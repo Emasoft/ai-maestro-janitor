@@ -157,20 +157,20 @@ def test_whitespace_only_stdout_logs_nothing(iso, monkeypatch: pytest.MonkeyPatc
     assert not _cost_log(iso["project"]).exists()
 
 
-def test_main_calls_the_phase_before_the_maintenance_return() -> None:
-    """The call site must precede the maintenance early-return in main().
+def test_main_calls_the_phase_on_every_fire_that_is_not_a_recovery() -> None:
+    """The call site must sit among the cheap survival phases, above the detector roster.
 
-    Maintenance fires are exactly the ones whose measured cost decides whether the
-    cadence is worth keeping — a call site below the early-return would blind the
-    series to the mode built for long idle stretches. Source-order assertion, same
-    technique as the markdown-spec guards: the invariant lives in code layout that
-    no unit call can observe.
+    It used to be pinned above the MAINTENANCE early-return, because a call site below it
+    would have blinded the cost series to exactly the mode built for long idle stretches.
+    Maintenance is gone (owner directive 2026-07-31), so there is no early-return left to
+    straddle — but the phase must still not drift down among the expensive chores, where a
+    fire that returns early for any other reason would stop recording the previous fire's
+    cost and leave holes in the series. Source-order assertion, same technique as the
+    markdown-spec guards: the invariant lives in code layout no unit call can observe.
     """
     src = (_PROJECT_ROOT / "scripts" / "dispatch.py").read_text(encoding="utf-8")
     body = src[src.index("def main(") :]
+    assert 'if mode == "maintenance":' not in body, "the maintenance early-return must be gone"
     call = body.index("_phase_heartbeat_cost()")
-    maint_return = body.index('if mode == "maintenance":')
-    assert call < maint_return, (
-        "_phase_heartbeat_cost() must run before the maintenance early-return, "
-        "or maintenance fires never enter the cost series"
-    )
+    detectors = body.index("_phase_cadence_tier()")
+    assert call < detectors, "_phase_heartbeat_cost() must stay with the cheap survival phases"

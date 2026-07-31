@@ -188,16 +188,22 @@ def test_server_owns_host_exit_drops_the_OS_keepalive() -> None:
     assert 'exit_reason = "server-owns-host"' in body
 
 
-def test_the_server_check_is_ordered_after_kill_switch_but_before_maintenance() -> None:
-    """Order is load-bearing. AFTER the kill-switch, so a human stop still wins and can
-    still fleet-broadcast. BEFORE maintenance/pause, because those branches keep the
-    daemon ALIVE and idling — and an idling daemon still holds the singleton flock and
-    keeps its OS keepalive armed, which IS the two-owner condition wearing a quiet hat."""
+def test_the_server_check_is_ordered_after_the_kill_switch_and_nothing_idles_after_it() -> None:
+    """Order is load-bearing. AFTER the kill-switch, so a human stop still wins and can still
+    fleet-broadcast.
+
+    It used to also be asserted BEFORE the maintenance branch, because maintenance (and pause)
+    kept the daemon ALIVE and idling — and an idling daemon still holds the singleton flock and
+    keeps its OS keepalive armed, which IS the two-owner condition wearing a quiet hat. Both
+    branches are gone (owner directive 2026-07-31), which removes that hazard at the root rather
+    than ordering around it: there is no longer any way for this daemon to be resident-but-idle,
+    so the second half of the assertion is now that no such branch exists at all."""
     body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
     kill = body.index('exit_reason = "kill-switch"')
     server = body.index('exit_reason = "server-owns-host"')
-    maint = body.index("if gs.maintenance_mode_present():", kill)
-    assert kill < server < maint, "kill-switch → server-owns-host → maintenance"
+    assert kill < server, "kill-switch → server-owns-host"
+    assert "gs.maintenance_mode_present()" not in body, "no idle-in-place branch may return"
+    assert "gs.global_pause_present()" not in body
 
 
 def test_daemon_still_imports_and_compiles() -> None:

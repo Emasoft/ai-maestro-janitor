@@ -353,12 +353,12 @@ def test_resume_phases_survive_empty_manifest(iso, capsys) -> None:
 
 
 def test_keep_going_nudge_points_at_pending_agents_and_directive(iso, capsys) -> None:
-    """In maintenance mode the nudge names the directive file AND the agent count."""
+    """The nudge names the directive file AND the agent count."""
     state, pa = iso["state"], iso["pa"]
     (state.state_dir() / "resume-directive.txt").write_text("finish TRDD-82OP4EN9\n", encoding="utf-8")
     pa.add("fork-C", now=int(time.time()))
     dispatch = _import_dispatch()
-    dispatch._phase_keep_going_nudge("maintenance")
+    dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
     assert "[janitor-resume]" in out
     assert "resume-directive.txt" in out
@@ -367,26 +367,33 @@ def test_keep_going_nudge_points_at_pending_agents_and_directive(iso, capsys) ->
 
 
 def test_keep_going_nudge_generic_when_nothing_pending(iso, capsys) -> None:
-    """No directive + empty manifest, maintenance-driven → the maintenance fallback line.
+    """No directive + empty manifest → the generic fallback line, which names NO off-lever.
 
-    issue #74: this fallback used to name `/janitor-keep-going off`, but in maintenance that
-    command is a NO-OP (the keep-going flag is absent) — so the line must NOT name it, and must
-    instead tell the agent to WAIT rather than self-disable a deliberately-set mode."""
+    INVERTED: the phase used to take a `mode` and had a second, maintenance-specific fallback
+    that told the agent to WAIT and named `/janitor-maintenance-mode off` as the human's exit.
+    Maintenance is gone (owner directive 2026-07-31) and with it the branch — one nudge, one
+    wording, no mode to reason about.
+
+    What survives from issue #74 is the rule that produced both variants: the line must not name
+    a command that switches the nudge off. Sessions were running `/janitor-keep-going off` while
+    merely BLOCKED ON A HUMAN DECISION — exactly when the guard matters most — so "say so briefly
+    and stop" is the whole of the correct response."""
     dispatch = _import_dispatch()
-    dispatch._phase_keep_going_nudge("maintenance")
+    dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
+    assert "[janitor-resume]" in out
     assert "/janitor-keep-going off" not in out
-    assert "do NOT disable maintenance mode" in out
-    assert "/janitor-maintenance-mode off" in out
+    assert "maintenance" not in out.lower(), "no retired mode may be named"
+    assert "no off-switch" in out, "the line must say plainly that there is nothing to run"
 
 
-def test_keep_going_nudge_default_on_names_pending_agent_full_mode(iso, capsys) -> None:
-    """DEFAULT-ON (user 2026-07-16): full mode nudges by default, and when a background agent is
-    pending the manifest pointer ENRICHES the nudge (W4) instead of being wasted on a silent fire."""
+def test_keep_going_nudge_names_a_pending_agent(iso, capsys) -> None:
+    """DEFAULT-ON (user 2026-07-16): every fire nudges, and when a background agent is pending the
+    manifest pointer ENRICHES the nudge (W4) instead of being wasted on a silent fire."""
     pa = iso["pa"]
     pa.add("fork-D", now=int(time.time()))
     dispatch = _import_dispatch()
-    dispatch._phase_keep_going_nudge("full")
+    dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
     assert "[janitor-resume]" in out
     assert "1 background agent(s) pending" in out
@@ -402,10 +409,25 @@ def test_retired_off_sentinel_cannot_strand_a_pending_agent(iso, capsys) -> None
     pa.add("fork-E", now=int(time.time()))
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
     dispatch = _import_dispatch()
-    dispatch._phase_keep_going_nudge("full")
+    dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
     assert "[janitor-resume]" in out, f"the retired sentinel silenced the nudge: {out!r}"
     assert "1 background agent(s) pending" in out, f"the pending agent must still be named: {out!r}"
+
+
+def test_retired_maintenance_sentinel_cannot_silence_the_nudge(iso, capsys) -> None:
+    """Same guarantee for the OTHER retired sentinel. A host upgraded while in local maintenance
+    still has `.janitor/state/maintenance-mode` on disk; that file must change nothing — the
+    nudge fires, and it does not mention a mode the session can no longer be in."""
+    state, pa = iso["state"], iso["pa"]
+    pa.add("fork-F", now=int(time.time()))
+    (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"a retired sentinel silenced the nudge: {out!r}"
+    assert "1 background agent(s) pending" in out
+    assert "maintenance" not in out.lower()
 
 
 # --------------------------------------------------------------------------- #

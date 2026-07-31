@@ -329,15 +329,12 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         self.assertTrue(any("cache-miss write 2500" in r for r in v.reasons))
 
 
-class TestEvaluateSelfBudget(unittest.TestCase):
-    """The pure self-budget escalation evaluator (TRDD-ZCODD6YS).
+class TestHeartbeatCost7d(unittest.TestCase):
+    """The pure rolling-7d heartbeat-cost reader — all that survives of the self-budget.
 
-    Heartbeat-only, three tiers (ok / slow / maintenance) — NEVER a `disarm` value (that
-    verdict does not exist; the ceiling is maintenance) — with a Schmitt-trigger release
-    dead-band. Real records, no mocks; `weighted_tokens` counts `output` 1:1, so an
-    `output`-only record's weighted cost equals its `output`."""
-
-    _FR = dict(cap_frac=0.6, maintenance_frac=0.9, release_frac=0.4)
+    It MEASURES and returns a number; it decides nothing. Real records, no mocks;
+    `weighted_tokens` counts `output` 1:1, so an `output`-only record's weighted cost
+    equals its `output`."""
 
     @staticmethod
     def _beat(ts: int, weighted: int, heartbeat: "bool | None" = True) -> dict:
@@ -346,85 +343,64 @@ class TestEvaluateSelfBudget(unittest.TestCase):
             r["heartbeat"] = heartbeat
         return r
 
-    def _eval(self, records, *, budget=1000, now=1_000_000, in_maintenance=False):
-        return token_meter.evaluate_self_budget(records, budget=budget, now=now, in_maintenance=in_maintenance, **self._FR)
-
-    def test_ok_below_cap(self):
-        self.assertEqual(self._eval([self._beat(1_000_000, 500)]).tier, "ok")
-
-    def test_slow_at_cap_fraction(self):
-        v = self._eval([self._beat(1_000_000, 600)])  # 600 >= 0.6 * 1000
-        self.assertEqual(v.tier, "slow")
-        self.assertEqual(v.cost, 600)
-
-    def test_maintenance_at_maintenance_fraction(self):
-        self.assertEqual(self._eval([self._beat(1_000_000, 900)]).tier, "maintenance")
-
-    def test_never_returns_disarm_at_any_cost(self):
-        """No cost, however large, produces anything above maintenance — `disarm` is not a
-        possible verdict (the whole lost-survival-marker failure class is removed)."""
-        v = self._eval([self._beat(1_000_000, 10_000_000)])
-        self.assertEqual(v.tier, "maintenance")
-        self.assertNotIn(
-            "disarm",
-            (token_meter.SELF_BUDGET_OK, token_meter.SELF_BUDGET_SLOW, token_meter.SELF_BUDGET_MAINTENANCE),
-        )
+    def test_sums_heartbeat_records(self):
+        recs = [self._beat(1_000_000, 500), self._beat(1_000_000, 200)]
+        self.assertEqual(token_meter.heartbeat_cost_7d(recs, now=1_000_000), 700)
 
     def test_heartbeat_filter_drops_interactive_missing_counts_true(self):
         """heartbeat:false never counts; a record MISSING the key counts as True (the `beats`
-        rule). Summing interactive turns would silence the janitor during the user's own work."""
+        rule). Summing interactive turns would blame the user for their own work."""
         recs = [
             self._beat(1_000_000, 100, heartbeat=True),
             self._beat(1_000_000, 10_000, heartbeat=False),  # huge interactive turn — must NOT count
             self._beat(1_000_000, 100, heartbeat=None),  # missing key → counts as heartbeat
         ]
-        v = self._eval(recs)
-        self.assertEqual(v.cost, 200)  # only the two heartbeat records
-        self.assertEqual(v.tier, "ok")
+        self.assertEqual(token_meter.heartbeat_cost_7d(recs, now=1_000_000), 200)
 
-    def test_budget_zero_disables(self):
-        self.assertEqual(self._eval([self._beat(1_000_000, 10_000_000)], budget=0).tier, "ok")
+    def test_empty_log_is_zero(self):
+        self.assertEqual(token_meter.heartbeat_cost_7d([], now=1_000_000), 0)
 
-    def test_negative_budget_disables(self):
-        self.assertEqual(self._eval([self._beat(1_000_000, 10_000_000)], budget=-5).tier, "ok")
-
-    def test_empty_log_is_ok(self):
-        self.assertEqual(self._eval([]).tier, "ok")
-
-    def test_garbage_records_fail_open_ok(self):
-        """Malformed dicts + a stray non-dict never raise (fail-open); cost is 0 → ok."""
+    def test_garbage_records_fail_open_zero(self):
+        """Malformed dicts + a stray non-dict never raise (fail-open); cost is 0."""
         garbage = [{"nope": 1}, {"ts": "bad", "output": 5}, "not-a-dict", 42]
-        v = self._eval(garbage)
-        self.assertEqual(v.tier, "ok")
-        self.assertEqual(v.cost, 0)
+        self.assertEqual(token_meter.heartbeat_cost_7d(garbage, now=1_000_000), 0)
 
     def test_only_counts_last_7d(self):
         now = 10_000_000
-        old = now - token_meter.SELF_BUDGET_WINDOW_S - 1  # just OUTSIDE the 7d window
+        old = now - token_meter.SELF_COST_WINDOW_S - 1  # just OUTSIDE the 7d window
         recs = [self._beat(old, 10_000), self._beat(now, 100)]
-        self.assertEqual(self._eval(recs, now=now).cost, 100)
+        self.assertEqual(token_meter.heartbeat_cost_7d(recs, now=now), 100)
 
-    def test_in_maintenance_holds_above_release_band(self):
-        """Schmitt: already in maintenance, cost between release(0.4) and cap(0.6) → HOLD
-        maintenance (the anti-flap dead-band)."""
-        v = self._eval([self._beat(1_000_000, 500)], in_maintenance=True)  # 0.5 * budget
-        self.assertEqual(v.tier, "maintenance")
 
-    def test_in_maintenance_releases_below_release_band(self):
-        """Schmitt: already in maintenance, cost falls BELOW release(0.4) → ok (release)."""
-        v = self._eval([self._beat(1_000_000, 300)], in_maintenance=True)  # 0.3 * budget
-        self.assertEqual(v.tier, "ok")
+class TestSelfBudgetThrottleIsGone(unittest.TestCase):
+    """INVERTED (owner directive 2026-07-31, *"never self-disable"*).
 
-    def test_in_maintenance_is_binary_never_slow(self):
-        """The in-maintenance branch yields only ok or maintenance — never slow — at any cost."""
-        for w in (0, 399, 400, 500, 899, 900, 5000):
-            v = self._eval([self._beat(1_000_000, w)], in_maintenance=True)
-            self.assertIn(v.tier, ("ok", "maintenance"))
-            self.assertNotEqual(v.tier, "slow")
+    This module used to expose `evaluate_self_budget`, a THREE-TIER escalation ladder
+    (ok / slow / maintenance) that let the janitor's own cost cap its cadence and then drop
+    the project into local maintenance. The old tests pinned the ladder's shape — most
+    carefully, that it could never reach `disarm`. That was the wrong safety property to
+    pin: the ceiling was still an off-switch, just a quieter one, and a session sitting in
+    budget-maintenance fired on schedule while doing nothing, which is indistinguishable
+    from health. Cost is now REPORTED (dispatch._phase_self_cost_alarm) and nothing else.
 
-    def test_verdict_carries_cost_and_budget(self):
-        v = self._eval([self._beat(1_000_000, 700)])
-        self.assertEqual((v.cost, v.budget), (700, 1000))
+    These assertions exist so the throttle cannot come back by accident — a re-added
+    `evaluate_self_budget` would be silently re-adopted by any future caller."""
+
+    def test_the_evaluator_is_gone(self):
+        self.assertFalse(hasattr(token_meter, "evaluate_self_budget"))
+        self.assertFalse(hasattr(token_meter, "SelfBudgetVerdict"))
+
+    def test_no_tier_constants_survive(self):
+        """No verdict vocabulary at all — not even `ok`. A tier constant is the seed of a
+        ladder, and `maintenance` names a mode that no longer exists."""
+        for name in ("SELF_BUDGET_OK", "SELF_BUDGET_SLOW", "SELF_BUDGET_MAINTENANCE", "SELF_BUDGET_WINDOW_S"):
+            self.assertFalse(hasattr(token_meter, name), f"{name} must not exist")
+
+    def test_cost_at_any_magnitude_is_just_a_number(self):
+        """The successor reports an enormous spend as an int and returns nothing actionable —
+        no tier, no flag, no verdict object. There is no cost that makes it decide."""
+        rec = {"ts": 1_000_000, "output": 10_000_000, "heartbeat": True}
+        self.assertEqual(token_meter.heartbeat_cost_7d([rec], now=1_000_000), 10_000_000)
 
 
 class TestSelfBudgetRecordSchemaUnchanged(unittest.TestCase):

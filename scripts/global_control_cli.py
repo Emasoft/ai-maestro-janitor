@@ -10,27 +10,21 @@ ONE source of truth (never duplicated into a skill's bash):
     global_control_cli.py disarm [reason]   # /janitor-global-disarm — TRUE STOP
     global_control_cli.py arm                # /janitor-global-arm    — revive after a disarm
     global_control_cli.py reload-skills [reason]  # /janitor-global-reload-skills — fleet skills reload
-    global_control_cli.py maintenance [reason]    # /janitor-global-maintenance — cache-warm cheap fires
-    global_control_cli.py maintenance-off         # /janitor-global-maintenance-off — resume full mode
     global_control_cli.py status             # show the active flag
 
-PAUSE IS GONE (owner directive 2026-07-31, *"remove the very option of disabling the
-janitor features"*). A stop that leaves the daemon resident and every heartbeat firing
-but doing nothing is, from the outside, indistinguishable from a healthy fleet — which is
-exactly how a project sat silently disabled for two weeks. `arm` still SWEEPS the retired
-flag so an older version cannot leave a machine looking suspended.
+PAUSE AND MAINTENANCE ARE GONE (owner directive 2026-07-31, *"remove the very option of
+disabling the janitor features"*). Both left the daemon resident and every heartbeat firing
+while doing none of the work, which from the outside — a process list, a cron list, a daemon
+heartbeat — is indistinguishable from a healthy fleet; that is exactly how a project sat
+silently disabled for two weeks. `arm` still SWEEPS both retired flags so an older version
+cannot leave a machine looking suspended, and BOTH verbs are REJECTED rather than accepted as
+no-ops: a retired verb that exits 0 lets a caller keep believing the fleet is quiesced.
 
-Two mechanisms remain, deliberately distinct:
-  * DISARM = the TRUE STOP. The running daemon EXITS on its next loop, per-session
-    heartbeats stop re-spawning it, AND every session's heartbeat goes SILENT. It is
-    loud and total — the cron is deleted, so a disarmed session cannot be mistaken for a
-    working one. Revive = `arm`.
-  * MAINTENANCE = the maintenance flag (TRDD-FPL60EKV). Unlike disarm, sessions
-    KEEP firing — but each fire is cache-refresh-ONLY (no detectors, no daemon tasks). The
-    daemon idles its workloads. This keeps every project's prompt cache warm at the 0.1x
-    cache-READ rate (~1/10 the 1.0x REWRITE a dead cache costs on the next real turn), so
-    it is the cheap alternative to disarm when the fleet is idle-but-returning. Revive =
-    `maintenance-off`.
+ONE machine-wide mechanism remains: DISARM, the TRUE STOP. The running daemon EXITS on its
+next loop, per-session heartbeats stop re-spawning it, AND every session's heartbeat goes
+SILENT. It is loud and total — the cron is deleted, so a disarmed session cannot be mistaken
+for a working one. Revive = `arm`. Cost pressure is answered per-session by the dynamic
+cadence tier (fewer fires, same work) and by a drift line naming the spend.
 
 `status` is the safe read-only default. Exits 0 on success; prints a one-line result.
 """
@@ -46,18 +40,13 @@ import user_intent  # noqa: E402
 
 
 def _status_line() -> str:
-    # Precedence mirrors dispatch's mode resolution: MAINTENANCE wins over a stop for SESSIONS
-    # (they keep firing cache-refresh-only) — a maintenance fire is an explicit keep-warm
-    # intent (TRDD-FPL60EKV). But the DAEMON checks the kill-switch FIRST and EXITS, so when
-    # BOTH maintenance and the kill-switch are set the daemon is stopped, not idle — report
-    # that honestly (/code-review B6) instead of claiming "daemon idle".
-    if gs.maintenance_mode_present():
-        if gs.kill_switch_present():
-            return "MAINTENANCE + DISARMED (sessions still fire cache-refresh-only, but the kill-switch stopped the daemon; run /janitor-global-arm, then /janitor-global-maintenance-off, to fully resume)"
-        return "MAINTENANCE (heartbeats stay armed but fire cache-refresh-only — no detectors, daemon idle; run /janitor-global-maintenance-off to resume full mode)"
+    # One state to report, because there is one machine-wide switch. The MAINTENANCE branch
+    # that used to precede this — and its "MAINTENANCE + DISARMED" combination, which existed
+    # only because the two flags could disagree about whether the daemon was stopped or merely
+    # idle — went with the mode (owner directive 2026-07-31).
     if gs.kill_switch_present():
         return "DISARMED (kill-switch set — daemon stopped AND every per-session heartbeat silent; run /janitor-global-arm to revive)"
-    return "RUNNING (no global stop or maintenance)"
+    return "RUNNING (no global stop)"
 
 
 # The machine-wide STOPS. These are the only sub-commands that need human authority: each one halts
@@ -95,8 +84,8 @@ def main() -> int:
             f"REFUSED: `{cmd}` stops the janitor on EVERY project on this machine, so it needs the "
             f"user's own request. No recent user instruction asked for it.\n"
             f"If you are the user: type /janitor-global-{cmd} yourself and it will run.\n"
-            f"(Agents: a budget/rate-limit problem is answered by /janitor-global-maintenance — "
-            f"which keeps firing cheaply and keeps nudging — never by a stop.)"
+            f"(Agents: a budget/rate-limit problem is answered by a slower cadence, which fires "
+            f"less often and still does the work — never by a stop.)"
         )
         return 1
     if cmd == "disarm":
@@ -122,6 +111,7 @@ def main() -> int:
         # cannot mistake this for a fleet-wide arm.
         gs.clear_kill_switch()
         gs.clear_global_pause()
+        gs.clear_maintenance_mode()
         print(
             "janitor global disarm cleared — the daemon may be (re)spawned again and "
             "already-armed per-session heartbeats resume. This does NOT arm any "
@@ -129,18 +119,21 @@ def main() -> int:
             "unarmed. Run /janitor-arm inside each project that needs one."
         )
         return 0
-    if cmd == "maintenance":
-        # MAINTENANCE (TRDD-FPL60EKV): sessions stay ARMED and keep firing, but each fire is
-        # cache-refresh-only (dispatch resolves mode=maintenance → no detectors, no daemon
-        # spawn), and the daemon idles its task workloads. The cheap way to keep every
-        # project's prompt cache warm (0.1x read) instead of letting it die (1.0x rewrite).
-        gs.set_maintenance_mode(reason)
-        print("janitor globally in MAINTENANCE mode — every session's heartbeat stays ARMED but fires cache-refresh-only (no detectors, no daemon tasks), keeping every project's prompt cache warm at ~1/10 the cost of letting it die. Run /janitor-global-maintenance-off to resume full mode.")
-        return 0
-    if cmd == "maintenance-off":
-        gs.clear_maintenance_mode()
-        print("janitor global maintenance lifted — heartbeats resume FULL fires (detectors) and the daemon resumes its task workloads.")
-        return 0
+    if cmd in ("maintenance", "maintenance-off", "pause", "unpause"):
+        # REJECT, never no-op. These verbs are retired (owner directive 2026-07-31), and a
+        # retired verb that exits 0 is worse than one that fails: the caller walks away
+        # believing the fleet is quiesced — which is the very illusion the mode created.
+        # `maintenance-off`/`unpause` are rejected too because there is nothing left to lift;
+        # any flag still on disk is inert and is swept by the next arm.
+        print(
+            f"REFUSED: `{cmd}` no longer exists. Maintenance mode and pause were removed because "
+            f"they left the daemon resident and every heartbeat firing while doing no work, so a "
+            f"quiesced fleet was indistinguishable from a healthy one. To spend less, slow a "
+            f"project's cadence (CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW). To actually stop: "
+            f"/janitor-global-disarm (machine-wide) or /janitor-disarm (this project) — both "
+            f"delete the cron, so a stopped session cannot be mistaken for a working one."
+        )
+        return 1
     if cmd == "reload-skills":
         # FLEET standalone-skills reload. Stamp the machine-wide generation; each live
         # session's heartbeat emits [janitor-reload-skills] once (per-project ack) on its
@@ -155,7 +148,7 @@ def main() -> int:
     if cmd == "status":
         print(_status_line())
         return 0
-    sys.exit(f"unknown command: {cmd!r} (use: disarm [reason] | arm | maintenance [reason] | maintenance-off | reload-skills [reason] | status)")
+    sys.exit(f"unknown command: {cmd!r} (use: disarm [reason] | arm | reload-skills [reason] | status)")
 
 
 if __name__ == "__main__":

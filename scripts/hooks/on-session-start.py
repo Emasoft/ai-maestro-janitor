@@ -693,19 +693,17 @@ def main() -> int:
 
     stop = _active_global_stop(gs)
     if stop is not None:
-        # MAINTENANCE WINS OVER A GLOBAL STOP (TRDD-FPL60EKV): maintenance-mode exists
-        # precisely so ONE session keeps its cache warm with cheap fires while the fleet
-        # is stopped. Suppressing the arm nudge here would strand that session unarmed
-        # at startup — the keep-warm never starts. Local sentinel OR machine-wide flag.
-        maintenance = (state.state_dir() / "maintenance-mode").is_file() or gs.maintenance_mode_present()
-        if not maintenance:
-            kind, reason, since = stop
-            state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
-            import time  # noqa: E402  -- stdlib
+        # A maintenance override used to sit here: maintenance-mode WON over a global stop,
+        # so the arm nudge still fired and that one session kept its cache warm with cheap
+        # do-nothing fires. Both the mode and the override are gone (owner directive
+        # 2026-07-31) — a stop is now unambiguous, and an armed-but-inert session is exactly
+        # the state that made a disabled fleet look healthy.
+        kind, reason, since = stop
+        state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
+        import time  # noqa: E402  -- stdlib
 
-            print(_format_stop_reminder(kind, reason, since, int(time.time())))
-            return 0
-        state.log_line("session-start", "global stop set but maintenance-mode active -> arm nudge proceeds")
+        print(_format_stop_reminder(kind, reason, since, int(time.time())))
+        return 0
 
     # /janitor-arm is idempotent, so even if the durable cron survived a previous
     # session, re-arming is safe.

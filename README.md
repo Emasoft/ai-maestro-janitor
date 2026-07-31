@@ -527,16 +527,13 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   *names*, and CI config for the window during which credentials are live
   and reachable; reports findings without ever echoing secret values.
 
-### Control commands (severity × scope)
+### Control commands
 
-Janitor activity is controlled along two axes — **severity** (how hard you
-stop it) and **scope** (this project only, or the whole machine). The
-quadrants:
+There is exactly ONE switch, in two scopes — **arm** and **disarm**:
 
 | | Local (this project) | Global (daemon + all instances) |
 |---|---|---|
 | **Disarm** = true stop / teardown | `/janitor-disarm` ↔ `/janitor-arm` | `/janitor-global-disarm` ↔ `/janitor-global-arm` |
-| **Maintenance** = keep firing, cache-refresh-only | `/janitor-maintenance-mode` ↔ `/janitor-maintenance-mode off` | `/janitor-maintenance-mode global` ↔ `/janitor-maintenance-mode global off` |
 
 **DISARM tears down.** Locally it removes the heartbeat cron, so nothing
 fires until you `/janitor-arm` again. Globally it sets the kill-switch — the
@@ -547,24 +544,27 @@ session runs `/janitor-disarm` and the cron **deletes itself**
 (TRDD-RQ9FIFX6). `/janitor-global-arm` clears the switch; re-arm a session
 with `/janitor-arm` and its next heartbeat lazy-spawns a fresh daemon.
 
-**PAUSE IS GONE (v0.67.0).** It suspended the janitor while leaving the cron
-firing and the daemon resident — from the outside, indistinguishable from a
-healthy fleet, which is how a project sat silently disabled for two weeks. A
-stop is now the kill-switch alone: loud, total, and observable, because the
-cron is deleted. A stale `global-pause.flag` or `.janitor/state/paused` left by
-an older version is INERT, and both are swept automatically.
+**PAUSE AND MAINTENANCE ARE GONE (v0.67.0).** Both suspended the janitor while
+leaving the cron firing and the daemon resident — from the outside, over a
+process list, a cron list, or a daemon heartbeat, indistinguishable from a
+healthy fleet. That is how a project sat silently disabled for two weeks.
+Maintenance was the more tempting of the two, because it had a real argument
+behind it: a fire re-reads the session context at the 0.1× prompt-cache **read**
+rate, and letting the cache die forces the next real turn to **rewrite** it at
+1.0×, so a do-nothing fire looked like the cheap way to stay warm. It was —
+and it also meant "is the janitor running?" and "is the janitor doing
+anything?" had different answers with nothing anywhere reporting the gap.
 
-**MAINTENANCE keeps firing — but cheap.** This is the middle ground between
-full and disarm. Each fire does the MINIMUM: the turn re-reads the session
-context at the 0.1× prompt-cache **read** rate (which resets the 5-minute cache
-TTL), then `dispatch.py` emits a never-stop "keep going" continue-nudge and
-returns — no detectors, no daemon spawn. It exists because letting the cache **die** (disarm → no fires) forces
-the next real turn to **rewrite** the whole context at the 1.0× rate — ~10× a
-cache read. So a maintenance fire costs ~1/10 of a cache-death rewrite: the
-cheapest way to keep a session (and thus its whole project's cache) warm.
-Maintenance **wins over** a global stop, so one session can stay warm while the
-fleet stays down (the daemon idles its tasks and is not respawned). Use it for
-idle-but-returning work; `/janitor-maintenance-mode off` restores full fires.
+A stop is now the kill-switch alone: loud, total, and observable, because the
+cron is deleted. A stale `global-pause.flag`, `maintenance-mode.flag`,
+`.janitor/state/paused` or `.janitor/state/maintenance-mode` left by an older
+version is INERT, and all are swept automatically by the next arm.
+
+**To spend less without stopping**, slow the cadence
+(`heartbeat_cron_slow`, default `*/30`) — fewer fires, same work, and the cron
+stays visible. Set `heartbeat_self_budget` to a weekly weighted-token ceiling
+and the heartbeat will additionally print one line naming this project's own
+spend when it crosses; it switches nothing off.
 
 **The never-stop nudge is UNCONDITIONAL and has no off-switch.** Every due heartbeat, in every
 mode, prints `[janitor-resume]` + "continue your pending task". It used to be opt-in with an
@@ -580,10 +580,11 @@ their own — run `/janitor-disarm` once in each such session (or `/janitor-arm`
 to pick up the new prompt).
 
 The global commands are backed by
-`scripts/global_control_cli.py disarm|arm|pause|unpause|maintenance|maintenance-off|status`
-(the `status` subcommand reports the daemon's current armed / paused / maintenance
-state; maintenance takes precedence in the readout, mirroring dispatch's mode
-resolution).
+`scripts/global_control_cli.py disarm|arm|reload-skills|status` (`status` reports
+RUNNING or DISARMED — two states, because there is one switch). The retired
+`pause`/`unpause`/`maintenance`/`maintenance-off` verbs are **rejected** with a
+non-zero exit rather than accepted as no-ops: a retired verb that exits 0 lets
+the caller keep believing the fleet is suspended.
 
 ### The `.trashcan/` directory
 

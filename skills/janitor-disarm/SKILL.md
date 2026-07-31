@@ -27,9 +27,9 @@ which reads this markdown — but the reasons live here, because a test can only
 after you have made it.
 
 1. **NEVER disarm on your own initiative.** The heartbeat is the ONLY thing that re-drives a session
-   after a turn ends, a compaction, or a rate limit. If the motive is COST, the answer is
-   `/janitor-global-maintenance` — it keeps firing at the 0.1× cache-read rate and keeps emitting the
-   continue-nudge: **go cheaper, never silent.** An agent that finds the token-economy argument for
+   after a turn ends, a compaction, or a rate limit. If the motive is COST, the answer is a SLOWER
+   CADENCE (`CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW`) — fewer fires, same work, and the
+   continue-nudge keeps arriving: **go cheaper, never silent.** An agent that finds the token-economy argument for
    silence persuasive has just rediscovered the bug this guard exists to prevent. (2026-07-14: an
    agent disarmed to save tokens during a rate limit and the session sat dead for hours —
    TRDD-RDFWQIFA.)
@@ -94,8 +94,7 @@ unverified disarm writes nothing. Nothing outside the project is touched.
 PROJECT-SCOPED. Withdraws this project's heartbeat crons, clears its arm state, and asks the guard to
 record its opt-out. Does NOT uninstall the plugin, prune logs, touch detector seen-files, or remove
 anything shared between projects — in particular never the machine-wide dispatcher stub. For a
-machine-wide stop use `/janitor-global-disarm`; for a cheap always-on mode use
-`/janitor-global-maintenance`.
+machine-wide stop use `/janitor-global-disarm`; to spend less without stopping, slow the cadence.
 
 ## Resources
 

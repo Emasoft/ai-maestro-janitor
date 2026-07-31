@@ -152,29 +152,6 @@ def commit_tier(raw: str, prev: CadenceState | None, demote_fires: int) -> Caden
     )
 
 
-def cap_tier(state: CadenceState, ceiling: str) -> CadenceState:
-    """Return `state` with `committed_tier` clamped to AT MOST `ceiling` (by `_TIER_RANK`).
-
-    A no-op when the committed tier is already at or below the ceiling — so capping at
-    SLOW leaves an already-SLOW state untouched but clamps a FAST/MID one to SLOW. Pure.
-
-    The self-budget throttle (TRDD-ZCODD6YS) threads this into `_phase_cadence_tier`: when
-    the janitor's own weekly heartbeat cost trips the cadence-cap tier, `committed` is
-    clamped here right after `commit_tier`, before `tier_to_cron`, so the live signals can
-    no longer promote the cron above the SLOW floor. Only `committed_tier` moves — the
-    hysteresis fields (`raw_tier`, `stable_count`, `last_rearm_ts`) are preserved so the
-    cap does not perturb the demote/dwell bookkeeping.
-    """
-    if _TIER_RANK[state.committed_tier] <= _TIER_RANK[ceiling]:
-        return state
-    return CadenceState(
-        raw_tier=state.raw_tier,
-        stable_count=state.stable_count,
-        committed_tier=ceiling,
-        last_rearm_ts=state.last_rearm_ts,
-    )
-
-
 def should_emit_renew(
     *,
     desired_differs: bool,

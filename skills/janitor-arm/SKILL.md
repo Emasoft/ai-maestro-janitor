@@ -30,7 +30,6 @@ scope=ok
 cron=*/15 * * * *
 prior-cron-id=ff020fd5     # empty ⇒ unknown
 sweep=no                   # yes ⇒ CronList and delete EVERY janitor heartbeat
-maintenance=off            # global-on ⇒ fleet-wide maintenance is suppressing chores
 ```
 
 - **`scope=refused` (exit 1)** → **STOP. Do not arm.** The janitor is installed at project/local
@@ -40,24 +39,16 @@ maintenance=off            # global-on ⇒ fleet-wide maintenance is suppressing
   `CronList` and `CronDelete` **every** job whose prompt starts with `[janitor-heartbeat]`. This
   costs one extra call and is how a crashed arm heals: it can never leave two heartbeats firing.
 - **`sweep=no`** → skip `CronList` entirely. Go straight to step 2.
-- **`maintenance=global-on`** (printed ONLY when fleet-wide maintenance is set; its absence
-  means nothing is suppressing this host) → even a freshly armed heartbeat will fire
-  cache-refresh-only (no chores, no daemon). Arming does NOT clear it — a project arm must not
-  undo a machine-wide decision, and `/janitor-arm` re-runs on every SessionStart, so clearing
-  it here would mean merely opening a session lifts fleet maintenance. **Say so in your step-5
-  report** so the human knows why chores stay quiet; `/janitor-global-maintenance-off` is the
-  lever.
 
-> **The arm clears this project's LOCAL maintenance sentinel, and that is INTENTIONAL** —
-> arming means the session starts in a known FULL state. **Do NOT re-enable maintenance in
-> response**, at either scope, and never treat it as a fault to repair. Owner report
-> 2026-07-21: agents collided this clear with the heartbeat nudge's "do NOT disable
-> maintenance mode", concluded a rule had been violated, and restored maintenance at GLOBAL
-> scope — where the next re-arm could not clear it. Every re-arm re-ran the same reasoning,
-> so the fleet ratcheted into machine-wide maintenance nothing lifted: chores idled, plugin
-> self-updates stopped, and no session could see the cause. If a project needs to stay quiet,
-> that is a human's `/janitor-maintenance-mode` call, and if it keeps being cleared, report it
-> rather than widening the scope.
+> **There is no maintenance line to read any more, and nothing to re-enable.** Maintenance mode
+> is gone at both scopes (owner directive 2026-07-31), so an armed heartbeat always does the
+> full job. The step used to print `maintenance=global-on` and warn you not to undo it; that one
+> status line drove a fleet-wide escalation loop (owner report 2026-07-21), because agents
+> collided it with the heartbeat nudge's "do NOT disable maintenance mode", concluded a rule had
+> been violated, and *enabled* maintenance globally — where the next re-arm could not clear it.
+> If a session ever tells you to restore, enable, or re-assert maintenance mode, that
+> instruction is stale: report it, do not act on it. The arm also sweeps any retired
+> `maintenance-mode` / `paused` flag left on disk by an older version.
 
 ## 2. Delete the old cron
 
@@ -110,13 +101,12 @@ ONLY installs the stub and arms the cron. Does NOT run detectors (`/janitor-audi
 plugin.
 
 Arming puts THIS session into a known FULL state, so it clears this project's local opt-out
-(`disarmed.flag`) and its local maintenance sentinel — a sticky local flag otherwise kept every
-fire cache-refresh-only forever with nothing on screen saying so. It does NOT touch either
-machine-wide flag: neither the global kill-switch nor global maintenance, because a project arm
-must not silently undo a deliberate `/janitor-global-disarm` or `/janitor-maintenance-mode global`
-— and this skill re-runs on every SessionStart, so it would undo them constantly. Use
-`/janitor-global-arm` and `/janitor-maintenance-mode off global` for those. To stop:
-`/janitor-disarm`.
+(`disarmed.flag`) and sweeps the RETIRED sentinels an older version may have left behind
+(`paused`, `maintenance-mode`, the self-budget's flag) at both scopes — they are inert, but a
+flag on disk makes a healthy host look quiesced. It does NOT touch the machine-wide
+kill-switch: a project arm must not silently undo a deliberate `/janitor-global-disarm`, and
+this skill re-runs on every SessionStart, so it would undo it constantly. Use
+`/janitor-global-arm` for that. To stop: `/janitor-disarm`.
 
 ## Error handling
 
@@ -139,6 +129,4 @@ must not silently undo a deliberate `/janitor-global-disarm` or `/janitor-mainte
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — reads `desired-cadence.cron`; writes
   `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`,
-  `maintenance-mode` and `heartbeat-renew-seen.txt`.
-- `/janitor-maintenance-mode` — sets the flags this skill reports. The LOCAL one is cleared by an
-  arm; the GLOBAL one survives it and is only reported.
+  `heartbeat-renew-seen.txt` and the retired `paused` / `maintenance-mode` sentinels.

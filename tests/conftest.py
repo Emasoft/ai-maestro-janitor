@@ -722,7 +722,7 @@ def _isolate_control_dir(request: pytest.FixtureRequest, tmp_path_factory: pytes
     reproducing `global_state_dir()`'s resolution ladder. That same fixedness makes it the
     most dangerous thing in the tree to leave unisolated: unlike the ladder, it does NOT
     move when a test sets `JANITOR_GLOBAL_STATE_DIR`, so any test calling
-    `set_kill_switch()` / `set_global_pause()` / `set_maintenance_mode()` writes the REAL
+    `set_kill_switch()` writes the REAL
     machine's control plane. A leaked `kill-switch.flag` disarms the whole fleet; a leaked
     `maintenance-mode.flag` silently idles every daemon chore — which is exactly the
     invisible, hours-long suppression that prompted §7.1 in the first place.

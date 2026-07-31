@@ -684,36 +684,44 @@ def test_ensure_daemon_kills_wedge_then_spawns(state_dir: Path, tmp_path: Path) 
 # ---------- maintenance-mode flag (TRDD-FPL60EKV) ----------
 
 
-def test_maintenance_mode_present_detects_flag(state_dir: Path) -> None:
-    """maintenance_mode_present() is False until set, True after set, False after clear."""
+def test_maintenance_mode_setter_and_reader_are_gone(state_dir: Path) -> None:
+    """INVERTED (owner directive 2026-07-31). Maintenance mode kept every session's cron firing
+    and the daemon resident while doing none of the work, so a quiesced fleet looked exactly
+    like a healthy one. The flag can no longer be SET or READ — only cleared.
+
+    The asymmetry is the point and mirrors the pause removal: keeping a reader would let some
+    future branch honour a flag nothing can legitimately set, which is how a retired switch
+    comes back to life."""
+    gs = _gs()
+    assert not hasattr(gs, "set_maintenance_mode")
+    assert not hasattr(gs, "maintenance_mode_present")
+    assert callable(gs.clear_maintenance_mode), "the migration sweep must survive"
+
+
+def test_retired_maintenance_flag_is_swept_from_disk(state_dir: Path) -> None:
+    """MIGRATION, and it is load-bearing: real hosts have `maintenance-mode.flag` on disk right
+    now, and the lever that used to lift it (/janitor-global-maintenance-off) went away with the
+    mode. `clear_maintenance_mode` is what every arm calls so an upgraded machine does not keep
+    looking suspended forever, with nothing left able to un-suspend it."""
     gs = _gs()
     gs.init_global_state()
-    assert gs.maintenance_mode_present() is False
-    gs.set_maintenance_mode("test")
-    assert gs.maintenance_mode_present() is True
+    flag = gs.control_dir() / "maintenance-mode.flag"
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text("set by an older janitor\n", encoding="utf-8")
     gs.clear_maintenance_mode()
-    assert gs.maintenance_mode_present() is False
+    assert not flag.exists(), "an arm must remove a flag an older version left behind"
 
 
-def test_maintenance_mode_clear_idempotent(state_dir: Path) -> None:
-    """Clearing an absent maintenance flag is a safe no-op (missing_ok)."""
+def test_maintenance_clear_idempotent_and_leaves_the_kill_switch_alone(state_dir: Path) -> None:
+    """Clearing an absent flag is a safe no-op, and sweeping the RETIRED flag must never touch
+    the one machine-wide switch that still exists — an arm sweeps litter, it does not revive a
+    deliberately disarmed fleet."""
     gs = _gs()
     gs.init_global_state()
     gs.clear_maintenance_mode()  # must not raise even though nothing is set
-    assert gs.maintenance_mode_present() is False
-
-
-def test_maintenance_mode_orthogonal_to_kill_switch(state_dir: Path) -> None:
-    """The maintenance flag is a distinct file — setting it never sets the kill-switch, and
-    vice-versa (they are orthogonal machine-wide controls)."""
-    gs = _gs()
-    gs.init_global_state()
-    gs.set_maintenance_mode("m")
-    assert gs.maintenance_mode_present() is True
-    assert gs.kill_switch_present() is False
-    gs.clear_maintenance_mode()
     gs.set_kill_switch("k")
-    assert gs.maintenance_mode_present() is False, "kill-switch must not imply maintenance"
+    gs.clear_maintenance_mode()
+    assert gs.kill_switch_present() is True, "the sweep must not clear the kill-switch"
 
 
 # ---------- daemon-restart RECENCY gate (audit B-2 / CC 2.1.200) ----------

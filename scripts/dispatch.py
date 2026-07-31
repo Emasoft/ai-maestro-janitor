@@ -56,7 +56,6 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
-import harness_backend  # noqa: E402  # #J-vs-#N discriminator — self-budget gates on it (TRDD-ZCODD6YS)
 import heartbeat_cadence as hc  # noqa: E402  # TTL-aware cadence tiers (TRDD-0QQX9H0G, #83)
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
@@ -386,15 +385,6 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("token-usage-anomaly", 300, "CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_INTERVAL"),
 ]
 
-# The detector subset that SURVIVES maintenance mode (user directive 2026-07-10,
-# TRDD-8Q0OYVWM): a maintenance session is exactly the long-running unattended one
-# whose token burn most needs watching, so the token-monitoring detectors keep
-# running while every other chore idles. Both are cheap local reads (the
-# token-meter log; the rotator's cached usage snapshot), self-gated and
-# self-cadenced, and their drift lines are precisely the alarms that must still
-# reach the model during a keep-warm idle.
-_MAINTENANCE_DETECTORS = frozenset({"token-usage-anomaly", "window-burn-rate"})
-
 # #J THIN MODE (TRDD-PZLVT2RN): detectors that must NOT run inside an ai-maestro
 # harness agent, because each one either mutates MACHINE-GLOBAL state (the shared
 # plugin cache / marketplace via `claude plugin ...`, the global-state request files)
@@ -423,18 +413,6 @@ _NON_HARNESS_DETECTORS = frozenset({
 def _detector_runs_in_harness(name: str) -> bool:
     """PURE: may `name` run inside a harness agent session? (The Phase-2 loop's gate.)"""
     return name not in _NON_HARNESS_DETECTORS
-
-
-def _run_maintenance_detectors() -> None:
-    """Run ONLY the token-monitoring detector subset (maintenance-mode fires).
-
-    Same roster entries, same env-var cadence overrides, same `_run_detector`
-    due-gate as the full Phase 2 loop — so a detector never runs twice in one
-    fire (maintenance returns before Phase 2) and never at a different cadence.
-    """
-    for name, default_interval, env_var in _DETECTORS:
-        if name in _MAINTENANCE_DETECTORS:
-            _run_detector(name, state.coerce_int(os.environ.get(env_var), default_interval))
 
 
 def _detector_is_due(name: str, interval: int) -> bool:
@@ -547,13 +525,12 @@ def _emit_decision(marker: str, payload_lines: Iterable[str] = ()) -> None:
 def _emit_quiet_if_idle() -> None:
     """Print the explicit `[janitor-quiet]` token iff no action decision fired this fire.
 
-    Called immediately before each terminal NO-ACTION `return 0` (the maintenance return
-    + the full-mode terminal exit). It makes the most-common (quiet) path an unmistakable
-    token instead of ambiguous empty stdout — a quiet fire is now distinguishable from a
-    stub that never ran or a swallowed line. `[janitor-quiet]` MAY coexist with detector
-    drift lines: it means "no ACTION this fire", not "nothing to surface". The
-    genuinely-silent skips (a temporary pause; the informational-notice early returns)
-    are left byte-silent on purpose and never reach here.
+    Called immediately before the terminal NO-ACTION `return 0`. It makes the most-common
+    (quiet) path an unmistakable token instead of ambiguous empty stdout — a quiet fire is
+    now distinguishable from a stub that never ran or a swallowed line. `[janitor-quiet]`
+    MAY coexist with detector drift lines: it means "no ACTION this fire", not "nothing to
+    surface". The genuinely-silent skips (the informational-notice early returns) are left
+    byte-silent on purpose and never reach here.
     """
     if not _decision_fired:
         print("[janitor-quiet]")
@@ -644,58 +621,45 @@ def _phase_globally_disarmed() -> bool:
     return False
 
 
-def _maintenance_mode_active() -> bool:
-    """Return True iff maintenance-mode is active for THIS session — either the
-    per-session flag (`.janitor/state/maintenance-mode`) or the machine-wide flag
-    (`/janitor-global-maintenance`).
-
-    Maintenance-mode (TRDD-FPL60EKV) keeps the heartbeat ARMED but makes each fire do
-    the MINIMUM: the fired turn re-reads the session context at the 0.1x prompt-cache
-    READ rate, which RESETS the 5-minute cache TTL, and dispatch then returns
-    immediately — no detectors, no daemon spawn, no agent work, no output. WHY it
-    matters: letting the cache DIE (disarm → no fires) forces the next real turn to
-    REWRITE the whole context at the 1.0x rate (~10x a cache read). So a maintenance
-    fire costs ~1/10 of a cache-death rewrite — the cheapest way to keep a session
-    (and thus its whole project's cache) warm. It is the middle ground between FULL
-    (fire + all due chores) and DISARM (stop firing, cache dies)."""
-    if (state.state_dir() / state.MAINTENANCE_FLAG).is_file():
-        return True
-    return gs.maintenance_mode_present()
-
-
 def _resolve_heartbeat_mode() -> str:
-    """Resolve what THIS fire does: 'full' | 'maintenance' | 'stop'.
+    """Resolve what THIS fire does: 'full' | 'stop'.
 
-    - 'maintenance' (highest priority — an explicit keep-warm intent, local OR
-      global): refresh the cache and do nothing else. Chosen EVEN under a global
-      stop, so a session can stay cache-warm while the fleet's expensive daemon +
-      fleet-recovery stay DOWN — closing the "keep one session alive => clear the
-      global switch => wake the whole fleet" gap (the July-budget burn).
-    - 'stop' (a machine-wide /janitor-global-disarm, and NO maintenance opt-in):
-      self-disarm — delete this cron so a fire costs zero (TRDD-RQ9FIFX6); the right
-      choice for LONG idle, where one 1.0x rewrite on return beats many cache-read
-      fires. Global PAUSE used to reach this branch too and is gone.
-    - 'full': the normal heartbeat — cache refresh + DUE detectors + daemon."""
-    if _maintenance_mode_active():
-        return "maintenance"
+    - 'stop' (a machine-wide /janitor-global-disarm): self-disarm — delete this cron so a
+      fire costs zero (TRDD-RQ9FIFX6); the right choice for LONG idle, where one 1.0x
+      context rewrite on return beats many 0.1x cache-read fires.
+    - 'full': the normal heartbeat — cache refresh + DUE detectors + daemon.
+
+    MAINTENANCE used to be a third mode and is GONE (owner directive 2026-07-31, the same
+    ruling that removed pause and `keep-going-off`). It kept the cron firing and the daemon
+    resident while doing none of the work, so from every outside vantage point — a process
+    list, a cron list, a daemon heartbeat — a quiesced fleet was indistinguishable from a
+    healthy one. That is the exact shape that let a project sit silently disabled for two
+    weeks. Cost pressure is answered by the dynamic cadence tier (which slows fires without
+    stopping work) and by a drift line naming the spend, never by a mode that switches the
+    detectors off. DISARM survives as the only stop because it is the opposite of silent:
+    the cron is deleted, so a disarmed session cannot be mistaken for a working one."""
     if _phase_globally_disarmed():
         return "stop"
     return "full"
 
 
-def _sweep_retired_pause_sentinel() -> None:
-    """Delete a RETIRED `.janitor/state/paused` sentinel if one is still on disk.
+def _sweep_retired_sentinels() -> None:
+    """Delete the RETIRED per-project control sentinels if any are still on disk.
 
-    The local pause is gone (owner directive 2026-07-31). Nothing reads the file any more, so this
-    is not a behaviour gate — it is cleanup. It matters because the sentinel supported an INDEFINITE
-    pause (`paused_until == 0` meant "until someone unpauses"), which is the worst version of the
-    shape that caused the incident: a project silently skipping every fire, forever, with only a log
-    line nobody reads to say so. Leaving the file behind would also make the next person to inspect
-    the state dir believe the project is still suspended. Best-effort; never raises."""
-    try:
-        (state.state_dir() / "paused").unlink(missing_ok=True)
-    except OSError:
-        pass
+    Pause, maintenance mode, and the self-budget's maintenance flag are all gone (owner
+    directive 2026-07-31). Nothing reads these files any more, so this is not a behaviour
+    gate — it is the MIGRATION half, and it is load-bearing: real hosts carry these flags
+    right now and the levers that used to lift them went away with the switches. Left
+    behind, `maintenance-mode` makes the next person to inspect the state dir believe the
+    project is still quiesced; `paused` was worse still, because it supported an INDEFINITE
+    hold (`paused_until == 0` meant "until someone unpauses") — a project skipping every
+    fire, forever, with only a log line nobody reads to say so. Best-effort; never raises."""
+    sd = state.state_dir()
+    for name in state.RETIRED_SENTINELS:
+        try:
+            (sd / name).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _sweep_old_files(root, suffixes: tuple[str, ...], cutoff: float) -> None:
@@ -741,8 +705,8 @@ def _phase_log_retention() -> None:
     # exist — nothing ever pruned them (this phase cleaned only logs/). An
     # mtime-age sweep is safe BECAUSE every in-use file is rewritten on use
     # (fresh mtime): only files nothing touched for the whole window are dead.
-    # Deliberately limited to *.txt / *.ts — control FLAGS (*.flag, paused,
-    # maintenance-mode) are NEVER swept: deleting a flag changes
+    # Deliberately limited to *.txt / *.ts — control FLAGS (*.flag and the
+    # retired sentinels) are NEVER swept here: deleting a flag changes
     # behavior, while deleting a stale stamp/seen-file only makes a detector due
     # again or re-emits an old finding once (fail-toward-run).
     state_days = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_STATE_RETENTION_DAYS"), 45)
@@ -1138,9 +1102,8 @@ def _phase_proactive_idle_compact() -> bool:
     (cooldown + resume recency + keep-going), so a measurement behind them never runs and the
     floor gate stays inert — the v0.49.0 bug, TRDD-28XF77X6.
 
-    Placed BEFORE the maintenance early-return in main() ON PURPOSE: a long unattended
-    maintenance session is the PRIME target — it is exactly the one that sits idle for hours and
-    then eats a cold write. It runs AFTER the rate-limit/compact-resume early-returns (those own
+    A long unattended session is the PRIME target — it is exactly the one that sits idle for
+    hours and then eats a cold write. It runs AFTER the rate-limit/compact-resume early-returns (those own
     the reactive cold case and would already have returned) and BEFORE the keep-going nudge, so a
     fire that compacts does not also emit a now-pointless [janitor-resume] (the compact's own
     directive re-anchors the resume on the next fire)."""
@@ -1619,15 +1582,14 @@ def _keep_going_muted_by_recent_resume(sd: Path, now: int) -> bool:
     return last_resume > 0 and 0 <= now - last_resume < _KEEP_GOING_RESUME_DEDUPE_S
 
 
-def _phase_keep_going_nudge(mode: str) -> None:
+def _phase_keep_going_nudge() -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working. UNCONDITIONAL.
 
     WHY (TRDD-TKNSTP82 Part B, user 2026-07-02; DEFAULT-ON user 2026-07-16): a healthy
     heartbeat detects drift and re-arms dead crons, but on its own it never tells an
     idle agent to keep working — so an unattended fleet went silent overnight even
     though the janitor was firing the whole time. This phase EMITS a resume-shaped nudge
-    but does NOT early-return — callers downstream (the maintenance early-return that
-    follows it in main(), or the full detector roster) run exactly as before.
+    but does NOT early-return — the detector roster downstream runs exactly as before.
 
     THERE IS NO OFF SWITCH, and that is the point (owner directive 2026-07-31: *"we need
     to remove the very option of disabling the janitor features"*). It used to have two —
@@ -1647,8 +1609,7 @@ def _phase_keep_going_nudge(mode: str) -> None:
     said "continue" and carried the directive too. See _keep_going_muted_by_recent_resume.
     """
     sd = state.state_dir()
-    maintenance = mode == "maintenance"
-    # DEDUPE (TRDD-QW6RVAKN) — the ONE case that skips a nudge, in every mode. It does not
+    # DEDUPE (TRDD-QW6RVAKN) — the ONE case that skips a nudge. It does not
     # weaken "always nudges": we are deferring to a [janitor-resume] cue that fired ONE
     # heartbeat ago and carried a resume DIRECTIVE — a strictly stronger nudge than this
     # generic one. Repeating it is duplication, not survival; the nudge resumes next fire.
@@ -1680,45 +1641,8 @@ def _phase_keep_going_nudge(mode: str) -> None:
         )
     if bits:
         note = "continue your pending task (keep-going mode) — " + "; ".join(bits)
-    elif maintenance:
-        # Maintenance is a deliberately-set mode with its own lifecycle
-        # (/janitor-maintenance-mode off); a per-fire nudge must NOT let a worker
-        # unilaterally exit it.
-        # NAME THE SCOPE (2026-07-21 incident). This line used to say only
-        # "(maintenance mode)". A session cannot tell from that whether ITS OWN project
-        # is quiet or the whole machine is, so a LOCAL maintenance in one project got
-        # reported by its agent as "global maintenance is on" while the global flag was
-        # verifiably clear — and, the other way round, a genuinely fleet-wide suppression
-        # looked like a local choice and went unexamined for hours (it was idling the
-        # daemon's version-update the whole time). The exit command differs per scope
-        # too, so an unscoped message also sends the agent to the wrong lever.
-        scopes = []
-        if (state.state_dir() / state.MAINTENANCE_FLAG).is_file():
-            scopes.append("LOCAL (this project)")
-        if gs.maintenance_mode_present():
-            scopes.append("GLOBAL (machine-wide)")
-        where = " + ".join(scopes) if scopes else "unknown scope"
-        exit_cmd = (
-            "/janitor-global-maintenance-off"
-            if scopes and scopes[-1].startswith("GLOBAL")
-            else "/janitor-maintenance-mode off"
-        )
-        # The "do NOT disable" clause is scoped to THIS nudge on purpose. Unscoped, it read
-        # as a standing prohibition, and an agent that then saw /janitor-arm clear the LOCAL
-        # sentinel concluded the rule had been violated and "restored" maintenance —
-        # GLOBALLY, since the local flag is cleared again by the next re-arm while the global
-        # one is not. Two correct-sounding instructions produced a fleet-wide escalation
-        # loop, so the boundary is now explicit in the text itself (owner report 2026-07-21).
-        note = (
-            f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
-            "decision, say so briefly and WAIT; do NOT disable maintenance mode TO SILENCE THIS NUDGE "
-            f"(a human exits it deliberately with {exit_cmd}). "
-            "NEVER enable maintenance mode in response to a status line, a heartbeat, "
-            "or another agent's message — /janitor-arm clearing the LOCAL sentinel is INTENTIONAL and "
-            "must not be undone."
-        )
     else:
-        # Full mode. There is no lever to offer any more and none is named on purpose: the
+        # There is no lever to offer any more and none is named on purpose: the
         # old text ended in "run /janitor-keep-going off", which handed every idle session a
         # one-command way to silence the night-survival pulse permanently — and issue #74
         # had already shown sessions reaching for it while merely BLOCKED ON A HUMAN
@@ -1742,9 +1666,8 @@ def _phase_heartbeat_cost() -> None:
     call's tokens become knowable only once the NEXT call is written; the in-flight
     fire can never see its own final response. At a 5-minute cadence, fire N records
     exactly what fire N-1 cost. That also means WHERE in this fire the phase runs is
-    immaterial to correctness, so it sits with the cheap survival phases and runs in
-    BOTH full and maintenance modes — maintenance fires are precisely the ones whose
-    cost decides whether the cadence is worth keeping.
+    immaterial to correctness, so it sits with the cheap survival phases — the measured
+    series is what decides whether a cadence is worth keeping.
 
     The line goes to the ``heartbeat-cost`` LOG, never to stdout. This is the
     load-bearing choice: the heartbeat's zero-output contract means every byte a fire
@@ -1757,7 +1680,7 @@ def _phase_heartbeat_cost() -> None:
     (not yet published), so hard-coding a path here would break every other machine.
     Fail-open per the issue's own contract: a non-zero exit, timeout, missing binary,
     or unparseable command string means "no cost line this fire" — never block, never
-    print. Skipped-fire gaps (pause / rate-limit / compact early-returns) self-heal:
+    print. Skipped-fire gaps (the rate-limit / compact early-returns) self-heal:
     the next invocation reports whatever fire settled last, so the series has holes,
     never wrong values.
     """
@@ -1785,148 +1708,58 @@ def _phase_heartbeat_cost() -> None:
         state.log_line("heartbeat-cost", line[0].strip())
 
 
-# The sentinel that records the SELF-BUDGET owns the LOCAL maintenance flag (TRDD-ZCODD6YS).
-# `.flag` suffix ON PURPOSE: _phase_log_retention never sweeps control flags, only *.txt/*.ts
-# stamps. Ownership by a dedicated file (not by the maintenance flag's content, which
-# /janitor-maintenance-mode owns) is what lets the budget clear ONLY a flag it created and
-# never a human's deliberate maintenance choice.
-_SELF_BUDGET_SENTINEL = "self-budget-maintenance.flag"
+def _phase_self_cost_alarm() -> None:
+    """SURFACE the janitor's own heartbeat spend once it crosses the user's weekly budget.
 
+    The janitor is a token-forensics tool that bounds OTHER sessions' cost but never named
+    its own. A cron fire re-reads the whole cached transcript, so an idle session pinned at
+    FAST can spend for a week with nothing reporting the total. This phase reports it, from
+    the meter that already exists (`token-meter.jsonl`, heartbeat records only — counting
+    the USER's own interactive turns would blame them for their work).
 
-def _coerce_frac(raw: str | None, default: float) -> float:
-    """Best-effort positive float from an env value; junk / absent / non-positive → default.
+    IT ACTUATES NOTHING, and that is the whole change (owner ruling 2026-07-31: *"never
+    self-disable"*). The previous version (TRDD-ZCODD6YS) escalated a two-rung throttle —
+    cap the cadence, then auto-enter LOCAL maintenance — which let cost pressure switch the
+    guard off by itself: every fire still happened, so the fleet looked healthy while doing
+    nothing, the exact shape janitor-has-no-off-switch-but-disarm forbids. Detectors and the
+    daemon keep running; a HUMAN reads this line and decides (slow the cadence, or
+    /janitor-disarm here, which is loud because it deletes the cron).
 
-    A typo in a fraction knob must never crash a survival-critical fire — fail-open to the
-    generous default, exactly as coerce_int does for the integer knobs."""
-    if not raw:
-        return default
+    Per-project channeling (TRDD-X92VBFNF): the line carries THIS project's spend and
+    nothing about any other. At most one line per local day per whole multiple of the
+    budget, so a flat overrun states itself daily while a spend that keeps GROWING re-alarms
+    the same day. Silent when `CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET` is unset or 0 —
+    that knob is a REPORTING threshold, never an enable-switch for janitor work. FAIL-OPEN:
+    any exception → say nothing (a metering bug must never break a fire)."""
     try:
-        v = float(raw.strip())
-    except (ValueError, AttributeError):
-        return default
-    return v if v > 0 else default
-
-
-def _clear_budget_maintenance(sd: Path) -> None:
-    """Clear a maintenance flag the SELF-BUDGET owns — and ONLY one it owns.
-
-    Ownership is the sentinel file: the budget writes it alongside the LOCAL MAINTENANCE_FLAG
-    whenever IT enters maintenance, so a user's manual /janitor-maintenance-mode (no sentinel)
-    or a machine-wide /janitor-global-maintenance is NEVER cleared here. Removing a
-    maintenance flag we did not create would silently undo a human's deliberate keep-warm
-    choice — the invisible cross-actor clobber the per-project channeling invariant
-    (TRDD-X92VBFNF) forbids. Best-effort; never raises."""
-    sentinel = sd / _SELF_BUDGET_SENTINEL
-    if not sentinel.is_file():
-        return  # not budget-owned → leave any user/global maintenance flag untouched
-    for p in (sd / state.MAINTENANCE_FLAG, sentinel):
-        try:
-            p.unlink()
-        except FileNotFoundError:
-            pass
-
-
-def _phase_self_budget() -> bool:
-    """Self-throttle the janitor's OWN heartbeat against a weekly cost budget (TRDD-ZCODD6YS).
-
-    The janitor is a token-forensics tool that bounds OTHER sessions' cost but never its own.
-    A cron fire re-reads the whole cached transcript, so an idle session pinned at FAST can
-    spend for a week with nothing capping the total. This phase wires the EXISTING per-turn
-    meter (token-meter.jsonl) back into the EXISTING throttle: when THIS project's rolling-7d
-    HEARTBEAT weighted cost crosses a user-set budget, escalate a TWO-rung throttle — cap the
-    cadence at the SLOW floor, then auto-enter LOCAL maintenance.
-
-    MAINTENANCE IS THE CEILING. This path NEVER emits [janitor-self-disarm] and NEVER routes
-    through _resolve_heartbeat_mode (Phase 0): maintenance already yields ~0.1x cost while
-    KEEPING the survival cron + the resume path alive, whereas disarm deletes the cron and
-    needs a manual /janitor-arm — deleting a survival cron is never a safe automatic reaction
-    to cost. Placed strictly AFTER every resume/compact early-return, so a rate-limited /
-    post-compact / post-clear recovery fire NEVER reaches this phase and can never be
-    throttled (the cardinal survival property — [^1]).
-
-    Actuates ONLY the LOCAL state.MAINTENANCE_FLAG + the returned SLOW cadence cap — NEVER
-    global_state maintenance/kill-switch (a per-project budget must never stop the fleet,
-    TRDD-X92VBFNF). The flag takes effect on the NEXT fire's Phase-0 _resolve_heartbeat_mode;
-    the current fire's already-resolved mode is untouched, so this phase never reorders the
-    current fire's survival logic. Because the phase still runs on maintenance fires (before
-    the maintenance early-return), it is ALSO the RELEASE point — a Schmitt-trigger dead-band
-    (evaluate_self_budget) holds maintenance until the rolling cost decays below release_frac,
-    then clears the flag and the next fire resolves full again.
-
-    Returns ``budget_cap_slow`` (clamp the cron to SLOW this fire). FAIL-OPEN is NORMATIVE:
-    ANY exception → return False and touch nothing (a metering bug breaking survival is the
-    cardinal sin)."""
-    try:
-        sd = state.state_dir()
-        flag = sd / state.MAINTENANCE_FLAG
-
-        # 1. Enable gate — OFF unless a non-zero weekly budget is set (default 0 = disabled).
-        #    This is survival-critical code, so an automatic drop-to-maintenance is opt-in,
-        #    never on by default. When off, also clear any flag the budget itself owns.
         budget = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET"), 0)
         if budget <= 0:
-            _clear_budget_maintenance(sd)
-            return False
-
-        # 2. Harness gate — inside an ai-maestro agent (#J thin mode) the daemon is not
-        #    spawned and Family-A continuity is SERVER-delegated (D4); an auto-maintenance
-        #    here would break server-owned continuity. NEVER actuate in harness.
-        if harness_backend.is_harness_session(os.environ):
-            return False
-
-        now = int(time.time())
-
-        # 3. Actively-waiting suppression — a working/resuming session is NEVER throttled.
-        #    The fire that ACTUALLY resumes returned early (rate-limit/compact/clear); the
-        #    fire after it reaches here, and the fresh last-resume.ts stamp protects it. Clear
-        #    any budget-owned flag too, so a session that resumes real work is un-throttled.
-        if _cadence_active_waiting(sd, now):
-            _clear_budget_maintenance(sd)
-            return False
-
-        # 4. Read THIS project's heartbeat cost + the current flag state → verdict (PURE).
-        records = tm.load_log(sd / "token-meter.jsonl")
-        cap_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_CAP_FRAC"), 0.6)
-        maintenance_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_MAINTENANCE_FRAC"), 0.9)
-        release_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_RELEASE_FRAC"), 0.4)
-        verdict = tm.evaluate_self_budget(
-            records,
-            budget=budget,
-            now=now,
-            cap_frac=cap_frac,
-            maintenance_frac=maintenance_frac,
-            release_frac=release_frac,
-            in_maintenance=flag.is_file(),
+            return
+        sd = state.state_dir()
+        cost = tm.heartbeat_cost_7d(tm.load_log(sd / "token-meter.jsonl"), now=int(time.time()))
+        if cost < budget:
+            return
+        today = datetime.now().astimezone().strftime("%Y%m%d")
+        line = dedupe.emit_once(
+            sd / "self-cost-seen.txt",
+            f"self-cost@{today}:{cost // budget}",
+            f"[heartbeat-cost] This project's janitor heartbeat has spent {cost} weighted tokens "
+            f"over the last 7d, past the {budget} budget. Nothing was switched off. To spend less, "
+            f"slow the cadence (CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW) or run /janitor-disarm in "
+            f"this project.",
         )
-
-        # 5. Actuate. The flag is the ONLY maintenance actuator; the SLOW cap is the return.
-        if verdict.tier == tm.SELF_BUDGET_MAINTENANCE:
-            sentinel = sd / _SELF_BUDGET_SENTINEL
-            if not flag.is_file() or sentinel.is_file():
-                # We are the owner — a fresh entry (no flag yet), or we already own it → (re)assert
-                # atomically. If the flag EXISTS but the sentinel does NOT, a HUMAN (or a global
-                # maintenance) owns it: ride along (return True) but never adopt or overwrite it.
-                state.atomic_write(sentinel, str(now))
-                state.atomic_write(flag, "self-budget")
-            state.log_line("dispatch", f"self-budget: maintenance (7d heartbeat cost {verdict.cost} >= {maintenance_frac}*{budget})")
-            return True
-        if verdict.tier == tm.SELF_BUDGET_SLOW:
-            _clear_budget_maintenance(sd)
-            state.log_line("dispatch", f"self-budget: cadence-cap SLOW (7d heartbeat cost {verdict.cost} >= {cap_frac}*{budget})")
-            return True
-        # ok — below every band (or the Schmitt release fired): drop any budget-owned flag.
-        _clear_budget_maintenance(sd)
-        return False
-    except Exception as exc:  # noqa: BLE001 — FAIL-OPEN normative: a metering bug must never throttle survival
-        state.log_line("dispatch", f"self-budget phase failed: {exc}")
-        return False
+        if line is not None:
+            print(line)
+            state.log_line("dispatch", f"self-cost: 7d heartbeat cost {cost} >= budget {budget}")
+    except Exception as exc:  # noqa: BLE001 — FAIL-OPEN normative: a metering bug must never break a fire
+        state.log_line("dispatch", f"self-cost phase failed: {exc}")
 
 
 def _phase_user_presence_breadcrumb() -> None:
     """Refresh the cross-plugin user-presence breadcrumb's liveness stamp.
 
     Writes ~/.aimaestro/state/user-presence.json's `written_at_epoch` on every
-    non-paused fire (the heartbeat firing IS the liveness proof the MANAGER's
+    fire (the heartbeat firing IS the liveness proof the MANAGER's
     presence tracker reads as a server-down fallback — TRDD-fb4850b5). It does
     NOT touch `last_user_input_epoch` — that field is owned by the
     UserPromptSubmit hook and reflects genuine user input, not cron ticks.
@@ -2067,14 +1900,8 @@ def _cadence_recent_activity(now: int) -> bool:
     return int(last) > 0 and (now - int(last)) < _RECENT_ACTIVITY_WINDOW_S
 
 
-def _phase_cadence_tier(budget_cap_slow: bool = False) -> None:
+def _phase_cadence_tier() -> None:
     """Dynamic TTL-aware heartbeat cadence (TRDD-0QQX9H0G, issue #83).
-
-    ``budget_cap_slow`` (TRDD-ZCODD6YS): when True, the janitor's OWN weekly heartbeat cost
-    tripped the cadence-cap tier of the self-budget throttle, so the committed tier is
-    clamped to the SLOW floor (`hc.cap_tier`) right after `commit_tier` — the live signals
-    can no longer promote the cron above SLOW this fire. Default False = unchanged behavior;
-    a no-op when dynamic cadence is off (this whole phase is a no-op then).
 
     Picks a cadence tier from live state each fire — FAST when actively waiting,
     MID on recent user activity, SLOW when idle — and applies a tier change by
@@ -2084,12 +1911,15 @@ def _phase_cadence_tier(budget_cap_slow: bool = False) -> None:
 
     Called AFTER the rate-limit / compact resume early-returns (so a recovery fire's
     output stays clean — a [janitor-renew] must never precede its [janitor-resume])
-    and after the keep-going nudge, but BEFORE the maintenance early-return, so a
-    maintenance session still demotes to SLOW and gets even cheaper. Because those
-    resume phases return early, a resume is visible here only via the `last-resume.ts`
-    stamp they leave behind — see _cadence_active_waiting. A TOTAL no-op when
-    heartbeat_cadence_dynamic is off. Fail-open throughout: a cadence bug must never
-    break the fire.
+    and after the keep-going nudge. Because those resume phases return early, a resume
+    is visible here only via the `last-resume.ts` stamp they leave behind — see
+    _cadence_active_waiting. A TOTAL no-op when heartbeat_cadence_dynamic is off.
+    Fail-open throughout: a cadence bug must never break the fire.
+
+    The SLOW tier is the ONLY sanctioned answer to cost pressure, because it slows fires
+    without stopping work: every detector still runs, just less often, and the cron is
+    still there. It replaced a self-budget clamp that could force SLOW and then drop the
+    project into maintenance — see _phase_self_cost_alarm for why that had to go.
 
     A differing desired cron does not automatically re-emit [janitor-renew]: a
     re-arm dwell (issue #89 half 2, hc.should_emit_renew) also gates it, so a
@@ -2137,12 +1967,6 @@ def _phase_cadence_tier(budget_cap_slow: bool = False) -> None:
         )
         prev = hc.state_from_dict(_read_json_file(sd / _CADENCE_STATE_FILE))
         committed = hc.commit_tier(raw, prev, demote_fires)
-
-        # 3b. self-budget cadence cap (TRDD-ZCODD6YS): the janitor's own weekly heartbeat
-        # cost tripped the SLOW-cap rung → clamp the committed tier to the SLOW floor before
-        # it maps to a cron, so live signals cannot promote the cron above SLOW this fire.
-        if budget_cap_slow:
-            committed = hc.cap_tier(committed, hc.SLOW)
 
         # 4. tier → desired cron.
         overrides = {
@@ -2204,20 +2028,18 @@ def main() -> int:
     global _decision_fired
     _decision_fired = False
 
-    # Phase 0: resolve this fire's MODE — full | maintenance | stop (TRDD-FPL60EKV).
-    # A fired turn re-reads the whole session context (~618k cached tokens at the 0.1x
-    # cache-READ rate — NOT free, but 1/10 of the 1.0x REWRITE the next real turn pays
-    # if the cache DIES). So there are THREE intents, not two:
-    #   * stop        — a machine-wide /janitor-global-disarm (kill-switch, TRDD-NJ22HNC3)
-    #                   or -pause (TRDD-a3fa4d5d) with NO maintenance opt-in → self-disarm:
-    #                   delete this cron so a fire costs zero (TRDD-RQ9FIFX6). Best for LONG
-    #                   idle. dispatch can't call CronDelete (a session tool), so it signals
-    #                   the session to run /janitor-disarm; self-limiting once the cron is gone.
-    #   * maintenance — keep firing but do ONLY the cache refresh + survival phases + the
-    #                   token-monitoring detector subset (_MAINTENANCE_DETECTORS — burn alarms
-    #                   must outlive the chores). Best for keeping a session/project cache
-    #                   warm at 1/10 the cost of letting it die and rewriting.
+    # Phase 0: resolve this fire's MODE — full | stop. A fired turn re-reads the whole
+    # session context (~618k cached tokens at the 0.1x cache-READ rate — NOT free, but 1/10
+    # of the 1.0x REWRITE the next real turn pays if the cache DIES), so there are exactly
+    # TWO intents:
+    #   * stop        — a machine-wide /janitor-global-disarm (kill-switch, TRDD-NJ22HNC3) →
+    #                   self-disarm: delete this cron so a fire costs zero (TRDD-RQ9FIFX6).
+    #                   Best for LONG idle. dispatch can't call CronDelete (a session tool),
+    #                   so it signals the session to run /janitor-disarm; self-limiting once
+    #                   the cron is gone.
     #   * full        — the normal heartbeat (cache refresh + due detectors + daemon).
+    # There is no third "keep firing but do nothing" mode any more — see
+    # _resolve_heartbeat_mode for why a silent one was the bug, not the feature.
     mode = _resolve_heartbeat_mode()
     if mode == "stop":
         # Bare marker on its own line — the cron prompt maps an exact [janitor-self-disarm]
@@ -2227,12 +2049,13 @@ def main() -> int:
         # (byte-identical bare token); no _emit_quiet_if_idle on this terminal action path.
         _emit_decision("[janitor-self-disarm]")
         return 0
-    # Phase 0.05: sweep the RETIRED per-project pause sentinel. It used to gate this fire; now it
-    # is only litter to remove, so the fire proceeds unconditionally.
-    _sweep_retired_pause_sentinel()
+    # Phase 0.05: sweep the RETIRED per-project sentinels (pause, maintenance mode, the
+    # self-budget's maintenance flag). They used to gate this fire; now they are only litter
+    # to remove, so the fire proceeds unconditionally.
+    _sweep_retired_sentinels()
 
     # Phase 0.4: refresh the user-presence breadcrumb liveness stamp. Runs on
-    # every non-paused fire, BEFORE the early-returning resume phases, so the
+    # every fire, BEFORE the early-returning resume phases, so the
     # MANAGER's presence fallback sees a fresh written_at_epoch even on a fire
     # that exits early for a rate-limit/compact resume.
     _phase_user_presence_breadcrumb()
@@ -2268,8 +2091,7 @@ def main() -> int:
     # PROACTIVELY during a cheap warm idle fire, so the next cold event is cheap. Gated on a
     # genuinely-idle session (user absent, nothing pending) + a large context. Returns early
     # like the resume phases so the fire stays minimal before the queued /compact runs. It sits
-    # AFTER the resume phases (they own the reactive cold case) and BEFORE the maintenance
-    # early-return below (a long unattended maintenance session is the prime target).
+    # AFTER the resume phases, which own the reactive cold case.
     if _phase_proactive_idle_compact():
         return 0
 
@@ -2277,84 +2099,38 @@ def main() -> int:
     _phase_heartbeat_renew()
 
     # Phase 1.5a: never-stop keep-going nudge (TRDD-TKNSTP82 Part B). Placed AFTER the
-    # renew phase and BEFORE the maintenance early-return below so BOTH modes get it:
-    # maintenance fires the nudge then takes its cheap return (no detectors/daemon);
-    # full fires the nudge then proceeds into the detector roster. It emits
-    # UNCONDITIONALLY — the opt-in flag and its off-switch are gone (owner directive
-    # 2026-07-31); see the phase's own docstring for why, and for the single
-    # time-bounded dedupe that remains. A prior rate-limit/compact resume already
-    # returned earlier in this function, so this phase is naturally skipped whenever
-    # one of those already fired this turn.
-    _phase_keep_going_nudge(mode)
+    # renew phase so the cron is already kept alive, and BEFORE the detector roster it
+    # does not gate. It emits UNCONDITIONALLY — the opt-in flag and its off-switch are
+    # gone (owner directive 2026-07-31); see the phase's own docstring for why, and for
+    # the single time-bounded dedupe that remains. A prior rate-limit/compact resume
+    # already returned earlier in this function, so this phase is naturally skipped
+    # whenever one of those already fired this turn.
+    _phase_keep_going_nudge()
 
-    # Phase 1.5a2: previous-fire cost record (janitor#78, opt-in). Before the
-    # maintenance early-return ON PURPOSE — maintenance fires are the ones whose
-    # measured cost justifies (or indicts) the cadence. Logs, never prints; the
-    # phase's docstring carries the why.
+    # Phase 1.5a2: previous-fire cost record (janitor#78, opt-in). Logs, never prints;
+    # the phase's docstring carries the why.
     _phase_heartbeat_cost()
 
-    # Phase 1.5a2b: the janitor's OWN heartbeat self-budget throttle (TRDD-ZCODD6YS).
-    # Placed strictly AFTER all four resume/compact early-returns (rate-limit / post-compact /
-    # post-clear / proactive-idle-compact) — so a RECOVERY fire NEVER reaches it and can never
-    # be throttled — and BEFORE the cadence phase + the maintenance early-return, so its SLOW
-    # cap threads into the cadence and its maintenance flag takes effect on the NEXT fire's
-    # Phase-0 mode resolution. It NEVER routes through _resolve_heartbeat_mode and NEVER emits
-    # [janitor-self-disarm]: the ceiling is LOCAL maintenance (cron + resume preserved). The
-    # call site is a SECOND fail-open layer around the phase's own try/except — a self-budget
+    # Phase 1.5a2b: name this project's own heartbeat spend when it passes the user's
+    # weekly budget. Placed strictly AFTER all four resume/compact early-returns
+    # (rate-limit / post-compact / post-clear / proactive-idle-compact) so a RECOVERY fire
+    # never spends output on a cost line. It REPORTS ONLY — no cadence clamp, no mode
+    # change, no [janitor-self-disarm]; the throttle it replaced is why (TRDD-ZCODD6YS,
+    # reverted by the owner's "never self-disable" ruling — see the phase docstring). The
+    # call site is a SECOND fail-open layer around the phase's own try/except: a metering
     # bug must never break a fire.
-    budget_cap_slow = False
     try:
-        budget_cap_slow = _phase_self_budget()
+        _phase_self_cost_alarm()
     except Exception as exc:  # noqa: BLE001 — belt-and-suspenders: survival is best-effort
-        state.log_line("dispatch", f"self-budget call failed: {exc}")
-        budget_cap_slow = False
+        state.log_line("dispatch", f"self-cost call failed: {exc}")
 
     # Phase 1.5a3: dynamic TTL-aware cadence tier (TRDD-0QQX9H0G, #83). Placed
     # AFTER the rate-limit / compact resume early-returns (so a recovery fire
     # never emits a re-arm marker and stays clean) and AFTER the keep-going nudge
-    # (so the nudge still leads that fire's output), but BEFORE the maintenance
-    # early-return so a maintenance (idle) session demotes to SLOW and gets even
-    # cheaper. It re-uses [janitor-renew] to re-arm the cron at the chosen tier; a
-    # total no-op when heartbeat_cadence_dynamic is off. `budget_cap_slow` (from the
-    # self-budget phase above) clamps the committed tier to SLOW when over budget.
-    _phase_cadence_tier(budget_cap_slow=budget_cap_slow)
-
-    # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
-    # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the
-    # 5-min TTL). Return HERE — after the cheap survival phases above (user-presence
-    # breadcrumb, rate-limit resume, post-compact resume, the 7-day cron auto-renew, and the
-    # never-stop keep-going nudge) so a cache-warm fire still keeps the cron alive and surfaces
-    # a pending resume — but BEFORE the expensive phases below (guard, daemon spawn, detectors,
-    # reloads) that maintenance exists to skip. This return used to sit at Phase 0, which
-    # starved the renew (the cron silently expired after 7 days, defeating maintenance's
-    # long-idle purpose) and the resume nudges (an unattended maintenance session stalled after
-    # a compact/rate-limit) — /code-review B1/B2/B4.
-    if mode == "maintenance":
-        # TRDD-8PH8YOIJ: the daemon's EXISTENCE is survival, not a chore. A running daemon
-        # keeps the 60s oauth-rotator-tick beating under maintenance (v0.28.1 B3), but when
-        # the daemon DIED during maintenance nothing respawned it — sessions skipped the
-        # spawn here, so the 5h window exhausted with no rotation and the user had to
-        # /login by hand (incident 2026-07-02). ensure_daemon_running() is cheap+idempotent
-        # (pid/heartbeat check; spawn only when dead) and honors the kill-switch +
-        # crash-loop breaker by construction, so a deliberate global STOP still wins.
-        # Maintenance idles the EXPENSIVE chores, never survival.
-        try:
-            gs.ensure_daemon_running()
-        except Exception:  # noqa: BLE001 — survival is best-effort; never break the fire
-            pass
-        # Token monitoring survives maintenance (user directive 2026-07-10,
-        # TRDD-8Q0OYVWM): run ONLY the _MAINTENANCE_DETECTORS subset at its
-        # normal cadence. Everything else stays idle — this keeps the burn
-        # alarms alive without reviving the chores maintenance exists to skip.
-        _run_maintenance_detectors()
-        state.log_line(
-            "dispatch", "maintenance-mode: cache-refresh fire, survival + token monitoring only"
-        )
-        # D5 (TRDD-82JRK0CY): the second terminal no-action exit. If nothing above set a
-        # decision (e.g. the keep-going nudge was muted by a recent resume), emit the
-        # explicit [janitor-quiet] token so this idle maintenance fire is unambiguous.
-        _emit_quiet_if_idle()
-        return 0
+    # (so the nudge still leads that fire's output). It re-uses [janitor-renew] to
+    # re-arm the cron at the chosen tier; a total no-op when heartbeat_cadence_dynamic
+    # is off. The SLOW tier is the only cost lever left, and it never stops work.
+    _phase_cadence_tier()
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
     _phase_autofix_mode_reminder()

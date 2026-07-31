@@ -29,15 +29,15 @@ from typing import Optional
 # it independently (TRDD-EFTQB9RR).
 DISARMED_FLAG = "disarmed.flag"
 
-# The LOCAL (this-project) maintenance sentinel: while present, dispatch drops the
-# fire to cache-refresh-only (no chores, no daemon). Written by
-# /janitor-maintenance-mode, read by dispatch._resolve_heartbeat_mode, and CLEARED BY
-# /janitor-arm — arming is the "start this session in a known FULL state" act, so a
-# stale local sentinel can no longer silently suppress every chore (owner directive
-# 2026-07-21: a sticky, invisible maintenance flag made it impossible to tell which
-# session was in maintenance without inspecting each one). The GLOBAL flag is
-# deliberately NOT cleared here — see arm_prepare.main.
-MAINTENANCE_FLAG = "maintenance-mode"
+# The RETIRED per-project control sentinels. NOTHING READS THESE — pause, maintenance
+# mode and the self-budget throttle are all gone (owner directive 2026-07-31: arm/disarm
+# is the only switch). The names survive as the SINGLE source of truth for the two sweeps
+# that delete them — dispatch on every fire, arm_prepare on every arm — because real hosts
+# carry these files right now and the levers that lifted them went away with the switches.
+# Without the sweep an upgraded machine keeps looking quiesced forever, with nothing left
+# to un-quiesce it. Retire the names themselves only once no supported version can write
+# one. See [[janitor-has-no-off-switch-but-disarm]].
+RETIRED_SENTINELS = ("paused", "maintenance-mode", "self-budget-maintenance.flag")
 
 # Written by the StopFailure hook on any turn-ending API error, cleared by
 # dispatch.py on the next fire. Read by fleet_scan to diagnose `frozen`.

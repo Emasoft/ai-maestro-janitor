@@ -1756,11 +1756,6 @@ def _build_tasks() -> list[Task]:
     ]
 
 
-# The only task(s) allowed to run while the daemon is idling under global MAINTENANCE
-# (see the `main()` maintenance branch below). Keep this to genuine keepalive-critical
-# work only — everything else in `tasks` is exactly what maintenance means to skip.
-_MAINTENANCE_KEEPALIVE_TASK_NAMES = frozenset({"oauth-rotator-tick"})
-
 # Machine-wide ONCE-ONLY chores the ai-maestro SERVER absorbs while it RUNS
 # (TRDD-PZLVT2RN Phase B2; BINARY since TRDD-LU0C5KAR — owner directive 2026-07-17:
 # "if the ai-maestro server is running, those chores are its responsibility. so the
@@ -1846,15 +1841,11 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     # list order — that dependence is exactly the starvation `_next_bulk_task` cures.
     bulk_next = None if bulk_busy else _next_bulk_task(tasks, yielded)
     for task in tasks:
-        # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
-        # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
-        # join the kill-switch in the per-task gate so "immediately skip the chores"
-        # actually holds; the top-of-loop maintenance branch then idles.
-        if (
-            not _running
-            or gs.kill_switch_present()
-            or gs.maintenance_mode_present()
-        ):
+        # A kill-switch set mid-loop skips the REMAINING tasks NOW, not after the current
+        # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause and maintenance
+        # used to join it here; both are gone (owner directive 2026-07-31), so the only
+        # thing that stops the chores is the stop that also stops the daemon.
+        if not _running or gs.kill_switch_present():
             break
         if task.name in yielded:
             continue  # the active server owns this chore (Phase B2)
@@ -1889,28 +1880,6 @@ def _sleep_seconds(tasks: list[Task], yielded: set[str], bulk_busy: bool) -> int
         default=_LOOP_CEILING_SEC,
     )
     return max(1, min(_LOOP_CEILING_SEC, next_due))
-
-
-def _run_maintenance_keepalive(tasks: list[Task]) -> None:
-    """Run ONLY the keepalive-critical task(s) while otherwise idling under MAINTENANCE.
-
-    B3 bug fix: the maintenance branch in `main()` used to `continue` straight past the
-    ENTIRE task list, so "oauth-rotator-tick" (the 60 s beat that refreshes the LIVE
-    OAuth credential — see `task_oauth_rotator_tick`) never ran under maintenance.
-    Maintenance keeps every session firing CHEAP (the CLAUDE.md contract), so a lapsed
-    token would break the whole fleet while it looked idle. This runs ONLY the task(s)
-    named in `_MAINTENANCE_KEEPALIVE_TASK_NAMES` — the alert-only
-    "oauth-rotator-supervisor" and everything else stay skipped, matching maintenance's
-    "idle the expensive workloads" intent. Goes through the Task object (not a bare
-    `task_oauth_rotator_tick()` call) so the normal cadence stamp + failure-backoff
-    bookkeeping in `Task.run()` still applies.
-    """
-    server_chores = harness_backend.server_runs_chores()
-    for task in tasks:
-        if _task_yielded_to_server(task.name, server_chores):
-            continue  # the active server owns the keepalive too (Phase B2)
-        if task.name in _MAINTENANCE_KEEPALIVE_TASK_NAMES and task.is_due():
-            task.run()
 
 
 def _consume_version_update_request(tasks: list[Task]) -> bool:
@@ -2233,42 +2202,14 @@ def main() -> int:
                 exit_reason = "server-owns-host"
                 break
 
-            # A global MAINTENANCE (TRDD-FPL60EKV) idles the daemon's expensive task
-            # workloads WITHOUT tearing it down and — unlike pause/disarm — WITHOUT stopping
-            # any session: the sessions are meant to KEEP firing cheap (cache-refresh-only) to
-            # stay warm, so this branch must NOT fleet-stop. Skip every task workload, keep
-            # ticking the heartbeat (so we are not seen as wedged), and stay responsive — the
-            # inner sleep breaks the instant maintenance lifts or a kill-switch/pause supersedes
-            # it. Placed ABOVE the pause branch so maintenance wins when both are set, matching
-            # dispatch's mode resolution (a session fires cheap, it is NOT disarmed).
-            if gs.maintenance_mode_present():
-                gs.write_heartbeat()
-                # B3 fix: run the keepalive-critical task(s) (oauth-rotator-tick) even
-                # though every other task workload stays skipped under maintenance —
-                # see _run_maintenance_keepalive's docstring for the WHY.
-                _run_maintenance_keepalive(tasks)
-                for _ in range(_LOOP_CEILING_SEC):
-                    # Break on _running=False, a kill-switch (the true STOP → the daemon must
-                    # exit via the while-top branch), or maintenance lifting — but NOT on a
-                    # global-pause. Maintenance is checked ABOVE the pause branch (it WINS when
-                    # both are set), so if pause also broke this sleep we would `continue`,
-                    # re-enter maintenance, break instantly again, and busy-spin write_heartbeat
-                    # at 100% CPU (/code-review B5). Maintenance keeps sleeping through a pause.
-                    if (
-                        not _running
-                        or gs.kill_switch_present()
-                        or not gs.maintenance_mode_present()
-                    ):
-                        break
-                    time.sleep(1)
-                continue
-
-            # The global-PAUSE branch stood here: it idled the daemon without tearing it
-            # down — every task workload skipped, heartbeat still ticking so nobody saw us
-            # as wedged. That combination is precisely what made the silent-disable
-            # incident invisible (owner directive 2026-07-31), so the flag and this branch
-            # are gone. A machine-wide stop is now the kill-switch alone, which EXITS and
-            # is therefore observable.
+            # The global-MAINTENANCE and global-PAUSE branches stood here. Both idled the
+            # daemon without tearing it down — every task workload skipped, heartbeat still
+            # ticking so nobody saw us as wedged, sessions still firing on schedule. That
+            # combination is precisely what made the silent-disable incident invisible
+            # (owner directive 2026-07-31), so both flags and both branches are gone. A
+            # machine-wide stop is now the kill-switch alone, which EXITS and is therefore
+            # observable. Cost is answered by each session's cadence tier, which slows the
+            # fires without stopping the work.
 
             # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server RUNS, yield
             # the absorbed chores — running them here too would be "doing the same

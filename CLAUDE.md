@@ -140,7 +140,7 @@ plugin updates auto-roll with NO re-arm) → `dispatch.py`:
 2. `resume-after-compact.flag` present → emit `[janitor-resume] …continue TRDD-xxxx…`, clear flag (post-compact auto-resume; the PostCompact hook wrote it — TRDD-31095269).
    Both resume phases also stamp `last-resume.ts` and RETURN EARLY. The stamp is the cadence phase's ONLY view of a resume — it runs later in the same `main()`, by which point the flag is already unlinked, so reading the flags there is dead code (fixed 2026-07-11).
 3. cron near 7-day expiry → emit `[janitor-renew]` (Claude re-runs /janitor-arm).
-3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: a `last-resume.ts` stamp <30min old / pending directive / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases + in maintenance mode, before the maintenance return; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
+3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: a `last-resume.ts` stamp <30min old / pending directive / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases; the SLOW tier is the only sanctioned answer to cost (fewer fires, same work) since the self-budget clamp was removed; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
 4. `ensure_daemon_running()` (lazy-spawn the singleton if dead).
 5. daemon stale/old-version → request restart (auto-roll the daemon too).
 6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
@@ -171,7 +171,7 @@ slow to land a fresh janitor release (v0.41.0 sat at cache 0.39.0 for hours). Th
 per-session `version-update` detector now RAISES `gs.request_version_update()`
 (`version-update-requested.flag`, global-state) when the cache is behind GitHub AND
 `auto_update_on_new_release` is on; the daemon's `_consume_version_update_request(tasks)`
-runs each loop AFTER the stop/pause/maintenance branches, BEFORE the due-loop —
+runs each loop AFTER the stop branch, BEFORE the due-loop —
 clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writer preserved
 (the detector only requests; issue #7/PRRD S2.1). Latency ~5-6min not 6h. Opt-out
 `CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER`; fail-open to the 6h beat.
@@ -290,30 +290,33 @@ confirmations/results via `systemMessage` (user-only); `/janitor-memory-user-sha
 is the sole path using `additionalContext` (which DOES reach the model). Fast
 no-op for any non-user-mem prompt; never crashes the session.
 
-**Skills (`skills/`)** — control surface (severity×scope, TRDD-a3fa4d5d): `janitor-arm`
-↔ `janitor-disarm` (local cron true-stop), `janitor-global-disarm` ↔
-`janitor-global-arm`, `janitor-maintenance-mode` (local + `global`, TRDD-FPL60EKV;
-machine-wide, backed by
-`scripts/global_control_cli.py disarm|arm|maintenance|maintenance-off|status` —
-kill-switch=disarm makes the daemon EXIT, maintenance-mode.flag=daemon idles but sessions
-keep firing CHEAP). **PAUSE (local + global) WAS REMOVED in v0.67.0** (owner directive
-2026-07-31): it suspended the janitor while leaving the cron firing and the daemon
-resident, i.e. indistinguishable from a healthy fleet from the outside — the same
-silent-disable shape as the `keep-going-off` incident. Stale `global-pause.flag` /
-`.janitor/state/paused` are INERT and swept. THREE heartbeat modes
-(`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon), MAINTENANCE (fire
-cache-refresh-ONLY — no chores/daemon, but DOES emit the never-stop keep-going nudge
-(TRDD-TKNSTP82); keeps the prompt cache warm at the 0.1× READ
-rate ≈ 1/10 the 1.0× REWRITE a dead cache costs on the next real turn; maintenance WINS over a
-global stop so ONE session stays warm while the fleet is down), STOP (self-disarm). Both global
-STOPS now TRULY STOP the heartbeat (free), not just silence it (TRDD-RQ9FIFX6): a set stop flag
-makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session runs `/janitor-disarm`
-→ the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
-tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
-firing costs zero (MAINTENANCE is the middle option: keep the fire but at that 0.1× floor).
-**The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge(mode)`
-fires on EVERY heartbeat in EVERY mode, called right before the maintenance early-return so both
-modes get it. Its opt-in flag, its `/janitor-keep-going off` sentinel and the
+**Skills (`skills/`)** — control surface: `janitor-arm` ↔ `janitor-disarm` (local cron
+true-stop), `janitor-global-disarm` ↔ `janitor-global-arm` (machine-wide, backed by
+`scripts/global_control_cli.py disarm|arm|reload-skills|status` — kill-switch=disarm makes
+the daemon EXIT). **ARM/DISARM IS THE ONLY SWITCH** (owner directive 2026-07-31, *"remove
+the very option of disabling the janitor features"*). PAUSE (local + global) went in
+v0.67.0 and MAINTENANCE MODE (local + global) with it: each suspended the janitor while
+leaving the cron firing and the daemon resident, i.e. indistinguishable from a healthy
+fleet from the outside — the same silent-disable shape as the `keep-going-off` incident.
+Maintenance was the more defensible of the two (a fire re-reads context at the 0.1× READ
+rate ≈ 1/10 the 1.0× REWRITE a dead cache costs, so a do-nothing fire looked like the cheap
+way to stay warm) and it is gone for exactly the same reason. Stale `global-pause.flag` /
+`maintenance-mode.flag` / `.janitor/state/{paused,maintenance-mode}` are INERT and swept
+(`state.RETIRED_SENTINELS`, swept by dispatch each fire AND by every arm); the retired CLI
+verbs are REJECTED, never accepted as no-ops. TWO heartbeat modes
+(`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon) and STOP
+(self-disarm). A global stop TRULY STOPS the heartbeat (free), not just silences it
+(TRDD-RQ9FIFX6): the flag makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker →
+the session runs `/janitor-disarm` → the cron DELETES ITSELF, because a cron FIRE is a full
+Claude turn that re-reads ~618k cached tokens (billed at the 0.1× cache-read rate, NOT free)
+whether or not detectors run — only NOT firing costs zero. **Cost is answered by the SLOW
+cadence tier (fewer fires, same work) and by `_phase_self_cost_alarm`, which prints one
+drift line naming this project's own 7d heartbeat spend past `heartbeat_self_budget` and
+actuates NOTHING** — it replaced the TRDD-ZCODD6YS two-rung throttle (cadence cap → auto
+LOCAL maintenance), reverted by the same "never self-disable" ruling.
+**The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge()`
+fires on EVERY heartbeat, takes no mode, and has one wording. Its opt-in flag, its
+`/janitor-keep-going off` sentinel and the
 `keep_going_default` knob were all REMOVED in v0.67.0 (owner directive 2026-07-31, *"remove the
 very option of disabling the janitor features"*): a host was found carrying
 `.janitor/state/keep-going-off` dated 14 days back, so every fire had correctly done nothing and
@@ -433,7 +436,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=4fb8956de814 digest=c81c14111ac1 generated=2026-07-30T18:21:43+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2e6a3da5dcba digest=bda4bbd03966 generated=2026-07-31T20:29:45+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -528,6 +531,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · NoteMeta — Parsed metadata for one memory note (from `memgrep index --markdown`).
   · ScopeReport — Everything the librarian surfaces for ONE memory scope root.
   · ScopeReport.has_findings(self) -> bool — True iff this scope surfaces ANYTHING (candidate or integrity issue).
+  · CorpusIndex — Where every slug LIVES and who REFERENCES it, across ALL scope roots.
   · main() -> int
 `scripts/detectors/memory-maintenance.py` — memory-maintenance — the wikimem-editor SCHEDULER (TRDD-b4b9e27c, the SCHEDULE layer).
   · main() -> int
@@ -844,6 +848,16 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
   · build_injection(terminal, action, *, esc_first, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
   · fire(plan) -> bool — Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
+`scripts/lib/fleet_plugin_updates.py` — Fleet-wide plugin updates — update EVERY project's enabled plugins, not just the live one.
+  · registry_path() -> Path — Claude Code's authoritative install registry — the same file `version_update_lib` reads.
+  · Target — One (plugin, scope, project) the sweep may update.
+  · Target.settings_path(self) -> Path
+  · enabled_plugins(settings_path) -> list[str] — Plugin ids explicitly enabled in a settings file, or `[]` on absent/malformed.
+  · plugin_is_enabled(plugin_id, enabled) -> bool — True iff `plugin_id` ("<name>@<market>") appears in an `enabledPlugins` list.
+  · read_registry() -> dict — Parse the install registry, or `{}` when it is missing/unreadable/malformed (fail-open).
+  · enumerate_targets(registry) -> list[Target] — Every (plugin, scope, project) this sweep should update, deduped and ordered.
+  · update_target(target, *, timeout_s) -> tuple[bool, str] — Run `claude plugin update <id> --scope <scope>` FOR THAT PROJECT. Returns `(ok, detail)`.
+  · sweep(*, max_targets, log) -> list[str] — Update every enabled plugin in every live project. Returns the ids actually updated.
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
   · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
   · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle recovery injection (TRDD-0GPQROC1). PURE.
@@ -919,19 +933,15 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · kill_switch_present() -> bool
   · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
   · clear_kill_switch() -> None — Remove the kill-switch flag from every location it may live (control_dir(), the
-  · maintenance_mode_present() -> bool — True iff the machine-wide MAINTENANCE flag is set (/janitor-global-maintenance,
-  · set_maintenance_mode(reason) -> None — Set the machine-wide MAINTENANCE flag at control_dir() (ARCHITECTURE.md §7.1,
-  · clear_maintenance_mode() -> None — Clear the machine-wide MAINTENANCE flag from every location it may live so
-  · global_pause_present() -> bool — True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
-  · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag at control_dir() (ARCHITECTURE.md §7.1,
-  · clear_global_pause() -> None — Clear the machine-wide PAUSE flag from every location it may live — the daemon
+  · clear_maintenance_mode() -> None — Clear a RETIRED machine-wide MAINTENANCE flag from every location it may live.
+  · clear_global_pause() -> None — Clear a RETIRED machine-wide PAUSE flag from every location it may live.
   · version_update_requested_present() -> bool — True iff a session detector (or an external control-plane writer) has requested
   · request_version_update(reason) -> None — Raise the release-triggered self-update request at control_dir() (ARCHITECTURE.md
   · clear_version_update_request() -> None — Clear the release-triggered self-update request from every location it may live.
   · request_plugin_update(plugin_id, scope, reason) -> None — Enqueue a request for the daemon to update ``plugin_id`` at ``scope`` (TRDD-YMTUPQER).
   · plugin_update_requests() -> list[dict] — The queued per-plugin update requests (each ``{plugin_id, scope, reason}``). Fail-open
   · clear_plugin_update_request(plugin_id, scope) -> None — Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
-  · fleet_stop_flag_state() -> str | None — The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
+  · fleet_stop_flag_state() -> str | None — ``"disarm"`` iff the machine-wide kill-switch is set, else None.
   · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
   · clear_fleet_injections(flag_state) -> None — Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
@@ -995,7 +1005,6 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
   · raw_tier(signals) -> str — The un-smoothed tier this fire's signals ask for. Pure.
   · commit_tier(raw, prev, demote_fires) -> CadenceState — Apply hysteresis: promote to a faster tier IMMEDIATELY, demote to a slower
-  · cap_tier(state, ceiling) -> CadenceState — Return `state` with `committed_tier` clamped to AT MOST `ceiling` (by `_TIER_RANK`).
   · should_emit_renew(*, desired_differs, committed, prev, now, dwell_s) -> bool — Decide whether THIS fire may emit ``[janitor-renew]`` (issue #89 half 2).
   · stamp_rearm(state, now) -> CadenceState — Return `state` with `last_rearm_ts` set to `now`.
   · tier_to_cron(tier, ttl_minutes, overrides) -> str — Map (tier, real cache-TTL) -> a 5-field cron. Pure.
@@ -1010,6 +1019,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · parse_ioc_yaml(path) -> list[IOCRecord] — Load a per-threat IOC bundle (or a list of bundles) from `path`.
 `scripts/lib/issue_catalog.py` — The ISSUE-CODE CATALOG — every incident the janitor can detect, with a stable id (TRDD-CGYMUKO6).
   · Issue — One detectable issue. `kind` is the ONLY thing that decides domain + agent (via KIND_REGISTRY).
+  · reconcile_retired(*, project_dir) -> list[tuple[str, str]] — Withdraw every pending proposal raised under a RETIRED code. Returns `(code, trdd_id)` pairs.
   · Raised — The outcome of `raise_issue`. `line` is a ready-to-print heartbeat line (empty when silent).
   · raise_issue(code, *, evidence, severity, dedupe_key, where, origin, project_dir, now, **data) -> Raised — Turn a detected issue into WORK. The one call a detector makes; the code decides everything else.
   · clear_issue(code, *, where, dedupe_key, project_dir, **data) -> str | None — The finding is GONE — withdraw its unapproved proposal. Returns the withdrawn TRDD id, or None.
@@ -1088,9 +1098,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
   · consolidate_has_work(root, *, last_fingerprint, stamp_age_s, recheck_after_s) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
-  · repair_has_work(root) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
+  · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
   · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
-  · conflict_has_work(root) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
+  · conflict_pairs(root) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
+  · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
   · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
   · content_has_work(intervention, root, *, split_max_bytes, scope, last_fingerprint, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
@@ -1141,6 +1152,14 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · check_ownership(project_repo, cwd_repo_root) -> None — Guard 1. Raise unless we are running inside the repo we are about to write to.
   · check_plan_matches_corpus(memdir, planned) -> list[NoteVerdict] — Guard 2 + 3. Re-classify NOW and prove the reviewed plan still describes reality.
   · apply_plan(memdir, project_repo, planned, *, stamp, keep_source) -> list[tuple[str, str]] — Publish the planned notes to PROJECT scope. Returns [(rel_path, outcome)].
+`scripts/lib/memory_refusals.py` — Per-CANDIDATE refusal ledger for the memory chores (issue #131).
+  · candidate_key(root, paths) -> str — The stable identity of a candidate: its root-relative paths, sorted, `|`-joined.
+  · content_hash(root, paths) -> str | None — sha256 over the candidates' actual BYTES, or None if any is unreadable.
+  · read(intervention, scope, root) -> dict[str, dict] — The ledger for one (intervention, scope, root), or `{}` on absent/corrupt.
+  · record(intervention, scope, root, paths, *, reason, now) -> bool — Record that this candidate was judged and DECLINED. True iff it was stored.
+  · refusal(intervention, scope, root, paths, *, now, ttl_s) -> dict | None — The live refusal covering this candidate, or None (⇒ dispatch).
+  · is_refused(intervention, scope, root, paths, *, now, ttl_s) -> bool — True iff this exact candidate, unchanged, was already judged and declined.
+  · clear(intervention, scope, root, paths) -> bool — Forget one refusal — the manual escape hatch. True iff an entry was removed.
 `scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
   · is_note_file(path) -> bool — True iff ``path`` is a real memory NOTE — the SSOT discriminator.
   · iter_note_files(memdir) -> list[Path] — Every real memory NOTE under ``memdir`` (recursive), filtered by ``is_note_file``.
@@ -1259,6 +1278,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/lib/rotator_usage.py` — Shared READ-ONLY account-usage gather (TRDD-OY0W6LX5).
   · accounts_usage() -> list[dict] — `[{"label", "usage"}]` for every unique known account (live + slots, deduped by
 `scripts/lib/rules_installer.py` — Install plugin-shipped rule files into the active scope's .claude/rules/.
+  · split_stamp(installed) -> tuple[str | None, bytes] — `(stamped_version, body)` for an installed file. A `None` version means it carries no stamp,
+  · should_install(installed_version, body_matches, src_version) -> tuple[bool, str] — PURE. May we overwrite the installed file with this source? Returns `(install, why)`.
   · remove_orphaned_rules() -> list[str] — Partial-uninstall self-heal: remove janitor-installed rules from every KNOWN rules
   · janitor_uninstalled() -> bool — True iff the janitor appears FULLY uninstalled: referenced in NO settings.json
   · cleanup_user_orphans_if_uninstalled() -> list[str] — Daemon entry point (TRDD-H9IBY95W): when the janitor is FULLY uninstalled, remove
@@ -1458,6 +1479,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · reclaim_stale(tickets, *, now, stale_s) -> list[Ticket] — Return the in-flight tickets whose agent DIED, reset to `open` with attempts++.
   · select_due(tickets, *, now, per_fire, budget_left, inflight) -> list[Ticket] — Pick the tickets to dispatch on THIS fire. PURE.
   · mark_failed(t, *, now, backoff_s, why) -> Ticket — A failed attempt: back off and retry, or give up EXPLICITLY.
+  · mark_invalid(t, *, now, why) -> Ticket — The finding was PROVEN not to be a defect: close it, terminally, with the disproof.
+  · evidence_fingerprint(evidence) -> str — A stable digest of a finding's INPUTS — what a refusal is conditioned on.
   · budget_left(ledger, *, now, per_day) -> int — Dispatches still allowed in the rolling 24h window.
   · tickets_dir(state_dir) -> Path
   · closed_dir(state_dir) -> Path
@@ -1465,6 +1488,11 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · load_all(state_dir) -> list[Ticket] — Every OPEN (non-archived) ticket. A corrupt file is skipped, never fatal.
   · load(ticket_id, state_dir) -> Ticket | None
   · save(t, state_dir) -> None — Persist a ticket. Terminal ones are ARCHIVED, never deleted (RULE 0's spirit: the record of
+  · refusals_path(state_dir) -> Path
+  · read_refusals(state_dir) -> dict[str, dict] — The refusal index: `dedupe_key → {ticket, evidence, ts}`. Fail-open `{}`.
+  · record_refusal(t, *, now, state_dir) -> None — Remember that THIS finding, with THESE inputs, was proven not to be a defect.
+  · clear_refusal(dedupe_key, state_dir) -> None — Forget a refusal — the escape hatch `retry` uses so a disproof is never permanent.
+  · refusal_for(dedupe_key, evidence, state_dir) -> str — The id of the ticket that disproved this exact finding, or `""` if it is not refused.
   · open_ticket(*, kind, title, detail, evidence, severity, dedupe_key, origin, trdd, now, state_dir) -> tuple[Ticket | None, str] — Open a ticket, or bump an existing one with the same `dedupe_key`. Returns (ticket, why).
   · record_dispatch(ticket_id, *, now, state_dir) -> None — Append to the rolling-24h ledger, TRIMMED on every append (no unbounded append sites).
   · read_ledger(state_dir) -> list[int]
@@ -1527,8 +1555,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · load_log(log_path) -> list[dict]
   · BudgetVerdict — The budget-tier decision for the IN-PROGRESS turn (TRDD-KI24GR5Z).
   · evaluate_turn_budget(usage, *, output_advisory, output_hard, cache_creation_advisory, cache_creation_hard, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
-  · SelfBudgetVerdict — The self-budget escalation verdict for THIS project's heartbeat cost (TRDD-ZCODD6YS).
-  · evaluate_self_budget(records, *, budget, now, cap_frac, maintenance_frac, release_frac, in_maintenance) -> SelfBudgetVerdict — Decide how hard to throttle the janitor's OWN heartbeat against a weekly cost budget.
+  · heartbeat_cost_7d(records, *, now) -> int — THIS project's rolling-7d WEIGHTED cost of the janitor's OWN heartbeat fires. PURE.
   · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
 `scripts/lib/trdd_common.py` — Shared TRDD-parsing helpers + the state-reconciliation checks (stdlib-only).
   · project_tasks_dir(project_dir) -> Path | None — The PROJECT tasks dir, honoring `CLAUDE_PLUGIN_OPTION_TRDD_PATH`.
@@ -1628,6 +1655,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · Classifier.classify(self, text) -> Iterator[Finding]
   · Classifier.re2_active(self) -> bool
 `scripts/lib/zizmor_patterns_extra.py` — Extension catalog for the janitor's second-pass workflow auditor.
+`scripts/memory_refusal_cli.py` — Record (or inspect) a memory-chore refusal — the write surface of the ledger (issue #131).
+  · main() -> int
 `scripts/memory_settings_cli.py` — Backing script for the /janitor-memory-*-frequency-{set,get} + -maxsize commands
   · main() -> int
 `scripts/memory_txn_cli.py` — Backing CLI for ONE atomic wikimem memory edit (TRDD-b92a9dd0, TRDD-A foundation).

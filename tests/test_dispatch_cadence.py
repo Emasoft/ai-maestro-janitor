@@ -43,12 +43,12 @@ def _import_dispatch():
     return mod
 
 
-def _run_phase(dispatch, *, budget_cap_slow: bool = False) -> str:
+def _run_phase(dispatch) -> str:
     buf = StringIO()
     old = sys.stdout
     sys.stdout = buf
     try:
-        dispatch._phase_cadence_tier(budget_cap_slow=budget_cap_slow)
+        dispatch._phase_cadence_tier()
     finally:
         sys.stdout = old
     return buf.getvalue()
@@ -146,8 +146,10 @@ def test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast(
     gs.init_global_state()
     st.init_state()
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
-    (_state(proj) / "maintenance-mode").write_text("")  # skip chores; cadence still runs
-    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    # Fire 2 runs the FULL roster now — the maintenance sentinel this test used to set to skip
+    # the chores is gone (owner directive 2026-07-31), so stub the detector runner instead. The
+    # cadence assertions are unchanged: they never depended on the mode, only on the signals.
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
     (_state(proj) / "rate-limited.flag").write_text("")
 
     out1 = _run_main(dispatch)
@@ -197,10 +199,18 @@ def test_demote_hysteresis_holds_fast_one_idle_fire(proj: Path, monkeypatch: pyt
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
 
 
-def test_maintenance_fire_runs_cadence_before_return(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """END-TO-END placement proof: a maintenance-mode dispatch.main() still reaches the
-    cadence phase (Phase 1.5a3, before the maintenance early-return), so an idle
-    maintenance session demotes to SLOW and re-arms once."""
+def test_a_retired_maintenance_sentinel_changes_nothing_about_the_fire(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INVERTED. This used to be the END-TO-END placement proof that a maintenance fire still
+    reached the cadence phase before its early-return — the phase deliberately sat ABOVE that
+    return so an idle maintenance session could demote to SLOW and get cheaper still.
+
+    There is no maintenance branch left to sit above (owner directive 2026-07-31). What the test
+    guards now is the MIGRATION: a host upgraded while in local maintenance still has
+    `.janitor/state/maintenance-mode` on disk, and that file must be inert — the fire runs its
+    full course and the cadence phase behaves exactly as it does without it. The old failure
+    mode, a leftover sentinel quietly suppressing every fire, is precisely what this pins shut."""
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
     dispatch = _import_dispatch()
     import global_state as gs
@@ -208,14 +218,16 @@ def test_maintenance_fire_runs_cadence_before_return(proj: Path, monkeypatch: py
 
     gs.init_global_state()
     st.init_state()
-    (st.state_dir() / "maintenance-mode").write_text("")
-    # Neutralize the maintenance survival work so the test stays hermetic.
-    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    (st.state_dir() / "maintenance-mode").write_text("set by an older janitor")
+    # Keep the fire hermetic: no daemon spawn, no real detector subprocesses.
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
 
     out = _run_main(dispatch)
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
     assert "[janitor-renew]" in out  # first fire, armed absent → re-arm to SLOW
+    # And the sentinel is SWEPT, so it cannot keep confusing whoever reads the state dir.
+    assert not (st.state_dir() / "maintenance-mode").exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -497,45 +509,55 @@ def test_daemon_feature_on_does_not_disable_cron_resume_fallback(
 
 
 # --------------------------------------------------------------------------- #
-# Self-budget SLOW cap (TRDD-ZCODD6YS). `_phase_cadence_tier(budget_cap_slow=True)` clamps
-# the committed tier to the SLOW floor even when live signals ask for FAST.
+# INVERTED (owner directive 2026-07-31) — the self-budget SLOW cap is GONE.
+# `_phase_cadence_tier` used to take `budget_cap_slow`, which clamped the committed tier
+# to the SLOW floor even when the live signals asked for FAST. Cost may no longer steer
+# the cadence at all: the tier follows the session's real state, and the user picks the
+# tier's cron. See scripts/dispatch.py::_phase_self_cost_alarm.
 # --------------------------------------------------------------------------- #
 
 
-def test_budget_cap_slow_pins_slow_even_with_fast_signal(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fresh last-resume.ts stamp would normally promote to FAST (*/5); with
-    budget_cap_slow=True the committed tier is clamped to SLOW (*/30) — the self-budget
-    throttle wins over the live promote signal for this fire."""
-    import time
+def test_the_phase_takes_no_budget_argument(proj: Path) -> None:
+    """The signature IS the guarantee. A `budget_cap_slow` parameter is what let a cost
+    verdict override a live promote signal — a resuming session, told to check back
+    every 30 minutes because the week had been expensive."""
+    import inspect
 
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))  # active-waiting → FAST signal
     dispatch = _import_dispatch()
-    _run_phase(dispatch, budget_cap_slow=True)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+    params = inspect.signature(dispatch._phase_cadence_tier).parameters
+    assert list(params) == [], f"the cadence phase must take no arguments, got {list(params)}"
+
+
+def test_a_fast_signal_wins_regardless_of_recorded_cost(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The behavioural half: a fresh `last-resume.ts` promotes to FAST (*/5) even with a
+    token-meter log far above any budget. This is the case the cap got wrong — an
+    actively-waiting session is the one that must be checked on MOST often, and it is also,
+    inevitably, the one that has been spending."""
     import json
-
-    assert json.loads((_state(proj) / "cadence-state.json").read_text())["committed_tier"] == "slow"
-
-
-def test_budget_cap_slow_false_leaves_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Control: the SAME fresh resume stamp WITHOUT the cap promotes to FAST as before —
-    proving the cap, not some side effect, is what pins SLOW above."""
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
+    now = int(time.time())
+    (_state(proj) / "last-resume.ts").write_text(str(now))  # active-waiting → FAST signal
+    (_state(proj) / "token-meter.jsonl").write_text(
+        json.dumps({"ts": now, "heartbeat": True, "output": 5_000_000}) + "\n", encoding="utf-8"
+    )
     dispatch = _import_dispatch()
-    _run_phase(dispatch, budget_cap_slow=False)
+    _run_phase(dispatch)
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+    assert json.loads((_state(proj) / "cadence-state.json").read_text())["committed_tier"] == "fast"
 
 
-def test_budget_cap_slow_noop_when_dynamic_off(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With heartbeat_cadence_dynamic OFF the whole phase is a no-op, so the SLOW cap is
-    inert (writes nothing, never errors) — documenting that maintenance is then the only
-    effective throttle."""
+def test_dynamic_off_is_still_a_total_noop(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With heartbeat_cadence_dynamic OFF the whole phase writes nothing and never errors.
+
+    The old version of this test closed by "documenting that maintenance is then the only
+    effective throttle" — that sentence is now false in both halves: maintenance is gone, and
+    the throttle it named was the thing that had to go. With dynamic cadence off, the cadence is
+    simply whatever the user armed."""
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
     dispatch = _import_dispatch()
-    out = _run_phase(dispatch, budget_cap_slow=True)
+    out = _run_phase(dispatch)
     assert out == ""
     assert not (_state(proj) / "desired-cadence.cron").exists()

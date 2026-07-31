@@ -142,21 +142,6 @@ def test_cli_disarm_arm_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     assert gs.kill_switch_present() is False
 
 
-def test_the_pause_subcommands_no_longer_exist(tmp_path, monkeypatch) -> None:
-    """`pause` / `unpause` must be REJECTED, not silently accepted as a no-op.
-
-    A retired verb that exits 0 is worse than one that errors: a script (or an agent) keeps
-    calling it, believes the fleet is suspended, and nothing says otherwise.
-    """
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    for verb in ("pause", "unpause"):
-        _user_asked(monkeypatch, tmp_path, f"/janitor-global-{verb}")
-        monkeypatch.setattr(cli.sys, "argv", ["x", verb])
-        with pytest.raises(SystemExit):
-            cli.main()
-
-
 def test_arm_sweeps_a_stale_pause_flag(tmp_path, monkeypatch) -> None:
     """The migration: a host paused under an older janitor must not keep a flag that makes it
     look suspended forever. `arm` is where the sweep runs."""
@@ -209,108 +194,66 @@ def test_cli_default_command_is_status(tmp_path, monkeypatch, capsys) -> None:
     assert gs.kill_switch_present() is False
 
 
-# ---------- MAINTENANCE (maintenance flag, TRDD-FPL60EKV) ----------
+# ---------- MAINTENANCE: the verbs are REJECTED, never no-ops (INVERTED 2026-07-31) ----------
 
-def test_cli_maintenance_roundtrip(tmp_path, monkeypatch, capsys) -> None:
-    """`maintenance` sets the maintenance flag and status reports MAINTENANCE;
-    `maintenance-off` clears it and status returns to RUNNING."""
+
+@pytest.mark.parametrize("verb", ["maintenance", "maintenance-off", "pause", "unpause"])
+def test_retired_verbs_are_rejected_not_silently_accepted(verb, tmp_path, monkeypatch, capsys) -> None:
+    """Every retired control verb EXITS NON-ZERO and says why.
+
+    Rejecting is the whole point, and it is why these tests were inverted rather than deleted: a
+    retired verb that exits 0 lets the caller walk away believing the fleet is quiesced — the
+    exact illusion the mode itself created, now reproduced by its own removal. `maintenance-off`
+    and `unpause` are refused too, because there is nothing left to lift; any flag still on disk
+    is inert and is swept by the next arm."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance", "keep caches warm"])
-    assert cli.main() == 0
-    assert gs.maintenance_mode_present() is True
-    assert json.loads((tmp_path / "maintenance-mode.flag").read_text(encoding="utf-8"))["reason"] == "keep caches warm"
+    # Mint a fresh user-intent token for the verb FIRST: even a caller with the strongest
+    # authority the CLI recognises cannot resurrect a retired switch. Authorization decides
+    # WHO may act, never WHAT exists.
+    _user_asked(monkeypatch, tmp_path, f"/janitor-global-{verb}")
+    monkeypatch.setattr(cli.sys, "argv", ["x", verb])
+    assert cli.main() == 1, f"`{verb}` must FAIL, not no-op"
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "disarm" in out, "the refusal must name the one stop that still exists"
+    assert not (tmp_path / "maintenance-mode.flag").exists(), "a refused verb writes nothing"
+    assert gs.kill_switch_present() is False, "and must never fall through to a real stop"
+
+
+def test_status_has_exactly_two_states(tmp_path, monkeypatch, capsys) -> None:
+    """RUNNING or DISARMED — nothing in between.
+
+    Status used to have a MAINTENANCE branch that OUTRANKED a stop, plus a combined
+    "MAINTENANCE + DISARMED" line, because the two flags could disagree about whether the daemon
+    was stopped or merely idling. With one switch left there is one question to answer, and a
+    reader can no longer be told the fleet is fine while it does nothing."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
-    assert "MAINTENANCE" in capsys.readouterr().out
-    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance-off"])
-    assert cli.main() == 0
-    assert gs.maintenance_mode_present() is False
+    assert "RUNNING" in capsys.readouterr().out
 
-
-def test_cli_maintenance_does_not_disarm(tmp_path, monkeypatch) -> None:
-    """MAINTENANCE raises ONLY its own flag — never the kill-switch or global-pause. It is
-    the opposite intent (keep firing cheap, not stop), so it must not imply a stop."""
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance"])
-    assert cli.main() == 0
-    assert gs.maintenance_mode_present() is True
-    assert gs.kill_switch_present() is False, "maintenance must NOT disarm"
-
-
-def test_cli_status_maintenance_wins_over_disarm(tmp_path, monkeypatch, capsys) -> None:
-    """When maintenance AND a stop are both set, status reports MAINTENANCE — precedence
-    mirrors dispatch's mode resolution (maintenance is the explicit keep-warm intent)."""
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     gs.set_kill_switch()
-    gs.set_maintenance_mode()
-    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
-    assert "MAINTENANCE" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "DISARMED" in out
+    assert "MAINTENANCE" not in out, "no mode may soften a stop"
 
 
-# ---------- Boundary: the self-budget path never writes GLOBAL flags (TRDD-ZCODD6YS) ----------
+def test_arm_sweeps_the_retired_flags_but_not_a_real_stop(tmp_path, monkeypatch, capsys) -> None:
+    """`arm` is the MIGRATION path for both retired flags — the only one a host in maintenance
+    will ever reach, since the mode's own lever is gone. It sweeps them and clears the
+    kill-switch it was actually asked to clear, and it creates no cron anywhere."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
+    for name in ("maintenance-mode.flag", "global-pause.flag"):
+        (tmp_path / name).write_text("left by an older janitor", encoding="utf-8")
+    gs.set_kill_switch("stopped by hand")
 
-
-def _import_dispatch_gc():
-    import importlib.util as _u
-
-    spec = _u.spec_from_file_location("dispatch_gc_ut", str(_PROJECT_ROOT / "scripts" / "dispatch.py"))
-    assert spec is not None and spec.loader is not None
-    mod = _u.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def test_self_budget_never_calls_global_setters(tmp_path, monkeypatch) -> None:
-    """The self-budget actuator must NEVER call set_maintenance_mode / set_kill_switch (the
-    per-project channeling invariant, TRDD-X92VBFNF): a per-project budget can only ever set
-    the LOCAL maintenance flag, never stop the fleet. Both global setters are patched to fail
-    the test if they are ever reached while the phase drives an over-budget maintenance
-    verdict."""
-    import json
-    import time as _time
-
-    project = tmp_path / "project"
-    (project / ".janitor" / "state").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "global"))
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
-    # Pop state/global_state so this test gets FRESH modules whose @lru_cache'd state_dir()
-    # resolves under THIS env — a shared, already-populated cache from an earlier test file
-    # would otherwise point the phase at the wrong project (the exact multi-file batch flake).
-    for m in ("dispatch_gc_ut", "state", "global_state"):
-        sys.modules.pop(m, None)
-
-    dispatch = _import_dispatch_gc()
-    _st = dispatch.state
-    _gs = dispatch.gs
-    _gs.init_global_state()
-    _st.init_state()
-    sd = _st.state_dir()
-    (sd / "token-meter.jsonl").write_text(
-        json.dumps({"ts": int(_time.time()), "heartbeat": True, "output": 5000}) + "\n", encoding="utf-8"
-    )
-
-    monkeypatch.setattr(_gs, "set_maintenance_mode", lambda *a, **k: pytest.fail("self-budget must NEVER set the GLOBAL maintenance flag"))
-    monkeypatch.setattr(_gs, "set_kill_switch", lambda *a, **k: pytest.fail("self-budget must NEVER set the kill-switch"))
-
-    assert dispatch._phase_self_budget() is True  # maintenance verdict
-    assert (sd / _st.MAINTENANCE_FLAG).is_file(), "only the LOCAL flag is written"
-    assert _gs.maintenance_mode_present() is False
-    assert _gs.kill_switch_present() is False
+    monkeypatch.setattr(cli.sys, "argv", ["x", "arm"])
+    assert cli.main() == 0
+    capsys.readouterr()
+    for name in ("maintenance-mode.flag", "global-pause.flag"):
+        assert not (tmp_path / name).exists(), f"arm must sweep the retired {name}"
+    assert gs.kill_switch_present() is False

@@ -95,31 +95,10 @@
       "sensitive": false
     },
     "heartbeat_self_budget": {
-      "title": "Heartbeat self-budget (rolling-7d weighted-token ceiling)",
-      "description": "The janitor's OWN weekly heartbeat cost ceiling (TRDD-ZCODD6YS). When THIS project's rolling-7d WEIGHTED heartbeat cost (heartbeat fires only, from token-meter.jsonl) crosses this budget, the dispatcher self-throttles: cap the cadence at the SLOW floor (>= cap_frac), then auto-enter LOCAL maintenance (>= maintenance_frac). MAINTENANCE IS THE CEILING \u2014 it keeps the survival cron + resume path alive at ~0.1x cost and NEVER self-disarms. Default 0 = the mechanism is DISABLED (opt-in). Set a generous ceiling to bound idle heartbeat spend without regressing recovery (an actively-waiting / resuming session is never throttled).",
+      "title": "Heartbeat self-budget (rolling-7d weighted-token REPORTING threshold)",
+      "description": "Weekly cost threshold at which the janitor NAMES its own heartbeat spend for THIS project. When the rolling-7d WEIGHTED heartbeat cost (heartbeat fires only, from token-meter.jsonl) crosses it, the fire prints one drift line stating the number \u2014 at most once per day per whole multiple of the budget. IT SWITCHES NOTHING OFF. This knob used to drive a self-throttle that capped the cadence and then dropped the project into local maintenance mode; that actuation was removed (owner directive 2026-07-31, \"never self-disable\") because a janitor that quiets itself when it gets expensive is indistinguishable from a healthy one while doing nothing. To spend less, slow the cadence (heartbeat_cron_slow) or disarm, which deletes the cron and is therefore visible. Default 0 = no line is ever printed.",
       "type": "number",
       "default": 0,
-      "sensitive": false
-    },
-    "heartbeat_self_budget_cap_frac": {
-      "title": "Self-budget cadence-cap trip fraction",
-      "description": "Fraction of heartbeat_self_budget at which the cadence is capped to the SLOW floor (TRDD-ZCODD6YS). Default 0.6. Ordered release_frac < cap_frac < maintenance_frac so the cadence cap always trips before maintenance.",
-      "type": "number",
-      "default": 0.6,
-      "sensitive": false
-    },
-    "heartbeat_self_budget_maintenance_frac": {
-      "title": "Self-budget maintenance trip fraction",
-      "description": "Fraction of heartbeat_self_budget at which the session auto-enters LOCAL maintenance (TRDD-ZCODD6YS). Default 0.9. Maintenance is the ceiling \u2014 the automatic self-budget never self-disarms.",
-      "type": "number",
-      "default": 0.9,
-      "sensitive": false
-    },
-    "heartbeat_self_budget_release_frac": {
-      "title": "Self-budget release (anti-flap) fraction",
-      "description": "Lower dead-band for the Schmitt-trigger release (TRDD-ZCODD6YS): once in budget-maintenance, the flag clears only when the rolling-7d cost falls BELOW this fraction of heartbeat_self_budget, preventing flag flap at the trip point. Default 0.4 (must be < cap_frac).",
-      "type": "number",
-      "default": 0.4,
       "sensitive": false
     },
     "token_price_per_mtok": {
@@ -243,7 +222,7 @@
     },
     "heartbeat_cost_command": {
       "title": "Heartbeat Cost Command (opt-in)",
-      "description": "Full shell command of a CLI that prints ONE line with the exact token+dollar cost of the PREVIOUS heartbeat fire (e.g. AgentLens: 'node ~/Code/agentlens/scripts/agentlens-heartbeat-cost.js --oneline'). Default: empty (disabled). When set, dispatch.py runs it on every fire \u2014 full AND maintenance mode \u2014 and appends its first stdout line to .janitor/logs/heartbeat-cost.log, building a greppable per-fire cost series. It never prints to the fire's stdout (a per-fire stdout line would cost output tokens on every fire, taxing the thing it measures). Fail-open: a non-zero exit, timeout (20s), or missing binary means no line this fire; the fire is never blocked. The command is config (not a hard-coded path) because such CLIs are typically machine-local.",
+      "description": "Full shell command of a CLI that prints ONE line with the exact token+dollar cost of the PREVIOUS heartbeat fire (e.g. AgentLens: 'node ~/Code/agentlens/scripts/agentlens-heartbeat-cost.js --oneline'). Default: empty (disabled). When set, dispatch.py runs it on every fire and appends its first stdout line to .janitor/logs/heartbeat-cost.log, building a greppable per-fire cost series. It never prints to the fire's stdout (a per-fire stdout line would cost output tokens on every fire, taxing the thing it measures). Fail-open: a non-zero exit, timeout (20s), or missing binary means no line this fire; the fire is never blocked. The command is config (not a hard-coded path) because such CLIs are typically machine-local.",
       "type": "string",
       "default": "",
       "sensitive": false

@@ -515,35 +515,17 @@ def clear_kill_switch() -> None:
     _flag_clear_dual("kill-switch.flag")
 
 
-def _maintenance_path() -> Path:
-    return _control_path("maintenance-mode.flag")
-
-
-def maintenance_mode_present() -> bool:
-    """True iff the machine-wide MAINTENANCE flag is set (/janitor-global-maintenance,
-    TRDD-FPL60EKV). Distinct from the kill-switch and global-pause: those STOP every
-    session's heartbeat (self-disarm → the prompt cache dies → the next real turn pays a
-    1.0x REWRITE), whereas maintenance KEEPS every session's heartbeat firing but does ONLY
-    the cache refresh (no detectors, no daemon tasks). It is the fleet-wide "keep every
-    project's cache warm at the 0.1x cache-READ rate instead of letting it die and paying
-    the 1.0x rewrite" control — ~1/10 the cost. The daemon idles its task workloads while it
-    is set (like a pause); `/janitor-global-maintenance` sets it, `-off` clears it. Triple-read
-    across control_dir() / global_state_dir() / legacy (TRDD-QK7M2B0X + TRDD-2U8AH82F)."""
-    return _flag_present_dual("maintenance-mode.flag")
-
-
-def set_maintenance_mode(reason: str = "") -> None:
-    """Set the machine-wide MAINTENANCE flag at control_dir() (ARCHITECTURE.md §7.1,
-    TRDD-QK7M2B0X) — every session's heartbeat drops to cache-refresh-only fires
-    (no chores) and the daemon idles its task workloads, until `clear_maintenance_mode`.
-    Written atomically with a provenance body; readers key on presence."""
-    _write_flag_provenance(_maintenance_path(), reason or "maintenance")
-
-
 def clear_maintenance_mode() -> None:
-    """Clear the machine-wide MAINTENANCE flag from every location it may live so
-    heartbeats resume FULL fires (chores) and the daemon resumes its task workloads.
-    Idempotent (a missing flag anywhere is fine)."""
+    """Clear a RETIRED machine-wide MAINTENANCE flag from every location it may live.
+
+    Maintenance mode is gone (owner directive 2026-07-31 — the ruling that also removed pause
+    and `keep-going-off`). It kept every session's cron firing and the daemon resident while
+    doing none of the work, so a quiesced fleet looked exactly like a healthy one from a
+    process list, a cron list, or a daemon heartbeat. Only the CLEAR survives, and only as a
+    migration: nothing reads the flag any more, but a host that was in maintenance when it
+    last ran an older janitor still has it on disk, and leaving it there tells the next
+    person to read the control plane that the machine is suspended. `arm` sweeps it. Removed
+    once no supported version can have set it."""
     _flag_clear_dual("maintenance-mode.flag")
 
 

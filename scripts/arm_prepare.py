@@ -169,21 +169,21 @@ def main() -> int:
     except OSError:
         pass
 
-    # Arming means "this session starts in a KNOWN state", so the LOCAL maintenance
-    # sentinel is revoked too (owner directive 2026-07-21). A sticky local flag made a
-    # session fire cache-refresh-only forever with nothing on screen saying so — you had
-    # to inspect every instance to learn which ones were suppressed.
-    #
-    # The GLOBAL flag is deliberately NOT cleared: /janitor-arm runs AUTOMATICALLY on
-    # every SessionStart re-arm, so clearing it here would mean merely opening a new
-    # Claude session silently lifts fleet-wide maintenance — the mode could never be
-    # kept on. Same rule the arm already applies to the machine-wide kill-switch: a
-    # project arm must not undo a deliberate machine-wide decision. Instead we REPORT
-    # it, which solves the visibility problem without the override.
-    try:
-        (sd / state.MAINTENANCE_FLAG).unlink()
-    except OSError:
-        pass
+    # Sweep the RETIRED sentinels — pause, maintenance mode, the self-budget's maintenance
+    # flag — at BOTH scopes (owner directive 2026-07-31). Nothing reads any of them now, so
+    # this cannot undo a live decision; it is the migration that keeps an upgraded host from
+    # looking suspended forever. The global flag is swept HERE, breaking the older rule that
+    # a project arm never touches machine-wide state, because that rule protected a machine-
+    # wide CHOICE and there is no longer a choice to protect: the only lever that used to
+    # lift the global flag (/janitor-global-maintenance-off) is gone with the mode, and
+    # /janitor-global-arm is reached only after a DISARM, so a host left in maintenance would
+    # otherwise never be swept by anything.
+    for name in state.RETIRED_SENTINELS:
+        try:
+            (sd / name).unlink()
+        except OSError:
+            pass
+    gs.clear_maintenance_mode()
 
     install_stub(plugin_root, data_dir)
     cron = resolve_cron(sd)
@@ -193,15 +193,11 @@ def main() -> int:
     print(f"cron={cron}")
     print(f"prior-cron-id={prior}")
     print(f"sweep={'no' if prior else 'yes'}")
-    # Report the GLOBAL flag only when it is SET. Printing `maintenance=off` on every arm
-    # was actively harmful (owner report 2026-07-21): agents read it as "the arm just
-    # disabled maintenance", collided it with the heartbeat nudge's "do NOT disable
-    # maintenance mode", concluded a rule had been broken, and RE-ENABLED it — globally,
-    # because the local sentinel gets cleared again by the very next re-arm while the
-    # global flag does not. One ordinary status line drove a fleet-wide escalation loop.
-    # Silence is the correct signal for "nothing is suppressing this host".
-    if gs.maintenance_mode_present():
-        print("maintenance=global-on")
+    # No `maintenance=` line any more — there is no maintenance mode to report. The line
+    # existed to make a suppressed host visible, and even in that narrow form it was
+    # dangerous: agents read a status line about maintenance, collided it with the
+    # heartbeat nudge's "do NOT disable maintenance mode", and RE-ENABLED it globally
+    # (owner report 2026-07-21). Nothing suppresses a host now, so nothing needs reporting.
     return 0
 
 

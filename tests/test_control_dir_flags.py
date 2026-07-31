@@ -47,12 +47,14 @@ def _gs():
 
 
 # Each live flag, paired with its present()/set()/clear() API and the on-disk filename.
-# `global-pause.flag` was a seventh row until 2026-07-31: the pause switch is retired
-# (owner directive), and only its CLEAR survives, as a migration sweep — so there is no
-# set()/present() pair left to round-trip.
+# `global-pause.flag` and `maintenance-mode.flag` were rows here until 2026-07-31: both
+# switches are retired (owner directive — they left the daemon resident and every heartbeat
+# firing while doing no work), and only their CLEAR survives, as a migration sweep. So
+# neither has a set()/present() pair left to round-trip; `test_retired_flags_have_clear_only`
+# below pins that asymmetry, because a reader kept for a flag nothing can set is exactly how
+# a retired switch comes back.
 _FLAGS = [
     ("kill-switch.flag", "kill_switch_present", "set_kill_switch", "clear_kill_switch"),
-    ("maintenance-mode.flag", "maintenance_mode_present", "set_maintenance_mode", "clear_maintenance_mode"),
     ("reload-needed.flag", "reload_flag_present", "set_reload_flag", "clear_reload_flag"),
     ("skills-reload-needed.flag", "skills_reload_flag_present", "set_skills_reload_flag", "clear_skills_reload_flag"),
     ("version-update-requested.flag", "version_update_requested_present", "request_version_update", "clear_version_update_request"),
@@ -214,3 +216,24 @@ def test_the_control_dir_is_NEVER_the_real_one_during_tests() -> None:
         f"tests must never resolve the live control plane, got {resolved}"
     )
     assert os.environ.get("JANITOR_CONTROL_DIR"), "the autouse isolation fixture must always set the override"
+
+
+def test_retired_flags_have_clear_only(dirs: tuple[Path, Path]) -> None:
+    """INVERTED (owner directive 2026-07-31). `global-pause.flag` and `maintenance-mode.flag`
+    were full rows in `_FLAGS` above until both switches were removed. What survives of each is
+    the CLEAR alone — the migration sweep every arm runs so a host that upgraded while quiesced
+    does not stay that way with no lever left to lift it.
+
+    Pinned as a shape, not a behaviour: a `set_*` would let the mode be re-entered, and a
+    `*_present` would let some future branch honour a flag nothing can legitimately set. Either
+    one alone is enough to bring the switch back, which is why both absences are asserted."""
+    control, _gsd = dirs
+    gs = _gs()
+    for fname, stem in (("global-pause.flag", "global_pause"), ("maintenance-mode.flag", "maintenance_mode")):
+        assert not hasattr(gs, f"set_{stem}"), f"set_{stem} must not exist"
+        assert not hasattr(gs, f"{stem}_present"), f"{stem}_present must not exist"
+        clear = getattr(gs, f"clear_{stem}")
+        control.mkdir(parents=True, exist_ok=True)
+        (control / fname).write_text("left by an older janitor\n", encoding="utf-8")
+        clear()
+        assert not (control / fname).exists(), f"{fname} must be swept, not merely ignored"

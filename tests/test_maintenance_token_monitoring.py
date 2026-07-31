@@ -1,10 +1,19 @@
-"""Token monitoring survives maintenance mode (TRDD-8Q0OYVWM).
+"""INVERTED — token monitoring no longer has to SURVIVE anything (was TRDD-8Q0OYVWM).
 
-User directive 2026-07-10: "make sure the janitor heartbeat even in maintenance mode
-will keep the token monitoring on". A maintenance session is the long-running
-unattended one whose burn most needs watching, so dispatch runs ONLY the
-token-monitoring detector subset inside the maintenance branch while every other
-chore stays idle. Real imports, no mocks beyond recording seams.
+User directive 2026-07-10: "make sure the janitor heartbeat even in maintenance mode will keep
+the token monitoring on". Maintenance idled every chore, so dispatch carried a SUBSET
+(`_MAINTENANCE_DETECTORS`) that ran inside the maintenance branch while the rest stayed idle.
+The directive was right and the subset was the wrong shape for it: an allowlist that decides
+which guards survive a quiet mode is a list someone must remember to extend, and everything not
+on it fails silently by design.
+
+Maintenance mode is gone (owner directive 2026-07-31), which answers the 2026-07-10 directive
+completely and permanently: there is no mode in which a detector does not run. These tests are
+kept, not deleted, because the subset is exactly what a future "cheap mode" would re-introduce —
+and the two detectors it named are the ones that watch token burn on an unattended session, the
+last thing that should ever be conditionally skipped.
+
+Real imports, no mocks beyond recording seams.
 """
 
 import importlib.util
@@ -26,101 +35,38 @@ def _import_dispatch():
     return mod
 
 
-def test_subset_is_exactly_the_token_monitors() -> None:
-    """The maintenance subset is the two token-burn detectors, nothing else."""
+def test_there_is_no_detector_subset_and_no_second_runner() -> None:
+    """Both halves are asserted: a surviving LIST invites a new runner, and a surviving RUNNER
+    invites a new list. Either one alone rebuilds the "some detectors are optional" shape."""
     dispatch = _import_dispatch()
-    assert dispatch._MAINTENANCE_DETECTORS == {"token-usage-anomaly", "window-burn-rate"}
+    assert not hasattr(dispatch, "_MAINTENANCE_DETECTORS")
+    assert not hasattr(dispatch, "_run_maintenance_detectors")
 
 
-def test_subset_names_are_bound_to_the_roster() -> None:
-    """Every subset name must be a real _DETECTORS roster entry — a renamed detector
-    that leaves a stale subset name would silently stop token monitoring in
-    maintenance (the four-readers-zero-writers lesson: bind names, don't repeat them)."""
+def test_the_token_monitors_are_still_in_the_real_roster() -> None:
+    """The two detectors the subset existed to protect must still be scheduled — the subset went
+    away because they are unconditional now, NOT because they stopped mattering. Asserted against
+    the REAL `_DETECTORS` roster, which is the only thing that runs them."""
     dispatch = _import_dispatch()
     roster = {name for name, _, _ in dispatch._DETECTORS}
-    missing = dispatch._MAINTENANCE_DETECTORS - roster
-    assert not missing, f"subset names not in the roster: {missing}"
+    for name in ("token-usage-anomaly", "window-burn-rate"):
+        assert name in roster, f"{name} must remain on the heartbeat roster"
 
 
-def test_run_maintenance_detectors_runs_only_the_subset(monkeypatch) -> None:
-    """_run_maintenance_detectors invokes _run_detector for the subset ONLY, with the
-    roster's own cadence for each — never the full roster, never a foreign interval."""
-    dispatch = _import_dispatch()
-    ran: list[tuple[str, int]] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append((name, interval)))
-    dispatch._run_maintenance_detectors()
-    names = {name for name, _ in ran}
-    assert names == dispatch._MAINTENANCE_DETECTORS
-    # Cadences come from the roster defaults (no env overrides in this test).
-    roster = {name: default for name, default, _ in dispatch._DETECTORS}
-    for name, interval in ran:
-        assert interval == roster[name], f"{name} ran at {interval}, roster says {roster[name]}"
+def test_main_has_no_mode_branch_that_skips_the_detector_loop() -> None:
+    """Source-order guard (same technique as the heartbeat-cost phase test): main() must reach its
+    detector loop with no early `return 0` gated on a MODE in between.
 
-
-def test_self_budget_escalation_and_hysteresis_release(tmp_path, monkeypatch) -> None:
-    """The self-budget maintenance ladder end-to-end (TRDD-ZCODD6YS): a crossed
-    maintenance-tier budget writes the LOCAL MAINTENANCE_FLAG (never the global flag) so the
-    NEXT fire's _resolve_heartbeat_mode returns 'maintenance'; a dead-band HOLD keeps it while
-    cost hovers; and once cost decays below release_frac a subsequent (maintenance-mode) fire
-    CLEARS the flag and the following fire resolves 'full' again — proving the throttle
-    RELEASES, never pins the session cheap forever."""
-    import json
-    import time as _time
-
-    project = tmp_path / "project"
-    (project / ".janitor" / "state").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "global"))
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
-    for m in ("dispatch_tmm", "dispatch", "state", "global_state"):
-        sys.modules.pop(m, None)
-
-    dispatch = _import_dispatch()
-    import global_state as gs
-    import state
-
-    gs.init_global_state()
-    state.init_state()
-    sd = state.state_dir()
-
-    def seed(weighted: int) -> None:
-        (sd / "token-meter.jsonl").write_text(
-            json.dumps({"ts": int(_time.time()), "heartbeat": True, "output": weighted}) + "\n",
-            encoding="utf-8",
-        )
-
-    # ENTER: 7d heartbeat cost over 0.9*budget → LOCAL maintenance flag; never the global one.
-    seed(5000)
-    assert dispatch._phase_self_budget() is True
-    assert (sd / state.MAINTENANCE_FLAG).is_file(), "over the maintenance fraction → LOCAL flag written"
-    assert gs.maintenance_mode_present() is False, "a per-project budget must never set the global flag"
-    assert dispatch._resolve_heartbeat_mode() == "maintenance", "the NEXT fire resolves maintenance"
-
-    # DEAD-BAND HOLD: cost drops to 0.5*budget (below cap/maint but ABOVE release 0.4) → the
-    # Schmitt trigger holds maintenance so the flag does not flap.
-    seed(500)
-    assert dispatch._phase_self_budget() is True
-    assert (sd / state.MAINTENANCE_FLAG).is_file(), "dead-band holds maintenance above the release band"
-
-    # RELEASE: cost falls below release_frac*budget → flag cleared, the next fire is full again.
-    seed(300)
-    assert dispatch._phase_self_budget() is False
-    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "released once cost drained below the dead-band"
-    assert dispatch._resolve_heartbeat_mode() == "full", "the session returns to full monitoring"
-
-
-def test_main_runs_token_monitoring_inside_the_maintenance_branch() -> None:
-    """Source-order guard (same technique as the heartbeat-cost phase test): the
-    _run_maintenance_detectors() call must sit BETWEEN the maintenance branch entry
-    and its return — inside the branch, so full mode never double-runs the subset
-    (Phase 2 covers it there) and maintenance never skips it."""
+    Only `mode == "stop"` may end a fire before the detectors, and it does so by DELETING the cron
+    (a self-disarm), which is observable from outside the process. Every other early return in
+    main() is a RESUME path — a fire that hands the turn to the model instead of doing chores, and
+    which the very next fire follows up on. What may never come back is a branch that keeps firing
+    on schedule and silently skips the work."""
     src = (_PROJECT_ROOT / "scripts" / "dispatch.py").read_text(encoding="utf-8")
     body = src[src.index("def main(") :]
-    branch = body.index('if mode == "maintenance":')
-    call = body.index("_run_maintenance_detectors()")
-    ret = body.index("return 0", branch)
-    assert branch < call < ret, (
-        "_run_maintenance_detectors() must run inside the maintenance branch, "
-        "before its early return"
-    )
+    assert 'if mode == "maintenance":' not in body
+    # The only mode branch left is the self-disarm, and it must precede everything else.
+    stop = body.index('if mode == "stop":')
+    detectors = body.index("for name, default_interval, env_var in _DETECTORS:")
+    assert stop < detectors
+    assert body.count("mode ==") == 1, "exactly one mode branch may exist"

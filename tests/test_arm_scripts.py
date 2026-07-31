@@ -169,43 +169,53 @@ def test_prepare_revokes_the_opt_out_and_installs_the_stub(project: Path) -> Non
     assert stub.stat().st_mode & 0o111, "the stub must be executable"
 
 
-def test_prepare_revokes_the_LOCAL_maintenance_sentinel(project: Path) -> None:
-    """Arming means "this session starts in a KNOWN state". A stale LOCAL maintenance sentinel
-    would otherwise keep every fire cache-refresh-only forever with nothing on screen saying so —
-    you'd have to inspect each instance to find the suppressed ones (owner directive 2026-07-21)."""
+def test_prepare_sweeps_every_retired_LOCAL_sentinel(project: Path) -> None:
+    """Arming means "this session starts in a KNOWN state", and after 2026-07-31 that state is
+    the ONLY state: pause and maintenance are gone, so their sentinels are inert litter.
+
+    The sweep is the load-bearing half of the removal, not tidiness. Real hosts have these files
+    on disk right now, and every lever that used to lift them went away with the switches — so a
+    flag left behind is a project that reads as suppressed with nothing able to un-suppress it.
+    Driven off `state.RETIRED_SENTINELS` so the list has ONE definition shared with the
+    dispatcher's per-fire sweep; a name added there is swept by both without touching this test."""
     _sd(project).mkdir(parents=True)
-    (_sd(project) / state.MAINTENANCE_FLAG).write_text("x", encoding="utf-8")
+    for name in state.RETIRED_SENTINELS:
+        (_sd(project) / name).write_text("left by an older janitor", encoding="utf-8")
 
     rc, kv, out = _prepare(project)
 
     assert rc == 0
-    assert not (_sd(project) / state.MAINTENANCE_FLAG).exists(), "arming must revoke local maintenance"
-    # And it says NOTHING about it. Printing `maintenance=off` on every arm caused a
+    for name in state.RETIRED_SENTINELS:
+        assert not (_sd(project) / name).exists(), f"arming must sweep the retired {name!r} sentinel"
+    # And it says NOTHING about any of it. Printing `maintenance=off` on every arm caused a
     # fleet-wide escalation loop (owner report 2026-07-21): agents read the line as "the arm
     # just disabled maintenance", collided it with the heartbeat nudge's "do NOT disable
     # maintenance mode", and re-enabled maintenance at GLOBAL scope — which the next re-arm
-    # cannot clear, so every re-arm re-ran the same reasoning and ratcheted the whole fleet
-    # into a suppression nothing lifted. Silence is the signal for "nothing is suppressing
-    # this host"; only a SET global flag is worth a line.
-    assert "maintenance" not in kv, f"an unset maintenance flag must be SILENT, got {out!r}"
+    # could not clear, so every re-arm re-ran the same reasoning and ratcheted the whole fleet
+    # into a suppression nothing lifted. There is no mode to report now, and no line about one.
+    assert "maintenance" not in kv, f"the arm must never print a maintenance line, got {out!r}"
 
 
-def test_prepare_does_NOT_clear_GLOBAL_maintenance_but_reports_it(project: Path) -> None:
-    """The GLOBAL flag survives an arm, and the arm SAYS so. /janitor-arm runs automatically on
-    every SessionStart re-arm, so clearing it here would mean merely opening a new session silently
-    lifts fleet-wide maintenance — the mode could never stay on. Same rule the arm already applies
-    to the kill-switch: a project arm must not undo a deliberate machine-wide decision. Reporting
-    solves the visibility problem without the override."""
+def test_prepare_sweeps_the_retired_GLOBAL_maintenance_flag(project: Path) -> None:
+    """INVERTED. The arm used to leave the GLOBAL flag alone and merely REPORT it, because a
+    project arm must not undo a deliberate machine-wide decision. There is no decision left to
+    respect: the mode is gone, the flag is inert, and its own lever
+    (/janitor-global-maintenance-off) went with it — while /janitor-global-arm is reached only
+    after a DISARM. So without this sweep a host left in maintenance would keep that file
+    forever, and every reader of the control plane would keep seeing a suspended machine.
+
+    The kill-switch is deliberately NOT swept here — that one is still a live human decision
+    (see the neighbouring guard)."""
     gs_dir = project / "gs"
     gs_dir.mkdir(parents=True)
     flag = gs_dir / "maintenance-mode.flag"
-    flag.write_text("fleet paused", encoding="utf-8")
+    flag.write_text("set by an older janitor", encoding="utf-8")
 
     rc, kv, _ = _prepare(project)
 
     assert rc == 0
-    assert flag.exists(), "a project arm must NOT lift fleet-wide maintenance"
-    assert kv["maintenance"] == "global-on", "the arm must surface the suppression it did not clear"
+    assert not flag.exists(), "an arm must sweep the retired global maintenance flag"
+    assert "maintenance" not in kv, "and must not mention it"
 
 
 # --------------------------------------------------------------------------- #

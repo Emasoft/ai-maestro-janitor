@@ -417,33 +417,26 @@ def test_stamp_rearm_sets_timestamp_preserves_tier_fields() -> None:
     assert stamped.committed_tier == hc.FAST
 
 
-# ---------- cap_tier (self-budget SLOW clamp, TRDD-ZCODD6YS) ----------
+# ---------- cap_tier is GONE (INVERTED, owner directive 2026-07-31) ----------
 
 
-def test_cap_tier_clamps_fast_to_slow() -> None:
-    """A FAST committed tier capped at SLOW → committed becomes SLOW; the hysteresis fields
-    (raw_tier, stable_count, last_rearm_ts) are preserved untouched."""
-    s = hc.CadenceState(raw_tier=hc.FAST, stable_count=3, committed_tier=hc.FAST, last_rearm_ts=999)
-    capped = hc.cap_tier(s, hc.SLOW)
-    assert capped.committed_tier == hc.SLOW
-    assert capped.raw_tier == hc.FAST
-    assert capped.stable_count == 3
-    assert capped.last_rearm_ts == 999
+def test_cap_tier_is_gone() -> None:
+    """INVERTED. `cap_tier` existed for ONE caller: the self-budget throttle, which clamped a
+    session's committed tier to SLOW once the janitor's own weekly cost tripped, then escalated
+    to local maintenance. That actuation was removed ("never self-disable"), so the clamp has no
+    caller and is deleted with it.
+
+    Asserted rather than merely deleted because a pure, harmless-looking helper is exactly what
+    a future self-throttle would reach for first: the tier a session commits to must follow the
+    live signals (is it waiting? is the user here?), never a cost verdict. Cost is answered by
+    the user CONFIGURING a slower tier, which is visible in the cron, and by a drift line naming
+    the spend."""
+    assert not hasattr(hc, "cap_tier")
 
 
-def test_cap_tier_clamps_mid_to_slow() -> None:
-    s = _cs(hc.MID)
-    assert hc.cap_tier(s, hc.SLOW).committed_tier == hc.SLOW
-
-
-def test_cap_tier_noop_on_already_slow() -> None:
-    """Capping an already-SLOW state at SLOW returns it UNCHANGED (a no-op, not an error)."""
-    s = _cs(hc.SLOW)
-    assert hc.cap_tier(s, hc.SLOW) is s
-
-
-def test_cap_tier_ceiling_mid_leaves_slow_alone_clamps_fast() -> None:
-    """The clamp respects _TIER_RANK for any ceiling, not just SLOW: a MID ceiling leaves a
-    SLOW state alone and clamps a FAST one to MID."""
-    assert hc.cap_tier(_cs(hc.SLOW), hc.MID).committed_tier == hc.SLOW
-    assert hc.cap_tier(_cs(hc.FAST), hc.MID).committed_tier == hc.MID
+def test_commit_tier_is_the_only_tier_decider() -> None:
+    """The surviving decision surface: raw_tier reads the signals, commit_tier applies
+    hysteresis, and nothing else may move a committed tier."""
+    assert callable(hc.raw_tier) and callable(hc.commit_tier)
+    movers = [n for n in dir(hc) if not n.startswith("_") and "cap" in n.lower()]
+    assert movers == [], f"no clamp/cap API may reappear: {movers}"

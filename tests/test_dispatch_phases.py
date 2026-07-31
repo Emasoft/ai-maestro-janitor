@@ -861,42 +861,19 @@ def test_run_detector_fast_detector_runs_normally(env_isolation: dict, monkeypat
     assert last_run.is_file(), "a fast detector must still stamp last-run on success"
 
 
-# ---------- Phase 0: maintenance-mode (TRDD-FPL60EKV) ----------
-
-
-def test_maintenance_mode_active_false_when_no_flags(env_isolation: dict) -> None:
-    """No local or global maintenance flag → maintenance-mode is not active."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-
-    gs.init_global_state()
-    assert dispatch._maintenance_mode_active() is False
-
-
-def test_maintenance_mode_active_true_from_local_flag(env_isolation: dict) -> None:
-    """The per-session .janitor/state/maintenance-mode flag activates maintenance-mode."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-    import state
-
-    gs.init_global_state()
-    state.init_state()
-    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
-    assert dispatch._maintenance_mode_active() is True
-
-
-def test_maintenance_mode_active_true_from_global_flag(env_isolation: dict) -> None:
-    """The machine-wide /janitor-global-maintenance flag activates maintenance-mode."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-
-    gs.init_global_state()
-    gs.set_maintenance_mode("test")
-    assert dispatch._maintenance_mode_active() is True
+# ---------- Phase 0: mode resolution — INVERTED, maintenance is gone (2026-07-31) ----------
+#
+# `_maintenance_mode_active()` and the whole third mode were removed by the owner directive
+# that also removed pause and keep-going-off. The four tests that pinned the mode's semantics
+# (local flag, global flag, and its PRECEDENCE over the kill-switch) are replaced by the two
+# that matter now: mode resolution is binary, and neither retired flag can revive a third
+# state. Kept rather than deleted because "keep ONE session warm while the fleet is stopped"
+# is a genuinely attractive idea — and it is exactly the property that let a session stay
+# armed, firing, and doing nothing while every outside signal said the fleet was healthy.
 
 
 def test_resolve_heartbeat_mode_full_when_no_flags(env_isolation: dict) -> None:
-    """No stop and no maintenance → the heartbeat runs in FULL mode."""
+    """No stop → the heartbeat runs in FULL mode."""
     dispatch = _import_dispatch()
     import global_state as gs
 
@@ -905,7 +882,7 @@ def test_resolve_heartbeat_mode_full_when_no_flags(env_isolation: dict) -> None:
 
 
 def test_resolve_heartbeat_mode_stop_on_kill_switch(env_isolation: dict) -> None:
-    """A kill-switch with no maintenance opt-in resolves to STOP (self-disarm)."""
+    """A kill-switch resolves to STOP (self-disarm) — the one machine-wide control left."""
     dispatch = _import_dispatch()
     import global_state as gs
 
@@ -914,10 +891,13 @@ def test_resolve_heartbeat_mode_stop_on_kill_switch(env_isolation: dict) -> None
     assert dispatch._resolve_heartbeat_mode() == "stop"
 
 
-def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation: dict) -> None:
-    """Maintenance is the highest-priority intent: even with the kill-switch set, a session
-    that opted into maintenance resolves to MAINTENANCE (keep the cache warm), NOT stop. This
-    is the "keep one session warm while the fleet stays down" property (TRDD-FPL60EKV)."""
+def test_no_retired_flag_can_override_a_kill_switch(env_isolation: dict) -> None:
+    """THE inversion. Maintenance used to OUTRANK the kill-switch: a session with the local
+    sentinel resolved to `maintenance` and kept firing while the fleet was deliberately stopped.
+    A retired sentinel on disk must not resurrect that — a stop is a stop.
+
+    Both the mode's helper and its flag are checked, because the flag alone is what a real
+    upgraded host actually carries."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -925,55 +905,52 @@ def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation:
     gs.init_global_state()
     state.init_state()
     gs.set_kill_switch("fleet-down")
-    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
-    assert dispatch._resolve_heartbeat_mode() == "maintenance"
+    (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
+    assert not hasattr(dispatch, "_maintenance_mode_active")
+    assert dispatch._resolve_heartbeat_mode() == "stop"
 
 
-def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """BEHAVIORAL PROOF: in maintenance-mode main() does close to the MINIMUM — it emits ONLY
-    the never-stop keep-going nudge and runs ONLY the token-monitoring detector subset
-    (TRDD-8Q0OYVWM: the burn alarms outlive the chores) — but it DOES call
-    ensure_daemon_running (TRDD-8PH8YOIJ): the daemon's existence is SURVIVAL (it beats the
-    60s oauth-rotator-tick that rotates accounts), not a chore. Before this, a daemon that
-    died during maintenance stayed dead — nobody rotated, the 5h window exhausted, and the
-    user had to /login by hand (incident 2026-07-02)."""
+def test_main_full_fire_runs_the_whole_roster_with_a_retired_sentinel_present(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BEHAVIORAL PROOF of the removal. A host upgraded while in local maintenance has the
+    sentinel on disk; the fire must run the FULL detector roster anyway, sweep the sentinel, and
+    still ensure the daemon (TRDD-8PH8YOIJ: the daemon's existence is SURVIVAL — it beats the
+    60 s oauth-rotator-tick that rotates accounts; a daemon that died during maintenance used to
+    stay dead, the 5h window exhausted, and the user had to /login by hand, incident
+    2026-07-02).
+
+    The predecessor asserted the opposite — that ONLY the two token monitors ran — which was the
+    best available answer while the mode existed. Running everything is the better one."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
 
     gs.init_global_state()
     state.init_state()
-    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+    (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
 
     ran: list[str] = []
     ensured: list[bool] = []
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
-    monkeypatch.setattr(
-        dispatch.gs,
-        "ensure_daemon_running",
-        lambda *a, **k: ensured.append(True),
-    )
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: ensured.append(True))
 
     out = _capture_stdout(dispatch.main)
-    assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
-    expected = "[janitor-resume]\n" + _maintenance_line()
-    assert out.strip() == expected, f"a maintenance fire must emit ONLY the maintenance nudge, got {out!r}"
-    # TRDD-8Q0OYVWM: the token-burn monitors are the ONE detector subset that
-    # survives maintenance (user directive 2026-07-10) — nothing else runs.
-    assert set(ran) == dispatch._MAINTENANCE_DETECTORS, f"maintenance runs ONLY the token monitors, ran {ran}"
-    assert len(ran) == len(dispatch._MAINTENANCE_DETECTORS), f"no detector may run twice, ran {ran}"
-    stamps = list(state.state_dir().glob("last-run-*.ts"))
-    assert stamps == [], f"the recording fake never stamps last-run, found {stamps}"
-    assert ensured == [True], "maintenance MUST attempt ensure_daemon_running (TRDD-8PH8YOIJ survival)"
+    assert "[janitor-self-disarm]" not in out
+    assert "[janitor-resume]" in out
+    roster = [name for name, _, _ in dispatch._DETECTORS]
+    assert ran == roster, f"every roster detector must run, in order; ran {ran}"
+    assert ensured == [True], "the daemon survival respawn must still be attempted"
+    assert not (state.state_dir() / "maintenance-mode").exists(), "the retired sentinel is swept"
 
 
-def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The keep-warm-while-fleet-down property end-to-end: with the kill-switch set AND the
-    maintenance flag set, main() does NOT self-disarm and the daemon is NOT actually spawned —
-    the session keeps a cheap cache-refresh beat while the fleet/daemon stay down
-    (TRDD-FPL60EKV). Since TRDD-8PH8YOIJ, maintenance DOES call ensure_daemon_running (the
-    survival respawn), so this test lets the REAL gate run and asserts the deeper
-    spawn_daemon_detached is never reached — a deliberate global STOP still wins."""
+def test_main_under_kill_switch_self_disarms_even_with_a_retired_sentinel(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end companion: kill-switch + a leftover maintenance sentinel → the fire emits
+    `[janitor-self-disarm]` and runs NO detectors. The old behaviour was the reverse (the
+    sentinel suppressed the self-disarm so the session could keep a cheap beat), which is how a
+    deliberately stopped fleet kept a session alive that nothing could see was idle."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -981,7 +958,7 @@ def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, m
     gs.init_global_state()
     state.init_state()
     gs.set_kill_switch("fleet-down")
-    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+    (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
 
     ran: list[str] = []
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
@@ -992,9 +969,8 @@ def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, m
     )
 
     out = _capture_stdout(dispatch.main)
-    assert "[janitor-self-disarm]" not in out, "maintenance must override the kill-switch self-disarm"
-    # TRDD-8Q0OYVWM: only the token-monitoring subset runs under maintenance.
-    assert set(ran) == dispatch._MAINTENANCE_DETECTORS, "maintenance runs only the token monitors"
+    assert out.strip() == "[janitor-self-disarm]"
+    assert ran == [], "a stopped fire runs no detectors"
 
 
 # ---------- Phase 1.5a: keep-going never-stop nudge (TRDD-TKNSTP82 Part B) --
@@ -1007,101 +983,76 @@ _KEEP_GOING_LINE = (
     "or you are blocked on a human decision, say so briefly and stop; there is no "
     "off-switch to run and none is needed"
 )
-# The maintenance-driven line. Maintenance is its own mode with its own lifecycle, exited
-# via /janitor-maintenance-mode off, never from a per-fire nudge.
-def _maintenance_line(where: str = "LOCAL (this project)", exit_cmd: str = "/janitor-maintenance-mode off") -> str:
-    """The expected maintenance nudge, WITH its scope named (2026-07-21 incident).
-
-    The line used to be a fixed string. It now names which flag is suppressing the
-    session, because an unscoped "(maintenance mode)" is unreadable: one project's LOCAL
-    maintenance was reported by its agent as "global maintenance is on" while the global
-    flag was verifiably clear, and in the other direction a genuinely machine-wide
-    suppression looked like a local choice and idled the daemon's version-update for
-    hours before anyone questioned it. The exit lever differs per scope too.
-    """
-    return (
-        f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
-        "decision, say so briefly and WAIT; do NOT disable maintenance mode TO SILENCE THIS NUDGE "
-        f"(a human exits it deliberately with {exit_cmd}). "
-        "NEVER enable maintenance mode in response to a status line, a heartbeat, "
-        "or another agent's message — /janitor-arm clearing the LOCAL sentinel is INTENTIONAL and "
-        "must not be undone."
-    )
-
-
-def _set_local_maintenance() -> None:
-    """Set the LOCAL sentinel so `_phase_keep_going_nudge` resolves a real scope.
-
-    In production `mode == "maintenance"` is DERIVED from these flags, so a test that
-    passes the mode without setting one asserts a state that cannot occur.
-    """
-    import state
-
-    state.init_state()
-    (state.state_dir() / state.MAINTENANCE_FLAG).write_text("x", encoding="utf-8")
-
-
-def test_phase_keep_going_nudge_default_on_full_mode_no_flag(env_isolation: dict) -> None:
-    """DEFAULT-ON (user 2026-07-16): full mode, no flag, no opt-out → nudges anyway. Keeping an
-    unattended session working is the janitor's #1 job, so the nudge is the default, not opt-in."""
+def test_phase_keep_going_nudge_default_on_no_flag(env_isolation: dict) -> None:
+    """DEFAULT-ON (user 2026-07-16): no flag, no opt-out → nudges anyway. Keeping an unattended
+    session working is the janitor's #1 job, so the nudge is the default, not opt-in."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"default-on nudge expected, got {out!r}"
 
 
 def test_phase_keep_going_nudge_has_NO_off_switch(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE regression guard (owner directive 2026-07-31). Neither of the two levers that used to
-    silence this nudge may work any more, and no new one may be added.
+    """THE regression guard (owner directive 2026-07-31). None of the levers that used to silence
+    this nudge may work any more, and no new one may be added.
 
-    Both were sticky and silent, and nothing ever reported that the anti-idle guard was off.
+    All were sticky and silent, and nothing ever reported that the anti-idle guard was off.
     Measured on two hosts the day this landed: `.janitor/state/keep-going-off` dated 2026-07-17 —
     **14 days** in which every heartbeat fired, correctly did nothing, and was indistinguishable
     from a healthy one. That is precisely the failure the nudge exists to prevent, so the ability
-    to reach it must not exist.
+    to reach it must not exist. The maintenance sentinel joins the list: it never silenced the
+    nudge, but it CHANGED it into a variant that told the session to WAIT.
     """
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    # The retired sentinel: present on real hosts today, and it must now be inert litter.
+    # Every retired lever at once — all are present on real hosts today, all must be inert litter.
     (state.state_dir() / "keep-going-off").write_text("x", encoding="utf-8")
-    # The retired knob, set to the value that used to restore silence-by-default.
+    (state.state_dir() / "maintenance-mode").write_text("x", encoding="utf-8")
+    (state.state_dir() / "paused").write_text("x", encoding="utf-8")
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
 
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], (
-        f"a retired off-switch still silences the never-stop nudge: {out!r}"
+        f"a retired off-switch still changes the never-stop nudge: {out!r}"
     )
 
 
 def test_the_nudge_never_offers_a_way_to_turn_itself_off(env_isolation: dict) -> None:
     """The TEXT matters as much as the gate: a line ending in "run /janitor-keep-going off" is an
     instruction an idle session will follow, and issue #74 showed sessions reaching for it while
-    merely BLOCKED ON A HUMAN DECISION — i.e. exactly when the guard matters most."""
+    merely BLOCKED ON A HUMAN DECISION — i.e. exactly when the guard matters most.
+
+    The maintenance variant of this line is gone with the mode, which removes the subtler version
+    of the same hazard: it told the session to WAIT and named a human's exit command, so an agent
+    that read it while blocked had a plausible reason to stop AND a lever to point at."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "/janitor-keep-going" not in out, f"the nudge must not name a retired off-switch: {out!r}"
+    assert "maintenance" not in out.lower(), f"the nudge must not name a retired mode: {out!r}"
     for verb in ("disable", "turn off", "silence"):
         assert verb not in out.lower(), f"the nudge must not suggest {verb!r}: {out!r}"
 
 
-def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation: dict) -> None:
-    """Maintenance ALWAYS gets the nudge, even with no standalone flag set — mode alone opts in."""
-    dispatch = _import_dispatch()
-    import state
+def test_phase_keep_going_nudge_takes_no_mode(env_isolation: dict) -> None:
+    """INVERTED: the phase used to take a `mode` and emit one of TWO lines. The maintenance
+    variant is gone with the mode — one wording, no branch, nothing to reason about.
 
-    state.init_state()
-    _set_local_maintenance()
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"unexpected nudge output: {out!r}"
+    A whole cluster of tests hung off that branch (which scope was named, which exit command was
+    offered, whether the retired sentinel could silence THAT variant too). They are all subsumed
+    here: a phase with no mode parameter cannot have a mode-dependent line."""
+    import inspect
+
+    dispatch = _import_dispatch()
+    assert list(inspect.signature(dispatch._phase_keep_going_nudge).parameters) == []
 
 
 def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_isolation: dict) -> None:
@@ -1113,86 +1064,10 @@ def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_is
 
     state.init_state()
 
-    first = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    second = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    first = _capture_stdout(dispatch._phase_keep_going_nudge)
+    second = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert first == second, "the nudge must re-fire identically on every call, no dedupe"
     assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
-
-
-# ---------- issue #74: the maintenance line must not point at a lever that cannot exit it --
-
-
-def test_phase_keep_going_nudge_maintenance_names_only_its_own_exit(env_isolation: dict) -> None:
-    """issue #74 core: the maintenance nudge must warn against self-disabling and must not name a
-    lever that cannot exit maintenance (the old line named `/janitor-keep-going off`, a NO-OP in
-    maintenance — so it re-fired forever while the agent falsely reported "keep-going OFF")."""
-    dispatch = _import_dispatch()
-    import state
-
-    state.init_state()
-    _set_local_maintenance()
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "/janitor-keep-going" not in out, f"maintenance nudge must not name a retired lever: {out!r}"
-    assert "do NOT disable maintenance mode" in out, f"maintenance nudge must warn against self-disable: {out!r}"
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
-
-
-def test_the_retired_sentinel_cannot_silence_maintenance_either(env_isolation: dict) -> None:
-    """The sentinel is inert in EVERY mode now, not merely overridden in maintenance."""
-    dispatch = _import_dispatch()
-    import state
-
-    state.init_state()
-    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
-    _set_local_maintenance()
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"retired sentinel had an effect: {out!r}"
-
-
-def test_maintenance_nudge_names_WHICH_scope_is_suppressing(env_isolation: dict) -> None:
-    """THE 2026-07-21 regression guard. The nudge used to say only "(maintenance mode)".
-
-    That one omission cost a day. One project's LOCAL sentinel made its agent report
-    "global maintenance is on" while the global flag was verifiably clear; in the other
-    direction a genuinely machine-wide flag (set by another session's pre-v0.58.0 skill,
-    which still parsed "global" from prose) read as a local choice and went unexamined
-    for hours while it idled the daemon's version-update — which is why a release sat
-    un-updated until the owner noticed. A session cannot act on a mode it cannot locate,
-    and the exit lever differs per scope, so an unscoped line also points at the wrong
-    command. Every scope combination must be distinguishable from the line alone."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-    import state
-
-    state.init_state()
-
-    # LOCAL only -> named LOCAL, exits via the local (now local-only) skill.
-    _set_local_maintenance()
-    local_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "LOCAL (this project)" in local_out, local_out
-    assert "GLOBAL" not in local_out, f"a local-only suppression must not claim to be fleet-wide: {local_out!r}"
-    assert "/janitor-maintenance-mode off" in local_out, local_out
-
-    # GLOBAL only -> named GLOBAL, and points at the GLOBAL off-switch. Pointing at the
-    # local command here would be the cruellest failure: it "succeeds", changes nothing,
-    # and the fleet stays suppressed.
-    (state.state_dir() / state.MAINTENANCE_FLAG).unlink()
-    gs.set_maintenance_mode("test")
-    global_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "GLOBAL (machine-wide)" in global_out, global_out
-    # Match the SCOPE CLAUSE, not the bare word: the line's anti-escalation boilerplate
-    # legitimately says "the LOCAL sentinel", so a substring check on "LOCAL" would fail on
-    # correct output. The claim under test is that this project is not named as a source.
-    assert "LOCAL (this project)" not in global_out, (
-        f"a global suppression must not read as this project's own: {global_out!r}"
-    )
-    assert "/janitor-global-maintenance-off" in global_out, global_out
-
-    # BOTH -> both named, because clearing only one leaves the session still suppressed
-    # and the agent believing it acted.
-    _set_local_maintenance()
-    both_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "LOCAL (this project)" in both_out and "GLOBAL (machine-wide)" in both_out, both_out
 
 
 def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1204,7 +1079,7 @@ def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeyp
 
     state.init_state()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"the retired knob still silenced it: {out!r}"
 
 
@@ -1490,13 +1365,13 @@ def test_compact_resume_then_nudge_emits_only_one_resume_cue(env_isolation: dict
     assert fire_a.count("[janitor-resume]") == 1
 
     # Fire B (the next heartbeat): the nudge must NOT repeat the cue.
-    fire_b = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    fire_b = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert fire_b == "", f"a SECOND [janitor-resume] fired right after the compact resume: {fire_b!r}"
 
     # ...and the never-stop pulse resumes once the dedupe window passes.
     past = int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1)
     dispatch._stamp_resume(sd, past)
-    fire_c = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    fire_c = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert fire_c.splitlines()[0] == "[janitor-resume]", "the never-stop nudge must come back"
 
 
@@ -1512,36 +1387,44 @@ def test_rate_limit_resume_then_nudge_emits_only_one_resume_cue(env_isolation: d
 
     fire_a = _capture_stdout(lambda: dispatch._phase_rate_limit_recovery())
     assert fire_a.count("[janitor-resume]") == 1
-    fire_b = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    fire_b = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert fire_b == "", f"a SECOND [janitor-resume] fired right after the rate-limit resume: {fire_b!r}"
 
 
-def test_keep_going_dedupe_applies_in_maintenance_mode_too(env_isolation: dict) -> None:
-    """The dedupe is the ONE case where maintenance skips a nudge. It does not weaken "even in
-    maintenance it always nudges": we defer to a cue that fired ONE heartbeat ago and carried
-    the resume DIRECTIVE — strictly stronger than this generic nudge — and only that one fire
-    is skipped."""
+def test_keep_going_dedupe_is_the_only_skip_and_it_is_mode_free(env_isolation: dict) -> None:
+    """The resume-dedupe is the ONE case where a nudge is skipped, and it is time-bounded.
+
+    It used to have a maintenance-mode twin (this test asserted the dedupe applied "in
+    maintenance too"). With one mode left there is one dedupe: defer to a cue that fired ONE
+    heartbeat ago and carried the resume DIRECTIVE — strictly stronger than this generic nudge —
+    and skip only that fire. A retired sentinel on disk changes nothing about it."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    _set_local_maintenance()
     sd = state.state_dir()
+    (sd / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
     dispatch._stamp_resume(sd, int(time.time()))
-    assert _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance")) == ""
+    assert _capture_stdout(dispatch._phase_keep_going_nudge) == ""
 
-    # Next fire past the window: maintenance nudges again, unconditionally.
+    # Next fire past the window: it nudges again, unconditionally.
     dispatch._stamp_resume(sd, int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1))
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
 
 
-# ---------- Phase 1.5a2b: the self-budget throttle (TRDD-ZCODD6YS) ----------
+# ---------- Phase 1.5a2b: the self-COST alarm (was the self-budget throttle) ----------
 #
-# The janitor meters its OWN heartbeat cost and self-throttles: cap the cadence at SLOW,
-# then auto-enter LOCAL maintenance. MAINTENANCE IS THE CEILING — this path NEVER emits
-# [janitor-self-disarm], NEVER routes through _resolve_heartbeat_mode, and NEVER touches
-# global_state (a per-project budget must never stop the fleet).
+# INVERTED (owner directive 2026-07-31, "never self-disable"). The janitor still METERS its own
+# heartbeat cost, but the two-rung throttle it used to drive — cap the cadence at SLOW, then
+# auto-enter LOCAL maintenance — is gone. Cost pressure now produces ONE drift line naming the
+# spend, and nothing else: no flag, no cadence clamp, no mode change, no marker.
+#
+# The old ladder was careful about all the right things (never the global flags, never a disarm,
+# never a recovery fire) and still had the defect the whole directive is about: a session in
+# budget-maintenance fired on schedule and did nothing, so the fleet looked healthy. The tests
+# below keep every survival property the old ones pinned and add the one that replaces the
+# ladder — that the alarm actuates NOTHING.
 
 
 def _seed_heartbeat_cost(state, weighted: int) -> None:
@@ -1555,30 +1438,41 @@ def _seed_heartbeat_cost(state, weighted: int) -> None:
     (sd / "token-meter.jsonl").write_text(_json.dumps(rec) + "\n", encoding="utf-8")
 
 
-def _run_self_budget(dispatch):
-    """Run _phase_self_budget() capturing stdout; return (return_value, stdout)."""
+def _run_self_cost(dispatch) -> str:
+    """Run _phase_self_cost_alarm() capturing stdout; return the stdout."""
     buf = StringIO()
     old = sys.stdout
     sys.stdout = buf
     try:
-        rv = dispatch._phase_self_budget()
+        dispatch._phase_self_cost_alarm()
     finally:
         sys.stdout = old
-    return rv, buf.getvalue()
+    return buf.getvalue()
 
 
 def _budget_1000(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
 
 
-# --- THE CARDINAL SURVIVAL TEST (combined resume + budget) -------------------
+def _no_actuation(dispatch, state, gs) -> None:
+    """Assert the alarm changed NO state anywhere. This is the whole inversion in one helper,
+    so every test below can make the claim cheaply and none can forget half of it."""
+    sd = state.state_dir()
+    for name in state.RETIRED_SENTINELS:
+        assert not (sd / name).exists(), f"the alarm must not write {name!r}"
+    assert not (sd / "desired-cadence.cron").exists(), "the alarm must not steer the cadence"
+    assert not (sd / "cadence-state.json").exists()
+    assert gs.kill_switch_present() is False, "and must never touch a machine-wide flag"
+
+
+# --- THE CARDINAL SURVIVAL TEST (combined resume + over budget) --------------
 
 
 def test_cardinal_ratelimit_and_over_budget_resumes_never_disarms(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A session BOTH budget-maintenance-eligible AND rate-limited MUST still emit
-    [janitor-resume], MUST NEVER emit [janitor-self-disarm], leaves the cron/cadence
-    unchanged, and _phase_self_budget is NEVER reached on that fire. Direct proof that a
-    recovery fire is untouched by D2 — the recovery early-return fires before the phase."""
+    """A session BOTH far over budget AND rate-limited MUST still emit [janitor-resume], MUST
+    NEVER emit [janitor-self-disarm], leaves the cron/cadence unchanged, and never reaches the
+    cost phase at all — the recovery early-return fires first, so a recovery fire never spends
+    output tokens on a cost line."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -1587,19 +1481,18 @@ def test_cardinal_ratelimit_and_over_budget_resumes_never_disarms(env_isolation:
     state.init_state()
     sd = state.state_dir()
     _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 5000)  # >> 0.9 * budget → would be maintenance IF reached
+    _seed_heartbeat_cost(state, 5000)  # >> budget → would alarm IF reached
     state.atomic_write(sd / "rate-limited.flag", "1")
     state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
 
     calls: list[str] = []
-    monkeypatch.setattr(dispatch, "_phase_self_budget", lambda: calls.append("reached") or False)
+    monkeypatch.setattr(dispatch, "_phase_self_cost_alarm", lambda: calls.append("reached"))
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-resume]" in out, "a rate-limited fire must still resume"
-    assert "[janitor-self-disarm]" not in out, "the self-budget path must NEVER self-disarm"
-    assert calls == [], "self-budget phase must NEVER be reached on a recovery fire"
-    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "no maintenance flag written on a recovery fire"
-    assert not (sd / "desired-cadence.cron").exists(), "cron/cadence unchanged on a recovery fire"
+    assert "[janitor-self-disarm]" not in out, "cost must NEVER produce a disarm"
+    assert calls == [], "the cost phase must NEVER be reached on a recovery fire"
+    _no_actuation(dispatch, state, gs)
 
 
 def test_cardinal_postcompact_and_over_budget_resumes_never_disarms(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1610,174 +1503,169 @@ def test_cardinal_postcompact_and_over_budget_resumes_never_disarms(env_isolatio
 
     gs.init_global_state()
     state.init_state()
-    sd = state.state_dir()
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
     _arm_compact_flag(state, "continue TRDD-ZCODD6YS")
 
     calls: list[str] = []
-    monkeypatch.setattr(dispatch, "_phase_self_budget", lambda: calls.append("reached") or False)
+    monkeypatch.setattr(dispatch, "_phase_self_cost_alarm", lambda: calls.append("reached"))
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-resume]" in out
     assert "[janitor-self-disarm]" not in out
-    assert calls == [], "self-budget phase must NEVER be reached on a post-compact recovery fire"
-    assert not (sd / state.MAINTENANCE_FLAG).is_file()
+    assert calls == [], "the cost phase must NEVER be reached on a post-compact recovery fire"
+    _no_actuation(dispatch, state, gs)
 
 
-# --- never-disarm invariant across every verdict -----------------------------
+# --- the alarm: reports, and does nothing else -------------------------------
 
 
-def test_self_budget_phase_prints_nothing_any_verdict(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drive _phase_self_budget through ok/slow/maintenance — it prints NOTHING (no
-    [janitor-self-disarm], no [janitor-resume]); the only actuators are the flag + the
-    return value. The sole legitimate emitter of the disarm marker is Phase 0, untouched."""
-    dispatch = _import_dispatch()
-    import state
+def test_over_budget_prints_the_spend_and_actuates_nothing(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE inversion, end to end. Far over budget → ONE line that names the cost and the budget,
+    tells the human what they can do, and leaves every piece of state untouched.
 
-    _budget_1000(monkeypatch)
-    state.init_state()
-    for weighted, expect_rv in ((100, False), (700, True), (5000, True)):
-        # A fresh log each iteration; clear any budget flag the prior iteration set.
-        dispatch._clear_budget_maintenance(state.state_dir())
-        _seed_heartbeat_cost(state, weighted)
-        rv, out = _run_self_budget(dispatch)
-        assert out == "", f"the self-budget phase must print nothing (weighted={weighted}), got {out!r}"
-        assert "[janitor-self-disarm]" not in out
-        assert rv is expect_rv, f"weighted={weighted} → expected return {expect_rv}, got {rv}"
-
-
-# --- verdict actuation (LOCAL flag only, never global) -----------------------
-
-
-def test_verdict_ok_writes_no_flag_returns_false(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    The three predecessors of this test asserted the opposite for each rung: `slow` returned True
+    to clamp the cadence, `maintenance` wrote the LOCAL flag plus an ownership sentinel, and the
+    next fire's mode resolution came back `maintenance`. None of those actuators exist."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
 
     gs.init_global_state()
     _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 100)  # < 0.6 * budget
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is False
-    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
+    _seed_heartbeat_cost(state, 5000)
+
+    out = _run_self_cost(dispatch)
+    assert "5000" in out and "1000" in out, f"the line must name the spend and the budget: {out!r}"
+    assert "Nothing was switched off" in out
+    assert "[janitor-self-disarm]" not in out
+    assert "[janitor-resume]" not in out, "a cost line is not an action marker"
+    _no_actuation(dispatch, state, gs)
+    assert dispatch._resolve_heartbeat_mode() == "full", "cost must not change the next fire's mode"
 
 
-def test_verdict_slow_caps_but_writes_no_maintenance_flag(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    dispatch = _import_dispatch()
-    import state
-
-    _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 700)  # >= 0.6*budget, < 0.9*budget → slow
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is True, "the SLOW cap returns True"
-    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file(), "slow does NOT enter maintenance"
-
-
-def test_verdict_maintenance_writes_local_flag_and_sentinel_never_global(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_under_budget_is_silent(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     dispatch = _import_dispatch()
     import global_state as gs
     import state
 
     gs.init_global_state()
     _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 5000)  # >= 0.9 * budget → maintenance
-    rv, _ = _run_self_budget(dispatch)
-    sd = state.state_dir()
-    assert rv is True
-    assert (sd / state.MAINTENANCE_FLAG).is_file(), "budget-maintenance writes the LOCAL flag"
-    assert (sd / dispatch._SELF_BUDGET_SENTINEL).is_file(), "and its ownership sentinel"
-    # NEVER the machine-wide flags — a per-project budget must not stop the fleet.
-    assert gs.maintenance_mode_present() is False
-    assert gs.kill_switch_present() is False
-    # The NEXT fire's mode resolution now returns maintenance from the LOCAL flag.
-    assert dispatch._resolve_heartbeat_mode() == "maintenance"
+    _seed_heartbeat_cost(state, 100)
+    assert _run_self_cost(dispatch) == ""
+    _no_actuation(dispatch, state, gs)
 
 
-# --- actively-waiting suppression --------------------------------------------
-
-
-def test_active_waiting_suppresses_throttle_and_clears_budget_flag(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An over-budget session that is actively waiting (fresh last-resume.ts) is NOT throttled:
-    no cap (returns False) AND any budget-owned maintenance flag is cleared."""
+def test_no_budget_set_is_silent_at_any_cost(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default 0 = no threshold = no line, however large the spend. The knob is a REPORTING
+    threshold; it has never been, and must not become, an enable-switch for janitor work."""
     dispatch = _import_dispatch()
+    import global_state as gs
     import state
 
-    _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 5000)
-    sd = state.state_dir()
-    # Pre-existing budget-owned maintenance (flag + sentinel) from a prior over-budget fire.
-    state.atomic_write(sd / state.MAINTENANCE_FLAG, "self-budget")
-    state.atomic_write(sd / dispatch._SELF_BUDGET_SENTINEL, str(int(time.time())))
-    # Now the session resumes work → active-waiting.
-    state.atomic_write(sd / "last-resume.ts", str(int(time.time())))
-
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is False, "an actively-waiting session is never throttled"
-    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "the budget-owned flag is cleared on resume"
-    assert not (sd / dispatch._SELF_BUDGET_SENTINEL).is_file()
+    gs.init_global_state()
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", raising=False)
+    _seed_heartbeat_cost(state, 10_000_000)
+    assert _run_self_cost(dispatch) == ""
+    _no_actuation(dispatch, state, gs)
 
 
-def test_active_waiting_via_directive(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A non-empty resume-directive.txt counts as active-waiting → no cap.
-
-    The retired `keep-going` flag used to be a second signal here. Dropping it is not a loss of
-    coverage: the nudge it gated is unconditional now, so the flag would have been true of every
-    session and pinned the whole fleet to the FAST tier — the opposite of what this controller is
-    for. The remaining signals are all genuinely per-session.
-    """
-    dispatch = _import_dispatch()
-    import state
-
-    _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 5000)
-    sd = state.state_dir()
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
-
-    state.atomic_write(sd / "resume-directive.txt", "continue TRDD-ZCODD6YS")
-    assert _run_self_budget(dispatch)[0] is False
-
-
-def test_the_retired_keep_going_flag_is_NOT_an_active_waiting_signal(
+def test_the_line_is_deduped_per_day_but_re_alarms_as_the_spend_grows(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Inertness, asserted rather than assumed: a stale `keep-going` file left on a real host must
-    not silently hold that project at the expensive FAST cadence forever."""
+    """A flat overrun states itself once a day; a spend that keeps GROWING re-alarms the same
+    day. Firing every fire would tax the very thing it measures — a per-fire stdout line costs
+    output tokens on every heartbeat — but staying silent while the number doubles would hide
+    the case the human most needs to see."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 1500)  # 1x the budget
+    assert _run_self_cost(dispatch) != "", "first crossing alarms"
+    assert _run_self_cost(dispatch) == "", "the same bucket is silent on the next fire"
+
+    _seed_heartbeat_cost(state, 2500)  # 2x the budget — a materially bigger spend
+    assert "2500" in _run_self_cost(dispatch), "a growing spend re-alarms the same day"
+
+
+def test_a_retired_maintenance_flag_is_neither_written_nor_cleared(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old phase owned an ownership sentinel purely so it could clear ITS maintenance flag
+    without clobbering a human's. That whole problem is gone: the alarm never writes a flag, so
+    it never has to decide whose flag it is. A leftover file is left exactly as found — the
+    per-fire sweep in main() is what removes it, not this phase."""
     dispatch = _import_dispatch()
     import state
 
     _budget_1000(monkeypatch)
     _seed_heartbeat_cost(state, 5000)
     sd = state.state_dir()
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    state.atomic_write(sd / "maintenance-mode", "left by an older janitor")
 
-    state.atomic_write(sd / "keep-going", "")
-    assert _run_self_budget(dispatch)[0] is True, "a retired flag must not count as active-waiting"
-
-
-# --- harness gate ------------------------------------------------------------
+    _run_self_cost(dispatch)
+    assert (sd / "maintenance-mode").is_file(), "the alarm touches no flag, in either direction"
+    assert not (sd / "self-budget-maintenance.flag").exists(), "and mints no ownership sentinel"
 
 
-def test_harness_session_no_actuation(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Inside an ai-maestro agent (#J thin mode) the self-budget NEVER actuates: no flag
-    write, budget_cap_slow False — server-delegated continuity must not be broken."""
+def test_an_actively_waiting_session_still_gets_its_cost_named(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INVERTED. The throttle SUPPRESSED itself for an actively-waiting session, because
+    throttling a session mid-recovery was the cardinal sin. Reporting is not throttling: there is
+    nothing to suppress, and the working session is the one whose spend is most worth naming.
+
+    The recovery FIRES are still protected — they return before this phase (see the two cardinal
+    tests above); this is the fire AFTER one."""
     dispatch = _import_dispatch()
     import state
 
     _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 5000)  # would be maintenance in standalone mode
+    _seed_heartbeat_cost(state, 5000)
+    state.atomic_write(state.state_dir() / "last-resume.ts", str(int(time.time())))
+
+    assert "5000" in _run_self_cost(dispatch)
+
+
+def test_a_harness_session_reports_too(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """INVERTED. The throttle refused to actuate inside an ai-maestro agent (#J thin mode),
+    because auto-maintenance there would break server-delegated continuity. A phase that only
+    prints has nothing to break, so the gate is gone — and a harness agent's own spend is worth
+    naming for exactly the same reason a standalone session's is."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
     monkeypatch.setenv("AIMAESTRO_AGENT", "1")  # → is_harness_session True
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is False
-    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
+    assert "5000" in _run_self_cost(dispatch)
 
 
 # --- fail-open (NORMATIVE) ---------------------------------------------------
 
 
-def test_fail_open_when_evaluator_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An evaluate_self_budget that raises leaves the phase unaffected — returns False,
-    nothing thrown, no flag written (fail-open contract)."""
+def test_fail_open_when_load_log_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A load_log that raises is caught by the phase's try/except → silence, no throw. A metering
+    bug must never break a fire."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    _budget_1000(monkeypatch)
+    state.init_state()
+
+    def _boom(*a, **k):
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(dispatch.tm, "load_log", _boom)
+    assert _run_self_cost(dispatch) == ""  # must not raise
+    _no_actuation(dispatch, state, gs)
+
+
+def test_fail_open_when_the_cost_reader_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same contract one layer up: a broken `heartbeat_cost_7d` is swallowed too."""
     dispatch = _import_dispatch()
     import state
 
@@ -1787,33 +1675,14 @@ def test_fail_open_when_evaluator_raises(env_isolation: dict, monkeypatch: pytes
     def _boom(*a, **k):
         raise RuntimeError("simulated metering failure")
 
-    monkeypatch.setattr(dispatch.tm, "evaluate_self_budget", _boom)
-    rv, out = _run_self_budget(dispatch)  # must not raise
-    assert rv is False
-    assert out == ""
-    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
-
-
-def test_fail_open_when_load_log_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A load_log that raises is caught by the phase's try/except → False, no throw."""
-    dispatch = _import_dispatch()
-    import state
-
-    _budget_1000(monkeypatch)
-    state.init_state()
-
-    def _boom(*a, **k):
-        raise OSError("simulated read failure")
-
-    monkeypatch.setattr(dispatch.tm, "load_log", _boom)
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is False
+    monkeypatch.setattr(dispatch.tm, "heartbeat_cost_7d", _boom)
+    assert _run_self_cost(dispatch) == ""
 
 
 def test_main_call_site_fail_open_second_layer(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The call site in main() wraps _phase_self_budget in its own try/except (second
-    fail-open layer): even a phase that RAISES (bypassing its own guard) cannot break the
-    fire — main() completes and never emits a disarm marker."""
+    """The call site in main() wraps the phase in its own try/except (second fail-open layer):
+    even a phase that RAISES (bypassing its own guard) cannot break the fire — main() completes
+    and never emits a disarm marker."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -1823,44 +1692,12 @@ def test_main_call_site_fail_open_second_layer(env_isolation: dict, monkeypatch:
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
-    def _raise() -> bool:
+    def _raise() -> None:
         raise RuntimeError("phase blew past its own guard")
 
-    monkeypatch.setattr(dispatch, "_phase_self_budget", _raise)
+    monkeypatch.setattr(dispatch, "_phase_self_cost_alarm", _raise)
     out = _capture_stdout(dispatch.main)  # must not raise
     assert "[janitor-self-disarm]" not in out
-
-
-# --- ownership safety: never clobber a user/global maintenance flag ----------
-
-
-def test_disabled_mechanism_never_clears_user_maintenance(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The mechanism OFF (budget=0, default) must NOT clear a human's manual maintenance flag
-    — only a flag the budget itself owns (sentinel present) is ever cleared."""
-    dispatch = _import_dispatch()
-    import state
-
-    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", raising=False)  # disabled
-    state.init_state()
-    sd = state.state_dir()
-    state.atomic_write(sd / state.MAINTENANCE_FLAG, "user set this")  # user-owned, NO sentinel
-    rv, _ = _run_self_budget(dispatch)
-    assert rv is False
-    assert (sd / state.MAINTENANCE_FLAG).is_file(), "a user's manual maintenance flag must survive"
-
-
-def test_ok_verdict_never_clears_user_maintenance(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Even with the mechanism ON and an ok verdict, a user-owned maintenance flag (no
-    sentinel) is preserved — the budget clears only flags it created."""
-    dispatch = _import_dispatch()
-    import state
-
-    _budget_1000(monkeypatch)
-    _seed_heartbeat_cost(state, 100)  # ok verdict
-    sd = state.state_dir()
-    state.atomic_write(sd / state.MAINTENANCE_FLAG, "user set this")  # user-owned, no sentinel
-    _run_self_budget(dispatch)
-    assert (sd / state.MAINTENANCE_FLAG).is_file(), "the budget must not clear a user flag it does not own"
 
 
 # --------------------------------------------------------------------------- #
@@ -2021,18 +1858,19 @@ def test_main_rate_limited_and_idle_still_resumes_never_quiet(env_isolation: dic
     assert "[janitor-quiet]" not in out
 
 
-def test_main_idle_maintenance_fire_emits_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An idle terminal exit emits the explicit [janitor-quiet] token. Uses the
-    maintenance early-return (the light main() path that reaches _emit_quiet_if_idle),
-    with the keep-going nudge muted by a fresh resume stamp so no action fires."""
+def test_main_idle_fire_emits_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An idle terminal exit emits the explicit [janitor-quiet] token.
+
+    This used to drive the MAINTENANCE early-return, which was the one light main() path that
+    reached `_emit_quiet_if_idle` without running the whole roster. With that return gone the
+    full path is the only path, so the detectors are stubbed instead — the assertion is
+    unchanged, and it is now about the exit every real quiet fire actually takes."""
     dispatch = _import_dispatch()
-    import state
 
     _isolate_home(env_isolation, monkeypatch)
     sd = _seed_state_dir(dispatch)
-    (sd / state.MAINTENANCE_FLAG).write_text("")               # → maintenance mode
     (sd / "last-resume.ts").write_text(str(int(time.time())))  # mutes the keep-going nudge
-    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
     out = _capture_stdout(dispatch.main)
@@ -2040,16 +1878,14 @@ def test_main_idle_maintenance_fire_emits_quiet(env_isolation: dict, monkeypatch
     assert "[janitor-resume]" not in out  # the nudge was muted → a genuinely idle fire
 
 
-def test_main_action_maintenance_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The complement: a maintenance fire whose keep-going nudge DOES fire is an ACTION
-    fire — it emits [janitor-resume] and NEVER [janitor-quiet]."""
+def test_main_action_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The complement: a fire whose keep-going nudge DOES fire is an ACTION fire — it emits
+    [janitor-resume] and NEVER [janitor-quiet]."""
     dispatch = _import_dispatch()
-    import state
 
     _isolate_home(env_isolation, monkeypatch)
-    sd = _seed_state_dir(dispatch)
-    (sd / state.MAINTENANCE_FLAG).write_text("")  # maintenance mode; no resume stamp → nudge fires
-    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    _seed_state_dir(dispatch)  # no resume stamp → the nudge fires
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
     out = _capture_stdout(dispatch.main)
