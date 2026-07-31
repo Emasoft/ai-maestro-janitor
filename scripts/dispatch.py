@@ -1053,9 +1053,31 @@ def _phase_clear_resume() -> bool:
     # written, i.e. it DID happen. `>` would strand that flag forever, because nothing
     # re-stamps `clear-observed.ts` until the NEXT clear — an unarmable flag is the very
     # stall this phase exists to prevent, so the tie must break toward resuming.
+    now = int(time.time())
     written_at = state.read_int_state(since_file, 0)
     observed_at = state.read_int_state(sd / "clear-observed.ts", 0)
     if observed_at <= 0 or observed_at < written_at:
+        # NOT armed. Before leaving it, bound it: making the flag unconsumable by any other
+        # phase (the fix above) also means a /clear the user never ran leaves it on disk
+        # FOREVER, and the next real /clear would then resume against a directive from an
+        # abandoned handoff. Nothing else sweeps it — the orphaned-resume detector only
+        # knows `resume-after-compact.flag`. A deferral measured in hours is legitimate
+        # (USER_PRESENT waits on a human); a day is an abandoned clear.
+        #
+        # Age from the sidecar, falling back to the flag's own mtime: a missing/garbage
+        # sidecar reads as 0, and gating the sweep on `written_at > 0` would make exactly
+        # that case the one thing nothing can ever clean up.
+        max_age = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
+        )
+        age = now - (written_at or state.file_mtime(flag))
+        if max_age > 0 and age > max_age:
+            for stale in (flag, since_file):
+                try:
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
+            state.log_line("dispatch", f"swept an abandoned pre-/clear resume flag ({age}s old)")
         return False
 
     try:
@@ -1069,7 +1091,6 @@ def _phase_clear_resume() -> bool:
     if len(directive) > 280:
         directive = directive[:277] + "..."
 
-    now = int(time.time())
     age = max(0, now - (written_at or now))
 
     # F7 (wikimem audit): bare marker line + prose payload — see

@@ -354,6 +354,11 @@ def main() -> int:
                 transcript_path = str(payload.get("transcript_path", "") or "")
     except Exception:  # noqa: BLE001 -- best-effort; never break session start
         source = "startup"
+    # Record what was parsed. Several branches below (the clear-observed stamp, the reload
+    # ack seeding, the cold-compact gate) are gated on `source`, and from outside a wrong
+    # `source` is INDISTINGUISHABLE from the branch having run and failed — both leave no
+    # file. One log line makes that difference readable after the fact.
+    state.log_line("session-start", f"source={source}")
 
     # Cold-cache auto-compact (TRDD-EUWIHP0G) — the "before any expensive turn"
     # path. When a RESUMED session (a fresh process) carries a large context whose
@@ -375,8 +380,13 @@ def main() -> int:
     if source == "clear":
         try:
             state.atomic_write(state.state_dir() / "clear-observed.ts", str(int(time.time())))
-        except Exception:  # noqa: BLE001 -- never break session start
-            pass
+        except Exception as exc:  # noqa: BLE001 -- never break session start
+            # LOG, never swallow silently: a lost stamp means the post-clear resume never
+            # fires and the fresh session sits idle — the exact silent-disable shape this
+            # project treats as a defect. Logging keeps the failure diagnosable without
+            # ever raising into session start.
+            state.log_line("session-start", f"clear-observed stamp failed: {exc!r}")
+            print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
 
     if source in ("startup", "resume"):
         state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))

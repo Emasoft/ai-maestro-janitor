@@ -785,6 +785,33 @@ def test_clear_resume_is_silent_until_the_clear_is_actually_observed(
     assert (sd / "resume-after-clear.flag").exists(), "the flag must still be armed later"
 
 
+def test_an_abandoned_pre_clear_flag_is_swept_not_kept_forever(
+    env_isolation: dict,
+) -> None:
+    """Making the flag unconsumable by other phases also means a /clear the user never ran
+    would strand it forever, and the NEXT real /clear would resume an abandoned directive.
+    A day-old unarmed flag is swept; a fresh one is not."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "abandoned handoff", age_s=86400 + 60)
+    assert dispatch._phase_clear_resume() is False
+    sd = state.state_dir()
+    assert not (sd / "resume-after-clear.flag").exists(), "an abandoned flag must be swept"
+    assert not (sd / "resume-after-clear.ts").exists()
+
+
+def test_a_deferred_but_recent_pre_clear_flag_is_kept(env_isolation: dict) -> None:
+    """The sweep must not eat a legitimately deferred clear — USER_PRESENT waits on a
+    human, which is minutes-to-hours, not a day."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "still pending", age_s=3600)
+    assert dispatch._phase_clear_resume() is False
+    assert (state.state_dir() / "resume-after-clear.flag").exists()
+
+
 def test_clear_resume_ignores_an_observation_older_than_the_flag(
     env_isolation: dict,
 ) -> None:

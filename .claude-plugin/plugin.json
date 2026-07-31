@@ -822,6 +822,13 @@
       "default": 180,
       "sensitive": false
     },
+    "clear_resume_max_age_s": {
+      "title": "Abandoned Pre-/clear Resume Flag Max Age (seconds)",
+      "description": "Default 86400 (24h). `/janitor-handoff-and-clear` writes `resume-after-clear.flag` BEFORE firing /clear, and ONLY the post-clear resume phase may consume it \u2014 no other phase may, because it describes an event that has not happened yet. That correctness property has a cost: a /clear the user never actually runs leaves the flag on disk forever, and the NEXT real /clear would then resume against an abandoned handoff's directive. This is the bound. A deferral of minutes-to-hours is legitimate (the USER_PRESENT path waits on a human); an unarmed flag older than this is an abandoned clear and is swept on the next heartbeat. Set 0 to disable the sweep and keep an unarmed flag indefinitely.",
+      "type": "number",
+      "default": 86400,
+      "sensitive": false
+    },
     "cold_cache_compact_enabled": {
       "title": "Cold-Cache Auto-Compact on Resume Enabled",
       "description": "ON by default (TRDD-EUWIHP0G). After a >1h stop (a rate limit; the user exits and relaunches later; a logout/login), the 1h prompt-cache TTL has expired, so the FIRST resumed turn re-writes the WHOLE context as a cache-creation (~600k tokens on average, billed ~1.25\u00d7), burning a large chunk of the 5h window. When true, the janitor self-fires /compact on resume whenever a LARGE context comes back cold \u2014 at SessionStart (source startup/resume, context >= cold_cache_compact_min_context_tokens) and on the heartbeat rate-limit-clear path (the gap outlived the cache TTL AND the context is large). It CANNOT avoid that immediate cold write (any first turn pays it), but it shrinks the context to ~50k so the REST of the window \u2014 and every FUTURE cold resume \u2014 runs cheap instead of dragging ~600k forward on every turn. The compaction is SOFT (the resumed REPL is idle, so nothing is interrupted) and the resume is preserved: post-compact-resume records the directive and continues the prior task after compaction. Fully fail-safe \u2014 a non-automatable terminal (plain Terminal.app / VS Code / CI) or any fault degrades to the normal resume with no regression. Set to false to opt OUT.",
