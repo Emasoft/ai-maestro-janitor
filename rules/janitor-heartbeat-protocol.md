@@ -1,6 +1,5 @@
-<!-- ai-maestro-janitor:installed-rule — copied into your rules dir by the ai-maestro-janitor
-     plugin. SAFE TO REMOVE if the plugin is uninstalled; removing it never affects any MEMORY
-     store, only this rule file. -->
+<!-- ai-maestro-janitor:installed-rule — installed by the ai-maestro-janitor plugin. Safe to
+     delete once that plugin is gone; a rule file, never a MEMORY store. -->
 
 > [!IMPORTANT]
 > **ai-maestro-janitor heartbeat protocol** — applies ONLY to a turn whose user message's FIRST

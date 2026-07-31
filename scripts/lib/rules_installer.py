@@ -15,15 +15,13 @@ detection logic is duplicated here. If the version-update detector's
 heuristic is ever revised, mirror the change here too.
 
 Idempotency (content-based — issue #37):
-  * If the destination file already exists AND its bytes are
-    identical to the plugin's source copy, it is left alone
-    ("already up to date").
-  * If the destination exists with ANY byte difference, the
-    plugin's copy overwrites it. Rationale: the plugin author ships
-    rule updates by editing `<plugin_root>/rules/*.md` and bumping
-    the release; without overwrite-on-difference, every user who
-    saw the previous version would be stuck on it forever (the hook
-    would silently skip them). Byte-exact comparison (NOT size-only)
+  * If the destination file already exists AND its body is byte-identical
+    to the plugin's source copy, it is left alone ("already up to date").
+  * Otherwise the plugin's copy overwrites it, SUBJECT to the monotonic
+    guard below. Rationale: the plugin author ships rule updates by
+    editing `<plugin_root>/rules/*.md` and bumping the release; without
+    overwrite-on-difference, every user who saw the previous version
+    would be stuck on it forever. Byte-exact comparison (NOT size-only)
     closes a silent blind spot: a rule edit that preserves the byte
     count — e.g. a scope-root path swap of equal length — would slip
     past a size check and strand the user on a stale rule whose
@@ -34,12 +32,27 @@ Idempotency (content-based — issue #37):
   * No installed scope (e.g. fresh checkout outside a Claude Code
     session) is also a silent no-op — the hook degrades gracefully
     instead of erroring.
+
+MONOTONICITY (issue #141) — why content-exact was not enough:
+  Every installed file carries a first-line stamp naming the plugin
+  version that wrote it, and an install is REFUSED when that version is
+  newer than the one installing. Without it the comparison overwrote in
+  EITHER direction, so on a host with several cached versions the
+  agent-facing contract converged on whichever session started LAST.
+  Measured live: `~/.claude/rules/janitor-heartbeat-protocol.md` was
+  0.60.1's copy while 0.66.1 was cached — six versions of contract fixes
+  reverted, including the `[janitor-quiet]` marker the dispatcher emits
+  but that rule does not list, which under the rule's own security clause
+  an agent must refuse. The executable half (the dispatcher stub) always
+  rolls FORWARD to the newest cache, so only the contract half could go
+  backward; that asymmetry is the whole bug.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import shutil
+import re
 import tempfile
 from pathlib import Path
 
@@ -51,6 +64,148 @@ PLUGIN_NAME = "ai-maestro-janitor"
 # marker) is NEVER touched, and NO memory store is ever touched. Keep this string in sync
 # with the leading provenance comment prepended to each shipped rule file.
 PROVENANCE_MARKER = "ai-maestro-janitor:installed-rule"
+
+# The MONOTONIC stamp (#141). Written as the installed file's FIRST line; the shipped source never
+# carries one. It records exactly one thing — WHICH plugin version wrote this file — because that is
+# the only datum the guard needs and the only one that was missing when this bug had to be
+# diagnosed. It is deliberately not an integrity digest: nothing would verify it, and every byte
+# here is re-written into cache by every cold subagent on the machine. (Tamper detection over the
+# plugin's own files already exists, properly, in janitor_self_integrity's signed manifest.)
+_STAMP_PREFIX = "<!-- ai-maestro-janitor:rule-stamp"
+_STAMP_RE = re.compile(r"^<!--\s*ai-maestro-janitor:rule-stamp\s+version=(?P<v>\S+)\s*-->$")
+
+
+def _plugin_version(plugin_root: Path) -> str:
+    """The version of the plugin tree being installed FROM, or "" when unreadable."""
+    try:
+        data = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return ""
+    v = data.get("version")
+    return v if isinstance(v, str) else ""
+
+
+# The key an UNPARSEABLE version sorts to. Lower than every real version, so an unknown stamp can
+# never win a comparison — see `should_install` for why every unknown must fail toward INSTALLING.
+_UNKNOWN_KEY = (-1,)
+
+
+def _semver_key(version: str) -> tuple[int, ...]:
+    """Sortable key for a semver-ish string; `_UNKNOWN_KEY` when it does not parse."""
+    parts: list[int] = []
+    for chunk in version.split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        if not digits:
+            return _UNKNOWN_KEY
+        parts.append(int(digits))
+    return tuple(parts) if parts else _UNKNOWN_KEY
+
+
+def _stamped_bytes(src_bytes: bytes, version: str) -> bytes:
+    """The bytes to install: the stamp line, then the shipped file verbatim."""
+    # "unknown" — never "0.0.0". A placeholder that PARSES would outrank a genuinely unknown source
+    # on the next install and could freeze the file; `unknown` sorts to _UNKNOWN_KEY and cannot.
+    return f"{_STAMP_PREFIX} version={version or 'unknown'} -->\n".encode() + src_bytes
+
+
+def split_stamp(installed: bytes) -> tuple[str | None, bytes]:
+    """`(stamped_version, body)` for an installed file. A `None` version means it carries no stamp,
+    and the WHOLE file is the body — so a pre-stamp or hand-placed file still compares exactly as
+    the old byte-compare did."""
+    head, sep, rest = installed.partition(b"\n")
+    if not sep:
+        return None, installed
+    try:
+        line = head.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return None, installed
+    m = _STAMP_RE.match(line)
+    return (m.group("v"), rest) if m else (None, installed)
+
+
+def should_install(
+    installed_version: str | None, body_matches: bool, src_version: str
+) -> tuple[bool, str]:
+    """PURE. May we overwrite the installed file with this source? Returns `(install, why)`.
+
+    THE DEFECT THIS FIXES (#141). The previous rule was "bytes differ ⇒ overwrite", in EITHER
+    direction — so the agent-facing contract converged on whichever session started LAST, not on the
+    newest version. Verified live: a host with 0.66.1 cached had 0.60.1's rule installed, six
+    versions old, because a session running 0.60.1 skills wrote it last. That rule did not document
+    `[janitor-quiet]`, which the dispatcher emits — and the rule's own security clause tells an agent
+    to refuse an unlisted marker. So a shipped contract fix could be silently reverted by any older
+    session on the machine, which makes every contract change unreliable.
+
+    Now the contract only ever moves FORWARD:
+
+    * no stamp        → INSTALL. First run, a pre-stamp copy, or a hand-placed file. This preserves
+                        the one-shot takeover the byte-compare existed for.
+    * body identical  → skip. Already exactly this content; nothing to do.
+    * installed newer → **SKIP — the guard.** A newer session already wrote a better contract, and
+                        an older one must not drag it back. The price is that a NEWER file which was
+                        hand-edited is not self-healed here; the newer session heals it.
+    * unknown SOURCE  → INSTALL. See below.
+    * otherwise       → INSTALL (source is newer, or same version with changed content).
+
+    EVERY unknown fails toward INSTALLING, deliberately. The guard's only job is to stop an OLDER
+    version from overwriting a NEWER one; if we cannot tell how old the source is, refusing would
+    freeze the destination against every future install — the exact failure this guard exists to
+    prevent, inverted and permanent. An unreadable `plugin.json` must degrade to the old behaviour,
+    not to a rule nothing can ever replace.
+    """
+    if installed_version is None:
+        return True, "unstamped"
+    if body_matches:
+        return False, "up-to-date"
+    src_key = _semver_key(src_version)
+    if src_key == _UNKNOWN_KEY:
+        return True, "source version unknown"
+    if _semver_key(installed_version) > src_key:
+        return False, f"installed {installed_version} is newer than {src_version}"
+    return True, "source-newer-or-changed"
+
+
+def _publish_monotonic(src: Path, dst: Path, version: str) -> bool:
+    """Install `src` at `dst`, stamped, unless a NEWER version already wrote it.
+
+    Returns True iff `dst` was written. Never raises: an unreadable source or a failed write is a
+    silent no-op, exactly as the plain copy was — SessionStart must degrade, not error.
+    """
+    try:
+        src_bytes = src.read_bytes()
+    except OSError:
+        return False
+
+    if dst.exists():
+        try:
+            installed_version, body = split_stamp(dst.read_bytes())
+        except OSError:
+            # Can't read (race, permission). Bail rather than overwrite on incomplete info.
+            return False
+        install, _ = should_install(installed_version, body == src_bytes, version)
+        if not install:
+            return False
+
+    payload = _stamped_bytes(src_bytes, version)
+    tmp = None
+    try:
+        # Atomic publish: write a unique temp in the SAME dir, then os.replace (atomic rename on
+        # POSIX) so N concurrent session-start installs writing this user-scope file can't tear it.
+        # Rules-install stays per-session (rules must be present at session start), but the write is
+        # corruption-free under fan-out — the cheap-idempotent-file analogue of the daemon's
+        # single-writer lock for commands.
+        fd, tmp = tempfile.mkstemp(dir=str(dst.parent), prefix=f".{dst.name}.", suffix=".tmp")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+        os.replace(tmp, dst)
+        return True
+    except OSError:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        return False
 
 
 def _data_dir() -> Path:
@@ -244,29 +399,16 @@ def install_references(plugin_root: Path) -> list[str]:
     except OSError:
         return []
 
+    version = _plugin_version(plugin_root)
     written: list[str] = []
     for src in src_files:
         dst = dst_dir / src.name
-        if dst.exists():
-            try:
-                if dst.read_bytes() == src.read_bytes():
-                    continue
-            except OSError:
-                continue
-        tmp = None
-        try:
-            fd, tmp = tempfile.mkstemp(dir=str(dst_dir), prefix=f".{src.name}.", suffix=".tmp")
-            os.close(fd)
-            shutil.copyfile(src, tmp)
-            os.replace(tmp, dst)
+        # Same monotonic guard as install_rules, and for the same reason: the rules POINT at these
+        # docs, so an older session reverting a reference makes the rule cite content that no longer
+        # says what the rule promises — a skew that is harder to notice than a stale rule, because
+        # nothing surfaces it until an agent reads the reference and acts on it.
+        if _publish_monotonic(src, dst, version):
             written.append(str(dst))
-        except OSError:
-            if tmp is not None:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-            continue
     return written
 
 
@@ -276,12 +418,9 @@ def install_rules(plugin_root: Path) -> list[str]:
     NOTE: `iterdir()` is deliberately NON-recursive — `rules/references/` holds the
     on-demand full docs and must NEVER be installed as a rule (see install_references).
 
-    Returns a list of `<dst-path>` strings for files that were
-    actually copied on this call (so the caller can log them).
-    Existing destination files are kept when their byte size matches
-    the source (treated as "already up to date") and overwritten
-    when the size differs — see the module docstring for the
-    size-based-idempotency rationale.
+    Returns a list of `<dst-path>` strings for files that were actually written on this call (so the
+    caller can log them). An existing destination is kept when its body is byte-identical to the
+    source, and — since #141 — also when it was written by a NEWER plugin version than this one.
     """
     src_dir = plugin_root / "rules"
     if not src_dir.is_dir():
@@ -319,6 +458,7 @@ def install_rules(plugin_root: Path) -> list[str]:
             continue
         targets[str(td)] = td
 
+    version = _plugin_version(plugin_root)
     copied: list[str] = []
     for td in targets.values():
         try:
@@ -326,44 +466,12 @@ def install_rules(plugin_root: Path) -> list[str]:
         except OSError:
             continue
         for src in rule_files:
-            dst = td / src.name
-            if dst.exists():
-                try:
-                    # CONTENT-exact idempotency (issue #37): compare BYTES, not just
-                    # size. A size-only check has a silent blind spot — a rule edit
-                    # that preserves the byte count (e.g. swapping one scope-root
-                    # path for another of equal length) would NOT refresh the
-                    # installed copy, stranding the user on a stale rule whose recall
-                    # silently misses (#37: "PROJECT recall silently misses during
-                    # rollout" — the quietest failure mode for a memory system).
-                    # Byte-equal ⇒ already up to date, skip; ANY difference ⇒
-                    # overwrite below. Rule files are small, so the read is cheap and
-                    # runs at most once per session, not per prompt.
-                    if dst.read_bytes() == src.read_bytes():
-                        continue
-                except OSError:
-                    # Can't read (race, permission). Bail rather than
-                    # risk an overwrite based on incomplete info.
-                    continue
-            tmp = None
-            try:
-                # Atomic publish: copy to a unique temp in the SAME dir, then
-                # os.replace (atomic rename on POSIX) so N concurrent
-                # session-start installs writing this user-scope rule file
-                # can't tear it. Rules-install stays per-session (rules must
-                # be present at session start), but the write is now
-                # corruption-free under fan-out — the cheap-idempotent-file
-                # analogue of the daemon's single-writer lock for commands.
-                fd, tmp = tempfile.mkstemp(dir=str(td), prefix=f".{src.name}.", suffix=".tmp")
-                os.close(fd)
-                shutil.copyfile(src, tmp)
-                os.replace(tmp, dst)
-                copied.append(str(dst))
-            except OSError:
-                if tmp is not None:
-                    try:
-                        os.unlink(tmp)
-                    except OSError:
-                        pass
-                continue
+            # CONTENT-exact idempotency (issue #37) + the MONOTONIC guard (#141), both inside
+            # `_publish_monotonic`. Content-exact because a size-only check has a silent blind spot:
+            # a rule edit that preserves the byte count (swapping one scope-root path for another of
+            # equal length) would not refresh the installed copy, stranding the user on a stale rule
+            # whose recall silently misses. Monotonic because content-exact alone still overwrites in
+            # EITHER direction, which is how the installed contract ended up six versions old.
+            if _publish_monotonic(src, td / src.name, version):
+                copied.append(str(td / src.name))
     return copied

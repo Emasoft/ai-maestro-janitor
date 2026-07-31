@@ -22,10 +22,31 @@ import rules_installer  # noqa: E402
 _DST_NAME = "demo-rule.md"
 
 
-def _make_plugin(plugin_root: Path, body: str) -> None:
+def _body(path: Path) -> bytes:
+    """The installed file MINUS its monotonic stamp line — i.e. the shipped content.
+
+    Since #141 every installed file leads with a `version=`/`sha=` stamp, so a raw byte-compare
+    against the source no longer holds. The BODY is what must still match exactly, and asserting on
+    it (rather than loosening to a substring check) keeps these tests catching a truncated or
+    mangled copy.
+    """
+    return rules_installer.split_stamp(path.read_bytes())[1]
+
+
+def _body_text(path: Path) -> str:
+    return _body(path).decode("utf-8")
+
+
+def _make_plugin(plugin_root: Path, body: str, *, version: str | None = None) -> None:
     rules = plugin_root / "rules"
     rules.mkdir(parents=True, exist_ok=True)
     (rules / _DST_NAME).write_text(body, encoding="utf-8")
+    if version is not None:
+        meta = plugin_root / ".claude-plugin"
+        meta.mkdir(parents=True, exist_ok=True)
+        (meta / "plugin.json").write_text(
+            '{"name":"ai-maestro-janitor","version":"%s"}' % version, encoding="utf-8"
+        )
 
 
 def _isolate_project_scope(monkeypatch, home: Path, project: Path) -> Path:
@@ -167,7 +188,7 @@ def test_installs_rule_to_project_scope(tmp_path, monkeypatch):
     _make_plugin(plugin, "RULE BODY v1\n")
     copied = rules_installer.install_rules(plugin)
     assert dst.is_file()
-    assert dst.read_text(encoding="utf-8") == "RULE BODY v1\n"
+    assert _body_text(dst) == "RULE BODY v1\n"
     assert str(dst) in copied
 
 
@@ -188,7 +209,7 @@ def test_overwrite_on_size_change(tmp_path, monkeypatch):
     rules_installer.install_rules(plugin)
     _make_plugin(plugin, "RULE BODY v2 - now a different length\n")
     copied = rules_installer.install_rules(plugin)
-    assert dst.read_text(encoding="utf-8") == "RULE BODY v2 - now a different length\n"
+    assert _body_text(dst) == "RULE BODY v2 - now a different length\n"
     assert str(dst) in copied
 
 
@@ -205,7 +226,7 @@ def test_overwrite_on_same_size_different_content(tmp_path, monkeypatch):
     assert len(new_body) == len("RULE BODY v1\n")
     _make_plugin(plugin, new_body)
     copied = rules_installer.install_rules(plugin)
-    assert dst.read_text(encoding="utf-8") == new_body
+    assert _body_text(dst) == new_body
     assert str(dst) in copied
 
 
@@ -295,7 +316,7 @@ def test_ind_rules_install_and_are_content_idempotent(tmp_path, monkeypatch):
     for name in _IND_RULES:
         dst = rules_dst_dir / name
         assert dst.is_file(), f"{name} was not installed"
-        assert dst.read_bytes() == (src_dir / name).read_bytes(), f"{name} not byte-identical to source"
+        assert _body(dst) == (src_dir / name).read_bytes(), f"{name} not byte-identical to source"
         assert str(dst) in copied
     # Re-install is a no-op: the on-disk copies are already byte-exact.
     assert rules_installer.install_rules(_PROJECT_ROOT) == []
@@ -316,7 +337,7 @@ def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
     assert _MARKER not in victim.read_text(encoding="utf-8")
 
     copied = rules_installer.install_rules(_PROJECT_ROOT)
-    text = victim.read_text(encoding="utf-8")
+    text = _body_text(victim)
     assert _MARKER in text, "the unmarked same-named file must be overwritten by the marked IND copy"
     assert text == (_PROJECT_ROOT / "rules" / "trdd-design-tasks.md").read_text(encoding="utf-8")
     assert str(victim) in copied
@@ -365,15 +386,41 @@ def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
 # net +842 B (~210 tokens). Compressing further would have deleted normative content to satisfy a
 # byte budget — the false economy this comment block already warns about. Bring it back DOWN when a
 # rule move frees room.
-_RULES_FLOOR_CAP_BYTES = 53_300
+#
+# MEASURED LOWER 53_300 -> 53_100, and the metric now counts what is actually INSTALLED
+# (#141/#150, 2026-07-31). Two things happened at once and they must not be netted silently:
+#   +230 B  the #150 fix — the memory-assignment sidecar named ABSOLUTELY plus the STOP-don't-guess
+#           clause. Normative text; it landed over the old cap, which is how this was found.
+#   +432 B  the monotonic install stamp (#141) — 54 B on each of the 8 INSTALLED copies. The old
+#           measurement read the repo sources, which carry no stamp, so it under-reported the real
+#           machine floor. The cap is therefore RE-BASED onto the installed size (53_300 + 432 =
+#           53_732, rounded to 53_700): same strictness, honest metric. Calling a metric change a
+#           tightening would be the dishonest way to book this.
+#   -448 B  compressing the 8 identical provenance header comments (228 B -> 172 B each). Pure
+#           boilerplate: it keeps the marker, the "safe to delete after uninstall", and the "never a
+#           MEMORY store" guardrail, and drops only wording.
+# Measured installed floor: 53,400 B — 16 B BELOW the pre-change installed floor of 53,416 B, so the
+# stamp is fully paid for. It also bought the smallest form that does the job: version only, no
+# digest (an integrity field nothing verifies is decoration charged to every cold subagent).
+_RULES_FLOOR_CAP_BYTES = 53_700
 _SINGLE_RULE_CAP_BYTES = 12_000
+
+
+def _installed_size(path: Path) -> int:
+    """Bytes this rule occupies ONCE INSTALLED — source plus its monotonic stamp line.
+
+    The stamp (#141) is added at install time, so measuring the repo source alone under-reports the
+    real context floor by one stamp per rule. The floor is charged per cold subagent, machine-wide,
+    so it has to be measured as the agent actually receives it.
+    """
+    return len(rules_installer._stamped_bytes(path.read_bytes(), "0.66.1"))
 
 
 def test_shipped_rules_stay_under_the_context_floor_cap():
     """The whole shipped-rules corpus must stay under the floor cap — it is re-written
     into cache by every cold subagent, machine-wide."""
     md = sorted((_PROJECT_ROOT / "rules").glob("*.md"))
-    total = sum(p.stat().st_size for p in md)
+    total = sum(_installed_size(p) for p in md)
     assert total <= _RULES_FLOOR_CAP_BYTES, (
         f"shipped rules total {total} B > cap {_RULES_FLOOR_CAP_BYTES} B. "
         "Move reference material to rules/references/ (on-demand), do not grow the floor."
@@ -419,7 +466,7 @@ def test_install_references_writes_to_the_data_dir(tmp_path, monkeypatch):
     written = rules_installer.install_references(plugin)
     dst = rules_installer.references_dir() / "trdd-design-tasks-full.md"
     assert dst.is_file()
-    assert dst.read_text(encoding="utf-8") == "FULL DOC BODY"
+    assert _body_text(dst) == "FULL DOC BODY"
     assert str(dst) in written
     # Byte-identical second call is a no-op (same idempotency contract as install_rules).
     assert rules_installer.install_references(plugin) == []
@@ -431,6 +478,178 @@ def test_install_references_is_a_noop_without_a_references_dir(tmp_path, monkeyp
     _make_plugin(plugin, "# demo\n")
     _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=True)
     assert rules_installer.install_references(plugin) == []
+
+
+# ---- issue #141: the installed contract must only ever move FORWARD ------
+
+def test_the_guard_refuses_an_older_version_over_a_newer_one(tmp_path, monkeypatch):
+    """THE regression. A host keeps several cached plugin versions and any session may run any of
+    them; before this, `install_rules` overwrote on ANY byte difference, in EITHER direction, so the
+    installed rule converged on whichever session started LAST. Measured live:
+    `~/.claude/rules/janitor-heartbeat-protocol.md` was 0.60.1's copy while 0.66.1 was cached — six
+    versions of contract fixes silently reverted, including the `[janitor-quiet]` marker the
+    dispatcher emits but that older rule does not list, which the rule's own security clause tells an
+    agent to refuse. Newest must win regardless of who runs last.
+    """
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+
+    new_plugin = tmp_path / "plugin-new"
+    _make_plugin(new_plugin, "RULE v0.66.1 — documents [janitor-quiet]\n", version="0.66.1")
+    assert rules_installer.install_rules(new_plugin) == [str(dst)]
+
+    old_plugin = tmp_path / "plugin-old"
+    _make_plugin(old_plugin, "RULE v0.60.1 — no [janitor-quiet] here\n", version="0.60.1")
+    assert rules_installer.install_rules(old_plugin) == [], "an older session must not reinstall"
+    assert _body_text(dst) == "RULE v0.66.1 — documents [janitor-quiet]\n"
+
+
+def test_a_newer_version_still_installs_over_an_older_one(tmp_path, monkeypatch):
+    """The guard is one-directional — it must not freeze the rule. Shipping a fix has to reach the
+    host, which is the entire reason overwrite-on-difference existed in the first place."""
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+
+    old_plugin = tmp_path / "plugin-old"
+    _make_plugin(old_plugin, "RULE v0.60.1\n", version="0.60.1")
+    rules_installer.install_rules(old_plugin)
+
+    new_plugin = tmp_path / "plugin-new"
+    _make_plugin(new_plugin, "RULE v0.66.1\n", version="0.66.1")
+    assert rules_installer.install_rules(new_plugin) == [str(dst)]
+    assert _body_text(dst) == "RULE v0.66.1\n"
+
+
+def test_same_version_with_changed_content_still_installs(tmp_path, monkeypatch):
+    """Development on an unbumped version must keep working — the guard compares versions, and an
+    equal version is NOT newer, so content changes still land."""
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "RULE a\n", version="0.66.1")
+    rules_installer.install_rules(plugin)
+    _make_plugin(plugin, "RULE b\n", version="0.66.1")
+    assert rules_installer.install_rules(plugin) == [str(dst)]
+    assert _body_text(dst) == "RULE b\n"
+
+
+def test_an_unstamped_file_is_taken_over_even_by_an_old_version(tmp_path, monkeypatch):
+    """First run, a pre-#141 installed copy, and a hand-placed global all look the same: no stamp.
+    All three must be taken over, or an upgrade could never establish the stamp it needs to guard —
+    and the one-shot takeover of a user's hand-placed same-named global (issue #73) would break."""
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("# hand-placed, no stamp\n", encoding="utf-8")
+
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "SHIPPED RULE\n", version="0.1.0")
+    assert rules_installer.install_rules(plugin) == [str(dst)]
+    assert _body_text(dst) == "SHIPPED RULE\n"
+
+
+def test_an_unknown_source_version_never_blocks_the_install(tmp_path, monkeypatch):
+    """An unreadable plugin.json must degrade to the OLD behaviour, not to a frozen file.
+
+    The guard's only job is to stop an older version overwriting a newer one. If the source version
+    is unknown we cannot make that judgement — and refusing would lock the destination against every
+    future install, which is the failure the guard exists to prevent, inverted and permanent.
+    """
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    stamped = tmp_path / "plugin-stamped"
+    _make_plugin(stamped, "RULE from 9.9.9\n", version="9.9.9")
+    rules_installer.install_rules(stamped)
+
+    unknown = tmp_path / "plugin-unknown"          # no .claude-plugin/plugin.json at all
+    _make_plugin(unknown, "RULE from an unversioned tree\n")
+    assert rules_installer.install_rules(unknown) == [str(dst)]
+    assert _body_text(dst) == "RULE from an unversioned tree\n"
+
+
+def test_the_stamp_records_the_writing_version(tmp_path, monkeypatch):
+    """The stamp is also the DIAGNOSTIC. Finding the live skew took real work precisely because the
+    installed file carried no provenance; `head -1` must now answer "which version wrote this?"."""
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "BODY\n", version="1.2.3")
+    rules_installer.install_rules(plugin)
+
+    first = dst.read_text(encoding="utf-8").splitlines()[0]
+    assert "ai-maestro-janitor:rule-stamp" in first
+    assert "version=1.2.3" in first
+    assert rules_installer.split_stamp(dst.read_bytes())[0] == "1.2.3"
+
+
+def test_an_unversioned_source_stamps_unknown_and_stays_replaceable(tmp_path, monkeypatch):
+    """A stamp must never write a PARSEABLE placeholder for an unknown version.
+
+    `0.0.0` would outrank a genuinely unknown source on the next install and could freeze the file
+    permanently; `unknown` sorts below every real version and therefore cannot.
+    """
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "BODY\n")  # no plugin.json
+    rules_installer.install_rules(plugin)
+    assert rules_installer.split_stamp(dst.read_bytes())[0] == "unknown"
+
+    later = tmp_path / "plugin-later"
+    _make_plugin(later, "NEWER BODY\n")  # also unversioned — must still replace it
+    assert rules_installer.install_rules(later) == [str(dst)]
+    assert _body_text(dst) == "NEWER BODY\n"
+
+
+def test_references_are_guarded_the_same_way(tmp_path, monkeypatch):
+    """The rules POINT at these docs, so an older session reverting a reference makes the rule cite
+    content that no longer says what the rule promises — a skew harder to notice than a stale rule,
+    because nothing surfaces it until an agent reads the reference and acts on it."""
+    _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=True)
+
+    def _mk_refs(root: Path, body: str, version: str) -> None:
+        refs = root / "rules" / "references"
+        refs.mkdir(parents=True, exist_ok=True)
+        (refs / "demo-full.md").write_text(body, encoding="utf-8")
+        meta = root / ".claude-plugin"
+        meta.mkdir(parents=True, exist_ok=True)
+        (meta / "plugin.json").write_text(
+            '{"name":"ai-maestro-janitor","version":"%s"}' % version, encoding="utf-8"
+        )
+
+    new_plugin = tmp_path / "ref-new"
+    _mk_refs(new_plugin, "FULL DOC v2\n", "0.66.1")
+    rules_installer.install_references(new_plugin)
+
+    old_plugin = tmp_path / "ref-old"
+    _mk_refs(old_plugin, "FULL DOC v1\n", "0.60.1")
+    assert rules_installer.install_references(old_plugin) == []
+
+    dst = rules_installer.references_dir() / "demo-full.md"
+    assert _body_text(dst) == "FULL DOC v2\n"
+
+
+# ---- should_install: the pure decision -----------------------------------
+
+def test_should_install_decision_table():
+    """The four branches, stated directly, so a future edit that inverts one is caught here rather
+    than six versions later on a user's machine."""
+    assert rules_installer.should_install(None, False, "1.0.0")[0] is True       # unstamped
+    assert rules_installer.should_install("1.0.0", True, "2.0.0")[0] is False    # already this body
+    assert rules_installer.should_install("2.0.0", False, "1.0.0")[0] is False   # THE guard
+    assert rules_installer.should_install("1.0.0", False, "2.0.0")[0] is True    # source newer
+    assert rules_installer.should_install("1.0.0", False, "1.0.0")[0] is True    # same version
+    assert rules_installer.should_install("2.0.0", False, "")[0] is True         # unknown source
+
+
+def test_semver_comparison_is_numeric_not_lexicographic():
+    """0.9.0 vs 0.10.0 is the classic trap: string order says 0.9.0 wins and would let a session six
+    releases old revert the newest contract — exactly the bug, re-introduced by a sloppy compare."""
+    assert rules_installer.should_install("0.9.0", False, "0.10.0")[0] is True
+    assert rules_installer.should_install("0.10.0", False, "0.9.0")[0] is False
+
+
+def test_split_stamp_leaves_an_unstamped_file_whole():
+    """An unstamped file's body is the WHOLE file, so a pre-#141 copy compares exactly as the old
+    byte-compare did. If this mis-parsed, every existing install would look content-changed and be
+    rewritten on every session."""
+    assert rules_installer.split_stamp(b"# a rule\nbody\n") == (None, b"# a rule\nbody\n")
+    assert rules_installer.split_stamp(b"no trailing newline") == (None, b"no trailing newline")
+    stamped = b"<!-- ai-maestro-janitor:rule-stamp version=1.2.3 -->\nbody\n"
+    assert rules_installer.split_stamp(stamped) == ("1.2.3", b"body\n")
 
 
 def test_every_slimmed_rule_points_at_its_full_reference():
