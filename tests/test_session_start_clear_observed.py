@@ -8,82 +8,73 @@ phase cannot tell "the clear happened" from "the clear is still pending", and ev
 other resume phase used to eat the flag in that gap — stranding the fresh session with
 no cue at all.
 
-Isolation matches `test_session_start_rearm_guard.py`: $CLAUDE_PROJECT_DIR +
-$JANITOR_GLOBAL_STATE_DIR + $HOME under tmp, and the two heavy best-effort filesystem
-steps (rules install, lean-ctx allowlist) neutralized. The hook's real `main()` runs.
+The hook runs as a SUBPROCESS, the way Claude Code actually runs it (the same pattern as
+`test_hooks_execute.py`). That is not merely more faithful — it is load-bearing. The
+first cut of this file imported the hook in-process, and `state.state_dir()` and friends
+are `@lru_cache`'d for the process lifetime (correct in production: one project per
+process). The hook resolves its helpers as `from lib import state`, a DIFFERENT module
+object from a bare `import state`, with its own caches — so an in-process test that
+clears one leaves the hook pinned to whichever project ran FIRST in the pytest process.
+Every later test then wrote into the first test's tmp dir, which reads exactly like "the
+stamp is broken", passes in isolation, and fails only in the full suite. A subprocess has
+no such shared state by construction.
 """
 
 from __future__ import annotations
 
-import importlib.util as _u
 import json
+import os
+import subprocess
 import sys
 import time
-from io import StringIO
 from pathlib import Path
 
 import pytest
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+REPO = Path(__file__).resolve().parent.parent
+HOOK = REPO / "scripts" / "hooks" / "on-session-start.py"
 
 
-def _run_session_start(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, source: str
-) -> Path:
-    """Run the real SessionStart main() with a `source` payload; return the state dir."""
+def _run_session_start(tmp_path: Path, *, source: str) -> Path:
+    """Run the SessionStart hook as Claude Code does; return the project's state dir."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    # The plugin must look installed, or scope detection short-circuits before the hook
+    # reaches the branch under test.
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"ai-maestro-janitor@ai-maestro-plugins": True}}),
+        encoding="utf-8",
+    )
     project = tmp_path / "project"
     project.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
 
-    for mod in ("global_state", "state"):
-        sys.modules.pop(mod, None)
-    import global_state as gs
-    import state
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PLUGIN_ROOT": str(REPO),
+        "CLAUDE_PROJECT_DIR": str(project),
+        # Never touch the real machine: no daemon spawn, no OS keepalive, no real
+        # global state.
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "global-state"),
+        "CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED": "false",
+        "CLAUDE_PLUGIN_OPTION_OS_KEEPALIVE_ENABLED": "false",
+    }
 
-    # `state.state_dir()` and friends are @lru_cache'd for the PROCESS lifetime — correct
-    # in production (one project per process), lethal here. The hook resolves its helpers
-    # as `from lib import state`, which is a DIFFERENT module object from the bare `state`
-    # this file re-imports, with its OWN caches: popping only the bare name leaves the
-    # hook pinned to whichever project ran FIRST in this process. Symptom: every test after
-    # the first writes into the first one's tmp dir, so a per-test assertion on a file both
-    # fails and looks like the hook is broken. Clear BOTH modules' caches after the env is
-    # set, so each test resolves its own dirs.
-    # `lib.state` is looked up rather than imported: on the first test the hook has not
-    # created it yet, and there is no stale cache to clear then anyway.
-    for mod_obj in (state, sys.modules.get("lib.state")):
-        for fn in ("project_root", "janitor_root", "state_dir", "log_dir"):
-            clear = getattr(getattr(mod_obj, fn, None), "cache_clear", None)
-            if clear is not None:
-                clear()
-
-    gs.init_global_state()
-
-    monkeypatch.setattr("lib.rules_installer.install_rules", lambda _root: [])
-    monkeypatch.setattr("lib.leanctx_allowlist.ensure_janitor_allowed", lambda: [])
-
-    spec = _u.spec_from_file_location(
-        "janitor_on_session_start_clear_observed",
-        str(_PROJECT_ROOT / "scripts" / "hooks" / "on-session-start.py"),
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps(
+            {"source": source, "session_id": "sid-1", "transcript_path": ""}
+        ),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
     )
-    assert spec is not None and spec.loader is not None
-    hook = _u.module_from_spec(spec)
-    spec.loader.exec_module(hook)
-
-    payload = json.dumps({"source": source, "session_id": "sid-1", "transcript_path": ""})
-    old_in, old_out = sys.stdin, sys.stdout
-    sys.stdin = StringIO(payload)
-    sys.stdout = StringIO()
-    try:
-        hook.main()
-    finally:
-        sys.stdin, sys.stdout = old_in, old_out
-    return state.state_dir()
+    assert "Traceback" not in proc.stderr, (
+        f"the hook crashed, so any assertion below would be vacuous:\n{proc.stderr[:2000]}"
+    )
+    return project / ".janitor" / "state"
 
 
 def _diagnosis(sd: Path) -> str:
@@ -97,13 +88,11 @@ def _diagnosis(sd: Path) -> str:
     )
 
 
-def test_a_clear_is_recorded_with_a_timestamp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_clear_is_recorded_with_a_timestamp(tmp_path: Path) -> None:
     """source=clear → `clear-observed.ts` holds a fresh epoch. This stamp is the ONLY
     thing that lets the post-clear resume fire, so its absence is a silent stall."""
     before = int(time.time())
-    sd = _run_session_start(monkeypatch, tmp_path, source="clear")
+    sd = _run_session_start(tmp_path, source="clear")
     stamp = sd / "clear-observed.ts"
     assert stamp.is_file(), (
         "SessionStart(source=clear) must record the observation" + _diagnosis(sd)
@@ -113,20 +102,19 @@ def test_a_clear_is_recorded_with_a_timestamp(
 
 
 @pytest.mark.parametrize("source", ["startup", "resume", "compact", "unknown-source", ""])
-def test_no_other_source_is_mistaken_for_a_clear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
+def test_no_other_source_is_mistaken_for_a_clear(tmp_path: Path, source: str) -> None:
     """Only a real `/clear` may arm the flag. A `compact` in particular restarts the
     hook in the SAME session, so treating it as a clear would consume the PRE-marker
     early — the exact bug this stamp exists to prevent, via a different door.
 
-    The absence assertion alone would pass vacuously if `main()` never reached the branch,
-    so it is paired with positive proof from the hook's own log that it parsed exactly this
-    source — otherwise a hook that crashed on import would look like five passing tests."""
-    sd = _run_session_start(monkeypatch, tmp_path, source=source)
+    The absence assertion alone would pass vacuously if the hook never reached the
+    branch, so it is paired with positive proof from the hook's own log that it parsed
+    exactly this source — otherwise a hook that died on import would look like five
+    passing tests."""
+    sd = _run_session_start(tmp_path, source=source)
     log = (sd.parent / "logs" / "session-start.log").read_text(encoding="utf-8")
     # The hook keeps whatever the payload carried, VERBATIM — only a MISSING `source` key
-    # falls back to "startup", so an explicitly-empty one stays empty. Either way it is not
-    # "clear", which is all this test needs.
+    # falls back to "startup", so an explicitly-empty one stays empty. Either way it is
+    # not "clear", which is all this test needs.
     assert f"source={source}" in log, f"the hook did not reach the source branch{_diagnosis(sd)}"
     assert not (sd / "clear-observed.ts").exists(), f"source={source!r} is not a /clear"
