@@ -655,12 +655,29 @@ def test_rate_limit_recovery_also_clears_compact_flag(env_isolation: dict) -> No
 # ---------- Phase 1.15: post-CLEAR resume (TRDD-Z582IKIR P1) ---------------
 
 
-def _arm_clear_flag(state, directive: str, *, age_s: int = 0) -> None:
-    """Simulate what clear_trigger.py writes pre-/clear: directive flag + ts sidecar."""
+def _write_clear_flag(state, directive: str, *, age_s: int = 0) -> None:
+    """Simulate what clear_trigger.py writes PRE-/clear: directive flag + ts sidecar.
+
+    This is the flag on its own — the /clear has NOT happened yet, so the phase must
+    leave it alone. Use `_arm_clear_flag` for the post-/clear (consumable) state.
+    """
     state.init_state()
     sd = state.state_dir()
     state.atomic_write(sd / "resume-after-clear.ts", str(int(time.time()) - age_s))
     state.atomic_write(sd / "resume-after-clear.flag", directive)
+
+
+def _observe_clear(state, *, age_s: int = 0) -> None:
+    """Simulate SessionStart(source=clear) — the ONE signal that the /clear happened."""
+    state.atomic_write(
+        state.state_dir() / "clear-observed.ts", str(int(time.time()) - age_s)
+    )
+
+
+def _arm_clear_flag(state, directive: str, *, age_s: int = 0) -> None:
+    """The full post-/clear state: the pre-marker AND the observation that armed it."""
+    _write_clear_flag(state, directive, age_s=age_s)
+    _observe_clear(state)
 
 
 def test_phase_clear_resume_silent_when_flag_absent(env_isolation: dict) -> None:
@@ -736,23 +753,83 @@ def test_phase_clear_resume_generic_cue_when_flag_empty(env_isolation: dict) -> 
     assert "agent-handoff.md" in out
 
 
-def test_compact_resume_also_clears_clear_flag(env_isolation: dict) -> None:
-    """A compact-resume subsumes a pending clear-resume — clear both flags so a
-    session left with BOTH never emits two [janitor-resume] cues across two fires."""
+def test_compact_resume_must_not_consume_the_pending_clear_flag(env_isolation: dict) -> None:
+    """INVERTED. This phase used to delete resume-after-clear.* as "subsumed"; that was
+    the bug. The clear flag is a PRE-marker for a /clear that has NOT run, so a compact
+    landing in the gap must leave it — otherwise the fresh session gets no cue at all."""
     dispatch = _import_dispatch()
     import state
 
     _arm_compact_flag(state, "continue TRDD-abcd1234")
-    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    _write_clear_flag(state, "continue TRDD-Z582IKIR")  # written, clear NOT yet observed
     out = _capture_stdout(dispatch._phase_compact_resume)
     assert out.startswith("[janitor-resume]")
     sd = state.state_dir()
-    assert not (sd / "resume-after-clear.flag").exists(), "clear flag must be cleared too"
-    assert not (sd / "resume-after-clear.ts").exists()
+    assert (sd / "resume-after-clear.flag").exists(), "PRE-marker must survive a compact"
+    assert (sd / "resume-after-clear.ts").exists(), "its sidecar must survive too"
 
 
-def test_rate_limit_recovery_also_clears_clear_flag(env_isolation: dict) -> None:
-    """A rate-limit resume subsumes a pending clear-resume — clear its flags too."""
+def test_clear_resume_is_silent_until_the_clear_is_actually_observed(
+    env_isolation: dict,
+) -> None:
+    """THE regression. A heartbeat between the flag write and the /clear must not consume
+    it: presence alone proves nothing, only SessionStart(source=clear) does."""
+    dispatch = _import_dispatch()
+    import state
+
+    _write_clear_flag(state, "continue TRDD-Z582IKIR")
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", f"must stay silent before the clear happened, got {out!r}"
+    assert dispatch._phase_clear_resume() is False
+    sd = state.state_dir()
+    assert (sd / "resume-after-clear.flag").exists(), "the flag must still be armed later"
+
+
+def test_clear_resume_ignores_an_observation_older_than_the_flag(
+    env_isolation: dict,
+) -> None:
+    """A stamp from a PREVIOUS /clear must not arm a flag written after it — otherwise
+    every later handoff would be consumed early, forever."""
+    dispatch = _import_dispatch()
+    import state
+
+    _observe_clear(state, age_s=600)  # an old clear
+    _write_clear_flag(state, "continue TRDD-Z582IKIR")  # a NEW handoff, clear still pending
+    assert dispatch._phase_clear_resume() is False
+    assert (state.state_dir() / "resume-after-clear.flag").exists()
+
+
+def test_clear_resume_subsumes_the_stale_compact_and_rate_limit_markers(
+    env_isolation: dict,
+) -> None:
+    """The sound direction of the subsumption: a /clear destroyed the context those
+    markers describe, so ONE cue fires and they go with it."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_compact_flag(state, "continue TRDD-abcd1234")
+    state.atomic_write(state.state_dir() / "rate-limited.flag", "1")
+    state.atomic_write(state.state_dir() / "rate-limited-since.ts", str(int(time.time())))
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]")
+    sd = state.state_dir()
+    for stale in (
+        "resume-after-compact.flag",
+        "resume-after-compact.ts",
+        "rate-limited.flag",
+        "rate-limited-since.ts",
+    ):
+        assert not (sd / stale).exists(), f"{stale} describes the destroyed context"
+
+
+def test_rate_limit_recovery_must_not_consume_the_pending_clear_flag(
+    env_isolation: dict,
+) -> None:
+    """INVERTED, same reason as the compact case: a rate limit is not a /clear, so it may
+    not spend the PRE-marker for one. The window is real — a rate limit can land between
+    `clear_trigger.py` writing the flag and the user's terminal running `/clear`."""
     dispatch = _import_dispatch()
     import state
 
@@ -760,12 +837,12 @@ def test_rate_limit_recovery_also_clears_clear_flag(env_isolation: dict) -> None
     sd = state.state_dir()
     state.atomic_write(sd / "rate-limited.flag", "1")
     state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
-    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    _write_clear_flag(state, "continue TRDD-Z582IKIR")  # clear NOT yet observed
 
     out = _capture_stdout(dispatch._phase_rate_limit_recovery)
     assert out.startswith("[janitor-resume]")
-    assert not (sd / "resume-after-clear.flag").exists(), "clear flag must be cleared too"
-    assert not (sd / "resume-after-clear.ts").exists()
+    assert (sd / "resume-after-clear.flag").exists(), "PRE-marker must survive a rate limit"
+    assert (sd / "resume-after-clear.ts").exists(), "its sidecar must survive too"
 
 
 # ---------- _run_detector wall-clock timeout (audit finding 1) -------------
@@ -1815,6 +1892,8 @@ def test_clear_resume_phase_flushes_bare_resume_and_returns(env_isolation: dict)
     dispatch = _import_dispatch()
     sd = _seed_state_dir(dispatch)
     (sd / "resume-after-clear.flag").write_text("read the handoff")
+    # The flag alone is a PRE-marker; SessionStart(source=clear) is what arms it.
+    (sd / "clear-observed.ts").write_text(str(int(time.time())))
 
     buf = StringIO()
     old = sys.stdout

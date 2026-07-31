@@ -837,15 +837,16 @@ def _maybe_cold_compact_on_rate_limit(sd: Path, age: int, now: int) -> bool:
         cold_cache_compact.mark_fired(sd, now=now)
         _stamp_resume(sd, now)
         # This branch returns True before the normal _phase_rate_limit_recovery cleanup
-        # runs, so it must clear ALL resume flags itself — including a pending post-clear
-        # one (TRDD-Z582IKIR) — else a redundant [janitor-resume] fires after the compact.
+        # runs, so it must clear the POST-event resume flags itself, else a redundant
+        # [janitor-resume] fires after the compact. It must NOT touch
+        # `resume-after-clear.*`: that is a PRE-marker for a /clear that has not run yet
+        # (see `_phase_clear_resume`) — consuming it here silently strands the fresh
+        # session with no cue at all.
         for p in (
             sd / "rate-limited.flag",
             sd / "rate-limited-since.ts",
             sd / "resume-after-compact.flag",
             sd / "resume-after-compact.ts",
-            sd / "resume-after-clear.flag",
-            sd / "resume-after-clear.ts",
         ):
             try:
                 p.unlink()
@@ -905,18 +906,18 @@ def _phase_rate_limit_recovery() -> bool:
     # untrusted-shaped (an agent description), so _emit_decision defangs each.
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
-    # Also clear any pending post-compact / post-clear resume flag: a rate-limit
-    # resume cue already says "resume the pending task", which subsumes both.
-    # Clearing them here prevents a second, redundant [janitor-resume] on a later
-    # fire when a compaction / clear and a rate-limit overlapped in the same window.
+    # Also clear any pending post-COMPACT resume flag: a rate-limit resume cue already
+    # says "resume the pending task", which subsumes it — both describe the SAME
+    # already-happened event, so no cue is lost. `resume-after-clear.*` is deliberately
+    # NOT in this list: it is a PRE-marker for a /clear that has not run yet, and a rate
+    # limit landing in that gap is exactly the case that used to strand the fresh session
+    # with no cue at all. Only `_phase_clear_resume` may consume it.
     sd = state.state_dir()
     for p in (
         flag,
         since_file,
         sd / "resume-after-compact.flag",
         sd / "resume-after-compact.ts",
-        sd / "resume-after-clear.flag",
-        sd / "resume-after-clear.ts",
     ):
         try:
             p.unlink()
@@ -981,14 +982,16 @@ def _phase_compact_resume() -> bool:
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
     sd = state.state_dir()
-    # Also clear a pending post-CLEAR resume flag: a compact-resume cue subsumes it.
-    # Without this, a session carrying BOTH flags would emit [janitor-resume] here on
-    # one fire and AGAIN from _phase_clear_resume on the next (TRDD-Z582IKIR).
+    # This used to ALSO delete `resume-after-clear.*` as "subsumed". That was wrong and
+    # is the bug this comment now guards: subsumption is only sound between two markers
+    # describing the SAME already-happened event. The clear flag is a PRE-marker for a
+    # /clear that has NOT run yet, so deleting it here silently disarmed the post-clear
+    # resume and left the fresh session idle forever. The double-cue it was avoiding is
+    # now prevented from the other side: `_phase_clear_resume` runs FIRST and clears the
+    # stale post-compact / rate-limit markers, which the /clear genuinely does obsolete.
     for p in (
         flag,
         since_file,
-        sd / "resume-after-clear.flag",
-        sd / "resume-after-clear.ts",
     ):
         try:
             p.unlink()
@@ -1019,12 +1022,40 @@ def _phase_clear_resume() -> bool:
     return True so main() skips the drift detectors this fire and the resume cue gets
     clean attention.
 
-    Placed AFTER `_phase_compact_resume` in main(): if a compaction and a clear ever
-    left both flags, compact-resume runs first and clears the clear flag too, so only
-    one [janitor-resume] is ever emitted.
+    ARMING (the load-bearing difference from the other two phases). The flag is a
+    PRE-marker — it is written BEFORE the /clear it describes — so its mere PRESENCE
+    proves nothing. Between the write and the clear there is a real window (widest in
+    the USER_PRESENT case, where the clear waits on a human), and a heartbeat landing in
+    it must leave the flag alone. `/clear` has no hook of its own, but it re-enters
+    SessionStart with `source=clear`, which stamps `clear-observed.ts` — the ONE
+    unambiguous observation that the clear happened. So this phase consumes the flag
+    only when a clear was observed AT OR AFTER the flag was written.
+
+    Rejected alternatives, both of which fire on the wrong event: `heartbeat-armed-at.ts`
+    and `heartbeat-cron-id.txt` do change across a /clear (it destroys the cron), but a
+    routine `[janitor-renew]` re-arm changes them too, so a renew in the pre-clear window
+    would arm the flag early — the same bug via a different path. The session id does NOT
+    change at all: /clear keeps the SAME process and session (see the SessionStart hook's
+    own dedupe comment), so it cannot discriminate.
+
+    Runs FIRST among the resume phases in main(): it can no longer fire prematurely, and
+    a /clear genuinely obsoletes any pending post-compact / rate-limit marker (they
+    describe the context that /clear destroyed), so it consumes those — keeping the
+    exactly-one-cue property, in the direction that is actually sound.
     """
-    flag = state.state_dir() / "resume-after-clear.flag"
+    sd = state.state_dir()
+    flag = sd / "resume-after-clear.flag"
     if not flag.is_file():
+        return False
+
+    since_file = sd / "resume-after-clear.ts"
+    # `>=`, not `>`: the tie means the clear landed in the same second the flag was
+    # written, i.e. it DID happen. `>` would strand that flag forever, because nothing
+    # re-stamps `clear-observed.ts` until the NEXT clear — an unarmable flag is the very
+    # stall this phase exists to prevent, so the tie must break toward resuming.
+    written_at = state.read_int_state(since_file, 0)
+    observed_at = state.read_int_state(sd / "clear-observed.ts", 0)
+    if observed_at <= 0 or observed_at < written_at:
         return False
 
     try:
@@ -1038,9 +1069,8 @@ def _phase_clear_resume() -> bool:
     if len(directive) > 280:
         directive = directive[:277] + "..."
 
-    since_file = state.state_dir() / "resume-after-clear.ts"
     now = int(time.time())
-    age = max(0, now - state.read_int_state(since_file, now))
+    age = max(0, now - (written_at or now))
 
     # F7 (wikimem audit): bare marker line + prose payload — see
     # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract). D5
@@ -1058,8 +1088,18 @@ def _phase_clear_resume() -> bool:
     # context — list them so the resumed turn re-attaches to each via SendMessage.
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
-    sd = state.state_dir()
-    for p in (flag, since_file):
+    # The /clear destroyed the context those OTHER markers described, so this cue truly
+    # does subsume them — this is the sound direction of the subsumption that used to run
+    # backwards. Clearing them here keeps "exactly one [janitor-resume] per event" without
+    # any phase ever consuming a PRE-marker.
+    for p in (
+        flag,
+        since_file,
+        sd / "resume-after-compact.flag",
+        sd / "resume-after-compact.ts",
+        sd / "rate-limited.flag",
+        sd / "rate-limited-since.ts",
+    ):
         try:
             p.unlink()
         except FileNotFoundError:
@@ -2063,6 +2103,16 @@ def main() -> int:
     # Phase 0.5: log retention.
     _phase_log_retention()
 
+    # Phase 0.9: post-CLEAR resume (TRDD-Z582IKIR P1). Runs FIRST among the resume
+    # phases because it is the only one gated on an event the others cannot observe:
+    # `clear-observed.ts`, stamped by SessionStart(source=clear). Ordering it first is
+    # what lets the two phases below stop deleting `resume-after-clear.*` as "subsumed"
+    # — that deletion consumed a PRE-marker and silently stranded the fresh session. A
+    # /clear genuinely obsoletes a pending compact / rate-limit marker, so this phase
+    # clears those instead, and exactly one [janitor-resume] is still emitted.
+    if _phase_clear_resume():
+        return 0
+
     # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
     # skip drift detectors this fire so resume gets clean attention.
     if _phase_rate_limit_recovery():
@@ -2075,15 +2125,6 @@ def main() -> int:
     # exactly once and return early — like rate-limit recovery — so the resume
     # gets clean attention with no detector noise this fire.
     if _phase_compact_resume():
-        return 0
-
-    # Phase 1.15: post-CLEAR resume (TRDD-Z582IKIR P1). The `/janitor-handoff-and-clear`
-    # primitive persists resume-after-clear.flag before firing /clear, then bootstraps
-    # the fresh session to re-arm the destroyed cron. This — the re-armed cron's first
-    # fire — is the resume half: read the flag, emit ONE [janitor-resume] cue pointing
-    # at the link-only handoff, and return early so it gets clean attention. The /clear
-    # analogue of Phase 1.1; runs AFTER it so a session left with both flags resumes once.
-    if _phase_clear_resume():
         return 0
 
     # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a

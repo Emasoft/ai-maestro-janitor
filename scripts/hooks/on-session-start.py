@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -360,6 +361,23 @@ def main() -> int:
     # cache-creation re-write shrinks to ~50k for the rest of the window. See the
     # helper's docstring for the full rationale + gating. Best-effort by contract.
     _maybe_cold_compact_on_session_start(state, plugin_root, source, transcript_path)
+
+    # THE "a /clear actually happened" signal (TRDD-Z582IKIR follow-up). `/clear` has
+    # no hook of its own, but it re-enters SessionStart with source=clear — this is the
+    # ONLY unambiguous observation of it. dispatch.py's `_phase_clear_resume` gates on
+    # this stamp instead of the mere PRESENCE of `resume-after-clear.flag`, because that
+    # flag is a PRE-marker: `clear_trigger.py` writes it BEFORE firing /clear, so a
+    # heartbeat landing in the gap would otherwise consume a resume for a clear that has
+    # not happened yet — and the fresh session then sits idle with no cue at all.
+    # Stamped unconditionally on every clear (even with no flag pending): a stamp older
+    # than a later flag never arms it, so a spurious stamp is inert, whereas a MISSING
+    # one strands the resume forever. Best-effort — a fault here must never break start.
+    if source == "clear":
+        try:
+            state.atomic_write(state.state_dir() / "clear-observed.ts", str(int(time.time())))
+        except Exception:  # noqa: BLE001 -- never break session start
+            pass
+
     if source in ("startup", "resume"):
         state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
         # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a
@@ -403,8 +421,9 @@ def main() -> int:
         if fleet_restart.argv_is_claude(argv):
             ident["argv"] = argv
         if ident:
-            import time  # noqa: E402  -- stdlib
-
+            # `time` is imported at module scope (the clear-observed stamp above needs it
+            # earlier in THIS function); a second function-local import here would make
+            # the name local for the whole body and leave that earlier use unbound.
             ident["pid"] = str(os.getppid())  # the session process, not this hook
             ident["recorded_at"] = str(int(time.time()))
             state.atomic_write(
@@ -700,8 +719,6 @@ def main() -> int:
         # the state that made a disabled fleet look healthy.
         kind, reason, since = stop
         state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
-        import time  # noqa: E402  -- stdlib
-
         print(_format_stop_reminder(kind, reason, since, int(time.time())))
         return 0
 
