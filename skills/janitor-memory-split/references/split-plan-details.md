@@ -53,3 +53,20 @@ sub-page. Then design the outputs:
   the cap. If a natural sub-topic is itself still over the cap, that sub-page is
   fine for THIS run — the next heartbeat splits it further. Convergence only
   requires real progress this level.
+
+## Hard invariants (every SPLIT pass enforces)
+
+- **Transactional** — stage → verify → atomic-swap; crash-resumable; idempotent.
+  Never edit a live page directly; always via `memory_txn_cli.py`.
+- **No information lost** — union(overview, sub-pages) ⊇ every fact + every `[^N]`
+  lesson of the source, copied verbatim (lessons byte-identical).
+- **Type & tier preserved** — sub-pages keep the source's `metadata.type`; a
+  component is never fragmented; one element = one page.
+- **Connected** — overview links DOWN to every sub-page, each sub-page links UP;
+  moved-detail backlinks redirected in the SAME txn; zero dangling/one-sided links.
+- **Bounded & disable-able** — one page, one level per run; recursion across
+  heartbeats; honors the kill-switch and `split_per_day: 0`.
+
+Each is mechanically checked by `memory_edit_verify.verify_split` before the
+transaction commits, so a pass that would violate one aborts rather than landing a
+half-split page — the invariants are enforced, not merely documented.

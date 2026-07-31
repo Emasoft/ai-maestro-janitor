@@ -13,26 +13,24 @@ description: SPLIT executor — breaks ONE oversized wikimem page (over split_ma
 
 ## Overview
 
-SPLIT is the size-triggered editorial leg of the wikimem autonomous librarian. A
-memory page that grows past the configured `split_max_bytes` cap is hard to load
-and navigate, so this skill turns it into a **concise overview page** (a map of
-per-sub-page summaries) plus **type-preserving sub-pages** that hold the detail —
-exactly how a Wikipedia article splits into sub-articles. Know the canonical
-wikimem model first — `skills/janitor-memory-write/references/wikimem-model.md`
-(tiers hub/aspect/component, the bidirectional link law, page anatomy,
-file→functionality globs).
+SPLIT is the size-triggered editorial leg of the wikimem autonomous librarian. A page
+past the `split_max_bytes` cap is hard to load and navigate, so this skill turns it
+into a **concise overview page** (a map of per-sub-page summaries) plus
+**type-preserving sub-pages** holding the detail — how a Wikipedia article splits into
+sub-articles. Know the canonical wikimem model first —
+`skills/janitor-memory-write/references/wikimem-model.md` (tiers, the bidirectional
+link law, page anatomy, file→functionality globs).
 
 Two non-negotiable safety properties shape everything below:
 
-1. **You NEVER edit a live memory page directly.** Every mutation goes through
-   the crash-safe, hash-guarded, flock-serialized transaction core via
-   `scripts/memory_txn_cli.py`: you edit COPIES in a staging dir, then
-   `commit --op split` reconstructs the change set, runs `verify_split`, and only
-   on PASS applies it atomically. A crash mid-pass leaves a journal a later
-   heartbeat rolls forward — no duplicate pages, no data loss.
-2. **No information is ever lost.** The union of the overview + every sub-page
-   must reproduce every fact and every `[^N]` lesson from the original.
-   `verify_split` is the gate that proves it.
+1. **You NEVER edit a live memory page directly.** Every mutation goes through the
+   crash-safe, hash-guarded, flock-serialized transaction core via
+   `scripts/memory_txn_cli.py`: edit COPIES in a staging dir, then `commit --op split`
+   runs `verify_split` and applies atomically only on PASS. A crash mid-pass leaves a
+   journal a later heartbeat rolls forward — no duplicate pages, no data loss.
+2. **No information is ever lost.** The union of the overview + every sub-page must
+   reproduce every fact and every `[^N]` lesson from the original; `verify_split`
+   proves it.
 
 ## When to use
 
@@ -246,16 +244,11 @@ the txn (live tree untouched).
 
 ## Hard invariants (every SPLIT pass enforces)
 
-- **Transactional** — stage → verify → atomic-swap; crash-resumable; idempotent.
-  Never edit a live page directly; always via `memory_txn_cli.py`.
-- **No information lost** — union(overview, sub-pages) ⊇ every fact + every `[^N]`
-  lesson of the source, copied verbatim (lessons byte-identical).
-- **Type & tier preserved** — sub-pages keep the source's `metadata.type`; a
-  component is never fragmented; one element = one page.
-- **Connected** — overview links DOWN to every sub-page, each sub-page links UP;
-  moved-detail backlinks redirected in the SAME txn; zero dangling/one-sided links.
-- **Bounded & disable-able** — one page, one level per run; recursion across
-  heartbeats; honors the kill-switch and `split_per_day: 0`.
+Transactional · no information lost · type & tier preserved · connected (no dangling
+or one-sided links) · bounded and disable-able. Each is mechanically checked by
+`memory_edit_verify.verify_split` BEFORE the transaction commits, so a violating pass
+aborts rather than landing a half-split page. Full statement of all five:
+[split-plan-details](references/split-plan-details.md#hard-invariants-every-split-pass-enforces).
 
 ## Done when (terminating conditions)
 

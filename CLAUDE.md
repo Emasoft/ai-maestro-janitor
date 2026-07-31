@@ -291,8 +291,9 @@ is the sole path using `additionalContext` (which DOES reach the model). Fast
 no-op for any non-user-mem prompt; never crashes the session.
 
 **Skills (`skills/`)** — control surface (severity×scope, TRDD-a3fa4d5d): `janitor-arm`
-↔ `janitor-disarm` (local cron true-stop), `janitor-global-disarm` ↔ `janitor-global-arm`
-+ `janitor-maintenance-mode` (local + `global`, TRDD-FPL60EKV) (machine-wide, backed by
+↔ `janitor-disarm` (local cron true-stop), `janitor-global-disarm` ↔
+`janitor-global-arm`, `janitor-maintenance-mode` (local + `global`, TRDD-FPL60EKV;
+machine-wide, backed by
 `scripts/global_control_cli.py disarm|arm|maintenance|maintenance-off|status` —
 kill-switch=disarm makes the daemon EXIT, maintenance-mode.flag=daemon idles but sessions
 keep firing CHEAP). **PAUSE (local + global) WAS REMOVED in v0.67.0** (owner directive
