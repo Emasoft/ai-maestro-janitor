@@ -10,11 +10,13 @@ A stale one is a document that LIES about the guardian's coverage.
 
 from __future__ import annotations
 
+import re
 import string
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -342,6 +344,162 @@ def test_reconcile_leaves_an_APPROVED_finding_alone(project: Path) -> None:
 
     assert issue_catalog.reconcile("DEP-001", []) == []
     assert len(tickets.load_all()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 4b. RETIREMENT — a code that stops being raised must take its proposals with it
+# --------------------------------------------------------------------------- #
+
+
+def _codes_with_a_producer() -> set[str]:
+    """Every catalog code that appears ANYWHERE under `scripts/` outside the catalog itself.
+
+    Deliberately a mention-scan, not a `raise_issue("CODE"` scan. Two producers pass the code in a
+    variable — `workflow-security` maps a rule id through `workflow_issue_codes`, and
+    `memgrep-index-health` forwards a code the Rust validator emits — so a call-shape regex reports
+    those as unraisable, which is false. A mention elsewhere can over-count (a code named only in a
+    comment would pass), so this proves the SOUND direction only: a code that appears nowhere but
+    the catalog definitely has no producer. That is the condition that strands proposals, and it is
+    the condition AICTX-001 was in.
+    """
+    cat = ROOT / "scripts" / "lib" / "issue_catalog.py"
+    doc = ROOT / "scripts" / "issue_catalog_doc.py"  # generates FROM the catalog; not a producer
+    texts = [
+        f.read_text(encoding="utf-8", errors="replace")
+        for pattern in ("*.py", "*.rs")
+        for f in (ROOT / "scripts").rglob(pattern)
+        if f not in (cat, doc)
+    ]
+    return {code for code in issue_catalog.ISSUE_CATALOG if any(code in t for t in texts)}
+
+
+def test_no_PROJECT_code_is_unraisable_without_being_retired() -> None:
+    """THE structural guard. A PROJECT code with no producer is dead in one direction and dangerous
+    in the other: ISSUE-CODES.md still advertises it as live coverage, while any proposal already on
+    a host's board under it can never be withdrawn — only the detector that raises a code calls
+    `reconcile` for it, so when the producer goes, the withdrawal goes with it.
+
+    That is exactly what splitting AICTX-001 into AICTX-002 did, and it took a field report of two
+    "hallucinated" proposals nobody could clear to notice. Retiring a code now means deleting the
+    entry AND listing it in RETIRED_CODES; this test is what makes forgetting either half fail here
+    rather than on a user's board.
+    """
+    have = _codes_with_a_producer()
+    assert have, "the source scan matched nothing at all — it has drifted from the tree layout"
+    orphans = sorted(
+        code
+        for code, issue in issue_catalog.ISSUE_CATALOG.items()
+        if tickets.KIND_REGISTRY[issue.kind].domain == tickets.PROJECT
+        and code not in have
+        and code not in issue_catalog.RETIRED_CODES
+    )
+    assert not orphans, (
+        f"PROJECT codes with no producer: {orphans}. Either wire one, or delete the entry and add it "
+        "to issue_catalog.RETIRED_CODES so its stranded proposals get withdrawn."
+    )
+
+
+# HARNESS codes open a ticket directly instead of a proposal, so an unwired one strands nothing and
+# is not the bug this section guards. It is still a published claim of coverage the janitor does not
+# have — `MEMCORP-001` says `memory-librarian` reports corpus damage, and that detector never raises
+# it — so the set is PINNED rather than waved through: a NEW dead entry fails here.
+_KNOWN_UNWIRED_HARNESS_CODES = {"MEMCORP-001", "STATE-001"}
+
+
+def test_no_NEW_harness_code_is_left_unwired() -> None:
+    """Adding a catalog entry and forgetting the producer is the same mistake in a lower-stakes
+    place: ISSUE-CODES.md tells the user what the janitor can see, and a stale one lies about it."""
+    have = _codes_with_a_producer()
+    unwired = {
+        code
+        for code, issue in issue_catalog.ISSUE_CATALOG.items()
+        if tickets.KIND_REGISTRY[issue.kind].domain != tickets.PROJECT and code not in have
+    }
+    assert unwired <= _KNOWN_UNWIRED_HARNESS_CODES, (
+        f"new catalog codes with no producer: {sorted(unwired - _KNOWN_UNWIRED_HARNESS_CODES)}"
+    )
+    assert not (_KNOWN_UNWIRED_HARNESS_CODES - unwired - have), (
+        "a code left this list without being wired or removed — update _KNOWN_UNWIRED_HARNESS_CODES"
+    )
+
+
+def test_a_retired_code_is_not_still_being_raised() -> None:
+    """The inverse, and the more dangerous direction: if a listed code were still live, every fire
+    would raise the finding and the reminder pass would immediately withdraw it — an invisible
+    thrash that also guarantees the user never gets to approve the fix."""
+    pat = re.compile(r"raise_issue\(\s*\"([A-Z0-9-]+)\"")
+    raised = {
+        code
+        for py in (ROOT / "scripts").rglob("*.py")
+        for code in pat.findall(py.read_text(encoding="utf-8", errors="replace"))
+    }
+    still_live = sorted(issue_catalog.RETIRED_CODES.keys() & raised)
+    assert not still_live, f"RETIRED_CODES lists codes that are still raised: {still_live}"
+
+
+def test_AICTX_001_stays_retired() -> None:
+    """The live orphan this machinery was built for. It must not be quietly dropped from the map by a
+    later cleanup: the entry is the only thing that withdraws the AICTX-001 proposals already sitting
+    on hosts' boards, and those hosts have no other way to clear them."""
+    assert "AICTX-001" in issue_catalog.RETIRED_CODES
+    assert "AICTX-002" in issue_catalog.ISSUE_CATALOG, "the successor must still be live"
+
+
+def test_a_retired_code_is_gone_from_the_catalog() -> None:
+    """A retired code must not linger as a catalog entry: `reconcile_retired` would then compete with
+    a `reconcile` that could still be called for it, and the published doc would keep advertising
+    coverage the janitor no longer has."""
+    both = sorted(issue_catalog.RETIRED_CODES.keys() & issue_catalog.ISSUE_CATALOG.keys())
+    assert not both, f"retired codes still in the catalog: {both}"
+
+
+def test_reconcile_retired_withdraws_a_stranded_proposal(project: Path) -> None:
+    """The healing half, end to end: a proposal raised under a code that is later retired is
+    withdrawn without anyone naming it — which is the whole point, since by then no detector exists
+    that could name it."""
+    r = issue_catalog.raise_issue("DEP-003", package="reqeusts", target="requests", now=NOW)
+    assert _proposals(project)
+
+    # Retire the code the proposal was raised under, as a real retirement would.
+    retired = dict(issue_catalog.RETIRED_CODES)
+    retired["DEP-003"] = "test retirement"
+    with mock.patch.object(issue_catalog, "RETIRED_CODES", retired):
+        withdrawn = issue_catalog.reconcile_retired()
+
+    assert withdrawn == [("DEP-003", r.trdd)]
+    assert _proposals(project) == [], "the stranded proposal must leave the board"
+
+
+def test_reconcile_retired_leaves_live_codes_alone(project: Path) -> None:
+    """It must key on the retirement list, not on 'looks stale'. A live finding withdrawn here would
+    silently delete a real proposal the user was about to approve."""
+    keep = issue_catalog.raise_issue("WFSEC-001", where=".github/workflows", now=NOW)
+    assert issue_catalog.reconcile_retired() == []
+    live = _proposals(project)
+    assert len(live) == 1 and keep.trdd in live[0].name
+
+
+def test_reconcile_retired_leaves_an_APPROVED_finding_alone(project: Path) -> None:
+    """Approval hands the work to the ticket queue. Retiring the code afterwards must not reach in
+    and cancel work a human already authorized — only the agent working the ticket may close it."""
+    r = issue_catalog.raise_issue("DEP-003", package="reqeusts", target="requests", now=NOW)
+    ok, _ = ticket_proposal.approve(r.trdd, now=NOW)
+    assert ok
+
+    retired = dict(issue_catalog.RETIRED_CODES)
+    retired["DEP-003"] = "test retirement"
+    with mock.patch.object(issue_catalog, "RETIRED_CODES", retired):
+        assert issue_catalog.reconcile_retired() == []
+    assert len(tickets.load_all()) == 1
+
+
+def test_reconcile_retired_is_a_noop_when_nothing_is_retired(project: Path) -> None:
+    """It runs on every fire from the reminder pass, so the common case has to be free of surprises
+    as well as cheap."""
+    issue_catalog.raise_issue("DEP-003", package="reqeusts", target="requests", now=NOW)
+    with mock.patch.object(issue_catalog, "RETIRED_CODES", {}):
+        assert issue_catalog.reconcile_retired() == []
+    assert len(_proposals(project)) == 1
 
 
 # --------------------------------------------------------------------------- #

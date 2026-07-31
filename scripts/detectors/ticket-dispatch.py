@@ -54,6 +54,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import global_state as gs  # noqa: E402
+import issue_catalog  # noqa: E402
 import state  # noqa: E402
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
@@ -64,6 +65,15 @@ _REMIND_CAP = 3  # …and never more than a handful of lines; the rest are count
 
 def _proposal_reminder(now: int) -> list[str]:
     """The standing "these are waiting on YOU" lines, or [] when it is not time (or nothing waits)."""
+    # First, drop the proposals nobody can ever act on. A PROJECT finding is withdrawn only by the
+    # detector that raises its code, so a code that stops being raised strands every proposal already
+    # on the board: nothing re-raises them, nothing withdraws them, and this reminder nags about work
+    # that has no producer left. Doing it HERE — the one channel that surfaces standing proposals,
+    # driven by the board rather than by any detector — is what makes it independent of whichever
+    # detector was retired. See issue_catalog.RETIRED_CODES.
+    for code, uid in issue_catalog.reconcile_retired():
+        state.log_line("ticket-dispatch", f"withdrew TRDD-{uid} — {code} is retired")
+
     waiting = ticket_proposal.pending()
     stamp = state.state_dir() / "ticket-remind-at.ts"
     if not waiting:

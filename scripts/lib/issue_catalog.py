@@ -364,21 +364,11 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="Drift accumulates silently until an incident proves the protection everyone assumed was in place is not.",
         fix="Bring the repo back to the baseline. Applying the baseline AS-IS is pre-approved; any deviation from it needs the user's decision.",
     ),
-    "AICTX-001": Issue(
-        scanner="ai-context-poisoning",
-        kind="security-workflow",
-        severity="critical",
-        title="an agent-context file may be poisoned: {path}",
-        what="A file the AI reads as INSTRUCTIONS (CLAUDE.md, a skill, an agent definition, a rule) contains authority impersonation, invisible unicode, or a jailbreak pattern.",
-        why="This is the highest-leverage attack on an agentic system: the payload does not exploit the code, it exploits the reader — and the reader has the user's full privileges.",
-        fix="Do not 'clean it up' silently. Preserve the file, show the user the exact payload and where it came from, and strip the covert unicode only after they have seen it.",
-    ),
-    # AICTX-002 exists because AICTX-001 above describes a file that CONTAINS a
-    # payload, while the `ai-context-poisoning` scanner finds a dependency whose
-    # code can WRITE such a file. Those are different claims, and raising the
-    # first for the second reported a documented opt-in CLI feature (playwright's
-    # `init-agents`) as a critical compromise — verified false, at the cost of a
-    # full agent dispatch (janitor#110, janitor#99 §4).
+    # AICTX-002 replaced the retired AICTX-001 (see RETIRED_CODES). AICTX-001 described a file that
+    # CONTAINS a payload, while this scanner finds a dependency whose code can WRITE such a file.
+    # Those are different claims, and raising the first for the second reported a documented opt-in
+    # CLI feature (playwright's `init-agents`) as a critical compromise — verified false, at the cost
+    # of a full agent dispatch (janitor#110, janitor#99 §4).
     #
     # The three states are distinct and only the middle one is an active risk:
     #   1. the package CAN write agent-context files   → static scan  → this code
@@ -419,6 +409,61 @@ ISSUE_CATALOG: dict[str, Issue] = {
         fix="Diff the old and new definitions, show the user what changed, and do not re-enable the server until they have approved the change.",
     ),
 }
+
+
+# --------------------------------------------------------------------------- #
+# retired codes — a code that stops being raised must take its proposals with it
+# --------------------------------------------------------------------------- #
+
+# Every code this catalog USED to raise and no longer does, mapped to why.
+#
+# A PROJECT-domain finding becomes a proposal TRDD that only a human can approve, and the only thing
+# that can withdraw one is `reconcile(code, live)` — called BY the detector that raises that code.
+# So the moment a detector stops raising a code, its in-flight proposals become unreachable: nothing
+# raises them, nothing withdraws them, and they sit on the board forever awaiting approval for a
+# finding whose producer no longer exists. The janitor then nags about work nobody can clear.
+#
+# That is not hypothetical — it is how this entry got here. Splitting AICTX-001 into AICTX-002
+# (d89eca8) moved the raise and the reconcile together, correctly, and silently stranded every
+# AICTX-001 proposal already on a host's board. Reported from the field as two "hallucinated"
+# proposals that could not be made to go away.
+#
+# Retiring a code therefore has two obligations, and this map is how the second one is discharged:
+#   1. stop raising it (delete the catalog entry — an unraisable entry is dead code and, worse,
+#      `issue_domain`/ISSUE-CODES.md advertise it as a live code that never fires), and
+#   2. list it HERE, so `reconcile_retired` withdraws its orphans on every host that has any.
+# `test_issue_catalog.py` enforces both directions: no live code may be listed here, and no catalog
+# code may be unraised without being listed here.
+RETIRED_CODES: dict[str, str] = {
+    "AICTX-001": (
+        "split into AICTX-002 (d89eca8): AICTX-001 claimed a file CONTAINS a payload, but the "
+        "scanner only proves a dependency CAN WRITE such a file — raising the first for the second "
+        "reported a documented opt-in CLI feature as a critical compromise (janitor#110)."
+    ),
+}
+
+
+def reconcile_retired(*, project_dir: str | None = None) -> list[tuple[str, str]]:
+    """Withdraw every pending proposal raised under a RETIRED code. Returns `(code, trdd_id)` pairs.
+
+    Deliberately keyed on the proposal's own key prefix and NOT on `ISSUE_CATALOG`, because a retired
+    code is normally DELETED from the catalog — `reconcile()` returns early for an unknown code, so
+    it cannot clean up after a retirement even if someone remembers to call it.
+
+    Cheap and safe to call on every fire: one pass over the pending proposals, and a no-op on the
+    overwhelmingly common case where none of them names a retired code.
+    """
+    if not RETIRED_CODES:
+        return []
+    withdrawn: list[tuple[str, str]] = []
+    for p in ticket_proposal.pending(project_dir):
+        code = p.key.split(":", 1)[0]
+        if code not in RETIRED_CODES:
+            continue
+        uid = ticket_proposal.retract(p.key, project_dir=project_dir)
+        if uid:
+            withdrawn.append((code, uid))
+    return withdrawn
 
 
 # --------------------------------------------------------------------------- #

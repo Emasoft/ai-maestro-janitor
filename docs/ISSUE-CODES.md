@@ -164,11 +164,10 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-17 code(s).
+16 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
-| `AICTX-001` | ai-context-poisoning | critical | an agent-context file may be poisoned: {path} |
 | `AICTX-002` | ai-context-poisoning | low | a dependency can write agent-context files: {path} |
 | `BRPROT-001` | branch-protection | high | the default branch of {slug} is unprotected |
 | `BRPROT-002` | branch-protection | high | the branch-protection baseline on {slug} has drifted: {detail} |
@@ -185,13 +184,6 @@ unattended access to your repository.
 | `WFSEC-004` | workflow-security | medium | a workflow depends on a MUTABLE reference in {where} |
 | `WFSEC-005` | workflow-security | critical | a workflow exposes a secret in {where} |
 | `WFSEC-006` | workflow-security | medium | a workflow's own safety rail is missing or defeated in {where} |
-
-### `AICTX-001` — an agent-context file may be poisoned: {path}
-
-- **Scanner:** `ai-context-poisoning` · **Severity:** `critical` · **Kind:** `security-workflow`
-- **What it is:** A file the AI reads as INSTRUCTIONS (CLAUDE.md, a skill, an agent definition, a rule) contains authority impersonation, invisible unicode, or a jailbreak pattern.
-- **Why it matters:** This is the highest-leverage attack on an agentic system: the payload does not exploit the code, it exploits the reader — and the reader has the user's full privileges.
-- **Fix attempted:** Do not 'clean it up' silently. Preserve the file, show the user the exact payload and where it came from, and strip the covert unicode only after they have seen it.
 
 ### `AICTX-002` — a dependency can write agent-context files: {path}
 
