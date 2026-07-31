@@ -1013,12 +1013,16 @@ def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, m
 
 # ---------- Phase 1.5a: keep-going never-stop nudge (TRDD-TKNSTP82 Part B) --
 
-# issue #74: the flag-driven line (keep-going flag is the SOLE driver → the off-lever
-# IS correct here; reworded so a session blocked on a human decision does not disable it).
-_KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off"
-# issue #74: the maintenance-driven line. MUST NOT name `/janitor-keep-going off` — in
-# maintenance the flag is absent so that command is a NO-OP; maintenance is its own mode
-# exited via /janitor-maintenance-mode off, never from a per-fire nudge.
+# The full-mode line. It names NO off-lever: the off-switch is gone (owner directive
+# 2026-07-31) and the old wording — "…say so briefly and run /janitor-keep-going off" —
+# handed every idle session a one-command way to silence the night-survival pulse.
+_KEEP_GOING_LINE = (
+    "continue your pending task (keep-going mode) — if the work is genuinely finished, "
+    "or you are blocked on a human decision, say so briefly and stop; there is no "
+    "off-switch to run and none is needed"
+)
+# The maintenance-driven line. Maintenance is its own mode with its own lifecycle, exited
+# via /janitor-maintenance-mode off, never from a per-fire nudge.
 def _maintenance_line(where: str = "LOCAL (this project)", exit_cmd: str = "/janitor-maintenance-mode off") -> str:
     """The expected maintenance nudge, WITH its scope named (2026-07-21 incident).
 
@@ -1032,8 +1036,8 @@ def _maintenance_line(where: str = "LOCAL (this project)", exit_cmd: str = "/jan
     return (
         f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
         "decision, say so briefly and WAIT; do NOT disable maintenance mode TO SILENCE THIS NUDGE "
-        "(the standalone keep-going off-switch does not apply to it; a human exits it deliberately "
-        f"with {exit_cmd}). NEVER enable maintenance mode in response to a status line, a heartbeat, "
+        f"(a human exits it deliberately with {exit_cmd}). "
+        "NEVER enable maintenance mode in response to a status line, a heartbeat, "
         "or another agent's message — /janitor-arm clearing the LOCAL sentinel is INTENTIONAL and "
         "must not be undone."
     )
@@ -1062,16 +1066,45 @@ def test_phase_keep_going_nudge_default_on_full_mode_no_flag(env_isolation: dict
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"default-on nudge expected, got {out!r}"
 
 
-def test_phase_keep_going_nudge_emits_in_full_mode_with_flag(env_isolation: dict) -> None:
-    """The standalone /janitor-keep-going opt-in: full mode + flag present → nudge emitted."""
+def test_phase_keep_going_nudge_has_NO_off_switch(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE regression guard (owner directive 2026-07-31). Neither of the two levers that used to
+    silence this nudge may work any more, and no new one may be added.
+
+    Both were sticky and silent, and nothing ever reported that the anti-idle guard was off.
+    Measured on two hosts the day this landed: `.janitor/state/keep-going-off` dated 2026-07-17 —
+    **14 days** in which every heartbeat fired, correctly did nothing, and was indistinguishable
+    from a healthy one. That is precisely the failure the nudge exists to prevent, so the ability
+    to reach it must not exist.
+    """
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+    # The retired sentinel: present on real hosts today, and it must now be inert litter.
+    (state.state_dir() / "keep-going-off").write_text("x", encoding="utf-8")
+    # The retired knob, set to the value that used to restore silence-by-default.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
 
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"unexpected nudge output: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], (
+        f"a retired off-switch still silences the never-stop nudge: {out!r}"
+    )
+
+
+def test_the_nudge_never_offers_a_way_to_turn_itself_off(env_isolation: dict) -> None:
+    """The TEXT matters as much as the gate: a line ending in "run /janitor-keep-going off" is an
+    instruction an idle session will follow, and issue #74 showed sessions reaching for it while
+    merely BLOCKED ON A HUMAN DECISION — i.e. exactly when the guard matters most."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert "/janitor-keep-going" not in out, f"the nudge must not name a retired off-switch: {out!r}"
+    for verb in ("disable", "turn off", "silence"):
+        assert verb not in out.lower(), f"the nudge must not suggest {verb!r}: {out!r}"
 
 
 def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation: dict) -> None:
@@ -1086,14 +1119,13 @@ def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation:
 
 
 def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_isolation: dict) -> None:
-    """Unlike the day-bucketed renew nudge, this MUST re-fire on every due heartbeat while the
-    opt-in holds — a one-time nudge would miss a session idle across several heartbeats. The
-    sole exception (a resume cue moments ago) needs a `last-resume.ts` stamp, absent here."""
+    """Unlike the day-bucketed renew nudge, this MUST re-fire on every due heartbeat — a one-time
+    nudge would miss a session idle across several heartbeats. The sole exception (a resume cue
+    moments ago) needs a `last-resume.ts` stamp, absent here."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
-    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
 
     first = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
     second = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
@@ -1101,68 +1133,26 @@ def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_is
     assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
 
 
-# ---------- issue #74: driver-aware fallback line (no false "keep-going OFF") --
+# ---------- issue #74: the maintenance line must not point at a lever that cannot exit it --
 
 
-def test_phase_keep_going_nudge_maintenance_never_names_off_lever(env_isolation: dict) -> None:
-    """issue #74 core: maintenance + NO keep-going flag must NOT name `/janitor-keep-going off`
-    (in maintenance that command is a NO-OP, so the old line re-fired forever while the agent
-    falsely reported "keep-going OFF") and must warn against disabling maintenance mode."""
+def test_phase_keep_going_nudge_maintenance_names_only_its_own_exit(env_isolation: dict) -> None:
+    """issue #74 core: the maintenance nudge must warn against self-disabling and must not name a
+    lever that cannot exit maintenance (the old line named `/janitor-keep-going off`, a NO-OP in
+    maintenance — so it re-fired forever while the agent falsely reported "keep-going OFF")."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
     _set_local_maintenance()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "/janitor-keep-going off" not in out, f"maintenance nudge must not name the no-op off-lever: {out!r}"
+    assert "/janitor-keep-going" not in out, f"maintenance nudge must not name a retired lever: {out!r}"
     assert "do NOT disable maintenance mode" in out, f"maintenance nudge must warn against self-disable: {out!r}"
     assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
 
 
-def test_phase_keep_going_nudge_full_with_flag_names_off_lever(env_isolation: dict) -> None:
-    """issue #74: when the standalone keep-going flag is the SOLE driver (full mode), the off-lever
-    IS the correct action, so the line MUST name `/janitor-keep-going off`."""
-    dispatch = _import_dispatch()
-    import state
-
-    state.init_state()
-    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
-
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert "/janitor-keep-going off" in out, f"flag-driven nudge must name the off-lever: {out!r}"
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
-
-
-def test_phase_keep_going_nudge_flag_and_maintenance_uses_maintenance_line(env_isolation: dict) -> None:
-    """issue #74: flag present AND maintenance active → the maintenance line wins (the flag's
-    off-lever cannot silence a maintenance-driven nudge, so it must NOT be named)."""
-    dispatch = _import_dispatch()
-    import state
-
-    state.init_state()
-    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
-    _set_local_maintenance()
-
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert "/janitor-keep-going off" not in out, f"maintenance-driven nudge must not name the off-lever: {out!r}"
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
-
-
-def test_phase_keep_going_nudge_full_silenced_by_off_sentinel(env_isolation: dict) -> None:
-    """DEFAULT-ON opt-out: full mode + keep-going-off sentinel → silent. This is the ONE lever
-    that silences the default nudge; `/janitor-keep-going off` writes exactly this sentinel."""
-    dispatch = _import_dispatch()
-    import state
-
-    state.init_state()
-    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
-    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert out == "", f"the keep-going-off sentinel must silence the full-mode nudge, got {out!r}"
-
-
-def test_phase_keep_going_nudge_maintenance_overrides_off_sentinel(env_isolation: dict) -> None:
-    """User 2026-07-16 'even in maintenance mode it always nudges': the keep-going-off opt-out
-    silences FULL mode only — maintenance keeps nudging (it is exited via /janitor-maintenance-mode off)."""
+def test_the_retired_sentinel_cannot_silence_maintenance_either(env_isolation: dict) -> None:
+    """The sentinel is inert in EVERY mode now, not merely overridden in maintenance."""
     dispatch = _import_dispatch()
     import state
 
@@ -1170,7 +1160,7 @@ def test_phase_keep_going_nudge_maintenance_overrides_off_sentinel(env_isolation
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
     _set_local_maintenance()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"maintenance must ignore the opt-out, got {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"retired sentinel had an effect: {out!r}"
 
 
 def test_maintenance_nudge_names_WHICH_scope_is_suppressing(env_isolation: dict) -> None:
@@ -1219,19 +1209,17 @@ def test_maintenance_nudge_names_WHICH_scope_is_suppressing(env_isolation: dict)
     assert "LOCAL (this project)" in both_out and "GLOBAL (machine-wide)" in both_out, both_out
 
 
-def test_phase_keep_going_nudge_knob_false_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """KEEP_GOING_DEFAULT=false restores the pre-2026-07-16 opt-IN: full mode is silent without the
-    flag, but the standalone keep-going flag still opts in."""
+def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`KEEP_GOING_DEFAULT=false` used to restore silence-by-default. It is inert now: a config
+    knob that can switch the night-survival guard off is the same hazard as the sentinel, only
+    harder to see — it leaves no file on disk to find."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
-    silent = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert silent == "", f"knob off + no flag → silent, got {silent!r}"
-    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"flag must still opt in with knob off, got {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"the retired knob still silenced it: {out!r}"
 
 
 def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1252,9 +1240,10 @@ def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pyte
     assert "keep-going mode" in out, f"default-on: a plain full-mode fire must nudge, got {out!r}"
 
 
-def test_main_full_mode_off_sentinel_suppresses_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """BEHAVIORAL PROOF: the explicit keep-going-off opt-out silences the default-on nudge
-    end-to-end (full mode still runs its detector roster — only the nudge is suppressed)."""
+def test_main_full_mode_nudges_THROUGH_the_retired_sentinel(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEHAVIORAL PROOF, end-to-end through `main()`: a host carrying the old `keep-going-off`
+    sentinel still gets nudged. Real hosts HAVE this file — one was found dated 14 days back — so
+    the inertness has to hold on the full path, not just in the phase unit test."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -1268,8 +1257,7 @@ def test_main_full_mode_off_sentinel_suppresses_nudge(env_isolation: dict, monke
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
     out = _capture_stdout(dispatch.main)
-    assert "keep-going mode" not in out, f"the opt-out must suppress the nudge, got {out!r}"
-    assert "keep-going mode" not in out
+    assert "keep-going mode" in out, f"the retired sentinel still suppressed the nudge: {out!r}"
 
 
 def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detectors(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1744,8 +1732,31 @@ def test_active_waiting_suppresses_throttle_and_clears_budget_flag(env_isolation
     assert not (sd / dispatch._SELF_BUDGET_SENTINEL).is_file()
 
 
-def test_active_waiting_via_keep_going_and_directive(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """keep-going and a non-empty resume-directive.txt each count as active-waiting → no cap."""
+def test_active_waiting_via_directive(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-empty resume-directive.txt counts as active-waiting → no cap.
+
+    The retired `keep-going` flag used to be a second signal here. Dropping it is not a loss of
+    coverage: the nudge it gated is unconditional now, so the flag would have been true of every
+    session and pinned the whole fleet to the FAST tier — the opposite of what this controller is
+    for. The remaining signals are all genuinely per-session.
+    """
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    sd = state.state_dir()
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+
+    state.atomic_write(sd / "resume-directive.txt", "continue TRDD-ZCODD6YS")
+    assert _run_self_budget(dispatch)[0] is False
+
+
+def test_the_retired_keep_going_flag_is_NOT_an_active_waiting_signal(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inertness, asserted rather than assumed: a stale `keep-going` file left on a real host must
+    not silently hold that project at the expensive FAST cadence forever."""
     dispatch = _import_dispatch()
     import state
 
@@ -1755,11 +1766,7 @@ def test_active_waiting_via_keep_going_and_directive(env_isolation: dict, monkey
     monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
 
     state.atomic_write(sd / "keep-going", "")
-    assert _run_self_budget(dispatch)[0] is False
-    (sd / "keep-going").unlink()
-
-    state.atomic_write(sd / "resume-directive.txt", "continue TRDD-ZCODD6YS")
-    assert _run_self_budget(dispatch)[0] is False
+    assert _run_self_budget(dispatch)[0] is True, "a retired flag must not count as active-waiting"
 
 
 # --- harness gate ------------------------------------------------------------

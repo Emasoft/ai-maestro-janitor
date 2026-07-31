@@ -370,10 +370,14 @@ def _fresh_cover(proj: Path) -> None:
 def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE NEGATIVE TEST (MF4): a session active-waiting for a NON-rate-limit reason —
-    keep-going, a resume directive, or pending background agents — stays FAST with NO fresh
-    daemon-wake-covered.ts. This proves the coverage stamp, NOT active_waiting, authorizes
-    demotion: the stamp demotes ONLY the rate-limit/resume reason, never these."""
+    """THE NEGATIVE TEST (MF4): a session active-waiting for a NON-rate-limit reason — a resume
+    directive or pending background agents — stays FAST with NO fresh daemon-wake-covered.ts.
+    This proves the coverage stamp, NOT active_waiting, authorizes demotion: the stamp demotes
+    ONLY the rate-limit/resume reason, never these.
+
+    `keep-going` used to be a third reason here and is gone with the off-switches: the nudge it
+    gated is unconditional now, so it would be true of every session and pin the whole fleet FAST.
+    """
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
@@ -381,10 +385,6 @@ def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
     sd = _state(proj)
     now = int(time.time())
     monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
-
-    (sd / "keep-going").write_text("")
-    assert dispatch._cadence_active_waiting(sd, now) is True
-    (sd / "keep-going").unlink()
 
     (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     assert dispatch._cadence_active_waiting(sd, now) is True
@@ -397,17 +397,17 @@ def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
 def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Even a FRESH coverage stamp must NOT demote a keep-going session: the stamp suppresses
-    ONLY the rate-limit/resume reason. keep-going is an independent FAST signal, so a covered
-    keep-going session is still FAST — this is why the demotion keys on the reason, not on
-    active_waiting as a whole."""
+    """Even a FRESH coverage stamp must NOT demote a session waiting on a resume DIRECTIVE: the
+    stamp suppresses ONLY the rate-limit/resume reason. A pending directive is an independent FAST
+    signal, so a covered session with one is still FAST — this is why the demotion keys on the
+    reason, not on active_waiting as a whole."""
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
     dispatch = _import_dispatch()
     sd = _state(proj)
     monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
-    (sd / "keep-going").write_text("")
+    (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, int(time.time())) is True
 

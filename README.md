@@ -583,11 +583,13 @@ Maintenance **wins over** a global stop, so one session can stay warm while the
 fleet stays down (the daemon idles its tasks and is not respawned). Use it for
 idle-but-returning work; `/janitor-maintenance-mode off` restores full fires.
 
-**KEEP-GOING is the standalone never-stop nudge for FULL mode.** Maintenance already emits
-the continue-nudge unconditionally (above); `/janitor-keep-going` (local-only, no global
-variant) opts a session running in normal FULL mode into the SAME nudge — every due heartbeat
-prints `[janitor-resume]` + "continue your pending task" — while keeping detectors, the
-daemon, and drift reporting active. `/janitor-keep-going off` stops the nudge.
+**The never-stop nudge is UNCONDITIONAL and has no off-switch.** Every due heartbeat, in every
+mode, prints `[janitor-resume]` + "continue your pending task". It used to be opt-in with an
+opt-out (`/janitor-keep-going` / `off`, plus a `keep_going_default` config knob); both were
+removed in v0.67.0 because both were sticky and silent. A host was found carrying
+`.janitor/state/keep-going-off` dated 14 days earlier: every heartbeat had fired, correctly done
+nothing, and looked exactly like a healthy one — which is precisely the failure the nudge exists
+to prevent. A guard you can switch off invisibly is not a guard.
 
 **Rollout caveat.** The `[janitor-self-disarm]` marker is baked into the cron
 prompt at arm time, so crons armed BEFORE this shipped won't self-disarm on

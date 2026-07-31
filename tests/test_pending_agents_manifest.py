@@ -393,15 +393,19 @@ def test_keep_going_nudge_default_on_names_pending_agent_full_mode(iso, capsys) 
     assert "pending-agents.json" in out
 
 
-def test_keep_going_nudge_off_sentinel_silent_even_with_pending_agent(iso, capsys) -> None:
-    """The explicit `keep-going-off` opt-out silences the full-mode nudge even with a pending
-    background agent — the ONE deliberate lever that replaces the old implicit full-mode silence."""
+def test_retired_off_sentinel_cannot_strand_a_pending_agent(iso, capsys) -> None:
+    """The retired `keep-going-off` sentinel must NOT silence the nudge — least of all here, where
+    a background agent is still in flight and the nudge is what tells the session to resume it.
+    That combination is the worst case the off-switch created: work parked, and the one mechanism
+    that would pick it back up switched off invisibly."""
     state, pa = iso["state"], iso["pa"]
     pa.add("fork-E", now=int(time.time()))
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
     dispatch = _import_dispatch()
     dispatch._phase_keep_going_nudge("full")
-    assert capsys.readouterr().out == ""
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"the retired sentinel silenced the nudge: {out!r}"
+    assert "1 background agent(s) pending" in out, f"the pending agent must still be named: {out!r}"
 
 
 # --------------------------------------------------------------------------- #

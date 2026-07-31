@@ -308,12 +308,16 @@ makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session r
 → the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
 tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
 firing costs zero (MAINTENANCE is the middle option: keep the fire but at that 0.1× floor).
-The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays). `janitor-keep-going`
-↔ `janitor-keep-going off` (TRDD-TKNSTP82, local-only, no global variant, `.janitor/state/keep-going`)
-is the STANDALONE opt-in for the same never-stop continue-nudge while running in FULL mode
-(detectors/daemon stay active) — `dispatch._phase_keep_going_nudge(mode)` fires it whenever that
-flag is set OR mode=="maintenance", called right before the maintenance early-return so both
-modes get it.
+The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
+**The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge(mode)`
+fires on EVERY heartbeat in EVERY mode, called right before the maintenance early-return so both
+modes get it. Its opt-in flag, its `/janitor-keep-going off` sentinel and the
+`keep_going_default` knob were all REMOVED in v0.67.0 (owner directive 2026-07-31, *"remove the
+very option of disabling the janitor features"*): a host was found carrying
+`.janitor/state/keep-going-off` dated 14 days back, so every fire had correctly done nothing and
+looked healthy. The ONE remaining skip is time-bounded and self-clearing — the single fire right
+after a `[janitor-resume]` cue, which already said "continue" and carried the directive
+(`_keep_going_muted_by_recent_resume`); that is a de-duplicator, not a mute.
 Rollout caveat: crons armed BEFORE this shipped don't self-disarm (the cron prompt is baked at
 arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 (user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).
