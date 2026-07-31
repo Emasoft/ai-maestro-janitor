@@ -86,9 +86,11 @@ def _active_global_stop(gs) -> tuple[str, str, int] | None:
     stat/read failure degrades to empty, never raises — this must never break
     session start.
     """
+    # PAUSED was a second row here. The global-pause flag is retired (owner directive
+    # 2026-07-31) — a stop that leaves everything running while doing nothing is what made
+    # the silent-disable incident invisible in the first place.
     for kind, fname, present in (
         ("DISARMED", "kill-switch.flag", gs.kill_switch_present),
-        ("PAUSED", "global-pause.flag", gs.global_pause_present),
     ):
         if not present():
             continue

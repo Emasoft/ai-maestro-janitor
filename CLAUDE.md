@@ -291,13 +291,15 @@ is the sole path using `additionalContext` (which DOES reach the model). Fast
 no-op for any non-user-mem prompt; never crashes the session.
 
 **Skills (`skills/`)** — control surface (severity×scope, TRDD-a3fa4d5d): `janitor-arm`
-↔ `janitor-disarm` (local cron true-stop), `janitor-pause` ↔ `janitor-unpause` (local
-suspend, `.janitor/state/paused`), `janitor-global-disarm` ↔ `janitor-global-arm` +
-`janitor-global-pause` ↔ `janitor-global-unpause` + `janitor-maintenance-mode` (local +
-`global`, TRDD-FPL60EKV) (machine-wide, backed by
-`scripts/global_control_cli.py disarm|arm|pause|unpause|maintenance|maintenance-off|status` —
-kill-switch=disarm makes the daemon EXIT, global-pause=pause keeps the daemon ALIVE,
-maintenance-mode.flag=daemon idles but sessions keep firing CHEAP). THREE heartbeat modes
+↔ `janitor-disarm` (local cron true-stop), `janitor-global-disarm` ↔ `janitor-global-arm`
++ `janitor-maintenance-mode` (local + `global`, TRDD-FPL60EKV) (machine-wide, backed by
+`scripts/global_control_cli.py disarm|arm|maintenance|maintenance-off|status` —
+kill-switch=disarm makes the daemon EXIT, maintenance-mode.flag=daemon idles but sessions
+keep firing CHEAP). **PAUSE (local + global) WAS REMOVED in v0.67.0** (owner directive
+2026-07-31): it suspended the janitor while leaving the cron firing and the daemon
+resident, i.e. indistinguishable from a healthy fleet from the outside — the same
+silent-disable shape as the `keep-going-off` incident. Stale `global-pause.flag` /
+`.janitor/state/paused` are INERT and swept. THREE heartbeat modes
 (`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon), MAINTENANCE (fire
 cache-refresh-ONLY — no chores/daemon, but DOES emit the never-stop keep-going nudge
 (TRDD-TKNSTP82); keeps the prompt cache warm at the 0.1× READ
@@ -308,7 +310,6 @@ makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session r
 → the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
 tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
 firing costs zero (MAINTENANCE is the middle option: keep the fire but at that 0.1× floor).
-The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
 **The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge(mode)`
 fires on EVERY heartbeat in EVERY mode, called right before the maintenance early-return so both
 modes get it. Its opt-in flag, its `/janitor-keep-going off` sentinel and the

@@ -703,15 +703,14 @@ def test_maintenance_mode_clear_idempotent(state_dir: Path) -> None:
     assert gs.maintenance_mode_present() is False
 
 
-def test_maintenance_mode_orthogonal_to_kill_switch_and_pause(state_dir: Path) -> None:
-    """The maintenance flag is a distinct file — setting it never sets the kill-switch or
-    global-pause, and vice-versa (they are orthogonal machine-wide controls)."""
+def test_maintenance_mode_orthogonal_to_kill_switch(state_dir: Path) -> None:
+    """The maintenance flag is a distinct file — setting it never sets the kill-switch, and
+    vice-versa (they are orthogonal machine-wide controls)."""
     gs = _gs()
     gs.init_global_state()
     gs.set_maintenance_mode("m")
     assert gs.maintenance_mode_present() is True
     assert gs.kill_switch_present() is False
-    assert gs.global_pause_present() is False
     gs.clear_maintenance_mode()
     gs.set_kill_switch("k")
     assert gs.maintenance_mode_present() is False, "kill-switch must not imply maintenance"

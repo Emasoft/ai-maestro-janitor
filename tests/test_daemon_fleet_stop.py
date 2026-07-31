@@ -107,12 +107,19 @@ def test_dedupe_skips_already_injected(monkeypatch, tmp_path) -> None:
     assert gs.fleet_injections_seen() == {"41:disarm", "42:disarm"}
 
 
-def test_pause_injects_pause_command(monkeypatch, tmp_path) -> None:
-    """A pause flag (no kill-switch) injects /janitor-pause."""
+def test_a_stale_pause_flag_injects_NOTHING(monkeypatch, tmp_path) -> None:
+    """The retired pause flag must not drive a fleet-wide injection.
+
+    Pause is gone (owner directive 2026-07-31) and `/janitor-pause` no longer exists, so a host
+    still carrying the flag would otherwise have every session in the fleet typed at with a
+    command that does not resolve — a fleet-wide error loop driven by dead state.
+    """
     fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41)])
-    gs.set_global_pause("p")
+    cd = gs.control_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "global-pause.flag").write_text("{}", encoding="utf-8")
     daemon.task_fleet_stop()
-    assert [c["command"] for c in fire.calls] == ["/janitor-pause"]
+    assert fire.calls == [], f"a retired flag still injected: {fire.calls}"
 
 
 def test_no_stamp_on_fire_failure(monkeypatch, tmp_path) -> None:

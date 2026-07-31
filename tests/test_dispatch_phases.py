@@ -82,24 +82,22 @@ def _capture_stdout(fn):
 # ---------- Phase 0: machine-wide global pause (TRDD-a3fa4d5d) -------------
 
 
-def test_phase_global_paused_false_when_flag_absent(env_isolation: dict) -> None:
-    """No global-pause flag → the phase returns False and the heartbeat proceeds."""
+def test_a_stale_global_pause_flag_no_longer_stops_anything(env_isolation: dict) -> None:
+    """The retired global-pause flag is INERT (owner directive 2026-07-31).
+
+    A host that was paused under an older janitor still has `global-pause.flag` on disk, and it
+    must not keep that machine suspended after the upgrade. Pause was removed because a stop that
+    leaves the daemon resident and every heartbeat firing-but-idle is indistinguishable, from the
+    outside, from a healthy fleet — the exact shape of the incident.
+    """
     dispatch = _import_dispatch()
     import global_state as gs
 
     gs.init_global_state()
-    assert dispatch._phase_global_paused() is False
-
-
-def test_phase_global_paused_true_when_flag_set(env_isolation: dict) -> None:
-    """A machine-wide global pause → the phase returns True so main() self-disarms THIS
-    session's heartbeat (emits [janitor-self-disarm] → the session deletes its own cron)."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-
-    gs.init_global_state()
-    gs.set_global_pause("test")
-    assert dispatch._phase_global_paused() is True
+    cd = gs.control_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "global-pause.flag").write_text("stale", encoding="utf-8")
+    assert dispatch._resolve_heartbeat_mode() == "full", "a retired flag still suppressed the fire"
 
 
 # ---------- Phase 0: machine-wide global DISARM / kill-switch (TRDD-NJ22HNC3) ----------
@@ -159,32 +157,30 @@ def test_main_self_disarms_when_globally_disarmed(env_isolation: dict, monkeypat
     assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
 
 
-def test_main_self_disarms_when_globally_paused(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """global-pause (the "stop the project heartbeats but keep the daemon" control) ALSO
-    self-disarms: main() emits the bare [janitor-self-disarm] marker and runs no detector.
-    Pre-RQ9FIFX6 it only SILENCED — the cron kept firing ~618k cached tokens. Now it TRULY
-    stops (deletes the cron = free), which is what the user asked for.
+def test_main_ignores_a_stale_global_pause_flag(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: a leftover global-pause flag must NOT stop a fire.
+
+    Pause used to reach the same self-disarm path as the kill-switch. It is retired (owner
+    directive 2026-07-31), and real hosts carry the flag, so the inertness has to hold through
+    `main()` and not merely in the mode resolver — otherwise upgrading would leave those machines
+    silently suspended with nothing on screen to say why.
     """
     dispatch = _import_dispatch()
     import global_state as gs
-    import state
 
     gs.init_global_state()
-    gs.set_global_pause("paused")
+    cd = gs.control_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "global-pause.flag").write_text("stale", encoding="utf-8")
 
     ran: list[str] = []
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
-    monkeypatch.setattr(
-        dispatch.gs,
-        "ensure_daemon_running",
-        lambda *a, **k: pytest.fail("daemon spawn attempted while globally paused"),
-    )
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
     out = _capture_stdout(dispatch.main)
-    assert out.strip() == "[janitor-self-disarm]", f"a globally-paused heartbeat must emit the bare self-disarm marker, got {out!r}"
-    assert ran == [], f"a globally-paused heartbeat must run NO detector, ran {ran}"
-    stamps = list(state.state_dir().glob("last-run-*.ts"))
-    assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+    assert "[janitor-self-disarm]" not in out, f"a retired flag still self-disarmed the session: {out!r}"
+    assert ran, "a retired flag still suppressed every detector"
 
 
 def test_main_self_disarm_is_idempotent_self_limiting(env_isolation: dict) -> None:
@@ -915,16 +911,6 @@ def test_resolve_heartbeat_mode_stop_on_kill_switch(env_isolation: dict) -> None
 
     gs.init_global_state()
     gs.set_kill_switch("test")
-    assert dispatch._resolve_heartbeat_mode() == "stop"
-
-
-def test_resolve_heartbeat_mode_stop_on_global_pause(env_isolation: dict) -> None:
-    """A global-pause with no maintenance opt-in resolves to STOP (self-disarm)."""
-    dispatch = _import_dispatch()
-    import global_state as gs
-
-    gs.init_global_state()
-    gs.set_global_pause("test")
     assert dispatch._resolve_heartbeat_mode() == "stop"
 
 

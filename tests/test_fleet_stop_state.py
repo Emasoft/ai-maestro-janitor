@@ -29,15 +29,22 @@ def test_flag_state_none_when_no_flags(monkeypatch, tmp_path: Path) -> None:
     assert gs.fleet_stop_flag_state() is None
 
 
-def test_flag_state_disarm_dominates_pause(monkeypatch, tmp_path: Path) -> None:
-    """The kill-switch (disarm) takes precedence over pause when both are set."""
+def test_flag_state_is_disarm_or_nothing(monkeypatch, tmp_path: Path) -> None:
+    """Only the kill-switch produces a fleet-stop state now.
+
+    It used to also return "pause" for the softer flag; pause is retired (owner directive
+    2026-07-31), so a host carrying a stale `global-pause.flag` must read as NOT stopped —
+    otherwise the upgrade would leave that fleet stopped by dead state.
+    """
     _isolate(monkeypatch, tmp_path)
-    gs.set_global_pause("p")
-    assert gs.fleet_stop_flag_state() == "pause"
+    cd = gs.control_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "global-pause.flag").write_text("{}", encoding="utf-8")
+    assert gs.fleet_stop_flag_state() is None, "a retired flag must not stop the fleet"
     gs.set_kill_switch("d")
     assert gs.fleet_stop_flag_state() == "disarm"
     gs.clear_kill_switch()
-    assert gs.fleet_stop_flag_state() == "pause"
+    assert gs.fleet_stop_flag_state() is None
 
 
 def test_record_then_seen_roundtrip(monkeypatch, tmp_path: Path) -> None:

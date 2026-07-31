@@ -1,12 +1,14 @@
 """Tests for the machine-wide janitor control flags (TRDD-a3fa4d5d).
 
-Two distinct global flags, each with its own semantics:
+One machine-wide stop, plus a keep-warm mode:
   * the kill-switch (DISARM) — daemon exits AND every heartbeat goes silent. The
     daemon + ensure_daemon_running + dispatch.py Phase 0 all honor it (TRDD-NJ22HNC3).
-    The `disarm` CLI raises the kill-switch AND the pause flag (so already-cached
-    heartbeats silence immediately); `arm` clears both.
-  * the global-pause flag (PAUSE) — daemon idles but stays alive, heartbeats silent;
-    set ALONE by /janitor-global-pause, cleared by /janitor-global-unpause.
+  * the maintenance flag — sessions keep firing, cache-refresh-only.
+
+The global-pause flag (PAUSE) was a third mechanism until 2026-07-31. It is retired: a
+stop that leaves the daemon resident and every heartbeat firing-but-idle is
+indistinguishable from a healthy fleet, which is how a project sat silently disabled for
+two weeks. Only `clear_global_pause` survives, as a migration sweep run by `arm`.
 
 These cover the global_state primitives + the global_control_cli surface against an
 isolated state dir (no real daemon, no real ~/.claude). The daemon-idle and
@@ -59,42 +61,6 @@ def test_set_kill_switch_default_reason(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     gs.set_kill_switch()
     assert json.loads((tmp_path / "kill-switch.flag").read_text(encoding="utf-8"))["reason"] == "stopped"
-
-
-# ---------- PAUSE (global-pause flag) ----------
-
-def test_global_pause_set_and_clear(tmp_path, monkeypatch) -> None:
-    """set creates the global-pause flag, clear removes it, clear is idempotent — and
-    it is a DIFFERENT file from the kill-switch (disarm ≠ pause)."""
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    assert gs.global_pause_present() is False
-    gs.set_global_pause("paused via test")
-    assert gs.global_pause_present() is True
-    assert json.loads((tmp_path / "global-pause.flag").read_text(encoding="utf-8"))["reason"] == "paused via test"
-    assert gs.kill_switch_present() is False     # pause does NOT set the disarm flag
-    gs.clear_global_pause()
-    assert gs.global_pause_present() is False
-    gs.clear_global_pause()                       # idempotent
-
-
-def test_disarm_and_pause_are_independent(tmp_path, monkeypatch) -> None:
-    """The two flags are orthogonal — clearing one never clears the other."""
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    gs.set_kill_switch()
-    gs.set_global_pause()
-    assert gs.kill_switch_present() and gs.global_pause_present()
-    gs.clear_global_pause()
-    assert gs.kill_switch_present() is True and gs.global_pause_present() is False
 
 
 # ---------- the global_control_cli surface ----------
@@ -151,14 +117,13 @@ def test_a_stop_with_no_user_intent_is_REFUSED(tmp_path, monkeypatch, capsys) ->
     monkeypatch.setattr(cli.sys, "argv", ["x", "disarm", "an agent decided this on its own"])
     assert cli.main() != 0, "an unauthorized machine-wide stop must FAIL, not silently succeed"
     assert gs.kill_switch_present() is False, "no flag may be raised without the user's say-so"
-    assert gs.global_pause_present() is False
 
 
 def test_cli_disarm_arm_roundtrip(tmp_path, monkeypatch, capsys) -> None:
-    """DISARM is the TRUE STOP: it raises BOTH the kill-switch AND the global-pause flag
-    so per-session heartbeats go silent IMMEDIATELY — even one running a pre-fix cached
-    dispatch.py that honors only global-pause (TRDD-NJ22HNC3). ARM clears BOTH (full
-    revive)."""
+    """DISARM is the TRUE STOP: the kill-switch makes the daemon EXIT and every heartbeat go
+    silent (TRDD-NJ22HNC3). ARM revives it, and also SWEEPS the retired global-pause flag an
+    older version could have left set — nothing reads it now, but a stale flag in the control
+    plane makes a healthy machine look suspended to the next reader."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
     # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
     # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
@@ -169,31 +134,40 @@ def test_cli_disarm_arm_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli.sys, "argv", ["x", "disarm", "because"])
     assert cli.main() == 0
     assert gs.kill_switch_present() is True
-    assert gs.global_pause_present() is True, \
-        "disarm must ALSO raise the pause flag so already-cached heartbeats go silent now"
     monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
     assert "DISARMED" in capsys.readouterr().out
     monkeypatch.setattr(cli.sys, "argv", ["x", "arm"])
     assert cli.main() == 0
     assert gs.kill_switch_present() is False
-    assert gs.global_pause_present() is False, "arm must clear BOTH flags (full revive)"
 
 
-def test_cli_pause_does_not_disarm(tmp_path, monkeypatch) -> None:
-    """PAUSE stays pause-only — it raises ONLY the global-pause flag, never the
-    kill-switch. (Disarm is the superset that raises both; pause is the soft idle.)"""
+def test_the_pause_subcommands_no_longer_exist(tmp_path, monkeypatch) -> None:
+    """`pause` / `unpause` must be REJECTED, not silently accepted as a no-op.
+
+    A retired verb that exits 0 is worse than one that errors: a script (or an agent) keeps
+    calling it, believes the fleet is suspended, and nothing says otherwise.
+    """
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    _user_asked(monkeypatch, tmp_path, "/janitor-global-pause")
-    monkeypatch.setattr(cli.sys, "argv", ["x", "pause", "soft idle"])
+    for verb in ("pause", "unpause"):
+        _user_asked(monkeypatch, tmp_path, f"/janitor-global-{verb}")
+        monkeypatch.setattr(cli.sys, "argv", ["x", verb])
+        with pytest.raises(SystemExit):
+            cli.main()
+
+
+def test_arm_sweeps_a_stale_pause_flag(tmp_path, monkeypatch) -> None:
+    """The migration: a host paused under an older janitor must not keep a flag that makes it
+    look suspended forever. `arm` is where the sweep runs."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
+    stale = tmp_path / "global-pause.flag"
+    stale.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(cli.sys, "argv", ["x", "arm"])
     assert cli.main() == 0
-    assert gs.global_pause_present() is True
-    assert gs.kill_switch_present() is False, "pause must NOT set the kill-switch"
+    assert not stale.exists(), "arm must sweep the retired pause flag"
 
 
 def test_cli_reload_skills_stamps_only_its_own_flag(tmp_path, monkeypatch, capsys) -> None:
@@ -215,45 +189,10 @@ def test_cli_reload_skills_stamps_only_its_own_flag(tmp_path, monkeypatch, capsy
     body = (tmp_path / "skills-reload-needed.flag").read_text(encoding="utf-8")
     assert json.loads(body)["reason"] == "installed skill-x"
     # It is NOT a stop: neither the kill-switch nor the pause flag is raised.
-    assert gs.kill_switch_present() is False and gs.global_pause_present() is False
+    assert gs.kill_switch_present() is False
     monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
     assert "RUNNING" in capsys.readouterr().out
-
-
-def test_cli_pause_unpause_roundtrip(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    _user_asked(monkeypatch, tmp_path, "/janitor-global-pause")
-    monkeypatch.setattr(cli.sys, "argv", ["x", "pause"])
-    assert cli.main() == 0
-    assert gs.global_pause_present() is True
-    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
-    cli.main()
-    assert "PAUSED" in capsys.readouterr().out
-    monkeypatch.setattr(cli.sys, "argv", ["x", "unpause"])
-    assert cli.main() == 0
-    assert gs.global_pause_present() is False
-
-
-def test_cli_status_precedence_disarm_over_pause(tmp_path, monkeypatch, capsys) -> None:
-    """When BOTH flags are set, status reports DISARMED (the stronger state) — a
-    disarmed daemon is stopped, so 'paused' would be misleading."""
-    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
-    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
-    # TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME isolated tmp_path so
-    # the raw-path assertions below (which read `tmp_path / "<flag>"` directly) still
-    # find what set_*() wrote, and so no test here shares the real ~/.claude/janitor-control.
-    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
-    gs.set_kill_switch()
-    gs.set_global_pause()
-    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
-    cli.main()
-    assert "DISARMED" in capsys.readouterr().out
 
 
 def test_cli_default_command_is_status(tmp_path, monkeypatch, capsys) -> None:
@@ -267,7 +206,7 @@ def test_cli_default_command_is_status(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli.sys, "argv", ["x"])
     assert cli.main() == 0
     assert "RUNNING" in capsys.readouterr().out
-    assert gs.kill_switch_present() is False and gs.global_pause_present() is False
+    assert gs.kill_switch_present() is False
 
 
 # ---------- MAINTENANCE (maintenance flag, TRDD-FPL60EKV) ----------
@@ -293,7 +232,7 @@ def test_cli_maintenance_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     assert gs.maintenance_mode_present() is False
 
 
-def test_cli_maintenance_does_not_disarm_or_pause(tmp_path, monkeypatch) -> None:
+def test_cli_maintenance_does_not_disarm(tmp_path, monkeypatch) -> None:
     """MAINTENANCE raises ONLY its own flag — never the kill-switch or global-pause. It is
     the opposite intent (keep firing cheap, not stop), so it must not imply a stop."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
@@ -306,7 +245,6 @@ def test_cli_maintenance_does_not_disarm_or_pause(tmp_path, monkeypatch) -> None
     assert cli.main() == 0
     assert gs.maintenance_mode_present() is True
     assert gs.kill_switch_present() is False, "maintenance must NOT disarm"
-    assert gs.global_pause_present() is False, "maintenance must NOT pause"
 
 
 def test_cli_status_maintenance_wins_over_disarm(tmp_path, monkeypatch, capsys) -> None:

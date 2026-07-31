@@ -376,22 +376,11 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
 - `/janitor-disarm` — stops the heartbeat cron. Deletes every
   `[janitor-heartbeat]` job, clears the arm-timestamp, and suppresses the
   renewal nudge. Use to pause janitor activity without uninstalling.
-- `/janitor-pause [duration]` — suppresses heartbeat output without
-  removing the cron. Writes `.janitor/state/paused` with an optional epoch
-  expiry; while present, dispatch.py exits silently. Lighter than
-  `/janitor-disarm` — use when starting a focus block or large refactor.
-  `/janitor-unpause` lifts the pause; if a duration was supplied
-  (`/janitor-pause 2h`, `/janitor-pause until 18:00`), the next heartbeat
-  after expiry auto-clears the sentinel.
-- `/janitor-unpause` — removes the paused sentinel. Idempotent (no-op when
-  not paused). Does NOT arm the cron — for that, use `/janitor-arm`.
-- `/janitor-global-disarm` · `/janitor-global-arm` ·
-  `/janitor-global-pause` · `/janitor-global-unpause` — the global-scope
-  counterparts of the four local commands above, acting on the machine-wide
+- `/janitor-global-disarm` · `/janitor-global-arm` — the global-scope
+  counterparts of the two local commands above, acting on the machine-wide
   daemon and every Claude Code instance at once (see
-  [Control commands](#control-commands-severity--scope) for the full
-  severity × scope matrix). Backed by
-  `scripts/global_control_cli.py disarm|arm|pause|unpause|status`.
+  [Control commands](#control-commands-severity--scope)). Backed by
+  `scripts/global_control_cli.py disarm|arm|status`.
 - `/janitor-memory-record-recent` — user-invoked harvest of recent changes
   into the **Wikimem** (the project's markdown memory system) — the active
   counterpart of the `memorize-nudge` heartbeat detector (which only
@@ -547,7 +536,6 @@ quadrants:
 | | Local (this project) | Global (daemon + all instances) |
 |---|---|---|
 | **Disarm** = true stop / teardown | `/janitor-disarm` ↔ `/janitor-arm` | `/janitor-global-disarm` ↔ `/janitor-global-arm` |
-| **Pause** = suspend (no daemon teardown) | `/janitor-pause` ↔ `/janitor-unpause` | `/janitor-global-pause` ↔ `/janitor-global-unpause` |
 | **Maintenance** = keep firing, cache-refresh-only | `/janitor-maintenance-mode` ↔ `/janitor-maintenance-mode off` | `/janitor-maintenance-mode global` ↔ `/janitor-maintenance-mode global off` |
 
 **DISARM tears down.** Locally it removes the heartbeat cron, so nothing
@@ -559,17 +547,12 @@ session runs `/janitor-disarm` and the cron **deletes itself**
 (TRDD-RQ9FIFX6). `/janitor-global-arm` clears the switch; re-arm a session
 with `/janitor-arm` and its next heartbeat lazy-spawns a fresh daemon.
 
-**PAUSE keeps the daemon alive.** Locally the cron keeps firing on schedule
-but `dispatch.py` no-ops in place (no drift lines surface), so a locally
-paused janitor resumes instantly the moment you `/janitor-unpause` — no
-re-arm, no re-spawn. Globally the daemon stays alive (it just idles its
-tasks), but every armed session's heartbeat **self-disarms** exactly as under
-a global disarm: a cron FIRE is a full Claude turn that re-reads the whole
-session context (~618k cached tokens, billed at the 0.1× cache-read rate,
-**not** free) whether or not detectors run, so silencing the output saved
-nothing — only deleting the cron makes a fire cost zero. So
-`/janitor-global-pause` is the "stop every project's heartbeat but keep the
-daemon" control; re-arm each session to resume.
+**PAUSE IS GONE (v0.67.0).** It suspended the janitor while leaving the cron
+firing and the daemon resident — from the outside, indistinguishable from a
+healthy fleet, which is how a project sat silently disabled for two weeks. A
+stop is now the kill-switch alone: loud, total, and observable, because the
+cron is deleted. A stale `global-pause.flag` or `.janitor/state/paused` left by
+an older version is INERT, and both are swept automatically.
 
 **MAINTENANCE keeps firing — but cheap.** This is the middle ground between
 full and disarm. Each fire does the MINIMUM: the turn re-reads the session
@@ -715,8 +698,6 @@ nothing drifted. Typical interactions:
   (zizmor + Sentinel classifiers).
 - `/janitor-safe-delete <path>` — move files to the recoverable
   `.trashcan/` instead of `rm`.
-- `/janitor-pause` · `/janitor-unpause` — temporarily silence / restore
-  the heartbeat; `/janitor-disarm` removes the cron entirely.
 - `/janitor-autofix-on|off` — toggle the act-don't-ask remediation
   policy per project.
 

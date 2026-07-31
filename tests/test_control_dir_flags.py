@@ -1,7 +1,7 @@
 """Tests for the fixed control-plane directory (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X).
 
-The six machine-wide MODE flags (kill-switch, maintenance, global-pause, the two reload
-generations, version-update-request) move from `global_state_dir()`'s 4-rung resolution
+The machine-wide MODE flags (kill-switch, maintenance, the two reload generations,
+version-update-request) move from `global_state_dir()`'s 4-rung resolution
 ladder to ONE fixed path (`~/.claude/janitor-control/`) so an external program — the
 ai-maestro server, with no fixed install location of its own — can hardcode and `stat()`
 it without reproducing a ladder it cannot know about.
@@ -46,11 +46,13 @@ def _gs():
     return global_state
 
 
-# The six flags, paired with their present()/set()/clear() API and the on-disk filename.
+# Each live flag, paired with its present()/set()/clear() API and the on-disk filename.
+# `global-pause.flag` was a seventh row until 2026-07-31: the pause switch is retired
+# (owner directive), and only its CLEAR survives, as a migration sweep — so there is no
+# set()/present() pair left to round-trip.
 _FLAGS = [
     ("kill-switch.flag", "kill_switch_present", "set_kill_switch", "clear_kill_switch"),
     ("maintenance-mode.flag", "maintenance_mode_present", "set_maintenance_mode", "clear_maintenance_mode"),
-    ("global-pause.flag", "global_pause_present", "set_global_pause", "clear_global_pause"),
     ("reload-needed.flag", "reload_flag_present", "set_reload_flag", "clear_reload_flag"),
     ("skills-reload-needed.flag", "skills_reload_flag_present", "set_skills_reload_flag", "clear_skills_reload_flag"),
     ("version-update-requested.flag", "version_update_requested_present", "request_version_update", "clear_version_update_request"),

@@ -633,24 +633,13 @@ def _phase_globally_disarmed() -> bool:
     user-reported "many janitors still running / token bleed". The only way a fire costs zero
     is to STOP FIRING, i.e. delete the cron (TRDD-RQ9FIFX6). `/janitor-global-arm` clears it.
 
-    WHY a separate phase from `_phase_global_paused`: the two flags are distinct daemon STATES
-    (pause IDLES a live daemon, disarm EXITS it) but drive the SAME heartbeat action — emit
-    [janitor-self-disarm], run nothing. Keeping them separate keeps the daemon-side semantics
-    honest while sharing the heartbeat-side self-disarm."""
+    This is now the ONLY machine-wide stop. The softer global PAUSE that used to sit beside it
+    (daemon alive but idle, heartbeats no-op) is gone with the rest of the off-switches — a stop
+    that leaves everything running while doing nothing is indistinguishable from a healthy fleet
+    from the outside, which is the exact shape of the incident. A disarm is loud and total: the
+    cron is deleted, so a disarmed session cannot be mistaken for a working one."""
     if gs.kill_switch_present():
         state.log_line("dispatch", "global-disarm (kill-switch) set -> emit [janitor-self-disarm]")
-        return True
-    return False
-
-
-def _phase_global_paused() -> bool:
-    """Return True if the MACHINE-WIDE global pause is set (TRDD-a3fa4d5d). When set, main()
-    emits a bare [janitor-self-disarm] marker so the session DELETES its own heartbeat cron
-    (truly free; a fired turn can't be made cheap -- TRDD-RQ9FIFX6). The DAEMON stays alive
-    (pause IDLES it, it does not EXIT), so global-pause is the "stop the project heartbeats but
-    keep the daemon" control. `/janitor-global-unpause` lifts it; sessions re-arm on next start."""
-    if gs.global_pause_present():
-        state.log_line("dispatch", "global-pause set -> emit [janitor-self-disarm]")
         return True
     return False
 
@@ -682,35 +671,31 @@ def _resolve_heartbeat_mode() -> str:
       stop, so a session can stay cache-warm while the fleet's expensive daemon +
       fleet-recovery stay DOWN — closing the "keep one session alive => clear the
       global switch => wake the whole fleet" gap (the July-budget burn).
-    - 'stop' (a machine-wide /janitor-global-disarm or -pause, and NO maintenance
-      opt-in): self-disarm — delete this cron so a fire costs zero (TRDD-RQ9FIFX6);
-      the right choice for LONG idle, where one 1.0x rewrite on return beats many
-      cache-read fires.
+    - 'stop' (a machine-wide /janitor-global-disarm, and NO maintenance opt-in):
+      self-disarm — delete this cron so a fire costs zero (TRDD-RQ9FIFX6); the right
+      choice for LONG idle, where one 1.0x rewrite on return beats many cache-read
+      fires. Global PAUSE used to reach this branch too and is gone.
     - 'full': the normal heartbeat — cache refresh + DUE detectors + daemon."""
     if _maintenance_mode_active():
         return "maintenance"
-    if _phase_globally_disarmed() or _phase_global_paused():
+    if _phase_globally_disarmed():
         return "stop"
     return "full"
 
 
-def _phase_paused() -> bool:
-    """Return True if the heartbeat is paused (and we should exit early)."""
-    paused_file = state.state_dir() / "paused"
-    if not paused_file.is_file():
-        return False
-    paused_until = state.read_int_state(paused_file, 0)
-    now_ts = int(time.time())
-    if paused_until == 0 or now_ts < paused_until:
-        state.log_line("dispatch", f"skipped: paused (until={paused_until})")
-        return True
-    # Expiry passed → auto-resume. Remove the sentinel and continue.
+def _sweep_retired_pause_sentinel() -> None:
+    """Delete a RETIRED `.janitor/state/paused` sentinel if one is still on disk.
+
+    The local pause is gone (owner directive 2026-07-31). Nothing reads the file any more, so this
+    is not a behaviour gate — it is cleanup. It matters because the sentinel supported an INDEFINITE
+    pause (`paused_until == 0` meant "until someone unpauses"), which is the worst version of the
+    shape that caused the incident: a project silently skipping every fire, forever, with only a log
+    line nobody reads to say so. Leaving the file behind would also make the next person to inspect
+    the state dir believe the project is still suspended. Best-effort; never raises."""
     try:
-        paused_file.unlink()
-    except FileNotFoundError:
+        (state.state_dir() / "paused").unlink(missing_ok=True)
+    except OSError:
         pass
-    state.log_line("dispatch", f"auto-resumed: pause expiry passed (was {paused_until})")
-    return False
 
 
 def _sweep_old_files(root, suffixes: tuple[str, ...], cutoff: float) -> None:
@@ -2242,11 +2227,9 @@ def main() -> int:
         # (byte-identical bare token); no _emit_quiet_if_idle on this terminal action path.
         _emit_decision("[janitor-self-disarm]")
         return 0
-    # Phase 0.05: per-project TEMPORARY pause (.janitor/state/paused) — auto-expires and resumes
-    # the SAME cron in place, so it stays a silent skip and must NOT self-disarm (deleting the
-    # cron would break its in-place auto-resume).
-    if _phase_paused():
-        return 0
+    # Phase 0.05: sweep the RETIRED per-project pause sentinel. It used to gate this fire; now it
+    # is only litter to remove, so the fire proceeds unconditionally.
+    _sweep_retired_pause_sentinel()
 
     # Phase 0.4: refresh the user-presence breadcrumb liveness stamp. Runs on
     # every non-paused fire, BEFORE the early-returning resume phases, so the

@@ -63,7 +63,7 @@ def authority() -> str | None:
     # state; fail CLOSED (treat an unreadable flag as absent) so a broken read can never invent
     # authority that does not exist.
     try:
-        if gs.kill_switch_present() or gs.global_pause_present():
+        if gs.kill_switch_present():
             return "global-stop"
     except OSError:
         pass

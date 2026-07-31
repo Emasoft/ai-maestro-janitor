@@ -547,33 +547,14 @@ def clear_maintenance_mode() -> None:
     _flag_clear_dual("maintenance-mode.flag")
 
 
-def _global_pause_path() -> Path:
-    return _control_path("global-pause.flag")
-
-
-def global_pause_present() -> bool:
-    """True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
-    kill-switch: a PAUSE leaves the daemon ALIVE but idle (it skips all task workloads
-    while this is present), and every session's heartbeat no-ops — a temporary,
-    teardown-free silence. `/janitor-global-pause` sets it; `/janitor-global-unpause`
-    clears it. Contrast the kill-switch, which makes the daemon EXIT (the true stop).
-    Triple-read across control_dir() / global_state_dir() / legacy (TRDD-QK7M2B0X +
-    TRDD-2U8AH82F)."""
-    return _flag_present_dual("global-pause.flag")
-
-
-def set_global_pause(reason: str = "") -> None:
-    """Set the machine-wide PAUSE flag at control_dir() (ARCHITECTURE.md §7.1,
-    TRDD-QK7M2B0X) — the daemon idles (stays alive, keeps ticking its heartbeat so it is
-    not seen as wedged) and per-session heartbeats no-op, until `clear_global_pause`.
-    Written atomically with a provenance body; readers key on presence."""
-    _write_flag_provenance(_global_pause_path(), reason or "paused")
-
-
 def clear_global_pause() -> None:
-    """Clear the machine-wide PAUSE flag from every location it may live — the daemon
-    resumes running due tasks on its next loop and sessions resume emitting drift.
-    Idempotent (a missing flag anywhere is fine)."""
+    """Clear a RETIRED machine-wide PAUSE flag from every location it may live.
+
+    The pause switch is gone (owner directive 2026-07-31 — see `dispatch._phase_keep_going_nudge`
+    for the incident). Only the CLEAR survives, and only as a migration: a host that was paused
+    when it last ran an older janitor still has the flag on disk, and while nothing reads it any
+    more, leaving it there means the next person to look at the control plane sees a machine that
+    claims to be paused. Every arm sweeps it. Removed once no supported version can have set it."""
     _flag_clear_dual("global-pause.flag")
 
 
@@ -747,15 +728,14 @@ def clear_plugin_update_request(plugin_id: str, scope: str) -> None:
 
 
 def fleet_stop_flag_state() -> str | None:
-    """The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
-    (the kill-switch) DOMINATES ``pause``: a disarm is the true stop (delete the cron),
-    so it takes precedence over the softer pause. The daemon's fleet-stop beat reads
-    this to decide which slash command to inject into every other session."""
-    if kill_switch_present():
-        return "disarm"
-    if global_pause_present():
-        return "pause"
-    return None
+    """``"disarm"`` iff the machine-wide kill-switch is set, else None.
+
+    It used to also return ``"pause"`` for the softer global-pause flag. Pause is gone with the
+    rest of the off-switches (owner directive 2026-07-31): a stop that leaves the daemon alive but
+    idle is precisely the silent-disable shape that caused the incident — indistinguishable, from
+    the outside, from a healthy fleet. Disarm remains because it is loud and total: the cron is
+    deleted, so a disarmed session cannot be mistaken for a working one."""
+    return "disarm" if kill_switch_present() else None
 
 
 def _fleet_injections_path() -> Path:

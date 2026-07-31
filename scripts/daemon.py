@@ -328,7 +328,6 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                 time.time() > deadline
                 or not _running
                 or gs.kill_switch_present()
-                or gs.global_pause_present()  # component B: abort a long chore on pause
             ):
                 state.log_line("daemon", f"  killing `{short}` (timeout or shutdown)")
                 proc.kill()
@@ -1850,11 +1849,10 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
         # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
         # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
         # join the kill-switch in the per-task gate so "immediately skip the chores"
-        # actually holds; the top-of-loop pause/maintenance branches then idle.
+        # actually holds; the top-of-loop maintenance branch then idles.
         if (
             not _running
             or gs.kill_switch_present()
-            or gs.global_pause_present()
             or gs.maintenance_mode_present()
         ):
             break
@@ -2265,24 +2263,12 @@ def main() -> int:
                     time.sleep(1)
                 continue
 
-            # A global PAUSE (TRDD-a3fa4d5d) idles the daemon WITHOUT tearing it down:
-            # skip every task workload, but keep ticking the heartbeat so other sessions
-            # never see us as wedged, and stay responsive — the inner sleep breaks the
-            # instant the pause lifts (or a kill-switch/disarm supersedes it), so unpause
-            # resumes work within ~1 s with no re-spawn. This is the lighter sibling of
-            # the kill-switch (which EXITS); a pause is a temporary, teardown-free silence.
-            if gs.global_pause_present():
-                # PAUSE must reach every OTHER armed session too: this branch `continue`s
-                # BEFORE the task list, so the fleet-stop beat can only fire from here (a
-                # registered Task never runs while a flag is set). Deduped per (pid,flag) +
-                # opt-in-gated → a no-op unless FLEET_STOP_ENABLED=1 (TRDD-ME8V2YJF).
-                task_fleet_stop()
-                gs.write_heartbeat()
-                for _ in range(_LOOP_CEILING_SEC):
-                    if not _running or gs.kill_switch_present() or not gs.global_pause_present():
-                        break
-                    time.sleep(1)
-                continue
+            # The global-PAUSE branch stood here: it idled the daemon without tearing it
+            # down — every task workload skipped, heartbeat still ticking so nobody saw us
+            # as wedged. That combination is precisely what made the silent-disable
+            # incident invisible (owner directive 2026-07-31), so the flag and this branch
+            # are gone. A machine-wide stop is now the kill-switch alone, which EXITS and
+            # is therefore observable.
 
             # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server RUNS, yield
             # the absorbed chores — running them here too would be "doing the same

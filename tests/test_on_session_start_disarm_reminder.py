@@ -65,8 +65,8 @@ def test_active_global_stop_none_when_running(monkeypatch, tmp_path) -> None:
     assert hook._active_global_stop(gs) is None
 
 
-def test_active_global_stop_disarm_dominates_pause(monkeypatch, tmp_path) -> None:
-    """When BOTH flags are set, DISARMED (kill-switch) wins over PAUSED."""
+def test_active_global_stop_ignores_a_stale_pause_flag(monkeypatch, tmp_path) -> None:
+    """A stale retired pause flag must not be reported as an active stop; only the kill-switch is."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
     # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
     # TRDD-QK7M2B0X), not global_state_dir() — isolate it too, or every test in this
@@ -74,7 +74,9 @@ def test_active_global_stop_disarm_dominates_pause(monkeypatch, tmp_path) -> Non
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     gs = importlib.import_module("global_state")
-    gs.set_global_pause("pause reason")
+    cd = gs.control_dir()
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "global-pause.flag").write_text('{"reason": "pause reason"}', encoding="utf-8")
     gs.set_kill_switch("disarm reason")
     hook = _load_hook()
     result = hook._active_global_stop(gs)

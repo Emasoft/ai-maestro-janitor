@@ -43,8 +43,11 @@ def _run_session_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, flag:
     gs.init_global_state()
     if flag == "disarm":
         gs.set_kill_switch("test")
-    elif flag == "pause":
-        gs.set_global_pause("test")
+    elif flag == "stale-pause":
+        # The RETIRED global-pause flag, written raw: no setter exists any more.
+        cd = gs.control_dir()
+        cd.mkdir(parents=True, exist_ok=True)
+        (cd / "global-pause.flag").write_text('{"reason": "test"}', encoding="utf-8")
 
     # Neutralize the heavy best-effort filesystem side effects so the test only exercises the
     # guard (and never runs the real lean-ctx binary or copies real rule files).
@@ -84,11 +87,17 @@ def test_session_start_skips_rearm_when_globally_disarmed(tmp_path: Path, monkey
     assert "run /janitor-arm to arm it" not in out, "must NOT nudge re-arm while globally disarmed"
 
 
-def test_session_start_skips_rearm_when_globally_paused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """global-pause set → same: no arm nudge (keep the daemon, stop the project heartbeats)."""
-    out = _run_session_start(monkeypatch, tmp_path, flag="pause")
-    assert "globally PAUSED" in out, f"expected the enriched paused reminder, got {out!r}"
-    assert "run /janitor-arm to arm it" not in out, "must NOT nudge re-arm while globally paused"
+def test_session_start_ignores_a_stale_pause_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A STALE retired pause flag must NOT suppress the arm nudge.
+
+    Pause is gone (owner directive 2026-07-31). A host that was paused under an older janitor
+    still has the flag on disk, and if SessionStart kept honoring it that machine would never be
+    nudged to arm again — silently unarmed forever, which is the failure this whole change is
+    about.
+    """
+    out = _run_session_start(monkeypatch, tmp_path, flag="stale-pause")
+    assert "globally PAUSED" not in out, f"the retired flag was still reported as a stop: {out!r}"
+    assert "run /janitor-arm to arm it" in out, f"the arm nudge must still fire: {out!r}"
 
 
 def test_session_start_nudges_rearm_when_not_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
