@@ -1,7 +1,7 @@
 {
   "files": {
     "CLAUDE.md": "32e0c6cd75e02890e2877a06ed9b2367a66bb43860d7eedfea68240c47b2011f",
-    "README.md": "8a6458913a187d02ebb31631875995770f05ee67d4778b72ffebeac4dd787b74",
+    "README.md": "71e4d46b6424f9f03e259507da7c6a362d5adf977f4206f802b6d16f5d7f0787",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -57,6 +57,9 @@
     "skills/janitor-memory-split/SKILL.md": "2a0d49c7abd460e13230c220028c990fdd1a097dd30d856bad257d7ff97cc6be",
     "skills/janitor-memory-update/SKILL.md": "5a2b10f53b12b233e2e79afa6877e3d34fe9f64b71cf7bf9e779d018a15e00f8",
     "skills/janitor-memory-write/SKILL.md": "6ec876d520792c8ae8fb121154e530ebc5a8ee9b85eef714cc98de8181572bc0",
+    "skills/janitor-plugin-install/SKILL.md": "2598fc5be95cd365c88f9ae16b278ccfd01f26767254571ade188f1447db3636",
+    "skills/janitor-plugin-uninstall/SKILL.md": "05892c96fb3a44ece56b6ea8c5b18dd529837f089d87c142585c27a2b251c29e",
+    "skills/janitor-plugin-upgrade/SKILL.md": "ce5fa18b3b571f7b9fe7a507cf4a0e7533fd9be63157b7c8fa4f8a94673629dc",
     "skills/janitor-refresh-cc-logins/SKILL.md": "626621ec67310f949829cd4d0b6f46570560297d175092d0aefe8f41450a5597",
     "skills/janitor-reload-plugins/SKILL.md": "95a707f5073cdb1f91f111cff8ebac731bccd0537fd9d52f168c576711514c6f",
     "skills/janitor-reload-skills/SKILL.md": "4a5a01919f2d706e844010573f1650c7ace74a41c51c265574e8d9bbb5ab58bc",
