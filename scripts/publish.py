@@ -176,6 +176,52 @@ _TEST_SUITE_TIMEOUT_SEC = 1800
 # fetches from GitHub, so its floor moves with the network.
 _CPV_TIMEOUT_SEC = 900
 
+# The CPV validator pin — ONE literal, in `.cpv-version` at the repo root.
+#
+# It was previously written out eight times: five here and three across ci.yml and
+# release.yml. Nothing tied them together, so a bump was eight independent edits and
+# missing one produced the worst possible shape — the local gate validating against a
+# different CPV than CI does. That divergence is invisible until a release goes red on
+# a rule the local run never applied, and then it reads as a CPV bug rather than a
+# stale pin.
+#
+# A plain text file is the only form all three consumers can share: a Python constant
+# is unreadable from a workflow's `run:` block, and a workflow `env:` is unreadable
+# from this script. Both workflows now read the same file.
+#
+# FAIL-FAST, deliberately, against this file's usual fail-open habit: every other
+# degradation here loses a convenience, whereas silently falling back to a default pin
+# would run the release's mandatory security-and-structure gate against an unintended
+# validator version while reporting success. A publish that cannot state which
+# validator it used has not been validated.
+_CPV_VERSION_FILE = Path(__file__).resolve().parent.parent / ".cpv-version"
+
+
+def _read_cpv_pin(path: Path | None = None) -> str:
+    """The pinned CPV tag from `.cpv-version`. Raises rather than guess a default.
+
+    `path` is injectable so the failure modes (absent file, malformed tag) can be
+    tested directly instead of only through a real publish, where they would surface
+    as a red release rather than a red test.
+    """
+    src = _CPV_VERSION_FILE if path is None else path
+    try:
+        pin = src.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise SystemExit(f"FATAL: cannot read the CPV pin at {src}: {exc}") from exc
+    # Shape-check it: this string is interpolated into a `git+https://…@<pin>` spec, so
+    # a stray newline or a shell metacharacter would either build a broken URL or, in
+    # the workflows, be re-split by the shell. Tags here are always `vMAJOR.MINOR.PATCH`.
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", pin):
+        raise SystemExit(
+            f"FATAL: malformed CPV pin {pin!r} in {src} (expected a tag like v4.2.0)"
+        )
+    return pin
+
+
+_CPV_PIN = _read_cpv_pin()
+_CPV_SPEC = f"git+https://github.com/Emasoft/claude-plugins-validation@{_CPV_PIN}"
+
 
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
@@ -648,7 +694,7 @@ def install_branch_rules(root: Path) -> int:
             [
                 "uvx",
                 "--from",
-                "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0",
+                _CPV_SPEC,
                 "--with",
                 "pyyaml",
                 "cpv-setup-branch-rules",
@@ -1029,7 +1075,7 @@ def run_gate(root: Path) -> int:
         return 1
     ve = subprocess.run(
         ["uvx", "--from",
-         "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0",
+         _CPV_SPEC,
          "--with", "pyyaml",
          "cpv-remote-validate", "plugin", ".", "--strict"],
         cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
@@ -1262,8 +1308,8 @@ def stage_validate(root: Path) -> None:
 
     Cornerstone rule: a plugin cannot be pushed unless validation passes
     with 0 issues (WARNING allowed). The validator is ALWAYS fetched from
-    GitHub (git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0) via
-    uvx so a local tampered copy cannot weaken the rules. No exceptions.
+    GitHub (claude-plugins-validation, pinned by `.cpv-version` at the repo root)
+    via uvx so a local tampered copy cannot weaken the rules. No exceptions.
 
     Order: runs AFTER lint + tests so behavioral regressions fail fast
     before the structural validator even looks at the manifest.
@@ -1277,7 +1323,7 @@ def stage_validate(root: Path) -> None:
     # on CRITICAL(1), MAJOR(2), MINOR(3), NIT(4); WARNING(5+) passes.
     run([
         "uvx", "--from",
-        "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0",
+        _CPV_SPEC,
         "--with", "pyyaml",
         "cpv-remote-validate", "plugin", ".", "--strict",
     ], cwd=root, timeout=_CPV_TIMEOUT_SEC)
@@ -1317,7 +1363,7 @@ def stage_ci_preflight(root: Path) -> None:
     try:
         rc = subprocess.run([
             "uvx", "--from",
-            "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0",
+            _CPV_SPEC,
             "--with", "pyyaml",
             "cpv-remote-validate", "ci-preflight", ".",
         ], cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode

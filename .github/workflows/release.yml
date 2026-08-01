@@ -91,6 +91,16 @@ jobs:
         # `timeout` exits 124 on a hang — retry that. Any other non-zero is CPV's
         # real 1..4 severity exit: fail fast, no pointless retry.
         run: |
+          # The CPV pin is read from `.cpv-version` — the single source of truth this
+          # repo shares with publish.py and ci.yml (see _CPV_PIN in publish.py). Hard-
+          # fail rather than default: an unpinned resolve would take CPV's default
+          # branch, which is both a red-release hazard and a supply-chain hole.
+          CPV_PIN="$(tr -d '[:space:]' < .cpv-version || true)"
+          case "$CPV_PIN" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::.cpv-version missing or malformed: '$CPV_PIN'"; exit 1 ;;
+          esac
+          echo "CPV pinned to $CPV_PIN"
           # THE 300s WAS NEVER 300s OF VALIDATION (fixed 2026-07-26, v0.61.1 failure).
           # `timeout` wrapped the WHOLE `uvx` call, which clones + builds CPV from git
           # first: measured 142s (v0.61.1) and 159s (v0.61.0) on a cold runner. So CPV's
@@ -104,11 +114,11 @@ jobs:
           # alone. `|| true` and a discarded stdout: this step must never be able to fail
           # the release — even if the probe subcommand errors, uvx has already BUILT and
           # cached the package, which is the only thing being bought here.
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0 \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@${CPV_PIN}" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            timeout 420 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0 \
+            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@${CPV_PIN}" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
