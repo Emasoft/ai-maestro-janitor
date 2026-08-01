@@ -32,9 +32,18 @@ _PAYLOAD = {
 def _isolate(tmp_path: Path) -> str:
     """Point the probe's cache/cooldown/lock dir at tmp; return the account key."""
     os.environ["JANITOR_USAGE_PROBE_DIR"] = str(tmp_path)
-    for var in (up.TTL_ENV, up.BACKOFF_BASE_ENV, up.BACKOFF_CAP_ENV, up.STALE_ENV):
+    for var in (up.TTL_ENV, up.BACKOFF_BASE_ENV, up.BACKOFF_CAP_ENV, up.STALE_ENV, up.RETIRE_ENV):
         os.environ.pop(var, None)
     return up.account_key(_TOKEN)
+
+
+def _entry(tmp_path: Path, key: str, *, age_s: float, now: float) -> Path:
+    """Write a complete probe entry (cache + cooldown + lock) aged `age_s` seconds."""
+    cache = tmp_path / f"{key}.json"
+    for path, body in ((cache, "{}"), (tmp_path / f"{key}.cooldown", "0 0"), (tmp_path / f"{key}.lock", "")):
+        path.write_text(body, encoding="utf-8")
+        os.utime(path, (now - age_s, now - age_s))
+    return cache
 
 
 def _getter(status: int, payload: dict | None, retry_after: int | None = None, calls: list | None = None):
@@ -405,3 +414,52 @@ def test_the_cache_file_holds_only_the_payload(tmp_path: Path) -> None:
     raw = (tmp_path / f"{key}.json").read_text(encoding="utf-8")
     assert _TOKEN not in raw
     assert json.loads(raw) == _PAYLOAD
+
+
+# --------------------------------------------------------------------------- #
+# retirement — the cache key is the ACCESS TOKEN, and access tokens rotate
+# --------------------------------------------------------------------------- #
+def test_retired_entries_and_their_siblings_are_pruned(tmp_path: Path) -> None:
+    """Every rotation of an access token mints a NEW key and strands the previous entry
+    forever: measured 51 files for 3 accounts, the oldest 6 days old and describing a 7d
+    window that had already reset. An entry past the retire age is deleted with its cooldown
+    and lock siblings — leaving those behind would just move the leak."""
+    _isolate(tmp_path)
+    now = time.time()
+    _entry(tmp_path, "fresh", age_s=60, now=now)
+    _entry(tmp_path, "stranded", age_s=up.retire_seconds() + 60, now=now)
+    assert up.prune_retired(now=now) == 3
+    assert (tmp_path / "fresh.json").exists()
+    for ext in ("json", "cooldown", "lock"):
+        assert not (tmp_path / f"stranded.{ext}").exists()
+
+
+def test_prune_never_touches_an_entry_that_can_still_serve_a_read(tmp_path: Path) -> None:
+    """The retire age must sit far above BOTH re-use horizons — `ttl_seconds` (re-use) and
+    `stale_seconds` (may it even be shown). A prune that ate a live entry would turn a cheap
+    cache hit into a fresh request against the endpoint this module exists to throttle."""
+    _isolate(tmp_path)
+    now = time.time()
+    assert up.retire_seconds() > up.stale_seconds() > up.ttl_seconds()
+    for age in (0, up.ttl_seconds() + 1, up.stale_seconds() + 1, up.retire_seconds() - 1):
+        _entry(tmp_path, f"k{int(age)}", age_s=age, now=now)
+    assert up.prune_retired(now=now) == 0
+    assert len(list(tmp_path.glob("*.json"))) == 4
+
+
+def test_a_write_sweeps_the_entry_its_own_token_rotation_stranded(tmp_path: Path) -> None:
+    """Pruning rides `write_cache` because a write is the ONE event that can mint a new key.
+    The freshly written entry must survive its own sweep and stay readable."""
+    _isolate(tmp_path)
+    now = time.time()
+    _entry(tmp_path, "old_token", age_s=up.retire_seconds() + 1, now=now)
+    assert up.write_cache("new_token", _PAYLOAD) is True
+    assert up.read_cache("new_token") == _PAYLOAD
+    assert not (tmp_path / "old_token.json").exists()
+
+
+def test_prune_is_fail_soft(tmp_path: Path) -> None:
+    """A prune failure must never break the probe that triggered it: a missing directory is
+    zero removals, not an exception."""
+    _isolate(tmp_path / "does-not-exist")
+    assert up.prune_retired() == 0

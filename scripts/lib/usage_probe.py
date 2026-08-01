@@ -85,6 +85,9 @@ _TTL_DEFAULT = 600  # never re-fetch one account inside this window
 _BACKOFF_BASE_DEFAULT = 600  # first 429 waits this long when the server states nothing...
 _BACKOFF_CAP_DEFAULT = 7200  # ...doubling per consecutive 429, capped here (2h)
 _STALE_DEFAULT = 1800  # past this a readout is "last known", never presented as live
+
+RETIRE_ENV = "CLAUDE_PLUGIN_OPTION_USAGE_PROBE_RETIRE_SECONDS"
+_RETIRE_DEFAULT = 86400  # past this an entry can never serve a read — delete it
 _TIMEOUT_DEFAULT = 6
 
 # A server-stated Retry-After is trusted, but floored: a 429 answered in under a minute is
@@ -223,13 +226,64 @@ def cache_age(key: str, *, now: float | None = None) -> float | None:
     return (time.time() if now is None else now) - mtime
 
 
+def retire_seconds() -> int:
+    """Age past which a probe entry is litter that can never serve a read again."""
+    return _int_option(RETIRE_ENV, _RETIRE_DEFAULT)
+
+
+def prune_retired(*, now: float | None = None, max_age_s: int | None = None) -> int:
+    """Delete probe entries older than `max_age_s`. Returns how many files were removed.
+
+    The cache key is a digest of the ACCESS TOKEN, and access tokens rotate (~8h per account
+    in practice), so every rotation strands the previous entry forever: measured 51 files for
+    3 accounts, the oldest 6 days old and describing a 7d window that had already reset. The
+    dead entries are unreachable rather than dangerous — a lookup only ever computes the key
+    for the CURRENT token — but they accumulate without bound, and any future code that scans
+    the directory instead of computing a key would read one account's stale 97% as another
+    account's current value.
+
+    An entry older than `retire_seconds` cannot serve a read no matter what: `ttl_seconds`
+    (600s) governs re-use and `stale_seconds` (1800s) governs whether it may even be shown,
+    so a day-old entry is already unusable by both. Its cooldown is likewise long expired.
+    Best-effort — a prune failure must never break the probe that triggered it."""
+    at = time.time() if now is None else now
+    cutoff = at - (retire_seconds() if max_age_s is None else max_age_s)
+    removed = 0
+    try:
+        entries = list(probe_dir().glob("*.json"))
+    except Exception:
+        return 0
+    for cache in entries:
+        try:
+            if cache.stat().st_mtime >= cutoff:
+                continue
+            stem = cache.with_suffix("")
+            for path in (cache, Path(f"{stem}.cooldown"), Path(f"{stem}.lock")):
+                try:
+                    path.unlink()
+                    removed += 1
+                except FileNotFoundError:
+                    pass
+        except Exception:
+            continue
+    return removed
+
+
 def write_cache(key: str, payload: dict) -> bool:
-    """Persist a fetched payload atomically. Returns True iff the write landed."""
+    """Persist a fetched payload atomically. Returns True iff the write landed.
+
+    Pruning rides the write because that is the one event that can mint a NEW key (a rotated
+    access token), so the directory can only grow at the moment it is also swept — no cadence
+    stamp, no second caller to forget."""
     try:
         state.atomic_write(_cache_path(key), json.dumps(payload))
-        return True
     except Exception:
         return False
+    try:
+        prune_retired()
+    except Exception:
+        pass
+    return True
 
 
 def read_cooldown(key: str) -> tuple[float, int]:

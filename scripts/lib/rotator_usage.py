@@ -20,6 +20,28 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import token_burn  # noqa: E402
+import usage_probe  # noqa: E402
+
+
+def _sample_age_s(blob: dict | None) -> int | None:
+    """Seconds since the SHARED cache entry backing this account was fetched, or None.
+
+    `/api/oauth/usage` is rate-limited, so `usage_probe` is the single throttled writer and
+    every consumer reads its cache — a reader can poll as fast as it likes, but it is being
+    served a SAMPLE, and two tools polling at different moments still describe the same one.
+    Without the sample's age, two readings taken seconds apart look like two measurements of
+    two different instants, and a diagnostic that lines them up against a token-usage history
+    silently mis-attributes the gap. Surfacing the age is what makes the readings joinable.
+
+    A cheap stat on a path already computed — no request, no lock, never raises."""
+    try:
+        token, _ = usage_probe.token_from_blob(blob)
+        if not token:
+            return None
+        age = usage_probe.cache_age(usage_probe.account_key(token))
+        return None if age is None else int(age)
+    except Exception:
+        return None
 
 
 def _probe(rotator: object, email: str | None, blob: dict | None, out: list[dict], *, is_live: bool = False) -> None:
@@ -37,7 +59,14 @@ def _probe(rotator: object, email: str | None, blob: dict | None, out: list[dict
     except Exception:
         return
     if status == 200 and isinstance(data, dict):
-        out.append({"label": token_burn.account_prefix(email), "usage": data, "is_live": is_live})
+        out.append(
+            {
+                "label": token_burn.account_prefix(email),
+                "usage": data,
+                "is_live": is_live,
+                "sample_age_s": _sample_age_s(blob),
+            }
+        )
 
 
 def _read_slot_blob(rotator: object, email: str) -> dict | None:

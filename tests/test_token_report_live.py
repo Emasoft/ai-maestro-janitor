@@ -509,3 +509,14 @@ def test_context_hook_prepare_silent_out_of_zone(tmp_path: Path) -> None:
     )
     assert r.returncode == 0
     assert "PREPARE" not in r.stdout
+
+
+def test_live_row_names_the_sample_age() -> None:
+    """`/api/oauth/usage` is rate-limited, so every consumer is served from ONE throttled
+    cache: two rows read seconds apart can describe samples minutes apart. The row states the
+    sample's age so readings are joinable against a usage history instead of being assumed
+    simultaneous. A sub-minute age adds no noise."""
+    usage = _live_usage(five_reset=_iso_at(_NOW + 900), seven_pct=30.0)
+    assert "sampled 7m ago" in (_tr._account_burn_line({"label": "a", "usage": usage, "sample_age_s": 420}, _NOW) or "")
+    assert "sampled" not in (_tr._account_burn_line({"label": "a", "usage": usage, "sample_age_s": 12}, _NOW) or "")
+    assert "sampled" not in (_tr._account_burn_line({"label": "a", "usage": usage}, _NOW) or "")

@@ -307,7 +307,12 @@ def _account_burn_line(acct: dict, now: int) -> str | None:
     # An idle account's ratios describe past average spend, not a current pace — say so here
     # rather than let a reader extrapolate them (the heartbeat alarm suppresses these outright).
     idle = " · idle (no session window)" if token_burn.session_is_open(usage, now) is False else ""
-    return f"  {acct.get('label', 'live')}{who}  " + "  ·  ".join(parts) + idle
+    # Name the SAMPLE, not just the value: /api/oauth/usage is rate-limited, so every consumer
+    # is served from one throttled cache. Two rows read seconds apart can describe samples
+    # minutes apart, and only the age makes them joinable against a usage history.
+    age = acct.get("sample_age_s")
+    stamp = f" · sampled {int(age) // 60}m ago" if isinstance(age, int) and age >= 60 else ""
+    return f"  {acct.get('label', 'live')}{who}  " + "  ·  ".join(parts) + idle + stamp
 
 
 def _account_burn_lines() -> list[str]:
