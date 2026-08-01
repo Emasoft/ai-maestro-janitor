@@ -3490,19 +3490,42 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // in a code sample is never falsely flagged — keeping the check deterministic and FP-free.
         let mut ref_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first ref line
         let mut def_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first def line
+        // label → first line carrying a `[^N]` that markdown does NOT treat as a reference
+        // because it sits inside a code span or a fence. Collected purely to EXPLAIN a
+        // `lesson-uncited` finding (janitor#152): the author wrote the citation, it just does
+        // not function, and the two states are visually identical in the source. Without this
+        // the message sends them to look at an atom body where they can SEE `[^3]` — so they
+        // conclude the linter is wrong and move on, and the lesson stays orphaned. Measured on
+        // the USER corpus when the issue was filed: 9 of 101 findings were this.
+        let mut hidden_ref_lines: BTreeMap<String, usize> = BTreeMap::new();
         for (i, raw) in lines.iter().enumerate() {
             let line_no = i + 1; // 1-based, matching ctx.in_code's indexing
-            if *ctx.in_code.get(i).unwrap_or(&false) {
-                continue; // inside a fenced code block — not real footnote syntax
-            }
+            let in_fence = *ctx.in_code.get(i).unwrap_or(&false);
             // Mask INLINE-code spans too, so a literal `[^N]` in example prose is not a false ref.
-            for (label, is_def) in scan_footnotes(&mask_inline_code(raw)) {
-                let table = if is_def {
+            let visible = if in_fence {
+                Vec::new() // inside a fenced code block — not real footnote syntax
+            } else {
+                scan_footnotes(&mask_inline_code(raw))
+            };
+            for (label, is_def) in &visible {
+                let table = if *is_def {
                     &mut def_lines
                 } else {
                     &mut ref_lines
                 };
-                table.entry(label).or_insert(line_no);
+                table.entry(label.clone()).or_insert(line_no);
+            }
+            // Anything the RAW line carries that the masked/fenced view dropped is a citation
+            // the author wrote and markdown will not honour. Defs are excluded: a definition
+            // shown inside a fence is documentation, not a miswritten citation.
+            for (label, is_def) in scan_footnotes(raw) {
+                if is_def {
+                    continue;
+                }
+                let shown = visible.iter().any(|(l, d)| !*d && *l == label);
+                if !shown {
+                    hidden_ref_lines.entry(label).or_insert(line_no);
+                }
             }
         }
         // Dangling reference: `[^N]` in the body with no `[^N]:` definition (report once, at first ref).
@@ -3528,16 +3551,22 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // is what makes it TRAVEL with that atom on `migrate`, which is the real reason to bother.
         for (label, &line) in &def_lines {
             if !ref_lines.contains_key(label) {
-                violations.push((
-                    Severity::Info,
-                    p.clone(),
-                    line,
-                    format!(
+                // If the citation EXISTS but is inert, say so and point at it. Telling an
+                // author to "cite it from an atom" when they already did is how a correct
+                // finding gets dismissed as a linter bug (janitor#152).
+                let msg = match hidden_ref_lines.get(label) {
+                    Some(&hidden) => format!(
+                        "page-level lesson `[^{label}]:` — a `[^{label}]` is present at line \
+                         {hidden} but sits INSIDE a code span/fence, so markdown renders it as \
+                         literal text, not a reference; move the closing backtick so the \
+                         citation falls outside the code span"
+                    ),
+                    None => format!(
                         "page-level lesson `[^{label}]:` — cite it from an atom (`[^{label}]` in \
                          the atom body) if it should travel with one"
                     ),
-                    "lesson-uncited",
-                ));
+                };
+                violations.push((Severity::Info, p.clone(), line, msg, "lesson-uncited"));
             }
         }
 
@@ -6599,6 +6628,75 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "both citations are real, so neither lesson is uncited; got: {v:?}"
         );
         assert!(!has_code(&v, "footnote-dangling-ref"), "got: {v:?}");
+    }
+
+    #[test]
+    fn an_uncited_lesson_whose_citation_is_inside_a_code_span_says_so() {
+        // janitor#152. The finding is CORRECT — a `[^1]` inside backticks is literal text, so
+        // the lesson genuinely does not travel — but the old message told the author to "cite it
+        // from an atom", and they could SEE `[^1]` sitting in the atom body. Present and
+        // non-functional are visually identical in the source, so the correct finding read as a
+        // linter bug and was dismissed; 9 of 101 USER-scope findings were this shape.
+        let dir = lint_tmpdir("hidden_citation");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             a fact. `[[other]] [^1]`.\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_code(&v, "lesson-uncited"), "still a real finding; got: {v:?}");
+        assert!(
+            has_violation(&v, "INSIDE a code span"),
+            "must explain WHY the visible citation does not count; got: {v:?}"
+        );
+        // And it must point AT the inert citation, not only at the definition.
+        assert!(has_violation(&v, "line 7"), "must cite the ref's line; got: {v:?}");
+    }
+
+    #[test]
+    fn a_lesson_with_no_citation_anywhere_keeps_the_plain_message() {
+        // The explanation is only correct when a citation actually exists. Telling an author to
+        // "move the closing backtick" when they never wrote one would be its own wrong advice.
+        let dir = lint_tmpdir("no_citation");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             a fact with no citation.\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_code(&v, "lesson-uncited"), "got: {v:?}");
+        assert!(has_violation(&v, "cite it from an atom"), "got: {v:?}");
+        assert!(
+            !has_violation(&v, "INSIDE a code span"),
+            "there is no hidden citation to point at; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn applying_the_prescribed_fix_clears_the_finding() {
+        // The remedy a message prescribes has to WORK. janitor#121 was an unsatisfiable nag —
+        // its advice could never clear it — so a message that gives instructions now proves
+        // those instructions are sufficient: same page, closing backtick moved.
+        let dir = lint_tmpdir("citation_fixed");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             a fact. `[[other]]` [^1].\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !has_code(&v, "lesson-uncited"),
+            "the prescribed fix must actually silence it; got: {v:?}"
+        );
     }
 
     #[test]
