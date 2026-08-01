@@ -2042,8 +2042,27 @@ fn normalize_keywords(raw: &str) -> Vec<String> {
 /// literal double-quote would break the quote-tracking in `split_top_level_commas`, corrupting every
 /// later field. Capped at the spec's 200 chars via the shared `truncate_chars` (char-safe).
 fn sanitize_quoted_value(raw: &str) -> String {
+    truncate_chars(sanitize_quoted_uncapped(raw), 200)
+}
+
+/// The same one-line/quote-safety normalisation WITHOUT the 200-char cap — for the page-level
+/// `description:` frontmatter field.
+///
+/// The cap belongs to the ATOM's inline `desc:` block-prop, where it is real: that value lives
+/// inside a `^id [ … ]` prop list that `split_top_level_commas` scans, so length there is a parser
+/// concern. A page `description:` is a standalone quoted YAML scalar with no such constraint — and
+/// it is THE field `memgrep recall` ranks on. Capping it silently deleted recall surface mid-word,
+/// which is the one failure this corpus cannot absorb: a symptom phrase that falls off the end is
+/// not degraded recall, it is a memory that can never be found by that symptom again.
+///
+/// Measured before the change: 139 of 174 pages (80%) already carry descriptions longer than 200
+/// chars, up to 1353 — because the recall law is "index by the QUESTION", so a description must
+/// hold every phrasing a future session might arrive with. `cmd_new_page` reusing the atom helper
+/// silently truncated every page it created (observed: a description cut at exactly 200 chars,
+/// mid-word, on `agent-self-imposed-gate-stall`).
+fn sanitize_quoted_uncapped(raw: &str) -> String {
     let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_chars(flat.replace('"', "'"), 200)
+    flat.replace('"', "'")
 }
 
 /// Build the atom marker line `^<id> [<props>]` in the field order the corpus uses: optional `desc`,
@@ -2333,7 +2352,12 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     let mut fm = String::new();
     fm.push_str("---\n");
     fm.push_str(&format!("name: {name}\n"));
-    fm.push_str(&format!("description: \"{}\"\n", sanitize_quoted_value(description)));
+    // UNCAPPED (see `sanitize_quoted_uncapped`): a page description is the recall-ranking field,
+    // not an atom block-prop, so the atom's 200-char parser cap must not be applied to it.
+    fm.push_str(&format!(
+        "description: \"{}\"\n",
+        sanitize_quoted_uncapped(description)
+    ));
     fm.push_str(&format!("ocd: {today}\n"));
     fm.push_str(&format!("lmd: {today}\n"));
     fm.push_str("metadata:\n");
@@ -5780,6 +5804,38 @@ body of b
         let d = atoms[0].desc.as_deref().expect("desc present");
         assert_eq!(d.chars().count(), 200, "desc is capped to 200 chars");
         assert_eq!(d, "a".repeat(200), "the cap keeps the first 200 chars");
+    }
+
+    #[test]
+    fn new_page_does_not_truncate_the_page_description() {
+        // REGRESSION. `cmd_new_page` reused the ATOM helper (`sanitize_quoted_value`) for the
+        // page-level `description:`, so every page the verb created had its description cut at
+        // exactly 200 chars, mid-word, silently. That field is what `memgrep recall` RANKS on, so a
+        // symptom phrase past the cut is not weakened recall — it is a memory that can never be
+        // found by that symptom again. Measured when this was found: 139 of 174 real pages (80%)
+        // already exceeded 200 chars, up to 1353, because "index by the QUESTION" means carrying
+        // every phrasing a future session might arrive with.
+        //
+        // The two normalisations MUST survive: whitespace flattened (a description is one line) and
+        // `"` → `'` (a raw quote would terminate the YAML scalar and corrupt the frontmatter).
+        let long = format!("{} \"quoted\"\n  and a newline {}", "a".repeat(150), "b".repeat(150));
+        let out = sanitize_quoted_uncapped(&long);
+        assert!(
+            out.chars().count() > 200,
+            "page description must NOT be capped, got {} chars",
+            out.chars().count()
+        );
+        assert!(!out.contains('"'), "embedded quotes must become ' to keep the YAML scalar valid");
+        assert!(!out.contains('\n'), "a description is one line");
+        assert!(out.contains("a".repeat(150).as_str()) && out.contains("b".repeat(150).as_str()),
+            "no content may be dropped from either side of the old cut point");
+
+        // The ATOM cap is unchanged — it is a real parser constraint, not shared with this field.
+        assert_eq!(
+            sanitize_quoted_value(&"a".repeat(210)).chars().count(),
+            200,
+            "the atom block-prop cap must stay"
+        );
     }
 
     #[test]
