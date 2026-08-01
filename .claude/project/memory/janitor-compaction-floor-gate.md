@@ -43,7 +43,7 @@ each cycle. No threshold value fixes this in general, because the floor is set b
 chosen by us.
 
 **A cooldown DEFERS a loop; it never ends one.** It was the only thing standing between this design
-and a 10-minute context-destruction cycle, and it was mistaken for a stop.
+and a 10-minute context-destruction cycle, and it was mistaken for a stop. [^1]
 
 The bug entered by REUSE: the size-only gate was safe for the two ORIGINAL triggers because they
 are RARE — SessionStart fires once per session, the rate-limit path once per limit. It became a
@@ -60,7 +60,7 @@ still gets its compaction.
 The floor is LEARNED, never assumed: `post-compact-resume.py` stamps `last-compact.ts`, and the
 next **Stop** records the context it observes as the floor (`cold_cache_compact.refresh_floor`).
 **Stop is the earliest point at which the post-compaction size is observable at all** — PostCompact
-itself is too early, because the compacted size does not exist until a turn has run against it.
+itself is too early, because the compacted size does not exist until a turn has run against it. [^2]
 Measuring at a turn's end can only OVER-state the floor, which under-states the gain and biases
 toward NOT firing: a missed optimization, never a destroyed context.
 
@@ -70,7 +70,7 @@ and record the floor FIRST, then apply cooldown / user-present / active-waiting 
 decision only. The compaction stamps all three gates itself (`mark_fired` → 600s cooldown; its
 auto-resume → `last-resume.ts`, 30-min recency; keep-going → active forever), so a measurement
 placed behind them never ran in exactly the unattended sessions the trigger targets — v0.49.0
-shipped with the floor gate inert, saved only by the 350k threshold sitting above the ~308k floor.
+shipped with the floor gate inert, saved only by the 350k threshold sitting above the ~308k floor. [^3]
 
 `last-compact.ts` is a high-water TIMESTAMP, never a consume-once flag — a flag some reader clears
 could let a compaction go unobserved, and an unobserved compaction is one whose floor is never

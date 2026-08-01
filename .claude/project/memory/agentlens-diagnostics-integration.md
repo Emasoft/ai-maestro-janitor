@@ -32,7 +32,7 @@ projection are null**. It is therefore authoritative ONLY for:
 
 It is NOT authoritative for window **utilization%** — the OAuth rotator's
 `/api/oauth/usage` read stays the only authoritative window% source. This killed the
-naive "switch the window budget to agentlensPro" plan (TRDD-90B47EM9's original premise).
+naive "switch the window budget to agentlensPro" plan (TRDD-90B47EM9's original premise). [^1]
 
 ## The per-detector split (TRDD-WUUR2DFX; USER "Anomaly switch + burn enrich")
 

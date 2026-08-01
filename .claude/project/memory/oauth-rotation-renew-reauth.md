@@ -105,7 +105,7 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
   2026-06-24 — native AX-tree button clicking, no Playwright dependency) OR
   **`slot_capture_browser.py`** (Playwright-CDP, the currently-shipped path + fallback); BOTH
   CDP-attach to the seeded REAL Chrome (never a mock-keychain LAUNCH) and DISMISS the cookie
-  banner before clicking Authorize. It is launched DETACHED (the visible browser flow can take
+  banner before clicking Authorize. [^3] It is launched DETACHED (the visible browser flow can take
   tens of seconds and polls the consent page up to ~300 s; running it inline under the tick cap
   would starve real rotation), with a per-email PID lock (skip-if-running, so a slow capture
   spanning several ticks is launched once), and DEAD LAST in the tick (after `cmd_auto`) so
@@ -189,7 +189,7 @@ plaintext slots (`$HOME/.claude/account-rotator/slots/`, and the data-dir
 (`migrate-slots` / `delete-plaintext-slots`). Do not chase the missing dir. The
 0600-file fallback is reachable ONLY when no keychain/keyring exists (off-mac without
 libsecret). State dir is `${CLAUDE_PLUGIN_DATA}/oauth-rotator/` (canonical), with a read
-fallback to the legacy standalone root + one-time migration. Resolve Chrome profiles via
+fallback to the legacy standalone root + one-time migration. [^5] Resolve Chrome profiles via
 `rotator.print-profiles-root` / `_profiles_root()`, never a hardcoded path.
 
 ## The exact commands

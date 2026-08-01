@@ -135,7 +135,7 @@ isolation lever silently covers everything EXCEPT the flags with the widest blas
 Three test files were writing the LIVE control plane before this was noticed; a leaked
 `kill-switch.flag` disarms the whole fleet. The fix is the **autouse `_isolate_control_dir`
 fixture in `tests/conftest.py`** — autouse, not per-file `setenv`, because the failure mode
-is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file.
+is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file. [^4]
 
 ## Notes and lessons learned
 

@@ -16,13 +16,13 @@ A human reading `maintenance=off` sees a FACT. An agent reading it asks "is some
 wrong, and should I fix it?" — and if any other instruction it holds implies that state is
 wrong, it acts. Machine-readable status emitted into an agent's context is therefore an
 INSTRUCTION SURFACE, not a report, and must be written as one: say nothing when there is
-nothing to act on, and when you do speak, name what must NOT be done.
+nothing to act on, and when you do speak, name what must NOT be done. [^1]
 
 ^the-2026-07-21-fleet-outage [desc: arm_nudge_escalation_loop_incident, keywords: fleet ratcheted into global maintenance nothing lifted it version-update stranded chores idled invisibly, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
 Two individually-correct messages combined into a machine-wide outage:
 
 1. the heartbeat nudge said **"do NOT disable maintenance mode"** — unscoped, so it read as
-   a standing prohibition;
+   a standing prohibition; [^2]
 2. `/janitor-arm` then CLEARED the local maintenance sentinel (deliberate — arming means
    the session starts in a known FULL state) and announced `maintenance=off`.
 
@@ -31,7 +31,7 @@ maintenance. They restored it at **GLOBAL** scope, because the LOCAL flag is cle
 by the very next re-arm while the global one is not. Every re-arm re-ran the same reasoning,
 so the fleet ratcheted into a machine-wide maintenance nothing lifted — every daemon chore
 idled, `version-update` stopped, two published releases sat uninstalled, and no session could
-see the cause because nothing recorded WHO set the flag or WHY.
+see the cause because nothing recorded WHO set the flag or WHY. [^3]
 
 ^the-fix-shape [desc: how_the_loop_was_broken_v0_58_1_v0_60_1, keywords: how to stop agents re-enabling a flag silence when unset scope the prohibition refuse remediation, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
 Four cuts, one per step of the loop (v0.58.1 + v0.60.1) — the shape generalizes to any

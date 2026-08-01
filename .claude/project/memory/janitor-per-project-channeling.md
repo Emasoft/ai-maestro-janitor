@@ -16,7 +16,7 @@ names, or aggregate counts that include them. Four independent reasons: wrong sk
 are FORBIDDEN from acting on other agents' workdirs/gits/repos; token-budget contamination
 breaks the division of responsibilities; data exfiltration into projects with weaker
 (possibly zero) protections. Only EXPLICIT HUMAN commands (`/janitor-show-global-status`,
-`/janitor-github-config-fix --all`) may be machine-wide.
+`/janitor-github-config-fix --all`) may be machine-wide. [^1]
 
 **Routing consequence:** findings about a project with NO live session go to the HUMAN via
 the daemon's notification channel ([[TRDD-4649ZLE0]] design) — never through another

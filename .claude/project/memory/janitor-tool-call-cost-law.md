@@ -20,7 +20,7 @@ turn_cost ≈ tool_calls × context_tokens × 0.1
 Measured on this repo's own `.janitor/state/token-meter.jsonl` (2026-07-14, ~520k context;
 weighted = `output + input + cache_creation + 0.1×cache_read`[^3]): **1 call ≈ 52k · 3 ≈ 157k ·
 6 ≈ 311k** — dead linear at ~52k/call, which is exactly `520k × 0.1`. A quiet heartbeat fire is
-ONE tool call.
+ONE tool call. [^2]
 
 The law is **`cache_read`-driven, so the 0.1× is the only price that enters it** — it is unaffected
 by how the janitor weights a cache WRITE, and the numbers above stand regardless.
@@ -33,7 +33,7 @@ one script is not cosmetic — it removes three full context re-reads. This is w
 **The dynamic cadence's control loop runs through the MODEL, so its actuation is billed at model
 rates.** `dispatch.py` CANNOT call `CronCreate` — only the model can — so a tier change is not a
 config write, it is a **full Claude turn**: the dispatcher emits `[janitor-renew]`, the session runs
-`/janitor-arm`, and that arm costs (post-TRDD-DLI76AUC) 4 tool calls ≈ 4 quiet fires. It was 6.
+`/janitor-arm`, and that arm costs (post-TRDD-DLI76AUC) 4 tool calls ≈ 4 quiet fires. It was 6. [^1]
 
 TRDD-0QQX9H0G priced the FIRES it saves but never the TRANSITIONS it costs. So:
 

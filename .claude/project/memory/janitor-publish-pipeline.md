@@ -56,7 +56,7 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
    existed; CPV ≥ v2.71.0 retired it after fixing its gitignore-walk bug, so the
    single `plugin --strict` pass now covers everything.)
 8. **Step 6 — version consistency** across plugin.json / pyproject.toml /
-   package.json / Cargo.toml / Python `__version__`; a mismatch aborts.
+   package.json / Cargo.toml / Python `__version__`; a mismatch aborts. [^1]
 9. **Step 7 — git-cliff availability pre-check** (fail BEFORE any file mutation —
    every release MUST produce a CHANGELOG entry + release notes).
 10. **Step 8 — compute the bumped semver** from `--major | --minor | --patch`
@@ -147,7 +147,7 @@ agents write, all legitimately. Two consequences, both paid for:
 Building the guard's own live-actor probe failed silently THREE times (a swallowed
 `ModuleNotFoundError`, then a sandboxed `HOME` that made it read the wrong home) — it now
 reads the liveness file from `_REAL_ENV["HOME"]` directly. A probe that fails silently
-degrades to "no other actor", i.e. it blames the suite.
+degrades to "no other actor", i.e. it blames the suite. [^4]
 
 
 ^ATOM-UHO6-Q99D [desc:"gate 4 timing out has TWO causes with one symptom — a worker-pool HANG (retry) and a genuinely SLOW run (raise the cap); time a standalone run to tell them apart", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck retry_did_not_clear_the_timeout, type: project, ocd: 2026-07-28, lmd: 2026-07-30]

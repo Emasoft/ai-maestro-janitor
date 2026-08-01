@@ -50,7 +50,7 @@ Top level — **ENFORCE** (set when missing OR different; `TOP_LEVEL_ENFORCE`):
    managed settings — a copy in a project's `.claude/settings.json` is SILENTLY IGNORED.
    Ensure it in `~/.claude/settings.json`, nowhere else. Accepted values: `"60s"|"5m"|"10m"|"never"`.
 3. **The zero footgun**: `CLAUDE_AFK_TIMEOUT_MS=0` does NOT disable auto-continue — it
-   dismisses the dialog IMMEDIATELY. Never "disable by zeroing".
+   dismisses the dialog IMMEDIATELY. Never "disable by zeroing". [^1]
 
 ## The lockstep invariant (two writers)
 

@@ -32,7 +32,7 @@ A session in `CLAUDE_CODE_RETRY_WATCHDOG`'s "Retrying in Xm" state BLOCKS the in
 BUFFERS typed keystrokes: typed slash-commands accumulate as text
 (`/janitor-arm/janitor-arm/…`), are never submitted (transcript shows `trailing_enqueues=0`),
 and FLOOD-execute when the wait finally breaks. Likewise a merely BUSY session enqueues typed
-commands indefinitely — a queue of operations fires whenever the turn happens to end.
+commands indefinitely — a queue of operations fires whenever the turn happens to end. [^1]
 
 ## Injection-safety corollaries (the esc_nudge design, TRDD-P7WU40G9 §BUG 3)
 
@@ -40,7 +40,7 @@ commands indefinitely — a queue of operations fires whenever the turn happens 
   (`terminal_trigger.HARD_INTERRUPT_ESC_COUNT`, 0.6 s apart), no text, no Enter. On a
   flood-residue input they CLEAR the draft; on a retry-wait they break it; on an idle empty
   prompt the worst case is an OPEN rewind menu, which the next burst's first Esc closes.
-  Destruction requires Enter, which an ESC-only plan never sends.
+  Destruction requires Enter, which an ESC-only plan never sends. [^2]
 - **The "needed 3-4 ESCs" observation = stacked dialogs**, not tool nesting — each open dialog
   eats one Esc. AskUserQuestion dialogs self-drain via the AFK timeout
   ([[claude-code-continuity-settings]]), and bypass-permissions fleets have no permission

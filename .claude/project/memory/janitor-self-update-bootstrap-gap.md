@@ -36,7 +36,7 @@ after a `[janitor-reload]` fires — verify the cache version first (`ls <cache>
 tail -1` and `claude plugin list`). A `[janitor-reload]` can fire on a stale/premature
 `reload-needed.flag` while the cache is unchanged, so the reload is a no-op on the OLD version
 and the running hooks are still the old ones. Reload ≠ update. See [[janitor-publish-pipeline]]
-for the release-gate half (CPV, pre-push hook, version/branch recheck).
+for the release-gate half (CPV, pre-push hook, version/branch recheck). [^1]
 
 ## Notes and lessons learned
 

@@ -22,7 +22,7 @@ heartbeat** that surfaces project-scoped drift to the model, and **one
 machine-wide daemon** that owns every user/global-scope mutation. This page is
 the navigable prose layer over the auto-generated project map in `CLAUDE.md` —
 read this to understand *how the pieces fit*, then drop into `CLAUDE.md`'s
-fenced map for the exact file/symbol index.
+fenced map for the exact file/symbol index. [^1]
 
 ## The two tiers
 
@@ -218,7 +218,7 @@ outside could re-fire it. Four layers, each resurrecting the one below:
   directive, and pushes the nudge that consumes it whenever THIS pane is
   unattended (see ^ATOM-DUXK-QD2D — recording alone did not stop a compaction
   from stranding a session; the push is the half that matters, and it must read
-  per-pane presence).
+  per-pane presence). [^6]
 - **L3 — in-session cron**: the ~5-min heartbeat self-trigger. Session-only is
   acceptable here precisely because L2 re-arms it every new session.
 
@@ -286,7 +286,7 @@ must report a crash.[^3]
 - LOCAL scope — anything machine-specific (the host's actual global-state path,
   the OAuth rotator's account/keychain particulars, absolute home paths) lives
   in LOCAL-scope notes, NOT here. This page is git-tracked and host-global, so
-  it stays generic by design.
+  it stays generic by design. [^2]
 - LOCAL-scope notes `reference_maintenance_mode_cache_warm_vs_disarm` and
   `feedback_arming_one_session_wakes_the_whole_fleet` — the maintenance-mode
   cost model and the fleet-wake incident that motivated it.

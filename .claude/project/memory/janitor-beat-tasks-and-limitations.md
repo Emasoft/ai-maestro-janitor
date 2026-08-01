@@ -68,7 +68,7 @@ stay cache-warm; demoting to SLOW cuts that ~6×.
 ## Clock B — the daemon beat tasks (`_build_tasks`)
 
 Every periodic daemon Task, its DEFAULT interval, and what it does. Each interval is
-overridable via its `CLAUDE_PLUGIN_OPTION_DAEMON_*_INTERVAL` env var.
+overridable via its `CLAUDE_PLUGIN_OPTION_DAEMON_*_INTERVAL` env var. [^1]
 
 | Task | Interval | Purpose / opt-in |
 |---|---|---|

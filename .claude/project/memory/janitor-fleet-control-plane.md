@@ -28,7 +28,7 @@ plugin DATA → legacy). A foreign program can hardcode exactly one rung, and on
 any host where a different rung applies it stats a file that never exists —
 which reads as **"flag absent"**, i.e. it ignores the control plane while
 looking perfectly healthy. A control plane whose miss-mode is "looks fine" is
-worse than none.
+worse than none. [^2]
 
 So the control plane is a **literal, unresolved path**: `~/.claude/janitor-control/`
 (`$JANITOR_CONTROL_DIR` overrides it for TESTS ONLY). This is the one sanctioned
@@ -74,7 +74,7 @@ update` that issue #7 exists to prevent.
 order fixed NEW-then-OLD (uniform order + non-blocking ⇒ deadlock-free),
 releasing the half it took when the other is contended. `acquire_*_lock()`
 returns an **opaque handle**, never a bare fd. Retire the OLD half two releases
-out and the tuple collapses back to one fd.
+out and the tuple collapses back to one fd. [^1]
 
 The singleton move **cannot reuse this primitive**: it must hold the NEW lock
 ACROSS the retirement of the OLD one, whereas `_acquire_dual_flock` releases

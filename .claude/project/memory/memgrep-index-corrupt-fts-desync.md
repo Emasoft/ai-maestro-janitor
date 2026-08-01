@@ -16,7 +16,7 @@ is corrupt`**, the SQLite FILE is almost certainly FINE. That second string is F
 The pages were never torn. Do **not** go hunting for a durability bug: memgrep sets
 `journal_mode = WAL` + `synchronous = NORMAL` (verified), and WAL is already crash-safe against a
 process being **killed** (only an OS/power crash can tear it) — so "an agent was killed by the rate
-limit" is **not** a sufficient explanation, and enabling WAL "harder" fixes nothing.
+limit" is **not** a sufficient explanation, and enabling WAL "harder" fixes nothing. [^1]
 
 **Why it desyncs (the real bug, fixed 2026-07-14 in `scripts/memgrep/src/index.rs`).** A schema
 migration cannot `ALTER` an FTS5 column set, so it must `DROP` + re-`CREATE` the virtual table — which
@@ -44,7 +44,7 @@ deterministically — it was never a race.**
 - `.memgrep/index.db` is a **derived cache, never a memory store** (the `.md` notes are the truth), so
   the correct recovery is to **rebuild, not to fail** — `open` now self-heals ('rebuild', then nuke +
   recreate as a last resort). Deleting it by hand is safe **only if you also delete `-wal`/`-shm`**: a
-  fresh DB beside a stale WAL is how you turn a logical desync into REAL file corruption.
+  fresh DB beside a stale WAL is how you turn a logical desync into REAL file corruption. [^2]
 - Still open (not a corruption bug, but real): memgrep sets **no `busy_timeout`**, so genuinely
   concurrent writers (the autorecall hook fires on EVERY prompt, plus the librarian detector and the
   memory agents) can fail with `SQLITE_BUSY`.

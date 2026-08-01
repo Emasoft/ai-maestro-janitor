@@ -47,7 +47,7 @@ Fleet reachability (which pane can be injected, via which channel): USER-scope p
 ## Design laws (cross-layer, all owner-ratified)
 
 - **Prevention beats recovery**: fix rotation first; recovery (ESC) then only accelerates a
-  retry that would already succeed.
+  retry that would already succeed. [^1]
 - **Never type text+Enter into a blocked session** — ESC-only; the session's own
   `rate-limited.flag → [janitor-resume]` machinery does the continuation.
 - **Per-project channeling**: every automatic surface (findings, alerts, token/burn warnings)

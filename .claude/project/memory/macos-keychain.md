@@ -74,7 +74,7 @@ respawn), boot out the launchd keepalive, and `killall SecurityAgent` to dismiss
 dialog backlog (freezing a process does NOT dismiss dialogs already handed to SecurityAgent).
 Note a **second, independent** flooder existed the same night — the user's *AgentLens* tool
 polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
-`security → parent → …` before blaming any one component.
+`security → parent → …` before blaming any one component. [^1]
 
 ## Gotcha 3b — the WRITE-side ACL prompt (severity: kills rotation; 2026-07-15 incident)
 
@@ -201,7 +201,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
 - `[[oauth-rotation-renew-reauth]]` — the ROTATE→RENEW→REAUTH component that reads these items.
 - `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1 & 2).
 - [[janitor-keepalive-test-isolation-fsevents]] — the OS-keepalive staging mechanism whose STALE
-  staged closure kept the pre-fix flooder alive (root-cause #5 above / lesson `[^2]`).
+  staged closure kept the pre-fix flooder alive (root-cause #5 above / lesson `[^2]`). [^8]
 
 ## Notes and lessons learned
 

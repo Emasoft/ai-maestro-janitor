@@ -91,7 +91,7 @@ metadata:
 
 The `description:` is the load-bearing recall surface — `memgrep recall` ranks on
 `description + title + tags` ONLY (the `metadata.type` taxonomy does NOT affect
-ranking). Put **symptom vocabulary** in `description`, put the **answer** in the
+ranking). [^2] Put **symptom vocabulary** in `description`, put the **answer** in the
 body (two-hop recall: symptom query → note → body answer). The
 `## Notes and lessons learned` section is MANDATORY on every page even when empty
 — the standing landing zone for `[^N]` correction lessons; the page-shape pass
@@ -193,7 +193,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
 
 - **`memory-scope-leak`** (`scripts/detectors/memory-scope-leak.py`) — keeps the
   PUSHED PROJECT scope free of machine/user-private data, because PROJECT is the
-  ONLY scope that leaves the machine. It scans every `<repo-root>/memory/**/*.md`
+  ONLY scope that leaves the machine. [^3] It scans every `<repo-root>/memory/**/*.md`
   page with the private-path lib, the PII shapes, the cloud + CI/CD credential
   libs, and an unknown-secret entropy pass (Shannon entropy + base64-ish gate),
   and emits `[memory-scope-leak] <file>: <class> — demote to LOCAL scope before
@@ -260,7 +260,7 @@ laterally. Wire both ends in the same edit; links are **scope-local** (a
 `[[wikilink]]` may only target a page in the SAME scope root — reference another
 scope's page in prose). The librarian flags one-sided links as a safety net, but
 the author wires both ends now. memgrep's `--to`/`--from` agree under the link
-law, so the graph navigates from ANY entry point in ANY direction.
+law, so the graph navigates from ANY entry point in ANY direction. [^1]
 
 **Navigate progressively:** recall surfaces the TIP (the hub / best page); follow
 only the links the task needs; read a shared general page ONCE and reuse it

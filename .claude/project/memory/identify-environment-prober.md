@@ -10,9 +10,9 @@ metadata:
 ---
 
 `/janitor-identify-environment` (`scripts/identify_environment.py` + the pure
-`scripts/lib/env_detect.py`) reports the full runtime environment: terminal, OS,
+`scripts/lib/env_detect.py`) reports the full runtime environment: terminal[^1], OS,
 filesystem, container/VM/CI, IDE + Claude-Code surface, execution context, network
-(proxy/VPN/Tailscale/gateway/NAT/DNS/firewall/listening-services), cloud footprint,
+(proxy/VPN/Tailscale/gateway/NAT[^2]/DNS/firewall/listening-services), cloud footprint,
 python env, user, PATH, compilers/runtimes/package-managers/dev-tools, MCP servers,
 the git repo + GitHub slug/branches/hooks/rulesets, wikimem sizes, and the
 installed/enabled plugins+hooks+skills+staleness.

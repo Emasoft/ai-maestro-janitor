@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))  # for a lib modu
 Do not "simplify" by dropping the second line. It is not a lint nit — omitting it is what
 killed `on-session-start.py` for three weeks (TRDD-EG2HSPMQ, commit `b28c53a`). The first
 line is also load-bearing for a different reason: the CPV hook validator's local-sibling
-detector recognises the `from lib import …` package form, which is why hooks use it at all.
+detector recognises the `from lib import …` package form, which is why hooks use it at all. [^1]
 
 **Why:** `scripts/lib/__init__.py` makes `lib` a package, so both forms *look* valid. Nothing
 in the code says which convention a given module tolerates — a module that only imports stdlib

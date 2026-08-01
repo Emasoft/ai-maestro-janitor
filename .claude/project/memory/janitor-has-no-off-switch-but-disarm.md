@@ -17,7 +17,7 @@ handoff of daemon chores to a live ai-maestro server (`harness_backend.server_ru
 anything?" were different questions with different answers, and nothing surfaced the gap.
 `/janitor-pause` left the cron firing and the daemon resident while doing nothing — from a
 process list, a cron list, or a daemon heartbeat, a suspended fleet looked exactly like a
-healthy one. Same for `keep-going-off`. Disarm survives because it is the opposite: it
+healthy one. Same for `keep-going-off`. [^1] Disarm survives because it is the opposite: it
 deletes the cron, so a disarmed session cannot be mistaken for a working one.
 
 **How to apply:** when asked for a "temporary quiet mode", a "suspend for an hour", a

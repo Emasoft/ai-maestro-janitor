@@ -30,14 +30,14 @@ session started LAST. Found live 2026-07-31: the installed heartbeat-protocol ru
 `[janitor-quiet]` that the dispatcher emits — and the rule's own security clause tells an
 agent to refuse an unlisted marker. Fixed in `442864c` (v1.0.0): each installed file leads
 with `<!-- ai-maestro-janitor:rule-stamp version=X.Y.Z -->` and an install is REFUSED when
-the installed stamp is newer. Every unknown fails toward INSTALLING — see [^2].
+the installed stamp is newer. Every unknown fails toward INSTALLING — see [^2]. [^3]
 
 ## The ghost symptom
 
 After v0.53.0 shipped the harness-relative compact threshold, a session still on 0.52.0
 hooks injected `/compact` at the OLD 350k threshold — indistinguishable from "the fix
 doesn't work" unless you know that session's LOADED version. Rule: **before declaring a
-shipped fix broken, establish the misbehaving session's loaded plugin version.**
+shipped fix broken, establish the misbehaving session's loaded plugin version.** [^1]
 
 ## Diagnosis
 

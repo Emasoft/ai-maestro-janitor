@@ -23,7 +23,7 @@ metadata:
 |---|---|---|---|
 | **IND universal** | `trdd-design-tasks.md`, `prrd-design-rules.md`, `universal-kanban.md` | `~/.claude/rules/` (user scope) | **janitor** (issue #73, TRDD-DE9757LJ) |
 | **DEP harness overlay** | `aimaestro-trdd-approval.md`, `aimaestro-manager-approval-defaults.md`, `aimaestro-prrd-governance.md`, `aimaestro-kanban-multiagent.md`, `aimaestro-agent-rules.md` | each agent **workdir**'s `.claude/rules/` | **ai-maestro server** (`rules/aimaestro/` + `lib/agent-rules-seed.ts`) |
-| **retired** | pre-split copies of the two universal ones + `trdd-approval-tiers.md`, `manager-approval-defaults.md` | `~/.claude/rules/` | ai-maestro-plugin (CORE) — retirement filed as `ai-maestro-plugin#35` |
+| **retired** | pre-split copies of the two universal ones + `trdd-approval-tiers.md`, `manager-approval-defaults.md` | `~/.claude/rules/` | ai-maestro-plugin (CORE) — retirement filed as `ai-maestro-plugin#35` [^2] |
 
 The owner's directive (2026-07-22): universal → janitor repo; harness-specific →
 ai-maestro repo, *"since it keeps the rules right with the ai-server code that
@@ -51,7 +51,7 @@ Each side is half-blind by construction: the janitor cannot see the workdir
 overlays (they seed into agent workdirs it never visits), and ai-maestro cannot
 see what CORE installs at user scope. Two agents each verified their own half and
 each concluded the other half was missing. The only reliable move is to measure
-the INSTALLED bytes on disk, not to reason from either repo's installer.
+the INSTALLED bytes on disk, not to reason from either repo's installer. [^1]
 
 ## Notes and lessons learned
 

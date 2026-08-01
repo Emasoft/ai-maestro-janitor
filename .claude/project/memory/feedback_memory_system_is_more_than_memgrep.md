@@ -15,7 +15,7 @@ tool. The system is **{ tool · rules · skills · (optional) hooks }** (USER re
 2026-06-08):
 
 - **tool** — `memgrep` (Rust, `<repo-root>/scripts/memgrep/`): markdown-AST
-  recall engine; ranks notes by how a SYMPTOM query hits `description + title + tags`.
+  recall engine; ranks notes by how a SYMPTOM query hits `description + title + tags`. [^1]
 - **rule** — `$HOME/.claude/rules/markdown-memory-recall.md` (also shipped as the janitor
   plugin's `rules/markdown-memory-recall.md`, auto-installed by rules_installer):
   recall-before-acting, the note schema, the "index by question/symptom not answer

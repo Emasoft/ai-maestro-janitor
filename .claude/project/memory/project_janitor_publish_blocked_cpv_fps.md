@@ -14,7 +14,7 @@ metadata:
 CPV `--strict` gate at exit 0 (CRITICAL/MAJOR/MINOR/NIT all 0).** The long block
 (115 unpushed commits) ended the same day CPV's scanner-aware fixes landed. What
 cleared the final findings (all devitalize-or-remove, never exempt — USER policy:
-exempt-lists were dropped fleet-wide as exploitable):
+exempt-lists were dropped fleet-wide as exploitable): [^1]
 
 - `tools/memgrep` → `scripts/memgrep` (RC-NONSTD-DIR-001; standard dir).
 - `INPUT_DEV/` (untracked+gitignored third-party extracts that the RC walk still
