@@ -462,7 +462,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=50173005ce1a digest=7b36de1537e2 generated=2026-07-31T21:00:49+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0a1baa9a15b6 digest=6b8381ea6c9e generated=2026-08-01T05:26:15+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1215,6 +1215,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · resolve_project_dir() -> Path | None — The PROJECT scope memory root ``<git-root>/.claude/project/memory/``, or
   · resolve_user_dir() -> Path — The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
   · resolve_user_mirror_dir() -> Path — The USER-memory BACKUP MIRROR ``~/.claude/ai-maestro-janitor-memory/`` (TRDD-GFT33HT9).
+  · page_atom_ids(text) -> set[str] — Every atom id DEFINED by a page. Pure; fenced code is not a definition.
+  · classify_mirror_orphans(orphan_texts, canonical_ids) -> tuple[list[str], list[str]] — Split mirror-only pages into ``(superseded, unknown)``. PURE — no I/O.
   · sync_user_memory_mirror() -> str | None — Keep the uninstall-surviving USER-memory MIRROR in step with the canonical store
   · resolve_wiki_dir(scope_root) -> Path — The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wikimem``.
   · is_curated_wiki_page(text) -> bool — True iff ``text`` is a CURATED wikimem page; False iff a RAW harness buffer note.
@@ -1272,18 +1274,28 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · parse_approval_response(reply) -> bool — Return True iff the reply is EXACTLY ``APPROVED`` after .strip().
   · apply_fp_filters(text, filters) -> bool — Return True iff ``text`` contains ANY substring from ``filters``.
 `scripts/lib/pending_agents.py` — Pending background-agent manifest (TRDD-82OP4EN9 W1) — deterministic fork
-  · add(agent_id, description, now) -> None — Record a spawned subagent. Fail-open: swallows everything.
+  · add(agent_id, description, now, transcript) -> None — Record a spawned subagent. Fail-open: swallows everything.
   · remove(agent_id, now) -> None — Clear a finished subagent. No-op on empty/unknown id (fail-open).
   · pending(now) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
   · is_janitor_agent(entry) -> bool — True iff this manifest entry is a background agent the JANITOR spawned for
   · pending_external(now) -> list[dict] — Live entries EXCLUDING the janitor's own housekeeping agents — the set the
   · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
+  · spawn_prompt(transcript_path) -> str — The original spawn prompt of an agent, read from the FIRST user message of its
+  · respawn_prompt(transcript_path) -> str — The full prompt to respawn an interrupted agent with, preamble included.
 `scripts/lib/plugin_freshness.py` — Plugin-freshness helper (issue #69, TRDD-YF4NDYYE) — verify cached-vs-live BEFORE
   · cached_version(plugin_root) -> str | None — The version of the plugin tree being audited (its own plugin.json).
   · installed_pins(plugin_name, marketplace) -> set[str] — EVERY version Claude Code has an install record for, or an empty set when unknown.
   · latest_published(plugin_root, *, now) -> str | None — Latest published release version, through the TTL cache. None when unknown
   · freshness(plugin_root, *, now) -> dict — The audit-header facts: what is being audited vs what is installed/published.
   · header(plugin_root, *, now) -> str — The one-line report header every cache-based audit prints first.
+`scripts/lib/plugin_target.py` — Parse the many ways a human names a plugin into one unambiguous target.
+  · PluginTargetError — The user's argument could not be read as any supported form.
+  · PluginTarget — One resolved target.
+  · PluginTarget.needs_marketplace_add(self) -> bool — True when the target names a source that may not be registered yet.
+  · PluginTarget.qualified(self) -> str | None — `plugin@marketplace` when both are known — the form both CLIs accept.
+  · parse_target(raw, *, isdir) -> PluginTarget — Parse one user-supplied plugin argument. Raises PluginTargetError on anything else.
+  · LocalKind — What a local directory actually IS, and the names read out of its manifests.
+  · classify_local_dir(path, *, read_json) -> LocalKind — Decide what a local directory is, from its `.claude-plugin/` manifests.
 `scripts/lib/posture.py` — Posture-grade computation for the janitor heartbeat.
   · PostureGrade — A single grade snapshot for the heartbeat.
   · compute(critical, high, major, minor, mal_advisories) -> PostureGrade — Compute a posture grade from per-severity counts + OSV MAL-* count.
@@ -1819,6 +1831,11 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · gather_facts(root, *, now) -> Facts — Collect every observable fact `diagnose` needs. The ONLY I/O entry point.
   · SupervisorResult — What `apply` did — alert codes recorded + logged (no heals: the daemon
   · apply(findings, *, log) -> SupervisorResult — Record + log every alert finding. The supervisor heals nothing now that
+`scripts/plugin_manage.py` — Backing script for /janitor-plugin-{install,uninstall,upgrade} — harness-adaptive.
+  · agent_cli() -> str | None — Absolute path of `aimaestro-agent.sh`, or None when it is not installed.
+  · resolve_local(target) -> pt.PluginTarget — Turn a local-directory target into a named one by reading its manifests.
+  · build_argv(action, target, *, scope, backend, agent_ref, cli) -> list[list[str]] — The ordered command(s) to run. PURE — builds, never executes, so a plan stays
+  · main() -> int
 `scripts/publish.py` — Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
   · cprint(msg) -> None
   · run(cmd, cwd, *, check, capture, timeout) -> subprocess.CompletedProcess[str] — Run a command, stream output, fail-fast on error.
