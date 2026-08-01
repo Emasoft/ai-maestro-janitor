@@ -63,6 +63,11 @@ integration shape.
 
 - [[janitor-beat-tasks-and-limitations]] — the heartbeat's dynamic TTL-aware tiers
   that the agentlensPro TTL-regime probe is meant to inform.
+- [[window-burn-rate-alarm-contract]] — the detector this enriches. On 2026-08-01
+  its 94% and agentlensPro's 5.9% looked like a contradiction and were not: two
+  correct readings of two DIFFERENT accounts (an idle alternate's 7d vs the live
+  account's 5h). Before treating a disagreement here as either tool's defect,
+  line up which account and which window each number describes.
 
 ## Notes and lessons learned
 

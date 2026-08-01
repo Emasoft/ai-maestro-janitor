@@ -279,6 +279,10 @@ must report a crash.[^3]
 
 ## See also
 
+- [[window-burn-rate-alarm-contract]] — the four gates a burn trip must pass
+  (including the idle gate), why every usage figure names its account and its
+  sample age, and why the `usage_probe` cache retires entries the access-token
+  rotation strands.
 - `CLAUDE.md` — the auto-generated, always-current project map (file → symbol
   index) this hub narrates. When the structure changes, the map is the source
   of truth; reconcile this prose to it.
