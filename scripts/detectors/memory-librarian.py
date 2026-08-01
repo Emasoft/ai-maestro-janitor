@@ -99,6 +99,20 @@ _MIN_SHARED_TOKENS = 2
 _GENERIC_DF_FLOOR = 4
 _GENERIC_DF_RATIO = 0.34
 
+# CONFLICT-only overall-similarity gate (issue #35, second half). The df filter above
+# bounds how generic a single token may be, but on a small corpus it still admits a lot:
+# with n=38 the cutoff is 13, so a token present in a THIRD of the notes counts as
+# "distinctive", and one such token alone spans C(13,2)=78 pairs. Two of them co-occurring
+# is routine, so `_MIN_SHARED_TOKENS` is met by notes that merely share a domain.
+#
+# A conflict is a STRONG claim, so it additionally requires the two notes to be broadly
+# similar, not just to intersect twice. Measured on a 38-note corpus that surfaced 40
+# candidates (saturating `_MAX_PAIRS_LISTED`, all later judged false): Jaccard over the
+# full token sets ran min 0.026 / median 0.050 / max 0.286, and the single 0.286 pair was
+# the one genuinely same-subject pair in the set. At 0.15 the 39 noise pairs drop and that
+# pair survives — a 3x margin over the median, not a hairline fit.
+_MIN_TOKEN_JACCARD = 0.15
+
 # `memgrep index --markdown` block header: `## <path> — <name>` (em-dash spaced).
 _BLOCK_RE = re.compile(r"^##\s+(?P<path>\S.*?)\s+—\s+(?P<name>.+?)\s*$")
 _TAGS_RE = re.compile(r"^tags:\s*(?P<tags>.+?)\s*$")
@@ -764,6 +778,18 @@ def _build_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:
     return merged
 
 
+def _token_jaccard(meta_a: NoteMeta, meta_b: NoteMeta) -> float:
+    """Overall token similarity of two notes: |A ∩ B| / |A ∪ B| over their FULL token sets.
+
+    Deliberately NOT the distinctive-filtered sets the edge is formed from. The question the
+    df filter answers is "is this token generic?"; the question here is "are these two notes
+    broadly about the same thing?", and dropping the shared generic tokens before measuring
+    overlap would discard exactly the evidence that answers it. Two empty notes score 0."""
+    a, b = set(meta_a.tokens), set(meta_b.tokens)
+    union = a | b
+    return len(a & b) / len(union) if union else 0.0
+
+
 def _conflict_pairs(
     notes: dict[str, NoteMeta],
     linked: set[frozenset[str]],
@@ -802,6 +828,8 @@ def _conflict_pairs(
             shared_tokens = distinctive[name_i] & distinctive[name_j]
             if len(shared_tokens) < _MIN_SHARED_TOKENS:
                 continue  # not the same subject — a shared tag alone is not a conflict
+            if _token_jaccard(notes[name_i], notes[name_j]) < _MIN_TOKEN_JACCARD:
+                continue  # intersects twice but is not broadly similar — a shared DOMAIN
             if not _has_contradiction_signal(
                 note_texts.get(name_i, ""), note_texts.get(name_j, ""), shared_tokens
             ):

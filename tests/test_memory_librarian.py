@@ -26,6 +26,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "memory-librarian.py"
+
+# In-process handle for the PURE helpers (the rest of this file drives the detector by
+# subprocess, which is right for end-to-end behaviour but cannot exercise arithmetic).
+# The module MUST be registered in sys.modules before exec: its `@dataclass` decorators
+# resolve `cls.__module__` through there, and omitting it fails with a bare AttributeError
+# on NoneType that says nothing about the real cause.
+import importlib.util  # noqa: E402
+
+_lib_spec = importlib.util.spec_from_file_location("librarian", DETECTOR)
+assert _lib_spec is not None and _lib_spec.loader is not None
+librarian = importlib.util.module_from_spec(_lib_spec)
+sys.modules["librarian"] = librarian
+_lib_spec.loader.exec_module(librarian)
+
+
+def _fake_meta(tokens: set[str], tags: set[str] | None = None):
+    """A NoteMeta carrying just the fields the similarity gate reads."""
+    return librarian.NoteMeta(tags=frozenset(tags or set()), tokens=frozenset(tokens))
 PROPOSAL_NAME = "memory-reorg-proposed.md"
 
 _MEMGREP = (
@@ -448,6 +466,87 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
             self.assertIn("(none)", conflict,
                           f"complementary pair must not be a conflict; got:\n{conflict}")
+
+    def test_shared_domain_with_a_contradiction_is_still_not_a_conflict(self):
+        """Issue #35, second half: two notes about DIFFERENT subjects that merely share a
+        domain must not be a conflict, even when they both mention numbers.
+
+        `_MIN_SHARED_TOKENS=2` plus the df filter is not enough on a small corpus — with
+        n notes the generic cutoff is `ceil(n*0.34)`, so a token in a THIRD of the corpus
+        still counts as "distinctive", and one such token alone spans C(k,2) pairs. Measured
+        on a real 38-note corpus this surfaced 40 candidates, SATURATING the cap, and every
+        one sampled was judged false. The overall-similarity gate is what separates
+        "same subject" from "same domain"."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # Both are about "claude agent" things and both state a number, so they clear
+            # _MIN_SHARED_TOKENS and the contradiction signal — but they share no subject.
+            # Descriptions are symptom-rich because that is the shape the recall law
+            # mandates and the shape the real corpus has (see the length test below).
+            (memdir / "claude_agent_spawn_budget.md").write_text(
+                _note("claude_agent_spawn_budget",
+                      "how many subagents may one claude agent session spawn before the cap / "
+                      "my fan out stopped launching workers halfway through / where is the per "
+                      "session spawn ceiling configured", [],
+                      body="A claude agent session may spawn 200 subagents before the cap."))
+            (memdir / "claude_agent_keychain_prompt.md").write_text(
+                _note("claude_agent_keychain_prompt",
+                      "a claude agent read triggered a macos password dialog / why does the "
+                      "keychain prompt appear during an unattended run / how long does an unlock "
+                      "wait before it gives up", [],
+                      body="A claude agent keychain read waits 30 seconds for the unlock."))
+            _run(home, project)
+            proposal_path = memdir / PROPOSAL_NAME
+            if proposal_path.exists():
+                proposal = proposal_path.read_text()
+                conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+                self.assertIn("(none)", conflict,
+                              f"a shared DOMAIN must not be a conflict; got:\n{conflict}")
+
+    def test_similarity_gate_needs_a_symptom_rich_description_to_discriminate(self):
+        """KNOWN PROPERTY, pinned so it is deliberate rather than accidental: the gate's
+        power scales with how much a note's `description:` actually says.
+
+        Tokens come from name+description only. Two notes with a FIVE-token description
+        sharing two generic tokens score 2/8 = 0.25 and pass the bar — not because they are
+        related, but because at that resolution there is no evidence either way. Give the
+        same two notes the symptom-rich descriptions the recall law requires (~16 tokens
+        each) and the same two shared tokens score 0.065, matching the real corpus median.
+
+        So the gate is not a substitute for writing real descriptions: a corpus of terse
+        notes gets little protection, which is one more reason a thin `description:` is a
+        defect rather than a style choice."""
+        terse_a = _fake_meta({"claude", "agent", "spawn", "budget", "session"})
+        terse_b = _fake_meta({"claude", "agent", "keychain", "prompting", "unlock"})
+        self.assertGreaterEqual(librarian._token_jaccard(terse_a, terse_b),
+                                librarian._MIN_TOKEN_JACCARD)
+
+        rich_a = _fake_meta(set(terse_a.tokens) | {f"sym_a{i}" for i in range(11)})
+        rich_b = _fake_meta(set(terse_b.tokens) | {f"sym_b{i}" for i in range(12)})
+        self.assertLess(librarian._token_jaccard(rich_a, rich_b), librarian._MIN_TOKEN_JACCARD)
+
+    def test_token_jaccard_is_intersection_over_union(self):
+        """The similarity gate measures overlap over the FULL token sets, not the
+        distinctive-filtered ones: the df filter answers 'is this token generic?', while
+        this answers 'are these two notes broadly about the same thing?' — and removing the
+        shared generic tokens first would discard the very evidence that answers it."""
+        a = _fake_meta({"alpha", "beta", "gamma", "delta"})
+        b = _fake_meta({"alpha", "beta", "gamma", "epsilon"})
+        self.assertAlmostEqual(librarian._token_jaccard(a, b), 3 / 5)
+        far = _fake_meta({"zeta", "eta"})
+        self.assertAlmostEqual(librarian._token_jaccard(a, far), 0.0)
+        self.assertAlmostEqual(librarian._token_jaccard(a, a), 1.0)
+        empty = _fake_meta(set())
+        self.assertEqual(librarian._token_jaccard(empty, empty), 0.0)  # no ZeroDivisionError
+
+    def test_jaccard_threshold_sits_well_above_the_measured_noise_floor(self):
+        """The threshold is calibrated, not hairline. On the corpus that motivated it the
+        false pairs ran median 0.050 and max 0.286, where the 0.286 pair was the one
+        genuinely same-subject pair — so the bar must clear the noise band by a real margin
+        while staying below that pair."""
+        self.assertGreater(librarian._MIN_TOKEN_JACCARD, 0.050 * 2)
+        self.assertLess(librarian._MIN_TOKEN_JACCARD, 0.286)
 
     def test_real_antonym_contradiction_is_a_conflict(self):
         """A GENUINE contradiction — two same-subject notes making OPPOSING claims
