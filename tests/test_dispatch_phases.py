@@ -12,6 +12,7 @@ point at tmp_path so the user's real state is never touched.
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from io import StringIO
@@ -66,6 +67,12 @@ def _import_dispatch():
     spec.loader.exec_module(mod)
     return mod
 
+
+
+def _reported_age(out: str) -> int:
+    """The `<n>s ago` the phase printed, or -1 when it printed none."""
+    m = re.search(r"(\d+)s ago", out)
+    return int(m.group(1)) if m else -1
 
 def _capture_stdout(fn):
     """Run fn() while capturing print() output. Return captured string."""
@@ -548,7 +555,15 @@ def test_phase_compact_resume_emits_directive_and_clears(env_isolation: dict) ->
     out = _capture_stdout(dispatch._phase_compact_resume)
     assert out.startswith("[janitor-resume]"), f"must lead with the resume marker, got {out!r}"
     assert "continue TRDD-31095269" in out
-    assert "42s ago" in out, "age from the .ts sidecar must be reported"
+    assert _reported_age(out) in (42, 43), (
+        # The helper stamps the sidecar as now-42, then the PHASE reads the clock again.
+        # A second ticking over between those two independent reads makes the age 43 —
+        # a real 1-in-N flake that only shows under a loaded full suite (it blocked a
+        # release on 2026-08-01, having passed in isolation every time). Asserting an
+        # exact second across two clock reads is the bug; the sidecar is still proven to
+        # be the source, because a missing/ignored one yields 0.
+        f"age must come from the .ts sidecar (~42s), got {out!r}"
+    )
     sd = state.state_dir()
     assert not (sd / "resume-after-compact.flag").exists(), "flag must be cleared after emission"
     assert not (sd / "resume-after-compact.ts").exists(), "ts sidecar must be cleared too"
@@ -703,7 +718,15 @@ def test_phase_clear_resume_emits_directive_and_clears(env_isolation: dict) -> N
     assert lines[0] == "[janitor-resume]", f"marker line must be bare, got {lines[0]!r}"
     assert "TRDD-Z582IKIR" in out
     assert "agent-handoff.md" in out, "the link-only handoff pointer must survive"
-    assert "42s ago" in out, "age from the .ts sidecar must be reported"
+    assert _reported_age(out) in (42, 43), (
+        # The helper stamps the sidecar as now-42, then the PHASE reads the clock again.
+        # A second ticking over between those two independent reads makes the age 43 —
+        # a real 1-in-N flake that only shows under a loaded full suite (it blocked a
+        # release on 2026-08-01, having passed in isolation every time). Asserting an
+        # exact second across two clock reads is the bug; the sidecar is still proven to
+        # be the source, because a missing/ignored one yields 0.
+        f"age must come from the .ts sidecar (~42s), got {out!r}"
+    )
     sd = state.state_dir()
     assert not (sd / "resume-after-clear.flag").exists(), "flag must be cleared after emission"
     assert not (sd / "resume-after-clear.ts").exists(), "ts sidecar must be cleared too"
