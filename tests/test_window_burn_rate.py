@@ -229,6 +229,29 @@ def test_model_scoped_limit_becomes_its_own_window() -> None:
     assert len(lines) == 1 and "7d/Fable window 90%" in lines[0]
 
 
+def test_model_scoped_session_limit_becomes_a_5h_window() -> None:
+    """Both window lengths are mapped, not just the weekly one. Anthropic emits only
+    `weekly_scoped` for Fable today, so every live model row reads `7d/…` — but a
+    model-scoped SESSION limit must resolve to a 5h window on its own, without a code
+    change, exactly like the weekly one does."""
+    usage = _usage(five=(10.0, _reset_for(_5H, 0.2)))
+    usage["limits"] = [_limit(kind="session_scoped", group="session", percent=75.0,
+                              resets_at=_reset_for(_5H, 0.2), model="Fable")]
+    wins = tbn.model_windows_from_usage(usage, NOW)
+    assert [w["label"] for w in wins] == ["5h/Fable"]
+    assert wins[0]["window_s"] == _5H
+    assert "5h/Fable window 75%" in tbn.evaluate(_acct("acct", usage), NOW, 1.5, 5.0)[0]
+
+
+def test_both_account_wide_windows_alarm_independently() -> None:
+    """5h and 7d are evaluated on equal terms: a hot session window alarms even while the
+    weekly one is comfortable, and vice versa."""
+    hot_5h = _usage(five=(90.0, _reset_for(_5H, 0.3)), seven=(20.0, _reset_for(_7D, 0.5)))
+    hot_7d = _usage(five=(10.0, _reset_for(_5H, 0.5)), seven=(94.0, _reset_for(_7D, 0.58)))
+    assert [ln.split(" window")[0][-2:] for ln in tbn.evaluate(_acct("a", hot_5h), NOW, 1.5, 5.0)] == ["5h"]
+    assert [ln.split(" window")[0][-2:] for ln in tbn.evaluate(_acct("a", hot_7d), NOW, 1.5, 5.0)] == ["7d"]
+
+
 def test_unscoped_limits_do_not_double_count_the_top_level_windows() -> None:
     """`session` and `weekly_all` carry `scope: null` and merely restate `five_hour` /
     `seven_day`. Reading them as extra windows would alarm twice for one window."""

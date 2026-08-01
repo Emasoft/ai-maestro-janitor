@@ -50,6 +50,77 @@ def _user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": text}}
 
 
+# ---------- --live per-account burn rows ------------------------------------
+# `_account_burn_line` had NO test, which is how it kept rendering only the two
+# account-wide windows for months after Anthropic moved model-scoped limits into
+# `limits[]`. Loaded by path because token_report.py is a uv-script, not a module.
+
+import importlib.util  # noqa: E402
+
+_tr_spec = importlib.util.spec_from_file_location("token_report_script", _SCRIPT)
+assert _tr_spec is not None and _tr_spec.loader is not None
+_tr = importlib.util.module_from_spec(_tr_spec)
+_tr_spec.loader.exec_module(_tr)
+
+_NOW = 1_800_000_000
+_7D_S = 7 * 86400
+
+
+def _iso_at(epoch: int) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+
+
+def _live_usage(*, five_reset: str | None, seven_pct: float, fable_pct: float | None = None) -> dict:
+    reset7 = _iso_at(_NOW + _7D_S // 2)
+    usage: dict = {
+        "five_hour": {"utilization": 10.0, "resets_at": five_reset},
+        "seven_day": {"utilization": seven_pct, "resets_at": reset7},
+    }
+    if fable_pct is not None:
+        usage["limits"] = [
+            {"kind": "weekly_all", "group": "weekly", "percent": seven_pct, "resets_at": reset7, "scope": None},
+            {
+                "kind": "weekly_scoped", "group": "weekly", "percent": fable_pct, "resets_at": reset7,
+                "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
+            },
+        ]
+    return usage
+
+
+def test_live_row_lists_model_scoped_windows() -> None:
+    """A model with its own weekly budget must appear beside the account-wide windows —
+    it can be near its cap while `7d` reads comfortable, and it exists ONLY in `limits[]`
+    (the flat `seven_day_opus`/`seven_day_sonnet` fields are null on every live payload)."""
+    usage = _live_usage(five_reset=_iso_at(_NOW + 900), seven_pct=30.0, fable_pct=88.0)
+    row = _tr._account_burn_line({"label": "acct", "usage": usage}, _NOW)
+    assert row is not None
+    assert "7d/Fable 88%" in row and "7d 30%" in row
+
+
+def test_live_row_does_not_double_count_unscoped_limits() -> None:
+    """The unscoped `weekly_all` entry restates `seven_day`; listing it too would show the
+    same window twice with the same number and read like two separate problems."""
+    usage = _live_usage(five_reset=_iso_at(_NOW + 900), seven_pct=30.0, fable_pct=88.0)
+    row = _tr._account_burn_line({"label": "acct", "usage": usage}, _NOW)
+    assert row is not None and row.count("7d 30%") == 1
+
+
+def test_live_row_names_live_vs_alternate_and_flags_idle() -> None:
+    """Side by side, an email prefix does not say which account you are signed in as, and an
+    idle account's ratios describe past average spend rather than a current pace. Both facts
+    are stated; an unknown liveness prints no marker rather than a guess."""
+    active = _live_usage(five_reset=_iso_at(_NOW + 900), seven_pct=30.0)
+    idle = _live_usage(five_reset=None, seven_pct=94.0)
+    assert " (live)" in (_tr._account_burn_line({"label": "a", "usage": active, "is_live": True}, _NOW) or "")
+    assert " (alternate)" in (_tr._account_burn_line({"label": "a", "usage": active, "is_live": False}, _NOW) or "")
+    plain = _tr._account_burn_line({"label": "a", "usage": active}, _NOW) or ""
+    assert "(live)" not in plain and "(alternate)" not in plain
+    assert "idle (no session window)" not in plain
+    assert "idle (no session window)" in (_tr._account_burn_line({"label": "a", "usage": idle}, _NOW) or "")
+
+
 # ---------- token_meter.read_context_snapshot -------------------------------
 
 

@@ -120,15 +120,8 @@ def _heartbeat_week_line(beat_7d_weighted: int, price_per_mtok: float | None) ->
     it UNDER-states the real cost, which is why it is labeled an estimate."""
     if price_per_mtok is not None:
         dollars = beat_7d_weighted / 1_000_000 * price_per_mtok
-        return (
-            f"  janitor heartbeat: ~${dollars:.2f} this week on quiet fires "
-            f"({_fmt_k(beat_7d_weighted)} weighted tokens, WEIGHTED est. — cache_creation "
-            f"counted 1x though it bills ~2x, cache_read at 1/10)"
-        )
-    return (
-        f"  janitor heartbeat: {_fmt_k(beat_7d_weighted)} weighted tokens this week on quiet "
-        f"fires (set CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK for a $ estimate)"
-    )
+        return f"  janitor heartbeat: ~${dollars:.2f} this week on quiet fires ({_fmt_k(beat_7d_weighted)} weighted tokens, WEIGHTED est. — cache_creation counted 1x though it bills ~2x, cache_read at 1/10)"
+    return f"  janitor heartbeat: {_fmt_k(beat_7d_weighted)} weighted tokens this week on quiet fires (set CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK for a $ estimate)"
 
 
 def _project_dir() -> str:
@@ -286,14 +279,20 @@ def _short_slug(slug: str) -> str:
 
 
 def _account_burn_line(acct: dict, now: int) -> str | None:
-    """One account's `<prefix>  5h NN% (ratio X.Xx)  ·  7d NN% (ratio X.Xx, exhausts …)`
+    """One account's `<prefix> (live)  5h NN% (ratio X.Xx)  ·  7d NN% (…)  ·  7d/Fable NN% (…)`
     line for `--live`, or None when it has no computable window. Pure over the gathered
-    payload."""
+    payload.
+
+    Unlike the heartbeat alarm this view is an EXPLICIT human command, so it stays maximal:
+    model-scoped windows are listed beside the account-wide ones (a model with its own budget
+    can be near its cap while `7d` reads comfortable), an idle account is shown and LABELLED
+    idle rather than dropped, and every row says whether it is the live credential — the one
+    thing an email prefix cannot tell you when you are comparing accounts side by side."""
     usage = acct.get("usage")
     if not isinstance(usage, dict):
         return None
     parts: list[str] = []
-    for w in token_burn.windows_from_usage(usage, now):
+    for w in token_burn.windows_from_usage(usage, now) + token_burn.model_windows_from_usage(usage, now):
         r = w["burn_ratio"]
         rt = f"{r:.1f}x" if r is not None else "n/a"
         seg = f"{w['label']} {w['util_pct']:.0f}% (ratio {rt}"
@@ -303,7 +302,12 @@ def _account_burn_line(acct: dict, now: int) -> str | None:
         parts.append(seg + ")")
     if not parts:
         return None
-    return f"  {acct.get('label', 'live')}  " + "  ·  ".join(parts)
+    live = acct.get("is_live")
+    who = "" if not isinstance(live, bool) else (" (live)" if live else " (alternate)")
+    # An idle account's ratios describe past average spend, not a current pace — say so here
+    # rather than let a reader extrapolate them (the heartbeat alarm suppresses these outright).
+    idle = " · idle (no session window)" if token_burn.session_is_open(usage, now) is False else ""
+    return f"  {acct.get('label', 'live')}{who}  " + "  ·  ".join(parts) + idle
 
 
 def _account_burn_lines() -> list[str]:
@@ -448,9 +452,7 @@ def _render_attribution(as_json: bool) -> int:
     ranking = fleet.get("ranking", [])
     totals = fleet.get("totals", {})
     aligned = "window-aligned (resets_at)" if fleet.get("w5_lo") is not None else "trailing (no live probe)"
-    print(
-        f"[janitor-token-attribution] {len(projects)} project(s)  ·  fleet 5h {_fmt_k(totals.get('roll_5h', 0))}  ·  7d {_fmt_k(totals.get('roll_7d', 0))} weighted  ·  {aligned}"
-    )
+    print(f"[janitor-token-attribution] {len(projects)} project(s)  ·  fleet 5h {_fmt_k(totals.get('roll_5h', 0))}  ·  7d {_fmt_k(totals.get('roll_7d', 0))} weighted  ·  {aligned}")
     if not ranking:
         print("  no per-project transcript activity in the last 7d.")
         return 0
