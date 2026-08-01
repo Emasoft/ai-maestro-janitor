@@ -36,7 +36,7 @@ bogus `grant_type=refresh_token` to the token URL and read WHO answers:
 **Why this matters / how to apply:** any new urllib call to a `platform.claude.com` /
 `claude.ai` endpoint behind Cloudflare MUST set a non-default User-Agent or it 1010s. If you
 see `1010` anywhere in rotator logs (`rotator.log` / `bootstrap-*.log`), it is THIS — add the
-UA, don't chase the browser/cookie path. See also `[[oauth-rotation-renew-reauth]]` (the
+UA, don't chase the browser/cookie path. See also [[oauth-rotation-renew-reauth]] (the
 component page; the CDP-attach transport — the OTHER half of a working renew — is detailed
 there and in the LOCAL-scope renew browser-transport note). See also
 `[[project_rotator_let_429_happen_version_skew]]` — the 429 deadlock this 1010 bug

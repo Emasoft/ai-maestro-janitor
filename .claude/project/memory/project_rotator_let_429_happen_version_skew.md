@@ -69,7 +69,7 @@ the symptom should a version-skew recur.
 Full record: TRDD-32acd15f §STATE 2026-06-11 addendum. Don't trust a compaction
 summary's claim about which account is healthy — it time-varies; read
 `oauth-health` live (the rotator resume protocol lives in a LOCAL-scope note). See
-also `[[oauth-rotation-renew-reauth]]` (the component overview; this page is the
+also [[oauth-rotation-renew-reauth]] (the component overview; this page is the
 incident record behind its 429 lesson) and `[[project_janitor_cc_changelog_currency]]`
 (the rate-limit MENU that freezes the session on 429 — why rotation must be proactive).
 

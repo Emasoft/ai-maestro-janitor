@@ -105,6 +105,10 @@ work alone) — NOT to wait for a CPV exempt mechanism (issue #40), which would
 contradict this page's policy. Decision surfaced to USER; see TRDD-fe45babc
 STATE §1.[^2]
 
+See also [[reference_cpv_dotclaude_gitignore_fp]] — a narrower CPV `--strict` FP (the
+`.claude/` MINOR from PROJECT memory living there) that shares this page's broader
+publish-gate FP history.
+
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0001, status:valid, keywords:"publish_blocked_claim_superseded cpv_major_fp_era_over dont_carry_blocked_forward", ocd:2026-06-11, lmd:2026-06-12] SUPERSEDED original note: "the publish is
   correctly BLOCKED until CPV #75 lands" — true 2026-06-11 morning; CPV's

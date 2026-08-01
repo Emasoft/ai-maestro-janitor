@@ -40,7 +40,7 @@ that page.
 via `security` MUST (a) put the value on argv, not stdin, and (b) base64-wrap it. The
 canonical impl is `scripts/oauth_rotator/safe_storage.py` (store/retrieve, three-valued
 fail-closed `StoreResult`). Symptom to recall from: "keychain secret truncated to 128 bytes"
-or "value came back as hex / garbled". See also `[[oauth-rotation-renew-reauth]]` (the
+or "value came back as hex / garbled". See also [[oauth-rotation-renew-reauth]] (the
 rotator component page that uses this keychain layer).
 
 ## Notes and lessons learned

@@ -49,6 +49,10 @@ shipped fix broken, establish the misbehaving session's loaded plugin version.**
   + STALE flag; the janitor will consume it fail-open (`agentlens_probe`) to verify a pushed
   `[janitor-reload]` actually landed and to raise a per-project stale-hooks drift finding.
 
+See also [[status-lines-to-autonomous-readers-cause-escalation]] — a fix published but not
+installed is exactly the stranded-flag shape that page generalizes: a status line with
+readers and no writers is where automatic remediation piles up.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-ROLL-GHOST, status:valid, keywords:"fix published but bug still happening stale hooks session loaded old version reload-plugins ghost", ocd:2026-07-18, lmd:2026-07-18]
