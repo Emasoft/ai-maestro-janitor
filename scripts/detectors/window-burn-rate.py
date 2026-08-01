@@ -275,13 +275,16 @@ def main() -> int:
     # speculative (TRDD-90B47EM9).
     clause = _agentlens_cause_clause() or _top_consumer_clause(w5_lo, w7_lo)
     seen = state.state_dir() / "window-burn-rate-seen.txt"
-    day = now // 86400
     for trip in trips:
-        key = f"burn-{day}-{trip['key']}"
+        # The key is account+window+RESET EPOCH (built by `evaluate_trips`), so the dedupe
+        # horizon is ONE WINDOW INSTANCE and re-arms exactly when that window resets. It
+        # used to carry a `day` component instead, which re-alarmed about the SAME unchanged
+        # 7d window on all seven of its days — one reading presenting as a recurring event.
+        key = f"burn-{trip['key']}"
         line = dedupe.emit_once(seen, key, trip["line"] + clause)
         if line is not None:
             # emit_once stored line+clause; if the clause changed but the key already fired
-            # today it stays deduped — the burn condition (account+window+day) is the signal.
+            # for this window instance it stays deduped — the burn condition is the signal.
             print(line)
             # Index the surfaced alarm in THIS project's findings ledger (TRDD-FENWWB4E)
             # so it stays traceable after the session ends ("why did we hit the wall on

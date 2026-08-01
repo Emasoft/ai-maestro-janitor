@@ -22,9 +22,14 @@ sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 import token_burn  # noqa: E402
 
 
-def _probe(rotator: object, email: str | None, blob: dict | None, out: list[dict]) -> None:
+def _probe(rotator: object, email: str | None, blob: dict | None, out: list[dict], *, is_live: bool = False) -> None:
     """Probe ONE account's usage READ-ONLY and append it to `out` on HTTP 200; skip silently
-    on a missing blob, non-200 status, or any error."""
+    on a missing blob, non-200 status, or any error.
+
+    `is_live` records whether this is the credential Claude Code is actually signed in as.
+    It is the ONE fact a reader needs and the label cannot carry: two accounts differ only
+    by an email prefix, so a burn line about an alternate is otherwise indistinguishable
+    from one about the reader's own session (see `token_burn.format_burn_line`)."""
     if not blob:
         return
     try:
@@ -32,7 +37,7 @@ def _probe(rotator: object, email: str | None, blob: dict | None, out: list[dict
     except Exception:
         return
     if status == 200 and isinstance(data, dict):
-        out.append({"label": token_burn.account_prefix(email), "usage": data})
+        out.append({"label": token_burn.account_prefix(email), "usage": data, "is_live": is_live})
 
 
 def _read_slot_blob(rotator: object, email: str) -> dict | None:
@@ -63,7 +68,7 @@ def _collect(rotator: object, out: list[dict]) -> None:
     live = _read_live(rotator)
     if live is not None and isinstance(live_email, str):
         seen.add(live_email)
-        _probe(rotator, live_email, live, out)
+        _probe(rotator, live_email, live, out, is_live=True)
     for email in (st.get("slots") if isinstance(st, dict) else {}) or {}:
         if not isinstance(email, str) or email in seen:
             continue

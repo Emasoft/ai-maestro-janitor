@@ -30,6 +30,91 @@ _WINDOWS: tuple[tuple[str, str, int], ...] = (
     ("7d", "seven_day", _7D),
 )
 
+# `limits[].group` -> (base label, window seconds). The payload's own grouping is what
+# says how long a scoped window is; an unknown group is SKIPPED rather than guessed,
+# because `elapsed_fraction` divides by this number and a wrong length silently scales
+# every pace and projection derived from it.
+_LIMIT_GROUPS: dict[str, tuple[str, int]] = {
+    "session": ("5h", _5H),
+    "weekly": ("7d", _7D),
+}
+
+# Model display names come from the API and end up in a drift line, so they are reduced
+# to a conservative charset before ever being formatted (a drift line is parsed
+# downstream, and `[`/`]` are its own delimiters).
+_MODEL_NAME_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-")
+
+
+def _model_name(scope: object) -> str:
+    """The sanitized `scope.model.display_name` of a `limits[]` entry, or "" when the entry
+    is not model-scoped. "" is the discriminator: the `session` / `weekly_all` entries carry
+    `scope: null` and merely restate `five_hour` / `seven_day`, so only the scoped ones are
+    net-new information."""
+    if not isinstance(scope, dict):
+        return ""
+    model = scope.get("model")
+    if not isinstance(model, dict):
+        return ""
+    raw = model.get("display_name")
+    if not isinstance(raw, str):
+        return ""
+    return "".join(c for c in raw if c in _MODEL_NAME_OK).strip()[:32]
+
+
+def model_windows_from_usage(usage: dict, now: int) -> list[dict]:
+    """Per-window burn inputs for every MODEL-SCOPED limit in the payload's `limits[]`.
+
+    Anthropic moved model-scoped limits OUT of the flat `seven_day_opus` / `seven_day_sonnet`
+    fields — verified `null` on every live payload 2026-08-01 — and into a generic `limits[]`
+    array whose scoped entries carry `scope.model.display_name`. A model with its own window
+    (Fable 5 today) is therefore invisible to any reader that only looks at `five_hour` /
+    `seven_day`: it can sit at 90% of its OWN weekly budget while the account's `seven_day`
+    reads comfortable. Reading the array rather than a hardcoded model list is what makes a
+    newly-scoped model show up on its own.
+
+    Same dict shape as `windows_from_usage` (so both feed one evaluator), labeled
+    `<base>/<model>` e.g. `7d/Fable`, plus the API's own `severity` and `is_active` verdicts.
+    Pure."""
+    out: list[dict] = []
+    if not isinstance(usage, dict):
+        return out
+    limits = usage.get("limits")
+    if not isinstance(limits, list):
+        return out
+    for entry in limits:
+        if not isinstance(entry, dict):
+            continue
+        model = _model_name(entry.get("scope"))
+        if not model:
+            continue
+        group = _LIMIT_GROUPS.get(str(entry.get("group") or ""))
+        if group is None:
+            continue
+        base, window_s = group
+        pct = entry.get("percent")
+        if not isinstance(pct, (int, float)) or isinstance(pct, bool):
+            continue
+        raw_reset = entry.get("resets_at")
+        resets_at = th.parse_ts(raw_reset) if isinstance(raw_reset, str) else None
+        if resets_at is None:
+            continue
+        util_pct = float(pct)
+        frac = tb.elapsed_fraction_from_reset(resets_at, window_s, now)
+        out.append(
+            {
+                "label": f"{base}/{model}",
+                "util_pct": util_pct,
+                "resets_at_epoch": resets_at,
+                "window_s": window_s,
+                "elapsed_fraction": frac,
+                "burn_ratio": tb.burn_ratio(util_pct, frac),
+                "exhaustion_epoch": tb.projected_exhaustion_epoch(resets_at, window_s, util_pct, now),
+                "severity": entry.get("severity"),
+                "is_active": entry.get("is_active"),
+            }
+        )
+    return out
+
 
 def account_prefix(email: str | None) -> str:
     """The privacy-safe account label for a drift line: the local part of the email only
@@ -78,6 +163,37 @@ def windows_from_usage(usage: dict, now: int) -> list[dict]:
     return out
 
 
+def session_is_open(usage: dict, now: int) -> bool | None:
+    """Does this account have an OPEN 5h SESSION window right now?
+
+    `True` (a `five_hour` bucket whose `resets_at` is still in the future), `False` (a
+    `five_hour` bucket with a null / unparseable / already-past `resets_at` — the API's
+    shape for "no session window is running", i.e. the account is IDLE), or `None` when
+    the payload does not say (no `five_hour` key at all).
+
+    Load-bearing, because `burn_ratio` and `projected_exhaustion_epoch` are derived from a
+    window AVERAGE: extrapolating them forward asserts the account KEEPS SPENDING. An idle
+    ALTERNATE (no 5h window, 7d still at 94% from earlier use) consumes nothing, so
+    "1.6x linear pace; projected exhaustion in 6h" is simply false — it describes a future
+    that cannot happen. Measured on a real payload 2026-08-01: `five_hour = {utilization:
+    0.0, resets_at: null}` while `seven_day = 94%`, and that account tripped every fire.
+
+    A definite `False` is the ONLY value that suppresses a trip; `None` fails toward the
+    alarm, so a payload-shape change can never silently mute a genuine burn. This cannot
+    hide a real one either: a window that is actually burning has, by construction, an open
+    session — the request that spends the budget is what opens it."""
+    if not isinstance(usage, dict):
+        return None
+    w = usage.get("five_hour")
+    if not isinstance(w, dict):
+        return None
+    raw_reset = w.get("resets_at")
+    resets_at = th.parse_ts(raw_reset) if isinstance(raw_reset, str) else None
+    if resets_at is None:
+        return False
+    return resets_at > now
+
+
 def window_starts(accounts_usage: list[dict], now: int) -> tuple[int | None, int | None]:
     """The LIVE subscription windows' START epochs `(w5_lo, w7_lo)` — `resets_at − window_s`.
 
@@ -108,13 +224,22 @@ def window_starts(accounts_usage: list[dict], now: int) -> tuple[int | None, int
     return (w5_lo, w7_lo)
 
 
-def format_burn_line(label: str, window: dict) -> str:
+def format_burn_line(label: str, window: dict, *, live: bool | None = None) -> str:
     """Render ONE tripped window as the base drift line (no top-consumer clause — the
-    caller appends that only when fleet attribution is available)."""
+    caller appends that only when fleet attribution is available).
+
+    `live` names WHICH account the line is about: the credential Claude Code is signed in
+    as (`True` → "(live)") or a rotator alternate (`False` → "(alternate)"); `None` omits
+    the marker. An email prefix alone is NOT enough — a reader who sees a burn line inside
+    their own session reasonably assumes it describes THEIR window, and on 2026-08-01 that
+    mis-read cost a full debugging session across two agents: the live account was at
+    5h 5% / 7d 36% (matching the status line) while the alarming 94% belonged to a
+    different, idle account. The line must say whose window it is."""
     util = window["util_pct"]
+    who = "" if live is None else (" (live)" if live else " (alternate)")
     frac = window["elapsed_fraction"] or 0.0
     ratio = window["burn_ratio"] or 0.0
-    base = f"[window-burn-rate] ⚠ {label} {window['label']} window {util:.0f}% at {frac * 100:.0f}% elapsed — {ratio:.1f}x linear pace"
+    base = f"[window-burn-rate] ⚠ {label}{who} {window['label']} window {util:.0f}% at {frac * 100:.0f}% elapsed — {ratio:.1f}x linear pace"
     exhaustion = window["exhaustion_epoch"]
     resets_at = window["resets_at_epoch"]
     if isinstance(exhaustion, int) and exhaustion < resets_at:
@@ -127,10 +252,16 @@ def format_burn_line(label: str, window: dict) -> str:
 def evaluate_trips(accounts_usage: list[dict], now: int, ratio: float, min_util: float) -> list[dict]:
     """The pure burn verdict: one trip per (account, window) whose burn ratio ≥ `ratio`.
 
-    `accounts_usage` is `[{"label": <prefix>, "usage": <raw /api/oauth/usage payload>}]`.
-    A window is a trip iff its utilization ≥ `min_util` (the floor so a fresh, barely-used
-    window never alarms) AND its `burn_ratio` is computable AND ≥ `ratio`. Each trip carries
-    a stable `key` (`<label>-<window>`, for per-day dedupe) and the rendered `line`."""
+    `accounts_usage` is `[{"label": <prefix>, "usage": <payload>, "is_live": <bool|None>}]`.
+    A window is a trip iff the account has NOT been proven idle (see `session_is_open`) AND
+    its utilization ≥ `min_util` (the floor so a fresh, barely-used window never alarms) AND
+    its `burn_ratio` is computable AND ≥ `ratio`.
+
+    Each trip carries the rendered `line` and a stable `key` — `<label>-<window>-<reset
+    epoch>`. The reset epoch makes the key identify ONE WINDOW INSTANCE, so the caller's
+    dedupe re-arms exactly when the window resets rather than on a calendar boundary: a 7d
+    window keyed per DAY re-alarms seven times about the same unchanged window, which is
+    how a single 94% reading became a recurring alarm."""
     trips: list[dict] = []
     for acct in accounts_usage:
         if not isinstance(acct, dict):
@@ -139,13 +270,28 @@ def evaluate_trips(accounts_usage: list[dict], now: int, ratio: float, min_util:
         usage = acct.get("usage")
         if not isinstance(usage, dict):
             continue
-        for w in windows_from_usage(usage, now):
+        # An idle account has no burn RATE to be above pace — only a stock level. Reporting
+        # a projection for it is a claim about a future it is not moving toward.
+        if session_is_open(usage, now) is False:
+            continue
+        live = acct.get("is_live")
+        live = live if isinstance(live, bool) else None
+        # Model-scoped windows are evaluated on the SAME terms as the account-wide ones —
+        # a model with its own budget (Fable 5 today) can exhaust while `seven_day` still
+        # reads comfortable, and that is exactly the early rate-limit this detector exists
+        # to catch.
+        for w in windows_from_usage(usage, now) + model_windows_from_usage(usage, now):
             if w["util_pct"] < min_util:
                 continue
             r = w["burn_ratio"]
             if r is None or r < ratio:
                 continue
-            trips.append({"key": f"{label}-{w['label']}", "line": format_burn_line(label, w)})
+            trips.append(
+                {
+                    "key": f"{label}-{w['label']}-{w['resets_at_epoch']}",
+                    "line": format_burn_line(label, w, live=live),
+                }
+            )
     return trips
 
 
