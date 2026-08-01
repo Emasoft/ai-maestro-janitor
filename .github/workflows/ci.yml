@@ -62,20 +62,17 @@ jobs:
 
       - name: Validate plugin (strict)
         run: |
-          # The CPV pin is read from `.cpv-version`, the single source of truth this
-          # repo shares with publish.py (see the comment on _CPV_PIN there). It used
-          # to be an eighth hand-maintained copy of the same tag, so CI could silently
-          # validate against a different CPV than the local gate did.
+          # The CPV pin is written LITERALLY here and kept equal to `.cpv-version` by
+          # tests/test_cpv_pin_ssot.py, which publish.py runs as a gate — so drift
+          # cannot reach the remote, and `.cpv-version` stays the one place a human
+          # edits the tag.
           #
-          # Hard-fail on a missing/empty file rather than default: an unpinned resolve
-          # would pick up CPV's default branch, which is both a red-CI hazard and a
-          # supply-chain hole (CI executes whatever is on that branch).
-          CPV_PIN="$(tr -d '[:space:]' < .cpv-version || true)"
-          case "$CPV_PIN" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::.cpv-version missing or malformed: '$CPV_PIN'"; exit 1 ;;
-          esac
-          echo "CPV pinned to $CPV_PIN"
+          # It is deliberately NOT `@${SOME_VAR}` read from that file at runtime. CPV's
+          # validator inspects this YAML statically and cannot evaluate a shell
+          # variable, so an indirected ref is a MAJOR finding that blocks the publish
+          # (measured 2026-08-01, 3 findings). The static form is also the auditable
+          # one: a reviewer sees which CPV version CI executes without tracing a file
+          # read — the same reason an unpinned resolve is refused below.
           # CPV remote validation occasionally HANGS on a flaky remote/network
           # call (observed v0.8.5 AND v0.24.4: the REPO-LINT stage ran with no
           # progress while publish.py's identical local CPV --strict had already
@@ -86,21 +83,9 @@ jobs:
           # attempts self-heal that case. A real validation failure (any other
           # non-zero — CPV's 1-4 severity exits) fails fast WITHOUT a pointless
           # retry. The job-level timeout-minutes is the hard backstop.
-          # BUMP PROTOCOL: the CPV ref is pinned in THREE places and they must move
-          # together, in one commit — this file, .github/workflows/release.yml, and
-          # scripts/publish.py. Never bump without first running the new ref against
-          # the tree locally.
-          # PINNED AT v3.19.0 as of the 2026-07-25 canonical-pipeline update
-          # (bumped from v3.16.0): scripts/publish.py was regenerated from the
-          # v3.19.0 canonical template and emits this exact ref, so the three
-          # sites are byte-identical by construction. Do not hand-edit one of them.
-          #
-          # Verified locally against this tree BEFORE the bump, per the BUMP
-          # PROTOCOL above: v3.16.0 and the outgoing v3.11.0 pin produce an
-          # identical severity profile and the same exit code on this commit, so
-          # the bump is behaviour-neutral here. What it buys is the canonical
-          # pipeline itself — v3.16.0 flags a v3.11.0-era publish.py as drifted,
-          # and regenerating from the newer template clears that.
+          # BUMP PROTOCOL: edit `.cpv-version`, then run the SSOT test — it names every
+          # site that must move with it and fails until they match. Never bump without
+          # first running the new ref against the tree locally.
           # Do NOT keep a running scanner-finding narrative in this file: tracked
           # content is scanned content, so a commentary naming finding codes becomes a
           # finding itself. Per-finding history belongs in the TRDD / .janitor handoff.
@@ -112,7 +97,7 @@ jobs:
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
           run_cpv() {
-            timeout 300 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@${CPV_PIN}" \
+            timeout 300 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the

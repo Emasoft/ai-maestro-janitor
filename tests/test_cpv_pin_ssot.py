@@ -89,7 +89,13 @@ def test_a_malformed_pin_fails_fast(tmp_path: Path, bad: str) -> None:
 
 
 def test_no_source_file_hardcodes_the_pin() -> None:
-    """The literal survives in `.cpv-version` ALONE.
+    """The literal survives in `.cpv-version` and the WORKFLOWS alone.
+
+    The workflows are exempt because CPV's validator reads their YAML statically and
+    rejects an interpolated ref (see
+    `test_every_workflow_cpv_ref_is_a_literal_equal_to_the_pin_file`, which pins them to
+    `.cpv-version` instead). They are the only sanctioned copies; every other file must
+    read the pin.
 
     Scans the tracked tree (git ls-files, so vendored/ignored trees are out of
     scope) rather than a hand-listed set of files: a ninth copy added to a NEW
@@ -115,6 +121,11 @@ def test_no_source_file_hardcodes_the_pin() -> None:
             rel.startswith("CHANGELOG")
             or rel.startswith("design/")
             or "/memory/" in f"/{rel}"
+            # The two workflows MUST carry the literal — CPV cannot resolve a variable
+            # statically. Their equality with .cpv-version is enforced by the sibling
+            # test, so this exemption widens the write surface without loosening the
+            # invariant.
+            or rel.startswith(".github/workflows/")
         ):
             continue
         p = _ROOT / rel
@@ -131,14 +142,36 @@ def test_no_source_file_hardcodes_the_pin() -> None:
     )
 
 
-def test_both_workflows_read_the_pin_file_and_guard_it() -> None:
-    """Each workflow that resolves CPV must read `.cpv-version` AND refuse a
-    missing/malformed value. Reading it without the guard would fall through to an
-    empty `@`, i.e. an unpinned resolve of CPV's default branch — the failure this
-    whole change exists to prevent, wearing the costume of a fix."""
+def test_every_workflow_cpv_ref_is_a_literal_equal_to_the_pin_file() -> None:
+    """Each workflow resolves CPV at a LITERAL tag, and every one of them equals
+    `.cpv-version`.
+
+    The workflows are the ONE place the tag is written out rather than read, and it is
+    deliberate. CPV's own validator inspects the workflow YAML STATICALLY, so a
+    `@${VAR}` read from `.cpv-version` at runtime is unresolvable to it and raises a
+    MAJOR that blocks the publish (measured 2026-08-01: 3 findings, one per call site,
+    on a construction that would in fact have expanded correctly in bash). The static
+    form is also the auditable one — a reviewer sees which CPV version CI executes
+    without following an indirection.
+
+    So `.cpv-version` stays the single place a human edits, and THIS test is what
+    propagates it: publish.py runs the suite as a gate, so a drifted workflow pin can
+    never reach the remote. That makes the duplication enforced rather than trusted."""
+    pin = (_ROOT / ".cpv-version").read_text(encoding="utf-8").strip()
+    ref_re = re.compile(r"claude-plugins-validation@(?P<ref>[^\"'\s\\]+)")
+    total = 0
     for name in ("ci.yml", "release.yml"):
         text = (_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
-        assert "claude-plugins-validation" in text, f"{name}: no CPV resolve found"
-        assert ".cpv-version" in text, f"{name} does not read the pin file"
-        assert "${CPV_PIN}" in text, f"{name} does not interpolate the pin"
-        assert "::error::" in text, f"{name} lacks the fail-fast guard on the pin"
+        refs = [m.group("ref") for m in ref_re.finditer(text)]
+        assert refs, f"{name}: no CPV resolve found"
+        total += len(refs)
+        for ref in refs:
+            assert "$" not in ref, (
+                f"{name} resolves CPV at {ref!r} — an interpolated ref is a MAJOR "
+                "finding for CPV's static validator. Write the tag literally."
+            )
+            assert ref == pin, (
+                f"{name} pins CPV at {ref!r} but .cpv-version says {pin!r}. "
+                "Bump .cpv-version and update every workflow call site in the same commit."
+            )
+    assert total >= 3, f"expected every known CPV call site to be checked, saw {total}"
