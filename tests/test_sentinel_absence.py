@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from lib.sentinel.model import Workflow  # noqa: E402
-from lib.sentinel.rules_absence import RULES  # noqa: E402
+from lib.sentinel.rules_absence import RULES, MissingPersistCredentials  # noqa: E402
 
 
 def fired(text: str) -> set:
@@ -181,6 +181,54 @@ jobs:
       - run: npm test
 """
         self.assertNotIn("missing-persist-credentials", fired(wf))
+
+    def test_the_finding_cites_the_offending_job_not_an_innocent_one(self):
+        """The reported LINE must be the pushing job's own checkout.
+
+        janitor#157: the rule kept its own per-`uses` occurrence counter and
+        advanced it only for AUDITED steps — i.e. inside the job_pushes gate — so
+        the Nth audited checkout was reported at the Nth TEXTUAL checkout. With
+        two hardened non-pushing build jobs ahead of the offender, a correct
+        finding was cited against `build-linux`'s checkout, which sets
+        persist-credentials three lines below. It was filed as a false positive;
+        it was a true finding wearing the wrong line number.
+
+        A true finding pointed at innocent code is worse than a false one: it
+        costs the same investigation AND teaches the reader to distrust the HIGH
+        banner, which is the one banner that has to stay trustworthy.
+        """
+        wf = """\
+on: [push]
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: cargo build
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: cargo build
+  commit-binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git push origin HEAD
+"""
+        findings = MissingPersistCredentials().check(Workflow("t.yml", wf))
+        self.assertEqual(len(findings), 1, "only the pushing job is at fault")
+        # Line 20 is commit-binaries' own checkout; line 6 is build-linux's — the
+        # line the pre-fix rule reported, and the one that looks innocent.
+        self.assertEqual(
+            findings[0].line,
+            20,
+            "must cite the pushing job's checkout, not the first one in the file",
+        )
 
 
 class TestMissingEnvProtection(unittest.TestCase):

@@ -216,9 +216,22 @@ class MissingPersistCredentials(Rule):
 
     def check(self, wf: Workflow) -> list[Finding]:
         findings: list[Finding] = []
-        # Mirrors Ruby `Hash.new(0)` — per-`uses` occurrence counter so two
-        # identical checkout steps map to consecutive matching source lines.
-        seen_checkout_lines: dict[str, int] = {}
+        # Line attribution comes from uses_actions(), which is the ONE place that
+        # maps a step to its source line. This rule used to keep a second copy of
+        # that per-`uses` occurrence counter — and advanced it only for AUDITED
+        # steps, i.e. inside the `job_pushes` gate below. So the Nth audited
+        # checkout was reported at the Nth TEXTUAL checkout, and those diverge the
+        # instant any job is skipped (janitor#157).
+        #
+        # What that looked like in the wild: a workflow with two hardened,
+        # non-pushing build jobs and one pushing job that omits the setting. The
+        # finding was CORRECT — the pushing job really does leave the token in
+        # .git/config — but it was reported against the first build job's
+        # checkout, which sets `persist-credentials: false` a few lines below. The
+        # reporter read the cited line, saw the hardening, and filed it as a false
+        # positive. A true finding pointed at innocent code is worse than a false
+        # one: it costs the same investigation AND discredits the HIGH banner.
+        line_of_step = {id(e["step"]): e["line"] for e in wf.uses_actions()}
 
         for job in wf.jobs().values():
             job_pushes = self._job_does_push(job, wf)
@@ -251,19 +264,9 @@ class MissingPersistCredentials(Rule):
                 if persist is True:
                     continue
 
-                all_lines = wf.lines_of(r"uses:\s*" + re.escape(str(uses)))
-                idx = seen_checkout_lines.get(uses, 0)
-                if idx < len(all_lines):
-                    line = all_lines[idx]
-                elif all_lines:
-                    line = all_lines[-1]
-                else:
-                    line = None
-                seen_checkout_lines[uses] = idx + 1
-
                 findings.append(self._finding(
                     wf,
-                    line or 0,
+                    line_of_step.get(id(step), 0),
                     matched_text=f"uses: {uses}",
                 ))
         return findings
