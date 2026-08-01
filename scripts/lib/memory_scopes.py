@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 # The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The CANONICAL
@@ -100,9 +101,33 @@ USER_MEM_DIRNAME = "user-mem"
 # Non-note sub-dirs inside a memory dir, never walked into: the private store,
 # memgrep's SQLite sidecar cache, and the transaction staging dir (a staged copy
 # mid-edit is not a committed note).
+# Where the mirror parks a page that canonical deleted and that is PROVABLY
+# superseded (janitor#146/#156). Not a delete: the page keeps existing, it just
+# stops being part of the corpus — so it can no longer collide on atom ids, and a
+# restore can no longer resurrect it. Listed in EXCLUDED_DIRNAMES below, which is
+# what makes it invisible to every scan site at once (lint, recall, the librarian,
+# the content-precheck) instead of each having to learn about it.
+SUPERSEDED_DIRNAME = ".superseded"
+
+# Non-note sub-dirs inside a memory dir, never walked into: the private store,
+# memgrep's SQLite sidecar cache, the transaction staging dir (a staged copy
+# mid-edit is not a committed note), and the mirror's superseded attic.
 EXCLUDED_DIRNAMES: frozenset[str] = frozenset(
-    {USER_MEM_DIRNAME, ".memgrep", ".maint-staging"}
+    {USER_MEM_DIRNAME, ".memgrep", ".maint-staging", SUPERSEDED_DIRNAME}
 )
+
+# An atom marker: `^<id>` at the start of a line, followed by whitespace or its
+# `[props]` block. The lookahead is load-bearing — without it a bare `^` opening a
+# regex in prose ("^foo matches...") would register as an atom id and could make an
+# orphan page look superseded by a page that never defined it.
+_ATOM_MARKER_RE = re.compile(r"^\^([A-Za-z0-9_-]+)(?=[ \t\[])", re.MULTILINE)
+
+# Fenced blocks are stripped before parsing. janitor#152 is the same lesson from the
+# other direction: markdown code can contain text that LOOKS like corpus syntax and
+# is not. A doc page showing `^example-atom [desc: ...]` in a fence must not be
+# credited with defining that atom — here that mistake would let a fence in some
+# canonical page vouch for an orphan and quarantine real knowledge.
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 
 def is_note_file(path: str | os.PathLike[str]) -> bool:
@@ -261,7 +286,105 @@ def _dir_has_memory(d: Path) -> bool:
 #     would execute against a corpus months out of step with the hashes it recorded.
 #   - `.memgrep/index.db` is a SQLite file that may be mid-write, so it lands torn — and it
 #     is regeneratable anyway (`memgrep reindex`), so backing it up buys nothing.
-_MIRROR_IGNORE = shutil.ignore_patterns(".maint-staging", ".memgrep")
+_MIRROR_IGNORE = shutil.ignore_patterns(
+    ".maint-staging", ".memgrep", SUPERSEDED_DIRNAME
+)
+
+
+def page_atom_ids(text: str) -> set[str]:
+    """Every atom id DEFINED by a page. Pure; fenced code is not a definition."""
+    return set(_ATOM_MARKER_RE.findall(_FENCE_RE.sub("", text)))
+
+
+def classify_mirror_orphans(
+    orphan_texts: dict[str, str], canonical_ids: set[str]
+) -> tuple[list[str], list[str]]:
+    """Split mirror-only pages into ``(superseded, unknown)``. PURE — no I/O.
+
+    A page that exists in the MIRROR but not in CANONICAL is one of two very
+    different things, and the whole safety of pruning rests on telling them apart
+    (janitor#156 states this requirement itself):
+
+    * **superseded** — canonical deleted it because a consolidation folded it into a
+      successor. Provable, not guessed: every atom id the page defines is still
+      defined somewhere in canonical, so the knowledge survives under the successor
+      and the orphan is a pure duplicate. Duplicates are not harmless — they collide
+      on atom id, so `recall <id>` cannot resolve which page was meant.
+    * **unknown** — canonical lost it for a reason nobody recorded, and no canonical
+      page covers it. This is the mirror doing exactly its job: holding the only
+      surviving copy. NEVER prune it.
+
+    Two deliberate asymmetries, both erring toward keeping memory:
+
+    * A page defining ZERO atom ids is **unknown**, never superseded. `set() <= X` is
+      vacuously True, so the natural subset test would silently classify every
+      atom-less page as safe to prune — the exact shape of bug that deletes the
+      knowledge this mirror exists to protect. It is spelled out rather than relying
+      on the reader to notice the empty case.
+    * The test is on the page's OWN ids, not on prose similarity. A page whose text
+      merely resembles a canonical page is unknown.
+    """
+    superseded: list[str] = []
+    unknown: list[str] = []
+    for name in sorted(orphan_texts):
+        ids = page_atom_ids(orphan_texts[name])
+        if ids and ids <= canonical_ids:
+            superseded.append(name)
+        else:
+            unknown.append(name)
+    return superseded, unknown
+
+
+def _quarantine_superseded_orphans(primary: Path, mirror: Path) -> list[str]:
+    """Park provably-superseded mirror-only pages in ``<mirror>/.superseded/``.
+
+    RELOCATE, never delete: the page stops being corpus (the attic is in
+    EXCLUDED_DIRNAMES, so no scan, lint, recall or restore sees it) while remaining
+    on disk and recoverable with one `mv`. That keeps the property the mirror exists
+    for — nothing is ever lost — while removing the two harms an orphan causes: the
+    atom-id collision, and a restore resurrecting a page canonical deliberately
+    consolidated away.
+
+    Returns the names of pages that are mirror-only and NOT provably superseded, so
+    the caller can surface them. They are left exactly where they are: an unexplained
+    orphan may be the only copy of that knowledge.
+
+    Best-effort — any OSError leaves the mirror untouched. A backup that cannot tidy
+    itself is still a working backup; one that raises during session start is not.
+    """
+    primary_notes = {p.name: p for p in iter_note_files(primary)}
+    mirror_notes = {p.name: p for p in iter_note_files(mirror)}
+    orphan_names = set(mirror_notes) - set(primary_notes)
+    if not orphan_names:
+        return []
+
+    try:
+        canonical_ids: set[str] = set()
+        for p in primary_notes.values():
+            canonical_ids |= page_atom_ids(p.read_text(encoding="utf-8", errors="replace"))
+        orphan_texts = {
+            n: mirror_notes[n].read_text(encoding="utf-8", errors="replace")
+            for n in orphan_names
+        }
+    except OSError:
+        return []
+
+    superseded, unknown = classify_mirror_orphans(orphan_texts, canonical_ids)
+    if superseded:
+        attic = mirror / SUPERSEDED_DIRNAME
+        try:
+            attic.mkdir(parents=True, exist_ok=True)
+            for name in superseded:
+                dest = attic / name
+                # Never clobber a previously-parked page of the same name: keeping
+                # both costs a few KB, and losing the older one would be the very
+                # deletion this function is written to avoid.
+                if dest.exists():
+                    dest = attic / f"{Path(name).stem}.{int(time.time())}.md"
+                shutil.move(str(mirror_notes[name]), str(dest))
+        except OSError:
+            pass  # a partial tidy is fine; the next session start retries
+    return unknown
 
 
 def sync_user_memory_mirror() -> str | None:
@@ -281,6 +404,19 @@ def sync_user_memory_mirror() -> str | None:
     never break session start. Cheap: the USER corpus is small markdown + a regeneratable
     index.
 
+    Additive-only had a cost the mirror could not pay (janitor#146/#156): a canonical
+    DELETE never propagates, so a page consolidated into a successor stayed here
+    forever, duplicating the successor's atom ids — and a restore would then inject
+    that ambiguity back into canonical, undoing the consolidation. So the
+    primary→mirror branch also RELOCATES (never deletes) the orphans it can PROVE are
+    redundant, into ``.superseded/``. See ``_quarantine_superseded_orphans``.
+
+    Only that branch. On RESTORE the mirror is the source of truth and the primary is
+    empty, so "not in canonical" describes every page here and means nothing — running
+    the same step then would be a mass quarantine of the only surviving corpus. The
+    classifier independently refuses that (an empty canonical id-set makes every page
+    unknown), but the call site does not rely on that second line of defence.
+
     It mirrors NOTES only (``_MIRROR_IGNORE``) — never the transaction staging tree, never
     the memgrep index. See that constant for why copying them is actively harmful.
     """
@@ -290,6 +426,11 @@ def sync_user_memory_mirror() -> str | None:
         if _dir_has_memory(primary):
             mirror.mkdir(parents=True, exist_ok=True)
             shutil.copytree(primary, mirror, dirs_exist_ok=True, ignore=_MIRROR_IGNORE)
+            # The copy is additive, so a canonical DELETE never reaches the mirror
+            # (janitor#146/#156): the page strands here, collides on atom id, and a
+            # later restore resurrects a page that was deliberately consolidated away.
+            # Park only the ones proven redundant; anything unexplained stays put.
+            _quarantine_superseded_orphans(primary, mirror)
             return "mirrored"
         if _dir_has_memory(mirror):
             primary.mkdir(parents=True, exist_ok=True)
