@@ -304,5 +304,113 @@ class TestReportToTrddDrift(unittest.TestCase):
             self.assertIn("security-trio-consolidation-plan.md", out)
 
 
+# --- the curator moved and the exclusion did not follow (janitor#121) -------------
+#
+# The dir was a single literal, `memory-subconscious-agent`. The agent has since been
+# renamed `janitor-memory-subconscious-agent` and grown per-chore dirs beside it, so
+# every abstain written after the rename fell outside the exclusion and was nagged
+# forever — unsatisfiable, because the reports are gitignored and the prescribed
+# remedy (mint a TRDD recording that a pass did nothing) is one another detector
+# deletes on a 30-day timer.
+#
+# Note this is the SAME shape as the 2026-07-29 correction above, one field over: that
+# one asserted the producer's FORMAT from expectation, this one its PATH. Both fail
+# OPEN, so neither announced itself.
+
+
+class TestCuratorDirCoverage(unittest.TestCase):
+    """The exclusion must cover wherever the curator ACTUALLY writes."""
+
+    def _dirs(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_r2t", DETECTOR)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._MEMORY_CURATOR_DIRS
+
+    def test_the_agents_own_name_is_covered(self):
+        """Derived from `agents/`, not hardcoded — so the NEXT rename fails here
+        instead of silently re-opening #121. The agent's report dir is its own name."""
+        agents_dir = DETECTOR.parent.parent.parent / "agents"
+        curators = [
+            p.stem for p in agents_dir.glob("*.md") if "memory" in p.stem
+        ]
+        self.assertTrue(curators, "no memory-curator agent found to check against")
+        covered = self._dirs()
+        for name in curators:
+            self.assertIn(
+                name,
+                covered,
+                f"agent {name!r} writes to reports/{name}/ but the no-op exclusion "
+                "does not cover that dir — its abstains will be nagged forever",
+            )
+
+    def test_the_legacy_dir_is_still_covered(self):
+        """53 reports still sit under the pre-rename name; dropping it would re-nag
+        every one of them."""
+        self.assertIn("memory-subconscious-agent", self._dirs())
+
+    def test_human_memory_dirs_are_not_swallowed(self):
+        """Why the set is enumerated instead of a `memory-*` prefix match:
+        `reports/memory-docs/` and `reports/memory-edit-verify/` are human work that
+        SHOULD be flagged when it records a decision."""
+        covered = self._dirs()
+        self.assertNotIn("memory-docs", covered)
+        self.assertNotIn("memory-edit-verify", covered)
+
+
+class TestRenamedCuratorDir(unittest.TestCase):
+    def _mem_proj(self, tmp: str, subdir: str) -> Path:
+        root = Path(tmp)
+        (root / "design" / "tasks").mkdir(parents=True)
+        (root / "reports" / subdir).mkdir(parents=True)
+        (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+            _trdd("in-progress", "Active"))
+        return root
+
+    def test_abstain_under_the_current_agent_name_not_flagged(self):
+        """The #121 regression: a no-op pass under the RENAMED dir."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-subconscious-agent")
+            rep = (root / "reports/janitor-memory-subconscious-agent"
+                   / "20260801_041418+0200-consolidate-local.md")
+            rep.write_text(
+                "# CONSOLIDATE pass — LOCAL scope\n\n"
+                "## Outcome\n\nABSTAINED — no qualifying candidate; nothing mutated.\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_abstain_under_a_per_chore_dir_not_flagged(self):
+        """The curator also writes per-chore dirs (`janitor-memory-conflict/` and
+        friends exist on disk); those are the same producer."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-conflict")
+            rep = (root / "reports/janitor-memory-conflict"
+                   / "20260801_040000+0200-conflict-consolidation-plan.md")
+            rep.write_text(
+                "# CONFLICT pass\n\n## Outcome\n\nNOTHING DUE — no scope crossed its "
+                "cadence boundary.\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_a_real_decision_in_the_new_dir_is_still_flagged(self):
+        """Widening WHERE must not silence WHAT. A pass that actually mutated and
+        recommends follow-up has no no-op marker, so it is still flagged — otherwise
+        this fix would have traded a false positive for a false negative."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-subconscious-agent")
+            rep = (root / "reports/janitor-memory-subconscious-agent"
+                   / "20260801_042000+0200-merged-security-trio-plan.md")
+            rep.write_text(
+                "# CONSOLIDATE pass\n\n## Outcome\n\nMERGED the security-trio pages; "
+                "recommend a follow-up TRDD to wire the chosen option in.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("merged-security-trio-plan.md", out)
+
+
 if __name__ == "__main__":
     unittest.main()

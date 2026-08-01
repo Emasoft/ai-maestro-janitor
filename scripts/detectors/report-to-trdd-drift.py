@@ -54,7 +54,38 @@ _DECISION_RE = re.compile(
 # THIS dir only, then key off the curator's own outcome marker in the body — a genuine
 # decision report (one that actually merged/split and recommends follow-up) lacks that
 # marker and is STILL flagged.
-_MEMORY_CURATOR_DIR = "memory-subconscious-agent"
+# EVERY dir the memory curator writes under — not one literal (janitor#121).
+#
+# This was a single name, `memory-subconscious-agent`, and the agent has since been
+# renamed `janitor-memory-subconscious-agent`, with per-chore dirs alongside it.
+# Measured on this repo when the issue was worked: 53 reports in the covered legacy
+# dir, and 6 in dirs the gate did not cover at all — so every abstain written since
+# the rename was nagged again, which is precisely the unsatisfiable loop #121 reports.
+#
+# It is the SAME failure the long comment below dissects, one field over: that one
+# asserted the producer's FORMAT from expectation instead of from artifacts; this one
+# asserted its PATH. Both fail OPEN, which is why neither was noticed — an exclusion
+# that never matches just looks like a noisy detector, never a broken one.
+#
+# Enumerated, not prefix-matched. `reports/memory-docs/` and
+# `reports/memory-edit-verify/` are human work that SHOULD be flagged when it records
+# a decision, and a `memory-*` prefix would silence both.
+#
+# Widening WHERE cannot silence a decision: `_is_memory_noop_report` still requires the
+# curator's own no-op marker in the body, so a pass that actually merged or split is
+# flagged in these dirs exactly as before. The dir set only bounds where a body marker
+# is allowed to speak.
+_MEMORY_CURATOR_DIRS: frozenset[str] = frozenset(
+    {
+        "memory-subconscious-agent",  # legacy name; 53 reports still on disk
+        "janitor-memory-subconscious-agent",  # the agent's current name
+    }
+    | {
+        # the per-chore dirs, one per marker the heartbeat can dispatch
+        f"janitor-memory-{chore}"
+        for chore in ("consolidate", "split", "atomize", "conflict", "repair", "harvest")
+    }
+)
 # MEASURED CORRECTION 2026-07-29. The previous pattern matched ONLY an inline
 # `**Outcome:** ABSTAINED …` label, and its comment claimed that was "verified across
 # every real abstain/nothing-due report". It was not: across the 51 curator reports on
@@ -112,12 +143,19 @@ def _contained(child: Path, root: Path) -> bool:
 def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
     """True iff `rep` is a janitor-memory-subconscious-agent ABSTAIN / no-op report.
 
-    Scoped to `reports/memory-subconscious-agent/` so it can never silence a decision
-    report living elsewhere; then keyed off the curator's own `**Outcome:**
-    ABSTAINED|NOTHING DUE` opening marker (issue #63). A pass that actually mutated the
-    corpus and recommends follow-up lacks that marker → still flagged for conversion.
+    Scoped to the curator's own report dirs (`_MEMORY_CURATOR_DIRS`) so it can never
+    silence a decision report living elsewhere; then keyed off the curator's own
+    `**Outcome:** ABSTAINED|NOTHING DUE` opening marker (issue #63). A pass that actually
+    mutated the corpus and recommends follow-up lacks that marker → still flagged for
+    conversion.
+
+    Matches on the report's dir NAME rather than a built path, so a nested layout
+    (`reports/<curator-dir>/<sub>/x.md`) is covered too — the previous
+    `reports_dir / NAME in rep.parents` form only ever matched one exact depth.
     """
-    if (reports_dir / _MEMORY_CURATOR_DIR) not in rep.parents:
+    if not any(p.name in _MEMORY_CURATOR_DIRS for p in rep.parents):
+        return False
+    if not _contained(rep, reports_dir):
         return False
     try:
         head = rep.read_text(encoding="utf-8", errors="replace")[:_NOOP_SCAN_BYTES]
