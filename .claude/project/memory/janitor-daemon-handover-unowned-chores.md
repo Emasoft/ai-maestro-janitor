@@ -1,8 +1,8 @@
 ---
 name: janitor-daemon-handover-unowned-chores
-description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone"
+description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone / daemon.heartbeat.ts is hours stale and the spawn-attempt stamp is days old / the daemon starts and then exits after about one second / daemon.log says stopping server-owns-host / os-keepalive activate then uninstall on every spawn / should I force the janitor daemon back up"
 ocd: 2026-07-29
-lmd: 2026-07-29
+lmd: 2026-08-01
 metadata:
   node_type: memory
   type: project
@@ -68,6 +68,44 @@ deliberately and advertised in `capabilities`.
 - [[janitor-daemon-bulk-lane]] — the other way chore stamps go stale: the daemon is ALIVE
   but blocked behind a ~20 min bulk run. Same symptom, opposite cause.
 
+
+^ATOM-FDNM-LHZ0 [desc:"the decisive tell for 'stood down' vs 'died' is the daemon's own 'stopping (server-owns-host)' log line — never the heartbeat gap, which looks identical either way", keywords: is_the_daemon_dead_or_deliberately_absent daemon_heartbeat_is_hours_stale_and_daemon_pid_is_gone spawn_attempt_stamp_is_a_week_old stopping_server_owns_host should_I_force_the_janitor_daemon_back_up daemon_starts_then_exits_after_one_second, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+**The absence has two causes that look identical from state files, and one that tells them
+apart.** `daemon.pid` missing + `daemon.heartbeat.ts` hours stale + `daemon.spawn-attempt.ts`
+days old is EXACTLY what a crashed, un-respawned daemon looks like — and exactly what a
+correct stand-down looks like too. Neither the gap nor the stamps can distinguish them,
+because a daemon that exits deliberately stops writing precisely as one that died does.
+
+**Read `<global-state>/daemon.log` and look for the daemon's own exit reason.** A stand-down
+prints, within about a second of each start:
+
+```
+started (pid=…, tasks=[…])
+os-keepalive activate: ok=True
+os-keepalive uninstall: ok=True
+stopping (server-owns-host)
+```
+
+That sequence — start, install the OS keepalive, immediately uninstall it, exit — IS the
+withdrawal handshake, and it repeats on every spawn. A crash leaves no `stopping` line at
+all; a kill-switch stop names the kill-switch instead. [^3]
+
+
+^ATOM-N7UC-RFOR [desc:"once the withdrawal handshake is confirmed, corroborate against server-liveness and then do NOT force a daemon up — the defect to escalate is server-side", keywords: should_I_restart_the_janitor_daemon_myself server_liveness_json_staleness_window the_withdrawal_was_not_justified is_this_a_janitor_bug_or_a_server_bug escalate_the_absorbed_chore_that_never_runs, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+**Corroborate from the other side before acting.** `~/.aimaestro/server-liveness.json` with a
+beat inside its ~90 s staleness window means a live server owns the host — the condition that
+legitimately produces the stand-down. Absent, stale, or malformed ⇒ the withdrawal was NOT
+justified and the absence IS a real defect worth chasing.
+
+**When the handshake and a fresh beat both check out, do not force a daemon back up.** The
+janitor is obeying the binary coordination rule (TRDD-LU0C5KAR); overriding it re-creates the
+two-owner collision that rule exists to remove, and a `flock` the other owner cannot see
+excludes nobody. The thing to escalate is the server not EXECUTING what it absorbed — this
+repo's contract is explicit that a running server which does not run an absorbed chore is a
+server bug, never a janitor guard.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-JDHU-4A18, status:valid, keywords:"read_a_stale_chore_stamp_as_nothing_is_running janitor_stamp_only_moves_when_the_janitor_runs_it concluded_rotation_was_dead_when_the_server_was_doing_it last_switch_at_measures_switches_not_refreshes", ocd:2026-07-29, lmd:2026-07-29]
@@ -86,3 +124,4 @@ deliberately and advertised in `capabilities`.
   the frozen-session watchdog — had been down just as long, with both sides behaving exactly
   as designed and only the union containing a hole. DO enumerate the FULL set the withdrawn
   actor owned and subtract what the new owner claims, rather than starting from the claim.
+[^3]: [id:ATOM-6CGH-BVIR, status:valid, desc:"I raised a false alarm from three agreeing state files and retracted it after reading the log", keywords:"concluded_the_daemon_was_dead_when_it_had_stood_down almost_force_spawned_a_daemon_the_server_owned three_state_files_agreed_and_all_three_were_the_wrong_evidence the_log_had_the_answer_the_whole_time", ocd:2026-08-01, lmd:2026-08-01] DO NOT conclude the daemon died from state files alone — not from a missing `daemon.pid`, a 21 h-stale `daemon.heartbeat.ts`, and a week-old `daemon.spawn-attempt.ts` together — BECAUSE all three are ALSO produced by a correct stand-down, so their agreement adds confidence without adding information, and their combined weight is what makes the wrong conclusion feel verified. I announced "the daemon has been dead for 21.6 h with no respawn attempt in a week" and was one step from force-spawning a daemon the ai-maestro server already owned, which is exactly the two-owner collision TRDD-LU0C5KAR exists to prevent. DO open `daemon.log` and read the daemon's OWN exit reason before diagnosing its absence: `stopping (server-owns-host)`, repeating once per spawn, settles it in one line.

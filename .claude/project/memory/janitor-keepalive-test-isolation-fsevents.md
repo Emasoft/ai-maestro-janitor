@@ -1,8 +1,8 @@
 ---
 name: janitor-keepalive-test-isolation-fsevents
-description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / a test wrote the LIVE control plane and JANITOR_GLOBAL_STATE_DIR did not move it / a kill-switch flag appeared from nowhere and disarmed the fleet / how to root-cause an fseventsd or mds RAM/CPU runaway"
+description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / a test wrote the LIVE control plane and JANITOR_GLOBAL_STATE_DIR did not move it / a kill-switch flag appeared from nowhere and disarmed the fleet / how to root-cause an fseventsd or mds RAM/CPU runaway / I found a daemon.py process running from a temp directory / is this the real janitor daemon or a test leftover / an orphaned daemon from the test suite stayed alive for days / a daemon process burning almost no CPU that ignored SIGTERM / ps shows a second daemon but daemon.pid names a different one"
 ocd: 2026-07-03
-lmd: 2026-07-22
+lmd: 2026-08-01
 metadata:
   node_type: memory
   type: project
@@ -125,6 +125,9 @@ fires rather than trusting its docstring):
   "a self-healing gate must be consulted by EVERY respawn path." Both are keepalive
   restage/respawn bugs that looked correct per-path but broke at the whole-surface
   seam.
+- [[feedback-a-launcher-is-not-the-process]] — the general rule behind the escapee atom
+  below: the suite launches the daemon through `uv run`, so the handle it holds is the
+  LAUNCHER; signalling that handle orphans the real child. Kill the process GROUP.
 
 ^control-dir-ignores-the-isolation-lever [desc: fixed_path_defeats_env_isolation, keywords: test wrote the live control plane JANITOR_GLOBAL_STATE_DIR did not move it kill-switch leaked from a test autouse _isolate_control_dir fixture, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
 `control_dir()` (the `~/.claude/janitor-control/` control plane, TRDD-QK7M2B0X) is
@@ -136,6 +139,43 @@ Three test files were writing the LIVE control plane before this was noticed; a 
 `kill-switch.flag` disarms the whole fleet. The fix is the **autouse `_isolate_control_dir`
 fixture in `tests/conftest.py`** — autouse, not per-file `setenv`, because the failure mode
 is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file. [^4]
+
+
+^ATOM-ODTM-LOI0 [desc:"the suite spawns REAL daemon processes that can outlive it — identify an escapee by its sandbox env, never by its argv, which names the repo script the real daemon also runs", keywords: found_a_daemon_py_running_from_a_temp_directory is_this_the_real_janitor_daemon_or_a_test_leftover orphaned_daemon_from_the_test_suite daemon_process_alive_for_days_with_no_cpu janitor_test_session_temp_home ps_shows_two_daemons_but_daemon_pid_is_absent daemon_ignored_sigterm_and_needed_sigkill, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+**The suite spawns REAL daemons, so a process-table audit can find one long after the run.**
+An escapee's argv is `<python> …/scripts/daemon.py` — the SAME repo script the production
+daemon runs — so argv cannot tell them apart. The environment can:
+
+- **Test escapee:** the python interpreter path sits under a `janitor-test-session-*` temp
+  dir, and `ps -E -p <pid>` shows `HOME`, `JANITOR_GLOBAL_STATE_DIR`, `JANITOR_CONTROL_DIR`
+  and `JANITOR_DATA_DIR` all pointing into pytest tmp dirs (often already deleted), plus
+  `JANITOR_TEST_SANDBOX_DENY` naming the real dirs it is forbidden to touch.
+- **Production daemon:** its pid is the one written in `<global-state>/daemon.pid`, and it
+  holds the real singleton flock.
+
+Because the isolation levers are per-process env, an escapee CANNOT corrupt real state — it
+is contained, not dangerous. It is still worth killing: it holds an fd on an unlinked flock,
+and it makes every later process-table audit ambiguous.
+
+
+^ATOM-5STX-ZL36 [desc:"the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed is_this_orphan_evidence_my_fix_failed compare_the_orphan_start_time_to_the_fix_commit_date, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+Measured instance (2026-07-30 → 2026-08-02): one escapee still alive **2 d 18 h** after its
+sandbox HOME had been deleted, at **0.13 s of CPU total** and 4 MB RSS — parked in a sleep,
+which is precisely why nothing ever noticed it. `ppid 1`, its process-group leader long gone.
+
+Two consequences worth keeping:
+
+- **A leak is silent, so absence of symptoms is not absence of leaks.** Nobody reports a
+  process that uses no CPU and touches no real state; it is found only by looking.
+- **It ignored SIGTERM and required SIGKILL.** A cleanup that sends SIGTERM and assumes
+  success leaves the escapee running while reporting a clean teardown.
+
+The fix is to kill the process GROUP rather than the handle the suite holds (landed
+2026-08-01). Note the ordering when judging a leak you find: an escapee that STARTED before
+that fix is not evidence the fix failed — compare its start time against the fix's commit
+date before concluding anything.
 
 ## Notes and lessons learned
 
