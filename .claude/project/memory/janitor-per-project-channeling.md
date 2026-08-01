@@ -33,6 +33,9 @@ was communicated to ai-maestro (janitor#100) as binding on the server's daemon-f
 - [[TRDD-4649ZLE0]] — human-notification channel (per-project escalation rule)
 - `scripts/detectors/fleet-github-config.py`, `scripts/lib/github_config_audit.py`
 
+See also [[janitor-daemon-bulk-lane]] — the other v0.50.0-era daemon invariant (bulk-lane
+serialization, a sibling concern, not governed by this one).
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-XPRJ-MEM1, status:valid, keywords:"fleet summary counts leaked every session cross project drift line notified other repos", ocd:2026-07-17, lmd:2026-07-17]

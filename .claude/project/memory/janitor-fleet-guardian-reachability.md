@@ -205,6 +205,12 @@ skipped entirely: sacrosanct means we do not write into its tree, not merely tha
 do not inject into its pane. Reaches only projects with a running claude (that is the
 complete set of *harmful* cases — a flag in a dormant project is inert litter).
 
+See also [[janitor-architecture]] — the L0–L3 immortality layers this reachability
+diagnosis lives inside. [[status-lines-to-autonomous-readers-cause-escalation]] — a
+control flag with readers and no writers is exactly this page's `armed`-column
+mislabeling, generalized: whichever scope is never auto-cleared is where remediation
+piles up.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG05-0010, status:valid, keywords:"inferred_resolver_from_one_call_site false_missing_channel_alarm read_function_not_one_callsite", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED, and it shipped: v0.35.5's code

@@ -200,7 +200,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   The relationship belongs on that note's own `## Governed by`, which may legally point UP.
 - `[[oauth-rotation-renew-reauth]]` — the ROTATE→RENEW→REAUTH component that reads these items.
 - `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1 & 2).
-- `[[janitor-keepalive-test-isolation-fsevents]]` — the OS-keepalive staging mechanism whose STALE
+- [[janitor-keepalive-test-isolation-fsevents]] — the OS-keepalive staging mechanism whose STALE
   staged closure kept the pre-fix flooder alive (root-cause #5 above / lesson `[^2]`).
 
 ## Notes and lessons learned

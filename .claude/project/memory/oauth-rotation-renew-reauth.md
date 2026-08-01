@@ -442,6 +442,9 @@ The documented past errors — each folded in so the symptom finds the fix:
   macOS keychain gotchas, the rotator design directives, and the rotator resume protocol.
 - Governed by [[claude-code-continuity-engineering]] (rotation is the PREVENTION layer of
   the unattended-continuity stack).
+- [[janitor-architecture]] — the divergent-input-path bug class this rotator's version-skew
+  429 deadlock (lesson [^2]) is one instance of: a self-healing gate consulted by only one
+  code path is hidden half-coverage.
 
 [^10]: [id:ATOM-ROTA-7DPX, status:valid, keywords:"rotation all accounts maxed deadlock 7d window precious safe threshold reject only at 99 fresh 5h high 7d usable overnight stall", ocd:2026-07-18, lmd:2026-07-18]
   DO NOT gate a rotation-target's 7-day window on the same conservative SAFE margin as the

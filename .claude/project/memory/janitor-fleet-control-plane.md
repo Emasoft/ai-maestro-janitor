@@ -86,6 +86,9 @@ both halves on partial failure.
   SUBSTRATE (which flags and locks a second chore owner must observe); that one
   owns who actually EXECUTES, and what stops running when the janitor hands the
   whole host to a live ai-maestro server.
+- [[janitor-has-no-off-switch-but-disarm]] — the opt-IN capability flags
+  (`hard_restart_enabled`, `fleet_stop_enabled`, `issues-watch`) that live in this
+  control plane and ARM extra capability rather than disable existing work.
 
 ## Notes and lessons learned
 

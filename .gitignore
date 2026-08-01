@@ -34,6 +34,14 @@ node_modules/
 !.claude/project/
 !.claude/project/memory/
 !.claude/project/memory/**
+# …except the transaction core's scratch. `**` above re-includes EVERYTHING under the
+# memory dir, which swept in `.maint-staging/` — the staging + journal of an IN-FLIGHT
+# memory edit. That is not shared knowledge, it is a lock-file-shaped intermediate that
+# exists only between `begin` and `commit`. Leaving it visible to git means any publish
+# attempted while a memory chore is running is refused for "unexpected" paths (observed
+# 2026-08-01: 74 orphaned staging dirs from two stopped agents blocked a release), and a
+# careless `git add` would commit half of someone's uncommitted transaction.
+.claude/project/memory/.maint-staging/
 
 # Editor and OS files
 .DS_Store

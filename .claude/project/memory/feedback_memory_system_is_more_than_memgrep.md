@@ -33,7 +33,8 @@ ALL four layers, not just the binary. Reference impl lives in ai-maestro-janitor
 the 13-repo ecosystem rollout is tracked in TRDD-ce195129. Distribution =
 `cargo install --path scripts/memgrep` + prebuilt release binaries. Recall must always
 degrade to plain `grep` when memgrep is absent. See also `[[memory-system]]` (the full
-component page for this functionality).
+component page for this functionality) and [[memgrep-index-corrupt-fts-desync]] (the
+binary layer's own index-corruption gotcha, a case where "just the binary" was not enough).
 
 
 ^ATOM-9AWW-4NCO [desc:"authoring routes through memgrep write verbs not hand-written md", keywords: how_to_write_a_wikimem_memory never_hand-write_wikimem_md use_memgrep_add-atom_new-page_add-lesson_verbs canonical_5-key_lesson_form atom_correct_by_construction_pass_only_body_and_keywords, type: feedback, ocd: 2026-07-21, lmd: 2026-07-21]
