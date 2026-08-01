@@ -191,6 +191,27 @@ from a different writer — the heartbeat/daemon mutating state mid-gate rather 
 source. Both surface on the same symptom query, and that is intended: read the guard's `[source-tree]`
 vs `[plugin-data]` prefix to tell which one you are looking at.
 
+
+^ATOM-FGXY-NBTB [desc:"CPV's pin is written LITERALLY in both workflows and kept equal to .cpv-version by a test — an SSOT indirection there is a MAJOR that blocks the publish", keywords: publish_blocked_by_a_MAJOR_about_a_non-resolvable_CPV_ref workflow_pins_a_non-resolvable_ref can_I_read_the_CPV_version_from_a_file_at_runtime where_is_the_CPV_tag_pinned bumping_the_CPV_version, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+**The CPV tag is written LITERALLY in both workflows** (`ci.yml` once, `release.yml` twice)
+and kept equal to `.cpv-version` by `tests/test_cpv_pin_ssot.py`, which `publish.py` runs as
+a gate — so drift cannot reach the remote. To bump: edit `.cpv-version`, then update every
+workflow call site in the same commit; the test names them and fails until they match.
+
+Do NOT "DRY" this by reading the file into a shell var and interpolating `@${VAR}`. CPV's
+validator inspects the workflow YAML **statically** and cannot evaluate a shell variable, so
+it reads the ref as non-resolvable and raises one MAJOR per call site — 3 findings, publish
+blocked (measured 2026-08-01, on a construction that bash would in fact have expanded
+correctly). The literal is also the auditable form: a reviewer sees which CPV version CI
+executes without tracing a file read, which is the same property the surrounding comment
+demands when it refuses an UNPINNED resolve.
+
+The general shape, worth carrying elsewhere: an SSOT indirection is only free when every
+CONSUMER can follow it. A consumer that reads your file as text rather than running it sees
+the indirection, not the value — so the fix is not to abandon the SSOT but to move the
+enforcement into a test, where duplication becomes checked rather than trusted.
+
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`

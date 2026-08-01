@@ -53,6 +53,29 @@ See also [[status-lines-to-autonomous-readers-cause-escalation]] — a fix publi
 installed is exactly the stranded-flag shape that page generalizes: a status line with
 readers and no writers is where automatic remediation piles up.
 
+
+^ATOM-14GY-NESV [desc:"a live ai-maestro server ABSORBS the update chore, so the janitor daemon correctly stands down — and if the server never consumes the request, the machine silently keeps running the old plugin", keywords: I_published_a_fix_but_the_cache_is_still_on_the_old_version the_janitor_daemon_is_dead_and_the_heartbeat_is_fine version-update-requested_stays_true_forever detectors_still_report_the_pre-fix_numbers_after_a_release who_actually_performs_the_plugin_update, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+
+**A stalled update can be nobody's bug in progress.** When an ai-maestro server is alive
+(`harness_backend.server_is_alive()`, from a fresh `~/.aimaestro/server-liveness.json`), it
+ABSORBS the update trio, so `server_runs_chores()` is true and the janitor daemon deliberately
+does not run. A dead daemon is then CORRECT, not a failure — and the per-session detector still
+raises `version-update-requested`. If the server never consumes it, the flag simply stays set
+and the machine keeps running the old plugin with no error anywhere.
+
+Observed 2026-08-01: v2.2.0 published and green, and 71 minutes later the cache was still
+2.1.0, the request still pending, daemon heartbeat 20h stale, server alive. The tell is that
+DETECTORS KEEP REPORTING PRE-FIX NUMBERS — the memory-librarian still said 120 conflict
+candidates when the shipped fix makes it 28, because the heartbeat runs the CACHED detector.
+Confirm it directly rather than inferring: grep the new symbol in
+`~/.claude/plugins/cache/.../<version>/scripts/...` and compare with the working tree.
+
+Do NOT add a janitor-side fallback: the binary coordination rule (TRDD-LU0C5KAR) removed
+exactly that guard, and this repo's contract says a running server that does not execute an
+absorbed chore is a SERVER bug. Do NOT hand-run `claude plugin update --scope user` either —
+user-scope writes belong to the single writer (issue #7 / PRRD S2.1). Escalate to the server
+side; the pending flag is the evidence.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-ROLL-GHOST, status:valid, keywords:"fix published but bug still happening stale hooks session loaded old version reload-plugins ghost", ocd:2026-07-18, lmd:2026-07-18]
