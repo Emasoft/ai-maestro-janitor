@@ -79,13 +79,20 @@ def _import_session_start_hook():
 
 
 def test_add_then_pending_roundtrip(iso) -> None:
-    """add() records {agentId, description, ts, nudges}; pending() returns it live.
-    `nudges` seeds at 0 — the per-entry resume budget introduced for #75."""
+    """add() records {agentId, description, ts, nudges, transcript}; pending() returns it
+    live. `nudges` seeds at 0 — the per-entry resume budget introduced for #75.
+    `transcript` is the respawn-recovery handle (empty when the payload carried none)."""
     pa = iso["pa"]
     pa.add("agent-abc123", "fix runtime LOWs", now=1000)
     got = pa.pending(now=1000)
     assert got == [
-        {"agentId": "agent-abc123", "description": "fix runtime LOWs", "ts": 1000, "nudges": 0}
+        {
+            "agentId": "agent-abc123",
+            "description": "fix runtime LOWs",
+            "ts": 1000,
+            "nudges": 0,
+            "transcript": "",
+        }
     ]
 
 
@@ -561,3 +568,67 @@ def test_cadence_probe_still_flips_for_a_user_agent(iso) -> None:
     dispatch = _import_dispatch()
     assert dispatch._pending_external_agent_count() == 1
     assert dispatch._cadence_active_waiting(state.state_dir(), now) is True
+
+
+# ---------- respawn recovery (resume-first, respawn-fallback) -----------------
+
+
+def test_transcript_survives_a_reload(iso, tmp_path) -> None:
+    """THE near-miss. `_normalize` REBUILDS each entry from a fixed key set, so a field it
+    does not name is dropped on the first load — which would delete the respawn handle at
+    exactly the moment it is needed. Pinned so it cannot silently regress."""
+    pa = iso["pa"]
+    pa.add("a1", "job", now=1000, transcript="/tmp/t.jsonl")
+    got = pa.pending(now=1000)
+    assert got[0]["transcript"] == "/tmp/t.jsonl", "the respawn handle must survive a reload"
+
+
+def test_spawn_prompt_reads_the_first_user_message(tmp_path, iso) -> None:
+    """The transcript's first user message IS the original spawn prompt — the only faithful
+    source, since SubagentStart's payload carries no prompt."""
+    pa = iso["pa"]
+    t = tmp_path / "t.jsonl"
+    t.write_text(
+        '{"type":"system","message":{"content":"boot"}}\n'
+        '{"type":"user","message":{"content":"DO THE THING, carefully."}}\n'
+        '{"type":"user","message":{"content":"a later message"}}\n',
+        encoding="utf-8",
+    )
+    assert pa.spawn_prompt(str(t)) == "DO THE THING, carefully."
+
+
+def test_spawn_prompt_handles_block_content(tmp_path, iso) -> None:
+    pa = iso["pa"]
+    t = tmp_path / "t.jsonl"
+    t.write_text(
+        '{"type":"user","message":{"content":[{"type":"text","text":"line one"},'
+        '{"type":"text","text":"line two"}]}}\n',
+        encoding="utf-8",
+    )
+    assert pa.spawn_prompt(str(t)) == "line one\nline two"
+
+
+def test_spawn_prompt_is_empty_when_unrecoverable(tmp_path, iso) -> None:
+    pa = iso["pa"]
+    assert pa.spawn_prompt(str(tmp_path / "missing.jsonl")) == ""
+    assert pa.spawn_prompt("") == ""
+
+
+def test_respawn_prompt_warns_about_duplicate_work(tmp_path, iso) -> None:
+    """A respawned agent starts blank and cannot INFER that half its job is done. Repeating
+    a memory chore is not harmless — it re-proposes merges and burns a window — so the
+    idempotency instruction has to be stated, and the original must follow VERBATIM."""
+    pa = iso["pa"]
+    t = tmp_path / "t.jsonl"
+    t.write_text('{"type":"user","message":{"content":"ORIGINAL TASK TEXT"}}\n', encoding="utf-8")
+    out = pa.respawn_prompt(str(t))
+    assert out.startswith("RESUMED JOB")
+    assert "MAY ALREADY BE DONE" in out
+    assert out.endswith("ORIGINAL TASK TEXT"), "the original prompt must be reissued verbatim"
+
+
+def test_respawn_prompt_is_empty_when_the_original_is_lost(tmp_path, iso) -> None:
+    """Refuse rather than invent: a made-up prompt silently does a DIFFERENT job under the
+    same name, which is worse than reporting the job unrecoverable."""
+    pa = iso["pa"]
+    assert pa.respawn_prompt(str(tmp_path / "gone.jsonl")) == ""

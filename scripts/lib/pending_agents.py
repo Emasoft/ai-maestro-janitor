@@ -145,6 +145,10 @@ def _normalize(entry: object, now: int) -> dict | None:
         "description": str(entry.get("description", "") or "")[:_MAX_DESC_LEN],
         "ts": ts,
         "nudges": nudges,
+        # Carried through explicitly: this function REBUILDS each entry from a fixed key
+        # set, so any field not named here is silently dropped on the first load — which
+        # would delete the one thing a respawn needs, at the moment it is needed most.
+        "transcript": str(entry.get("transcript", "") or ""),
     }
 
 
@@ -163,8 +167,21 @@ def _save_unlocked(entries: list[dict]) -> None:
     state.atomic_write(_manifest_path(), json.dumps(entries, ensure_ascii=False))
 
 
-def add(agent_id: str, description: str = "", now: int | None = None) -> None:
-    """Record a spawned subagent. Fail-open: swallows everything."""
+def add(
+    agent_id: str,
+    description: str = "",
+    now: int | None = None,
+    transcript: str = "",
+) -> None:
+    """Record a spawned subagent. Fail-open: swallows everything.
+
+    `transcript` is the RECOVERY path. Resuming an agent is always preferred and the
+    harness does it from the agent's own session — but when a resume fails, the only way to
+    respawn the SAME job is to reissue its original prompt, and SubagentStart's payload does
+    not carry one. The agent's first user message does, so the transcript path is what makes
+    the fallback possible at all. Storing the path (not the prompt) keeps the manifest small
+    and always current.
+    """
     try:
         agent_id = str(agent_id or "").strip()
         if not agent_id:
@@ -180,6 +197,7 @@ def add(agent_id: str, description: str = "", now: int | None = None) -> None:
                     "description": str(description or "")[:_MAX_DESC_LEN],
                     "ts": t,
                     "nudges": 0,  # a re-spawned id gets a fresh nudge budget
+                    "transcript": str(transcript or ""),
                 }
             )
             _save_unlocked(entries[-MAX_ENTRIES:])
@@ -283,3 +301,70 @@ def _directive_line(entry: dict) -> str:
     desc = " ".join(state.sanitize_for_drift_line(entry["description"]).split())[:_MAX_DESC_LEN]
     suffix = f" — {desc}" if desc else ""
     return f"resume background agent via SendMessage: {aid}{suffix}"
+
+
+# The preamble prepended to a RESPAWNED prompt. The respawned agent starts with a blank
+# transcript, so it has no idea part of its job may already be done — and a memory chore
+# repeated blindly is not harmless: it re-proposes merges that were already made, re-anchors
+# lessons, and burns a window doing it. Idempotency has to be stated, because the agent
+# cannot infer it.
+RESPAWN_PREAMBLE = (
+    "RESUMED JOB — a previous run of THIS EXACT TASK was interrupted, and resuming its "
+    "session failed, so you are a fresh agent receiving the original prompt verbatim below.\n"
+    "PART OF THE WORK MAY ALREADY BE DONE. Before every change, CHECK whether it is already "
+    "applied and skip it if so — verify, do not assume, in either direction. Report at the end "
+    "how many items you found already complete.\n"
+    "Any transaction the previous run left open was aborted; nothing it COMMITTED was lost.\n"
+    "--- ORIGINAL PROMPT FOLLOWS ---\n"
+)
+
+
+def spawn_prompt(transcript_path: str) -> str:
+    """The original spawn prompt of an agent, read from the FIRST user message of its
+    transcript. Empty string when it cannot be recovered.
+
+    This is the only faithful source: SubagentStart's payload carries no prompt, so a
+    respawn that does not read this is guessing at the job it is repeating.
+    """
+    try:
+        path = Path(str(transcript_path or ""))
+        if not path.is_file():
+            return ""
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "user":
+                    continue
+                msg = rec.get("message")
+                content = msg.get("content") if isinstance(msg, dict) else None
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    parts = [
+                        b.get("text", "")
+                        for b in content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    ]
+                    joined = "\n".join(p for p in parts if p)
+                    if joined:
+                        return joined
+        return ""
+    except Exception:  # noqa: BLE001 - recovery must never raise into a hook or dispatch
+        return ""
+
+
+def respawn_prompt(transcript_path: str) -> str:
+    """The full prompt to respawn an interrupted agent with, preamble included.
+
+    Empty when the original could not be recovered — the caller must then say the job is
+    unrecoverable rather than invent a replacement prompt, because a made-up prompt silently
+    does a DIFFERENT job under the same name.
+    """
+    original = spawn_prompt(transcript_path)
+    return f"{RESPAWN_PREAMBLE}{original}" if original else ""

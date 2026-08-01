@@ -40,6 +40,7 @@ def main() -> int:
     agent_id = ""
     desc = ""
     cwd_fallback = ""
+    transcript = ""
     try:
         payload = json.loads(raw) if raw.strip() else {}
         if isinstance(payload, dict):
@@ -47,6 +48,10 @@ def main() -> int:
             # Not in the documented schema — tolerated best-effort extras only.
             desc = str(payload.get("agent_type", "") or payload.get("description", "") or "")
             cwd_fallback = str(payload.get("cwd", "") or "")
+            # The RECOVERY handle. The payload carries no prompt, so if a resume of
+            # this agent ever fails, its transcript is the only faithful source of the
+            # job it was given (its first user message IS the spawn prompt).
+            transcript = str(payload.get("transcript_path", "") or "")
     except (ValueError, TypeError):
         return 0
     if not agent_id.strip():
@@ -69,7 +74,7 @@ def main() -> int:
 
     try:
         state.init_state()
-        pending_agents.add(agent_id, desc)
+        pending_agents.add(agent_id, desc, transcript=transcript)
     except Exception as exc:  # noqa: BLE001 - fail-open, always exit 0
         try:
             state.log_line("subagent-start", f"manifest add failed: {exc}")
