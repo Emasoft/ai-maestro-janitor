@@ -61,6 +61,47 @@ raise SystemExit(99)
 '''
 
 
+# Passthrough `taskpolicy`: run the command WITHOUT macOS background QoS.
+#
+# The bulk lane deliberately launches its detached children under `taskpolicy -b`
+# (background QoS: throttled CPU, disk IO and network together) so a ~20 min
+# marketplace refresh never starves the user's foreground work. Correct in
+# production, ruinous for a test's patience budget — MEASURED on a loaded dev box,
+# `uv run scripts/daemon.py --help` costs 1.0 s at normal QoS and 75.5 s under
+# `taskpolicy -b`. That is a ~73x swing driven entirely by how busy the machine
+# happens to be, so a wait bound sized for the daemon's real work still goes red,
+# and it goes red exactly when the machine is busiest: during a publish, which runs
+# the full suite. (The recheck-beat knob below was an earlier, partial fix for the
+# same red test; it removed ~10 s of poll latency and left the ~150 s of throttled
+# boot untouched, which is why the flake survived it.)
+#
+# Stubbing is not mocking: the REAL code path still runs — the daemon detects
+# taskpolicy, builds the ['taskpolicy', '-b'] prefix, and execs it. Only the QoS
+# side effect, which no assertion here is about, is neutralized. Same pattern and
+# rationale as the `claude` stub above.
+#
+# Linux is deliberately NOT stubbed. `nice -n 19` + `ionice -c 3` are ordinary
+# scheduler hints, not a QoS band, and cost a rounding error next to this; leaving
+# them real keeps the Linux prefix genuinely exercised.
+#
+# Unknown flags are a hard error rather than a silent skip: real taskpolicy has
+# value-taking options (-t, -l), and treating one of those as a bare flag would
+# exec the VALUE as the command — a stub that quietly runs the wrong process is
+# worse than no stub.
+_TASKPOLICY_STUB = '''#!/usr/bin/env python3
+import os, sys
+a = sys.argv[1:]
+while a and a[0].startswith("-"):
+    if a[0] not in ("-b", "-d", "-g", "-a"):
+        sys.stderr.write("taskpolicy stub: unhandled flag %r\\n" % a[0])
+        raise SystemExit(64)
+    a.pop(0)
+if not a:
+    raise SystemExit(0)
+os.execvp(a[0], a)
+'''
+
+
 @pytest.fixture
 def harness(tmp_path: Path):
     """Set up the daemon's isolated runtime: state dir + stub claude on PATH.
@@ -74,6 +115,10 @@ def harness(tmp_path: Path):
     bin_dir.mkdir()
     (bin_dir / "claude").write_text(_CLAUDE_STUB, encoding="utf-8")
     (bin_dir / "claude").chmod(0o755)
+    # See _TASKPOLICY_STUB: neutralize macOS background QoS so a child boot costs
+    # ~1 s instead of ~75 s and this file's waits measure the daemon, not the load.
+    (bin_dir / "taskpolicy").write_text(_TASKPOLICY_STUB, encoding="utf-8")
+    (bin_dir / "taskpolicy").chmod(0o755)
     stub_log = tmp_path / "claude.log"
 
     base_env = os.environ.copy()
