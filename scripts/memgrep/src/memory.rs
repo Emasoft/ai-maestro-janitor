@@ -2594,6 +2594,25 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// True for a markdown INDENTED code block line (4+ spaces or a tab).
+///
+/// `add-lesson` appends its `[^N]` to the atom's last body line, and a `[^N]` inside a code block
+/// is LITERAL TEXT, not a footnote reference — so anchoring there writes a citation that does not
+/// cite, which the lint then correctly reports as `lesson-uncited`. Observed for real: a page whose
+/// atom ended with an indented command block got its anchor placed on the `du -sk …` line.
+///
+/// FENCED blocks were already excluded via `in_fence`; indented ones were not. Same defect class as
+/// janitor#152 — a citation that is present and inert — except produced by the tool that writes
+/// citations, so the author has no way to see it coming.
+///
+/// Deliberately conservative: a deeply-indented LIST CONTINUATION also matches, and is skipped. That
+/// is the right trade, because the two failures are not symmetric — skipping a legal anchor moves it
+/// to an earlier prose line and the citation still works, while anchoring into code produces a dead
+/// citation that looks correct in the source. Cost of over-skipping: nothing observable.
+fn is_indented_code(line: &str) -> bool {
+    line.starts_with("    ") || line.starts_with('\t')
+}
+
 /// `locate_atom_body` generalised to any id-matcher (so `add-lesson` can accept the canonical-8 /
 /// `^name` spellings via `atom_id_matches`). Returns `(marker_line_idx, last_nonblank_body_line_idx)`
 /// for the FIRST body atom whose id satisfies `is_match`, or None.
@@ -2640,8 +2659,9 @@ fn locate_atom_body_matching(
             open = Some((i, i, id));
         } else if let Some((_, last, _)) = open.as_mut()
             && !line.trim().is_empty()
+            && !is_indented_code(line)
         {
-            *last = i; // a non-blank body line advances the anchor point
+            *last = i; // a non-blank PROSE line advances the anchor point
         }
     }
     finish(&open)
@@ -7289,5 +7309,43 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(locate_atom_body_matching(text, &|id: &str| atom_id_matches(id, "AAAABBBB")).is_some());
         // An unknown id yields nothing.
         assert!(locate_atom_body_matching(text, &|id: &str| atom_id_matches(id, "ATOM-ZZZZ-9999")).is_none());
+    }
+
+    #[test]
+    fn the_anchor_never_lands_inside_an_indented_code_block() {
+        // A `[^N]` inside a code block is LITERAL TEXT, so anchoring there writes a citation that
+        // does not cite — and `lesson-uncited` then correctly fires on a page whose author did
+        // everything right. Hit for real: a page whose atom ended with an indented command block
+        // got its anchor placed on the `du -sk …` line. Fenced blocks were already excluded via
+        // `in_fence`; indented ones were not.
+        let text = "---\nname: p\n---\n^ATOM-AAAA-BBBB [keywords: kw]\nreal prose line\n\n    indented --command\n\n## Notes and lessons learned\n";
+        let m = |id: &str| atom_id_matches(id, "ATOM-AAAA-BBBB");
+        let (_marker, last) = locate_atom_body_matching(text, &m).expect("atom located");
+        assert_eq!(
+            text.lines().nth(last).unwrap(),
+            "real prose line",
+            "the anchor must fall on prose, never on an indented code line"
+        );
+    }
+
+    #[test]
+    fn a_tab_indented_code_line_is_also_refused_as_an_anchor() {
+        // Markdown accepts a TAB as an indented-code marker just as it accepts 4 spaces; a check
+        // that only looked for spaces would leave the same dead-citation bug for tab users.
+        let text = "---\nname: p\n---\n^ATOM-AAAA-BBBB [keywords: kw]\nreal prose line\n\n\ttab --command\n\n## Notes\n";
+        let m = |id: &str| atom_id_matches(id, "ATOM-AAAA-BBBB");
+        let (_marker, last) = locate_atom_body_matching(text, &m).expect("atom located");
+        assert_eq!(text.lines().nth(last).unwrap(), "real prose line");
+    }
+
+    #[test]
+    fn an_all_code_body_falls_back_to_the_marker_rather_than_anchoring_into_code() {
+        // Degenerate case: every body line is code. Falling back to the marker line is the
+        // behaviour already documented for an empty-bodied atom ("the ref lands right after the
+        // marker — still a valid body-anchor"), and it is strictly better than a dead citation.
+        let text = "---\nname: p\n---\n^ATOM-AAAA-BBBB [keywords: kw]\n\n    only --code --here\n\n## Notes\n";
+        let m = |id: &str| atom_id_matches(id, "ATOM-AAAA-BBBB");
+        let (marker, last) = locate_atom_body_matching(text, &m).expect("atom located");
+        assert_eq!(last, marker, "no prose to anchor to → fall back to the marker line");
     }
 }
