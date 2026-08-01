@@ -190,19 +190,44 @@ def harness(tmp_path: Path):
         "spawn": spawn,
     }
 
-    # Teardown: terminate any daemons the test (or its singleton-loser
-    # siblings) left alive. Best-effort, then SIGKILL the holdouts.
+    # Teardown: terminate any daemons the test (or its singleton-loser siblings)
+    # left alive. Best-effort SIGTERM, then SIGKILL the holdouts.
+    #
+    # Kill the PROCESS GROUP, not just `proc`. `proc` is the `uv run` LAUNCHER; the
+    # daemon is a python CHILD with a different pid — this file's own
+    # test_daemon_writes_pid_and_heartbeat documents `written_pid != proc.pid`, and
+    # both alive. Signalling only the launcher therefore ORPHANS the daemon, which
+    # then runs forever against a state dir pytest has already deleted.
+    #
+    # Not hypothetical: found one such orphan alive after 2 DAYS (`scripts/daemon.py`
+    # under a `janitor-test-session-*` tmp python, its state dir long gone). A test
+    # suite that leaves a running daemon behind violates the standing rule that every
+    # resource a suite opens is closed before it returns.
+    #
+    # `start_new_session=True` on the spawn makes each launcher a session leader, so
+    # its pgid == its pid and ONE killpg reaches launcher + daemon together. Falling
+    # back to the bare proc keeps this correct if getpgid ever fails.
     for proc in spawned:
-        if proc.poll() is None:
+        if proc.poll() is not None:
+            continue
+        try:
+            pgid: int | None = os.getpgid(proc.pid)
+        except OSError:
+            pgid = None
+        for sig, grace in ((signal.SIGTERM, 3), (signal.SIGKILL, 2)):
+            if proc.poll() is not None:
+                break
             try:
-                proc.terminate()
-                proc.wait(timeout=3)
+                if pgid is not None:
+                    os.killpg(pgid, sig)
+                else:
+                    proc.send_signal(sig)
+            except OSError:
+                break  # already gone
+            try:
+                proc.wait(timeout=grace)
             except subprocess.TimeoutExpired:
-                proc.kill()
-                try:
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    pass
+                pass
 
 
 def _wait_for(predicate, timeout: float = 8.0, interval: float = 0.1) -> bool:
