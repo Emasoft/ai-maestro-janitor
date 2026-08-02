@@ -1,9 +1,9 @@
 ---
 trdd-id: 98ISATJZ
 title: Memory-system discoverability — own the design (janitor#62)
-column: dev
+column: published
 created: 2026-07-09T14:53:03+0200
-updated: 2026-07-11T14:35:00+0200
+updated: 2026-08-02T07:05:00+0200
 current-owner: janitor-dev
 assignee: janitor-dev
 priority: 4
@@ -23,6 +23,7 @@ test-requirements: [unit]
 review-requirements: [human-review]
 runtime-targets: [macos, linux]
 impacts: []
+implementation-commits: [b92e388]
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/62", "Emasoft/ai-maestro-plugin:TRDD-202ccfa2"]
 ---
 
@@ -74,6 +75,32 @@ equals the manifest default — 25 options checked, so this drift class cannot r
 **NEXT ACTION:** none for Phase 1. **S3 stays BLOCKED on #52** (ai-maestro-plugin
 must ship the memgrep `publish-sync`/`link` engine first — do NOT build it here);
 it will be its own TRDD when that engine lands. Post the Phase-1 result to #62.
+
+### 2026-08-02 — CLOSED (`dev → published`)
+
+The card's own NEXT ACTION was *"none for Phase 1 … Post the Phase-1 result to #62"*, and that
+post happened on **2026-07-16** — the janitor's Claude commented on #62 naming the four shipped
+surfaces and **closed the issue as ADDRESSED** (verified against the live issue, not from memory:
+`gh issue view 62` → `CLOSED 2026-07-16T01:15:50Z`). The deliverable this card exists for — OWN
+the discoverability design, and land Phase 1 — is complete, and the requester considered it
+answered 17 days ago. It has sat in `dev` since.
+
+**Implementation verified, not assumed.** `b92e388` (breadcrumb lib + the two manifest-default
+corrections + the ratchet test) is contained in tag `ai-maestro-janitor--v0.45.0`, so this is a
+released card; `implementation-commits:` was empty and is now recorded, which is what let the
+reconciler read this as unshipped work in progress.
+
+**About the "S3 stays BLOCKED on #52" line — that is the prose/frontmatter mismatch, and the
+frontmatter was right.** S3 is not held work on THIS card: the same paragraph already rules that
+*"it will be its own TRDD when that engine lands"*, and rule 13 is one atomic task per card. #52
+is still OPEN and lives in another repo (ai-maestro-plugin must ship the memgrep
+`publish-sync`/`link` engine first), so making this card `blocked` on it would park a delivered
+design behind an external dependency it does not own, indefinitely. The blocked language describes
+a FUTURE card's precondition, not this one's state — which is exactly the trap of writing a
+sibling's status into a card's STATE block.
+
+`release-via: publish` and the work is in a released tag ⇒ terminal column is **`published`**, not
+`completed` (TRDD rule 12 — published archives AS ITSELF, or the fact that it shipped is erased).
 
 **Coupling / do-NOT-duplicate:** S3 (published-note discovery) couples to #52 —
 it cannot ship until ai-maestro-plugin's memgrep `publish-sync`/`link` engine

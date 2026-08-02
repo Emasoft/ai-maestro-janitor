@@ -1,9 +1,10 @@
 ---
 trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
-column: dev
+column: testing
+implementation-commits: [3316e44, a852cb8, f4cba4f, a7506d3, 9986f7e, def438f, 21da98c, 0028c1e]
 created: 2026-06-08T16:53:09+0200
-updated: 2026-07-11T14:52:00+0200
+updated: 2026-08-02T07:20:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -23,7 +24,33 @@ external-refs: []
 
 # TRDD-dfc0959a — Rotator 3-layer cascade + keychain-encrypted cookies + consistency fixes
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-11
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
+
+### 2026-08-02 — STATE REFRESH (`dev → testing`). Four claims below are SUPERSEDED — do NOT act on them.
+
+Board reconciliation flagged this card, and re-reading it against git found the head asserting
+several things that stopped being true weeks ago. A stale STATE block is the one defect this
+section exists to prevent, so the corrections come FIRST:
+
+| SUPERSEDED claim (still written below) | Reality, verified 2026-08-02 |
+|---|---|
+| *"decide + implement the verify-before SCRUB"* is outstanding (Phase-3 item 3) | **DONE** — `0028c1e`, `cookie_vault.scrub_profile_cookies` / `verify_restorable` / `scrub_enabled`, released in `v0.45.0`. The 2026-07-11 entry below already describes it; the Phase-3 checklist was never updated to match. |
+| *"republish the janitor + restart … the daemon still runs cached 0.6.1 — none of this is live yet"* (Phase-3 item 4) | **DONE, ~22 releases ago.** Installed cache is **2.3.0**; every Phase 0/1/2 commit is in a released tag. |
+| *"DO NOT push the unpushed commits (now 57) without explicit USER go"* | **Spent.** Those 57 were pushed long ago; the working tree carries 4 unpushed docs-only commits from today. This line now reads as a standing embargo on a backlog that no longer exists. |
+| `Session at 98% weekly (429) …; end-to-end validation is blocked until a fresh window` | **HISTORICAL — dated 2026-06-08, cleared long since.** It described that afternoon's rate-limit window, not a live block. It is why the reconciler read this card as prose-claiming-a-block the frontmatter did not encode; `blocked-by:` was correctly empty. Reworded at its own site below so the card stops re-tripping that check every sweep. |
+
+**WHAT IS ACTUALLY LEFT — items 1 and 2 only, and both need conditions I cannot manufacture:**
+a real non-429 session plus a genuine interactive reauth ("stay signed in") to (1) flip
+`CLAUDE_ROTATOR_KEYCHAIN_COOKIES=1` and confirm a capture materializes-before / snapshots-after,
+and (2) confirm RENEW mints via CDP-attach → ROTATE swaps → the cascade log is correct. The code
+is shipped and default-OFF, so nothing is at risk while this waits.
+
+**Column: `dev → testing`.** The remaining work is validation of delivered code, and `dev`
+asserted someone was building it — nobody has since 2026-07-11. `implementation-commits:` was
+empty despite 8 landed commits and is now recorded, which is the other reason this card looked
+unshipped.
+
+### The 2026-07-11 entry (kept verbatim below — accurate about the scrub design, stale about what remains)
 
 **2026-07-11 — the verify-before-SCRUB is DECIDED and IMPLEMENTED (Phase 3 item 3).**
 `cookie_vault.scrub_profile_cookies()` + `verify_restorable()` + `scrub_enabled()`,
@@ -196,8 +223,10 @@ DO NOT push the unpushed commits (now 57) without explicit USER go.
   encrypted on disk). The redesign moves cookies INTO the keychain. This changes
   profiles-root/cookie-detection fundamentally — Phase-0 path fixes may be partly superseded
   by Phase 2; do Phase 0 anyway so the system is correct in the interim.
-- Session at 98% weekly (429) when this was written; end-to-end validation is blocked until
-  a fresh window + a successful reauth (tick "stay signed in").
+- ~~Session at 98% weekly (429) when this was written; end-to-end validation waits on
+  a fresh window + a successful reauth (tick "stay signed in").~~ **[HISTORICAL 2026-06-08 —
+  that rate-limit window is long gone.]** What end-to-end validation still needs is the reauth
+  half only: a real interactive "stay signed in" login. See the 2026-08-02 refresh at the head.
 
 **Durable artifacts to read before acting:**
 - `reports/oauth-rotator-consistency-audit/{A-core-py,B-detectors-daemon,C-shell-skills}.md`

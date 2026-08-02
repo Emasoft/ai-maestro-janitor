@@ -1,9 +1,11 @@
 ---
 trdd-id: 2C8XFOW9
 title: Restart Claude sessions after the janitor changes ~/.claude/settings.json (apply-on-restart)
-column: backburner
+column: blocked
+pre-block-column: backburner
+blocked-by: [ai-maestro#75]
 created: 2026-07-17T02:21:39+0200
-updated: 2026-07-17T02:21:39+0200
+updated: 2026-08-02T07:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -80,7 +82,43 @@ NON-EMPTY change summary → a change was just applied → a restart is needed t
   all — so the ensurer already no-ops there) AND does not own its launch string → call the SERVER
   restart script. The user believes it is `aimaestro-manage-clients.sh cli-client-restart --aid <id>`.
 
-**BLOCKED ON (do not implement past the open decisions until these clear):**
+### 2026-08-02 — board reconciliation: encoded the real block (`backburner → blocked`)
+
+Reconciliation flagged this card as prose-claims-a-block-the-frontmatter-does-not-encode, plus two
+"stale blockers". Per-card, the **prose was right and the frontmatter was silent** — so the
+frontmatter is what changes: `column: blocked`, `pre-block-column: backburner`,
+`blocked-by: [ai-maestro#75]`.
+
+- **The blocker is real and still live.** **Emasoft/ai-maestro#75** — re-checked 2026-08-02, still
+  **OPEN** (2 comments). It owes this card the sanctioned settings-edit API and the CLI-client
+  restart verb for workdir-restricted agents; without them the ai-maestro-mode half cannot be built
+  at all.
+- **A non-TRDD blocker is this repo's own convention, not an improvisation.** `TRDD-AM8JD9SG` carries
+  `blocked-by: [ai-maestro#46]` and `TRDD-56d24c02` carries `blocked-by: [ai-maestro#102]`, both with
+  `pre-block-column:` recorded. My first pass at this reconciliation argued the opposite — that an
+  out-of-repo issue cannot be a `blocked-by:` and `backburner` was therefore the honest column — and
+  that was wrong: I generalised from the pipeline rule's *"naming a card that is itself still open"*
+  without checking what the board already does. Corrected here rather than left standing, because
+  the wrong version would have taught the next reader to under-encode every cross-repo block.
+- **`pre-block-column: backburner`**, so clearing #75 restores it to the resting state it was
+  deliberately put in — it does not silently promote itself into the work columns.
+- **The second gate is NOT encodable and stays prose.** A **USER decision** on the 3
+  high-blast-radius questions (the AskUserQuestion posed 2026-07-17 timed out unanswered) is what
+  really governs: auto-relaunching a user's sessions with `--dangerously-skip-permissions` is the
+  highest-blast-radius item on this board, and building it on an away-default rather than an answer
+  is the one failure mode this card was written to prevent. There is no id for "ask the user", and
+  inventing one would put an unresolvable reference on the board.
+- **EQ792YPX and T7N67AQP are NOT stale blockers — they were never blockers.** They are cited here
+  as things to REUSE (this card is the EHT of EQ792YPX; the presence gate comes from T7N67AQP), and
+  both being `published` is precisely what makes them reusable. The checker infers prose-named
+  blockers from "any TRDD id mentioned in a body whose prose says blocked", which is a deliberately
+  wide net; this is the false-positive shape it warns about. Nothing to unblock.
+- **What actually gates the work is unchanged:** auto-relaunching a user's sessions with
+  `--dangerously-skip-permissions` is the highest-blast-radius thing on this board. Building it on
+  an away-default rather than an answer would be the one failure mode this card was written to
+  avoid, so it waits.
+
+**DEFERRED PENDING (a USER decision + an out-of-repo answer — see above for why this is not `blocked`):**
 - **ai-maestro#75** (filed this session) — needs from the ai-maestro server: (1) the exact
   CLI-client-restart command + how the janitor gets its own `--aid`; (2) a sanctioned server
   API/script to edit `~/.claude/settings.json` for workdir-restricted agents (or confirmation the
