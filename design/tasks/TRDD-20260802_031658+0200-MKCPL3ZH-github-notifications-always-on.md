@@ -1,10 +1,11 @@
 ---
 trdd-id: MKCPL3ZH
 title: Both GitHub notification chores run always, on the cron, with project-local state
-column: testing
+column: published
 created: 2026-08-02T03:16:58+0200
-updated: 2026-08-02T03:16:58+0200
-implementation-commits: [559930a, a2d43cf]
+updated: 2026-08-02T03:52:00+0200
+released-in: v2.3.0
+implementation-commits: [559930a, a2d43cf, 3e83dac, 8cd8fb2]
 current-owner: claude
 assignee: claude
 task-type: feature
@@ -21,12 +22,19 @@ labels: [github, notifications, heartbeat, always-on, security]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
 
-**STATUS: IMPLEMENTED, full suite green (14057 passed, 1 skipped), ruff + pyright clean.**
-Commits `559930a` (implementation) and `a2d43cf` (tests). Ships on the next `publish.py`.
+**STATUS: SHIPPED in v2.3.0** (published 2026-08-02T01:50:03Z), installed at USER scope
+(2.1.0 → 2.3.0). All 11 publish gates passed; remote CPV `PARITY-CLEAN (FAIL=0, WARNING=3,
+PASS=8)`; full suite 14057 passed / 1 skipped; ruff + pyright clean.
 
-**NEXT ACTION:** none. The last open decision (the four vestigial on/off skills) was RESOLVED
+**NEXT ACTION: none.** The last open decision (the four vestigial on/off skills) was resolved
 by the owner the same night — *"delete the vestigial skills and commands. complete all tasks
-and publish"* — and they are deleted. Card moves to `testing` → publish.
+and publish"* — and they are deleted.
+
+Verified AFTER install rather than inferred from the CLI's success message: the user-scope
+record points at the `2.3.0` cache dir, `gh-reply-watch.py` is present there, the four deleted
+skills are absent from it, and the cached `github-issues-watch.py` carries the always-on gate.
+The auto-rolling dispatcher stub resolves the newest cache, so the next heartbeat fire runs
+the new detector with no re-arm.
 
 ## The directive
 
