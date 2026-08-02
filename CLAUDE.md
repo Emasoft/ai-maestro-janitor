@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=954d84676104 digest=a4c05c35d4d3 generated=2026-08-02T12:36:04+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e8b33cab1187 digest=0f2669f88bd2 generated=2026-08-02T18:44:59+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -33,6 +33,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/arm_record.py` — Everything /janitor-arm must do AFTER the cron exists (TRDD-DLI76AUC).
   · valid_cron_id(value) -> bool
   · record(state_dir, *, cron, cron_id, now) -> None
+  · main() -> int
+`scripts/claudemd_slim.py` — claudemd_slim — the slim janitor-managed CLAUDE.md CLI (TRDD-H12K9JYX).
+  · cmd_index(root, *, to_stdout) -> int
+  · cmd_check(root) -> int
+  · cmd_verify(root, old_file) -> int — Prove the migration lost nothing: OLD narrative facts + load-bearing tokens must
   · main() -> int
 `scripts/clear_trigger.py` — Backing script for /janitor-handoff-and-clear (TRDD-Z582IKIR P1).
   · plan_clear() -> tuple[list[str], list[str]] — The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
@@ -143,6 +148,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · present_lockfile_managers(root) -> set[str] — Filesystem wrapper around `_lockfile_managers`. Never raises.
   · resolve_package_manager(*, package_manager_field, lockfiles, has_yarnrc_yml) -> str — Which manager installs this project: npm | yarn-classic | yarn-berry | pnpm | bun |
   · detect_package_manager(root) -> str — Filesystem wrapper around `resolve_package_manager`. Never raises.
+  · main() -> int
+`scripts/detectors/peer-freeze-recovery.py` — peer-freeze-recovery — freeze recovery for PEER sessions while the daemon is dark
+  · run_once(now) -> str — One gated beat. Returns a short outcome tag (for tests + the log line).
   · main() -> int
 `scripts/detectors/plugin-updates.py` — Plugin-updates detector — Python port of plugin-updates.sh.
   · should_signal_user_update(*, enabled, scope, is_self, is_fleet, user_scope_enabled, installed, latest) -> bool — True iff the detector should SIGNAL the daemon to update this USER-scope plugin
@@ -367,6 +375,13 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · cooldown_seconds() -> int
   · min_gain_tokens() -> int
   · proactive_idle_enabled() -> bool — The preventive path is gated by BOTH the master cold-compact switch AND its own knob, so
+  · clear_enabled() -> bool — Gated by its OWN knob only — NOT by `enabled()`. The cold-compact master switch governs
+  · clear_min_idle_seconds() -> int
+  · clear_min_context_tokens() -> int
+  · clear_cooldown_seconds() -> int
+  · clear_in_cooldown(state_dir, *, now) -> bool
+  · mark_clear_fired(state_dir, *, now) -> None — Best-effort; a stamp failure must never break the nudge itself.
+  · should_clear_when_long_idle(context_tokens, idle_seconds, *, user_present, active_waiting, min_idle_s, min_context_tokens) -> bool — PURE. Is this session abandoned-and-fat enough that `/clear` beats leaving it alone?
   · should_compact_on_resume(context_tokens, *, min_context_tokens) -> bool — SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.
   · should_compact_after_idle(idle_seconds, context_tokens, *, min_idle_s, min_context_tokens) -> bool — Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold (idle past the TTL) AND
   · should_compact_proactively_idle(context_tokens, *, user_present, active_waiting, min_context_tokens, floor_tokens, min_gain) -> bool — PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
@@ -537,12 +552,15 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · init_global_state() -> Path — Create the global state dir if missing. Idempotent. Return its path.
   · control_dir() -> Path — Return the FIXED external control-plane directory: ~/.claude/janitor-control/.
   · read_flag_provenance(name) -> dict — Read one control-plane flag's provenance, checking the same THREE locations
+  · last_run_path(task) -> Path — WRITE path for one chore's completion stamp — `control_dir()/<task>.last-run.ts`
+  · read_last_run(task) -> int — One chore's completion epoch, taking the NEWEST across all three eras.
   · migrate_global_state_to_data_dir() -> Optional[int] — One-time staged migration legacy → plugin DATA dir (TRDD-2U8AH82F).
-  · daemon_pid() -> Optional[int] — Read daemon.pid → int, or None if missing / malformed.
-  · write_daemon_pid(pid) -> None
-  · remove_daemon_pid() -> None
-  · write_heartbeat(now) -> None
-  · read_heartbeat() -> int
+  · daemon_pid() -> Optional[int] — Read daemon.pid → int, or None if missing / malformed at EVERY era.
+  · write_daemon_pid(pid) -> None — Publish the daemon's pid at EVERY era's path (see the dual-write note above).
+  · remove_daemon_pid() -> None — Clear the pid from every era. A clear that missed one would leave a shutdown daemon
+  · write_heartbeat(now) -> None — Stamp the liveness beat at EVERY era's path (see the dual-write note above).
+  · read_heartbeat() -> int — The NEWEST liveness beat across every era.
+  · foreign_era_daemons(self_pid) -> list[tuple[str, int]] — Every era whose `daemon.pid` names a LIVE process that is not `self_pid`.
   · kill_switch_present() -> bool
   · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
   · clear_kill_switch() -> None — Remove the kill-switch flag from every location it may live (control_dir(), the
@@ -559,8 +577,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
   · clear_fleet_injections(flag_state) -> None — Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
   · daemon_is_alive(max_silence_s) -> bool — True iff the daemon's PID is alive AND its heartbeat is recent.
-  · acquire_singleton_flock(*, blocking) -> Optional[int] — Acquire the exclusive flock on daemon.flock.
-  · release_singleton_flock(fd) -> None — Close the fd; the kernel releases the flock as a side effect.
+  · acquire_singleton_dual(*, blocking) -> Optional[LockHandle] — Acquire the daemon singleton on EVERY era's `daemon.flock`, NEW path first.
+  · release_singleton_dual(handle) -> None — Release every era's singleton flock. Best-effort — the kernel frees them on process
   · acquire_marketplace_lock() -> Optional[LockHandle] — Non-blocking exclusive flock on marketplace-op.lock.
   · release_marketplace_lock(handle) -> None — Release the marketplace-op flock and close its fds. Best-effort.
   · ticket_dispatch_lock() -> Iterator[bool] — Serialise the support-ticket select→stamp→emit against every other session (TRDD-CGYMUKO6).
@@ -731,6 +749,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
   · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
   · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
+  · atom_footnote_citations(text) -> dict[str, set[str]] — `{atom_id: set of footnote ids that atom's BODY cites}` for one page.
+  · atom_lessons_travel(source_texts, result_texts) -> tuple[bool, list[str]] — An atom that MOVES between pages must take its lessons with it. Returns
   · ocd_lmd_ok_merge(source_metas, result_meta) -> tuple[bool, str] — The survivor of a merge keeps the OLDEST origin date and a fresh modify
   · is_legal_merge(meta_a, meta_b) -> tuple[bool, str] — Refuse a structurally-illegal merge (the agent still decides SUBJECT
   · is_legal_split(meta, body, min_sections, oversized) -> tuple[bool, str] — Decide whether a page may be split. Per the wikimem model "one element =
@@ -885,17 +905,27 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · load_recent(path, *, limit) -> list[dict] — The most-recent ``limit`` records, newest LAST (file order is chronological
   · summarize_recent(records) -> Optional[dict] — A compact rollup of recovery history for the dashboard, or None on empty input.
 `scripts/lib/repomap/__init__.py` — Auto-maintained project-map extractor/renderer (TRDD-e247a349).
+`scripts/lib/repomap/claudemd_slim.py` — Slim janitor-managed CLAUDE.md — the wikimem-index half (TRDD-H12K9JYX).
+  · narrative_max_bytes() -> int
+  · PageInfo — One PROJECT wikimem page, as the index needs it. Parsed from frontmatter only —
+  · PageInfo.is_overview(self) -> bool
+  · scan_pages(memdir) -> list[PageInfo] — Every real PROJECT wikimem page under `memdir`, sorted by name.
+  · corpus_digest(pages) -> str — 12-hex digest over (name, lmd, description) — the cheap freshness probe. lmd is
+  · render_index(pages, *, generated_iso, memdir_rel) -> str — The full fenced index block, trailing newline included.
+  · narrative_outside_fences(text) -> str — Everything OUTSIDE both janitor-owned fenced regions — the human/agent narrative
+  · slim_violations(text) -> list[str] — The slim-contract check — an ADVISORY list, one string per violation, empty when
+  · index_is_stale(text, pages) -> bool — True iff the spliced index's digest no longer matches the corpus (or there is no
 `scripts/lib/repomap/extractor.py` — Project-map extractor — language-agnostic interface + Python adapter.
   · Symbol — One public symbol in a file.
   · FileMap — Extracted structure of one source file.
   · extract_python(path) -> FileMap — Extract a FileMap from a Python source file via stdlib `ast`.
 `scripts/lib/repomap/markers.py` — Marker-fence operations for the project-map block (TRDD-e247a349 §3, §4).
-  · MalformedFences — The CLAUDE.md text contains a broken JANITOR-REPO-MAP fence pair
-  · has_map_block(text) -> bool — True iff a well-formed fenced block is present. Malformed fences raise
-  · read_fence_header(text) -> dict[str, str] | None — Parse the START fence's metadata (`sha`, `digest`, `generated`, schema)
-  · replace_map_block(text, new_block) -> str — Swap the existing fenced block for `new_block` (the maintainer's
-  · insert_map_block(text, new_block) -> str — First-time insertion (the /janitor-auto-repomap-on path): append the
-  · remove_map_block(text) -> str — Splice out the fenced block entirely (the /janitor-auto-repomap-off
+  · MalformedFences — The CLAUDE.md text contains a broken janitor fence pair
+  · has_map_block(text, start, end) -> bool — True iff a well-formed fenced block is present. Malformed fences raise
+  · read_fence_header(text, start, end) -> dict[str, str] | None — Parse the START fence's metadata (`sha`, `digest`, `generated`, schema)
+  · replace_map_block(text, new_block, start, end) -> str — Swap the existing fenced block for `new_block` (the maintainer's
+  · insert_map_block(text, new_block, start, end) -> str — First-time insertion (the /janitor-auto-repomap-on path): append the
+  · remove_map_block(text, start, end) -> str — Splice out the fenced block entirely (the /janitor-auto-repomap-off
 `scripts/lib/repomap/renderer.py` — Project-map renderer — FileMaps → the fenced CLAUDE.md block (TRDD-e247a349 §2).
   · render_body(filemaps) -> str — Deterministic map body (no fences, no timestamp). Individual files first
   · structure_hash(filemaps) -> str — 12-hex sha256 over the rendered body. Identical structure → identical
@@ -1065,7 +1095,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · rotate_log_if_big(name, max_bytes) -> None — Rotate <name>.log to <name>.log.1 when it exceeds `max_bytes`.
   · detached_uv_env() -> dict[str, str] — Environment for a DETACHED child that re-invokes a `uv run --script` shebang.
   · run_subprocess(cmd, *, timeout, cwd, capture, detector_name) -> Optional[subprocess.CompletedProcess[str]] — Run a subprocess with a default timeout, never propagate exceptions.
-  · sanitize_for_drift_line(text) -> str — Defang `[` `]` and strip control characters from untrusted text.
+  · sanitize_for_drift_line(text) -> str — Defang `[` `]`, strip control characters, and REDACT emails from untrusted text.
 `scripts/lib/suppression.py` — Shared suppression-file loader for janitor detectors.
   · SuppressionRule — A single, parsed suppression entry.
   · SuppressionRule.is_expired(self, today) -> bool
@@ -1075,11 +1105,24 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · load(project_root) -> SuppressionTable — Load the project's suppression table.
 `scripts/lib/terminal_trigger.py` — Terminal-aware self-trigger send-abstraction (TRDD-db169d9e R3).
   · valid_tmux_pane(pane) -> bool — True iff `pane` is a bare tmux pane id (`%<n>`) safe to place on a
+  · extract_prompt_field(pane_text) -> str | None — The CURRENT text of the input prompt field, or None when no field is found.
+  · prompt_field_is_empty(pane_text) -> bool — True ONLY when the field was read AND is empty. `None` (unreadable) is False, so an
+  · prompt_field_shows_only(pane_text, command) -> bool — True iff the field contains EXACTLY `command` and nothing else.
   · applescript_quote(command) -> str — `command` escaped for interpolation inside an AppleScript double-quoted string —
   · iterm_esc_lines(indent) -> list[str] — AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
+  · build_clear_field_steps(terminal) -> list[list[str]] | None — Steps that empty the input field WITHOUT submitting it, or None if unsupported.
+  · channel_is_readable(terminal) -> bool — True iff this channel CAN be read back at all — i.e. a None from `read_pane_text` means
+  · build_type_only_steps(terminal, command) -> list[list[str]] | None — Steps that TYPE `command` into the field but do NOT submit it, or None if unsupported.
+  · build_submit_steps(terminal) -> list[list[str]] | None — Steps that press Enter ALONE, or None if unsupported. The other half of the split
+  · read_pane_text(terminal) -> str | None — Read a pane's visible text, or None when this channel cannot be read back.
+  · wait_for_empty_prompt(terminal, *, interval_s, timeout_s, reader, sleeper, clock) -> tuple[bool, str] — Block until the input field is EMPTY. Returns (ok, why).
+  · verify_then_submit(terminal, command, *, submit, attempts, interval_s, reader, sleeper) -> tuple[bool, str] — After typing `command`, RE-READ and press Enter only if the field shows exactly it.
+  · wait_until_pane_free(terminal, *, quiet_s, giveup_s, reader, is_typing, sleeper, clock) -> tuple[bool, str] — RULES 1 + 2 only, for callers whose actual typing happens LATER in a detached child.
+  · inject_until_sent(terminal, command, *, type_fn, submit_fn, clear_fn, pre_submit, quiet_s, retry_s, giveup_s, reader, is_typing, sleeper, clock) -> tuple[bool, str] — Keep trying until the command is actually SENT. Returns (sent, why).
   · build_tmux_steps(pane, commands, *, esc_first) -> list[list[str]] — The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
   · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · build_xdotool_steps(commands, *, esc_first) -> list[list[str]] — The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
+  · run_chained_inject(terminal, *, first, then, gate_stamp, gate_baseline, pre_submit_first, gate_timeout_s, giveup_s, sleeper) -> tuple[bool, str] — Type `first`, wait for the session it creates to actually EXIST, then type each of
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
   · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
   · main() -> int
