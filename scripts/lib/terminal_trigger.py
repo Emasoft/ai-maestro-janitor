@@ -241,6 +241,18 @@ def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | No
             ["RUN", "tmux", "send-keys", "-t", pane, "C-k"],
             ["RUN", "tmux", "send-keys", "-t", pane, "C-u"],
         ]
+    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+        # The SAME C-a / C-k / C-u trio as tmux, as raw control characters (0x01, 0x0b, 0x15).
+        # This branch was MISSING until 2026-08-02 and its absence was silent in the worst way:
+        # `clear_fn` resolved to None on iTerm, so rule 3's "clear the field and re-inject"
+        # did nothing at all, and `inject_until_sent` would loop forever re-reading its own
+        # un-cleared text — the deadlock the clear exists to prevent, on the ONLY channel this
+        # project actually runs on. Verified live against a real pane, not from documentation.
+        return [["RUN", "osascript", "-e", _iterm_session_script(terminal["session_id"], [
+            "            write text (character id 1) without newline",
+            "            write text (character id 11) without newline",
+            "            write text (character id 21) without newline",
+        ])]]
     return None
 
 
@@ -248,6 +260,41 @@ def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | No
 # Small on purpose: a genuinely wedged pane should be reported, not polled forever — but one
 # osascript timeout must not kill a procedure that is otherwise fine.
 _MAX_TRANSIENT_UNREADABLE = 3
+
+
+def _iterm_session_script(sid: str, inner: list[str]) -> str:
+    """AppleScript that runs `inner` against ONLY the iTerm session whose id == `sid`.
+
+    Iterates windows → tabs → sessions and matches `(id of s)`. This shape is copied from
+    the PROVEN `clear_trigger._build_osascript` / `fleet_inject.iterm_osascript`, and the
+    reason is a live failure: the first version of these builders used
+    `first window whose id is "<uuid>"`, which iTerm rejects with
+
+        Can't make "ECEF0378-…" into type integer. (-1700)
+
+    because a WINDOW id is an integer while the session id is a UUID. The unit tests asserted
+    the argv STRUCTURE and passed happily; only running it against a real pane surfaced it —
+    and `_run_steps` swallows stderr (DEVNULL, check=False), so the injector looped forever
+    typing nothing, with an empty field on every read-back. One builder, one proven shape.
+    """
+    lines = [
+        'tell application "iTerm2"',
+        "  repeat with w in windows",
+        "    repeat with t in tabs of w",
+        "      repeat with s in sessions of t",
+        f'        if (id of s) is "{sid}" then',
+        "          tell s",
+    ]
+    lines += inner
+    lines += [
+        "          end tell",
+        "        end if",
+        "      end repeat",
+        "    end repeat",
+        "  end repeat",
+        "end tell",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def channel_is_readable(terminal: Mapping[str, str]) -> bool:
@@ -288,13 +335,10 @@ def build_type_only_steps(
         # containing e.g. "Enter" would be sent as the Enter KEY rather than typed.
         return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "-l", command]]
     if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
-        sid = terminal["session_id"]
-        return [[
-            "RUN", "osascript", "-e",
-            'tell application "iTerm2" to tell (first session of first tab of '
-            f'(first window whose id is "{sid}") whose id is "{sid}") to '
-            f'write text "{applescript_quote(command)}" without newline',
-        ]]
+        return [["RUN", "osascript", "-e", _iterm_session_script(
+            terminal["session_id"],
+            [f'            write text "{applescript_quote(command)}" without newline'],
+        )]]
     return None
 
 
@@ -305,15 +349,13 @@ def build_submit_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
     if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
         return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "Enter"]]
     if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
-        sid = terminal["session_id"]
-        # `character id 13` is a bare CR — `write text ""` WITH a newline would work too,
-        # but an empty write is easy to mistake for a no-op when reading this later.
-        return [[
-            "RUN", "osascript", "-e",
-            'tell application "iTerm2" to tell (first session of first tab of '
-            f'(first window whose id is "{sid}") whose id is "{sid}") to '
-            "write text (character id 13) without newline",
-        ]]
+        # `write text ""` sends the trailing newline ONLY — iTerm appends one unless
+        # `without newline` is given, so an empty write IS the Enter keypress. Uses the same
+        # verb as the typing half rather than a `character id 13` variant, so both halves
+        # succeed or fail together instead of one silently doing nothing.
+        return [["RUN", "osascript", "-e", _iterm_session_script(
+            terminal["session_id"], ['            write text ""'],
+        )]]
     return None
 
 

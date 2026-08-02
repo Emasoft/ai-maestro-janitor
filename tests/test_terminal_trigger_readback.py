@@ -736,3 +736,40 @@ def test_a_transient_unreadable_pane_RETRIES_instead_of_aborting() -> None:
         sleeper=lambda _s: None, clock=lambda: 0.0,
     )
     assert not ok2 and "not readable" in why2
+
+
+# --- iTerm: the shape AppleScript actually accepts (live-verified 2026-08-02) -----
+
+
+def test_iterm_scripts_match_the_SESSION_id_never_a_window_id() -> None:
+    """THE live failure. The first version used `first window whose id is "<uuid>"`, which
+    iTerm rejects — `Can't make "ECEF0378-…" into type integer. (-1700)` — because a WINDOW
+    id is an integer while a session id is a UUID.
+
+    It passed every unit test, because the tests asserted argv STRUCTURE and never that
+    AppleScript accepts the script. And `_run_steps` runs with check=False + stderr=DEVNULL,
+    so the injector looped forever typing NOTHING with an empty field on every read-back.
+    Pins the session-matching shape for all three builders."""
+    sid = "ECEF0378-8D5D-4834-A8A9-371F0FDB3720"
+    t = {"kind": "iterm", "session_id": sid}
+    for steps in (tt.build_type_only_steps(t, "/clear"),
+                  tt.build_submit_steps(t),
+                  tt.build_clear_field_steps(t)):
+        assert steps is not None
+        script = steps[0][-1]
+        assert f'if (id of s) is "{sid}" then' in script, "must match the SESSION id"
+        assert "whose id is" not in script, "the window-id form is what iTerm rejected"
+        assert "repeat with s in sessions of t" in script, "must iterate sessions"
+
+
+def test_iterm_clear_field_is_SUPPORTED_or_rule_3_is_a_silent_noop() -> None:
+    """`build_clear_field_steps` had NO iTerm branch, so `clear_fn` was None on the only
+    channel this project runs on — rule 3's clear-and-retry silently did nothing and the
+    loop would deadlock on its own un-cleared text."""
+    t = {"kind": "iterm", "session_id": "ECEF0378-8D5D-4834-A8A9-371F0FDB3720"}
+    steps = tt.build_clear_field_steps(t)
+    assert steps is not None, "iTerm MUST support clearing the field"
+    script = steps[0][-1]
+    for code in ("character id 1", "character id 11", "character id 21"):
+        assert code in script, f"missing {code} (C-a / C-k / C-u)"
+    assert "(character id 27)" not in script, "ESC would interrupt the turn, never use it here"
