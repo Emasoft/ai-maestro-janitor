@@ -1,9 +1,9 @@
 ---
 trdd-id: QKWU26ZG
 title: Reorder pass moves superseded atoms below the Superseded delimiter
-column: todo
+column: complete
 created: 2026-08-02T23:38:03+0200
-updated: 2026-08-02T23:38:03+0200
+updated: 2026-08-03T01:47:48+0200
 current-owner: janitor-session
 task-type: feature
 severity: low
@@ -12,14 +12,32 @@ release-via: publish
 created-by: 57WJL5L2
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [5b5816e]
 ---
 
 # The READABILITY layer of TRDD-57WJL5L2 — move superseded atoms below `## Superseded`
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-03
 
-**Not started.** Split out of TRDD-57WJL5L2 per its own design refinement: the
+**COMPLETE — landed as commit 5b5816e.** Home decision resolved per the design notes:
+the REPAIR chore (not retro-lesson, not an 8th marker) — the defect is page SHAPE,
+repair is the lint-clearing pass, and retro-lesson's precheck only fires on
+pointer-less atoms so a CONVERTED atom above the heading would never re-trigger it.
+Shipped: the repair skill's new checklist entry + staged-edit step (create
+`## Superseded` before Notes when missing; move superseded atom blocks below it
+VERBATIM — reorder only, lessons stay pooled, never touch a valid atom);
+`_page_needs_repair` mirrors memgrep's two WARN shapes (shared
+`_SUPERSEDED_STATUS_RE`); the `## Superseded` convention documented on
+wikimem-model.md beside the superseded-memory invariant. 128 precheck/maintenance +
+88 skill-shape tests green. First REAL reorder run is observation-gated on a corpus
+candidate appearing (none exists today). Ships via the blocked release train
+(TRDD-AWXK0RFT).
+
+**SUPERSEDED — do NOT carry forward:** "Not started."
+
+---
+
+Split out of TRDD-57WJL5L2 per its own design refinement: the
 CORRECTNESS layer shipped there (status-keyed default-exclude + `--include-superseded`
 + the two lint WARNs, commit cceb229) and is complete without this; the delimiter +
 reorder are the READABILITY layer (humans see current facts first). The lint WARNs
