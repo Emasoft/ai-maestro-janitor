@@ -1,9 +1,9 @@
 ---
 trdd-id: VJCMZ2OP
 title: memgrep migrate — move an atom and all its baggage between wikimem pages
-column: testing
+column: complete
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-02T16:35:00+0200
+updated: 2026-08-02T18:42:56+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
@@ -69,10 +69,29 @@ ref resolved — so footnote-integrity correctly passed, and the props parser th
 ownership. The guard is doing what it says; the gap is that ATOM-PROPS well-formedness is not
 part of what it says.
 
-**NEXT ACTION:** make the pre-flight also refuse a source/dest whose ATOM PROPS do not parse
-(reuse `memgrep lint`'s `atom-no-keywords`/props check, not full lint — full lint would block a
-migrate on an unrelated one-sided link, which the design deliberately allows). Then re-run
-bullet 3. Bullets 4 (mid-transaction abort) and 5 (`cargo test`) remain unexercised.
+### ✅ 2026-08-02 18:42 — CLOSED: props pre-flight shipped; bullets 3, 4, 5 all exercised
+
+**The fix:** `atom_props_violations(text)` (memory.rs, beside `migrate_compute`) — refuses any
+atom whose props DROP segments or parse to no `keywords:`; exactly the lint props check, NOT
+full lint (a one-sided link still migrates, by design). Wired into the pre-flight for BOTH
+pages, contract 4b.
+
+**Bullet 3 re-run through the INSTALLED binary** (cli-verify-on-path): the malformed
+space-separated source → `Error: --from page has malformed ATOM PROPS … nothing written`,
+exit 1, **both pages byte-unchanged** (cmp). Same corpus with the props corrected → migrates
+clean (shared lesson copied, exit 0).
+
+**Bullet 4 exercised, and it found a SECOND real defect:** simulating the crash-between-writes
+state (dest written, source not) proved the duplicate is recoverable — atom + lesson on both
+pages, each page independently footnote-clean — but the OBVIOUS recovery move, re-running the
+migrate, inserted a SECOND copy on dest (measured: `^foo` twice). New pre-flight guard: an
+atom already present on `--to` is refused with a message naming the crashed-state recovery
+(delete one copy by hand). The bullet-4 test asserts the refusal.
+
+**Bullet 5:** `cargo test` — 137 + 127 across both targets, 0 failed; clippy quiet.
+
+No remaining work. (The two guards are the whole delta; the happy-path behavior verified on
+2026-08-02 morning is unchanged, re-confirmed via the installed binary.)
 
 **⚠️ I first reported this as "migrate silently corrupts data" — that was WRONG and I retract
 it.** The corruption is real but it is *caused by* malformed INPUT, not by migrate mishandling

@@ -27,6 +27,17 @@ def det(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     (tmp_path / "proj").mkdir()
+    # state.project_root() is lru_cached MODULE-WIDE (its docstring says tests rely on
+    # cache_clear) — in production every detector is a fresh subprocess, but in-process
+    # imports here inherit whatever root a PRIOR test resolved, and the detector's
+    # self-exclusion then filters the WRONG project (the full-suite-only failure this
+    # comment is the autopsy of).
+    import state as state_mod
+
+    state_mod.project_root.cache_clear()
+    state_mod.janitor_root.cache_clear()
+    state_mod.state_dir.cache_clear()
+    state_mod.log_dir.cache_clear()
     spec = importlib.util.spec_from_file_location(
         "peer_freeze_recovery",
         _PROJECT_ROOT / "scripts" / "detectors" / "peer-freeze-recovery.py",
@@ -34,9 +45,12 @@ def det(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
-    # Fresh state module caches (project_root is env-derived per call in state.py, but
-    # global_state resolves dirs at call time — nothing to reset beyond env).
-    return mod
+    yield mod
+    # Leave no poisoned cache for the NEXT file either — symmetric hygiene.
+    state_mod.project_root.cache_clear()
+    state_mod.janitor_root.cache_clear()
+    state_mod.state_dir.cache_clear()
+    state_mod.log_dir.cache_clear()
 
 
 def _arm_dark_window(det, monkeypatch: pytest.MonkeyPatch) -> None:

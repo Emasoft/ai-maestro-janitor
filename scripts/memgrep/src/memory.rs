@@ -2846,6 +2846,36 @@ struct MigrateResult {
 /// The PURE core of `migrate` (no IO / no reindex) — computes both rewritten page texts or fails.
 /// See `cmd_migrate_cli` for the contract. Split out so the whole move logic is unit-testable on
 /// in-memory strings without touching the filesystem or the SQLite index.
+/// Pre-flight guard for `migrate` (TRDD-VJCMZ2OP bullet 3): every atom's PROPS on the page must be
+/// WELL-FORMED — no parser-dropped segments (the space-separated `[id:X status:y keywords:z]` form
+/// collapses into one bogus `id:` value) and a non-empty `keywords:`. NOT full lint, deliberately:
+/// full lint would refuse a migrate over an unrelated one-sided link, which the design allows. This
+/// exists because footnote-integrity alone PASSED on such a page (every ref resolved) while the
+/// mis-parsed props made ownership attribution wrong, and the migrate then wrote a dest citing the
+/// same footnote twice — corruption caused by input no write-verb produces, but corruption the tool
+/// must REFUSE rather than propagate.
+fn atom_props_violations(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in atoms_for_lint(text) {
+        let dropped = dropped_prop_segments(&a.props_raw);
+        if !dropped.is_empty() {
+            out.push(format!(
+                "atom `^{}` (line {}): {} props segment(s) would be DISCARDED by the parser — \
+                 a comma separates FIELDS; join key-phrases with `_`",
+                a.id,
+                a.line,
+                dropped.len()
+            ));
+            continue; // the keywords check below would be a misleading duplicate on this atom
+        }
+        let props = parse_block_props(&a.props_raw);
+        if props.get("keywords").map(|v| v.is_empty()).unwrap_or(true) {
+            out.push(format!("atom `^{}` (line {}): no parseable `keywords:`", a.id, a.line));
+        }
+    }
+    out
+}
+
 fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<MigrateResult> {
     // Pre-flight (contract 4): BOTH pages must be footnote-clean, or the renumber arithmetic is unsafe.
     for (label, text) in [("--from", from_text), ("--to", to_text)] {
@@ -2857,6 +2887,16 @@ fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<Migrate
                 v.join("; ")
             );
         }
+        // Contract 4b (bullet 3): atom props must PARSE, or ownership attribution is built on a
+        // mis-read and the footnote arithmetic silently goes wrong even though every ref resolves.
+        let v = atom_props_violations(text);
+        if !v.is_empty() {
+            anyhow::bail!(
+                "{label} page has malformed ATOM PROPS — run `memgrep lint` + repair it FIRST \
+                 (a mis-parsed props block mis-attributes footnote ownership; nothing written): {}",
+                v.join("; ")
+            );
+        }
     }
 
     // Locate the migrating atom on --from and lift its whole segment.
@@ -2864,6 +2904,19 @@ fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<Migrate
     let matcher = |id: &str| atom_id_matches(id, &query);
     let (marker_idx, _body_last) = locate_atom_body_matching(from_text, &matcher)
         .ok_or_else(|| anyhow::anyhow!("no atom answering `{atom}` on the --from page"))?;
+
+    // Refuse when the atom ALREADY exists on --to. Without this, re-running a migrate over the
+    // crashed-between-writes state (dest written, source not — contract 5's deliberate duplicate)
+    // would insert a SECOND copy on dest: the "recoverable duplicate" becomes an unrecoverable
+    // mess precisely when someone follows the obvious recovery move. Found by the bullet-4 test,
+    // not by inspection — the re-run produced `^foo` twice on dest before this guard.
+    if locate_atom_body_matching(to_text, &matcher).is_some() {
+        anyhow::bail!(
+            "atom `{atom}` already exists on the --to page — if this is the aftermath of an \
+             interrupted migrate (dest written, source not), delete ONE copy by hand instead of \
+             re-running; nothing written"
+        );
+    }
     let from_lines: Vec<&str> = from_text.lines().collect();
     let seg_end = atom_segment_end(&from_lines, marker_idx);
     let atom_block = from_lines[marker_idx..seg_end].join("\n");
@@ -7123,6 +7176,75 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             err.to_string().contains("footnote-integrity"),
             "malformed source must be refused pre-flight: {err}"
+        );
+    }
+
+    #[test]
+    fn migrate_refuses_malformed_atom_props_on_source() {
+        // Bullet 3 (TRDD-VJCMZ2OP): SPACE-separated props parse into one bogus `id:` value, so
+        // footnote ownership is attributed off a mis-read — every ref RESOLVES (footnote-integrity
+        // passes) yet the built dest cited the same footnote twice. Measured live 2026-08-02 before
+        // this guard: exit 0, "1 moved, 0 shared", dest body `fact.[^2][^2]`. The only safe answer
+        // to input no write-verb produces is REFUSAL with nothing written.
+        let from = page(
+            "from",
+            "^mover [id:mover status:active keywords:k]\nThe moving fact.[^1]\n\n\
+             ^stayer [keywords: k]\nstays.[^1]\n\n## Notes and lessons learned\n[^1]: shared lesson.\n",
+        );
+        let to = page("to", "body.\n\n## Notes and lessons learned\n");
+        let err = migrate_compute(&from, &to, "mover").unwrap_err();
+        assert!(
+            err.to_string().contains("ATOM PROPS"),
+            "space-separated props must be refused pre-flight, not mis-migrated: {err}"
+        );
+    }
+
+    #[test]
+    fn migrate_refuses_malformed_atom_props_on_dest_too() {
+        // The dest side attributes ownership for the COLLISION/renumber arithmetic — a mis-parsed
+        // dest is the same hazard from the other end.
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n",
+        );
+        let to = page(
+            "to",
+            "^resident [id:resident keywords_missing]\nresident fact.\n\n## Notes and lessons learned\n",
+        );
+        let err = migrate_compute(&from, &to, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("ATOM PROPS"),
+            "a props-broken dest must be refused pre-flight: {err}"
+        );
+    }
+
+    #[test]
+    fn migrate_crash_between_writes_leaves_a_recoverable_duplicate_never_a_loss() {
+        // Bullet 4 (contract 5): B is written BEFORE A. Simulate the crash window by applying ONLY
+        // the dest write and leaving the source untouched — the on-disk state a kill between the two
+        // atomic writes produces. The claim to prove is RECOVERABLE DUPLICATE, never loss: the atom +
+        // its lesson exist on BOTH pages, and EACH page is independently footnote-clean, so a repair
+        // (delete either copy) needs no arithmetic. A loss (atom on neither page, or a dangling ref)
+        // would fail these asserts.
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n",
+        );
+        let to = page("to", "body.\n\n## Notes and lessons learned\n");
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        let crashed_dest = r.dest_text; // landed
+        let crashed_source = from; // the second write never happened
+        assert!(crashed_dest.contains("^foo") && crashed_dest.contains("foo lesson."));
+        assert!(crashed_source.contains("^foo") && crashed_source.contains("foo lesson."));
+        assert!(footnote_integrity_violations(&crashed_dest).is_empty(), "dest clean on its own");
+        assert!(footnote_integrity_violations(&crashed_source).is_empty(), "source clean on its own");
+        // And the OBVIOUS recovery move — just re-run the migrate — must be REFUSED, because the
+        // atom already sits on dest and a second insert would double it. (Measured before the
+        // already-on-dest guard existed: the re-run happily produced `^foo` twice on dest.)
+        let err = migrate_compute(&crashed_source, &crashed_dest, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("already exists on the --to page"),
+            "a re-run over the crashed state must be refused, not duplicated: {err}"
         );
     }
 
