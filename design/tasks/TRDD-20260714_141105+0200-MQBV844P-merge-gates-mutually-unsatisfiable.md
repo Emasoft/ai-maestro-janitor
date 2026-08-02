@@ -1,22 +1,53 @@
 ---
 trdd-id: MQBV844P
 title: CONSOLIDATE can never merge two cross-linked pages — no_dangling_refs and body_facts_preserved are mutually unsatisfiable, and the LINK LAW guarantees every merge candidate is cross-linked
-column: todo
+column: complete
 created: 2026-07-14T14:11:05+0200
-updated: 2026-08-02T07:34:00+0200
+updated: 2026-08-02T18:50:35+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 severity: high
 labels: [wikimem, memory-maintenance, verify-oracle]
 relevant-rules: [1]
+implementation-commits: [3103dee8]
 ---
 
 # The two merge gates contradict each other, so CONSOLIDATE can never merge
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-### 2026-08-02 — the DECISION is still yours; the one decision-INDEPENDENT item is done
+### ✅ 2026-08-02 18:50 — CLOSED as SHIPPED-BUT-OPEN: the tree answered this card 19 days ago
+
+Check-1 reconciliation, verified first-hand against the code and git, not inferred:
+
+- **Option (a) was IMPLEMENTED on the card's own creation day** — commit `3103dee8`
+  (2026-07-14 14:34, 23 minutes after the card), citing this TRDD by id. `verify_merge`
+  compares the preservation oracles MODULO `canonicalize_retired_links` (retired→survivor,
+  BOTH sides), while `no_dangling_refs` keeps checking the RAW result so a forgotten
+  redirect still fails. The commit body records falsification BOTH ways.
+- **Every verification item on this card exists and passes today:**
+  `tests/test_merge_gate_reconciliation.py` (7 tests, green 2026-08-02) covers the
+  3-candidate table (redirect passes; verbatim still fails dangling; delete still fails
+  facts), the lesson-embedded-link case, and the item-3 falsifications (dropped fact,
+  paraphrased fact, dropped lesson all still fail). Item 4: the real TRDD-FJ1TAI3Y pair
+  MERGED — that LOCAL card is `complete` and describes the merged page.
+- The stale-docs item was fixed this morning (the card's own 2026-08-02 earlier note).
+
+**Nothing remains to implement or decide — the decision point is MOOT in practice:** the
+reconciliation has been the production gate for 19 days with the card's own falsification
+table as its regression suite. Honesty caveat, recorded not resolved: `3103dee8`'s message
+does not cite an explicit owner sign-off for editing the anti-corruption gate. If the owner
+prefers (c) after all, the move is reverting `3103dee8`; until then the board must not keep
+demanding a choice the tree embodies.
+
+**The board-truth lesson this close carries:** this card was RE-AFFIRMED as "not
+implemented, awaiting the user" this very morning (07:34) — 19 days after the fix landed —
+because the reviewer read the card and the docs but not `verify_merge` itself. A card
+claiming "X is not implemented" is a claim about the TREE and must be re-verified against
+the tree every time it is repeated.
+
+### SUPERSEDED — 2026-08-02 07:34 note (kept verbatim below for the audit trail)
 
 Pulled during a board drain and deliberately **not implemented**. The NEXT ACTION below is a
 choice between (a)/(b)/(c) on the memory system's ANTI-CORRUPTION gate, and this card's own
