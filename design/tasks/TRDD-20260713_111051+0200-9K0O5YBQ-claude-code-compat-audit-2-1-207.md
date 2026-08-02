@@ -1,9 +1,10 @@
 ---
 trdd-id: 9K0O5YBQ
 title: Claude Code compatibility audit at v2.1.207 — the janitor uses 10 of 31 hook events and 1 of 5 handler types
-column: todo
+column: complete
+eht: [TL6NL7MK, MN7ZU3RY, LI7ENU2A]
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T11:10:51+0200
+updated: 2026-08-02T07:53:00+0200
 current-owner: janitor-session
 task-type: audit
 severity: MEDIUM
@@ -90,12 +91,35 @@ Channels looked like the sanctioned replacement for `fleet_inject`'s keystroke i
 messaging system, that never fails."** The fleet-injection replacement path is **AMP**, not
 channels. Do not re-open without new user direction.
 
-## NEXT ACTION
+## NEXT ACTION — DONE 2026-08-02: the three NPTs are filed; this audit is CLOSED
 
-Nothing is shipped by this TRDD — it is the audit record. Spawn NPTs for the items worth
-doing, in this order:
-1. `SessionEnd` teardown hook (we have none).
-2. `ConfigChange` / `FileChanged` to retire the polling scope-drift detectors.
-3. Reconcile the jitter claim in TRDD-0QQX9H0G's docs.
+~~Nothing is shipped by this TRDD — it is the audit record. Spawn NPTs for the items worth
+doing, in this order:~~
+1. `SessionEnd` teardown hook (we have none). → **TRDD-TL6NL7MK**
+2. `ConfigChange` / `FileChanged` to retire the polling scope-drift detectors. → **TRDD-MN7ZU3RY**
+3. Reconcile the jitter claim in TRDD-0QQX9H0G's docs. → **TRDD-LI7ENU2A**
+
 Do NOT adopt any new `additionalContext`-emitting hook until TRDD-K1RJUYGK's injection-budget
-discipline is applied to it.
+discipline is applied to it. **That constraint is carried on all three cards**, so it survives
+this one being archived.
+
+### Why the audit closes here
+
+It says of itself that it ships nothing — it is evidence, and rule 11 is explicit that a report
+presents DATA while the DECISIONS it leads to become TRDDs. All three decisions are now cards on
+the board, so the audit has nothing left to hold. It sat in `todo` for 20 days looking like
+unstarted work, when what it actually needed was a 15-minute filing pass.
+
+Two things were carried into the children rather than left here, because a bullet inside an
+archived audit is invisible (rule 9 — derived tasks are depth-1 cards):
+
+- **The scope-drift replacement is a LATENCY win, not a replacement.** A hook fires for the LIVE
+  session only, while the detectors are the only thing that inspects a project nobody is sitting
+  in. Deleting the poll would blind every other project — so MN7ZU3RY specifies event-driven fast
+  path **plus** poll as backstop.
+- **The jitter correction cannot go where the audit pointed.** TRDD-0QQX9H0G is `published`, and
+  rule 12 freezes a terminal card's body. LI7ENU2A routes it to the living surfaces instead
+  (`CLAUDE.md`, `heartbeat_cadence.py`) and records that the two sources for the jitter figure
+  CONTRADICT each other, so neither is adopted by default.
+
+`release-via:` is absent ⇒ `complete` is the terminal column (rule 12).
