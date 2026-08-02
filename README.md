@@ -526,17 +526,30 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
 - `/janitor-credential-window-audit` — scans the repo, shell-env variable
   *names*, and CI config for the window during which credentials are live
   and reachable; reports findings without ever echoing secret values.
-- `/janitor-github-issues-monitor-on` ↔ `/janitor-github-issues-monitor-off`
-  — notifies you when someone **replies** to a thread THIS project's Claude
-  opened, on **any** repo. The filter is a per-project **registry** of what
-  this project opened, not GitHub's `reason` field: on a shared `gh` identity
-  the owner's own open-source traffic carries the same `reason: author`
-  (measured, 5 of 6 emitted threads were the owner's). A plugin
-  `PostToolUse(Bash)` hook fills the registry from the URLs that GitHub-
-  *creating* commands print; reading commands never register.
-  **Not the same as `/janitor-issues-watch-on`**, which reports NEW issues on
-  *this project's own repo* through the heartbeat — different question,
-  different mechanism, no shared state.
+### GitHub notifications — always on, nothing to enable
+
+Two chores the janitor runs on every heartbeat, in every project, with no
+setup. They answer different questions and share no state:
+
+- **New issues and comments on this project's own repo.** Reports each new
+  issue and each new comment on your tracker.
+- **Replies to threads this project's Claude opened, on any repo.** The
+  filter is a per-project **registry** of what this project opened, not
+  GitHub's `reason` field: on a shared `gh` identity your own open-source
+  traffic carries the same `reason: author` (measured, 5 of 6 emitted threads
+  were the owner's). A plugin `PostToolUse(Bash)` hook fills the registry from
+  the URLs that GitHub-*creating* commands print; reading commands never
+  register. Tracking data is stored **in the project**, at
+  `.janitor/gh-issues-monitor/` (gitignored).
+
+**The first fire in a project is silent.** Each chore adopts what is already
+there as its baseline and reports from the next fire on, so switching them on
+for everyone never dumps an existing backlog into your session — on this repo
+that would have been 43 issues.
+
+Both skip silently when the project has no GitHub remote, or `gh` is missing,
+unauthenticated, or rate-limited. Turn either off with
+`issues_watch_enabled` / `gh_reply_watch_enabled` in your user config.
 
 ### Control commands
 

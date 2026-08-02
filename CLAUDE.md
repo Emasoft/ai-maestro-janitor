@@ -202,7 +202,7 @@ clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writ
 run by `dispatch.py`; emits drift lines; slow ones use a PID-tracked detached-worker
 that skips if the prior worker is alive; per-detector cadence + seen-file dedupe.
 **Project-scoped — never touch user-scope.** Groups:
-- *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), github-issues-watch (TRDD-2KQQAEPP — **OFF by default**, one stat of `.janitor/state/issues-watch.flag`; when ON, notifies main Claude of each NEW issue or NEW comment on the project's GitHub tracker and keeps reporting until disabled. Seen-map `{number: updatedAt}` is the dedupe — GitHub bumps `updatedAt` on a comment, so one field catches both; `/janitor-issues-watch-on` seeds a baseline from the currently-open issues so enabling never dumps the backlog into context; issue titles are attacker-controlled and go through `sanitize_for_drift_line`; fail-open on missing/unauthed `gh`), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
+- *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), github-issues-watch (TRDD-2KQQAEPP — **ALWAYS ON** since the 2026-08-02 owner directive; notifies main Claude of each NEW issue or NEW comment on the project's own GitHub tracker. Seen-map `{number: updatedAt}` in `.janitor/state/` is the dedupe — GitHub bumps `updatedAt` on a comment, so one field catches both. **The FIRST fire on a project is silent**: a MISSING seen-map means "adopt the current open set as the baseline, say nothing" — the anti-flood guard that replaced the retired `/janitor-issues-watch-on`'s seed-then-arm ordering, worth 43 suppressed lines on this repo alone. Keyed on `exists()`, never the parsed map, because `_read_seen` fails open to `{}` for a CORRUPT file too and there re-reporting is the safe direction. Issue titles are attacker-controlled and go through `sanitize_for_drift_line`; fail-open on missing/unauthed `gh`; opt-out `CLAUDE_PLUGIN_OPTION_ISSUES_WATCH_ENABLED`), gh-reply-watch (**ALWAYS ON**, same directive — REPLIES to threads THIS project opened, on ANY repo; the cron-driven replacement for the session Monitor, see GH-REPLY MONITOR below), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
 - *TRDD/task:* trdd-drift, trdd-reminder.
 - *cleanup:* screenshot-purge, trashcan-purge, reports-purge (S8 TRDD-LCO8229M — 30d age retention for `reports/**` excluding the screenshot-purge-owned `screenshots/` subtree, `CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS`; + `.janitor/state/*seen*` line-cap to the newest `CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES`=500, so dedupe horizons stop growing unbounded).
 - *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; on a local alarm it ENRICHES (never suppresses) the line with agentlensPro's `get_burn_status` burn-rate + `investigate_burn` cause via the shared `agentlens_probe` lib (config-gated `heartbeat_burn_status_command`/`heartbeat_investigate_burn_command`, fail-open — TRDD-HL8H3XCV); default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; **TOKEN-QUIETNESS (v0.51.0, ARCHITECTURE.md §3):** the alarm surfaces ONLY in the CULPRIT project's own sessions (`_own_project_trip`: fleet attribution slug == this project's slug; unattributable trips silent everywhere, suppression logged) and a surfaced alarm is indexed in the project's findings ledger (`WINDOW-BURN`); enrichment PREFERS agentlensPro's `investigate_burn` OTEL cause (config-gated, fail-open, `agentlens_probe` — TRDD-90B47EM9), else the native attribution via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; the machine-wide view lives behind `/janitor-token-attribution` + `token_report --live`).
@@ -274,26 +274,51 @@ Plus `scripts/gh_issues_monitor/gh_register_hook.py` (PostToolUse `Bash`) — se
 GH-REPLY MONITOR below; it lives outside `scripts/hooks/` because it belongs to that
 subsystem, not to the heartbeat.
 
-**GH-REPLY MONITOR (`skills/janitor-github-issues-monitor-{on,off}` +
-`scripts/gh_issues_monitor/`)** — ported from the standalone `github-issues-monitor-*`
-user skills. Notifies when someone REPLIES to a thread THIS project opened, on ANY repo,
-via a persistent `Monitor` running `gh_notify_poll.py` every 120 s (GitHub's
-`X-Poll-Interval: 60` is the floor). **Distinct from the `github-issues-watch` DETECTOR
-above**, which reports NEW issues on this project's OWN repo via the heartbeat — different
-question, different mechanism, no shared state. The filter is a **registry intersection**,
-not a `reason` filter: on a shared `gh` identity the owner's personal open-source traffic
-carries the same `reason: author` (measured 5-of-6 emitted threads), so a thread is watched
-only because this project OPENED it. `gh_register_hook.py` fills that registry from
-GH-**creating** commands' printed URLs (`gh issue create`, `pr create|comment|review`,
-`api -X POST …/comments` — never `list`/`view`, which would watch everything merely READ).
-It ships as a PLUGIN hook, NOT installed into `~/.claude/settings.json` as the standalone
-skill did: that baked an ABSOLUTE path to the script, which inside a plugin is the
-EPHEMERAL versioned cache dir → the hook dies silently at the next update when the version
-dir is GC'd. It also drops the vendored 621-line transactional settings editor. State
-(`registry.json` = a RECORD OF WORK, `state.json` cursor) lives in
-`<DATA>/gh-issues-monitor/<project-slug>/` — DATA, not `.janitor/state/`, which is
-documented as regeneratable; the standalone skill's `~/.claude/state/github-issues-monitor/`
-is COPIED across on first use (copy, never move: a rollback must still find it).
+**GH-REPLY MONITOR (`scripts/detectors/gh-reply-watch.py` + `scripts/gh_issues_monitor/`)**
+— notifies when someone REPLIES to a thread THIS project opened, on ANY repo.
+**Distinct from the `github-issues-watch` DETECTOR above**, which reports NEW issues on this
+project's OWN repo — different question, different mechanism, no shared state.
+
+**ALWAYS ON and CRON-DRIVEN since the 2026-08-02 owner directive** ("must be a chore executed
+always by the janitor. no need to enable it. […] integrate it better in the chron. ensure it
+works both inside ai-maestro harness and outside"). It was a persistent `Monitor` looping
+`gh_notify_poll.py` every 120 s, started ONLY by step 3 of the now-retired
+`/janitor-github-issues-monitor-on` — so it died on every restart and compaction, and a hook
+could not revive it because **a hook cannot call the `Monitor` tool**. The fix was available
+all along: `do_poll` was ALREADY a one-shot (poll, print, write cursor, exit) and the Monitor
+only wrapped it in `while true; sleep 120`. As a detector the heartbeat supplies the schedule,
+nothing can forget to arm it, and it runs in BOTH backends — `_NON_HARNESS_DETECTORS` is a
+deny-list and neither GitHub chore is on it. Cadence 900 s, far above GitHub's
+`X-Poll-Interval: 60` floor. **First fire is silent** (`--baseline`), else the first poll
+replays every already-read registered thread as a fresh reply.
+
+**Every forwarded line is `sanitize_for_drift_line`d.** The poller interpolates
+attacker-controlled text (issue TITLE, comment BODY) and its `squeeze()` only collapses
+whitespace and truncates — harmless while the output went to Monitor notifications a human
+reads, NOT harmless as heartbeat drift the model acts on, where a bare `[janitor-…]` line is
+an instruction. Without it, "anyone can open an issue" reaches "the janitor stops".
+
+The filter is a **registry intersection**, not a `reason` filter: on a shared `gh` identity the
+owner's personal open-source traffic carries the same `reason: author` (measured 5-of-6
+emitted threads), so a thread is watched only because this project OPENED it.
+`gh_register_hook.py` fills that registry from GH-**creating** commands' printed URLs
+(`gh issue create`, `pr create|comment|review`, `api -X POST …/comments` — never
+`list`/`view`, which would watch everything merely READ). It ships as a PLUGIN hook, NOT
+installed into `~/.claude/settings.json` as the standalone skill did: that baked an ABSOLUTE
+path to the script, which inside a plugin is the EPHEMERAL versioned cache dir → the hook dies
+silently at the next update when the version dir is GC'd.
+
+State (`registry.json` = a RECORD OF WORK, `state.json` cursor) lives **in the project** at
+`.janitor/gh-issues-monitor/` (owner directive, same night: "store the tracking data
+locally"). Slug-keyed subdirs of the global DATA dir gave per-project SEPARATION but not
+LOCALITY — keyed by absolute path, so moving a checkout orphaned its registry, and one store
+held every project's record of work. Deliberately NOT `.janitor/state/`, advertised as
+regeneratable and safe to delete: the registry is filled by the hook as `gh` commands happen,
+so a lost one cannot be rebuilt, only re-accumulated. Both older locations
+(`<DATA>/gh-issues-monitor/<slug>/`, then the pre-port
+`~/.claude/state/github-issues-monitor/<slug>/`) are migrated newest-first, **copy never
+move** — a rollback must still find its registry. Gitignored via `.gitignore`'s `.janitor/`.
+The poller is NOT `chmod +x`; run it as `uv run --script`, never by path.
 
 **USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
 `scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
@@ -353,8 +378,10 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
-`janitor-github-issues-monitor-on` ↔ `-off` (the GH-REPLY MONITOR above — replies to
-threads THIS project opened, anywhere; not the same as `janitor-issues-watch-on`),
+`janitor-github-issues-monitor-on` ↔ `-off` and `janitor-issues-watch-on` ↔ `-off` (all four
+now VESTIGIAL — both features are always-on chores as of 2026-08-02; the `-on` pair only
+re-baselines, and whether the `-off` pair should exist at all is an open owner decision,
+since a per-feature silent disable is the shape the 2026-07-31 directive removed),
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
 `scripts/compact_trigger.py`; SOFT/enqueue by default since TRDD-0GPQROC1 — `/compact`
 runs when the turn ends; `--hard` = ESC-interrupt for emergencies (the ≥85% enforcement
