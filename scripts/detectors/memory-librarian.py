@@ -168,7 +168,14 @@ _APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
 # component whose body shows a doc EXAMPLE containing `## Applies to` must not
 # be flagged as radiating; found by simulation S10b). memgrep's own link parser
 # is already fence-aware; this brings the line-wise shape scan to parity.
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# A fence DELIMITER line only — the opener/closer of a fenced block. The negative
+# lookaheads are load-bearing (issue #178): a PROSE line that merely BEGINS with an
+# inline code span ('```fence``` or `inline code` is inert…') used to match, flip the
+# strip-toggle IN with its closer on the SAME line, and silently swallow the rest of
+# the body — including the `## Notes and lessons learned` heading, reported "missing"
+# forever on a page that has it. A real delimiter (``` or ```lang / ~~~) never carries
+# a second marker later on its own line, so requiring that distinguishes the two.
+_FENCE_RE = re.compile(r"^\s*(?:```(?!.*```)|~~~(?!.*~~~))")
 # Any ATX heading, with its level — used to find where the lessons section ENDS
 # so a `[^N]:` definition can be located relative to it (issue #115 FP 1).
 _HEADING_RE = re.compile(r"^\s*(?P<hashes>#{1,6})\s+\S")

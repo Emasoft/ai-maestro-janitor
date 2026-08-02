@@ -1448,3 +1448,15 @@ def test_verify_repair_refuses_desc_less_atom_and_passes_backfilled():
     )
     ok2, reasons2 = v.verify_repair(src, meta, fixed, v.parse_frontmatter(fixed))
     assert ok2, reasons2
+
+
+def test_atom_desc_violations_not_blinded_by_inline_code_span_line():
+    """Issue #178's defect class in THIS scanner: a prose line starting with an inline
+    triple-backtick span must not open a phantom fenced block — the desc-less atom
+    after it must still be flagged."""
+    a = _note(body=(
+        "```fence``` or `inline code` is inert, one in prose is live.\n"
+        "^AFTR0001 [keywords: some_fact, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+        "fact after the span line.\n"
+    ))
+    assert any("AFTR0001" in x for x in v.atom_desc_violations(a))

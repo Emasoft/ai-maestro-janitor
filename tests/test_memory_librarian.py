@@ -1631,3 +1631,29 @@ class TestContradictionSignalAnchoring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_scan_page_shape_inline_code_span_does_not_swallow_the_body():
+    """Issue #178: a PROSE line that merely BEGINS with an inline triple-backtick span
+    ('```fence``` or `inline` …') used to flip the fence-strip toggle IN — its closer
+    is on the SAME line — and everything after it (including the Notes heading) was
+    stripped, so the section was reported missing forever on a page that has it."""
+    text = (
+        "---\nname: t\ndescription: d\n---\n"
+        "```fence``` or `inline code` is inert, one in prose is live.\n"
+        "more body\n\n"
+        "## Notes and lessons learned\n"
+    )
+    findings = librarian._scan_page_shape("t.md", text)
+    assert not any("Notes and lessons" in f for f in findings), findings
+
+
+def test_scan_page_shape_real_fence_still_strips_its_content():
+    """The complement: a heading INSIDE a genuine fenced example must still not
+    satisfy the check (the S10b behavior the fix must not weaken)."""
+    text = (
+        "---\nname: t\ndescription: d\n---\n"
+        "body\n```\n## Notes and lessons learned\n```\n"
+    )
+    findings = librarian._scan_page_shape("t.md", text)
+    assert any("Notes and lessons" in f for f in findings)

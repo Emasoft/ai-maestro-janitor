@@ -1200,7 +1200,11 @@ _ATOM_DESC_UNQUOTED_RE = re.compile(r"(?:^|[\[,])\s*desc\s*:\s*([^,\]]*)")
 _ATOM_DESC_MAX = 200
 # Fenced code can carry marker-SHAPED example lines (janitor#152's lesson from the other
 # direction); strip fences before scanning so an example can never flag a violation.
-_FENCED_BLOCK_RE = re.compile(r"(?ms)^\s*```.*?^\s*```\s*?$")
+# The opener line must contain NO second ``` (issue #178's defect class): a prose line
+# starting with an INLINE span ('```x``` or …') would otherwise open a phantom block
+# that swallows real atoms up to the next genuine fence — violations silently missed.
+# `[^\n]` (not `.`) bounds the guard to the opener's own line despite the s-flag.
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^\s*```(?:(?!```)[^\n])*\n.*?^\s*```\s*?$")
 
 
 def atom_desc_violations(text: str) -> list[str]:
