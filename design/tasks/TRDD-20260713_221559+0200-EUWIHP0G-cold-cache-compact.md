@@ -3,7 +3,7 @@ trdd-id: EUWIHP0G
 title: Auto-compact a large context on resume after a cold-cache gap or login to save the 5h window
 column: ai_review
 created: 2026-07-13T22:15:59+0200
-updated: 2026-08-02T13:05:35+0200
+updated: 2026-08-02T18:30:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: high
@@ -102,6 +102,16 @@ previously exercised the real resolution.
 
 **NEXT ACTION:** none blocking. The card's original acceptance criterion is retired; the mechanism
 is verified at the real threshold.
+
+**2026-08-02 18:30 — AI REVIEW PASSED (first-hand spot-check, not a re-derivation).** Verified the
+claimed artifacts exist and the pinned contract holds: `scripts/lib/cold_cache_compact.py`,
+`tests/test_cold_cache_compact.py`, and `tests/test_cold_compact_threshold_contract.py` all
+present; the 8 threshold-contract tests pass fresh (incl. the 270k-must-NOT-fire tripwire). The
+review found nothing to change: the falsification evidence, the real-pane injection counts, and
+the honest NOT-claimable list are exactly what a reviewer would demand. The card stays in
+`ai_review` only because its remaining gate is a REAL cold-cache resume at the harness-relative
+threshold (~716k here) — an observation, not a review artifact; same open-wait shape as its
+parent HI0BGQGJ.
 
 **2026-08-02 — prose/frontmatter mismatch corrected.** This line used to end "Ready for
 `testing → ai_review` on the owner's call" while `column:` already read `ai_review` — the move had
