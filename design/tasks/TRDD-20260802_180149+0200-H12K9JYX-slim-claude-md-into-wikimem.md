@@ -1,27 +1,37 @@
 ---
 trdd-id: H12K9JYX
 title: Janitor-managed CLAUDE.md becomes a slim index over the wikimem
-column: dev
+column: complete
 created: 2026-08-02T18:01:49+0200
-updated: 2026-08-02T18:01:49+0200
+updated: 2026-08-02T18:34:26+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
 scope: project
 blocked-by: []
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [2544d16, 1f42f77]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Phase A (tooling) IN PROGRESS 2026-08-02.** Owner directive received verbatim this day —
-see "The contract" below; do not re-derive it.
+**COMPLETE 2026-08-02 18:34.** Both phases shipped and independently verified.
 
-**NEXT ACTION:** finish Phase A (lib + CLI + tests + skill), commit; then extend
-`project-map-drift` with the slim/index nudge (deferred until the running full suite
-finishes — editing a detector mid-suite can red not-yet-collected tests); then Phase B:
-migrate THIS repo's CLAUDE.md through the new skill and commit the result.
+- **Phase A (tooling)** — commit `2544d16`: parameterized fence surgery, index renderer,
+  slim-contract check, preservation oracle, CLI (`index`/`check`/`verify`), the
+  `janitor-claude-md-slim` skill, the `project-map-drift` slim nudge (corpus-gated). 10 new
+  tests; repomap cluster 52 green.
+- **Phase B (this repo's migration)** — commit `1f42f77` (agent-executed, then re-verified
+  FIRST-HAND by the orchestrator, not taken on report): narrative 48,165 → **1,031 bytes**
+  (12 wikimem pages: 6 new + 6 extended), `check` exit 0, map fence **byte-identical**
+  (150,823 bytes compared across `1f42f77~1..1f42f77`), and the preservation proof
+  RE-RUN from git history (`git show 1f42f77~1:CLAUDE.md` as `--old`) → "preservation
+  PROVEN — every fact line and token survives", exit 0. The slim CLAUDE.md carries exactly
+  the owner's five elements: description, urls, commands, map fence, wikimem index.
+
+**NEXT ACTION: none — card closed.** Rollout note for OTHER repos: the detector nudge only
+fires where a PROJECT wikimem corpus exists, so bootstrap-first (`/janitor-memory-bootstrap`)
+remains the entry path; the nudge names the skill.
 
 ## The contract (owner directive, 2026-08-02, verbatim scope)
 
