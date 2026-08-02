@@ -72,13 +72,16 @@ def _run(
 def test_build_osascript_targets_uuid_and_types_resume() -> None:
     """The osascript targets the specific session id and types /janitor-resume, SOFT."""
     mod = _import()
-    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
+    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
     # SOFT only: a compaction already ended the turn — NO ESC byte is ever sent.
     assert "character id 27" not in osa, "resume is SOFT-only; it must never send an ESC"
     assert '"/janitor-resume"' in osa, "must type /janitor-resume"
     assert '"/compact"' not in osa and '"/reload-plugins' not in osa, "wrong command"
-    assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
+    # The delay deliberately moved OUT of the AppleScript (TRDD-DXM75JB2): no flag
+    # re-check can run inside AppleScript, so the sleep + type-time guard live in
+    # terminal_trigger's python child now. An in-script delay would reopen the race.
+    assert "delay" not in osa, "the sleep belongs to the guarded python child, not AppleScript"
 
 
 def test_uuid_regex_accepts_real_rejects_injection() -> None:
@@ -161,3 +164,58 @@ def test_rate_limited_flag_alone_still_fires() -> None:
     )
     assert proc2.returncode == 0
     assert "DRY_RUN" in proc2.stdout and "NOTHING_PENDING" not in proc2.stdout
+
+
+# ---------- the TYPE-TIME guard (TRDD-DXM75JB2) ----------
+#
+# The fire-time NOTHING_PENDING check above runs in the PARENT; the keystrokes land
+# ~delay seconds later from a DETACHED child. A heartbeat cron fire can consume the
+# pending flag during that sleep, and before this guard the keystrokes still landed —
+# a `/janitor-resume` typed into a session that had already resumed. These tests run
+# the terminal_trigger CHILD role synchronously with the steps swapped for a marker
+# write, so "was anything typed?" becomes "does the marker exist?".
+
+
+def _run_child_payload(delay_s: float, marker: Path, guards: list[str]) -> None:
+    import importlib.util as _u2
+
+    tt_path = _PROJECT_ROOT / "scripts" / "lib" / "terminal_trigger.py"
+    spec = _u2.spec_from_file_location("tt_under_test", str(tt_path))
+    assert spec is not None and spec.loader is not None
+    tt = _u2.module_from_spec(spec)
+    spec.loader.exec_module(tt)
+    payload = tt._encode_payload(delay_s, [["RUN", "touch", str(marker)]], guards)
+    proc = subprocess.run(
+        [sys.executable, str(tt_path), "--__send", payload],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_child_aborts_when_flag_consumed_during_delay(tmp_path: Path) -> None:
+    """The race this card exists for: the flag vanishes while the child sleeps → the
+    child must type NOTHING. Non-vacuity is proven by the positive twin below plus a
+    mutation run (guard stripped → this goes red) recorded in the closing commit."""
+    flag = tmp_path / "resume-after-compact.flag"
+    marker = tmp_path / "typed.marker"
+    # The flag does not exist at child run time — the consumed-during-sleep state.
+    _run_child_payload(0.1, marker, [str(flag)])
+    assert not marker.exists(), "keystrokes landed after the pending flag was consumed"
+
+
+def test_child_types_when_flag_survives_the_delay(tmp_path: Path) -> None:
+    """The positive twin: with the flag still present after the sleep, the steps run —
+    proving the guard mechanism is live rather than short-circuiting everything."""
+    flag = tmp_path / "rate-limited.flag"
+    flag.touch()
+    marker = tmp_path / "typed.marker"
+    _run_child_payload(0.1, marker, [str(flag)])
+    assert marker.exists(), "the guard must not suppress a still-pending resume"
+
+
+def test_child_without_guard_key_keeps_legacy_behavior(tmp_path: Path) -> None:
+    """Callers that pass no guard (compact/reload/clear triggers) are byte-for-byte
+    unaffected — the key is opt-in per payload."""
+    marker = tmp_path / "typed.marker"
+    _run_child_payload(0.1, marker, [])
+    assert marker.exists()

@@ -1,9 +1,9 @@
 ---
 trdd-id: DXM75JB2
 title: The PostCompact resume push checks the pending flag at fire time, not at type time
-column: todo
+column: complete
 created: 2026-08-02T13:05:35+0200
-updated: 2026-08-02T13:05:35+0200
+updated: 2026-08-02T19:04:04+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -29,7 +29,21 @@ different cause entirely (a session blocked on `ExitPlanMode` read as dead), and
 defect is fixed (`d4498ff`). This one is a spam-reduction nicety on a narrow race — real, but
 not a correctness or safety issue. Do not let the parent card's severity carry over to it.
 
-**NEXT ACTION:** move the pending-flag check INSIDE the detached child — re-read the flags after
+### ✅ 2026-08-02T19:04:04+0200 — CLOSED: the type-time guard shipped, all three acceptance boxes checked
+
+- `terminal_trigger`'s child payload grew an OPT-IN `abort_unless_any` key: after its
+  sleep, before the first keystroke, the child aborts unless one of the guard files still
+  exists. Absent key = byte-for-byte legacy behavior (compact/reload/clear untouched, and a
+  test pins that).
+- `resume_trigger` passes both pending flags on BOTH channels. The iTerm path's delay
+  MOVED out of AppleScript (where no re-check can run) into the same guarded python child
+  (`fire_detached_argv`); the tmux/linux paths thread the guard through
+  `send_self_command`. The fire-time NOTHING_PENDING early exit is retained.
+- Tests: flag-consumed-during-delay → nothing typed; flag-survives → typed (the positive
+  twin that proves the guard is live); no-guard-key → legacy. Non-vacuity mutation-verified
+  in the closing commit: guard stripped → the race test reds. Trigger cluster 98 green.
+
+**ORIGINAL NEXT ACTION (done):** move the pending-flag check INSIDE the detached child — re-read the flags after
 the sleep, immediately before sending, and abort with the existing `NOTHING_PENDING` outcome if
 they are gone. The fire-time check stays as a cheap early exit.
 

@@ -738,10 +738,16 @@ def build_xdotool_steps(
     return steps
 
 
-def _encode_payload(delay_s: float, steps: list[list[str]]) -> str:
-    return base64.b64encode(
-        json.dumps({"delay": float(delay_s), "steps": steps}).encode("utf-8")
-    ).decode("ascii")
+def _encode_payload(
+    delay_s: float, steps: list[list[str]], abort_unless_any: list[str] | None = None
+) -> str:
+    payload: dict = {"delay": float(delay_s), "steps": steps}
+    if abort_unless_any:
+        # TYPE-TIME guard (TRDD-DXM75JB2): the CHILD re-checks these paths AFTER its
+        # sleep, immediately before the first keystroke, and aborts when none exists.
+        # Opt-in per payload — callers without the key keep today's behavior exactly.
+        payload["abort_unless_any"] = [str(p) for p in abort_unless_any]
+    return base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
 
 
 # --- the CHAINED injector child (TRDD-0BVF4K7E) ----------------------------
@@ -872,6 +878,15 @@ def _run_send_payload(payload_b64: str) -> int:
     except (ValueError, json.JSONDecodeError):
         return 2
     time.sleep(max(0.0, float(data.get("delay", 0.0))))
+    guards = data.get("abort_unless_any")
+    if isinstance(guards, list) and guards:
+        # TYPE-TIME re-check (TRDD-DXM75JB2): the fire-time check in the PARENT ran
+        # before this child's sleep; a heartbeat fire can consume the pending flag
+        # DURING that sleep, and keystrokes typed after that are queue spam into a
+        # session that already resumed. None of the guard files left ⇒ abort silently
+        # (the parent already reported FIRED — a no-op here is the desired outcome).
+        if not any(Path(str(g)).is_file() for g in guards):
+            return 0
     _run_steps(data.get("steps", []))
     return 0
 
@@ -897,16 +912,30 @@ def _run_steps(steps) -> None:
             )
 
 
-def _fire_detached_steps(delay_s: float, steps: list[list[str]]) -> None:
+def _fire_detached_steps(
+    delay_s: float, steps: list[list[str]], abort_unless_any: list[str] | None = None
+) -> None:
     """Launch a fully-detached child that sleeps then runs the steps, so the ESC it
-    sends can't kill the parent and the parent returns immediately."""
+    sends can't kill the parent and the parent returns immediately. `abort_unless_any`
+    (optional) makes the child re-check those files after its sleep and abort when none
+    remains — the type-time guard of TRDD-DXM75JB2."""
     subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
-        [sys.executable, str(Path(__file__).resolve()), "--__send", _encode_payload(delay_s, steps)],
+        [sys.executable, str(Path(__file__).resolve()), "--__send", _encode_payload(delay_s, steps, abort_unless_any)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+
+
+def fire_detached_argv(
+    delay_s: float, argv: list[str], *, abort_unless_any: list[str] | None = None
+) -> None:
+    """PUBLIC: run one fixed argv through the SAME detached delayed child as the
+    keystroke senders — sleep, optional type-time guard, then the command. Exists so a
+    sibling script (resume_trigger's iTerm-osascript path) shares this executor instead
+    of embedding its delay inside AppleScript, where no guard can run (TRDD-DXM75JB2)."""
+    _fire_detached_steps(delay_s, [["RUN", *argv]], abort_unless_any)
 
 
 # --- ai-maestro send via the SHIPPED CLI (issue #42; TRDD-db169d9e R4) ------
@@ -1107,7 +1136,7 @@ def _resolve_linux_gui_channel(env: Mapping[str, str]) -> str | None:
 
 def _try_linux_gui_send(
     commands: Sequence[str], *, delay_s: float, esc_first: bool, dry_run: bool,
-    env: Mapping[str, str],
+    env: Mapping[str, str], abort_unless_any: Sequence[str] | None = None,
 ) -> str | None:
     """Best-effort Linux GUI-terminal send via wtype/xdotool into the FOCUSED window.
     Returns a `FIRED:`/`DRY_RUN:` status on success, or None to fall through to
@@ -1122,7 +1151,11 @@ def _try_linux_gui_send(
     if dry_run:
         keys = ("ESC+" if esc_first else "") + "+".join(commands)
         return f"DRY_RUN:{channel}:focused:{keys}@{delay_s}s"
-    _fire_detached_steps(delay_s, builder(list(commands), esc_first=esc_first))
+    _fire_detached_steps(
+        delay_s,
+        builder(list(commands), esc_first=esc_first),
+        list(abort_unless_any) if abort_unless_any else None,
+    )
     return f"FIRED:{channel}"
 
 
@@ -1130,6 +1163,7 @@ def send_self_command(
     commands: str | Sequence[str], *, delay_s: float = 2.0, esc_first: bool = True,
     dry_run: bool = False, env: Mapping[str, str] | None = None,
     respect_user_presence: bool = True,
+    abort_unless_any: Sequence[str] | None = None,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
     pane, choosing the mechanism by `state.terminal_kind()`.
@@ -1195,7 +1229,8 @@ def send_self_command(
         # so macOS/iTerm keeps its unchanged USE_ITERM_PATH degrade. (TRDD-ME8V2YJF)
         # _try_linux_gui_send returns None (degrade) or a truthy FIRED:/DRY_RUN: status.
         return _try_linux_gui_send(
-            cmds, delay_s=delay_s, esc_first=esc_first, dry_run=dry_run, env=e
+            cmds, delay_s=delay_s, esc_first=esc_first, dry_run=dry_run, env=e,
+            abort_unless_any=abort_unless_any,
         ) or USE_ITERM_PATH
     if kind == "tmux":
         pane = (e.get("TMUX_PANE") or "").strip()
@@ -1204,7 +1239,11 @@ def send_self_command(
         if dry_run:
             keys = ("ESC+" if esc_first else "") + "+".join(cmds)
             return f"DRY_RUN:tmux:{pane}:{keys}@{delay_s}s"
-        _fire_detached_steps(delay_s, build_tmux_steps(pane, cmds, esc_first=esc_first))
+        _fire_detached_steps(
+            delay_s,
+            build_tmux_steps(pane, cmds, esc_first=esc_first),
+            list(abort_unless_any) if abort_unless_any else None,
+        )
         return "FIRED:tmux"
     return f"NO_AUTO_TERMINAL:{kind}"  # unreachable while _DELEGATE_KINDS == {"tmux"}
 

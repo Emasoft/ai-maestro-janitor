@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -56,7 +55,7 @@ RESUME_CMD = "/janitor-resume"
 _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 
 
-def _build_osascript(uuid: str, delay_s: float) -> str:
+def _build_osascript(uuid: str) -> str:
     """AppleScript that targets ONLY the session whose id == uuid, then types
     `/janitor-resume` (SOFT — no ESC).
 
@@ -65,9 +64,14 @@ def _build_osascript(uuid: str, delay_s: float) -> str:
     `write text` appends a return). The command is a FIXED module constant, so
     interpolating it is not an injection sink — unlike `uuid`, which `_UUID_RE`
     validates before it reaches here.
+
+    The DELAY deliberately lives OUTSIDE this script now (TRDD-DXM75JB2): it used to be
+    an AppleScript `delay` line, but no flag re-check can run inside AppleScript, so a
+    heartbeat fire consuming the pending flag during that delay still got the keystrokes.
+    The sleep + type-time guard both live in `terminal_trigger.fire_detached_argv`'s
+    python child instead.
     """
     lines = [
-        f"delay {delay_s}",
         'tell application "iTerm2"',
         "  repeat with w in windows",
         "    repeat with t in tabs of w",
@@ -85,14 +89,13 @@ def _build_osascript(uuid: str, delay_s: float) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _fire(script: str) -> None:
-    """Launch osascript fully detached so the parent returns immediately."""
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        ["osascript", "-e", script],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+def _fire(script: str, delay_s: float, pending_flags: list[str]) -> None:
+    """Launch osascript through terminal_trigger's detached delayed child, with the
+    TYPE-TIME flag guard (TRDD-DXM75JB2): the child sleeps `delay_s`, re-checks the
+    pending flags, and aborts silently when a heartbeat fire consumed them during the
+    sleep — the keystrokes never land in a session that already resumed."""
+    terminal_trigger.fire_detached_argv(
+        delay_s, ["osascript", "-e", script], abort_unless_any=pending_flags
     )
 
 
@@ -120,24 +123,31 @@ def main() -> int:
     # turn and run as a visible no-op later. Fail-open: an unresolvable project dir
     # must not kill the push (typing a redundant command is annoying; missing a real
     # resume strands an unattended session).
+    pending_flags: list[str] = []
     try:
         import state  # noqa: PLC0415 -- sibling lib, resolved via the path insert above
 
         sdir = state.state_dir()
-        if not any(
-            (sdir / f).is_file() for f in ("resume-after-compact.flag", "rate-limited.flag")
-        ):
+        pending_flags = [
+            str(sdir / f) for f in ("resume-after-compact.flag", "rate-limited.flag")
+        ]
+        if not any(Path(p).is_file() for p in pending_flags):
             print("NOTHING_PENDING")
             return 0
     except Exception:  # noqa: BLE001 -- fail-open toward firing
-        pass
+        pending_flags = []  # unresolvable project dir ⇒ no guard either (fire unconditionally)
 
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
     # esc_first=False ALWAYS: SOFT is the only correct mode post-compaction.
+    # `abort_unless_any` is the TYPE-TIME half of the self-cancel (TRDD-DXM75JB2): the
+    # fire-time check above stays as the cheap no-subprocess early exit; the child
+    # re-checks the same flags after its delay, so a heartbeat fire consuming them
+    # DURING the sleep no longer gets a redundant `/janitor-resume` typed after it.
     sent = terminal_trigger.send_self_command(
-        RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run
+        RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run,
+        abort_unless_any=pending_flags or None,
     )
     # The user is AT the keyboard — they will drive the session themselves, so a resume
     # nudge is both unnecessary and destructive (it would clobber what they are typing).
@@ -169,7 +179,7 @@ def main() -> int:
     if args.dry_run:
         print(f"DRY_RUN would fire {RESUME_CMD} at iTerm session {uuid} after {args.delay}s")
         return 0
-    _fire(_build_osascript(uuid, args.delay))
+    _fire(_build_osascript(uuid), args.delay, pending_flags)
     print("RESUME_FIRED")
     return 0
 
