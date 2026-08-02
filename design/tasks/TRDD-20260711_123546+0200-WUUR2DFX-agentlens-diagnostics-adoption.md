@@ -3,7 +3,7 @@ trdd-id: WUUR2DFX
 title: Adopt agentlensPro as the janitor's authoritative diagnostics source — retire the home-grown estimates
 column: backburner
 created: 2026-07-11T12:35:46+0200
-updated: 2026-07-12T05:04:10+0200
+updated: 2026-08-02T06:12:00+0200
 current-owner: janitor-claude
 assignee: null
 priority: 3
@@ -44,8 +44,9 @@ User steer (2026-07-11, verbatim): *"examine the agentlens skill and learn how t
 cli diagnostic tool, much better than the current janitor estimations on token usage or
 about what account type is running, or similar things."*
 
-This is the PARENT of two concrete detector adoptions, each its own TRDD — **BOTH now
-COMPLETE (shipped on `main`, unpushed, awaiting the NON-EXEMPT publish approval):**
+This is the PARENT of two concrete detector adoptions, each its own TRDD — **BOTH COMPLETE
+AND RELEASED in v0.41.0** (verified 2026-08-02: `e107a57`, `e2e4e89`, `f18e233` are all on
+`origin/main` and contained in the `v0.41.0` tag; both child cards are `column: complete`):
 - **TRDD-90B47EM9** — `window-burn-rate`: ENRICH the culprit clause with `investigate_burn`
   cause; KEEP the rotator `/api/oauth/usage` window% (commit e107a57).
 - **TRDD-HL8H3XCV** — `token-usage-anomaly`: CROSS-CHECK — corroborate (`get_burn_status`
@@ -64,6 +65,21 @@ measures.**
 **REMAINING (optional, not started):** the last two inventory rows — `token_report` /
 `token_baseline.estimate_window_cap` absolute-cap inference, and plan/account-type in
 reports. Both would consume `get_account_status`; neither is scheduled. NOT blocking.
+
+**`backburner` is the CORRECT column, and this note is why** (re-checked 2026-08-02 after a
+`trdd-drift` "untouched for 21d" line). Idleness here is not a stall: 3 of the 5 inventory
+rows are DONE and released, and the other 2 are deliberately deferred with no dependency on
+them. The only thing that was actually wrong was the STATE claiming the children were
+"unpushed, awaiting publish approval" — false since v0.41.0, ~22 releases ago, and exactly
+the kind of stale assertion that makes a later reader think a publish is pending.
+
+**Read the first remaining row skeptically before starting it.** The inventory says
+`token_report`'s absolute-cap inference should defer to "the CLI reports the real budget
+directly", but this card's own Open-question section then established the opposite: with no
+configured capacity agentlensPro reports `capacitySource: "none"` and its window budget /
+percentage / projection are **null**, which is why `window-burn-rate` kept the rotator's
+`/api/oauth/usage` read as the only authoritative window% source. So that row's premise was
+superseded by a later finding on this same card and needs re-deriving, not implementing.
 
 ## The invariant every adoption MUST hold
 
