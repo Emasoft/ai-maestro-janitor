@@ -1,9 +1,10 @@
 ---
 trdd-id: RYZCVVKA
 title: The repo working tree was overwritten with the CACHED plugin closure — writer unidentified
-column: todo
+column: testing
+implementation-commits: [fef258c, 56bf46d, 05b1a38, 84fe8da]
 created: 2026-07-11T15:45:00+0200
-updated: 2026-07-11T16:30:00+0200
+updated: 2026-08-02T07:48:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -167,9 +168,42 @@ on a file that was then edited and committed, it would have shipped a regression
 published fixes — and the only reason it was caught at all is that it happened to clear an
 executable bit the tests depend on.
 
-**REMAINING (lead 3, still open):** audit every caller of `restage` / `install` /
+~~**REMAINING (lead 3, still open):** audit every caller of `restage` / `install` /
 `verify_or_restage` for a path where the destination could resolve to the repo. The write is
-refused now, so this is hardening, not risk.
+refused now, so this is hardening, not risk.~~
+
+## 2026-08-02 — LEAD 3 AUDITED, and the one gap it found is now closed (`todo → testing`)
+
+**Every production caller enumerated** (`grep` over `scripts/`, excluding the definition site).
+Three, and each destination is guarded:
+
+| caller | destination | verdict |
+|---|---|---|
+| `launchd_keepalive.restage()` / `install()` | `data_scripts_dir()` = `data_dir()/scripts` | DATA dir. Redirectable ONLY by the test-only `JANITOR_DATA_DIR` override — and if that were ever pointed into a repo, `stage_closure` refuses. |
+| `daemon.py` → `ka.restage(src)` | same as above | same |
+| **`keepalive_boot.verify_or_restage(_HERE)`** | **the running entry's OWN dir** | the one caller whose destination is not the DATA dir — see below |
+
+**The real finding is the third row.** Launch the L0 entry from a repo checkout
+(`uv run scripts/daemon_keepalive_entry.py`) and the repair target IS the source tree, so the
+refusal fires INSIDE the pre-launch gate. Reading the code, `_repair` raising is caught by a broad
+`except Exception` → loud log → `return False` → the entry still imports so the fault is visible.
+Correct — but **established only by reading**, which is exactly the standard this card was written
+to reject.
+
+**So it is now executable:** `test_boot_gate_handles_a_source_checkout_destination` builds a real
+git-worktree-plus-`plugin.json` destination and asserts the gate returns False, logs loudly, and
+leaves the source tree EMPTY.
+
+**Falsified, and the mutation showed the stakes are higher than "hardening".** Neutering
+`is_plugin_source_checkout` to return False makes the test fail — but not in the way expected: the
+gate **wrote 37 closure files into the source tree**, then hit an unrelated missing
+`keepalive_install.sh`, and **returned `True`**. So without the guard the boot gate clobbers the
+repo *and reports success*. That is the original incident's exact signature, reachable through the
+gate meant to protect the launch. Guard restored, `git diff` byte-clean, 53 keepalive tests green,
+ruff clean.
+
+**Why this stays out of `complete`:** the audit and its test are done, but this card is one of the
+three-layer defences and the new test rides the next publish like everything else.
 
 ## Notes and lessons learned
 

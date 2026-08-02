@@ -189,6 +189,47 @@ def test_broken_stage_unrepairable_returns_false_and_logs_loud(
     assert "restage FAILED" in err or "no runnable copy" in err
 
 
+def test_boot_gate_handles_a_source_checkout_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The L0 boot gate must SURVIVE the repo-clobber refusal, not propagate it
+    (TRDD-RYZCVVKA, lead 3).
+
+    `stage_closure` refuses a destination inside a plugin SOURCE checkout, and that guard is
+    tested at its own level. But `verify_or_restage` is the ONE production caller whose
+    destination is not the DATA dir — it is the running entry's OWN directory. Launch the L0
+    entry from a repo checkout (`uv run scripts/daemon_keepalive_entry.py`) and the repair
+    target IS the source tree, so the refusal fires inside the pre-launch gate.
+
+    A gate that let `UnsafeStageDestination` escape would abort the launch of the
+    MACHINE-WIDE guardian — turning a guard against silent data loss into an outage. It must
+    behave like every other unrepairable stage: no raise, loud log, return False, and let
+    `import daemon` surface the fault visibly.
+
+    Written because the audit that closed RYZCVVKA could only establish this by reading the
+    code: `_repair` raising is caught by a broad `except Exception`, so the handling was
+    correct but unproven. This makes it executable."""
+    cache = _make_cache(tmp_path)
+    # A staged dir that IS a plugin source checkout: a git work tree whose ROOT also carries
+    # .claude-plugin/plugin.json — exactly what is_plugin_source_checkout looks for.
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".claude-plugin").mkdir()
+    (repo / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    staged = repo / "scripts"
+    staged.mkdir()
+    monkeypatch.setattr(launchd_keepalive, "latest_cache_scripts_dir", lambda: cache)
+    monkeypatch.setattr(launchd_keepalive, "data_scripts_dir", lambda: staged)
+
+    result = keepalive_boot.verify_or_restage(str(staged))
+
+    assert result is False, "a refused (source-checkout) repair must return False, not raise"
+    err = capsys.readouterr().err
+    assert "keepalive-boot:" in err, "the refusal must be reported loudly, never swallowed"
+    # And the guard's whole point: the source tree was NOT written into.
+    assert list(staged.iterdir()) == [], "the source checkout must be left untouched"
+
+
 def test_gate_never_raises_on_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """FAIL-OPEN backstop: even a totally bogus argument must not raise out of the gate — it
     swallows everything and returns True so the launch is never aborted by this gate."""
