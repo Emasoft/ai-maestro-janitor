@@ -467,3 +467,17 @@ def test_diagnose_root_respects_slow_armed_cadence(tmp_path: Path) -> None:
     assert fs.diagnose_root(str(root), now=now, transcript_age=6000)[:2] == (
         "cron_dead", "rearm",
     )
+
+
+def test_awaiting_user_survives_a_trailing_bookkeeping_record() -> None:
+    """2026-08-02 review finding: a message-less harness record (summary/system/
+    progress) appended AFTER an unanswered ExitPlanMode must not hide it — the
+    walk skips what can neither ask nor answer. A real prose message still
+    terminates (someone spoke)."""
+    import json as _json
+    pending = _json.dumps({"message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "ExitPlanMode"}]}})
+    bookkeeping = _json.dumps({"type": "summary", "summary": "compacted"})
+    assert fs.awaiting_user_decision([pending, bookkeeping]) is True
+    prose = _json.dumps({"message": {"content": "the user answered in prose"}})
+    assert fs.awaiting_user_decision([pending, bookkeeping, prose]) is False

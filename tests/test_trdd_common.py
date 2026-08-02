@@ -574,3 +574,26 @@ def test_reconcile_stale_blocker_surfaces():
     assert v.fires
     assert "stale-blocker" in v.fired
     assert v.stale_blockers == ["3b9b2040"]
+
+
+def test_check4_announced_list_in_next_paragraph_is_collected():
+    """2026-08-02 review finding: 'blocked by the following:' with the ids listed in
+    the NEXT paragraph is an ordinary declaration shape; the paragraph scoping
+    dropped it. The fallback fires ONLY on the announcing colon — the FP test above
+    (prose ending in a period, reuse citations in the next paragraph) must keep
+    collecting nothing."""
+    rec = _record(
+        column="dev",
+        blocked_by="[]",
+        body=(
+            "\n## STATE\n"
+            "This card is BLOCKED by the following:\n"
+            "\n"
+            "- TRDD-3b9b2040\n"
+            "- TRDD-aebedbff\n"
+        ),
+    )
+    stale = tc.check4_stale_blockers(
+        rec, _column_of({"3b9b2040": "published", "aebedbff": "complete"})
+    )
+    assert sorted(stale) == ["3b9b2040", "aebedbff"]

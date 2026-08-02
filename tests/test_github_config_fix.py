@@ -83,6 +83,65 @@ def test_foreign_repo_empty_fetch_degrades_to_no_contexts(monkeypatch: pytest.Mo
     assert bpl.detect_required_status_checks(root) == []
 
 
+_MATRIX_WORKFLOW = """\
+name: Matrix CI
+on:
+  pull_request:
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps: [{run: "true"}]
+"""
+
+_PATHS_FILTERED_WORKFLOW = """\
+name: Docs CI
+on:
+  pull_request:
+    paths: ["docs/**"]
+jobs:
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+"""
+
+
+def test_foreign_repo_never_stages_matrix_or_paths_filtered_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-08-02 review finding: the shared parser derives `name or job_id` per job,
+    blind to strategy.matrix (real checks report as 'Tests (3.11)') and to paths:
+    filters (the workflow never runs on non-matching PRs) — either shape, made a
+    REQUIRED context on an unattended fleet repo, wedges every non-admin PR forever.
+    Such remote files must not be staged; plain workflows in the same fetch still are."""
+    monkeypatch.setattr(
+        gcf, "_fetch_remote_workflows",
+        lambda slug: {
+            "ci.yml": _PR_WORKFLOW,
+            "matrix.yml": _MATRIX_WORKFLOW,
+            "docs.yml": _PATHS_FILTERED_WORKFLOW,
+        },
+    )
+    root = gcf._project_root_for("Emasoft/some-fleet-repo", "o/other")
+    wf_dir = root / ".github" / "workflows"
+    assert (wf_dir / "ci.yml").is_file()
+    assert not (wf_dir / "matrix.yml").exists()
+    assert not (wf_dir / "docs.yml").exists()
+    contexts = [c["context"] for c in bpl.detect_required_status_checks(root)]
+    assert contexts == ["Lint", "tests"], "only reliably-reporting contexts may be derived"
+
+
+def test_stages_conservatively_rejects_unparseable_yaml() -> None:
+    """Unparseable ⇒ not staged (the parser would skip it anyway; unknown = unsafe)."""
+    assert gcf._stages_conservatively(": not : valid : yaml : [") is False
+    assert gcf._stages_conservatively(_PR_WORKFLOW) is True
+    assert gcf._stages_conservatively(_PUSH_ONLY_WORKFLOW) is True
+
+
 def test_fetch_survives_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fetcher never raises: a gh binary that fails (simulated via a broken PATH)
     yields {} rather than an exception — the fix must degrade, not crash, on an offline

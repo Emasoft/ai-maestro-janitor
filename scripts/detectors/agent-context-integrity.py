@@ -125,7 +125,15 @@ def _candidates(project_root: Path) -> list[Path]:
         for p in project_root.glob(pattern):
             if p.is_file():
                 seen.add(p)
-    return sorted(seen)
+    # ROOT-FIRST ordering (2026-08-02 review finding): plain lexicographic sort put
+    # every `.claude/...` path before the root `CLAUDE.md` ('.' < 'C'), so on a repo
+    # with more candidates than the scan budget, the ONE file every session auto-loads
+    # fell past `paths[:budget]` and was never scanned. Shallower = more likely
+    # auto-loaded = scanned first; lexicographic within a depth keeps the order stable.
+    return sorted(
+        seen,
+        key=lambda p: (len(p.relative_to(project_root).parts), str(p)),
+    )
 
 
 def _file_kind(path: Path) -> str:
@@ -217,7 +225,13 @@ def main() -> int:
         state.rotate_log_if_big(_NAME)
         return 0
 
-    signature = _content_signature(candidates)
+    # Signature over EXACTLY the subset _scan will read (2026-08-02 review finding):
+    # hashing the full candidate list while scanning only the first `budget` meant an
+    # edit to any UNSCANNED file busted the dedupe hash and re-printed the identical
+    # findings block every fire — the precise churn _content_signature's own docstring
+    # forbids.
+    scanned = candidates[: _max_files()]
+    signature = _content_signature(scanned)
     last_hash_file = state.state_dir() / f"{_NAME}-last-hash.ts"
     if last_hash_file.is_file():
         try:
@@ -226,7 +240,7 @@ def main() -> int:
         except OSError:
             pass
 
-    findings = _scan(candidates, project_root, _max_files())
+    findings = _scan(scanned, project_root, _max_files())
     state.atomic_write(last_hash_file, signature)
 
     if not findings:

@@ -741,13 +741,34 @@ def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:
     # widening exists for.
     masked = _mask_inline_code(record.body)
     if _BLOCKED_PROSE_RE.search(masked):
-        for lo, hi in _paragraph_spans(masked):
+        spans = _paragraph_spans(masked)
+        for i, (lo, hi) in enumerate(spans):
             if not _BLOCKED_PROSE_RE.search(masked[lo:hi]):
                 continue
             # Match on the masked slice, read ids from the ORIGINAL one: masking is
             # length-preserving, so the same offsets index both.
-            for uid in extract_trdd_refs(record.body[lo:hi]):
-                if uid not in candidates and uid != record.uid:
+            ids_here = [
+                uid for uid in extract_trdd_refs(record.body[lo:hi]) if uid != record.uid
+            ]
+            # ADJACENT-LIST fallback (2026-08-02 review finding): "blocked by the
+            # following:" with the ids as a LIST in the NEXT paragraph is an
+            # ordinary declaration shape the paragraph scoping dropped entirely.
+            # Gated THREE ways so the measured FP wins of the scoping (52→23; the
+            # held cards' scattered reuse citations) stay excluded: the blocked
+            # paragraph names no ids itself, only the single immediately-following
+            # paragraph is read, and — the discriminator — the blocked paragraph
+            # must END WITH THE ANNOUNCING COLON. A prose sentence ("BLOCKED on an
+            # upstream answer.") ends with a period and never takes the fallback;
+            # only a declaration that syntactically promises a list does.
+            if not ids_here and masked[lo:hi].rstrip().endswith(":") and i + 1 < len(spans):
+                nlo, nhi = spans[i + 1]
+                ids_here = [
+                    uid
+                    for uid in extract_trdd_refs(record.body[nlo:nhi])
+                    if uid != record.uid
+                ]
+            for uid in ids_here:
+                if uid not in candidates:
                     candidates.append(uid)
     stale: list[str] = []
     for uid in candidates:

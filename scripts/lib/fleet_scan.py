@@ -354,9 +354,18 @@ def awaiting_user_decision(tail: list[str]) -> bool:
             return False
         if rec.get("type") == "queue-operation":
             continue
-        content = (rec.get("message") or {}).get("content")
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            # Message-LESS bookkeeping (summary / system / progress / snapshot lines):
+            # it can neither ask a question nor answer one, so it must not TERMINATE
+            # the walk — bailing here was the 2026-08-02 review finding: ONE trailing
+            # harness record hid a pending ExitPlanMode beneath it and the guardian
+            # typed into the human's approval dialog (the exact TRDD-8IZ8COQ8 incident
+            # this predicate exists to prevent). Only a real MESSAGE resolves anything.
+            continue
+        content = msg.get("content")
         if not isinstance(content, list):
-            return False  # substantive, but not a tool exchange ⇒ not a pending question
+            return False  # a real message with prose content — someone spoke ⇒ not pending
         blocks = [b for b in content if isinstance(b, dict)]
         for b in blocks:
             if b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):

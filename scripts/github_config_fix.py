@@ -124,12 +124,54 @@ def _fetch_remote_workflows(slug: str) -> dict[str, str]:
     return out
 
 
+def _stages_conservatively(content: str) -> bool:
+    """May this REMOTE workflow feed `detect_required_status_checks`? (2026-08-02 review
+    finding.) The shared parser derives a context per job as `name or job_id`, which is
+    blind to two shapes that make a REQUIRED context never report — wedging every
+    non-admin PR in 'Expected — waiting for status', unmergeable:
+
+    - ``strategy.matrix``: the real checks report as 'name (3.11)' etc.; the bare name
+      never reports.
+    - ``paths:`` / ``paths-ignore:`` on the PR trigger: on non-matching PRs the workflow
+      never runs at all.
+
+    For the LOCAL checkout the operator can see and fix a wedge; for the 12 FLEET repos
+    this tool writes to unattended, omission (a less-strict ruleset) is strictly safer
+    than a never-reporting required check — so such files are not staged. The shared
+    parser itself is untouched: its output must stay byte-identical with the maintainer
+    plugin's (janitor#14). Unparseable ⇒ False (the parser would skip it anyway)."""
+    import yaml  # lazy — mirrors branch_protection_lib's own lazy import
+
+    try:
+        wf = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return False
+    if not isinstance(wf, dict):
+        return False
+    # YAML parses a bare `on:` key as boolean True — accept both spellings.
+    triggers = wf.get("on", wf.get(True, {}))
+    if isinstance(triggers, dict):
+        for trig in ("pull_request", "pull_request_target"):
+            cfg = triggers.get(trig)
+            if isinstance(cfg, dict) and ("paths" in cfg or "paths-ignore" in cfg):
+                return False
+    jobs = wf.get("jobs", {})
+    if isinstance(jobs, dict):
+        for job_cfg in jobs.values():
+            if isinstance(job_cfg, dict) and isinstance(job_cfg.get("strategy"), dict) \
+                    and "matrix" in job_cfg["strategy"]:
+                return False
+    return True
+
+
 def _project_root_for(slug: str, current_slug: str | None) -> Path:
     """A root whose `.github/workflows/` holds `slug`'s workflow files: the cwd when `slug`
     IS the current checkout, else a temp stage filled from the remote repo — so
     `detect_required_status_checks` (the ONE parser) discovers contexts for fleet repos
     too, not just the local one. A failed/empty fetch returns a path with no workflows dir,
-    which downstream reads as "no contexts" (the safe pre-fetch behavior)."""
+    which downstream reads as "no contexts" (the safe pre-fetch behavior). Remote files
+    that could yield never-reporting contexts are NOT staged — see
+    `_stages_conservatively`."""
     if current_slug and slug == current_slug:
         return Path.cwd()
     files = _fetch_remote_workflows(slug)
@@ -140,7 +182,8 @@ def _project_root_for(slug: str, current_slug: str | None) -> Path:
     wf_dir = Path(tmp.name) / ".github" / "workflows"
     wf_dir.mkdir(parents=True)
     for name, content in files.items():
-        (wf_dir / name).write_text(content, encoding="utf-8")
+        if _stages_conservatively(content):
+            (wf_dir / name).write_text(content, encoding="utf-8")
     return Path(tmp.name)
 
 
