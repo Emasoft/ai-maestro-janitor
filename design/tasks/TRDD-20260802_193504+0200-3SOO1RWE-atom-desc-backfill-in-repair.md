@@ -1,9 +1,9 @@
 ---
 trdd-id: 3SOO1RWE
 title: Repair pass backfills and validates the atom-level desc field
-column: todo
+column: testing
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T19:35:04+0200
+updated: 2026-08-02T20:05:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -19,9 +19,39 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-**Not started.** Child 4 of 4 split out of TRDD-87RKBYJ8 (duty 2 — authoring-time REQUIRED
-everywhere; the retroactive/validating half is MISSING). The cheapest of the four per the
-2026-08-02 audit.
+**✅ IMPLEMENTED 2026-08-02 20:05. Column `testing` — one real chore-driven backfill awaited
+(publish-gated: the chore runs from the installed plugin cache).**
+
+Shipped, all three steps + one defect found by measuring:
+1. **SSOT check** `memory_edit_verify.atom_desc_violations(text)` — missing / empty /
+   unquoted-PROSE / >200-char atom descs flag; quoted and unquoted CLEAN-SLUG (`[a-z0-9_]+`)
+   pass — the bar mirrors memgrep's `desc_unquoted_prose` (memory.rs:3081) EXACTLY, verified
+   against the Rust source first (a stricter Python bar would demand repairs the linter never
+   asks for; a looser one would pass pages lint rejects). Fenced marker-shaped examples never
+   flag. Wired into BOTH `verify_repair` (refusal reason — the completeness contract) and
+   `_page_needs_repair` (scheduler precheck) — same SSOT, cannot drift. Safe under WN7M829Y's
+   no-churn rule ONLY because step 3 makes repair able to fix it.
+2. **Precheck** dispatches on the violation; refusal ledger + per-run caps bound the sweep.
+3. **Repair skill** documents the backfill: summarize the atom's OWN body, never invent;
+   quote unquoted-prose verbatim; tighten an over-cap desc without dropping facts.
+4. **Defect found while measuring the blast radius:** a LOCAL page with DUPLICATE Notes
+   headings made `_body_minus_lessons` RAISE (its by-design multi-page guard) — which would
+   have crashed `repair_has_work` in the scheduler. `atom_desc_violations` now reports the
+   duplicate-heading defect as the violation instead of propagating (an oracle returns,
+   never raises).
+
+**Measured corpus blast radius (2026-08-02):** 2 LOCAL pages/14 violations + 2 PROJECT/2 +
+26 USER/123 = 30 pages/139 — bounded retroactive work the repair chore drains at its own
+cadence; that queue IS duty 2's cleanup, not collateral.
+
+Tests: 2 in `test_memory_edit_verify.py` (shape classifier incl. fence immunity; refuse →
+backfill → pass) + 2 in `test_memory_content_precheck.py` (dispatch on desc-less; NO churn on
+quoted/legacy-slug). Suites 116+84 green; ruff clean.
+
+**NEXT ACTION (testing):** after the next publish, observe ONE real `[janitor-memory-repair]`
+pass backfill a desc (oracle green) — then `complete`.
+
+*(superseded original entry: "Not started. Child 4 of 4… cheapest of the four.")*
 
 ## The ask (parent duty 2)
 

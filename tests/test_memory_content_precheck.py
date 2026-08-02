@@ -900,3 +900,33 @@ def test_repair_without_a_scope_never_suppresses(tmp_path, monkeypatch):
     p = _shaped(tmp_path, "a.md", notes=False)
     memory_refusals.record("repair", "LOCAL", tmp_path, [p], reason="unfixable")
     assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_desc_less_atom(tmp_path):
+    """TRDD-3SOO1RWE: an atom marker without a desc (or with unquoted PROSE desc) is
+    repair work — same SSOT check (atom_desc_violations) verify_repair enforces, so
+    the precheck and the commit-time bar cannot drift. Extending the precheck is
+    safe ONLY because the repair skill backfills descs (WN7M829Y's no-churn rule)."""
+    _shaped(
+        tmp_path, "a.md",
+        body=(
+            "^NODESC01 [keywords: some_fact, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+            "A durable fact line about the subject.\n"
+        ),
+    )
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_false_on_quoted_and_legacy_slug_descs(tmp_path):
+    """The complement pinning the bar EXACTLY at memgrep's: a quoted desc and an
+    unquoted clean legacy slug are both fine — no churn dispatches for them."""
+    _shaped(
+        tmp_path, "a.md",
+        body=(
+            '^GOOD0001 [desc:"a fine summary", keywords: k_one, ocd: 2026-08-01, lmd: 2026-08-01]\n'
+            "fact one.\n"
+            "^SLUG0002 [desc: clean_legacy_slug, keywords: k_two, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+            "fact two.\n"
+        ),
+    )
+    assert mcp.repair_has_work(tmp_path) is False

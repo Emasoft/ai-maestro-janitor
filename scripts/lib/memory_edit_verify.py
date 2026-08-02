@@ -1167,6 +1167,15 @@ def verify_repair(
     if _LESSONS_HEADING not in result_text:
         reasons.append(f"missing '{_LESSONS_HEADING}' section")
 
+    # Atom-level `desc:` completeness (TRDD-3SOO1RWE, parent duty 2): a REPAIR means
+    # completing the page, and the page-level `description` bar above never covered the
+    # ATOM descs — authoring skills require them at write time, but nothing validated
+    # existing atoms, so desc-less atoms accumulated. Same completeness contract as
+    # `_REQUIRED_FM_KEYS`: a repair that leaves one missing did not finish.
+    bad_descs = atom_desc_violations(result_text)
+    if bad_descs:
+        reasons.append("atom desc incomplete after repair: " + "; ".join(bad_descs))
+
     return (not reasons, reasons)
 
 
@@ -1177,6 +1186,79 @@ def verify_repair(
 # on what an atom marker is (TRDD-MADJ00KA). Byte-identical to the prior literal: without a DOTALL flag
 # `.` already excluded newlines, so `[^\n]*` inside the core changes nothing here.
 _ATOM_MARKER_RE = re.compile(rf"^\s*{_ATOM_MARKER_CORE}\s*$")
+
+# --- Atom-level desc completeness (TRDD-3SOO1RWE, parent duty 2 of TRDD-87RKBYJ8) --- #
+
+# A marker line captured WITH its props blob, so desc can be inspected per atom.
+_ATOM_MARKER_PROPS_RE = re.compile(r"^\s*\^([A-Za-z0-9_-]+)\s*\[([^\n]*)\]\s*$")
+# `desc:"…"` — the canonical QUOTED form (memgrep's `atom-unquoted-desc` lint marks the
+# unquoted form a defect, so a completing repair must leave the quoted one).
+_ATOM_DESC_QUOTED_RE = re.compile(r'(?:^|[\[,])\s*desc\s*:\s*"([^"]*)"')
+# Unquoted value: runs to the next top-level comma — safe because an UNQUOTED value
+# cannot itself contain a protected comma (only quoted values can, and those match above).
+_ATOM_DESC_UNQUOTED_RE = re.compile(r"(?:^|[\[,])\s*desc\s*:\s*([^,\]]*)")
+_ATOM_DESC_MAX = 200
+# Fenced code can carry marker-SHAPED example lines (janitor#152's lesson from the other
+# direction); strip fences before scanning so an example can never flag a violation.
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^\s*```.*?^\s*```\s*?$")
+
+
+def atom_desc_violations(text: str) -> list[str]:
+    """Every atom marker whose `desc:` is MISSING, UNQUOTED, or over the 200-char cap —
+    one human-readable violation string per atom. PURE; fenced code is ignored.
+
+    This is the SSOT the commit-time bar (`verify_repair`) and the scheduler precheck
+    (`memory_content_precheck._page_needs_repair`) both call, so they cannot drift —
+    the same discipline the frontmatter checks already follow. Authoring skills REQUIRE
+    a desc at write time; this closes the retroactive half (existing atoms predating
+    the requirement, and descs that rotted past the cap)."""
+    violations: list[str] = []
+    try:
+        body = _body_minus_lessons(text)
+    except ValueError:
+        # A page with DUPLICATE Notes headings trips _body_minus_lessons' multi-page
+        # guard (issue #88). That duplication is itself a structural defect repair must
+        # fix FIRST — report it as the violation instead of crashing the scheduler
+        # (repair_has_work) or the oracle (verify_repair must return, never raise).
+        return [
+            "page has duplicate '## Notes and lessons learned' headings — "
+            "merge them before atom descs can be checked"
+        ]
+    for line in _FENCED_BLOCK_RE.sub("", body).splitlines():
+        m = _ATOM_MARKER_PROPS_RE.match(line)
+        if not m:
+            continue
+        atom_id, props = m.group(1), m.group(2)
+        quoted = _ATOM_DESC_QUOTED_RE.search(props)
+        if quoted:
+            if len(quoted.group(1)) > _ATOM_DESC_MAX:
+                violations.append(
+                    f"^{atom_id}: desc is {len(quoted.group(1))} chars (max {_ATOM_DESC_MAX})"
+                )
+            elif not quoted.group(1).strip():
+                violations.append(f"^{atom_id}: desc is empty")
+            continue
+        unq = _ATOM_DESC_UNQUOTED_RE.search(props)
+        if unq:
+            val = unq.group(1).strip()
+            if not val:
+                violations.append(f"^{atom_id}: desc is empty")
+            elif not re.fullmatch(r"[a-z0-9_]+", val):
+                # Mirror memgrep's `desc_unquoted_prose` EXACTLY (memory.rs:3081): an
+                # unquoted clean legacy SLUG ([a-z0-9_]+) is accepted; unquoted PROSE is
+                # the Error the linter raises — a stricter bar here would demand repairs
+                # the linter never asks for (churn), a looser one would pass pages lint
+                # rejects.
+                violations.append(
+                    f'^{atom_id}: desc is unquoted prose (quote it: desc:"…")'
+                )
+            elif len(val) > _ATOM_DESC_MAX:
+                violations.append(
+                    f"^{atom_id}: desc is {len(val)} chars (max {_ATOM_DESC_MAX})"
+                )
+        else:
+            violations.append(f"^{atom_id}: desc missing")
+    return violations
 
 
 def verify_atomize(

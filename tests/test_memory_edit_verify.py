@@ -1398,3 +1398,53 @@ def test_fact_tokens_preserved_noop_passes_when_numeric_unit_line_wraps():
     mutated = a.replace("3\ndays", "30\ndays")
     ok2, missing2 = v.fact_tokens_preserved([a], mutated)
     assert not ok2 and any("3 days" in m for m in missing2)
+
+
+# ---------- atom desc completeness (TRDD-3SOO1RWE) ----------
+
+
+def test_atom_desc_violations_classifies_all_shapes():
+    """The SSOT check both verify_repair and the precheck call: missing, empty,
+    unquoted-PROSE, and over-cap descs flag; quoted and clean-legacy-slug descs pass;
+    fenced marker-shaped examples never flag (janitor#152's lesson)."""
+    body = (
+        '^GOOD1234 [desc:"a fine quoted summary", keywords: k_one, ocd: 2026-08-01, lmd: 2026-08-01]\n'
+        "fact one.\n"
+        "^SLUG5678 [desc: clean_legacy_slug_ok, keywords: k_two, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+        "fact two.\n"
+        "^MISS9012 [keywords: k_three, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+        "fact three.\n"
+        "^PROS3456 [desc: unquoted Prose with spaces, keywords: k_four, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+        "fact four.\n"
+        f'^LONG7890 [desc:"{"x" * 201}", keywords: k_five, ocd: 2026-08-01, lmd: 2026-08-01]\n'
+        "fact five.\n"
+        "```\n"
+        "^FENC0000 [keywords: an_example_inside_code]\n"
+        "```\n"
+    )
+    a = _note(body=body)
+    bad = v.atom_desc_violations(a)
+    flagged = " ".join(bad)
+    assert "MISS9012" in flagged and "missing" in flagged
+    assert "PROS3456" in flagged and "unquoted prose" in flagged
+    assert "LONG7890" in flagged and "201" in flagged
+    assert "GOOD1234" not in flagged and "SLUG5678" not in flagged
+    assert "FENC0000" not in flagged, "a fenced example must never flag"
+
+
+def test_verify_repair_refuses_desc_less_atom_and_passes_backfilled():
+    """The completeness contract: a repair that leaves an atom desc-less did not
+    finish (same bar shape as _REQUIRED_FM_KEYS); backfilling it passes."""
+    src = _note(body=(
+        "^ABCD1234 [keywords: some_fact, ocd: 2026-08-01, lmd: 2026-08-01]\n"
+        "The fact body.\n"
+    ))
+    meta = v.parse_frontmatter(src)
+    ok, reasons = v.verify_repair(src, meta, src, meta)
+    assert not ok and any("desc" in r for r in reasons)
+    fixed = src.replace(
+        "^ABCD1234 [keywords:",
+        '^ABCD1234 [desc:"The fact body summarized", keywords:',
+    )
+    ok2, reasons2 = v.verify_repair(src, meta, fixed, v.parse_frontmatter(fixed))
+    assert ok2, reasons2

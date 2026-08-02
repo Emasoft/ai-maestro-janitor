@@ -94,6 +94,15 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **A page's OWN one-sided link** → only the reciprocal that lives on THIS page is
   in scope (the librarian backfills reciprocals on OTHER pages; repair is
   single-page).
+- **Atom `desc:` incomplete** (TRDD-3SOO1RWE — `verify_repair` refuses a repair that
+  leaves one): every `^id [...]` atom marker must carry a `desc:` that is PRESENT,
+  ≤200 chars, and either QUOTED (`desc:"…"`, the canonical form) or an unquoted clean
+  legacy slug (`[a-z0-9_]+` only — exactly memgrep's `atom-unquoted-desc` bar; unquoted
+  PROSE is the defect). **Backfill by SUMMARIZING the atom's own body** — a true
+  one-line summary of what the atom asserts, never facts the body doesn't contain
+  (rule 5: infer, never invent). Quote unquoted-prose descs verbatim rather than
+  rewording them; trim an over-cap desc by tightening, never by dropping a fact the
+  body lacks elsewhere.
 
 ## EXECUTE the repair THROUGH the transaction core
 

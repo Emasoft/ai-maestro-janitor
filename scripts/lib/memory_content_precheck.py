@@ -309,6 +309,11 @@ def _page_needs_repair(text: str) -> bool:
         return True  # a radiator built as a receiver (inverted tier shape)
     if tier == "component" and has_applies:
         return True  # a receiver that radiates (the mirror inversion)
+    if memory_edit_verify.atom_desc_violations(text):
+        return True  # atom desc missing/unquoted-prose/over-cap — verify_repair's own bar
+        # (TRDD-3SOO1RWE: extending the precheck is safe ONLY because the repair skill
+        # now backfills descs — the WN7M829Y scope note forbade flagging defects the
+        # pass cannot fix; this one it can, via the same SSOT check.)
     return False
 
 
