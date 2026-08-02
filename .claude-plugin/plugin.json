@@ -619,6 +619,27 @@
       "default": 21600,
       "sensitive": false
     },
+    "peer_recovery_enabled": {
+      "title": "Peer Freeze-Recovery Enabled (dark-window stopgap)",
+      "description": "ON by default (TRDD-KQ9WM4TZ). While an ai-maestro server owns the host the janitor daemon exits (one daemon per host) and takes the session-liveness fleet guardian with it — so standalone sessions would have NO freeze recovery, silently. This detector runs the daemon's own recovery beat over PEER sessions (never its own) from whichever armed session wins a machine-wide flock, ONLY in that dark window (daemon dead AND server alive). All session-liveness knobs (session_liveness_enabled, fleet_recovery_enabled, fleet_hard_restart_enabled) apply unchanged inside the beat. Set false to disable the stopgap.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "peer_recovery_interval": {
+      "title": "Peer Freeze-Recovery Detector Cadence (seconds)",
+      "description": "Minimum seconds between per-session peer-freeze-recovery checks. Default: 300. The check outside the dark window is near-free (two liveness stats); the expensive fleet scan is additionally paced machine-wide by peer_recovery_interval_s.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
+    "peer_recovery_interval_s": {
+      "title": "Peer Freeze-Recovery Fleet-Beat Pacing (seconds, machine-wide)",
+      "description": "Minimum seconds between actual fleet recovery beats across ALL sessions (a shared last-run stamp + flock make one session the single writer). Default: 600. Only consulted inside the dark window.",
+      "type": "number",
+      "default": 600,
+      "sensitive": false
+    },
     "fleet_github_config_enabled": {
       "title": "Fleet GitHub-Config Surface Enabled (per-session)",
       "description": "ON by default (TRDD-157OH2D7). The per-session fleet-github-config detector reads ONLY the daemon's findings file (one file read + a content-hash dedupe, ZERO gh calls) and emits ONE compact drift line naming the finding counts, ALWAYS ending with a pointer to /janitor-github-config-fix so the notification carries the remedy. Content-hash deduped: an unchanged finding set never re-nags; a repo getting fixed or a new gap appearing re-alerts exactly once. Silent until the daemon has written a findings file. Set false to stop surfacing the fleet findings in this project's sessions (the daemon still audits).",

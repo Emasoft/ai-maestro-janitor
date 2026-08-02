@@ -1,9 +1,9 @@
 ---
 trdd-id: KQ9WM4TZ
 title: Standalone sessions have no freeze recovery while an ai-maestro server runs
-column: todo
+column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-02T16:10:46+0200
+updated: 2026-08-02T18:26:57+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -16,8 +16,37 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Not started. This is an EHT of TRDD-5ZVS1DDP — it handles a CONSEQUENCE of that card's
-shipped work, so 5ZVS1DDP cannot reach `complete` until this is terminal.**
+**STOPGAP IMPLEMENTED 2026-08-02 (branch 3 of the NEXT ACTION — #79 silent for 12 days;
+the last comment on the thread is our own measurement, no owner/server reply). Column
+`testing` — awaiting one real dark-window firing.**
+
+### What shipped
+
+`scripts/detectors/peer-freeze-recovery.py` + roster entry (300s) + `_NON_HARNESS_DETECTORS`
++ 3 plugin.json knobs (`peer_recovery_enabled`/`_interval`/`_interval_s`). Design:
+
+- **Reuses the daemon's beat VERBATIM** — `daemon.task_session_liveness(fleet=peers)` (the
+  parameter existed for tests; now it is the handoff surface). Diagnosis ladder, typing gate,
+  per-instance cooldowns, identity-stamped budgets, F3 audit, crash-loop alert: all unchanged,
+  and the budgets live in the SAME global-state recovery dir, so a respawned daemon later
+  CONTINUES the counters.
+- **Runs ONLY in the dark window**: daemon dead AND server alive. Daemon alive → its beat owns
+  it. Server dead → `ensure_daemon_running` on the ordinary path is the remedy (its crash-loop
+  breaker must not be bypassed here).
+- **Not a second daemon**: nothing resident — a bounded one-shot under a machine-wide
+  non-blocking flock + a stamp-FIRST last-run (even a crashing scan paces the fleet).
+- **Never recovers its own session** (`project_root == self` filtered): self-typing mid-turn is
+  the splice hazard TRDD-0BVF4K7E closed, and this cron is provably alive — it just fired.
+- notify.py's DAEMON-ONLY rule: honored in spirit — inside the flock there is exactly one
+  writer and no daemon; the crash-loop alert would otherwise be dark with the rest.
+
+8 behavior tests (gates, peer filtering, machine-wide pacing incl. stamp-first, roster +
+deny-list). **NEXT ACTION:** observe ONE real dark-window firing on this host (server up,
+daemon down): `.janitor/logs/peer-freeze-recovery.log` shows `ran the dark-window recovery
+beat`, and the F3 recovery audit gains records. Then `complete` — and 5ZVS1DDP's EHT clears.
+If #79 later confirms server-side takeover, this detector self-neutralizes (its gate sees the
+server, but recovery competes nowhere — the beat only touches sessions the server does NOT
+own, which `fleet_scan` already marks server_owned ⇒ HANDS OFF).
 
 **The gap is LIVE on this host as of 2026-08-02 16:10.** Not a hypothetical.
 

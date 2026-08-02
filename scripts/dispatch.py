@@ -367,6 +367,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # to one nudge per interval, and auto-silences the instant a note is written.
     # 4h cadence; an idle fire is one bounded `git log`.
     ("memorize-nudge", 14400, "CLAUDE_PLUGIN_OPTION_MEMORIZE_NUDGE_INTERVAL"),
+    # peer-freeze-recovery (TRDD-KQ9WM4TZ): while an ai-maestro server owns the host the
+    # daemon EXITS (§7.2) and takes session-liveness — the fleet freeze guardian — with it.
+    # This runs the daemon's OWN beat over PEER sessions (never its own) from whichever
+    # armed session wins a machine-wide flock, ONLY in that dark window (daemon dead AND
+    # server alive). 300s detector cadence; the real pacing is its machine-wide 600s stamp.
+    ("peer-freeze-recovery", 300, "CLAUDE_PLUGIN_OPTION_PEER_RECOVERY_INTERVAL"),
     # orphaned-resume-flag closes the janitor's own SILENT failure mode (issue #125): an
     # unconsumed `resume-after-compact.flag` means a compaction recorded a resume target
     # that no heartbeat ever delivered, i.e. that session's cron is dead/expired/unarmed.
@@ -415,6 +421,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
 # (OFF inside); it returns via the `aimaestro-continuity.sh status` 5-field contract
 # once that CLI ships to ~/.local/bin (follow-up, janitor#100).
 _NON_HARNESS_DETECTORS = frozenset({
+    "peer-freeze-recovery",  # fleet-wide actuation — a harness agent's world is server-owned
     "marketplace-refresh",
     "user-plugins-update",
     "local-plugins-update",
