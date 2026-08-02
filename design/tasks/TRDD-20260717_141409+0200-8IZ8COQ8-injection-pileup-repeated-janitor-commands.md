@@ -2,7 +2,7 @@
 trdd-id: 8IZ8COQ8
 title: Repeated janitor-command injections pile up in a session's input queue
 column: testing
-implementation-commits: [d4498ff]
+implementation-commits: [d4498ff, b60f07a]
 created: 2026-07-17T14:14:09+0200
 updated: 2026-08-02T10:34:00+0200
 current-owner: claude-ai-maestro-janitor
@@ -111,7 +111,7 @@ ESC-first rungs because the ESC *is* the unwedge; an ESC into a pending approval
 human's decision**. Neuter-tested — with the guard disabled the beat fires, and the frozen case
 sends ESC.
 
-**Correction, same session (`<pending>`).** The first cut of the predicate was "tail ends on ANY
+**Correction, same session (`b60f07a`).** The first cut of the predicate was "tail ends on ANY
 unanswered `tool_use`" — a **false positive**, caught by asking how this card interacts with
 TRDD-WKTD5JTC (whose whole design is *injecting ESC*). An unanswered call also describes a tool
 that is merely still RUNNING; Bash timeouts in this project are 20 minutes, which outlives the
