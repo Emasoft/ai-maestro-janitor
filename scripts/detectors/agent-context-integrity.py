@@ -153,6 +153,40 @@ def _scan(
     return out
 
 
+def poisoned_reason(findings: list[tuple[str, acp.Finding]], *, cap: int = 3) -> str:
+    """The `contextPoisonedReason` string for the ai-maestro wake gate (janitor#167).
+
+    PURE, and separated from the transport on purpose: the frozen CLI has no write path for
+    this field yet (`cmd_update`'s option allow-list is `--task/--model/--args/--tags/
+    --add-tag/--remove-tag` and it rejects everything else), so the janitor cannot set it
+    today. The STRING is my half of the agreement regardless of how it eventually travels,
+    and it is testable now.
+
+    **This value is read by a MODEL** — ai-maestro renders it in the wake refusal and an agent
+    can fetch it — so it carries exactly the defanging requirement the drift lines do. Two
+    properties make that hold, and both are tested:
+
+      * the payload's own bytes are NEVER included — only our rule ids and the file paths, so
+        an attacker's prose cannot ride into a context window inside an error message;
+      * every path goes through `sanitize_for_drift_line`, so a marker-shaped filename cannot
+        mimic a `[janitor-…]` line at any consumer.
+
+    Bounded: `cap` findings named, the rest counted. An unbounded reason string would be its
+    own denial-of-service against a UI field."""
+    if not findings:
+        return ""
+    files = {rel for rel, _ in findings}
+    named = "; ".join(
+        f"{state.sanitize_for_drift_line(rel)}:{f.line} [{f.rule_id}]"
+        for rel, f in findings[:cap]
+    )
+    more = f"; and {len(findings) - cap} more" if len(findings) > cap else ""
+    return (
+        f"{len(findings)} injection/authority pattern(s) in {len(files)} auto-loaded "
+        f"agent-context file(s): {named}{more}"
+    )
+
+
 def _content_signature(paths: list[Path]) -> str:
     """Hash the SCANNED set — path + mtime + size. Must cover exactly the files scanned, or a
     change to an unscanned file busts the hash and re-emits an unchanged finding every fire."""
