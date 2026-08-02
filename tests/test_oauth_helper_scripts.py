@@ -98,3 +98,30 @@ def _skill_name_field(body: str) -> str:
         if line.startswith("name:"):
             return line.split(":", 1)[1].strip().lower()
     return ""
+
+
+def test_check_login_never_asserts_identity() -> None:
+    """janitor#179: check-login.sh proves a session is SAVED in the profile filed under
+    <email>, never WHOSE it is (cookie values are encrypted; only the capture's /roles
+    probe resolves the owner). The confident '<email>: logged in' ✓ line over a profile
+    signed into another account inverted the operator's advice exactly when a re-login
+    was needed — so that phrasing must never return."""
+    text = (OAUTH_DIR / "check-login.sh").read_text()
+    # The exact f-string shape of the old confident claim (the guard comment in the
+    # script spells it "<email>" precisely so it does not collide with this assertion).
+    assert "✓ {email}: logged in" not in text, (
+        "check-login.sh must not claim '<email>: logged in' — identity is unverifiable offline"
+    )
+    assert "janitor#179" in text, "the ✓ lines must carry the owner-unverified caveat"
+
+
+def test_lifetime_status_clean_exit_carries_identity_caveat() -> None:
+    """janitor#179: lifetime-status.sh's clean exits must not read as a verified-identity
+    all-clear — 'nothing to do' over a wrong-account profile hid a dead slot behind
+    another account's cookies. Every healthy verdict/banner carries the caveat."""
+    text = (OAUTH_DIR / "lifetime-status.sh").read_text()
+    assert "nothing to do" not in text, (
+        "the bare 'nothing to do' all-clear must not survive — it asserted identity it never checked"
+    )
+    assert "janitor#179" in text, "clean exits must carry the owner-unverified caveat"
+    assert "IDENTITY_CAVEAT" in text, "both clean-exit paths must print the shared caveat"

@@ -134,7 +134,11 @@ for email in roster:
     elif (not has_refresh) and oauth_days is not None and oauth_days < setup_remind_days:
         v = f"RE-CAPTURE (setup-token < {setup_remind_days}d)"; action.append(email)
     else:
-        v = "ok"
+        # janitor#179: the cookie check proves a session is SAVED in the profile filed
+        # under this email, not WHOSE it is (values encrypted; identity resolves only at
+        # capture via /roles). A bare "ok" over a wrong-account profile inverted the
+        # advice exactly when a re-login was needed — say what is actually known.
+        v = "ok (session saved; owner unverified)"
     print(f"{email:40} {cookie_s:>16} {oauth_s:>26}  {v}")
 
 print("-" * 112)
@@ -163,12 +167,20 @@ if action:
         print("  ⚠ URGENT: no account has healthy OAuth right now — refresh immediately. (The login is a fresh")
         print("    human sign-in; it does NOT need the old cookie, so the command still works.)")
     sys.exit(1)
+# janitor#179: every clean exit carries the identity caveat — the cookie probe proves a
+# session is SAVED per profile, never WHOSE, so "nothing due" must not read as a
+# verified-identity all-clear (that inversion hid a dead slot behind another account's
+# cookies). Identity is confirmed only at capture (/roles), which re-files mismatches.
+IDENTITY_CAVEAT = ("  (Cookie checks prove a session is SAVED per profile, not WHOSE — janitor#179. A profile\n"
+                   "  signed into the WRONG account still reads ok here; capture verifies the true owner.)")
 if latched:
     # janitor #82 fix #1: cookies are fine so no refresh is DUE, but a set denied-latch hides
     # OAuth health — say so instead of a bare "all healthy", which here would be misleading.
-    print("\n✓ Cookies healthy — nothing urgent. NOTE: keychain denied-latch is set, so OAuth health is UNKNOWN")
+    print("\n✓ Sessions saved — nothing urgent. NOTE: keychain denied-latch is set, so OAuth health is UNKNOWN")
     print(f"  on {len(latched)}/{len(roster)} account(s); run  rotator.py clear-keychain-latch  after re-granting keychain access.")
+    print(IDENTITY_CAVEAT)
     sys.exit(0)
-print("\n✓ All accounts healthy; cookie vs OAuth lifetimes are staggered — nothing to do.")
+print("\n✓ Sessions saved on all accounts; cookie vs OAuth lifetimes are staggered — nothing due.")
+print(IDENTITY_CAVEAT)
 sys.exit(0)
 PY

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# check-login.sh <email> — verify the account's Chrome profile now holds a LIVE
-# claude.ai session (persistent, survived browser quit). Read-only: reads cookie
-# metadata (name/host/expiry) only, NEVER cookie values (those stay encrypted).
-# Exit 0 = logged in & persisted; non-zero = not logged in / not persisted.
+# check-login.sh <email> — verify the Chrome profile FILED UNDER <email> now holds
+# a LIVE claude.ai session (persistent, survived browser quit). Read-only: reads
+# cookie metadata (name/host/expiry) only, NEVER cookie values (those stay encrypted).
+# Exit 0 = a session is saved & persisted; non-zero = none saved.
+# WHOSE session it is CANNOT be verified offline (janitor#179): cookie values are
+# encrypted and no on-disk identity artifact exists — only the capture's /roles
+# probe resolves the true owner (and re-files under the ACTUAL account when they
+# differ). So the ✓ output claims "a session is saved", never "<email> is logged in".
 set -euo pipefail
 
 EMAIL="${1:?usage: check-login.sh <email>}"
@@ -42,14 +46,21 @@ except sqlite3.Error as e:
 # are dropped when Chrome quits, so they don't count as "saved login".
 persistent = [(n, exp) for (n, exp) in rows if exp > chrome_now]
 sk = [exp for (n, exp) in persistent if n == "sessionKey"]
+# janitor#179: never print "<email>: logged in" — this check proves a session is
+# SAVED in the profile filed under <email>, not WHOSE it is (cookie values are
+# encrypted; identity resolves only at capture via /roles). A confident ✓-as-<email>
+# over a profile signed into another account inverted the operator's advice exactly
+# when action was needed.
 if sk:
     when = time.strftime("%Y-%m-%d", time.localtime(sk[0] / 1_000_000 - 11644473600))
-    print(f"  ✓ {email}: logged in — sessionKey valid until ~{when} "
-          f"({len(persistent)} persistent claude.ai cookies).")
+    print(f"  ✓ {email}: a session is SAVED in this profile — sessionKey valid until ~{when} "
+          f"({len(persistent)} persistent claude.ai cookies). Owner unverified offline; "
+          f"capture resolves the true account (janitor#179).")
     sys.exit(0)
 if len(persistent) >= 5:
-    print(f"  ✓ {email}: logged in — {len(persistent)} persistent claude.ai cookies "
-          f"(no cookie literally named sessionKey, but a session is saved).")
+    print(f"  ✓ {email}: a session is SAVED — {len(persistent)} persistent claude.ai cookies "
+          f"(no cookie literally named sessionKey). Owner unverified offline; "
+          f"capture resolves the true account (janitor#179).")
     sys.exit(0)
 print(f"  ✗ {email}: not logged in / not persisted "
       f"({len(rows)} claude.ai cookie(s), {len(persistent)} persistent). "
