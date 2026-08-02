@@ -631,3 +631,52 @@ def test_master_disable_flag_silences_everything(tmp_path: Path) -> None:
     )
     assert r.returncode == 0
     assert r.stdout == ""
+
+
+def test_gitignored_corpus_is_not_scored_as_the_projects_supply_chain(
+    tmp_path: Path,
+) -> None:
+    """janitor#99, third instance. A scanner that judges "the project's own supply chain"
+    must ask GIT what the project ships — a downloaded corpus under a gitignored `*_dev/`
+    dir is not this project's code, and scoring it reports a finding no one can act on.
+
+    `_SKIP_DIRS` LOOKS like it covers this: it contains `"_dev"`. But the test is
+    `any(part in _SKIP_DIRS for part in path.parts)`, and `"downloads_dev" != "_dev"` —
+    so the entry matched only a directory literally named `_dev` and every real `*_dev`
+    tree was scanned. A skip list that silently matches nothing is worse than no skip
+    list: it reads as covered.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("/downloads_dev/\n", encoding="utf-8")
+    corpus = tmp_path / "downloads_dev" / "malware-sample"
+    corpus.mkdir(parents=True)
+    # An exfil-cluster setup.py — the pypi-setup-py-ast sub-check's positive case.
+    (corpus / "setup.py").write_text(
+        "import base64, socket, subprocess\n"
+        "from setuptools import setup\n"
+        "setup(name='x')\n",
+        encoding="utf-8",
+    )
+    r = _run(tmp_path, env_overrides={"CLAUDE_PLUGIN_ALLOW_SELF_SCAN": "1"})
+    assert r.returncode == 0
+    assert "downloads_dev" not in r.stdout, (
+        "a gitignored corpus must not be scored as this project's supply chain; "
+        f"got: {r.stdout!r}"
+    )
+
+
+def test_the_projects_own_setup_py_is_still_scanned(tmp_path: Path) -> None:
+    """The guard above must not disable the check. A TRACKED setup.py with the same
+    exfil-cluster imports is exactly what this detector exists to catch."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "setup.py").write_text(
+        "import base64, socket, subprocess\n"
+        "from setuptools import setup\n"
+        "setup(name='x')\n",
+        encoding="utf-8",
+    )
+    r = _run(tmp_path, env_overrides={"CLAUDE_PLUGIN_ALLOW_SELF_SCAN": "1"})
+    assert r.returncode == 0
+    assert "[pypi-setup-py-ast]" in r.stdout, (
+        f"the project's own setup.py must still be scanned; got: {r.stdout!r}"
+    )

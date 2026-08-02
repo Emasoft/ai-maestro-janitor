@@ -446,3 +446,35 @@ def test_site_packages_is_skipped(tmp_path: Path) -> None:
     r = _run(tmp_path)
     assert r.returncode == 0
     assert r.stdout == ""
+
+
+def test_binary_in_a_project_specific_gitignored_dir_is_not_flagged(tmp_path: Path) -> None:
+    """janitor#99. `_SKIP_PARTS` is a NAME list — it covers the conventional dirs
+    (`node_modules`, `*_dev`) but cannot know THIS project's gitignore. A binary under a
+    project-specific ignored tree is not part of the shipped surface, so flagging it is a
+    finding no one can act on. Git is the authority; the name list stays only as the cheap
+    walk prune."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("/.rechecker/\n", encoding="utf-8")
+    d = tmp_path / ".rechecker" / "scripts"
+    d.mkdir(parents=True)
+    (d / "tool").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert ".rechecker" not in r.stdout, (
+        f"a binary under a gitignored tree must not be flagged; got: {r.stdout!r}"
+    )
+
+
+def test_binary_in_a_tracked_scripts_dir_is_still_flagged(tmp_path: Path) -> None:
+    """The guard must not disable the scanner: a TRACKED ELF under scripts/ is exactly
+    the dropper shape this detector exists to catch."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    d = tmp_path / "scripts"
+    d.mkdir()
+    (d / "tool").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "binary-magic" in r.stdout, (
+        f"a tracked binary in scripts/ must still be flagged; got: {r.stdout!r}"
+    )

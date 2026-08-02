@@ -51,6 +51,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import git_utils  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -376,7 +377,14 @@ def _walk_targets(root: Path, max_files: int) -> list[Path]:
             if not full.is_file():
                 continue
             out.append(full)
-    return out
+    # GIT is the authority on what this project SHIPS (janitor#99). `_SKIP_PARTS` above
+    # is a NAME list — it prunes the walk cheaply (that pruning is what keeps this scan at
+    # 50 ms instead of 5 s, so it stays), but it can only know the conventional dirs. It
+    # cannot know THIS project's gitignore: a binary under a project-specific ignored dir
+    # (`.expect/`, `.rechecker/`, a local build tree) is not part of the shipped surface
+    # and flagging it is a finding no one can act on. Applied to the FINAL candidate list,
+    # after the budget cap, so the whole walk costs exactly one `git check-ignore`.
+    return git_utils.drop_gitignored(out, root=root)
 
 
 def _self_path() -> Path:

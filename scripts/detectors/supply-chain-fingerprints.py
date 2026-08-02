@@ -89,6 +89,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import git_utils  # type: ignore[import-not-found]  # noqa: E402
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
@@ -276,6 +277,36 @@ _GO_KILL_PATTERNS = [
 
 # Where to look for these env settings (project scope only — we never read
 # user dotfiles outside the project root).
+def _own_code(paths: list[Path], project_root: Path) -> list[Path]:
+    """The subset of `paths` that is THIS PROJECT'S OWN code — the only surface a
+    supply-chain scanner may judge (janitor#99).
+
+    GIT is the authority, via the shared `drop_gitignored`. `_SKIP_DIRS` is kept as a
+    cheap pre-filter (it also covers a project dir that is not a repo at all, where git
+    can answer nothing), but it must never be the only gate: a static name list cannot
+    know a given project's gitignore, and this one silently proved the point — it carried
+    `"_dev"`, while the membership test `part in _SKIP_DIRS` only ever matched a directory
+    literally NAMED `_dev`, so every real `downloads_dev/` `libs_dev/` `_corpus_dev/` tree
+    was scanned. A downloaded malware corpus under one of those was then reported as this
+    project's supply chain — and, because these checks raise tickets, dispatched a repair
+    agent at a file the project does not own. A skip list that matches nothing is worse
+    than none: it reads as covered.
+
+    The `*_dev` SUFFIX rule is honoured here explicitly (not left to the exact-match set)
+    so the documented convention still works in a non-git project directory.
+
+    Deliberately NOT applied to the `node_modules` / vendored-dependency walks: those
+    paths are gitignored BY DESIGN and scanning them is the entire point of the C2 and
+    lockfile checks. This filter answers "is this the project's own source?", which is a
+    different question from "is this a dependency we should inspect?"."""
+    kept = [
+        p
+        for p in paths
+        if not any(part in _SKIP_DIRS or part.endswith("_dev") for part in p.parts)
+    ]
+    return git_utils.drop_gitignored(kept, root=project_root)
+
+
 def _go_scan_targets(project_root: Path) -> list[Path]:
     """Files within project_root that may set Go env vars."""
     out: list[Path] = []
@@ -287,11 +318,9 @@ def _go_scan_targets(project_root: Path) -> list[Path]:
         for f in workflows.glob("*.yaml"):
             out.append(f)
     # Dockerfiles (any name starting with Dockerfile in any depth).
-    for f in project_root.rglob("Dockerfile*"):
-        if any(p in _SKIP_DIRS for p in f.parts):
-            continue
-        if f.is_file():
-            out.append(f)
+    out.extend(
+        _own_code([f for f in project_root.rglob("Dockerfile*") if f.is_file()], project_root)
+    )
     # Makefiles.
     for name in ("Makefile", "makefile", "GNUmakefile"):
         f = project_root / name
@@ -632,9 +661,7 @@ def _check_setup_py_ast(project_root: Path) -> list[str]:
     ):
         return []
     issues: list[str] = []
-    for path in project_root.rglob("setup.py"):
-        if any(p in _SKIP_DIRS for p in path.parts):
-            continue
+    for path in _own_code(list(project_root.rglob("setup.py")), project_root):
         try:
             source = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -736,9 +763,10 @@ def _content_signature(project_root: Path) -> str:
             pass
 
     # setup.py files.
-    for p in sorted(project_root.rglob("setup.py")):
-        if any(part in _SKIP_DIRS for part in p.parts):
-            continue
+    # Same `_own_code` gate as the scan itself — the signature must cover EXACTLY the
+    # files that get scanned, or a change to an unscanned file busts the dedupe hash and
+    # re-emits an unchanged finding every fire.
+    for p in _own_code(sorted(project_root.rglob("setup.py")), project_root):
         try:
             st = p.stat()
             rel_path = p.relative_to(project_root)
