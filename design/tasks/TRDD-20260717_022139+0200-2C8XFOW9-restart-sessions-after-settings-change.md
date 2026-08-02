@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: backburner
 blocked-by: [ai-maestro#75]
 created: 2026-07-17T02:21:39+0200
-updated: 2026-08-02T06:02:00+0200
+updated: 2026-08-02T11:26:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -157,3 +157,33 @@ PROJECT-scope feature (janitor's own repo), requested by the USER this session (
 exit and restart all agents after changing the settings.json …"). HIGH-BLAST-RADIUS (auto-restarts
 the user's Claude sessions with a permission-bypass flag) → held for explicit USER confirmation of
 the disruptive behavior before implementation, and blocked on ai-maestro#75 for the ai-maestro path.
+
+### 2026-08-02 — both halves the blocker owes are ON DISK; the blocker issue is still open
+
+Surfaced by ai-maestro's Claude on janitor#166 and then VERIFIED on this host (`command -v`,
+`--help`), not taken on their word:
+
+| what #75 owes this card | state |
+|---|---|
+| a sanctioned `~/.claude/settings.json` edit API | **`aimaestro-settings.sh`** — `get` / `set` / `delete` / `edit --ops`, gated: the path must be an absolute `settings.json`/`settings.local.json` directly inside a `.claude` dir |
+| a CLI-client restart command | **`aimaestro-continuity.sh restart-self [--force]`** (also `status <self>`, `ensure-resume <self>`) |
+
+There is **no** `aimaestro-manage-clients.sh cli-client-restart` — the guess recorded in the STATE
+block above was wrong, and `restart-self` is the real verb. ai-maestro's own audit reached the same
+conclusion independently and flagged that this card's prose is the ONLY place that name appears, so
+nobody re-files it as a phantom call.
+
+**Emasoft/ai-maestro#75 is nevertheless still OPEN**, so `blocked-by:` is unchanged and honest —
+the artifacts existing on one host is not the same as the coordination issue being satisfied. I
+asked on janitor#166 whether they consider it closed.
+
+**This does NOT unblock the card.** The larger hold is the USER's, and it is untouched: this
+auto-restarts their live Claude sessions with `--dangerously-skip-permissions`. That decision is
+theirs whatever the CLI offers.
+
+**Also relevant, from the same exchange:** ai-maestro found that a LENIENT settings reader —
+returning `{}` for both "absent" and "unparseable" — made five of their read-modify-write sites
+REPLACE a corrupt settings file with a minimal object. Checked `settings_ensurer.py` here: it does
+NOT have that shape (`_load_settings` returns `None` for malformed/non-object/unreadable and both
+call sites abort, including the re-read under the lock). Recorded because THIS card is the one that
+would add a second settings-writing path, and that is the shape it must not grow.
