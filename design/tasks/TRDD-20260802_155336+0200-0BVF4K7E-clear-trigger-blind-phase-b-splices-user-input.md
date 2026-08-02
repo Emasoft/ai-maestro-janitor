@@ -1,25 +1,50 @@
 ---
 trdd-id: 0BVF4K7E
 title: handoff-and-clear types blind 2s and 10s after its only presence check, so it can splice and submit a user's draft
-column: todo
+column: testing
 created: 2026-08-02T15:53:36+0200
-updated: 2026-08-02T15:53:36+0200
+updated: 2026-08-02T16:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 blocked-by: []
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [9652096, e17ff17]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Not started. The defect is VERIFIED by code reading; the FIX is designed but NOT approved.**
-The owner must choose between the chained-child design and the documented "leave at rules 1+2"
-fallback — the advisor is explicit that a naive middle path is *worse than the status quo*.
+**SHIPPED. Owner chose Option 1 (chained detached child) on 2026-08-02.**
+Phase 1 `9652096`, phase 2 `e17ff17`. Column `testing` — awaiting one real firing.
 
-**NEXT ACTION:** put the two options below to the owner, then implement the chosen one.
+### What landed
+
+- **Phase 1** — the pure pieces: `build_type_only_steps` / `build_submit_steps` (typing and
+  Enter must be SEPARABLE, because rule 3 verifies BETWEEN them and `build_tmux_steps` fuses
+  them), and `_await_fresh_session`.
+- **Phase 2** — `run_chained_inject` + a `--__chain` child in `clear_trigger`. ONE child, one
+  sequence: verified `/clear` → wait for `clear-observed.ts` to advance → verified
+  `/janitor-arm` → verified `/janitor-resume`. Every command read back before its Enter.
+- **Resume-state writes moved into the child's `pre_submit`** — the instant between "the field
+  reads exactly `/clear`" and Enter. This is the ONLY moment "a clear is about to happen" is
+  true; leaving them in `main()` once the child can defer for minutes would resurrect #105.
+- **Give-up is loud and self-cleaning**: the child logs its `(ok, why)` (stdio is DEVNULL, so
+  otherwise a give-up is indistinguishable from success) and DELETES the resume state it wrote.
+- **Non-blocking flock** so a second invocation cannot queue behind a pending chain and type
+  `/clear` twice — the second landing in the fresh session.
+- **Transient unreadable pane retries** (bounded, 3) on a readable channel; wtype/xdotool still
+  fail fast, since retrying cannot make them readable.
+- **Unreadable channels keep the legacy blind two-phase send** rather than refusing — refusing
+  would discard a command the user typed themselves, the behaviour the owner removed.
+
+Mutation-verified: removing the fresh-session gate, and firing `pre_submit` without a verified
+field, each red their own guard test. Full suite 14,174 passed.
+
+**NEXT ACTION:** observe ONE real `/janitor-handoff-and-clear` on a readable channel (tmux or
+iTerm) and confirm from `.janitor/logs/clear-trigger.log` that the chain reports `chain: OK`.
+Then `complete`. Do NOT close on the test suite alone — this whole card exists because the
+previous design passed its tests and still typed blind.
 
 ### The defect (verified in `scripts/clear_trigger.py`, 2026-08-02)
 
