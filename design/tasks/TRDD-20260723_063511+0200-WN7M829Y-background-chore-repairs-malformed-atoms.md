@@ -13,6 +13,12 @@ npt: [DOJ2LE1G]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
 
+**2026-08-02 20:15 — USER BATCH 1 VERIFIED: 33→22 (11 done, 0 flagged).** Count re-checked
+first-hand via `memgrep lint`; no pending transactions; touched pages gained no new findings.
+Remaining: **22 USER atoms in 2 more batches — HELD by the burn throttle** (5h window at 1.5×
+pace; resume after the ~22:40 reset per `.janitor/state/resume-directive.txt`). Report:
+`reports/janitor-memory-subconscious-agent/20260802_195003+0200-wn7m829y-oversized-pass3-user-b1.md`.
+
 **2026-08-02 19:45 — PASS 2a VERIFIED: LOCAL 1→0.** The page the verifier defect blocked
 (`reference_publish_cargo_clippy_bindgen_flaky.md`) decomposed clean on the first try after
 `c05ab942` — the fix is proven end-to-end, not just in the unit test. PROJECT and LOCAL are
