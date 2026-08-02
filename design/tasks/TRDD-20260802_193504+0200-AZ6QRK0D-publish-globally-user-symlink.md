@@ -1,15 +1,17 @@
 ---
 trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
-column: todo
+column: blocked
+pre-block-column: todo
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T19:35:04+0200
+updated: 2026-08-02T23:36:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
 scope: project
 release-via: publish
 created-by: 87RKBYJ8
+external-refs: [52]
 npt: []
 eht: []
 implementation-commits: []
@@ -17,10 +19,32 @@ implementation-commits: []
 
 # `published-globally` frontmatter value → a real USER-scope symlink
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-**Not started.** Child 2 of 4 split out of TRDD-87RKBYJ8 (duty 21, second in the parent's own
-priority order). Coordinate with issue **#52**'s cross-project design before building.
+**BLOCKED — do NOT build (the #52 coordination the card mandated was done 2026-08-02
+and it FORBIDS building this here).** The publishing verbs (`publish-sync` / `link`)
+belong to the UPSTREAM memgrep engine roadmap — ai-maestro-plugin **TRDD-202ccfa2**,
+tracked as **ai-maestro-plugin#18** — and the engine owner has not shipped them
+(re-verified in #52's thread: memgrep 0.1.0, verbs absent; design-text-only upstream).
+The janitor VENDORS `scripts/memgrep/`; a prior session's recorded ownership decision on
+janitor#52 (correct, per `how-to-fix-issues-of-other-projects.md`) is that building
+these verbs in the vendored copy would FORK the engine and pre-empt the owner's design.
+The janitor's standing OFFER to implement them as a branch→PR on ai-maestro-plugin sits
+on #18 awaiting the owner's go.
+
+**Unblock condition:** ai-maestro-plugin#18 lands a released memgrep with the verbs (or
+the owner accepts the PR offer) → re-sync the vendored copy → then wire this card's
+janitor half (symlink lint + privacy-gate + skills/heartbeat wiring) in one pass.
+**NEXT ACTION on unblock:** re-read janitor#52's last two comments (the held asks
+1/2/4/5 land together with the wiring), then implement per the audit steps below.
+
+**SUPERSEDED — do NOT carry forward:** "Not started. … Coordinate with issue #52 …
+before building" (the coordination happened; its outcome is the block above).
+
+---
+
+Child 2 of 4 split out of TRDD-87RKBYJ8 (duty 21, second in the parent's own
+priority order).
 
 ## The ask (parent duty 21 — the publishing half is MISSING)
 
