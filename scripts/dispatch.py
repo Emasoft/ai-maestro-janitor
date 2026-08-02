@@ -2204,6 +2204,18 @@ def _phase_cadence_tier() -> None:
 def main() -> int:
     state.init_state()
 
+    # Fire-time stamp (TRDD-LI7ENU2A prerequisite): record EVERY fire's wall-clock
+    # time, BEFORE any early-returning phase, so the cadence's real recovery-latency
+    # distribution (period + cron jitter) becomes measurable from FIRE times. Nothing
+    # else records a fire: token-meter's `ts` is turn-END (its `ts mod 300` is uniform
+    # — it measures turn duration, not jitter) and dispatch.log logs events, not
+    # fires. Bounded by log_line's structural rotation (S4); best-effort because
+    # telemetry must never kill a fire.
+    try:
+        state.log_line("heartbeat-fires", f"fire epoch={int(time.time())}")
+    except Exception:  # noqa: BLE001 -- telemetry only; the fire must proceed
+        pass
+
     # D5 (TRDD-82JRK0CY): reset the per-fire decision sentinel. A production fire is one
     # process so this is a no-op there, but tests call main()/phases repeatedly in-process,
     # and _emit_quiet_if_idle keys on it — so the reset is load-bearing for correctness.

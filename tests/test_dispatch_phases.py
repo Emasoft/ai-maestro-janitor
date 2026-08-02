@@ -2020,3 +2020,34 @@ def test_main_action_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-resume]" in out
     assert "[janitor-quiet]" not in out
+
+
+# ---------- the fire-time stamp (TRDD-LI7ENU2A prerequisite) ----------
+
+
+def test_main_stamps_fire_time_even_on_the_earliest_early_return(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EVERY fire must land a `fire epoch=` line in heartbeat-fires.log — including a
+    STOP-mode fire, which returns before every other phase. The stamp is what makes the
+    cadence's real recovery-latency distribution (period + cron jitter) measurable at
+    all: token-meter's ts is turn-END (its ts-mod-300 is uniform — turn duration, not
+    jitter) and nothing else records a fire. Proving the stamp on the EARLIEST return
+    proves it on every path. Two fires must append TWO lines (per-fire, not once)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    gs.set_kill_switch("disarmed")  # STOP mode — main() returns at Phase 0
+
+    _capture_stdout(dispatch.main)
+    log = state.log_dir() / "heartbeat-fires.log"
+    assert log.is_file(), "the fire stamp must land before the earliest early return"
+    lines = [ln for ln in log.read_text().splitlines() if "fire epoch=" in ln]
+    assert len(lines) == 1, f"one fire must stamp exactly one line, got {lines}"
+    assert re.search(r"fire epoch=\d{10}", lines[0]), lines[0]
+
+    _capture_stdout(dispatch.main)
+    lines = [ln for ln in log.read_text().splitlines() if "fire epoch=" in ln]
+    assert len(lines) == 2, "the stamp is per-fire, not once-per-session"

@@ -38,8 +38,15 @@ _TIER_RANK = {SLOW: 0, MID: 1, FAST: 2}
 # from MEASURED per-fire cost (the janitor's own token-meter: a quiet fire on a
 # ~510k-context session ≈ 507k cache_read ≈ $0.76):
 #   FAST=*/5  — keep the pre-#83 cadence for an ACTIVELY-WAITING session (rate-limit
-#               / resume pending): recovery latency matters most exactly then, so
-#               there is ZERO regression vs today for the state that needs speed.
+#               / resume pending): recovery latency matters most exactly then, and the
+#               FIRING FREQUENCY is unchanged vs pre-#83. The worst-case GAP is NOT
+#               "5 minutes": a scheduled fire lands late by a documented jitter, and
+#               the two sources disagree — the CronCreate tool says ≤10% of the
+#               period (max 15 min), the CC docs page says up to HALF the interval
+#               for sub-hourly tasks (both checked 2026-08-02) — so quote */5 as
+#               "5 min + 0.5–2.5 min jitter", never a bare period. Real distribution:
+#               measure FIRE times (`.janitor/logs/heartbeat-fires.log`, stamped by
+#               dispatch.main), never token-meter turn-END times (TRDD-LI7ENU2A).
 #   MID=*/15  — recent user activity: 3x cheaper than */5, still timely.
 #   SLOW=*/30 — idle keep-warm: 6x cheaper than */5, 30-min gaps under the 1h TTL.
 # */30 is the SAFE FLOOR for a uniform cadence: any `*/N` with 30<=N<60 fires

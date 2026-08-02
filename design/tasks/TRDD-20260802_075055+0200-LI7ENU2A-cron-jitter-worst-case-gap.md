@@ -1,9 +1,9 @@
 ---
 trdd-id: LI7ENU2A
 title: The cadence tiers' recovery-latency claim ignores cron jitter, and the two sources for it disagree
-column: todo
+column: complete
 created: 2026-08-02T07:50:55+0200
-updated: 2026-08-02T08:16:00+0200
+updated: 2026-08-02T19:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: docs
 severity: LOW
@@ -18,7 +18,30 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-**Not started.** NPT #3 of TRDD-9K0O5YBQ's compatibility audit, extracted 2026-08-02 (rule 9).
+**✅ COMPLETE 2026-08-02 19:25.** All three deliverables shipped, verification bullets met:
+
+1. **Prerequisite fire-stamp** — `dispatch.main()` now stamps `fire epoch=<epoch>` into
+   `.janitor/logs/heartbeat-fires.log` as its FIRST act after `init_state()`, before every
+   early-returning phase (stop-mode included). Bounded by `log_line`'s structural rotation
+   (S4); best-effort so telemetry can never kill a fire. Test:
+   `test_main_stamps_fire_time_even_on_the_earliest_early_return` (proves the earliest
+   return still stamps, and that it is per-fire, not once).
+2. **`heartbeat_cadence.py` docstring** — the FAST-tier comment now states firing FREQUENCY
+   unchanged, worst-case GAP = period + jitter, BOTH sources with their disagreement
+   (CronCreate tool ≤10%/max-15min vs CC docs half-the-interval, checked 2026-08-02), and
+   points measurement at fire times, never token-meter.
+3. **Wikimem** (the post-slim home of the old CLAUDE.md cadence text) —
+   `janitor-beat-tasks-and-limitations.md`: both claim sites corrected (tier table + the
+   control-flow atom `ATOM-PHXC-VE71`), correction lesson `[^2]` (`ATOM-0AOD-B2GJ`) added
+   via `memgrep add-lesson` per the protocol; validate + lint clean.
+
+Repo-wide grep: no claim survives that a tier's recovery latency is exactly its period
+(TRDD-0QQX9H0G is `published` — frozen, exempt per rule 12, and this card is its public
+correction). No jitter NUMBER was fabricated: only the two documents' ranges are quoted,
+with source + date; a measured figure waits for real `heartbeat-fires.log` data.
+
+*(superseded original entry: "Not started. NPT #3 of TRDD-9K0O5YBQ's compatibility audit,
+extracted 2026-08-02 (rule 9).")*
 
 ## The claim, and why it is optimistic
 
