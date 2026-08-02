@@ -1944,9 +1944,27 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         resume_recent = last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S
         if resume_recent and not _daemon_wake_covered_fresh(sd, now):
             return True
+        # AGE-BOUNDED, like the resume stamp above — and for the same reason, which this
+        # signal did not originally have. `resume-directive.txt` is unlinked by exactly ONE
+        # consumer, `post-compact-resume.py` ("one-shot per compact"). If that compaction
+        # never lands — the soft `/compact` is only ENQUEUED, so a session that never ends
+        # its turn, or is restarted first, never runs it — the pointer is never consumed and
+        # this branch pins the session to the FAST `*/5` tier FOREVER.
+        #
+        # Measured 2026-08-02: an idle session held FAST for 2.9 h on a directive written
+        # TWO DAYS earlier (Jul 31), which agentlensPro then reported as the fleet's #1
+        # IDLE_FLEET_KEEPWARM culprit inside a ~$200 window. 6x the fires, indefinitely,
+        # for a wait that ended two days ago.
+        #
+        # Bounding the CADENCE signal does NOT delete or ignore the file: the directive is
+        # still read as CONTENT by the resume phases and the nudge (dispatch.py:1712). Only
+        # its claim to mean "actively waiting RIGHT NOW" expires — which is precisely the
+        # distinction the stamp already made and this branch conflated.
         directive = sd / "resume-directive.txt"
         if directive.is_file() and directive.stat().st_size > 0:
-            return True
+            age = now - int(directive.stat().st_mtime)
+            if 0 <= age < _RESUME_RECENCY_WINDOW_S:
+                return True
     except OSError:
         pass
     # EXTERNAL agents only (TRDD-CI6ZTNB9): a janitor-spawned memory/security agent

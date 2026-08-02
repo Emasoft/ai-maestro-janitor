@@ -561,3 +561,53 @@ def test_dynamic_off_is_still_a_total_noop(proj: Path, monkeypatch: pytest.Monke
     out = _run_phase(dispatch)
     assert out == ""
     assert not (_state(proj) / "desired-cadence.cron").exists()
+
+
+def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE measured idle-burn defect (2026-08-02), and the asymmetry that caused it.
+
+    `resume-directive.txt` is unlinked by exactly ONE consumer — `post-compact-resume.py`,
+    "one-shot per compact". The soft `/compact` is only ENQUEUED, so a session that never ends
+    its turn (or is restarted first) never runs it and the pointer is never consumed. The old
+    check was `is_file() and st_size > 0` with NO age bound, while its sibling signal — the
+    resume STAMP one line above — has always been bounded to 30 min. Same signal class, one
+    bounded, one not.
+
+    Consequence measured on a live host: an idle session held the FAST `*/5` tier for 2.9 h on a
+    directive written TWO DAYS earlier, which agentlensPro then reported as the fleet's #1
+    IDLE_FLEET_KEEPWARM culprit inside a ~$200 window. 6x the fires, indefinitely, for a wait
+    that had ended two days before.
+
+    The fix bounds the CADENCE claim only. The file is still read as CONTENT by the resume
+    phases and the keep-going nudge — an old directive still says what to resume, it just stops
+    asserting "actively waiting RIGHT NOW"."""
+    import os
+    import time
+
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    now = int(time.time())
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+
+    d = sd / "resume-directive.txt"
+    d.write_text("continue TRDD-SOMETHING")
+
+    # Fresh: still FAST — the signal must keep working for a real, current wait.
+    assert dispatch._cadence_active_waiting(sd, now) is True
+
+    # Two days old, exactly the observed case: must NOT hold FAST any more.
+    stale = now - 2 * 24 * 3600
+    os.utime(d, (stale, stale))
+    assert dispatch._cadence_active_waiting(sd, now) is False, (
+        "a stale directive still pins FAST — the idle-burn defect is back"
+    )
+
+    # ...and the file is NOT deleted: it is still the pointer to what to resume.
+    assert d.is_file() and d.read_text() == "continue TRDD-SOMETHING"
+
+    # Just inside the window is still FAST (boundary, so the bound cannot be silently widened).
+    fresh = now - (dispatch._RESUME_RECENCY_WINDOW_S - 60)
+    os.utime(d, (fresh, fresh))
+    assert dispatch._cadence_active_waiting(sd, now) is True
