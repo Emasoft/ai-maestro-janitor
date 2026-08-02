@@ -1,9 +1,9 @@
 ---
 trdd-id: 0BVF4K7E
 title: handoff-and-clear types blind 2s and 10s after its only presence check, so it can splice and submit a user's draft
-column: testing
+column: complete
 created: 2026-08-02T15:53:36+0200
-updated: 2026-08-02T16:52:00+0200
+updated: 2026-08-02T17:41:04+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -15,8 +15,22 @@ implementation-commits: [9652096, e17ff17]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**SHIPPED. Owner chose Option 1 (chained detached child) on 2026-08-02.**
-Phase 1 `9652096`, phase 2 `e17ff17`. Column `testing` — awaiting one real firing.
+**COMPLETE — observed firing, 2026-08-02 17:39:53 +0200.** Owner chose Option 1 (chained
+detached child); phase 1 `9652096`, phase 2 `e17ff17`.
+
+### The observation that closed it (the whole reason this card existed)
+
+`.janitor/logs/clear-trigger.log` →
+`[2026-08-02T17:39:53+0200] [s:e804d2c9] chain: OK — chain complete`, and the successor
+session received exactly the chained sequence: `/clear` → `/janitor-arm` →
+`/janitor-resume`, in that order, nothing spliced. Corroborated first-hand by
+`scripts/handoff_clear_verify.py --phase after` — 4 PASS / 0 FAIL / 1 SKIP: cron id
+`d08f431a` → `be44aa7e` (destroyed by `/clear`, recreated by the chained re-arm), context
+638,904 → 230,619 tokens, SessionStart ran on `source=clear`. The single SKIP
+(`resume_flag_consumed`) is EXPECTED, not a gap: the design deliberately moved the
+resume-state writes into the child's `pre_submit`, i.e. strictly AFTER the `--phase before`
+snapshot is taken, so the "before" snapshot cannot see a flag that does not exist yet.
+Reading that SKIP as a failure would be reading the fix as the bug.
 
 ### What landed
 
@@ -41,10 +55,10 @@ Phase 1 `9652096`, phase 2 `e17ff17`. Column `testing` — awaiting one real fir
 Mutation-verified: removing the fresh-session gate, and firing `pre_submit` without a verified
 field, each red their own guard test. Full suite 14,174 passed.
 
-**NEXT ACTION:** observe ONE real `/janitor-handoff-and-clear` on a readable channel (tmux or
-iTerm) and confirm from `.janitor/logs/clear-trigger.log` that the chain reports `chain: OK`.
-Then `complete`. Do NOT close on the test suite alone — this whole card exists because the
-previous design passed its tests and still typed blind.
+**NEXT ACTION: none — card closed.** It was: observe ONE real
+`/janitor-handoff-and-clear` on a readable channel and confirm `chain: OK`. Done, above.
+Closing on the test suite alone was explicitly forbidden here, because this whole card
+exists because the previous design passed its tests and still typed blind.
 
 ### The defect (verified in `scripts/clear_trigger.py`, 2026-08-02)
 
