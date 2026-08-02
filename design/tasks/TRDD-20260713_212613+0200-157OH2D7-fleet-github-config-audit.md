@@ -1,9 +1,9 @@
 ---
 trdd-id: 157OH2D7
 title: Fleet GitHub-config + security audit across all plugin repos with an on-demand fix skill
-column: testing
+column: complete
 created: 2026-07-13T21:26:13+0200
-updated: 2026-08-02T17:26:00+0200
+updated: 2026-08-02T18:20:13+0200
 current-owner: janitor-session
 task-type: security
 severity: high
@@ -73,10 +73,28 @@ by the apply's own report: `role-agent` no longer appears. **Fleet is 12 of 13 c
 CI workflow defines; that repo's workflows define none, so there is nothing for a ruleset to
 require. Applying harder cannot fix it — authoring the workflow can.
 
-**NEXT ACTION:** run `/janitor-github-workflow-doctor` against
-`Emasoft/ai-maestro-web-scenario-tester` to give it CI check contexts, then re-run
-`github_config_fix.py --all` (read-only) and confirm the fleet reads 13/13. That is the only
-remaining work on this card.
+### ✅ 2026-08-02 18:20 — CLOSED: the fleet reads CLEAN, and the "structurally out of reach" claim was half-wrong
+
+The prescribed doctor run turned out unnecessary: `web-scenario-tester` HAD gained CI
+workflows (ci.yml with PR-triggered Lint/Test/Validate/… jobs) since the earlier diagnosis.
+Yet re-applying still left `NO_REQUIRED_CHECKS` — which exposed the REAL residual defect,
+in THIS tool, not that repo: `github_config_fix._project_root_for` handed every FOREIGN
+slug a nonexistent path, so `detect_required_status_checks` (which reads LOCAL workflow
+files) returned [] for any repo that wasn't the cwd. The fix could never have populated a
+fleet repo's checks rule from here, doctor or no doctor.
+
+**Fix (this card's closing commit):** `_fetch_remote_workflows` pulls the slug's
+`.github/workflows/*.yml|yaml` via `gh api` (bounded: ≤25 files, ≤512KB each, never
+raises) and stages them into a temp `.github/workflows/` that the SAME parser reads — one
+implementation for local and fleet, empty-fetch degrades to the old omit-the-rule
+behavior (an empty contexts array 422s the whole ruleset write). Tests monkeypatch the
+fetcher; parity with the PR-triggered-only filter proven.
+
+**Verified independently, not from the apply's own report:** the `baseline-pr-and-checks`
+ruleset on `web-scenario-tester` now requires
+`["Commitlint","Lint","Test","Test matrix","Validate","Workflow Security"]`, and a fresh
+read-only `--all` reports **14 of 14 repos compliant, zero findings** (the catalog grew to
+14 since the card's "13"). No remaining work.
 
 **Load-bearing facts / gotchas:**
 - Reuse, don't reinvent: `branch_protection_lib.apply_baseline_rulesets` /

@@ -26,21 +26,29 @@ SAFETY (Tier-2 discipline):
     plan routes them to /janitor-github-workflow-doctor and /janitor-security-agent.
 
 CI-context note: apply_baseline_rulesets auto-detects the required status-check contexts from
-`.github/workflows/` of the LOCAL checkout. So contexts are detected only for the repo whose
-working tree is the current directory. For a remote fleet repo we don't have locally, the
+`.github/workflows/` under the project root it is handed. For the repo whose checkout IS the
+cwd that root is the cwd; for a remote fleet repo the workflow files are FETCHED via
+`gh api repos/<slug>/contents/...` and staged into a temp `.github/workflows/` first, so the
+SAME parser (`detect_required_status_checks`) reads them — one implementation, no divergence
+between local and fleet behavior. This closed the last 157OH2D7 gap: the 13th fleet repo kept
+its NO_REQUIRED_CHECKS finding forever because the fix could only discover contexts for the
+cwd repo. When the fetch yields nothing (no workflows, no net, no auth) the
 `required_status_checks` RULE IS OMITTED — GitHub 422s an empty contexts array and that 422
 fails the whole ruleset write, so emitting it would take the `pull_request` gate down with it
 (observed live: 11 of 12 fleet repos 422'd while the one repo that WAS the cwd succeeded).
-The PR-review gate still lands everywhere; re-run this from a repo's own checkout to add its
-checks rule. The merge-jam + unprotected fixes do NOT depend on any of that.
+The PR-review gate still lands regardless; the merge-jam + unprotected fixes do NOT depend on
+any of that.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -64,12 +72,76 @@ def _current_repo_slug() -> str | None:
     return bpl.detect_repo_slug(Path.cwd())
 
 
+# Bounds on the remote-workflow fetch — a repo with hundreds of workflow files (or one
+# gigantic one) must not turn a config fix into a download job. Generous vs reality: the
+# fleet's busiest repo has 3.
+_MAX_REMOTE_WORKFLOWS = 25
+_MAX_WORKFLOW_BYTES = 512 * 1024
+
+# Keep every staged temp tree alive until interpreter exit: apply_baseline_rulesets reads
+# the staged files AFTER _project_root_for returns, so an eagerly-cleaned TemporaryDirectory
+# would hand it an empty root and silently regress to the no-contexts behavior.
+_STAGED_TMPDIRS: list[tempfile.TemporaryDirectory] = []
+
+
+def _fetch_remote_workflows(slug: str) -> dict[str, str]:
+    """`{filename: content}` for `slug`'s `.github/workflows/*.yml|yaml`, via `gh api`.
+
+    Never raises — every failure (no dir, no auth, no net, bad base64) degrades to an
+    empty dict, which downstream means "no contexts detected", exactly the pre-fetch
+    behavior. The listing and each file body come from the contents API; the body is the
+    JSON `content` field (base64), decoded here rather than shelled through `base64` so a
+    single malformed file skips cleanly."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["gh", "api", f"repos/{slug}/contents/.github/workflows"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if proc.returncode != 0:
+            return {}
+        listing = json.loads(proc.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return {}
+    if not isinstance(listing, list):
+        return {}
+    out: dict[str, str] = {}
+    for entry in listing[:_MAX_REMOTE_WORKFLOWS]:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name.endswith((".yml", ".yaml")) or "/" in name:
+            continue
+        if entry.get("size") and entry["size"] > _MAX_WORKFLOW_BYTES:
+            continue
+        try:
+            body = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["gh", "api", f"repos/{slug}/contents/.github/workflows/{name}", "--jq", ".content"],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if body.returncode != 0:
+                continue
+            out[name] = base64.b64decode(body.stdout).decode("utf-8")
+        except (OSError, subprocess.SubprocessError, binascii.Error, UnicodeDecodeError):
+            continue
+    return out
+
+
 def _project_root_for(slug: str, current_slug: str | None) -> Path:
-    """cwd when `slug` IS the current checkout (workflows are local → contexts detected), else
-    a path with no `.github/workflows/` so detect_required_status_checks returns []."""
+    """A root whose `.github/workflows/` holds `slug`'s workflow files: the cwd when `slug`
+    IS the current checkout, else a temp stage filled from the remote repo — so
+    `detect_required_status_checks` (the ONE parser) discovers contexts for fleet repos
+    too, not just the local one. A failed/empty fetch returns a path with no workflows dir,
+    which downstream reads as "no contexts" (the safe pre-fetch behavior)."""
     if current_slug and slug == current_slug:
         return Path.cwd()
-    return Path("/nonexistent-janitor-github-config-fix")
+    files = _fetch_remote_workflows(slug)
+    if not files:
+        return Path("/nonexistent-janitor-github-config-fix")
+    tmp = tempfile.TemporaryDirectory(prefix="janitor-ghcfg-wf-")
+    _STAGED_TMPDIRS.append(tmp)  # keep alive past this call — see the list's comment
+    wf_dir = Path(tmp.name) / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    for name, content in files.items():
+        (wf_dir / name).write_text(content, encoding="utf-8")
+    return Path(tmp.name)
 
 
 def _put_ruleset(slug: str, rid: int, payload: dict) -> tuple[bool, str]:
