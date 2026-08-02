@@ -500,7 +500,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=cd90ff035eb0 digest=522a3c68231b generated=2026-08-02T06:18:20+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=954d84676104 digest=a4c05c35d4d3 generated=2026-08-02T12:36:04+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -549,6 +549,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · Task.run(self) -> None
   · main() -> int
 `scripts/daemon_keepalive_entry.py` — L0 OS-keepalive entry point (TRDD-71ABD7V7) — run the co-located daemon.
+`scripts/detectors/agent-context-integrity.py` — agent-context-integrity — scan the files the agent loads AS INSTRUCTIONS (janitor#167).
+  · poisoned_reason(findings, *, cap) -> str — The `contextPoisonedReason` string for the ai-maestro wake gate (janitor#167).
+  · main() -> int
 `scripts/detectors/ai-context-poisoning.py` — AI-context-poisoning detector — npm + pip postinstall write audit.
   · main() -> int
 `scripts/detectors/binary-magic-scanner.py` — binary-magic-scanner — magic-byte sniff for binaries in unexpected paths.
@@ -766,9 +769,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/hooks/post-mcp-response-sanitizer.py` — PostToolUse hook — MCP-response prompt-injection sanitiser.
   · main() -> int
-`scripts/hooks/pre-bash-safety.py` — PreToolUse hook — compositional bash-exfil + sensitive-write blocker.
+`scripts/hooks/pre-bash-safety.py` — PreToolUse hook — bash-exfil, sensitive-write, and outbound-publication blocker.
   · check_compositional_exfil(command) -> str | None — Return a deny-reason if the command is a source+sink exfil chain.
   · check_sensitive_write(command) -> str | None — Return a deny-reason if the command writes to a sensitive path.
+  · check_outbound_publication(command) -> str | None — Deny a `gh` publish whose payload carries an email or a non-owner @mention.
   · main() -> int
 `scripts/hooks/pre-compact-handoff.py` — PreCompact hook — write a FILESYSTEM-GROUNDED handoff before each compaction.
   · main() -> int
@@ -973,7 +977,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · stale_threshold_for(armed_cron, base_stale_s) -> int — The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
   · substantive_age_from_tail(tail, *, now, fallback_age) -> tuple[int | None, int] — ``(substantive_age_s, trailing_enqueues)`` for a transcript tail.
-  · transcript_activity(root, now) -> tuple[int | None, int] — ``(substantive_age_s, trailing_enqueues)`` for this project's transcripts —
+  · awaiting_user_decision(tail) -> bool — True iff the transcript tail ends on an UNANSWERED call to a HUMAN-FACING tool
+  · transcript_activity(root, now) -> tuple[int | None, int, bool] — ``(substantive_age_s, trailing_enqueues, awaiting_user)`` for this project's
   · transcript_age(root, now) -> int | None — Seconds since this project's newest SUBSTANTIVE transcript line, or ``None``
   · sweep_stale_rate_limit(root, *, now, max_age_s) -> bool — Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
   · diagnose_root(root, *, now, transcript_age, stale_s, server_owned) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
@@ -989,6 +994,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/lib/git_utils.py` — Shared git helpers — Python port of scripts/lib/git-utils.sh.
   · is_squash_merged(branch_ref, base_ref, cwd) -> bool — Detect whether <branch_ref> was squash-merged into <base_ref>.
   · scope_tracking_status(rel) -> str — Probe git tracking status of `rel` (relative to project root).
+  · drop_gitignored(paths, *, root) -> list[Path] — Return `paths` minus the ones git ignores, order preserved (janitor#99).
 `scripts/lib/github_config_audit.py` — Fleet GitHub-config audit — the pure classifier + the read-only gather (TRDD-157OH2D7).
   · Finding — One classified gap on one repo. `code` is a FINDING_CODES member (fixed vocab,
   · RepoFacts — Everything `classify_repo` needs about ONE repo — all gathered READ-ONLY.

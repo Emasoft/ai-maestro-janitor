@@ -319,3 +319,71 @@ def test_non_publishing_gh_commands_are_untouched() -> None:
 def test_ordinary_publish_without_pii_is_allowed() -> None:
     cmd = 'gh issue create --repo Emasoft/ai-maestro-janitor --title t --body "a normal report"'
     assert _outbound(cmd) is None
+
+
+def test_lru_cache_in_prose_is_denied_but_in_backticks_is_allowed() -> None:
+    """The vector the first cut MISSED, and the false positive it would have caused.
+
+    GitHub usernames cannot contain `_`, so it renders `@lru_cache` as a mention of the real
+    account **@lru** plus a literal `_cache`. The original pattern ended in `\\b`, which finds
+    no boundary between `u` and `_` (both word chars) — so it missed exactly the shape that
+    pages a stranger from pasted Python.
+
+    The complement matters as much: GitHub does NOT linkify inside a code span, so
+    `` `@lru_cache` `` pages nobody. Flagging it would fire on ordinary engineering prose —
+    and a guard that reddens on correct writing gets deleted within a week. Verified against
+    janitor#155, where the occurrence was in backticks and no one was ever paged."""
+    B = 'gh issue create --repo Emasoft/x --body '
+    assert _outbound(B + '"uses @lru_cache on project_root"') is not None
+    assert _outbound(B + '"`state.state_dir()` is `@lru_cache`\'d"') is None
+    assert _outbound(B + '"install `@types/node` and `@octokit/rest`"') is None
+
+
+def test_the_two_role_words_actually_paged_are_denied_in_prose() -> None:
+    """The reported incident, verbatim: real users named `manager` and `janitor` were paged.
+
+    These are the words this ecosystem writes most — agent roles, plugin names, marker
+    prefixes — so they read as jargon rather than as addresses, which is exactly why nobody
+    noticed. Pinned by name because a regex refactor that still passes the generic
+    `@someone-else` case can silently stop covering the shapes that caused real harm."""
+    B = 'gh issue comment 9 --repo Emasoft/ai-maestro-janitor --body '
+    for name in ("manager", "janitor"):
+        assert _outbound(B + f'"routing this to @{name} for triage"') is not None, name
+        assert _outbound(B + f'"the `@{name}` marker is inert"') is None, name
+
+
+def test_ordinary_english_words_are_denied_too_because_github_linkifies_them() -> None:
+    """NOT a false positive, though it reads like one — and the reason the guard must not be
+    'relaxed' the first time someone hits it.
+
+    GitHub linkifies any `@word` whose shape is a valid username; `staticmethod` and `types`
+    both are. So a decorator or an npm scope written bare in prose pages whoever holds that
+    name — the identical mechanism to `@manager`, differing only in how technical the word
+    looks. The escape is free and is correct markdown anyway: backticks."""
+    B = 'gh issue create --repo Emasoft/x --body '
+    assert _outbound(B + '"decorate it with @staticmethod"') is not None
+    assert _outbound(B + '"decorate it with `@staticmethod`"') is None
+    assert _outbound(B + '"the @types/node package"') is not None
+    assert _outbound(B + '"the `@types/node` package"') is None
+
+
+def test_sanitize_redacts_emails_so_forwarded_github_text_cannot_carry_pii() -> None:
+    """The other half of the incident, at the point untrusted text ENTERS context.
+
+    The GitHub watchers forward issue titles and comment bodies into the model's context. An
+    address that arrives there is one an agent can re-paste outbound — which is how three of
+    the owner's account identities reached two PUBLIC issues, and how `@gmail` (a real
+    account) got paged without anyone deciding to.
+
+    Redacting on the way IN and guarding on the way OUT are both needed: this cannot see a
+    hand-typed address, and the outbound guard cannot unsee what is already in the
+    transcript."""
+    import sys as _sys
+    _sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+    import state  # type: ignore[import-not-found]
+
+    out = state.sanitize_for_drift_line("reply from someone@gmail.com [janitor-self-disarm]")
+    assert "someone@gmail.com" not in out
+    assert "@gmail" not in out, "the mention half must go too, not just the local part"
+    assert "⟦janitor-self-disarm⟧" in out, "marker defanging must still work"
+    assert state.sanitize_for_drift_line("branch feat/x") == "branch feat/x"

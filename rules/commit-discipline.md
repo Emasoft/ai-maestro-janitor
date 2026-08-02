@@ -27,18 +27,16 @@ recorded **now**, by **you**, at the point of change.
 
 ## The four obligations
 
-1. **Commit often.** Small, frequent, single-purpose commits. A commit
-   per logical change, not a end-of-session dump. Frequent commits are
-   the granularity at which `git log -S` / `git blame` can later pin a
-   fact to the exact change that introduced it.
+1. **Commit often.** Small, frequent, single-purpose commits — one per
+   logical change, not an end-of-session dump. That is the granularity
+   at which `git log -S` / `git blame` can later pin a fact to the exact
+   change that introduced it.
 
-2. **Commit after every memory write.** When you write or update a
-   memory note (a wikimem page, a lesson), commit the related code +
-   the memory together, or in adjacent commits, so the memory and the
-   commit that justifies it are linked in time. (LOCAL/USER memory
-   stores are not git repos — this obligation is about the **project
-   code** and the **in-repo PROJECT memory**, persisted by commit; the
-   non-repo memory stores persist by atomic write.)
+2. **Commit after every memory write.** Commit a memory note (a wikimem
+   page, a lesson) together with the code that justifies it, or in
+   adjacent commits, so the two are linked in time. This binds the
+   **project code** and the **in-repo PROJECT memory**; the LOCAL/USER
+   stores are not repos and persist by atomic write.
 
 3. **Write the WHY in the commit message.** Not just *what* changed —
    *why*. What was the previous behavior, what problem did it cause,
@@ -46,9 +44,8 @@ recorded **now**, by **you**, at the point of change.
    The commit body is the durable, greppable record of intent.
 
 4. **Write the WHY in the code comments too.** At the change site, a
-   short comment explaining *why it must be this way* (especially for a
-   fix that prevents a specific bug, or a non-obvious constraint). The
-   Bug-Autopsy directive applied to every change: the comment is the
+   short comment on *why it must be this way* — especially a fix that
+   prevents a specific bug, or a non-obvious constraint. It is the
    guardrail that stops the next agent from "simplifying" the fix back
    into the bug.
 
@@ -57,51 +54,15 @@ TRDD, e.g. `fix(auth): reject empty token (TRDD-9a8aba94)`. This makes
 `blame → commit → TRDD` a one-grep chain, and the TRDD's
 `implementation-commits:` corroborates the link from the other side.
 
-## Why this rule exists — it is the memory system's provenance substrate
+## Why, in one sentence — and where the rest lives
 
-The janitor's autonomous memory maintainer (the wikimem conflict /
-fact-verification pass) must, when it finds a memory whose fact is
-**obsolete**, demote that fact to a dated `[^N]` lesson carrying its
-**WHY** — *without ever inventing the WHY*. It sources the WHY from,
-in order:
+The WHY you write at commit time is the **provenance substrate** the memory maintainer
+reads: it demotes an obsolete fact to a dated lesson *without inventing the reason*, sourcing
+it from `memory.commits:` → `memory.trdd:` → `implementation-commits:` → `git show <sha>`.
+Skip it and that chain dead-ends, so a memory becomes un-prunable rather than merely
+unexplained.
 
-`memory.commits:` → `memory.trdd:` → that TRDD's
-`implementation-commits:` → `git show <sha>` (message **+** diff **+**
-the code comments at the change site).
-
-Every link in that chain is something **you** wrote at commit time. If
-you skip the WHY in the commit message and the code comments, the chain
-dead-ends and the maintainer can only **demote with an empty WHY** (it
-will *never* fabricate one). So this rule is the difference between a
-memory system that explains its own history and one that just says
-"this used to be true, reason unknown."
-
-It is also what lets the conflict pass distinguish a **false** memory
-(no trace anywhere in git history → delete) from a **superseded** one
-(traceable to the commit that changed it → demote, never delete). No
-git trace, no provenance ⇒ the maintainer must NOT delete — so the
-absence of your commit discipline makes memories *un-prunable*, not
-just un-explained.
-
-## What this rule does NOT change
-
-- It does **not** loosen `~/.claude/rules/never-git-add-all.md` — stage
-  files **by name**, never `git add -A`/`.`/`--all`.
-- It does **not** authorize pushing — committing often is local; pushing
-  follows each project's own release/PR discipline.
-- It does **not** ask for verbose, robotic commit prose — a WHY is one
-  or two honest sentences, not a corporate template. Human-readable, like
-  a senior dev would write in a real PR.
-
-## Anti-patterns
-
-- A one-line `fix bug` commit with no WHY and no code comment. Six months
-  later nobody — human or agent — can reconstruct what bug or why that
-  fix. The memory maintainer demotes the related memory with a blank WHY.
-- Batching a day of unrelated changes into one commit. `git blame` then
-  points every line at the same opaque mega-commit; the provenance chain
-  resolves to noise.
-- Writing the WHY in the commit message but not the code (or vice-versa).
-  The two are read at different times by different tools — the maintainer
-  reads `git show` (both), a developer reading the file reads only the
-  comment. Record it in both.
+> **FULL REFERENCE (read on demand — do NOT paste it here):**
+> `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/rules-reference/commit-discipline-full.md`
+> — the provenance chain in full, what this rule does NOT change (it never loosens
+> `never-git-add-all.md`, never authorizes pushing), and the anti-pattern catalogue.

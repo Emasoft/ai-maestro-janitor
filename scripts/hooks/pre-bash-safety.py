@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""PreToolUse hook — compositional bash-exfil + sensitive-write blocker.
+"""PreToolUse hook — bash-exfil, sensitive-write, and outbound-publication blocker.
 
 OPT-IN by default (set `CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED=true`
 to activate). When active, the hook fires on every `Bash` tool call and
@@ -232,7 +232,16 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # The one mention the owner sanctioned: the PRRD G1.1 self-identification line naming the
 # shared account. Anything else is paging a third party from the owner's identity.
 _ALLOWED_MENTION = "emasoft"
-_MENTION_RE = re.compile(r"(?<![A-Za-z0-9._%+-])@([A-Za-z0-9][A-Za-z0-9-]{0,38})\b")
+# NO trailing `\b`. GitHub usernames cannot contain `_`, so it renders `@lru_cache` as a
+# mention of **@lru** plus the literal `_cache` — but `\b` finds no boundary between `u` and
+# `_` (both are word chars), so a `\b`-anchored pattern MISSES the exact shape that pages a
+# stranger from pasted Python. The first cut had it, and it let `@lru_cache` through.
+_MENTION_RE = re.compile(r"(?<![A-Za-z0-9._%+\-/])@([A-Za-z0-9][A-Za-z0-9-]{0,38})")
+# GitHub does NOT linkify a mention inside a code span or fence. So `@staticmethod`,
+# `@types/node`, `@pytest.mark.slow` in backticks page nobody, and flagging them would make
+# the guard fire on ordinary engineering prose — which is how a guard gets deleted. Strip code
+# first, then look: the SAME token is a violation in prose and harmless in backticks.
+_CODE_SPAN_RE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
 
 
 def check_outbound_publication(command: str) -> str | None:
@@ -251,8 +260,9 @@ def check_outbound_publication(command: str) -> str | None:
             "(<account-A>) before publishing. NOTE an address also becomes an @mention: "
             "`user@gmail.com` pages the real GitHub account `@gmail`."
         )
+    prose = _CODE_SPAN_RE.sub(" ", command)
     strangers = sorted({
-        m.lower() for m in _MENTION_RE.findall(command) if m.lower() != _ALLOWED_MENTION
+        m.lower() for m in _MENTION_RE.findall(prose) if m.lower() != _ALLOWED_MENTION
     })
     if strangers:
         return (

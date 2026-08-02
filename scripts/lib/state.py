@@ -940,8 +940,11 @@ def run_subprocess(
         return None
 
 
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
 def sanitize_for_drift_line(text: str) -> str:
-    """Defang `[` `]` and strip control characters from untrusted text.
+    """Defang `[` `]`, strip control characters, and REDACT emails from untrusted text.
 
     Defends against prompt-mimicry where a user-controlled string
     (stash subject, PR title, server name, env var name) tries to
@@ -981,4 +984,18 @@ def sanitize_for_drift_line(text: str) -> str:
 
     cleaned = "".join(c for c in text if _keep(c))
     cleaned = cleaned.replace("[", "⟦").replace("]", "⟧")
-    return cleaned
+    # Redact email addresses (owner incident 2026-08-02). The GitHub watchers forward issue
+    # titles and comment bodies into the model's context, and an address that arrives there is
+    # an address an agent can re-paste into an outbound post — which is exactly how three of
+    # the owner's private account identities reached two PUBLIC issues. It is also how a
+    # STRANGER gets paged without anyone deciding to: GitHub renders the `@gmail` inside
+    # `user@gmail.com` as a mention of the real account `@gmail`.
+    #
+    # Redacting at the point untrusted text ENTERS context is the cheap fix; the outbound
+    # `pre-bash-safety` guard is the backstop for text that arrived some other way. Neither
+    # alone is sufficient — this one cannot see a hand-typed address, and that one cannot
+    # unsee what is already in the transcript.
+    #
+    # The local part is kept truncated so a drift line stays diagnostic ("which account?")
+    # without carrying the identity.
+    return _EMAIL_RE.sub(lambda m: f"{m.group(1)[:2]}…@⟨redacted⟩", cleaned)
