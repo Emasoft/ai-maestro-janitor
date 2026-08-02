@@ -3,7 +3,7 @@ trdd-id: AWXK0RFT
 title: Publish is blocked by a CRITICAL false positive on cfg(test) Rust in memgrep
 column: todo
 created: 2026-08-02T17:24:47+0200
-updated: 2026-08-02T17:24:47+0200
+updated: 2026-08-02T17:41:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -18,6 +18,32 @@ implementation-commits: []
 **Not started — AWAITING A USER DECISION. The owner asked for a release ("push via a
 release", 2026-08-02) and `publish.py` REFUSES. The blocker is a false positive, and I
 declined to clear it unilaterally.**
+
+### ⚠️ IMPACT IS NOT "79 UNPUSHED COMMITS" — EVERY FIX SHIPPED TODAY IS INERT
+
+Skills invoke their backing scripts by ABSOLUTE path into the **plugin CACHE**
+(`~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/scripts/…`), i.e. the
+PUBLISHED version — never the working tree. So until a release lands, the repo fixes do not
+exist as far as any `/janitor-*` skill is concerned. Measured 2026-08-02 (grep counts,
+cached v2.3.0 vs repo):
+
+| symbol | cached v2.3.0 (what the skill RUNS) | repo (fixed) |
+|---|---|---|
+| `_run_chain_payload` / `CLEAR_CHAIN_SPAWNED` (chained injector) | **0** | 3 |
+| `_user_present()` presence CANCEL | **PRESENT** (`:320`, `USER_PRESENT` at `:385`) | removed |
+| `_iterm_session_script` (the AppleScript fix) | **0** | 4 |
+
+**Consequence, observed live:** invoking `/janitor-handoff-and-clear` while the owner is at
+the keyboard still prints `USER_PRESENT` and does nothing — the very complaint that started
+this work ("*why the hell the agents are refusing to execute /janitor-handoff-and-clear when
+i gave the command myself???*"). The fix exists and is committed; the skill cannot reach it.
+
+Running `uv run --script scripts/clear_trigger.py` from the repo DOES use the fixed code —
+that is the only current workaround, and it bypasses the skill entirely.
+
+**So this card gates: TRDD-0BVF4K7E's fix reaching users, the injector's iTerm fix, the
+memory oracle/parser deadlock fix, and 77 commits.** It is the critical path, not a
+housekeeping item.
 
 ### The blocker, verbatim
 
