@@ -110,9 +110,30 @@
     },
     "issues_watch_interval": {
       "title": "GitHub issues-watch cadence (seconds)",
-      "description": "Minimum seconds between GitHub issue-tracker checks, when the watcher is enabled for a project via /janitor-issues-watch-on. The watcher is OFF by default and costs nothing until enabled. Default: 1800 (30 min) \u2014 issues do not churn every 5 minutes and each due fire costs one `gh` call.",
+      "description": "Minimum seconds between checks of this project's own GitHub issue tracker. Default: 1800 (30 min) \u2014 issues do not churn every 5 minutes and each due fire costs one `gh` call.",
       "type": "string",
       "default": "1800",
+      "sensitive": false
+    },
+    "issues_watch_enabled": {
+      "title": "GitHub Issues Watch Enabled",
+      "description": "When true (default), the janitor always watches THIS project's own GitHub tracker and reports new issues and new comments to the session. The first fire on a project is silent \u2014 it adopts the currently-open issues as its baseline \u2014 so enabling never dumps a backlog into context. Skips silently when the project has no GitHub remote or `gh` is absent/unauthenticated. Set false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "gh_reply_watch_enabled": {
+      "title": "GitHub Reply Watch Enabled",
+      "description": "When true (default), the janitor always watches for REPLIES to the GitHub threads this project opened (on any repo) and reports them to the session. Threads are registered automatically by the PostToolUse hook that observes `gh issue create` / `pr create` / `pr comment` and friends; the tracking data is stored locally in the project's own `.janitor/gh-issues-monitor/`. The first fire is silent (it baselines the notification cursor). Skips silently when `gh` is absent/unauthenticated. Set false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "gh_reply_watch_interval": {
+      "title": "GitHub reply-watch cadence (seconds)",
+      "description": "Minimum seconds between polls of the GitHub notifications API for replies to threads this project opened. Default: 900 (15 min), far above GitHub's `X-Poll-Interval: 60` floor; the heartbeat cadence tier bounds it further.",
+      "type": "string",
+      "default": "900",
       "sensitive": false
     },
     "pr_reconciler_interval": {

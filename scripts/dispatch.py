@@ -102,12 +102,23 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # v0.4.0 additions:
     ("remote-credentials", 3600, "CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL"),
     ("stale-stash", 86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
-    # github-issues-watch (TRDD-2KQQAEPP): notify the main Claude of new issues / new
-    # comments on the project's GitHub tracker. OFF by default — the detector is one stat
-    # of its opt-in sentinel and returns, so a project that never ran
-    # /janitor-issues-watch-on pays nothing. 30-min cadence: issues do not churn every
-    # 5 min, and each due fire costs a `gh` call.
+    # The two GitHub notification chores. ALWAYS ON since the 2026-08-02 owner directive
+    # ("must be a chore executed always by the janitor. no need to enable it") — the
+    # opt-in sentinel and the session Monitor that used to gate them are both retired.
+    # Each one's FIRST fire on a project is silent (it adopts the current state as its
+    # baseline), so going always-on cannot dump a backlog into context.
+    #
+    # github-issues-watch (TRDD-2KQQAEPP): NEW issues / NEW comments on THIS project's own
+    # tracker. 30-min cadence: issues do not churn every 5 min, and each due fire costs a
+    # `gh` call.
     ("github-issues-watch", 1800, "CLAUDE_PLUGIN_OPTION_ISSUES_WATCH_INTERVAL"),
+    # gh-reply-watch: REPLIES to threads THIS project opened, on ANY repo — a different
+    # question from the line above, and a different mechanism (it drives the one-shot
+    # gh_notify_poll.py). It replaces a session-scoped `Monitor` loop that died on every
+    # restart and compaction and had to be re-armed by hand; the heartbeat cannot forget.
+    # 15 min sits far above GitHub's `X-Poll-Interval: 60` floor, and the heartbeat tier
+    # bounds it further.
+    ("gh-reply-watch", 900, "CLAUDE_PLUGIN_OPTION_GH_REPLY_WATCH_INTERVAL"),
     ("nested-git-safety", 3600, "CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL"),
     ("tracked-ignored", 3600, "CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL"),
     # marketplace-refresh: per-session, scoped to local+project marketplaces.

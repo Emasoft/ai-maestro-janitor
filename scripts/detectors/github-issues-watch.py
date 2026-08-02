@@ -6,16 +6,24 @@
 
 USER order (2026-07-03): a command to enable monitoring of the open/new issues on the
 project's GitHub repo, notifying the main Claude of new issues or new messages on the
-tracker — "off by default, but once enabled it continue reporting until it is disabled."
+tracker.
 
-OFF BY DEFAULT. The whole detector is one `stat` of the opt-in sentinel
-`.janitor/state/issues-watch.flag` (written by `/janitor-issues-watch-on`) and returns
-immediately when it is absent — so a project that never opted in pays nothing on every
-fire. When ON it keeps reporting until `/janitor-issues-watch-off` removes the sentinel.
+ALWAYS ON since the 2026-08-02 owner directive ("must be a chore executed always by the
+janitor. no need to enable it"). The opt-in sentinel `.janitor/state/issues-watch.flag` is
+RETIRED — a per-feature switch is the silent-disable shape the 2026-07-31 directive removed,
+because a project sitting un-watched looks identical to a healthy one from the outside. The
+only remaining gate is the standard opt-out knob, so arm/disarm stays the real switch.
 
 The seen-map `{number: updatedAt}` is the dedupe: GitHub bumps `updatedAt` when a COMMENT
 lands, so the one field catches both a NEW issue and a NEW message on an existing one, and
 an issue that has not moved since the last pass never re-fires.
+
+FIRST FIRE IS SILENT. The retired enable-command seeded a baseline BEFORE arming the flag,
+and its skill called that ordering load-bearing; removing the flag without keeping the
+seeding would make the first fire on every repo diff against an empty map and report the
+ENTIRE open backlog into the model's context. So a MISSING seen-map means "adopt the
+current state, say nothing" — and the test is `exists()`, never the parsed value, because a
+CORRUPT map must keep reporting (see `_read_seen`).
 
 FAIL-OPEN everywhere: no git remote, a non-GitHub remote, `gh` missing / unauthenticated /
 rate-limited, a network error, or unparseable JSON all mean "silently do nothing". A
@@ -33,7 +41,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import issues_watch  # noqa: E402
 import state  # noqa: E402
 
-_FLAG = "issues-watch.flag"
 _SEEN = "issues-watch-seen.json"
 _LIMIT = 50
 
@@ -55,9 +62,8 @@ def main() -> int:
     state.init_state()
     sd = state.state_dir()
 
-    # The opt-in gate. One stat, then out — this is what keeps a non-watching project at
-    # ~zero cost on every heartbeat fire.
-    if not (sd / _FLAG).is_file():
+    # The only gate left. Default TRUE: this is a chore the janitor always runs.
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_ISSUES_WATCH_ENABLED", True):
         return 0
 
     project_root = state.project_root()
@@ -93,6 +99,25 @@ def main() -> int:
 
     current = issues_watch.parse_issues(proc.stdout or "")
     seen_path = sd / _SEEN
+
+    # FIRST FIRE ON THIS PROJECT: adopt the current open set as the baseline and say
+    # NOTHING. Without this, going always-on would dump every open issue of every repo
+    # into context the first time the detector runs there — the flood the retired
+    # /janitor-issues-watch-on prevented by seeding before it armed the flag.
+    #
+    # Keyed on exists(), NOT on the parsed map: `_read_seen` fails open to {} for a
+    # CORRUPT file too, and for that case re-reporting is the deliberately safe
+    # direction. Treating a corrupt map as "first run" would silently swallow whatever
+    # arrived while it was broken.
+    if not seen_path.exists():
+        state.atomic_write(seen_path, json.dumps(issues_watch.baseline(current), indent=0))
+        state.log_line(
+            "github-issues-watch",
+            f"first fire for {slug} — baselined {len(current)} open issue(s), reporting from the next fire",
+        )
+        state.rotate_log_if_big("github-issues-watch")
+        return 0
+
     seen = _read_seen(seen_path)
 
     for issue, reason in issues_watch.diff_issues(seen, current):

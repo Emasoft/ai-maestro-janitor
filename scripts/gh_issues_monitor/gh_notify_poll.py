@@ -61,22 +61,35 @@ def project_slug(root: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(root))
 
 
-def _legacy_state_dir(slug: str) -> Path:
+def _legacy_standalone_dir(slug: str) -> Path:
     """Where the standalone skill kept this project's registry before the port."""
     return Path.home() / ".claude" / "state" / "github-issues-monitor" / slug
 
 
+def _legacy_data_dir(slug: str) -> Path:
+    """Where the port kept it: per-project, but inside the machine-global DATA dir."""
+    return Path.home() / ".claude" / "plugins" / "data" / JANITOR_DATA_DIR_NAME / "gh-issues-monitor" / slug
+
+
 def state_dir() -> str:
-    """This project's registry + poll cursor, under the janitor's DATA dir.
+    """This project's registry + poll cursor, stored INSIDE the project.
 
-    DATA, not `.janitor/state/`: `registry.json` is a RECORD OF WORK (the threads
-    this project opened), not a cache — and `.janitor/state/` is documented as
-    regeneratable and safe to delete. DATA is the one location that survives a
-    plugin update and is purged only on uninstall, which is exactly the lifetime a
-    registry tied to this plugin should have.
+    OWNER DIRECTIVE (2026-08-02): "the github detector script should run in each
+    session/claude-code/project independently, and store the tracking data locally."
+    Slug-keyed subdirs of a machine-global dir gave per-project SEPARATION but not
+    per-project LOCALITY: the data lived somewhere else, was keyed by absolute path
+    (so moving or renaming a checkout silently orphaned its registry), and one store
+    held every project's record of work.
 
-    MIGRATES the standalone skill's `~/.claude/state/github-issues-monitor/<slug>/`
-    on first use. Copy, never move: if this port is ever rolled back the old skill
+    `.janitor/gh-issues-monitor/`, NOT `.janitor/state/`: `registry.json` is a RECORD
+    OF WORK — the threads this project opened — and `.janitor/state/` is documented
+    (CLAUDE.md, janitor-footprint rule) as regeneratable and safe to delete. Sitting
+    one level up keeps it local as directed while staying out of the zone advertised
+    as disposable, because nothing can regenerate it: the registry is filled by the
+    PostToolUse hook watching `gh` commands as they happen, so a lost registry cannot
+    be rebuilt, only re-accumulated from future posts.
+
+    MIGRATES from both older locations, newest first. Copy, never move: a rollback
     must still find its registry, and losing the record of which threads a project
     opened cannot be undone by re-running anything.
     """
@@ -84,15 +97,16 @@ def state_dir() -> str:
     if override:
         return override
     root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    slug = project_slug(root)
-    target = Path.home() / ".claude" / "plugins" / "data" / JANITOR_DATA_DIR_NAME / "gh-issues-monitor" / slug
+    target = Path(root) / ".janitor" / "gh-issues-monitor"
     if not target.exists():
-        legacy = _legacy_state_dir(slug)
-        if legacy.is_dir():
-            try:
-                shutil.copytree(legacy, target)
-            except OSError:
-                pass  # a failed migration must degrade to a fresh registry, never crash a poll
+        slug = project_slug(root)
+        for legacy in (_legacy_data_dir(slug), _legacy_standalone_dir(slug)):
+            if legacy.is_dir():
+                try:
+                    shutil.copytree(legacy, target)
+                except OSError:
+                    pass  # a failed migration degrades to a fresh registry, never crashes a poll
+                break
     return str(target)
 
 

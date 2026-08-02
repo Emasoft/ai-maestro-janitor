@@ -37,7 +37,15 @@ DISARMED_FLAG = "disarmed.flag"
 # Without the sweep an upgraded machine keeps looking quiesced forever, with nothing left
 # to un-quiesce it. Retire the names themselves only once no supported version can write
 # one. See [[janitor-has-no-off-switch-but-disarm]].
-RETIRED_SENTINELS = ("paused", "maintenance-mode", "self-budget-maintenance.flag")
+RETIRED_SENTINELS = (
+    "paused",
+    "maintenance-mode",
+    "self-budget-maintenance.flag",
+    # The github-issues-watch opt-in, retired by the 2026-08-02 always-on directive. Swept
+    # for the same reason as the others: an inert flag on disk makes a healthy host look
+    # configured, and the next reader has to prove it means nothing.
+    "issues-watch.flag",
+)
 
 # Written by the StopFailure hook on any turn-ending API error, cleared by
 # dispatch.py on the next fire. Read by fleet_scan to diagnose `frozen`.

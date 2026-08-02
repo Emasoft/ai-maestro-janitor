@@ -159,11 +159,12 @@ def test_long_title_is_capped() -> None:
 # ---------- the detector's gate (real run, no gh needed) ----------
 
 
-def _run_detector(project: Path) -> subprocess.CompletedProcess[str]:
+def _run_detector(project: Path, **extra_env: str) -> subprocess.CompletedProcess[str]:
     env = {
         "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
         "HOME": str(project),
         "CLAUDE_PROJECT_DIR": str(project),
+        **extra_env,
     }
     return subprocess.run(
         [sys.executable, str(_PROJECT_ROOT / "scripts" / "detectors" / "github-issues-watch.py")],
@@ -171,20 +172,44 @@ def _run_detector(project: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_detector_is_silent_when_not_opted_in(tmp_path: Path) -> None:
-    """OFF BY DEFAULT: with no sentinel the detector prints nothing and exits 0."""
+def test_detector_honours_the_disable_knob(tmp_path: Path) -> None:
+    """ALWAYS ON, but the standard opt-out knob still silences it."""
     project = tmp_path / "proj"
     (project / ".janitor" / "state").mkdir(parents=True)
-    proc = _run_detector(project)
+    proc = _run_detector(project, CLAUDE_PLUGIN_OPTION_ISSUES_WATCH_ENABLED="false")
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
 
 
 def test_detector_is_silent_without_a_github_remote(tmp_path: Path) -> None:
-    """Opted in, but the dir is not a GitHub repo → fail-open silence, never a crash."""
+    """Always on, but the dir is not a GitHub repo → fail-open silence, never a crash."""
     project = tmp_path / "proj"
     (project / ".janitor" / "state").mkdir(parents=True)
-    (project / ".janitor" / "state" / "issues-watch.flag").write_text("on")
     proc = _run_detector(project)
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+# ---------- the anti-flood first-run baseline (pure, no gh needed) ----------
+#
+# The retired /janitor-issues-watch-on seeded a baseline BEFORE arming its flag, and its
+# skill called that ordering load-bearing. Going always-on removed the flag, so the SEEDING
+# is what now stands between a fresh project and its whole open backlog landing in context —
+# measured at 43 issues on this repo alone. These pin the two halves that make it correct.
+
+
+def test_a_missing_seen_map_adopts_the_baseline_and_reports_nothing() -> None:
+    """FIRST FIRE IS SILENT: diffing the open set against the baseline it just took from
+    that same set is empty by construction — which is why 'seed, then say nothing' and
+    'report everything once' are the only two possible behaviours here."""
+    current = [_issue(1, "2026-01-01T00:00:00Z"), _issue(2, "2026-01-02T00:00:00Z")]
+    assert list(iw.diff_issues(iw.baseline(current), current)) == []
+
+
+def test_an_empty_seen_map_still_reports_everything() -> None:
+    """The other half, and the reason the detector keys on exists() and NOT on the parsed
+    map: `_read_seen` fails open to {} for a CORRUPT file too, and there re-reporting is
+    the safe direction. If a corrupt map were treated as 'first run' the detector would
+    silently swallow whatever arrived while it was broken."""
+    current = [_issue(1, "2026-01-01T00:00:00Z"), _issue(2, "2026-01-02T00:00:00Z")]
+    assert len(list(iw.diff_issues({}, current))) == 2
