@@ -3,7 +3,7 @@ trdd-id: HI0BGQGJ
 title: Push the post-compact resume so an idle session wakes in seconds not up to 30 min
 column: ai_review
 created: 2026-07-13T20:53:29+0200
-updated: 2026-07-29T03:02:50+0200
+updated: 2026-08-02T06:33:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
@@ -62,7 +62,41 @@ throughout (it passed on its own; no bypass).
 continuing — was not driven end-to-end here. It is covered at its seams by
 `test_post_compact_resume_hook.py` (flag write) and `test_dispatch_cold_cache.py` (emission).
 
-**NEXT ACTION:** none blocking. Ready for `testing → ai_review` on the owner's call.
+### 2026-08-02 — THE FINAL HOP RAN, in this repo's own session. Mechanism proven; the LATENCY claim is not.
+
+Observed live, not constructed. Timeline from the logs and the filesystem, all
+`s:e804d2c9`:
+
+| when | what | evidence |
+|---|---|---|
+| 05:56:50 | PreCompact captured the ground-truth handoff | `precompact-handoff.md` "Captured (local)" |
+| 05:58:45 | PostCompact wrote the flag **and fired the push** — the attended gate PASSED, it did not skip | `post-compact-resume.log`: `resume flag written…` then `resume push fired (/janitor-resume)` |
+| ~06:29 | `/janitor-resume` ran in this pane → dispatcher stub → **`[janitor-resume]` + the directive** | the stub's own stdout this turn |
+| ~06:30 | flag consumed; the agent read the handoff, then this STATE block, then continued | `resume-after-compact.flag` is GONE; this entry is the continuation |
+
+So `flag → stub → marker → directive → the agent actually continuing` is now observed, which is
+exactly the hop the paragraph above says was covered only at its seams. `307427a` is contained in
+the released tag `ai-maestro-janitor--v0.45.0`, so remaining item (1) is satisfied too.
+
+**What this run does NOT prove — and the number will look like a failure if this is not read.**
+The push fired at 05:58:45 and the command executed ~31 minutes later, which is no better than the
+`*/30` cron this card exists to beat. That is **not** a defect and not a slow push: the session was
+never idle. It spent that whole window inside one long board-triage turn, and a SOFT (no-ESC)
+injection ENQUEUES — by design, so it can never interrupt a live turn. The latency win is defined
+against an **idle** session, so demonstrating it needs a compaction that lands while the REPL is
+actually idle. This run demonstrates the MECHANISM, not the SPEED.
+
+**One thing to read correctly:** the directive named `TRDD-HI0BGQGJ` — this card — while the work
+actually in flight was the kanban triage. That is the documented design, not a mismatch: the hook's
+own docstring says it does "NOT auto-continue the task that was interrupted", and names the newest
+in-flight board TRDD as a **zero-discipline fallback**. The acceptance criterion was that the
+emitted directive match the recorded flag, and it does. Nobody should read a resume cue as "the
+janitor knows what you were doing".
+
+**NEXT ACTION:** none blocking. To reach a terminal column this needs the one thing above:
+a compaction while the REPL is genuinely idle, showing the `[janitor-resume]` turn starting in
+seconds rather than on the `*/30` cron. Staying in `ai_review` until then — moving it now would
+claim a latency benefit that has not been measured.
 
 **Load-bearing facts / gotchas:**
 - The hook-spawned `resume_trigger.py` inherits the hook's env; the iTerm/tmux session was
