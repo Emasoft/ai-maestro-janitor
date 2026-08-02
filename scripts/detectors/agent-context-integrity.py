@@ -31,8 +31,9 @@ DESIGN DECISIONS THAT ARE NOT INCIDENTAL:
   * **Every emitted byte is sanitized.** This detector QUOTES attacker-controlled text into
     heartbeat stdout, where the model reads lines as instructions. A poisoned file containing
     a bare `[janitor-self-disarm]` must arrive defanged.
-  * **Git-tracked surface only** (janitor#99). A gitignored context file is not loaded by any
-    other contributor and is not what the repo ships.
+  * **NO gitignore filter** — the documented exception to janitor#99. That rule answers "what
+    does the repo SHIP?"; this detector asks "what does the agent LOAD?" A gitignored
+    `CLAUDE.md` is still auto-loaded, so it is still poisonable. See `_candidates`.
   * **`file_kind` routing + the `filename` hint.** Prose rules on `.md`, source rules on code.
     Without the hint a security scanner's own fixtures — which are MADE of injection strings —
     produce nothing but false positives.
@@ -51,7 +52,6 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import agent_config_patterns as acp  # type: ignore[import-not-found]  # noqa: E402
-import git_utils  # type: ignore[import-not-found]  # noqa: E402
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
@@ -102,13 +102,28 @@ def _max_files() -> int:
 
 
 def _candidates(project_root: Path) -> list[Path]:
-    """Every git-TRACKED agent-context file under `project_root`, deduped and ordered."""
+    """Every agent-context file under `project_root`, deduped and ordered.
+
+    DELIBERATELY NOT gitignore-filtered, and this detector is the documented exception to
+    janitor#99. That rule answers *"what does the repo SHIP?"* — the attribution question a
+    supply-chain scanner must ask, so it does not score a downloaded corpus as the project's
+    own code. This detector asks a DIFFERENT question: *"what does the agent LOAD?"* Claude
+    Code reads `CLAUDE.md` from disk regardless of git status, so a gitignored one is auto-
+    loaded into every session and poisoning it works exactly as well. Filtering here was a
+    category error — a rule copied from a question it does not answer — and it left a
+    verified hole: a poisoned gitignored `CLAUDE.md` was silently skipped.
+
+    Confirmed by ai-maestro on janitor#167 from the other side: a harness agent's workdir
+    holds `.claude/settings.local.json` and seeded `aimaestro-*.md` rules that their managed
+    git-exclude block keeps OUT of git on purpose. Those are auto-loaded and are not
+    "gitignored because unimportant" — filtering would blind this detector to precisely the
+    files the fleet cares about."""
     seen: set[Path] = set()
     for pattern in _GLOBS:
         for p in project_root.glob(pattern):
             if p.is_file():
                 seen.add(p)
-    return git_utils.drop_gitignored(sorted(seen), root=project_root)
+    return sorted(seen)
 
 
 def _file_kind(path: Path) -> str:

@@ -42,6 +42,9 @@ _EXEMPT = {
     "reports-purge.py": "purges reports/, which the janitor's own rules REQUIRE to be "
                         "gitignored",
     "screenshot-purge.py": "purges gitignored test screenshots",
+    "agent-context-integrity.py": "asks 'what does the agent LOAD?', not 'what does the repo "
+                                  "SHIP?' — a gitignored CLAUDE.md is still auto-loaded into "
+                                  "every session, so it is still poisonable (janitor#167)",
 }
 # NB `trashcan-purge.py` is deliberately absent: it uses `iterdir()` on one directory, not
 # a recursive walk, so it never had the exposure. Listing it would imply a risk it does not
@@ -79,10 +82,14 @@ def test_every_walking_detector_is_classified() -> None:
     """A NEW scanner must land in one list or the other. This is the half that survives
     the author of the rule: without it, the next tree-walking detector inherits nothing
     and rediscovers janitor#99 on a user's repo instead of here."""
+    # `.glob(` is in the token set deliberately. The first version checked only `rglob(` and
+    # `os.walk(`, and `agent-context-integrity` — which walks with `.glob("**/…")` — escaped
+    # classification entirely. A test that silently covers fewer things than it claims is the
+    # same failure this file exists to prevent, one level up.
     walkers = {
         p.name
         for p in sorted(_DETECTORS.glob("*.py"))
-        if any(tok in p.read_text(encoding="utf-8") for tok in ("rglob(", "os.walk("))
+        if any(tok in p.read_text(encoding="utf-8") for tok in ("rglob(", "os.walk(", ".glob("))
     }
     # Only detectors that walk the PROJECT tree are in scope. Ones that walk config dirs,
     # the design/ corpus, or memory scopes judge no supply chain and need no verdict.

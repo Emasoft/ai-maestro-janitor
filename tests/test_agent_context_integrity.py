@@ -106,16 +106,30 @@ def test_a_forged_janitor_marker_in_the_payload_cannot_reach_stdout(tmp_path: Pa
     )
 
 
-def test_gitignored_context_file_is_not_scanned(tmp_path: Path) -> None:
-    """janitor#99. A gitignored CLAUDE.md is loaded by nobody else and is not what the repo
-    ships, so it is not this detector's business."""
+def test_gitignored_context_file_IS_scanned(tmp_path: Path) -> None:
+    """The documented exception to janitor#99, and a hole this suite originally PINNED SHUT.
+
+    The first version of this test asserted the opposite, because I applied janitor#99's
+    `drop_gitignored` here by reflex. That rule answers *"what does the repo SHIP?"* — the
+    attribution question, so a supply-chain scanner does not score a downloaded corpus as the
+    project's own code. This detector asks *"what does the agent LOAD?"*, and Claude Code
+    reads CLAUDE.md from disk regardless of git status. So a gitignored poisoned CLAUDE.md is
+    auto-loaded into every session and was being silently skipped.
+
+    ai-maestro reached the same conclusion from the other side (janitor#167): a harness
+    agent's workdir holds `.claude/settings.local.json` and seeded `aimaestro-*.md` rules that
+    their managed git-exclude block keeps out of git ON PURPOSE — auto-loaded, and not
+    "gitignored because unimportant"."""
     root = _repo(tmp_path)
     (root / ".gitignore").write_text("CLAUDE.md\n", encoding="utf-8")
     (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
     _track(root, ".gitignore")
     r = _run(root)
     assert r.returncode == 0
-    assert r.stdout == "", f"a gitignored context file must be skipped; got: {r.stdout!r}"
+    assert "[agent-context-integrity]" in r.stdout, (
+        "a gitignored CLAUDE.md is STILL auto-loaded, so it is still poisonable and must be "
+        f"scanned; got: {r.stdout!r}"
+    )
 
 
 def test_project_scope_memory_is_in_scope(tmp_path: Path) -> None:
