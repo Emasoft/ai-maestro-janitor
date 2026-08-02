@@ -1,504 +1,25 @@
-# ai-maestro-janitor — project structure & architecture reference
+# ai-maestro-janitor
 
-> **Purpose of this file:** a compact map so a session can recall how the
-> janitor works WITHOUT re-reading the tree. Keep it current when structure
-> changes. Verified-detail for the core wiring; grouped lists + conventions
-> for the breadth (38 detectors, ~200 pattern libs).
+A Claude Code plugin that keeps the dev environment tidy and secure, in the background:
+drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit
+auto-resume, prompt-cache keep-alive, and a markdown memory system. It runs on a
+per-session `CronCreate` heartbeat (session-scoped, re-armed each session) plus one
+machine-wide background daemon that owns every global-scope update. Deep knowledge
+about how it works lives in the PROJECT wikimem below, recalled by symptom instead of
+paid on every turn; see [[janitor-architecture]] for the architecture hub.
 
-## What it is
+## Links
 
-A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
+- Repo: https://github.com/Emasoft/ai-maestro-janitor
+- Marketplace (`ai-maestro-plugins`): https://github.com/Emasoft/ai-maestro-plugins
+- Connected ai-maestro harness: https://github.com/Emasoft/ai-maestro
 
-1. **Per-session heartbeat** — a `CronCreate` per project fires a fresh
-   turn every ~5 min → runs **project-scoped** drift detectors `--one-shot` →
-   emits one-line "drift" findings to the model. Silent when nothing drifts.
-   The cron is **SESSION-SCOPED by platform design** (CC docs: scheduled tasks live
-   in the current conversation, are restored only on `--resume`/`--continue`, and
-   expire after 7 days — there is **no** `durable` parameter). It therefore cannot
-   survive a Claude restart on its own: the SessionStart re-arm nudge and the
-   `[janitor-renew]` marker ARE the survival mechanism, not workarounds for a bug.
-2. **Global daemon** — ONE machine-wide singleton process that owns every
-   **user/global-scope** mutation (so N sessions don't stampede the same
-   command — issue #7). Spawned lazily by any session's heartbeat.
+## Commands
 
-## Two runtime backends — one plugin (TRDD-PZLVT2RN, v0.50.0)
-
-The SAME plugin branches at runtime on `harness_backend.py` (SSOT; discriminator
-`state.in_ai_maestro_agent_env()` — env flags `AIMAESTRO_AGENT`/`THIS_IS_AIMAESTRO`,
-fallback `AMP_AGENT_ID`/`AID_AUTH`):
-
-- **#N standalone** (outside ai-maestro): FULL mode — heartbeat + detectors + the global
-  daemon, exactly as documented in this file.
-- **#J harness** (inside an ai-maestro agent): THIN mode — workdir detectors only; **no
-  daemon spawn, no outside-project writes**; Family-A continuity (resume/rate-limit/compact
-  survival) is DELEGATED to the server's `aimaestro-continuity.sh` (e.g. `on-stop-failure`
-  fires `ensure-resume` via the agent CLI, detached). The SERVER is the daemon for harness
-  agents.
-- **Actuation exclusion:** the #N daemon's fleet recovery/stop marks server-owned agents
-  (`server_owned` diagnosis) and NEVER types into their panes — unknown ⇒ HANDS OFF.
-- **IRON RULE — the ai-maestro boundary is the SCRIPTS, never the HTTP API** (owner directive
-  2026-08-02). Every interaction goes through the frozen CLI (`aimaestro-*.sh`, `amp-*.sh`,
-  `aid-*.sh`); no plugin element may call `/api/*` or `:23000` directly, from any surface —
-  code, hook, script, skill, or agent. **And every SKILL that touches the boundary must SAY
-  so**, not merely avoid the API: a skill that leaves it unstated lets the next agent infer
-  the API is fair game. **A missing verb is a gap to REPORT, never a licence to bypass** —
-  calling the API, overloading an unrelated flag (`--tags` for a security signal), or dropping
-  a side-channel file for the server to poll are one violation in three costumes. Measured
-  instance: setting `contextPoisoned` (janitor#167) is blocked precisely here, because
-  `cmd_update`'s option allow-list has no such flag — reported to ai-maestro rather than
-  worked around.
-- **Chore coordination (Phase B2, BINARY since TRDD-LU0C5KAR — owner directive
-  2026-07-17):** responsibility follows server LIVENESS. A fresh auth-free probe file
-  `~/.aimaestro/server-liveness.json` (`{ts,pid,capabilities}`, 30 s beat / 90 s
-  staleness) ⇒ the server is RUNNING ⇒ ALL absorbed chores
-  (`harness_backend.SERVER_ABSORBED_TASKS`: the OAuth pair + the update trio) yield;
-  absent/stale/malformed ⇒ the janitor runs them ALL. `server_is_alive()` /
-  `server_runs_chores()` are the switch (env overrides `JANITOR_AIMAESTRO_SERVER_CHORES`
-  / `_STATE` first); the `capabilities` content is informational — "a running server
-  that does not execute an absorbed chore is a server bug, never a janitor guard" (the
-  rev-3 per-class token gating, TRDD-N9YAH5E7, is retired). File locks remain the
-  collision backstop across the 90 s handoff window. `design/ARCHITECTURE.md` rev 4
-  (proposed on janitor#100) is the canonical contract doc.
-- **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
-  carries ONLY the firing project's data — never another project's findings, names, or
-  aggregate counts. Fleet-wide views exist only behind explicit human commands. TOKEN
-  TELEMETRY included: `window-burn-rate` alarms only inside the CULPRIT project's own
-  sessions (unattributable trips silent everywhere); the context-advisory default is 80%
-  (one runway band below the 85% enforcement — the CC harness covers the mid band).
-- **Findings pipeline (v0.51.0 — TRDD-FENWWB4E + TRDD-4649ZLE0, ARCHITECTURE.md §4/§5):**
-  `lib/findings_ledger.py::record()` is the ONE choke point, three sinks — the AFFECTED
-  project's `.janitor/state/findings-ledger.ndjsonl` (append-only INDEX, frozen line shape
-  `{ts,sev,code,src,ref,msg}` ≤200 chars — the ai-maestro dashboard feed contract; bodies
-  live in the ticket/TRDD named by `ref`), the firing session's drift line (own project
-  only), and the human push. `issue_catalog.raise_issue` records once per finding birth;
-  SessionStart injects unread entries (cap ~10 + fold, ≤1 KB, cursor-acked);
-  `/janitor-findings` (backed by `scripts/findings_cli.py`) is the on-demand browser.
-  `lib/notify.py` is the DAEMON-ONLY human channel (Tier 1 desktop notification
-  default-on; Tier 2 opt-in webhook `CLAUDE_PLUGIN_OPTION_NOTIFY_WEBHOOK_URL`; gates:
-  sev ≥ HIGH + content-hash dedupe + 24 h cap with one-per-day digest fold) — wired to
-  supervisor alerts, the F4 keychain-degradation probe, task-quarantine entry, and the
-  fleet github-config digest.
-
-## Scope invariant (HARD RULE — issue #7)
-
-- **user/global-scope ops → daemon ONLY.** Bulk `claude plugin marketplace
-  update` (argless), `claude plugin update --scope user`, janitor self-update.
-- **project/local-scope ops → per-session detectors.** They hard-filter
-  `scope in (user, managed)` and only ever pass a specific `<market>` arg.
-- Cheap idempotent **file** writes to user-scope (rules) stay per-session but
-  MUST be **atomic** (tmp + `os.replace`) — the file analogue of the daemon's
-  single-writer lock for expensive commands.
-
-## Filesystem & state conventions (per plugins-reference.md)
-
-| Path | Resolves to | Lifecycle | Use for |
-|---|---|---|---|
-| `${CLAUDE_PLUGIN_ROOT}` | `~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<version>/` | **Ephemeral** — changes every update, GC'd ~7d | scripts, skills, hooks. **NEVER write state here.** |
-| `${CLAUDE_PLUGIN_DATA}` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | **Persistent** — survives updates, backed up, purged only on uninstall | ALL persistent state, caches, venvs. **Prefer this.** |
-| `$CLAUDE_PROJECT_DIR/.janitor/state/` | per-project | per-project | per-session detector state |
-
-**Current state locations:**
-- ✅ `dispatcher-stub.py` → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (correct).
-- ✅ per-session → `$PROJECT/.janitor/state/` (correct — project-scoped).
-- ✅ **daemon global state → `${CLAUDE_PLUGIN_DATA}/global-state/`** (TRDD-2U8AH82F). `global_state.py::global_state_dir` ladder: env override → XDG → DATA dir (once the `migrated-from-legacy.ts` marker exists, or fresh install) → legacy `~/.claude/janitor-global-state/` while a pre-migration install awaits its daemon. The DAEMON performs the one-time copy under the legacy singleton flock and takes the NEW flock BEFORE stamping the marker (flock-moves-LAST — no two-daemon window); control-flag readers dual-read legacy for version skew. Legacy dir = tombstoned read-fallback; retirement is an EHT 2 releases out.
-
-> **Principle (per user):** prefer `${CLAUDE_PLUGIN_DATA}` over any new
-> `~/.claude/<custom>/` folder. The data dir is the only one guaranteed
-> preserved across plugin/marketplace/version changes, backed up by backup
-> tools, and cleanly purged on uninstall. Unofficial folders are lost by
-> backups AND left as orphan junk by purge.
->
-> **THE ONE SANCTIONED EXCEPTION — `~/.claude/janitor-control/`** (owner, 2026-07-21:
-> *"this folder is an exception, introduced necessarily because of the shared flags with
-> the ai-maestro server"*). It holds the fleet control plane (ARCHITECTURE.md §7.1;
-> TRDD-QK7M2B0X) — the global MODE flags, the coordination LOCKS, the per-chore last-run
-> stamps, and the daemon singleton: everything a SECOND chore owner must observe or
-> contend on. That scope rule is audience, not kind — splitting coordination data across
-> two directories is how two daemons desynchronise, and a `flock` the other daemon cannot
-> see excludes nobody. It is a fixed path because an ai-maestro server must stat one
-> LITERAL path — `global_state_dir()`'s four-rung ladder is unreproducible by a foreign
-> reader, and guessing a rung fails silently as "flag absent", i.e. it ignores the control
-> plane while looking healthy. **Do NOT migrate this folder into the DATA dir**; the
-> principle's virtues (survives updates, backed up) are the exact properties a mode flag
-> must NOT have — an uninstalled janitor must leave nothing behind claiming the host is in
-> maintenance. Everything else — pid, flock, heartbeat, last-run stamps, injection stamps —
-> stays in `<DATA>/global-state/` and the principle governs it unchanged.
-
-## Runtime / installed tree
-
-```
-~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/  ephemeral plugin (scripts/skills/hooks)
-~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/ + global-state/ (canonical daemon state since TRDD-2U8AH82F)
-~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
-~/.claude/janitor-global-state/                                       LEGACY daemon state (auto-migrated → DATA/global-state by the daemon; read-fallback only):
-    daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
-    marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
-    kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
-    version-update-requested.flag (release-triggered self-update request; daemon consumes clear-before-run — TRDD-Y9KM5RCJ)
-$PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
-    rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
-    resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
-    desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json · last-resume.ts (TTL-aware cadence, TRDD-0QQX9H0G)
-cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param exists) → fires the stub
-```
-
-## Control flow
-
-**Heartbeat (per session):** cron prompt → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`
-(re-resolves latest cached `<ver>/scripts/dispatch.py`, `os.execv`s into it — so
-plugin updates auto-roll with NO re-arm) → `dispatch.py`:
-1. `rate-limited.flag` present → emit `[janitor-resume]`, clear flag (also clears the compact-resume flag).
-2. `resume-after-compact.flag` present → emit `[janitor-resume] …continue TRDD-xxxx…`, clear flag (post-compact auto-resume; the PostCompact hook wrote it — TRDD-31095269).
-   Both resume phases also stamp `last-resume.ts` and RETURN EARLY. The stamp is the cadence phase's ONLY view of a resume — it runs later in the same `main()`, by which point the flag is already unlinked, so reading the flags there is dead code (fixed 2026-07-11).
-3. cron near 7-day expiry → emit `[janitor-renew]` (Claude re-runs /janitor-arm).
-3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: a `last-resume.ts` stamp <30min old / pending directive / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases; the SLOW tier is the only sanctioned answer to cost (fewer fires, same work) since the self-budget clamp was removed; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
-4. `ensure_daemon_running()` (lazy-spawn the singleton if dead).
-5. daemon stale/old-version → request restart (auto-roll the daemon too).
-6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
-7. `reload-needed.flag` → emit `[janitor-reload]` (Claude runs /reload-plugins).
-8. `skills-reload-needed.flag` (bumped by `/janitor-global-reload-skills`) → emit `[janitor-reload-skills]` once-per-session (per-project ack) → Claude runs /janitor-reload-skills → /reload-skills (standalone non-plugin skills/commands). TRDD-LQU7OXXV.
-
-**Daemon loop (`daemon.py`):** acquire singleton flock (else exit) → every tick,
-run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
-periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
-**unconditionally** in `finally` (so stale last-run = task not *running*, not
-failing-silently). **Background bulk lane (TRDD-H7NVKSAX, 2026-07-17 oauth-starvation
-incident):** the BULK tasks (`marketplace-refresh`, `user-plugins-update`,
-`version-update`, `github-config-audit`) carry `background=True` and run in ONE detached
-child at a time (`daemon.py --run-task <name>`, parent reaps + stamps from the child rc)
-so a ~20-min bulk run can NEVER block the loop's 60s survival beats (oauth-rotator-tick
-above all — two back-to-back 1190s marketplace refreshes once blinded rotation while an
-account hit its 5h wall). One lane preserves the old bulk-chore serialization; file locks
-remain the backstop. Tasks: `marketplace-refresh` (3600s — was 1200s, which ≈ its own
-runtime and gave a 50% duty cycle; bulk), `user-plugins-update`
-(3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag),
-`rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
-provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a
-full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
-cache ~7d; opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`; NEVER touches memory).
-All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
-**Release-triggered self-update (TRDD-Y9KM5RCJ):** the 6h `version-update` beat is too
-slow to land a fresh janitor release (v0.41.0 sat at cache 0.39.0 for hours). The
-per-session `version-update` detector now RAISES `gs.request_version_update()`
-(`version-update-requested.flag`, global-state) when the cache is behind GitHub AND
-`auto_update_on_new_release` is on; the daemon's `_consume_version_update_request(tasks)`
-runs each loop AFTER the stop branch, BEFORE the due-loop —
-clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writer preserved
-(the detector only requests; issue #7/PRRD S2.1). Latency ~5-6min not 6h. Opt-out
-`CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER`; fail-open to the 6h beat.
-
-## Core files (verified)
-
-**Top-level `scripts/`**
-- `dispatcher-stub.py` — auto-roll stub in DATA; zero-arg, execs latest `dispatch.py`.
-- `dispatch.py` — per-session heartbeat entry; detector roster + cadences; resume/renew/reload markers.
-- `daemon.py` — global singleton daemon; `_run_workload`, `Task`/`Task.run` (finally-stamps last-run), `task_marketplace_refresh` / `task_user_plugins_update` / `task_version_update`, `_build_tasks`.
-- `doctor_classify.py` + `commands/doctor.py` — GitHub workflow-doctor CLI (zizmor + Sentinel classifiers).
-- `publish.py` — 14-gate fail-fast release pipeline (version bump → validate → lint → tests → commit → push → tag → GH release).
-- `safe_delete.py` — moves targets to `.trashcan/` (the `/janitor-safe-delete` backend).
-- `guard/branch_protection_apply.py` — applies branch-protection rules.
-
-**`scripts/lib/` core (non-pattern)**
-- `state.py` — per-session helpers (port of state.sh): `project_root`, `state_dir`(=`$PROJECT/.janitor/state`), `log_dir`, `atomic_write`, `log_line`, `read_int_state`, `is_truthy_env`, `coerce_int`.
-- `global_state.py` — daemon contract: `global_state_dir` (⚠️ unofficial path), the DUAL-ERA singleton (`acquire/release_singleton_dual` — holds every era's `daemon.flock`, control_dir() first; the old single-fd `acquire_singleton_flock` is retired, TRDD-QK7M2B0X), **`marketplace_lock`/`acquire/release_marketplace_lock`** (cross-process serialization), daemon lifecycle (`daemon_pid` live-preferring dual-read, `write/read_heartbeat` dual-write/max-read, `foreign_era_daemons` double-daemon detector, `kill_switch_present`, `daemon_is_alive`, `ensure_daemon_running`, `spawn_daemon_detached`, `daemon_needs_restart`, `set/clear_reload_flag`).
-- `dedupe.py` — `emit_once` (content-hash dedupe → unchanged findings stay silent).
-- `version_update_lib.py` — janitor self-update helpers (`attempt_auto_update`, `do_auto_update_if_needed`, `detect_install_scopes`); daemon-only caller.
-- `rules_installer.py` — `install_rules` copies plugin `rules/*.md` into the active scope's `.claude/rules/` (atomic tmp+replace; content-exact idempotency). Called by `on-session-start`. **Rules lifecycle (TRDD-H9IBY95W):** each shipped rule carries a leading inert-guard + `PROVENANCE_MARKER` comment (`ai-maestro-janitor:installed-rule`) → the rule self-disables when the janitor is DISARMED (kill-switch flag) and flags itself INERT + never-delete-memory when UNINSTALLED (data dir absent). `remove_orphaned_rules` (per-session, called by on-session-start after install) strips marker-bearing rules from any scope that's no longer an install target (partial uninstall / redundant project mirror); `cleanup_user_orphans_if_uninstalled` (daemon `rules-cleanup` task) removes user-scope orphans once `janitor_uninstalled()` (no settings scope AND no data dir). ALL removal is marker-gated `*.md`-only → never a user's own rule, never a memory store. Ships 8 rules; the set is AUTO-DISCOVERED by globbing `rules/*.md` (no hardcoded list). Includes the 3 IND governance rules `trdd-design-tasks`/`prrd-design-rules`/`universal-kanban` (issue #73, the ai-maestro-independent half of the 3-pillars split). INSTALL compares BYTES not markers, so it OVERWRITES an existing unmarked same-named user rule → the content-based overwrite is the one-shot takeover of the user's old hand-placed globals (marker-gating protects only the REMOVAL path, never the install).
-- `usage_probe.py` — the ONE throttled reader of `/api/oauth/usage` (TRDD-WEBA1RMF). Single writer, N readers: `rotator.usage_request` → this, so the rotator's 60 s beat and `window-burn-rate`'s 15 min share one budget. Sends `claude-code/<version>` (derived from `claude --version`) because that endpoint drops any other UA into an aggressive bucket that 429s persistently — and a probe 429 is read by the rotator as "account MAXED", so a throttle makes live AND every alternate look unusable at once and rotation stalls (the 2026-07-18 deadlock, TRDD-WBYFTU2L). **Two hosts, two OPPOSITE correct UAs:** `platform.claude.com/v1/oauth/token` still needs `claude-account-rotator` (urllib's default → Cloudflare 1010); pinned by `tests/test_oauth_token_useragent.py`. Per-account cache keyed by a salted token digest (mtime IS the TTL clock, 600 s), `Retry-After`/`anthropic-ratelimit-*-reset` honoured else exponential 600→7200 s, non-blocking flock with a post-acquire re-check (TOCTOU) and a `_NO_LOCK` sentinel for lock-less homes, `outcome["reason"]` so staleness names its true cause. **Resolves NO credential** — it is handed a token; `rotator._read_live_primary()` keeps the cross-platform ladder (macOS Keychain → `.credentials.json` → `secret-tool`), so a telemetry probe can never raise a keychain dialog. Throttling design adapted from ccgauge (MIT).
-- others: `branch_protection_lib`, `git_utils`, `git_ops_patterns`, `posture`/`posture_modes`, `suppression`, `output_formats`, `security_helpers`, `ioc_taxonomy`, `janitor_self_integrity`, `zizmor_classifier`/`zizmor_patterns*`, `sentinel/` (workflow-doctor rule engine: `model`, `rules_absence/context/injection/extra/repo`).
-
-## Conventions (breadth — list, don't per-symbol-dump)
-
-**Detectors (`scripts/detectors/`, 39)** — each a standalone `--one-shot` script
-run by `dispatch.py`; emits drift lines; slow ones use a PID-tracked detached-worker
-that skips if the prior worker is alive; per-detector cadence + seen-file dedupe.
-**Project-scoped — never touch user-scope.** Groups:
-- *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), github-issues-watch (TRDD-2KQQAEPP — **ALWAYS ON** since the 2026-08-02 owner directive; notifies main Claude of each NEW issue or NEW comment on the project's own GitHub tracker. Seen-map `{number: updatedAt}` in `.janitor/state/` is the dedupe — GitHub bumps `updatedAt` on a comment, so one field catches both. **The FIRST fire on a project is silent**: a MISSING seen-map means "adopt the current open set as the baseline, say nothing" — the anti-flood guard that replaced the retired `/janitor-issues-watch-on`'s seed-then-arm ordering, worth 43 suppressed lines on this repo alone. Keyed on `exists()`, never the parsed map, because `_read_seen` fails open to `{}` for a CORRUPT file too and there re-reporting is the safe direction. Issue titles are attacker-controlled and go through `sanitize_for_drift_line`; fail-open on missing/unauthed `gh`; opt-out `CLAUDE_PLUGIN_OPTION_ISSUES_WATCH_ENABLED`), gh-reply-watch (**ALWAYS ON**, same directive — REPLIES to threads THIS project opened, on ANY repo; the cron-driven replacement for the session Monitor, see GH-REPLY MONITOR below), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
-- *TRDD/task:* trdd-drift, trdd-reminder.
-- *cleanup:* screenshot-purge, trashcan-purge, reports-purge (S8 TRDD-LCO8229M — 30d age retention for `reports/**` excluding the screenshot-purge-owned `screenshots/` subtree, `CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS`; + `.janitor/state/*seen*` line-cap to the newest `CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES`=500, so dedupe horizons stop growing unbounded).
-- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; on a local alarm it ENRICHES (never suppresses) the line with agentlensPro's `get_burn_status` burn-rate + `investigate_burn` cause via the shared `agentlens_probe` lib (config-gated `heartbeat_burn_status_command`/`heartbeat_investigate_burn_command`, fail-open — TRDD-HL8H3XCV); default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; **TOKEN-QUIETNESS (v0.51.0, ARCHITECTURE.md §3):** the alarm surfaces ONLY in the CULPRIT project's own sessions (`_own_project_trip`: fleet attribution slug == this project's slug; unattributable trips silent everywhere, suppression logged) and a surfaced alarm is indexed in the project's findings ledger (`WINDOW-BURN`); enrichment PREFERS agentlensPro's `investigate_burn` OTEL cause (config-gated, fail-open, `agentlens_probe` — TRDD-90B47EM9), else the native attribution via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; the machine-wide view lives behind `/janitor-token-attribution` + `token_report --live`).
-- *scope drift:* settings-scope-drift, claude-md-scope-drift, cross-scope-reference-drift, subagent-scope-drift, mcp-config-drift.
-- *supply-chain/security:* mcp-rugpull, remote-credentials, supply-chain-fingerprints, typosquat-watcher, provenance-audit, repo-trust-score, package-manager-policy, workflow-security, historical-cache-scan, binary-magic-scanner, ai-context-poisoning, subagent-report, janitor-self-integrity.
-- *updates (some daemon-delegating shims):* marketplace-refresh, plugin-updates, local-plugins-update, project-plugins-update, **user-plugins-update (shim → daemon)**, version-update (shim → daemon).
-
-**Boundedness invariants (S3+S4, TRDD-7IUTRX29):** a self-heal that can run every
-tick MUST dedupe/back-off on an unchanged input (content-hash convergence like
-`verify_or_restage`, cadence stamps, cooldown gates like `fleet_recovery.gate` — all
-audited bounded 2026-07-07); every append site MUST rotate or trim — `state.log_line`
-rotates STRUCTURALLY (amortized inside the append, so hooks/detectors that never call
-`rotate_log_if_big` are still bounded), `AuditChain.trim()` caps the self-integrity
-chain via a key-signed trim-anchor that keeps genesis-anchored `verify()` green,
-`trim_recovery_audit` (documented rollup trade-off) + `token_meter.trim_log` +
-reports-purge's seen-file caps cover the rest.
-
-**Pattern libraries (`scripts/lib/*_patterns.py`, ~200)** — the security knowledge
-base. One module per attack class, uniform shape: exposes regex/rule definitions +
-metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
-`cloud_credential_patterns`, `prompt_injection_patterns`, `npm_lifecycle_patterns`,
-`k8s_admission_patterns`, …). **Don't enumerate — grep by domain when needed.**
-
-**Hooks (`scripts/hooks/`, 16)** — `on-session-start` (installs rules + ensures
-daemon + prints the MEMORY BREADCRUMB: one line naming the per-scope note counts
-and the `memgrep overview <dir>` entry point, so a fresh session learns the 3-scope
-wikimem exists without already knowing memgrep — TRDD-98ISATJZ S2 / janitor#62;
-counts only, NEVER note content, because the line lands in the session prefix and a
-PROJECT-scope page is untrusted git input; printed even while globally disarmed —
-memory outlives the heartbeat; opt out `…MEMORY_BREADCRUMB=false`),
-`on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
-`on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer` (PostToolUse
-→ **ON BY DEFAULT**; on a strong injection signal in an `mcp__*` response it
-STRIPS covert invisible/bidi unicode and REPLACES the payload via CC's
-`updatedToolOutput`, with a homoglyph-only weak-signal warn-not-replace
-safeguard; opt out `…POST_MCP_SANITIZER_ENABLED=false`, warn-only
-`…_STRIP=false`),
-`pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (DEFAULT-ON
-PreToolUse → context-size runaway guard: ADVISORY nudge ≥80% (was 60 — token-quietness audit: the CC harness covers the mid band), ENFORCEMENT
-(auto-compact + deny the tool call) ≥85%; statusline snapshot or transcript
-fallback; fail-open — TRDD-SMZFJVZ3), `post-compact-resume` (PostCompact → writes
-`resume-after-compact.flag` so the next heartbeat emits `[janitor-resume]
-…continue TRDD-xxxx…`; closes the watchdog loop so a compact doesn't stall an
-unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSubmit
-→ the PRIVATE user-memory subsystem, TRDD-4334aad0), `on-stop-token-meter` (Stop
-→ logs each heartbeat turn's token cost to `token-meter.jsonl` for
-`/janitor-token-report`; separate from the survival-critical on-stop hooks so a
-meter bug can't break resume — TRDD-a4e41e89). `on-stop-failure` also — STRICTLY
-after its critical `rate-limited.flag` write, best-effort/never-raises — snapshots
-the 5h/7d token windows to `window-exhaustion.jsonl` at each turn-ending API error;
-the MAX 5h/7d sum across those events is the empirical Opus window-cap lower bound
-surfaced by `/janitor-token-report` (TRDD-EDSFEQ5C). `pre-tool-token-budget` (PreToolUse
-→ token-meter **Phase 3** real-time spike + cache-miss guard, TRDD-KI24GR5Z:
-reuses `token_meter.tail_turn_usage` + the pure `token_meter.evaluate_turn_budget`
-to classify the IN-PROGRESS turn on TWO signals — `output` (full-price work) AND
-`cache_creation` (a CACHE-MISS cache WRITE, ~1.25×; the cheap 0.1× cache_read is
-NOT billed) — into ok/advisory/hard. **DEFAULT-ON** (opt-out
-`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`); silent below `…TURN_OUTPUT` (10000) /
-`…TURN_CACHE_CREATION` (25000); a strong stop-the-subagents/skill nudge at
-`…TURN_OUTPUT_HARD` (40000) / `…TURN_CACHE_CREATION_HARD` (75000); and — opt-in
-`…TOKEN_BUDGET_ENFORCE` — a `permissionDecision: deny` of a `Task`/`Agent` spawn at
-the hard tier (subagents are the biggest multiplier). Any threshold 0 disables it. The context-watchdog trio
-(pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
-skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥80%, enforcing
-≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
-(`…CONTEXT_HARDSTOP_PCT`, `…CONTEXT_AUTOCOMPACT_ENABLED`,
-`…CONTEXT_WINDOW_TOKENS`) — TRDD-SMZFJVZ3.
-Plus `scripts/gh_issues_monitor/gh_register_hook.py` (PostToolUse `Bash`) — see the
-GH-REPLY MONITOR below; it lives outside `scripts/hooks/` because it belongs to that
-subsystem, not to the heartbeat.
-
-**GH-REPLY MONITOR (`scripts/detectors/gh-reply-watch.py` + `scripts/gh_issues_monitor/`)**
-— notifies when someone REPLIES to a thread THIS project opened, on ANY repo.
-**Distinct from the `github-issues-watch` DETECTOR above**, which reports NEW issues on this
-project's OWN repo — different question, different mechanism, no shared state.
-
-**ALWAYS ON and CRON-DRIVEN since the 2026-08-02 owner directive** ("must be a chore executed
-always by the janitor. no need to enable it. […] integrate it better in the chron. ensure it
-works both inside ai-maestro harness and outside"). It was a persistent `Monitor` looping
-`gh_notify_poll.py` every 120 s, started ONLY by step 3 of the now-retired
-`/janitor-github-issues-monitor-on` — so it died on every restart and compaction, and a hook
-could not revive it because **a hook cannot call the `Monitor` tool**. The fix was available
-all along: `do_poll` was ALREADY a one-shot (poll, print, write cursor, exit) and the Monitor
-only wrapped it in `while true; sleep 120`. As a detector the heartbeat supplies the schedule,
-nothing can forget to arm it, and it runs in BOTH backends — `_NON_HARNESS_DETECTORS` is a
-deny-list and neither GitHub chore is on it. Cadence 900 s, far above GitHub's
-`X-Poll-Interval: 60` floor. **First fire is silent** (`--baseline`), else the first poll
-replays every already-read registered thread as a fresh reply.
-
-**Every forwarded line is `sanitize_for_drift_line`d.** The poller interpolates
-attacker-controlled text (issue TITLE, comment BODY) and its `squeeze()` only collapses
-whitespace and truncates — harmless while the output went to Monitor notifications a human
-reads, NOT harmless as heartbeat drift the model acts on, where a bare `[janitor-…]` line is
-an instruction. Without it, "anyone can open an issue" reaches "the janitor stops".
-
-The filter is a **registry intersection**, not a `reason` filter: on a shared `gh` identity the
-owner's personal open-source traffic carries the same `reason: author` (measured 5-of-6
-emitted threads), so a thread is watched only because this project OPENED it.
-`gh_register_hook.py` fills that registry from GH-**creating** commands' printed URLs
-(`gh issue create`, `pr create|comment|review`, `api -X POST …/comments` — never
-`list`/`view`, which would watch everything merely READ). It ships as a PLUGIN hook, NOT
-installed into `~/.claude/settings.json` as the standalone skill did: that baked an ABSOLUTE
-path to the script, which inside a plugin is the EPHEMERAL versioned cache dir → the hook dies
-silently at the next update when the version dir is GC'd.
-
-State (`registry.json` = a RECORD OF WORK, `state.json` cursor) lives **in the project** at
-`.janitor/gh-issues-monitor/` (owner directive, same night: "store the tracking data
-locally"). Slug-keyed subdirs of the global DATA dir gave per-project SEPARATION but not
-LOCALITY — keyed by absolute path, so moving a checkout orphaned its registry, and one store
-held every project's record of work. Deliberately NOT `.janitor/state/`, advertised as
-regeneratable and safe to delete: the registry is filled by the hook as `gh` commands happen,
-so a lost one cannot be rebuilt, only re-accumulated. Both older locations
-(`<DATA>/gh-issues-monitor/<slug>/`, then the pre-port
-`~/.claude/state/github-issues-monitor/<slug>/`) are migrated newest-first, **copy never
-move** — a rollback must still find its registry. Gitignored via `.gitignore`'s `.janitor/`.
-The poller is NOT `chmod +x`; run it as `uv run --script`, never by path.
-
-**USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
-`scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
-TRDD-4334aad0; renamed TRDD #196)** — a PRIVATE, agent-invisible user-authored
-memory store at `~/.claude/projects/<slug>/memory/user-mem/` (sibling of the
-agent corpus), with an immutable monotonic counter (`.counter` + flock; numbers
-retired-never-reused). `/janitor-memory-user-add [<text>]` saves (bare → previous
-user message via transcript); `/janitor-memory-user-search <q>` searches ONLY
-that store via `memgrep find <q> <dir> --use-index` (the `+`/`-`/wildcard/phrase
-DSL lives in the Rust crate); `/janitor-memory-user-share <N>` is the ONE gate
-that injects a memory into context. The legacy `/to-user-mem` / `/search-user-mem`
-/ `/share-user-mem` names still work (deprecated aliases) and — critically — stay
-recognised-and-blocked so a user who types one never leaks (an UNRECOGNISED form
-is not intercepted → the private text reaches the model). PRIVACY (verified vs
-the Claude Code hook docs): the UserPromptSubmit hook returns `decision:block`
-(erases the prompt → save text + search query never reach the model) and surfaces
-confirmations/results via `systemMessage` (user-only); `/janitor-memory-user-share`
-is the sole path using `additionalContext` (which DOES reach the model). Fast
-no-op for any non-user-mem prompt; never crashes the session.
-
-**Skills (`skills/`)** — control surface: `janitor-arm` ↔ `janitor-disarm` (local cron
-true-stop), `janitor-global-disarm` ↔ `janitor-global-arm` (machine-wide, backed by
-`scripts/global_control_cli.py disarm|arm|reload-skills|status` — kill-switch=disarm makes
-the daemon EXIT). **ARM/DISARM IS THE ONLY SWITCH** (owner directive 2026-07-31, *"remove
-the very option of disabling the janitor features"*). PAUSE (local + global) went in
-v0.67.0 and MAINTENANCE MODE (local + global) with it: each suspended the janitor while
-leaving the cron firing and the daemon resident, i.e. indistinguishable from a healthy
-fleet from the outside — the same silent-disable shape as the `keep-going-off` incident.
-Maintenance was the more defensible of the two (a fire re-reads context at the 0.1× READ
-rate ≈ 1/10 the 1.0× REWRITE a dead cache costs, so a do-nothing fire looked like the cheap
-way to stay warm) and it is gone for exactly the same reason. Stale `global-pause.flag` /
-`maintenance-mode.flag` / `.janitor/state/{paused,maintenance-mode}` are INERT and swept
-(`state.RETIRED_SENTINELS`, swept by dispatch each fire AND by every arm); the retired CLI
-verbs are REJECTED, never accepted as no-ops. TWO heartbeat modes
-(`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon) and STOP
-(self-disarm). A global stop TRULY STOPS the heartbeat (free), not just silences it
-(TRDD-RQ9FIFX6): the flag makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker →
-the session runs `/janitor-disarm` → the cron DELETES ITSELF, because a cron FIRE is a full
-Claude turn that re-reads ~618k cached tokens (billed at the 0.1× cache-read rate, NOT free)
-whether or not detectors run — only NOT firing costs zero. **Cost is answered by the SLOW
-cadence tier (fewer fires, same work) and by `_phase_self_cost_alarm`, which prints one
-drift line naming this project's own 7d heartbeat spend past `heartbeat_self_budget` and
-actuates NOTHING** — it replaced the TRDD-ZCODD6YS two-rung throttle (cadence cap → auto
-LOCAL maintenance), reverted by the same "never self-disable" ruling.
-**The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge()`
-fires on EVERY heartbeat, takes no mode, and has one wording. Its opt-in flag, its
-`/janitor-keep-going off` sentinel and the
-`keep_going_default` knob were all REMOVED in v0.67.0 (owner directive 2026-07-31, *"remove the
-very option of disabling the janitor features"*): a host was found carrying
-`.janitor/state/keep-going-off` dated 14 days back, so every fire had correctly done nothing and
-looked healthy. The ONE remaining skip is time-bounded and self-clearing — the single fire right
-after a `[janitor-resume]` cue, which already said "continue" and carried the directive
-(`_keep_going_muted_by_recent_resume`); that is a de-duplicator, not a mute.
-Rollout caveat: crons armed BEFORE this shipped don't self-disarm (the cron prompt is baked at
-arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
-(user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).
-`janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
-`janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
-`janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
-(the four `janitor-issues-watch-{on,off}` / `janitor-github-issues-monitor-{on,off}` skills were
-DELETED on 2026-08-02 by owner order — both features are always-on chores, so the `-on` pair
-had nothing to enable and the `-off` pair was exactly the per-feature silent disable the
-2026-07-31 directive removed; arm/disarm is the only switch, plus the two config knobs),
-`janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
-`scripts/compact_trigger.py`; SOFT/enqueue by default since TRDD-0GPQROC1 — `/compact`
-runs when the turn ends; `--hard` = ESC-interrupt for emergencies (the ≥85% enforcement
-hook passes it), `--handoff` = run `/janitor-write-handoff` first — combinable —
-TRDD-LQU7OXXV), `janitor-write-handoff` (rich agent-authored handoff to
-`.janitor/state/agent-handoff.md`, the OPT-IN semantic complement to the always-on
-zero-cost `pre-compact-handoff.py`; `--then-compact` chains to `/compact`),
-`janitor-reload-plugins` (→ `/reload-plugins --force`; soft default, `--hard`),
-`janitor-reload-skills`
-(→ CC's `/reload-skills` for STANDALONE non-plugin skills/commands at local/project/user
-scope — `/reload-plugins` only reloads plugin-bundled ones; backed by
-`scripts/reload_skills_trigger.py`; soft default, `--hard`) ↔ `janitor-global-reload-skills`
-(machine-wide:
-`global_control_cli.py reload-skills` stamps a `skills-reload-needed.flag` generation that
-`dispatch.py _phase_skills_reload` emits `[janitor-reload-skills]` for once-per-session,
-mirroring the `[janitor-reload]` path — TRDD-LQU7OXXV). The self-trigger commands share
-`scripts/lib/terminal_trigger.py`, which parameterizes `esc_first` (hard=ESC-interrupt /
-soft=enqueue) + multi-command sends — the substrate TRDD-ME8V2YJF reuses for daemon-driven
-fleet injection. **Injection is SOFT by default fleet-wide (TRDD-0GPQROC1):** the three
-self-triggers enqueue, `_fire_fleet_stop` types stop commands without ESC, gentle recovery
-rungs ESC only a `frozen` target (`fleet_recovery.injection_is_hard`), and
-`fleet_inject.build_command_plan` honors `esc_first` on EVERY channel (tmux/wtype/xdotool
-included — they used to always ESC).
-
-**Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
-many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one
-line + a report. `janitor-memory-subconscious-agent` (Wikimem editorial: consolidate/
-split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` via bare
-`[janitor-memory-*]` markers). `janitor-security-agent` (TRDD-f12cae1a — ALL 8 security
-skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via
-`security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since
-security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`).
-Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `model: opus`; both `effort: high`.
-
-**Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
-(`test_marketplace_lock`, `test_rules_installer`, `test_marketplace_refresh_daemon_stale`, …).
-Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`.
-
-**Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
-
-## Claude Code compatibility (changelog reviewed through **2.1.212**; audit ≥2.1.198)
-
-The janitor is coupled to harness internals (plugin options, hooks, subagents, the context
-indicator), so a CC release can break or silently change it. Findings from the ≥2.1.198 sweep —
-**re-run this audit each time CC jumps a few minor versions**, and extend this list:
-
-- **2.1.211 — integer env vars accept scientific notation + digit separators** (`1e6`, `64_000`;
-  2.1.208 had fixed `1e6` silently becoming `1`). The janitor's ~50 `CLAUDE_PLUGIN_OPTION_*` int
-  knobs flow through `state.coerce_int`, which gated on `str.isdigit()` and so SILENTLY rejected
-  those spellings → reverted the knob to its default. ✅ *ADOPTED (TRDD-CCCOMPAT):
-  `state.parse_nonneg_int` now accepts the same spellings CC does (plain / `64_000` / `1e6` /
-  `2.7e5`, whole-number only, non-negative); `coerce_int` + both hook-local `_coerce_int`
-  (`pre-tool-context-usage`, `pre-tool-token-budget`) delegate to it. Regression-tested.*
-- **2.1.212 — Task tool `mode` parameter deprecated (now ignored); subagents inherit the parent's
-  permission mode.** ✅ *janitor unaffected — verified it passes NO `mode` to Task/Agent; it spawns
-  agents via bare `[janitor-memory-*]`/`[janitor-ticket]` MARKERS, never a `mode` param. Do NOT add
-  one.*
-- **2.1.212 — per-session subagent-spawn cap (default 200, `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`;
-  `/clear` resets it).** The janitor's heartbeat spawns count toward it AND the user's shared
-  budget. ✅ *no code change — the janitor's spawns are ALREADY rate-limited well under 200 (memory
-  chores by the per-day `memory_settings` cadence; tickets by `tickets.budget_left` per-day). A
-  compaction does NOT reset the budget (only `/clear` does), so on a multi-day session keep the
-  janitor's spawn rates conservative; if it ever nears the cap, that is a future TRDD, not a bug.*
-- **2.1.212 — `continue:false` hook halt no longer dropped on a mid-stream tool failure; hook
-  infra errors no longer misreported as user rejections.** ✅ *janitor unaffected — its
-  UserPromptSubmit hooks use `decision:block` (user-mem privacy) / `additionalContext`, never
-  `continue:false`. The "infra error ≠ user rejection" fix (with 2.1.210's hook-timeout fix)
-  strictly HELPS the unattended mission — a slow janitor hook can no longer read as a stop.*
-- **2.1.212 — `/fork` now copies the conversation into a background session; the in-session
-  subagent is `/subtask`.** ✅ *janitor unaffected — it uses the Agent tool with
-  `run_in_background`, never the `/fork` command (the "fork" hits in the tree are git-fork
-  detection in `identify_environment.py` + memgrep build artifacts).*
-- **2.1.210 — a hook-callback timeout was misreported to the model as a user rejection, stopping
-  unattended sessions.** CC FIX (no janitor change). The janitor's synchronous in-hook subprocess
-  calls (`compact_trigger`, the beacon spawn) already carry their own bounded timeouts (≤20s) and
-  are best-effort/fail-open, so even a slow one degrades cleanly; this fix removes the false-stop
-  risk on pre-fix CLIs. Confirms the fail-open hook design is correct — keep it.
-- **2.1.207 — plugin options are USER-scope only.** `pluginConfigs` is **no longer read from a
-  project `.claude/settings.json`**. It fails SILENTLY (the knob reverts to its default, no
-  error), so a pre-2.1.207 project-scope config makes the janitor behave like a fresh install.
-  README's Configuration section now says user scope. An **`env` block** in project settings is
-  unaffected. ✅ *fixed in docs.*
-- **2.1.207 — `${user_config.*}` rejected in shell-form hook/monitor commands** (shell-injection
-  fix). ✅ *janitor unaffected — verified zero usages; hooks pass options as
-  `$CLAUDE_PLUGIN_OPTION_<KEY>`. Do NOT introduce `${user_config.*}`.*
-- **2.1.208 — false "100% context used" after a CLI auto-update** (the window "briefly reset to
-  200k" on long-context sessions). Not cosmetic here: at ≥85% `pre-tool-context-usage.py` fires
-  `/compact` AND denies the tool call, so a bogus number **destroys real conversation**.
-  `token_meter.resolve_context` now rejects a snapshot whose `tokens > window` (impossible in a
-  healthy session — the harness compacts first) and recomputes against the configured window.
-  ✅ *guarded + regression-tested; the guard stays for pre-2.1.208 CLIs.*
-- **2.1.202 — a re-invoked skill no longer appends a DUPLICATE copy of its instructions.** This
-  changes TRDD-DLI76AUC's cost model: before 2.1.202 every `[janitor-renew]` → `/janitor-arm`
-  stacked another full copy of the (then 12.5 KB) skill into context, so the churn compounded.
-  Post-fix, skill BYTE size is a one-off and `cost ≈ tool_calls × context × 0.1` dominates —
-  which is why the arm's 6→4 tool-call cut is the load-bearing half of that TRDD, not the shrink.
-- **2.1.199 — a subagent killed by a rate limit no longer reports SUCCESS.** The error now
-  reaches the parent (and partial work is returned). Previously a rate-limited
-  `janitor-memory-subconscious-agent` looked like a clean run, so a memory chore could be
-  stamped done having done nothing. No code change needed — but never re-introduce a "the agent
-  returned, therefore it worked" assumption.
-- **2.1.199 — `CLAUDE_CODE_RETRY_WATCHDOG` retries transient errors up to 300×.** Fewer turns die
-  on transient (non-usage) 429s, so `on-stop-failure`'s `rate-limited.flag` fires less often. The
-  flag remains the correct signal; only its frequency drops.
-- **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
-  `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
+- Tests: `uv run pytest`
+- Lint: `uv run ruff check scripts tests`
+- Release pipeline: `uv run scripts/publish.py`
+- Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
 <+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=954d84676104 digest=a4c05c35d4d3 generated=2026-08-02T12:36:04+0200
 ## Project map (auto-generated — do not edit between the fences)
@@ -1978,3 +1499,62 @@ indicator), so a CC release can break or silently change it. Findings from the �
 ### Convention groups
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
+
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=418c45254aaf generated=2026-08-02T18:23:55+0200
+## Wikimem index (PROJECT scope) — recall by symptom, read on demand
+
+Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
+
+- [ai-maestro-janitor-overview](.claude/project/memory/ai-maestro-janitor-overview.md) — how does ai-maestro-janitor work — the overall story + where the deeper pages are
+
+**claude-code-continuity-engineering** — claude stalled overnight
+- [claude-code-continuity-engineering](.claude/project/memory/claude-code-continuity-engineering.md) — claude stalled overnight
+  - [claude-code-continuity-settings](.claude/project/memory/claude-code-continuity-settings.md) — claude stopped on an api error instead of retrying
+  - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
+  - [claude-code-esc-input-semantics](.claude/project/memory/claude-code-esc-input-semantics.md) — how many ESC to unstick claude
+  - [claude-code-plugin-rollout-staleness](.claude/project/memory/claude-code-plugin-rollout-staleness.md) — the fix is published but the bug keeps happening
+
+**janitor-architecture** — how does the ai-maestro-janitor work
+- [janitor-architecture](.claude/project/memory/janitor-architecture.md) — how does the ai-maestro-janitor work
+  - [janitor-beat-tasks-and-limitations](.claude/project/memory/janitor-beat-tasks-and-limitations.md) — what is the heartbeat rate
+  - [agentlens-diagnostics-integration](.claude/project/memory/agentlens-diagnostics-integration.md) — should I switch a janitor detector to agentlensPro's window budget
+  - [janitor-fleet-control-plane](.claude/project/memory/janitor-fleet-control-plane.md) — a chore ran twice
+  - [window-burn-rate-alarm-contract](.claude/project/memory/window-burn-rate-alarm-contract.md) — when does the janitor's burn alarm actually fire
+  - [janitor-keepalive-test-isolation-fsevents](.claude/project/memory/janitor-keepalive-test-isolation-fsevents.md) — a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir
+  - [janitor-fleet-guardian-reachability](.claude/project/memory/janitor-fleet-guardian-reachability.md) — the status table says a project is NOT armed but I armed it myself
+  - [three-pillars-rules-ownership](.claude/project/memory/three-pillars-rules-ownership.md) — which repo owns trdd-design-tasks
+  - [janitor-daemon-handover-unowned-chores](.claude/project/memory/janitor-daemon-handover-unowned-chores.md) — every daemon chore stamp is frozen at the same age but no flag is set
+
+**Other topics**
+- [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
+- [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
+- [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment — why did terminal/TTY detection report wrong (…
+- [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
+- [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
+- [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
+- [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the 39 janitor detectors by group
+- [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
+- [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
+- [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
+- [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
+- [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
+- [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
+- [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
+- [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
+- [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
+- [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
+- [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
+- [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
+- [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
+- [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
+- [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
+- [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
+- [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
+- [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
+- [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on '.gitignore missing coverage for .claude/' — why it can't be satis…
+- [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
+- [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
+- [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
+- [status-lines-to-autonomous-readers-cause-escalation](.claude/project/memory/status-lines-to-autonomous-readers-cause-escalation.md) — agents keep turning global maintenance back on by themselves
+- [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
+<+-+-JANITOR-WIKIMEM-INDEX-END-(do-not-modify)-+-+>

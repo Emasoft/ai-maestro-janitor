@@ -106,6 +106,22 @@ excludes nobody. The thing to escalate is the server not EXECUTING what it absor
 repo's contract is explicit that a running server which does not run an absorbed chore is a
 server bug, never a janitor guard.
 
+
+^ATOM-E3NC-H279 [desc:"Chore coordination Phase B2 — a fresh server-liveness.json probe file decides whether absorbed chores yield or the janitor runs them ALL", keywords: chore_coordination_phase_b2 server_liveness_json_probe server_is_alive_server_runs_chores binary_chore_switch_trdd_lu0c5kar capabilities_informational_field, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+- **Chore coordination (Phase B2, BINARY since TRDD-LU0C5KAR — owner directive
+  2026-07-17):** responsibility follows server LIVENESS. A fresh auth-free probe file
+  `~/.aimaestro/server-liveness.json` (`{ts,pid,capabilities}`, 30 s beat / 90 s
+  staleness) ⇒ the server is RUNNING ⇒ ALL absorbed chores
+  (`harness_backend.SERVER_ABSORBED_TASKS`: the OAuth pair + the update trio) yield;
+  absent/stale/malformed ⇒ the janitor runs them ALL. `server_is_alive()` /
+  `server_runs_chores()` are the switch (env overrides `JANITOR_AIMAESTRO_SERVER_CHORES`
+  / `_STATE` first); the `capabilities` content is informational — "a running server
+  that does not execute an absorbed chore is a server bug, never a janitor guard" (the
+  rev-3 per-class token gating, TRDD-N9YAH5E7, is retired). File locks remain the
+  collision backstop across the 90 s handoff window. `design/ARCHITECTURE.md` rev 4
+  (proposed on janitor#100) is the canonical contract doc.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-JDHU-4A18, status:valid, keywords:"read_a_stale_chore_stamp_as_nothing_is_running janitor_stamp_only_moves_when_the_janitor_runs_it concluded_rotation_was_dead_when_the_server_was_doing_it last_switch_at_measures_switches_not_refreshes", ocd:2026-07-29, lmd:2026-07-29]

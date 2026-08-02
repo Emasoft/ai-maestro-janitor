@@ -346,6 +346,28 @@ binaries: `cd <checkout>/scripts/memgrep && cargo install --path .` on the host
 that sees it. That is also the recovery after ANY edit to the crate — a source
 change is invisible until reinstalled. [^6]
 
+
+^ATOM-K04O-1VMN [desc:"The USER-MEMORY subsystem section verbatim from CLAUDE.md: the commands, the immutable counter, the legacy-alias blocking, and the decision:block / additionalContext privacy mechanics", keywords: user_memory_subsystem_commands_add_search_share private_agent_invisible_store decision_block_user_prompt_submit_hook legacy_to-user-mem_search-user-mem_share-user-mem_aliases_blocked, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+**USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
+`scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
+TRDD-4334aad0; renamed TRDD #196)** — a PRIVATE, agent-invisible user-authored
+memory store at `~/.claude/projects/<slug>/memory/user-mem/` (sibling of the
+agent corpus), with an immutable monotonic counter (`.counter` + flock; numbers
+retired-never-reused). `/janitor-memory-user-add [<text>]` saves (bare → previous
+user message via transcript); `/janitor-memory-user-search <q>` searches ONLY
+that store via `memgrep find <q> <dir> --use-index` (the `+`/`-`/wildcard/phrase
+DSL lives in the Rust crate); `/janitor-memory-user-share <N>` is the ONE gate
+that injects a memory into context. The legacy `/to-user-mem` / `/search-user-mem`
+/ `/share-user-mem` names still work (deprecated aliases) and — critically — stay
+recognised-and-blocked so a user who types one never leaks (an UNRECOGNISED form
+is not intercepted → the private text reaches the model). PRIVACY (verified vs
+the Claude Code hook docs): the UserPromptSubmit hook returns `decision:block`
+(erases the prompt → save text + search query never reach the model) and surfaces
+confirmations/results via `systemMessage` (user-only); `/janitor-memory-user-share`
+is the sole path using `additionalContext` (which DOES reach the model). Fast
+no-op for any non-user-mem prompt; never crashes the session.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0001, status:valid, keywords:"memgrep_links_to_from_inverted verify_directional_flags_asymmetric_fixture one_sided_link_defect", ocd:2026-06-13, lmd:2026-06-13] `memgrep links --to NOTE` returns NOTE's

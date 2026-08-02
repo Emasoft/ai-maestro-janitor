@@ -149,6 +149,54 @@ user plugins EXCEPT the ai-maestro fleet").
 - [[agentlens-diagnostics-integration]] — the observability detectors' optional
   agentlensPro cross-check (informs the TTL-regime probe direction).
 
+
+^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+### Control flow
+
+**Heartbeat (per session):** cron prompt → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`
+(re-resolves latest cached `<ver>/scripts/dispatch.py`, `os.execv`s into it — so
+plugin updates auto-roll with NO re-arm) → `dispatch.py`:
+1. `rate-limited.flag` present → emit `[janitor-resume]`, clear flag (also clears the compact-resume flag).
+2. `resume-after-compact.flag` present → emit `[janitor-resume] …continue TRDD-xxxx…`, clear flag (post-compact auto-resume; the PostCompact hook wrote it — TRDD-31095269).
+   Both resume phases also stamp `last-resume.ts` and RETURN EARLY. The stamp is the cadence phase's ONLY view of a resume — it runs later in the same `main()`, by which point the flag is already unlinked, so reading the flags there is dead code (fixed 2026-07-11).
+3. cron near 7-day expiry → emit `[janitor-renew]` (Claude re-runs /janitor-arm).
+3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: a `last-resume.ts` stamp <30min old / pending directive / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases; the SLOW tier is the only sanctioned answer to cost (fewer fires, same work) since the self-budget clamp was removed; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
+4. `ensure_daemon_running()` (lazy-spawn the singleton if dead).
+5. daemon stale/old-version → request restart (auto-roll the daemon too).
+6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
+7. `reload-needed.flag` → emit `[janitor-reload]` (Claude runs /reload-plugins).
+8. `skills-reload-needed.flag` (bumped by `/janitor-global-reload-skills`) → emit `[janitor-reload-skills]` once-per-session (per-project ack) → Claude runs /janitor-reload-skills → /reload-skills (standalone non-plugin skills/commands). TRDD-LQU7OXXV.
+
+**Daemon loop (`daemon.py`):** acquire singleton flock (else exit) → every tick,
+run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
+periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
+**unconditionally** in `finally` (so stale last-run = task not *running*, not
+failing-silently). **Background bulk lane (TRDD-H7NVKSAX, 2026-07-17 oauth-starvation
+incident):** the BULK tasks (`marketplace-refresh`, `user-plugins-update`,
+`version-update`, `github-config-audit`) carry `background=True` and run in ONE detached
+child at a time (`daemon.py --run-task <name>`, parent reaps + stamps from the child rc)
+so a ~20-min bulk run can NEVER block the loop's 60s survival beats (oauth-rotator-tick
+above all — two back-to-back 1190s marketplace refreshes once blinded rotation while an
+account hit its 5h wall). One lane preserves the old bulk-chore serialization; file locks
+remain the backstop. Tasks: `marketplace-refresh` (3600s — was 1200s, which ≈ its own
+runtime and gave a 50% duty cycle; bulk), `user-plugins-update`
+(3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag),
+`rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
+provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a
+full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
+cache ~7d; opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`; NEVER touches memory).
+All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
+**Release-triggered self-update (TRDD-Y9KM5RCJ):** the 6h `version-update` beat is too
+slow to land a fresh janitor release (v0.41.0 sat at cache 0.39.0 for hours). The
+per-session `version-update` detector now RAISES `gs.request_version_update()`
+(`version-update-requested.flag`, global-state) when the cache is behind GitHub AND
+`auto_update_on_new_release` is on; the daemon's `_consume_version_update_request(tasks)`
+runs each loop AFTER the stop branch, BEFORE the due-loop —
+clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writer preserved
+(the detector only requests; issue #7/PRRD S2.1). Latency ~5-6min not 6h. Opt-out
+`CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER`; fail-open to the 6h beat.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG06-0014, status:valid, keywords:"verify_cadence_against_source_constants staged_plan_is_not_what_runs interval_default_cron_source_of_truth", ocd:2026-07-12, lmd:2026-07-12] Verified the beat cadences against

@@ -317,6 +317,19 @@ must report a crash.[^3]
   above when a live ai-maestro server owns the host: §7.2 withdraws the whole
   daemon, so the six chores nobody absorbed belong to nobody.
 
+- [[janitor-two-runtime-backends]] — the #N standalone vs #J harness backend
+  split, the ai-maestro boundary IRON RULE (scripts only, never the HTTP API).
+- [[janitor-findings-pipeline]] — the findings-ledger choke point + the
+  daemon-only human notification channel.
+- [[janitor-core-files-reference]] — the file-by-file reference for
+  `scripts/` and `scripts/lib/` core modules.
+- [[janitor-detector-and-hook-roster]] — the full 39-detector / 16-hook
+  grouped roster behind this hub's abbreviated summaries.
+- [[janitor-gh-reply-monitor]] — the GH-REPLY MONITOR subsystem (replies to
+  threads this project opened, on any repo).
+- [[janitor-skills-and-agents-roster]] — the full skills control-surface +
+  the two single-curator agents.
+
 
 ^ATOM-DUXK-QD2D [desc:"why unattended sessions were stranded after a compaction — the resume push read machine-global presence", keywords: dead_claude_sessions_I_have_to_wake_by_hand session_stranded_after_compaction resume-after-compact_flag_never_consumed post-compact_resume_did_not_fire per-pane_user_presence, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
 
@@ -329,6 +342,102 @@ human woke it by hand. Measured at the fix: five projects holding flags, two of 
 `state.terminal_pane_key()` + `state.per_pane_presence_path()` are the per-pane breadcrumb;
 `user_intent.user_is_present()` is its reader; the global file is the fallback only when the pane key
 cannot be resolved. Fixed in eb52843 (v0.63.2). [^12]
+
+
+^ATOM-HTZM-49B5 [desc:"CLAUDE.md's original purpose note + the two-tier 'what it is' overview (verbatim historical text, kept for provenance)", keywords: compact_map_recall_janitor_without_re-reading_tree what_it_is_two_tiers per_session_heartbeat_cron_five_minutes global_daemon_owns_user_global_scope_mutation, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+> **Purpose of this file:** a compact map so a session can recall how the
+> janitor works WITHOUT re-reading the tree. Keep it current when structure
+> changes. Verified-detail for the core wiring; grouped lists + conventions
+> for the breadth (38 detectors, ~200 pattern libs).
+
+### What it is
+
+A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
+
+1. **Per-session heartbeat** — a `CronCreate` per project fires a fresh
+   turn every ~5 min → runs **project-scoped** drift detectors `--one-shot` →
+   emits one-line "drift" findings to the model. Silent when nothing drifts.
+   The cron is **SESSION-SCOPED by platform design** (CC docs: scheduled tasks live
+   in the current conversation, are restored only on `--resume`/`--continue`, and
+   expire after 7 days — there is **no** `durable` parameter). It therefore cannot
+   survive a Claude restart on its own: the SessionStart re-arm nudge and the
+   `[janitor-renew]` marker ARE the survival mechanism, not workarounds for a bug.
+2. **Global daemon** — ONE machine-wide singleton process that owns every
+   **user/global-scope** mutation (so N sessions don't stampede the same
+   command — issue #7). Spawned lazily by any session's heartbeat.
+
+
+^ATOM-N9XA-YR3U [desc:"The scope invariant bullets verbatim: user/global-scope ops go to the daemon only, project/local-scope ops stay per-session, atomic file writes are the one exception", keywords: scope_invariant_hard_rule_issue_7 user_global_scope_ops_daemon_only project_local_scope_ops_per_session_detectors atomic_file_writes_user_scope_rules, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+### Scope invariant (HARD RULE — issue #7)
+
+- **user/global-scope ops → daemon ONLY.** Bulk `claude plugin marketplace
+  update` (argless), `claude plugin update --scope user`, janitor self-update.
+- **project/local-scope ops → per-session detectors.** They hard-filter
+  `scope in (user, managed)` and only ever pass a specific `<market>` arg.
+- Cheap idempotent **file** writes to user-scope (rules) stay per-session but
+  MUST be **atomic** (tmp + `os.replace`) — the file analogue of the daemon's
+  single-writer lock for expensive commands.
+
+
+^ATOM-MQ9L-E7LV [desc:"Filesystem & state conventions table + current state locations + the ONE SANCTIONED EXCEPTION principle box for ~/.claude/janitor-control/ (verbatim)", keywords: filesystem_state_conventions_table CLAUDE_PLUGIN_ROOT_ephemeral_CLAUDE_PLUGIN_DATA_persistent one_sanctioned_exception_janitor-control_folder global_state_dir_ladder_migration, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+### Filesystem & state conventions (per plugins-reference.md)
+
+| Path | Resolves to | Lifecycle | Use for |
+|---|---|---|---|
+| `${CLAUDE_PLUGIN_ROOT}` | `~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<version>/` | **Ephemeral** — changes every update, GC'd ~7d | scripts, skills, hooks. **NEVER write state here.** |
+| `${CLAUDE_PLUGIN_DATA}` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | **Persistent** — survives updates, backed up, purged only on uninstall | ALL persistent state, caches, venvs. **Prefer this.** |
+| `$CLAUDE_PROJECT_DIR/.janitor/state/` | per-project | per-project | per-session detector state |
+
+**Current state locations:**
+- ✅ `dispatcher-stub.py` → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (correct).
+- ✅ per-session → `$PROJECT/.janitor/state/` (correct — project-scoped).
+- ✅ **daemon global state → `${CLAUDE_PLUGIN_DATA}/global-state/`** (TRDD-2U8AH82F). `global_state.py::global_state_dir` ladder: env override → XDG → DATA dir (once the `migrated-from-legacy.ts` marker exists, or fresh install) → legacy `~/.claude/janitor-global-state/` while a pre-migration install awaits its daemon. The DAEMON performs the one-time copy under the legacy singleton flock and takes the NEW flock BEFORE stamping the marker (flock-moves-LAST — no two-daemon window); control-flag readers dual-read legacy for version skew. Legacy dir = tombstoned read-fallback; retirement is an EHT 2 releases out.
+
+> **Principle (per user):** prefer `${CLAUDE_PLUGIN_DATA}` over any new
+> `~/.claude/<custom>/` folder. The data dir is the only one guaranteed
+> preserved across plugin/marketplace/version changes, backed up by backup
+> tools, and cleanly purged on uninstall. Unofficial folders are lost by
+> backups AND left as orphan junk by purge.
+>
+> **THE ONE SANCTIONED EXCEPTION — `~/.claude/janitor-control/`** (owner, 2026-07-21:
+> *"this folder is an exception, introduced necessarily because of the shared flags with
+> the ai-maestro server"*). It holds the fleet control plane (ARCHITECTURE.md §7.1;
+> TRDD-QK7M2B0X) — the global MODE flags, the coordination LOCKS, the per-chore last-run
+> stamps, and the daemon singleton: everything a SECOND chore owner must observe or
+> contend on. That scope rule is audience, not kind — splitting coordination data across
+> two directories is how two daemons desynchronise, and a `flock` the other daemon cannot
+> see excludes nobody. It is a fixed path because an ai-maestro server must stat one
+> LITERAL path — `global_state_dir()`'s four-rung ladder is unreproducible by a foreign
+> reader, and guessing a rung fails silently as "flag absent", i.e. it ignores the control
+> plane while looking healthy. **Do NOT migrate this folder into the DATA dir**; the
+> principle's virtues (survives updates, backed up) are the exact properties a mode flag
+> must NOT have — an uninstalled janitor must leave nothing behind claiming the host is in
+> maintenance. Everything else — pid, flock, heartbeat, last-run stamps, injection stamps —
+> stays in `<DATA>/global-state/` and the principle governs it unchanged.
+
+
+^ATOM-UZAL-KYBJ [desc:"The Runtime / installed tree ASCII diagram (verbatim) showing every on-disk path the plugin uses", keywords: runtime_installed_tree_diagram plugin_cache_data_dir_memory_mirror_legacy_global_state_layout per_project_janitor_state_files_list, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+### Runtime / installed tree
+
+```
+~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/  ephemeral plugin (scripts/skills/hooks)
+~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/ + global-state/ (canonical daemon state since TRDD-2U8AH82F)
+~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
+~/.claude/janitor-global-state/                                       LEGACY daemon state (auto-migrated → DATA/global-state by the daemon; read-fallback only):
+    daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
+    marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
+    kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
+    version-update-requested.flag (release-triggered self-update request; daemon consumes clear-before-run — TRDD-Y9KM5RCJ)
+$PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
+    rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
+    resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
+    desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json · last-resume.ts (TTL-aware cadence, TRDD-0QQX9H0G)
+cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param exists) → fires the stub
+```
 
 ## Notes and lessons learned
 
