@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: testing
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-02T15:20:00+0200
+updated: 2026-08-02T15:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -64,8 +64,37 @@ idle, 350 k context (above the 308,644 floor), 2 h cooldown. **An UNKNOWN contex
 a VETO** — `None` must never read as "small" or "idle forever" at the moment we know least.
 Mutation-verified. Full suite 14,124.
 
-**NEXT ACTION:** observe it fire once on a real long-idle session, then decide whether the 6 h /
-350 k defaults are right. Nothing else is pending.
+### ✅ REACHABILITY MEASURED 2026-08-02 — the gate is NOT a filter that matches nothing
+
+The old NEXT ACTION ("observe it fire once") was **unfalsifiable as written**: it waits on an
+event without ever asking whether the event can occur. This session's recurring defect class is
+*a filter that reads as correct and matches nothing*, so the gate was measured directly instead.
+
+**It has never fired anywhere** — no `idle-clear-fired.ts` exists under `$HOME`. That alone says
+nothing; the inputs decide. Measured across 45 project transcripts:
+
+- **20 of 45 are ≥ 350 k.** Max seen **663 k**. The context threshold is comfortably reachable —
+  it is not stranded above the population.
+- **10 of 45 are ≥ 350 k AND idle ≥ 6 h**, so the *conjunction* is satisfiable too.
+
+**But the 10 are all DEAD sessions** (idle 121 h – 1789 h). A dead session runs no heartbeat, so
+the nudge can never fire in one — those rows prove the thresholds are well-placed, NOT that the
+nudge will ever run. The live population sits at ≥ 350 k with idle **0 h**, i.e. working.
+
+**So the honest reading: the defaults are sound and the target state (live + ≥ 350 k + idle 6 h)
+is genuinely rare — which is what a nudge for abandoned-but-alive sessions SHOULD be.** No
+change to 6 h / 350 k is justified by this data.
+
+**Counter-check on this very session:** context **266 k** immediately after a compaction — i.e.
+**below** the 350 k gate. So a session that has *already* compacted will not trip the nudge; only
+one that grew past 350 k and went idle *without* compacting will. That is the intended shape (the
+nudge exists precisely because `/compact` cannot go below its ~308 k floor), but it means the
+nudge is **structurally unreachable for post-compact sessions** — worth knowing before anyone
+"fixes" a future report of it never firing.
+
+**NEXT ACTION:** none blocking. Leave the defaults. Move to `complete` once one live firing is
+observed opportunistically — do NOT hold the card open waiting for it, and do NOT lower the
+thresholds to manufacture a firing.
 
 ### Verdict: NOT as external injection — a SELF-NUDGE, and probably not yet
 
