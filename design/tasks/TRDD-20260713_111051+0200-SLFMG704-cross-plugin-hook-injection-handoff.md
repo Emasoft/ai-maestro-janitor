@@ -1,17 +1,47 @@
 ---
 trdd-id: SLFMG704
 title: Hand off the hook-injection cache-thrash finding to the plugins that own the other offending hooks
-column: dev
+column: complete
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T13:22:00+0200
+updated: 2026-08-02T06:26:00+0200
 current-owner: janitor-session
 task-type: infra
 severity: HIGH
 parent-trdd: K1RJUYGK
+npt: [I6ZZWVDN]
 relevant-rules: []
 ---
 
 # Cross-plugin handoff of the hook-injection cache-thrash finding
+
+## 2026-08-02 — CLOSED (`dev → complete`). The handoff finished by proving there was nothing to hand off.
+
+All three numbered next actions below are struck: `hook: Stop` belongs to no plugin (every Stop
+hook on the machine checked, none emits `additionalContext`), `PostToolBatch` has no owner at all
+(an exhaustive audit of 474 hook registrations found ZERO on that event — nothing ran at that
+boundary, so nothing could have emitted the block), and the ai-maestro "broken registrations" item
+was CANCELLED because there was no bug: the registrations use the documented `args` exec form and
+my extraction had dropped the field.
+
+That is a complete answer, not an abandoned one. The card asked *which other plugins own the
+remaining offenders, so we can tell them* — and the answer is **none of them do**, established
+three independent ways. Under the cross-project rule the correct action for a finding that belongs
+to no plugin is to report it to no one, so there is no handoff left to perform. Sitting in `dev`
+for 20 days implied someone was still hunting for an owner.
+
+**The one genuinely unfinished item is now its own card: TRDD-I6ZZWVDN.** Item 4 below is labelled
+NPT and is about the janitor's OWN two remaining blocks (`SessionStart:compact`,
+`StopFailure:rate_limit`) — not about other plugins, so it never belonged on a cross-project
+handoff card, and an NPT written as a bullet is a task nobody can see on the board (rule 9). It is
+extracted verbatim, with the boundary-vs-emitter reasoning that makes the `StopFailure` row
+suspicious, and recorded in `npt:`.
+
+Two things below are deliberately NOT carried forward as work, because both are questions rather
+than defects and the card says so itself: the optional Anthropic confirmation of the host-emitted
+reminder, and the chief-of-staff missing-`command` question (that plugin is enabled nowhere on
+this machine, and it must be asked as a question, not filed as a defect).
+
+`release-via:` is absent ⇒ `complete` is the terminal column.
 
 This is an **EHT of TRDD-K1RJUYGK** — it handles the CONSEQUENCES of that finding for code the
 janitor does not own. K1RJUYGK fixed the janitor's own two hooks; this TRDD carries the same
