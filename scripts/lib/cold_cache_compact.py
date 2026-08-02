@@ -78,6 +78,36 @@ _FIRED_STAMP = "cold-compact-fired.ts"
 _FLOOR_STAMP = "compact-floor.json"
 _LAST_COMPACT_STAMP = "last-compact.ts"  # high-water mark, written by the PostCompact hook
 
+# --- long-idle CLEAR (owner directive 2026-08-02, stated twice) --------------------------
+#
+# WHY A SECOND, MORE DRASTIC LEVER EXISTS AT ALL — `refresh_floor`'s docstring above is the
+# whole argument: a real compaction took 343,007 -> 308,644, only 10%, because the base
+# (CLAUDE.md + plugins + rules + skills + MCP schemas + THE SUMMARY ITSELF) reloads after
+# every compaction. That floor is "a property of the install, not a number we get to choose",
+# so an abandoned session costs >= floor x 0.1 per fire FOREVER, and no amount of compacting
+# lowers it. `/clear` is the only lever that drops the summary and gets UNDER that floor.
+#
+# Owner, 2026-08-02: *"when an agent is left alone firing for a long time with a big context,
+# the best course of action is to run /janitor-handoff-and-clear ... the repeated nudges emit
+# will not cost much since they are only cache reads on a tiny context."*
+#
+# It composes with — and does not replace — the cadence fix in `d2a5204`: that one cut the
+# NUMBER of fires, this cuts the SIZE of each. A small context at the FAST tier is cheaper
+# than a fat one at SLOW.
+CLEAR_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_ENABLED"
+CLEAR_MIN_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_IDLE_SECONDS"
+CLEAR_MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
+CLEAR_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_COOLDOWN_SECONDS"
+# 6h: deliberately far longer than the compact path's 1h. "Left alone for a long time" is the
+# owner's phrase and the discriminator — a session idle for an hour may simply be between
+# turns; one idle for six, with no user input, is abandoned.
+DEFAULT_CLEAR_MIN_IDLE_SECONDS = 21600
+# Well above the ~308k compaction floor: below it there is nothing for `/clear` to reclaim that
+# `/compact` did not already, so firing the destructive lever would buy nothing.
+DEFAULT_CLEAR_MIN_CONTEXT_TOKENS = 350_000
+DEFAULT_CLEAR_COOLDOWN_SECONDS = 7200  # 2h — a cleared session that re-fattens is not urgent
+_CLEAR_FIRED_STAMP = "idle-clear-fired.ts"
+
 
 def enabled() -> bool:
     return state.is_truthy_env(ENABLED_ENV, True)
@@ -140,7 +170,70 @@ def proactive_idle_enabled() -> bool:
     return enabled() and state.is_truthy_env(PROACTIVE_IDLE_ENABLED_ENV, True)
 
 
+def clear_enabled() -> bool:
+    """Gated by its OWN knob only — NOT by `enabled()`. The cold-compact master switch governs
+    compaction; a user who turned that off has not thereby opted out of the long-idle clear,
+    and coupling them would make one knob silently disable two unrelated levers."""
+    return state.is_truthy_env(CLEAR_ENABLED_ENV, True)
+
+
+def clear_min_idle_seconds() -> int:
+    return state.coerce_int(os.environ.get(CLEAR_MIN_IDLE_ENV), DEFAULT_CLEAR_MIN_IDLE_SECONDS)
+
+
+def clear_min_context_tokens() -> int:
+    return state.coerce_int(os.environ.get(CLEAR_MIN_CONTEXT_ENV), DEFAULT_CLEAR_MIN_CONTEXT_TOKENS)
+
+
+def clear_cooldown_seconds() -> int:
+    return state.coerce_int(os.environ.get(CLEAR_COOLDOWN_ENV), DEFAULT_CLEAR_COOLDOWN_SECONDS)
+
+
+def clear_in_cooldown(state_dir: Path, *, now: int) -> bool:
+    last = state.read_int_state(state_dir / _CLEAR_FIRED_STAMP, 0)
+    return last > 0 and 0 <= now - last < clear_cooldown_seconds()
+
+
+def mark_clear_fired(state_dir: Path, *, now: int) -> None:
+    """Best-effort; a stamp failure must never break the nudge itself."""
+    try:
+        state.atomic_write(state_dir / _CLEAR_FIRED_STAMP, str(now))
+    except OSError:
+        pass
+
+
 # --- pure policy ------------------------------------------------------------
+
+def should_clear_when_long_idle(
+    context_tokens: int | None,
+    idle_seconds: int | None,
+    *,
+    user_present: bool,
+    active_waiting: bool,
+    min_idle_s: int,
+    min_context_tokens: int,
+) -> bool:
+    """PURE. Is this session abandoned-and-fat enough that `/clear` beats leaving it alone?
+
+    Every gate is a veto, and `None` for either measurement is a veto too: an unknown context
+    or an unknown idle age must never authorize a DESTRUCTIVE action. Unlike the compact path
+    there is deliberately no `min_gain`/floor term — the whole point is that `/clear` goes
+    BELOW the compaction floor, so comparing against that floor would veto exactly the case
+    this exists for.
+
+    Note what is NOT checked here, because it cannot happen: a session parked on
+    `ExitPlanMode`/`AskUserQuestion` or mid-long-tool cannot END ITS TURN, so its cron never
+    fires and this code never runs. That safety is structural — a property of who owns the
+    trigger — not a condition anyone has to remember to test. It is the entire reason this is a
+    SELF-nudge on the session's own heartbeat rather than keystrokes typed in from outside.
+    """
+    if user_present or active_waiting:
+        return False
+    if context_tokens is None or idle_seconds is None:
+        return False
+    if idle_seconds < min_idle_s:
+        return False
+    return context_tokens >= min_context_tokens
 
 def should_compact_on_resume(context_tokens: int | None, *, min_context_tokens: int) -> bool:
     """SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.

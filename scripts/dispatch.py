@@ -1663,6 +1663,82 @@ def _keep_going_muted_by_recent_resume(sd: Path, now: int) -> bool:
     return last_resume > 0 and 0 <= now - last_resume < _KEEP_GOING_RESUME_DEDUPE_S
 
 
+def _phase_idle_clear_nudge() -> bool:
+    """A session left alone firing for a long time with a big context should CLEAR, not just
+    compact. Emits ONE nudge telling the model to run `/janitor-handoff-and-clear`.
+
+    WHY CLEAR AND NOT COMPACT (owner directive 2026-08-02, stated twice): compaction has a
+    FLOOR it provably cannot go below. `cold_cache_compact.refresh_floor`'s docstring records
+    the measurement — a real compaction took 343,007 -> 308,644, only 10%, because the base
+    install AND THE SUMMARY ITSELF reload every time; that floor is "a property of the install,
+    not a number we get to choose". So an abandoned session costs >= floor x 0.1 per fire
+    forever, and compacting again reclaims nothing. `/clear` drops the summary and gets under
+    the floor. Owner: *"the repeated nudges emit will not cost much since they are only cache
+    reads on a tiny context."*
+
+    It COMPOSES with `d2a5204` rather than replacing it: that bounded a stale resume-directive
+    so an idle session demotes to the SLOW tier (fewer fires); this shrinks what each fire
+    re-reads (smaller fires). A small context at FAST beats a fat one at SLOW.
+
+    WHY A NUDGE AND NOT AN INJECTION — the model must author a FRESH handoff in the same turn
+    it clears. `/clear` is irreversible and the handoff is the only survivor, so a keystroke
+    typed from outside (which cannot write one) would be data loss. `clear_trigger.py` is built
+    as a SELF-trigger for exactly this reason: it validates the handoff the model just wrote.
+    Never route this through `fleet_inject`.
+
+    WHY IT CANNOT HIT A BUSY SESSION — a session parked on `ExitPlanMode`/`AskUserQuestion` or
+    mid-long-tool cannot end its turn, so its cron never fires and this phase never runs. That
+    is structural, not a gate anyone must remember to write.
+
+    Returns True iff it emitted (the caller does NOT early-return; the roster still runs).
+    """
+    try:
+        # Lazy, mirroring the sibling compact phase: only the idle path pays these imports,
+        # and the heartbeat's hot path stays import-light.
+        import cold_cache_compact  # noqa: PLC0415
+        import fleet_scan  # noqa: PLC0415
+        import user_intent  # noqa: PLC0415
+
+        if not cold_cache_compact.clear_enabled():
+            return False
+        sd = state.state_dir()
+        now = int(time.time())
+        # Cheap stat-only vetoes first; the transcript read below is the expensive part.
+        if cold_cache_compact.clear_in_cooldown(sd, now=now):
+            return False
+        present = user_intent.user_is_present(now=now)
+        active = _cadence_active_waiting(sd, now)
+        if present or active:
+            return False
+        root = state.project_root()
+        idle_s, _enq, _await = fleet_scan.transcript_activity(str(root), now)
+        ctx = cold_cache_compact.context_tokens_for(
+            cold_cache_compact.newest_transcript(root)
+        )
+        if not cold_cache_compact.should_clear_when_long_idle(
+            ctx,
+            idle_s,
+            user_present=present,
+            active_waiting=active,
+            min_idle_s=cold_cache_compact.clear_min_idle_seconds(),
+            min_context_tokens=cold_cache_compact.clear_min_context_tokens(),
+        ):
+            return False
+        cold_cache_compact.mark_clear_fired(sd, now=now)
+        hours = (idle_s or 0) // 3600
+        print(
+            f"[janitor-idle-clear] this session has been idle ~{hours}h with a large context "
+            f"(~{(ctx or 0) // 1000}k tokens) while its heartbeat keeps firing — every fire "
+            "re-reads that whole context. Run /janitor-handoff-and-clear NOW: it writes a "
+            "handoff first, then clears, so the next fires cost almost nothing. Compacting "
+            "instead would NOT help — it cannot go below its own floor."
+        )
+        return True
+    except Exception as exc:  # never let a cost optimisation break the heartbeat
+        state.log_line("dispatch", f"idle-clear nudge failed: {exc}")
+        return False
+
+
 def _phase_keep_going_nudge() -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working. UNCONDITIONAL.
 
@@ -2205,6 +2281,13 @@ def main() -> int:
     # the single time-bounded dedupe that remains. A prior rate-limit/compact resume
     # already returned earlier in this function, so this phase is naturally skipped
     # whenever one of those already fired this turn.
+    # Phase 1.5a0: long-idle CLEAR nudge (owner directive 2026-08-02). Placed immediately
+    # BEFORE the keep-going nudge so that on a fire where both would speak, the clear
+    # instruction is read first — "shrink, then continue" is the right order, and the
+    # keep-going nudge deliberately still fires so the session does not go silent. It does
+    # NOT early-return: the detector roster runs exactly as before.
+    _phase_idle_clear_nudge()
+
     _phase_keep_going_nudge()
 
     # Phase 1.5a2: previous-fire cost record (janitor#78, opt-in). Logs, never prints;

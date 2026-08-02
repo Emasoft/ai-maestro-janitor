@@ -372,3 +372,72 @@ def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED")
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED", "false")
     assert ccc.proactive_idle_enabled() is False                      # master off disables it too
+
+
+# --- long-idle CLEAR (owner directive 2026-08-02) --------------------------------------
+
+def _clear_kw(**over):
+    kw = dict(
+        user_present=False, active_waiting=False,
+        min_idle_s=21600, min_context_tokens=350_000,
+    )
+    kw.update(over)
+    return kw
+
+
+def test_long_idle_fat_session_is_cleared():
+    """The case the directive names: left alone a long time, big context, nobody waiting."""
+    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw()) is True
+
+
+def test_every_veto_blocks_the_clear_independently():
+    """Each gate alone must be sufficient to stop a DESTRUCTIVE action — checked one at a time
+    so a later refactor cannot quietly make one of them redundant and leave the others carrying
+    it. A `/clear` is irreversible; there is no partial credit for 'most gates held'."""
+    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw(user_present=True)) is False
+    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw(active_waiting=True)) is False
+    assert ccc.should_clear_when_long_idle(500_000, 100, **_clear_kw()) is False, "not idle long enough"
+    assert ccc.should_clear_when_long_idle(10_000, 30_000, **_clear_kw()) is False, "context too small"
+
+
+def test_an_UNKNOWN_measurement_never_authorizes_a_clear():
+    """`None` is not zero and must not read as 'small' or 'idle forever'.
+
+    `context_tokens_for` and `transcript_activity` both return None when they cannot read the
+    transcript — a fresh session, a moved checkout, a permissions error. Treating None as a
+    satisfied gate would clear a session precisely when we know least about it, which is the
+    worst possible moment for an irreversible action."""
+    assert ccc.should_clear_when_long_idle(None, 30_000, **_clear_kw()) is False
+    assert ccc.should_clear_when_long_idle(500_000, None, **_clear_kw()) is False
+    assert ccc.should_clear_when_long_idle(None, None, **_clear_kw()) is False
+
+
+def test_the_clear_threshold_sits_ABOVE_the_compaction_floor():
+    """Load-bearing relationship, not a taste. `refresh_floor` measured a real compaction at
+    343,007 -> 308,644: the base install plus the summary reload every time, so that floor is a
+    property of the install. Below it `/clear` reclaims nothing `/compact` did not already, so
+    firing the destructive lever there would buy nothing. The default must stay above it."""
+    assert ccc.DEFAULT_CLEAR_MIN_CONTEXT_TOKENS > 308_644
+
+
+def test_clear_is_gated_by_its_own_knob_not_the_compact_master(monkeypatch):
+    """Turning cold-compact off must NOT silently disable the clear too — one knob disabling
+    two unrelated levers is how a feature gets switched off without anyone noticing."""
+    monkeypatch.setenv(ccc.ENABLED_ENV, "false")
+    monkeypatch.delenv(ccc.CLEAR_ENABLED_ENV, raising=False)
+    assert ccc.enabled() is False
+    assert ccc.clear_enabled() is True
+    monkeypatch.setenv(ccc.CLEAR_ENABLED_ENV, "false")
+    assert ccc.clear_enabled() is False
+
+
+def test_clear_cooldown_suppresses_a_repeat(tmp_path):
+    import time as _t
+    now = int(_t.time())
+    sd = tmp_path
+    assert ccc.clear_in_cooldown(sd, now=now) is False
+    ccc.mark_clear_fired(sd, now=now)
+    assert ccc.clear_in_cooldown(sd, now=now) is True
+    assert ccc.clear_in_cooldown(
+        sd, now=now + ccc.DEFAULT_CLEAR_COOLDOWN_SECONDS + 1
+    ) is False
