@@ -101,9 +101,17 @@ file, so a server locking a path the janitor never opens excludes nobody.
   `global_pause_present` (:387) ALREADY carry a `_legacy_read_path(...)` dual-read from
   TRDD-2U8AH82F. This move adds a second transitional source, so keep the dual-read
   helper generic rather than writing a third bespoke fallback per flag.
-- `global_state_dir()` keeps its four-rung ladder for everything else — pid, flock,
-  heartbeat, last-run stamps, injection stamps, the migration marker. Only the MODE flags
-  move. Do not "simplify" by moving the whole dir.
+- ⚠️ **STALE as written — superseded by the SCOPE CORRECTION above, and by what has since
+  shipped.** It said: *"`global_state_dir()` keeps its four-rung ladder for everything else —
+  pid, flock, heartbeat, last-run stamps, injection stamps, the migration marker. Only the MODE
+  flags move."* That was the FIRST DRAFT's narrow scope, written before the owner widened it the
+  same day. Since then the three LOCKS (step 1) and the LAST-RUN STAMPS (step 2 first half,
+  `2b2be24`) have both moved, and the singleton is explicitly the next step — so three of the six
+  things this bullet lists as staying have moved or are scheduled to.
+  **What actually stays:** the `.failcount` (private streak), the injection stamps, and the
+  migration marker — none of which a second chore owner reads. The rule that decides is AUDIENCE,
+  not kind. Still true and still load-bearing: **do not "simplify" by moving the whole dir** —
+  `global_state_dir()`'s ladder exists for state a foreign reader has no business resolving.
 
 ## Why
 
