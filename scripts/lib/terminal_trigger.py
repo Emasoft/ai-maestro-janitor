@@ -244,6 +244,57 @@ def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | No
     return None
 
 
+def build_type_only_steps(
+    terminal: Mapping[str, str], command: str
+) -> list[list[str]] | None:
+    """Steps that TYPE `command` into the field but do NOT submit it, or None if unsupported.
+
+    Rule 3 needs typing and Enter to be two separate acts, because the verify happens
+    BETWEEN them: type, re-read the pane, and only then press Enter. The existing
+    `build_tmux_steps` fuses the two (`send-keys -l <cmd>` immediately followed by
+    `send-keys Enter`), which is correct for a blind send and unusable for a verified one —
+    by the time we could look, the command has already run.
+
+    A newline in `command` is refused, not escaped: it would submit on its own and defeat
+    the split. `applescript_quote` enforces the same invariant on the iTerm side.
+    """
+    if "\n" in command or "\r" in command:
+        raise ValueError("command must be a single line (a newline would submit it early)")
+    kind = terminal.get("kind", "")
+    if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
+        # `-l` is LITERAL: without it tmux interprets the text as key names, so a command
+        # containing e.g. "Enter" would be sent as the Enter KEY rather than typed.
+        return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "-l", command]]
+    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+        sid = terminal["session_id"]
+        return [[
+            "RUN", "osascript", "-e",
+            'tell application "iTerm2" to tell (first session of first tab of '
+            f'(first window whose id is "{sid}") whose id is "{sid}") to '
+            f'write text "{applescript_quote(command)}" without newline',
+        ]]
+    return None
+
+
+def build_submit_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
+    """Steps that press Enter ALONE, or None if unsupported. The other half of the split
+    above — sent only after the field has been read back and verified."""
+    kind = terminal.get("kind", "")
+    if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
+        return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "Enter"]]
+    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+        sid = terminal["session_id"]
+        # `character id 13` is a bare CR — `write text ""` WITH a newline would work too,
+        # but an empty write is easy to mistake for a no-op when reading this later.
+        return [[
+            "RUN", "osascript", "-e",
+            'tell application "iTerm2" to tell (first session of first tab of '
+            f'(first window whose id is "{sid}") whose id is "{sid}") to '
+            "write text (character id 13) without newline",
+        ]]
+    return None
+
+
 def read_pane_text(terminal: Mapping[str, str]) -> str | None:
     """Read a pane's visible text, or None when this channel cannot be read back.
 
@@ -603,6 +654,49 @@ def _encode_payload(delay_s: float, steps: list[list[str]]) -> str:
     return base64.b64encode(
         json.dumps({"delay": float(delay_s), "steps": steps}).encode("utf-8")
     ).decode("ascii")
+
+
+# --- the CHAINED injector child (TRDD-0BVF4K7E) ----------------------------
+#
+# `clear_trigger` cannot verify its own keystrokes: it types into the session that is
+# RUNNING it, so by the time the keys land the parent turn is over and nothing is left
+# in-process to read the pane back. Its old shape was two INDEPENDENT delayed children —
+# `/clear` at t=2s, the bootstrap at t=10s — each typing blind. A user who started typing
+# at t=1s had their draft spliced and SUBMITTED: exactly the harm the owner's three
+# injector rules exist to prevent, in the one command a human is most likely to type by
+# hand.
+#
+# The fix is NOT "apply rule 3 to each phase". That is worse than doing nothing: once
+# phase A can DEFER (rule 2), phase B's wall-clock timer decouples from it, so B's
+# `/janitor-resume` lands in the UN-cleared session, the dispatcher consumes
+# `resume-after-clear.flag`, and the eventually-landing `/clear` strands a session that is
+# unarmed AND unresumable. Phase B must chain on A's VERIFIED SUBMIT, never on a clock.
+#
+# Hence ONE child running ONE sequence, with a real gate between the phases:
+# `clear-observed.ts` is stamped by the SessionStart hook on `source == "clear"` — the only
+# unambiguous observation that /clear actually happened. Polling it beats parsing the pane,
+# which can only ever guess.
+
+
+def _await_fresh_session(
+    stamp: Path, baseline: int, *, timeout_s: float, sleeper=time.sleep, clock=time.monotonic
+) -> bool:
+    """Block until `stamp` reads STRICTLY NEWER than `baseline` — i.e. a /clear actually
+    landed and the fresh session's SessionStart hook stamped it. Returns False on timeout.
+
+    `baseline` is captured BEFORE /clear is typed, so a stamp left by an earlier clear can
+    never be mistaken for this one. Compared as an integer, not by mtime: an atomic_write
+    replaces the file, and a same-second replace would leave mtime indistinguishable.
+    """
+    deadline = clock() + timeout_s
+    while clock() < deadline:
+        try:
+            if int(stamp.read_text(encoding="utf-8").strip() or 0) > baseline:
+                return True
+        except (OSError, ValueError):
+            pass  # absent or mid-write — that IS the "not yet" answer
+        sleeper(1.0)
+    return False
 
 
 def _run_send_payload(payload_b64: str) -> int:

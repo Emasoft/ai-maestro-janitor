@@ -499,3 +499,84 @@ def test_an_abort_mid_procedure_restarts_the_window_it_does_not_resume() -> None
     ], "an abort must re-enter the quiet window, not resume the 5s retry"
     assert "CLEAR" not in log, "the user's own keystrokes must never be cleared"
     assert sent == ["Enter"]
+
+
+# --- TRDD-0BVF4K7E: the chained injector's building blocks -------------------
+
+
+def test_typing_and_ENTER_are_separate_acts_or_rule_3_cannot_exist() -> None:
+    """The whole reason these builders exist. `build_tmux_steps` FUSES type+Enter, which is
+    right for a blind send and unusable for a verified one — by the time we could look at
+    the field, the command has already run. Rule 3 verifies BETWEEN the two, so they must
+    be separable."""
+    t = {"kind": "tmux", "pane": "%1"}
+    typed = tt.build_type_only_steps(t, "/clear")
+    assert typed == [["RUN", "tmux", "send-keys", "-t", "%1", "-l", "/clear"]]
+    assert not any("Enter" in step for step in typed), "typing must NOT submit"
+    assert tt.build_submit_steps(t) == [["RUN", "tmux", "send-keys", "-t", "%1", "Enter"]]
+
+
+def test_literal_flag_is_present_or_a_command_becomes_a_KEYSTROKE() -> None:
+    """`-l` is load-bearing: without it tmux reads the text as KEY NAMES, so typing a
+    command containing `Enter` would send the Enter KEY instead of the characters."""
+    steps = tt.build_type_only_steps({"kind": "tmux", "pane": "%1"}, "/janitor-resume")
+    assert "-l" in steps[0], "missing -l turns typed text into key names"
+
+
+def test_a_newline_is_REFUSED_not_escaped() -> None:
+    """A newline would submit on its own and defeat the split — so it cannot be accepted at
+    all. Refusing is the only safe handling; escaping would silently produce a blind send."""
+    for bad in ("/clear\n/janitor-arm", "/clear\r"):
+        try:
+            tt.build_type_only_steps({"kind": "tmux", "pane": "%1"}, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"a newline must be refused, not accepted: {bad!r}")
+
+
+def test_write_only_channels_report_unsupported_rather_than_pretending() -> None:
+    """wtype/xdotool cannot be read back, so a verified injection is impossible there. They
+    must return None (the caller reports "cannot verify"), never a plausible step list."""
+    for t in ({"kind": "wtype"}, {"kind": "xdotool"}, {"kind": "unknown"}):
+        assert tt.build_type_only_steps(t, "/clear") is None
+        assert tt.build_submit_steps(t) is None
+
+
+def test_a_tampered_pane_or_session_id_reaches_NO_argv() -> None:
+    """Both ids are interpolated — the pane into an argv, the session id into an AppleScript
+    string literal. An invalid one must yield None, not a command built around it."""
+    assert tt.build_type_only_steps({"kind": "tmux", "pane": "-x; rm -rf /"}, "/clear") is None
+    assert tt.build_submit_steps({"kind": "tmux", "pane": "$(whoami)"}) is None
+    assert tt.build_type_only_steps({"kind": "iterm", "session_id": 'x" & do shell script "'}, "/c") is None
+
+
+def test_the_fresh_session_gate_waits_for_a_STRICTLY_NEWER_stamp(tmp_path) -> None:
+    """Phase B chains on this, not on a clock. The baseline is captured BEFORE /clear is
+    typed, so a stamp left by an EARLIER clear must not satisfy it — otherwise the bootstrap
+    fires into the un-cleared session, which is the stranding bug this design exists to
+    avoid."""
+    stamp = tmp_path / "clear-observed.ts"
+    stamp.write_text("1000", encoding="utf-8")
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 99.0])
+    assert tt._await_fresh_session(
+        stamp, 1000, timeout_s=10, sleeper=lambda _s: None, clock=lambda: next(ticks)
+    ) is False, "an OLD stamp equal to the baseline must not satisfy the gate"
+
+    stamp.write_text("1001", encoding="utf-8")
+    assert tt._await_fresh_session(
+        stamp, 1000, timeout_s=10, sleeper=lambda _s: None, clock=lambda: 0.0
+    ) is True
+
+
+def test_an_absent_or_corrupt_stamp_reads_as_NOT_YET_never_as_ready(tmp_path) -> None:
+    """Absent = the fresh session has not started; corrupt = we cannot tell. Both must mean
+    "keep waiting". Treating either as ready would submit the bootstrap blind."""
+    missing = tmp_path / "nope.ts"
+    assert tt._await_fresh_session(
+        missing, 0, timeout_s=1, sleeper=lambda _s: None, clock=iter([0.0, 9.0]).__next__
+    ) is False
+    corrupt = tmp_path / "corrupt.ts"
+    corrupt.write_text("not-a-number", encoding="utf-8")
+    assert tt._await_fresh_session(
+        corrupt, 0, timeout_s=1, sleeper=lambda _s: None, clock=iter([0.0, 9.0]).__next__
+    ) is False
