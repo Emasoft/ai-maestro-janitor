@@ -3,12 +3,13 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-02T14:32:00+0200
+updated: 2026-08-02T14:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 blocked-by: []
+implementation-commits: [d2a5204]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
@@ -17,17 +18,34 @@ blocked-by: []
 verdict section below BEFORE the design notes further down, which were written on a premise that
 turned out to be false.**
 
-### ⚠️ THE PREMISE WAS WRONG — diagnose before building
+### ✅ STEP 1 DONE — ROOT CAUSE FOUND AND FIXED (`d2a5204`). This card may not be needed.
 
-I filed this card assuming the janitor's own heartbeat drove the 92 s keep-warm fires. **It
-cannot have.** Verified first-hand: the cadence tiers are FAST `*/5` = **300 s**, MID `*/15` =
-900 s, SLOW `*/30` = 1800 s. A 92 s median gap is **faster than the fastest tier**, so something
-other than the janitor cron drove those turns.
+**The diagnosis found a BUG, not a missing feature.** `_cadence_active_waiting` treated
+`resume-directive.txt` as "actively waiting" on `is_file() and st_size > 0` with **no age
+bound**, while its sibling signal one line above (the resume STAMP) has always been bounded to
+30 min. The directive's ONLY consumer is `post-compact-resume.py` ("one-shot per compact"), and
+the soft `/compact` is merely ENQUEUED — so a session that never ends its turn never consumes
+it, and nothing else deletes it.
 
-**STEP 1 IS THEREFORE DIAGNOSIS, NOT IMPLEMENTATION:** read that session's transcript tail and
-establish what actually triggered each turn. Building an auto-clear mechanism on the assumption
-it was our cron would be a fix aimed at a cause that does not exist — and it would appear to
-work, because clearing the context reduces the cost of whatever the real driver is too.
+The measured session held FAST `*/5` for 2.9 h on a directive written **two days earlier**
+(Jul 31). `last-resume.ts` was correctly 42 h stale; the transcript showed **195 of 249** recent
+turns opening with `[janitor-heartbeat]` at a **285 s median** — our own cron, FAST tier, on a
+session doing nothing. Fixed by bounding the CADENCE claim to the same 30 min window (the file
+is still read as CONTENT). Mutation-verified.
+
+**⚠️ TWO CONFIDENT WRONG ANSWERS PRECEDED THE RIGHT ONE — the reason this section exists:**
+agentlensPro reported a **92 s** median gap. The advisor reasoned, correctly *from that figure*,
+that no tier is that fast, so our cron could not be the driver. I recorded that as "the premise
+was wrong" — in this very section. The transcript then showed 285 s ≈ `*/5`: the 92 s was
+**REQUEST**-level and one turn makes ~3 requests. My original premise was right; the defect was
+one level below it. **A metric's UNIT is part of the claim**; neither the tool nor the advisor
+was wrong, and neither was checkable without going to the transcript.
+
+**REVISED NEXT ACTION — measure before building anything here.** With the pin removed, an idle
+session should now demote to SLOW `*/30` (6× fewer fires) on its own. Re-check
+`IDLE_FLEET_KEEPWARM` after this ships. **If it is gone, this card is superseded by `d2a5204`
+and should be closed, not implemented** — the auto-clear machinery would have been an elaborate
+mitigation for a one-line staleness bug, and would have *appeared* to work.
 
 ### Verdict: NOT as external injection — a SELF-NUDGE, and probably not yet
 
