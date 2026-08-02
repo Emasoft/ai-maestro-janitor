@@ -1,9 +1,9 @@
 ---
 trdd-id: EFTQB9RR
 title: The disarm opt-out invariant had no writer, and disarm deleted a machine-wide file
-column: dev
+column: published
 created: 2026-07-09T20:36:10+0200
-updated: 2026-07-09T21:12:00+0200
+updated: 2026-08-02T06:29:00+0200
 current-owner: janitor
 assignee: janitor
 priority: 2
@@ -55,10 +55,26 @@ no `fleet scan failed`, and both stale instances diagnosed `cron_dead` → gentl
 which is the honest diagnosis the sweep exists to preserve. Live census: only ONE reachable
 project holds a `rate-limited.flag` and it is FRESH, so the sweep correctly deleted nothing.
 
-`column:` stays `dev` deliberately. `complete → publish → published` is a NON-EXEMPT
+~~`column:` stays `dev` deliberately.~~ `complete → publish → published` is a NON-EXEMPT
 transition (`~/.claude/rules/manager-approval-defaults.md` §Y), and the same decision is
 already pending for TRDD-K3WQ7XM9 (shipped in v0.35.1, still `column: dev`). Both should be
 advanced together once the owner rules on it.
+
+### 2026-08-02 — ADVANCED (`dev → published`), together with K3WQ7XM9 as this note asks
+
+The owner directive to complete the board is the ruling that was being waited on, and the
+transition it authorises is not a request to publish anything: **the publish already happened.**
+All three commits (`57bfe31`, `b2be32b`, `9e6fa2b`) are contained in the released tag
+`ai-maestro-janitor--v0.45.0`, verified with `git tag --contains` rather than taken from the card.
+What was left was bookkeeping catching up to a fact that has been true for weeks — the approval
+gate exists so nothing ships unapproved, not so a shipped card is barred from saying it shipped.
+
+`release-via: publish` + in a released tag ⇒ terminal column is **`published`**, not `completed`
+(rule 12 — published archives AS ITSELF, or the record that it shipped is destroyed).
+
+Items B and D of janitor#77 remain the owner's call and are NOT this card's work — its own NEXT
+ACTION says "nothing required" and the issue is already commented with A and C closed. If B or D
+is ever taken up it is a fresh card with a fresh scope, not a 24-day tail on a delivered one.
 
 - **Bug 1 — `disarmed.flag` had four readers and zero writers.** FIXED (`57bfe31`).
   `/janitor-disarm` now writes it; `/janitor-arm` now removes it, FIRST, before `CronCreate`.

@@ -1,9 +1,10 @@
 ---
 trdd-id: K3WQ7XM9
 title: Daemon crash-loop repair — init_state, staged_is_current, keepalive test-isolation, keychain re-prompt
-column: dev
+column: published
+implementation-commits: [1140208]
 created: 2026-07-09T07:29:26+0200
-updated: 2026-07-09T12:33:33+0200
+updated: 2026-08-02T06:30:00+0200
 current-owner: janitor
 assignee: janitor
 priority: 1
@@ -18,6 +19,25 @@ external-refs: []
 ---
 
 # Daemon crash-loop repair (post-0.34.0)
+
+## 2026-08-02 — ADVANCED (`dev → published`), paired with TRDD-EFTQB9RR
+
+EFTQB9RR recorded that both cards were holding at `dev` on ONE shared owner ruling about the
+non-exempt `complete → publish → published` transition, and that they should move together. The
+owner directive to complete the board is that ruling — and the transition asks permission for
+nothing, because the publish already happened: the keychain-flood fix `1140208` is contained in
+the released tag `ai-maestro-janitor--v0.45.0` (verified with `git tag --contains`), and this
+card's own head links the v0.35.1 release that first shipped it. The approval gate exists to stop
+unapproved shipping, not to stop a shipped card from recording that it shipped.
+
+**The `NEXT ACTION` block far below is spent — do NOT act on it.** It is the original dispatch
+brief ("fix #2 and #3 … THEN publish 0.35.0"), and the head of this very card supersedes it: the
+fixes landed and shipped in **v0.35.1**, and the flood was confirmed resolved in `22224db`
+("keychain flood RESOLVED + guardian re-armed"). Leaving it readable as a live instruction is how
+a resumed session re-publishes a version that went out three weeks ago.
+
+`implementation-commits:` was empty and now records `1140208`; that absence is why the reconciler
+could never see this card as shipped. `release-via: publish` ⇒ **`published`** (rule 12).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
 
