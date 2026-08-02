@@ -284,6 +284,74 @@ def _substantive_line(epoch: int) -> str:
     return _json.dumps({"type": "assistant", "timestamp": _iso(epoch), "message": {}})
 
 
+def _tool_use_line(epoch: int, tid: str, name: str = "ExitPlanMode") -> str:
+    import json as _json
+
+    return _json.dumps(
+        {
+            "type": "assistant",
+            "timestamp": _iso(epoch),
+            "message": {"content": [{"type": "tool_use", "id": tid, "name": name}]},
+        }
+    )
+
+
+def _tool_result_line(epoch: int, tid: str) -> str:
+    import json as _json
+
+    return _json.dumps(
+        {
+            "type": "user",
+            "timestamp": _iso(epoch),
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tid}]},
+        }
+    )
+
+
+def test_awaiting_user_decision_detects_an_unanswered_tool_use() -> None:
+    """THE 2026-07-17 case (TRDD-8IZ8COQ8). A session parked on `ExitPlanMode` is waiting
+    for a HUMAN, but its transcript goes as silent as a dead one — measured, 33 minutes —
+    so the guardian diagnosed `cron_dead` and typed into the approval dialog. The tell is
+    on disk: the newest substantive record is a tool_use with no answering tool_result."""
+    now = 1_784_300_000
+    tail = [
+        _substantive_line(now - 4000),
+        _tool_use_line(now - 2000, "toolu_PLAN"),
+    ]
+    assert fs.awaiting_user_decision(tail) is True
+
+
+def test_awaiting_user_decision_is_false_once_the_tool_answered() -> None:
+    """An ANSWERED tool_use is ordinary mid-turn work, not a pending question — the
+    guardian must stay free to recover a genuinely dead session."""
+    now = 1_784_300_000
+    tail = [
+        _tool_use_line(now - 2000, "toolu_A"),
+        _tool_result_line(now - 1999, "toolu_A"),
+    ]
+    assert fs.awaiting_user_decision(tail) is False
+
+
+def test_awaiting_user_decision_sees_through_trailing_enqueues() -> None:
+    """The guardian's own typed command appends queue bookkeeping. That must not hide the
+    pending question underneath it — otherwise the FIRST injection masks the evidence that
+    would have prevented the second."""
+    now = 1_784_300_000
+    tail = [
+        _tool_use_line(now - 2000, "toolu_PLAN"),
+        _enqueue_line(now - 10),
+    ]
+    assert fs.awaiting_user_decision(tail) is True
+
+
+def test_awaiting_user_decision_false_on_a_plain_stale_session() -> None:
+    """A genuinely idle/dead session ends on ordinary content — it must remain recoverable,
+    or this guard would disable fleet recovery entirely."""
+    now = 1_784_300_000
+    assert fs.awaiting_user_decision([_substantive_line(now - 4000)]) is False
+    assert fs.awaiting_user_decision([]) is False
+
+
 def test_substantive_age_ignores_trailing_enqueues() -> None:
     """Enqueue bookkeeping must not refresh liveness: the age comes from the newest
     SUBSTANTIVE line, and the queued commands are counted as wedged evidence."""
@@ -359,7 +427,7 @@ def test_transcript_activity_sees_through_enqueue_freshness(
         _enqueue_line(now - 3),
     ]
     (tdir / "s1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    age, trailing = fs.transcript_activity(str(root), now)
+    age, trailing, _awaiting = fs.transcript_activity(str(root), now)
     assert age == 4000
     assert trailing == 2
     assert fs.transcript_age(str(root), now) == 4000

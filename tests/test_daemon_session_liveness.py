@@ -30,13 +30,13 @@ import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _inst(
-    diagnosis: str, root: str, terminal: dict, *, trailing: int = 0
+    diagnosis: str, root: str, terminal: dict, *, trailing: int = 0, awaiting: bool = False
 ) -> "fleet_scan.Instance":
     """A synthetic Instance — only diagnosis/root/terminal matter to the task."""
     return fleet_scan.Instance(
         pid=1, command="claude", tty="ttys1", project_root=root, terminal=terminal,
         diagnosis=diagnosis, recovery=None, dispatch_age_s=None, active=False,
-        transcript_age_s=None, trailing_enqueues=trailing,
+        transcript_age_s=None, trailing_enqueues=trailing, awaiting_user=awaiting,
     )
 
 
@@ -227,6 +227,42 @@ def test_wedged_target_is_never_typed_at_again(tmp_path, monkeypatch) -> None:
     assert st["last_audit"] == "declined_wedged:rearm"
     assert pushes and pushes[0]["code"] == "FLEET-WEDGED"
     assert pushes[0]["project"] == "proj-w"
+
+
+def test_session_awaiting_a_human_answer_is_never_typed_at(tmp_path, monkeypatch) -> None:
+    """TRDD-8IZ8COQ8. A session parked on ExitPlanMode / a permission prompt is waiting
+    for a PERSON, but it looks exactly like a dead one — no transcript growth, no cron
+    fire, so the diagnosis lands on `cron_dead`. Measured in this repo 2026-07-17: the
+    guardian typed `/janitor-arm` into the approval dialog after 33 minutes of silence.
+    The beat must decline, spend an attempt, and route to the human channel."""
+    fleet = [_inst("cron_dead", "/p/proj-a", {"tmux_pane": "%7"}, awaiting=True)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    pushes: list = []
+    monkeypatch.setattr(
+        daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED"
+    )
+    daemon.task_session_liveness()
+    assert fired == []                                    # never typed at
+    assert "AWAITING USER" in _log(tmp_path)
+    sf = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-a")
+    st = json.loads(sf.read_text(encoding="utf-8"))
+    assert st["attempts"] == 1                            # budget consumed, not reset
+    assert st["last_audit"] == "declined_awaiting_user:rearm"
+    assert pushes and pushes[0]["code"] == "FLEET-AWAITING-USER"
+    assert pushes[0]["project"] == "proj-a"
+
+
+def test_awaiting_user_outranks_even_the_esc_first_rungs(tmp_path, monkeypatch) -> None:
+    """The ONE place this guard must be stricter than the wedged one. A frozen target's
+    rungs are ESC-first, and the wedged check exempts them because the ESC is the unwedge
+    — but an ESC into a pending approval DISMISSES the human's decision. Declining is the
+    lesser harm, so `awaiting_user` blocks hard rungs too."""
+    fleet = [_inst("frozen", "/p/proj-af", {"tmux_pane": "%8"}, trailing=3, awaiting=True)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: "PUSHED")
+    daemon.task_session_liveness()
+    assert fired == [], "an ESC would dismiss the pending prompt — must not fire"
+    assert "AWAITING USER" in _log(tmp_path)
 
 
 def test_wedged_short_circuit_exempts_esc_first_rungs(tmp_path, monkeypatch) -> None:

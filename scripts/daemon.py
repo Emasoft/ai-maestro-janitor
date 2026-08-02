@@ -1246,6 +1246,42 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # human notification naming the project. notify's content-hash dedupe + the
         # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
         # ESC is the unwedge (same policy _fire_fleet_stop already applies).
+        # TRDD-8IZ8COQ8 — the session is parked on a question meant for a HUMAN
+        # (ExitPlanMode / AskUserQuestion / a permission prompt). It looks IDENTICAL to a
+        # dead one: a blocked turn appends nothing and cannot fire its cron, so the tests
+        # this loop already ran read `cron_dead`. Measured in this repo on 2026-07-17 — an
+        # ExitPlanMode call, 33 minutes of silence, then the guardian typed `/janitor-arm`
+        # straight into the approval dialog. An unattended machine must never answer a
+        # question addressed to a person, so this outranks EVERY rung, hard ones included:
+        # an ESC here would DISMISS the human's pending decision, which is the one outcome
+        # worse than doing nothing. The wedged check below cannot cover this — its
+        # evidence (queued unexecuted commands) only exists once something has ALREADY
+        # been typed, so it catches the second injection and never the first.
+        if getattr(inst, "awaiting_user", False):
+            sig = f"declined_awaiting_user:{action}"
+            _write_recovery_state(
+                sf,
+                {"attempts": attempts + 1, "last_ts": now, "identity": identity,
+                 "last_audit": sig},
+            )
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} AWAITING USER (unanswered tool_use at the "
+                f"transcript tail) — would {action}; leaving it for the human",
+            )
+            if st.get("last_audit") != sig:
+                _audit(inst, "declined_awaiting_user", action, None)
+            try:
+                notify.push(
+                    sev="HIGH",
+                    code="FLEET-AWAITING-USER",
+                    project=os.path.basename(inst.project_root),
+                    summary="session is waiting on YOUR answer — it is not stuck",
+                    hint="open that project's pane and answer the prompt",
+                )
+            except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
+                pass
+            continue
         if getattr(inst, "trailing_enqueues", 0) >= 1 and not fr.injection_is_hard(
             inst.diagnosis
         ):
@@ -1381,6 +1417,12 @@ def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
         # pile up (the "janitor keeps printing commands" wedge, TRDD-8DR0X08A). Skip entirely —
         # NO coverage stamp — so dispatch keeps FAST and the cron stays the trigger.
         if getattr(inst, "trailing_enqueues", 0) >= 1:
+            continue
+        # Parked on a HUMAN decision (TRDD-8IZ8COQ8) — same reasoning as the recovery
+        # beat: a rate-limited session that is ALSO holding an approval dialog must not be
+        # typed into. No coverage stamp, so dispatch keeps FAST and the cron stays the
+        # trigger; the human answering the prompt is what unblocks it.
+        if getattr(inst, "awaiting_user", False):
             continue
         # Build the resume injection (soft enqueue). None ⇒ un-injectable pane (plain / VS Code
         # / ssh — no resolvable terminal): we CANNOT prove a wake, so stamp NO coverage and

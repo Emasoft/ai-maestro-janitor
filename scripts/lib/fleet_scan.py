@@ -94,6 +94,10 @@ class Instance:
     # the wedged-session evidence the daemon's recovery beat short-circuits on
     # (TRDD-8DR0X08A F2). Defaulted so pre-existing constructors stay valid.
     trailing_enqueues: int = 0
+    # The newest transcript ends on an UNANSWERED tool_use ⇒ the session is parked on a
+    # question meant for a HUMAN, not dead (TRDD-8IZ8COQ8). Defaulted so pre-existing
+    # constructors stay valid.
+    awaiting_user: bool = False
 
 
 def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
@@ -304,12 +308,70 @@ def substantive_age_from_tail(
     return fallback_age, trailing_enqueues
 
 
-def transcript_activity(root: str, now: int) -> tuple[int | None, int]:
-    """``(substantive_age_s, trailing_enqueues)`` for this project's transcripts —
-    ``(None, 0)`` when none exist. The age is seconds since the newest SUBSTANTIVE
-    transcript line (see ``substantive_age_from_tail``); ``trailing_enqueues`` is how
-    many typed-but-never-executed commands sit queued at the newest transcript's tail
-    — the daemon's wedged-session evidence (TRDD-8DR0X08A F2). The transcript lives
+def awaiting_user_decision(tail: list[str]) -> bool:
+    """True iff the transcript tail ends on an UNANSWERED ``tool_use`` — the session is
+    parked on a question meant for a HUMAN (``ExitPlanMode``, ``AskUserQuestion``, a
+    permission prompt), not dead.
+
+    TRDD-8IZ8COQ8. A blocked session is indistinguishable from a dead one by the signals
+    the guardian had: its transcript stops appending and its cron cannot fire, because
+    both need the turn to end. Measured on 2026-07-17 in this very repo — the last line
+    before a 33-minute silence was an ``ExitPlanMode`` tool_use, the guardian read
+    ``cron_dead``, and typed ``/janitor-arm`` into the approval dialog. That is worse than
+    the "janitor keeps printing commands" spam the user reported: it is an unattended
+    machine answering a question that was addressed to a person.
+
+    ``trailing_enqueues`` cannot cover this. It only becomes non-zero AFTER something has
+    been typed, so it catches the second injection and every one after — never the first,
+    which is the one that reaches the dialog. This predicate reads the state that is true
+    BEFORE anyone types.
+
+    Pure. Walks the tail backwards collecting answered ``tool_use_id``s, skipping queue
+    bookkeeping (the guardian's own typed command appends an enqueue line, which must not
+    hide the pending question beneath it), and stops at the newest substantive record: it
+    is a pending question iff that record carries a ``tool_use`` no ``tool_result``
+    answers. Anything else — ordinary content, an answered call, an unparseable tail — is
+    False, so a genuinely dead session stays recoverable. Combine with staleness: mid-turn
+    a tool_use is briefly unanswered by design, and only a STALE one means blocked."""
+    answered: set[str] = set()
+    for raw in reversed(tail):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            return False  # unparseable tail — cannot prove a pending question; stay recoverable
+        if not isinstance(rec, dict):
+            return False
+        if rec.get("type") == "queue-operation":
+            continue
+        content = (rec.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            return False  # substantive, but not a tool exchange ⇒ not a pending question
+        blocks = [b for b in content if isinstance(b, dict)]
+        for b in blocks:
+            if b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
+                answered.add(b["tool_use_id"])
+        pending = [
+            b["id"]
+            for b in blocks
+            if b.get("type") == "tool_use" and isinstance(b.get("id"), str)
+        ]
+        if pending:
+            return any(tid not in answered for tid in pending)
+        if any(b.get("type") == "tool_result" for b in blocks):
+            continue  # a results-only record: keep walking back to the call it answers
+        return False
+    return False
+
+
+def transcript_activity(root: str, now: int) -> tuple[int | None, int, bool]:
+    """``(substantive_age_s, trailing_enqueues, awaiting_user)`` for this project's
+    transcripts — ``(None, 0, False)`` when none exist. The age is seconds since the
+    newest SUBSTANTIVE transcript line (see ``substantive_age_from_tail``);
+    ``trailing_enqueues`` is how many typed-but-never-executed commands sit queued at the
+    newest transcript's tail — the daemon's wedged-session evidence (TRDD-8DR0X08A F2);
+    ``awaiting_user`` is whether that same tail ends on an unanswered ``tool_use``, i.e.
+    the session is blocked on a HUMAN decision (TRDD-8IZ8COQ8). All three come from ONE
+    read of the same tail. The transcript lives
     outside ``.janitor`` (``~/.claude/projects/<dashed-cwd>/*.jsonl``), so this maps
     the project root to its harness slug the same way the memory scopes do."""
     # SSOT slug (memory_scopes.project_slug): the harness dashes EVERY non-alphanumeric
@@ -327,21 +389,23 @@ def transcript_activity(root: str, now: int) -> tuple[int | None, int]:
                 if age is not None:
                     ages.append((age, os.path.join(tdir, name)))
     except OSError:
-        return None, 0
+        return None, 0, False
     if not ages:
-        return None, 0
+        return None, 0, False
     ages.sort()
     newest_mtime_age, newest_path = ages[0]
+    tail = _tail_lines(newest_path)
     sub_age, trailing = substantive_age_from_tail(
-        _tail_lines(newest_path), now=now, fallback_age=newest_mtime_age
+        tail, now=now, fallback_age=newest_mtime_age
     )
+    awaiting = awaiting_user_decision(tail)
     # Another session's transcript may be substantively younger than the newest file's
     # substantive age (its mtime is an upper bound on its own substantive age) — take
     # the minimum so a genuinely-working sibling session keeps the project "alive".
     candidates = [a for a, _ in ages[1:]]
     if sub_age is not None:
         candidates.append(sub_age)
-    return (min(candidates) if candidates else None), trailing
+    return (min(candidates) if candidates else None), trailing, awaiting
 
 
 def transcript_age(root: str, now: int) -> int | None:
@@ -582,7 +646,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
         root = find_janitor_root(_cwd_of(pid))
         if not root:
             continue
-        tr_age, trailing_enqueues = transcript_activity(root, now)
+        tr_age, trailing_enqueues, awaiting_user = transcript_activity(root, now)
         active = tr_age is not None and tr_age < ACTIVE_FRESH_S
         if sweep_stale_rate_limit_s is not None and sweep_stale_rate_limit(
             root, now=now, max_age_s=sweep_stale_rate_limit_s
@@ -625,6 +689,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
                 active=active,
                 transcript_age_s=tr_age,
                 trailing_enqueues=trailing_enqueues,
+                awaiting_user=awaiting_user,
             )
         )
     return fleet
