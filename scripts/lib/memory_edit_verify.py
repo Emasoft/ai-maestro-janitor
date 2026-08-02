@@ -703,6 +703,68 @@ def no_new_dangling_footnote_refs(source_texts: list[str], result_texts: list[st
     return (not new_ids, sorted(f"[^{i}]" for i in new_ids))
 
 
+_ATOM_ID_RE = re.compile(r"^\s*\^([A-Za-z0-9_-]+)\s*\[", re.MULTILINE)
+
+
+def atom_footnote_citations(text: str) -> dict[str, set[str]]:
+    """`{atom_id: set of footnote ids that atom's BODY cites}` for one page.
+
+    An atom's body runs from its `^id [props]` marker to the next atom marker, the lessons
+    heading, or EOF — the same span the atomize pass writes. Fences are masked first (L-4):
+    a `[^n]` inside a code example documents syntax, it does not cite a lesson.
+    """
+    masked = _mask_code_fences(_strip_frontmatter(text))
+    cut = masked.find(_LESSONS_HEADING)
+    if cut != -1:
+        masked = masked[:cut]
+    marks = list(_ATOM_ID_RE.finditer(masked))
+    out: dict[str, set[str]] = {}
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(masked)
+        body = masked[m.end() : end]
+        # The marker's own props blob is metadata, not a citation — the body starts after it.
+        out.setdefault(m.group(1), set()).update(_FN_ANY_RE.findall(body))
+    return out
+
+
+def atom_lessons_travel(source_texts: list[str], result_texts: list[str]) -> tuple[bool, list[str]]:
+    """An atom that MOVES between pages must take its lessons with it. Returns
+    (ok, sorted offenders as `atom#lesson`).
+
+    THE GAP THIS CLOSES (TRDD-VJCMZ2OP item 1e), and why no existing check catches it: the
+    `memgrep migrate` VERB is self-verified, but a HAND-move is not. Move atom `^X` from page A
+    to page B and drop its `[^3]` citation on the way, and every current invariant still passes:
+    page A keeps a footnote DEFINITION with no reference — an ORPHAN DEF, explicitly legal in
+    `footnote_refs_resolve` — and page B holds an atom that cites nothing, so
+    `no_new_dangling_footnote_refs` sees no new dangling ref either. The lesson is silently
+    orphaned on the page the atom no longer lives on. Nothing dangles, nothing errors, and the
+    knowledge is severed from the fact it explains.
+
+    So this check is keyed on the ATOM, not the page: for every atom present in BOTH the source
+    and result corpora, the footnote ids its body cited must still be cited. Losing one is the
+    defect, wherever the atom now lives. A *renumbered* footnote is a different id and would
+    read as loss — which is correct here: `migrate` renumbers on collision and re-cites under
+    the new id, so a genuine renumber keeps the citation COUNT and shows up as a lost id ONLY
+    when the atom really stopped citing anything. Callers doing a deliberate renumber pass the
+    post-renumber source text.
+    """
+    src: dict[str, set[str]] = {}
+    for t in source_texts:
+        for atom, fns in atom_footnote_citations(t).items():
+            src.setdefault(atom, set()).update(fns)
+    res: dict[str, set[str]] = {}
+    for t in result_texts:
+        for atom, fns in atom_footnote_citations(t).items():
+            res.setdefault(atom, set()).update(fns)
+    lost: list[str] = []
+    for atom, fns in src.items():
+        if atom not in res:
+            continue  # the atom itself is gone — that is lessons_preserved's concern, not ours
+        for fn in sorted(fns - res[atom]):
+            lost.append(f"^{atom}#[^{fn}]")
+    return (not lost, sorted(lost))
+
+
 # --------------------------------------------------------------------------- #
 # metadata invariants (ocd/lmd through a merge)
 # --------------------------------------------------------------------------- #
