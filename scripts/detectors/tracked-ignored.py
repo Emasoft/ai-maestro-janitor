@@ -143,9 +143,51 @@ def main() -> int:
     )
     if line is not None:
         print(line)
+        _warn_if_watch_dead(project_root)
 
     state.rotate_log_if_big("tracked-ignored")
     return 0
+
+
+def _warn_if_watch_dead(project_root: Path) -> None:
+    """Dead-watch cross-check (TRDD-MN7ZU3RY, the falsifiable half of proof-of-armed).
+
+    This detector is the POLL backstop of the FileChanged fast path. When a `.gitignore`
+    drift arrives here by POLL although the watch claimed to be armed BEFORE the change
+    (declared.ts < gitignore mtime) and no event was observed since the change
+    (observed.ts < gitignore mtime), the watch is provably dead — the exact silent
+    failure the card's trap #2 names (a wrong watchPaths placement fails with no event
+    and no error). "Declared but never observed" alone is NOT evidence (the file may
+    simply never have changed); the mtime ordering is what makes it falsifiable.
+    Edits made while NO session was live raise no alarm: the next SessionStart
+    re-stamps declared.ts AFTER the edit, so the ordering gate stays closed.
+    Best-effort and deduped per gitignore mtime — advisory, never a hard failure."""
+    try:
+        gi_mtime = state.file_mtime(project_root / ".gitignore")
+        if gi_mtime <= 0:
+            return
+        declared_file = state.state_dir() / "watch-paths-declared.json"
+        if not declared_file.is_file():
+            return  # watch never armed (old plugin / harness) — nothing to prove
+        import json  # noqa: PLC0415 -- only needed on this advisory path
+
+        declared_ts = int(json.loads(declared_file.read_text()).get("ts", 0))
+        observed_ts = state.read_int_state(
+            state.state_dir() / "watch-paths-observed.ts", 0
+        )
+        if declared_ts and declared_ts < gi_mtime and observed_ts < gi_mtime:
+            warn = dedupe.emit_once(
+                state.state_dir() / "tracked-ignored-seen.txt",
+                f"deadwatch@{gi_mtime}",
+                "[tracked-ignored] DEAD WATCH: .gitignore changed after the FileChanged "
+                "watch was declared, yet no event was observed — this drift arrived by "
+                "POLL only. The watchPaths declaration is likely not being honored "
+                "(TRDD-MN7ZU3RY trap #2).",
+            )
+            if warn is not None:
+                print(warn)
+    except Exception as exc:  # noqa: BLE001 -- advisory only; the finding above already printed
+        state.log_line("tracked-ignored", f"dead-watch cross-check skipped: {exc}")
 
 
 if __name__ == "__main__":
