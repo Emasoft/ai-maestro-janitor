@@ -322,14 +322,21 @@ def _word_seq(text: str) -> list[str]:
     return _WORD_SEQ_RE.findall(text.lower())
 
 
-def _numbers_near(seq: list[str], subj: str, window: int) -> frozenset[str]:
-    """Bare numbers appearing within `window` tokens of any occurrence of `subj`."""
-    nums: set[str] = set()
+def _tokens_near(seq: list[str], subj: str, window: int) -> frozenset[str]:
+    """Every token within `window` tokens of any occurrence of `subj`.
+
+    The shared proximity primitive for BOTH contradiction branches. It exists as one
+    function because the two branches drifted apart when they did not: the numeric branch
+    anchored its evidence to the shared subject and the antonym branch did not, so the
+    latter's false-positive rate scaled with page LENGTH rather than with disagreement
+    (janitor#106).
+    """
+    out: set[str] = set()
     for i, w in enumerate(seq):
         if w == subj:
             lo, hi = max(0, i - window), min(len(seq), i + window + 1)
-            nums.update(t for t in seq[lo:hi] if t.isdigit())
-    return frozenset(nums)
+            out.update(seq[lo:hi])
+    return frozenset(out)
 
 
 def _has_contradiction_signal(
@@ -338,10 +345,20 @@ def _has_contradiction_signal(
     """True iff two SAME-SUBJECT notes show a real OPPOSING-CLAIM signal (#35/#38/#43).
 
     A conflict is more than a shared topic — it needs a contradiction. Two low-FP
-    forms are detected: (1) an ANTONYM split (always/never, enable/disable, …)
-    with one side in each note; (2) a NUMERIC divergence — a different number
-    stated within `_CONTRA_WINDOW` tokens of the SAME shared subject in each note
-    (the canonical "retries 3×" vs "retries 5×" clash). Complementary same-subject
+    forms are detected, and BOTH are anchored the same way: the opposing evidence
+    must sit within `_CONTRA_WINDOW` tokens of the SAME shared subject in each
+    note. (1) an ANTONYM split (always/never, enable/disable, …) with one side
+    beside the subject in each; (2) a NUMERIC divergence — a different number
+    beside the subject in each (the canonical "retries 3×" vs "retries 5×" clash).
+
+    The antonym branch used to test bare set-membership over the WHOLE note, so its
+    false-positive rate scaled with page LENGTH rather than with disagreement: two
+    long pages that AGREE were reported as contradictory because one said "always"
+    somewhere and the other "never" somewhere (janitor#106). The upstream
+    `_MIN_TOKEN_JACCARD` gate masks that — but backwards, since a SIMILARITY filter
+    admits precisely the long, same-topic pairs where a stray antonym collision is
+    most likely and least meaningful. Anchoring fixes the branch instead of hiding
+    it, and this docstring previously described only the numeric half. Complementary same-subject
     notes (no antonym, no numeric clash) are NOT a contradiction — they belong to
     the wider aggregation net, not the precise conflict surface. Negation-only
     clashes ("use X" vs "don't use X") are deliberately LEFT to aggregation:
@@ -350,13 +367,14 @@ def _has_contradiction_signal(
     the issues ask conflict to be PRECISE over exhaustive.
     """
     seq_a, seq_b = _word_seq(text_a), _word_seq(text_b)
-    set_a, set_b = set(seq_a), set(seq_b)
-    for x, y in _ANTONYM_PAIRS:
-        if (x in set_a and y in set_b) or (y in set_a and x in set_b):
-            return True
     for subj in shared_subjects:
-        nums_a = _numbers_near(seq_a, subj, _CONTRA_WINDOW)
-        nums_b = _numbers_near(seq_b, subj, _CONTRA_WINDOW)
+        near_a = _tokens_near(seq_a, subj, _CONTRA_WINDOW)
+        near_b = _tokens_near(seq_b, subj, _CONTRA_WINDOW)
+        for x, y in _ANTONYM_PAIRS:
+            if (x in near_a and y in near_b) or (y in near_a and x in near_b):
+                return True
+        nums_a = frozenset(t for t in near_a if t.isdigit())
+        nums_b = frozenset(t for t in near_b if t.isdigit())
         if nums_a and nums_b and nums_a != nums_b:
             return True
     return False

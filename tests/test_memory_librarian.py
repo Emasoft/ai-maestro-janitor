@@ -1575,5 +1575,59 @@ class TestMemoryLibrarianRegistration(unittest.TestCase):
         self.assertGreaterEqual(found_interval, 21600, "background librarian must run no more often than 6h")
 
 
+class TestContradictionSignalAnchoring(unittest.TestCase):
+    """The ANTONYM branch must be anchored to a shared subject, like the NUMERIC one
+    (janitor#106, reported by ai-maestro-autonomous-agent 2026-08-02).
+
+    `_has_contradiction_signal` has two branches and only one was anchored. The numeric
+    branch asks for a divergent number within `_CONTRA_WINDOW` tokens of a SHARED SUBJECT;
+    the antonym branch asked only whether "always" appears anywhere in A and "never"
+    anywhere in B. So its false-positive rate scaled with page LENGTH rather than with
+    disagreement — and the function's own docstring described only the anchored half.
+
+    The upstream Jaccard gate (`_MIN_TOKEN_JACCARD`) masks this by never handing the noisy
+    pairs to the predicate, but it masks it exactly backwards: a similarity filter admits
+    the pairs most likely to be long AND broadly on the same topic, which is the population
+    where an unanchored always/never collision is most likely and least meaningful."""
+
+    def test_far_apart_antonyms_on_agreeing_pages_are_not_a_contradiction(self):
+        """Two long same-subject pages that AGREE must not be reported as contradictory
+        merely because one says "always" and the other "never" somewhere far from the
+        subject. This is the case a reader would most trust the detector on."""
+        filler = "and then the operator reviews the report before continuing the run "
+        text_a = (
+            "the cache is refreshed by the daemon " + filler * 6
+            + "we always prefer the atomic write here"
+        )
+        text_b = (
+            "the cache is refreshed by the daemon " + filler * 6
+            + "we never leave a partial file behind"
+        )
+        self.assertFalse(
+            librarian._has_contradiction_signal(text_a, text_b, frozenset({"cache"})),
+            "an always/never pair far from the shared subject is not a contradiction",
+        )
+
+    def test_antonyms_beside_the_shared_subject_are_still_a_contradiction(self):
+        """The complement, so the fix cannot be satisfied by deleting the branch: an
+        antonym split stated AT the shared subject must still fire."""
+        text_a = "the heartbeat cron is always armed on session start"
+        text_b = "the heartbeat cron is never armed automatically"
+        self.assertTrue(
+            librarian._has_contradiction_signal(text_a, text_b, frozenset({"cron"})),
+            "an always/never split beside the shared subject IS a contradiction",
+        )
+
+    def test_numeric_branch_is_unchanged(self):
+        """The already-anchored branch must keep working exactly as before."""
+        self.assertTrue(
+            librarian._has_contradiction_signal(
+                "the client retries 3 times before failing",
+                "the client retries 5 times before failing",
+                frozenset({"retries"}),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
