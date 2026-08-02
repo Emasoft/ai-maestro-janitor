@@ -141,9 +141,12 @@ A `[^N]:` footnote whose bracketed block is the lesson's ADDRESS
 instead.` ONE lesson = ONE mistake, ≤3 lines, all three parts.
 
 **`keywords:` is the RECALL SURFACE** — the SYMPTOM phrases a future session will search with,
-not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.** A comma
-splits FIELDS, a space splits the KEY-PHRASES, so each phrase is `underscore_joined` — written
-`a phrase, another phrase` everything after the first comma is silently DROPPED.
+not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.**
+
+**Two syntaxes.** The VERB's `--keywords` takes a **COMMA-separated** list, spaces allowed, and
+underscore-joins each phrase for you. The **STORED** props block is the opposite — space-separated
+phrases, so a comma hand-written there silently DROPS the rest (another reason not to hand-author).
+Pre-joining, or omitting the commas, collapses every phrase into ONE unfindable string.
 
 Full field grammar + supersession: the FULL REFERENCE above.
 
