@@ -1,14 +1,14 @@
 {
   "summary": {
-    "queries": 23,
+    "queries": 22,
     "hit_at_1": 1.0,
     "hit_at_3": 1.0,
     "hit_at_10": 1.0,
     "mrr": 1.0,
-    "mean_total_tokens": 272.0,
-    "total_tokens": 6257,
-    "total_bytes": 24953,
-    "hops_used": 23
+    "mean_total_tokens": 263.8,
+    "total_tokens": 5803,
+    "total_bytes": 23137,
+    "hops_used": 22
   },
   "rows": [
     {
@@ -232,17 +232,6 @@
       "hop_used": true
     },
     {
-      "q": "do I need to retry after upload",
-      "expect": "object-store-consistency#read-after-write-is-strong-now",
-      "kw_pos": 3,
-      "rank": 1,
-      "find_tokens": 272,
-      "hop_tokens": 152,
-      "total_tokens": 424,
-      "bytes": 1694,
-      "hop_used": true
-    },
-    {
       "q": "object exists but is missing from the listing",
       "expect": "object-store-consistency#listing-still-lags",
       "kw_pos": 2,
@@ -258,10 +247,10 @@
       "expect": "object-store-consistency#listing-still-lags",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 201,
+      "find_tokens": 171,
       "hop_tokens": 141,
-      "total_tokens": 342,
-      "bytes": 1365,
+      "total_tokens": 312,
+      "bytes": 1243,
       "hop_used": true
     }
   ],

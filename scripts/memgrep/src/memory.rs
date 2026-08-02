@@ -2119,6 +2119,31 @@ fn notes_section_line(text: &str) -> Option<usize> {
     None
 }
 
+/// The 1-based line of the page's canonical `## Superseded` delimiter heading (TRDD-57WJL5L2),
+/// fence-aware, or `None` when the page carries no such heading. Exact spelling only, matched
+/// case-insensitively on the heading TEXT (the `##` level is fixed) — this is the ONE canonical
+/// delimiter spelling the corpus keys on; a page using different wording is simply not detected,
+/// by design (a fuzzy match here would risk mistaking an unrelated heading for the delimiter).
+/// 1-based (unlike `notes_section_line`'s 0-based `enumerate`) so it lines up directly with
+/// `AtomLintFacts.line`, which the lint check compares it against.
+fn superseded_heading_line(text: &str) -> Option<usize> {
+    let mut in_fence = false;
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if t.trim_end().eq_ignore_ascii_case("## Superseded") {
+            return Some(i + 1);
+        }
+    }
+    None
+}
+
 /// Atomic page write (unique tmp in the SAME dir, then rename) — the tmp-then-rename discipline the
 /// index-markdown writer (memory.rs) and the SQLite ledger (index.rs) already use, so a concurrent
 /// `recall`/reader never observes a half-written page. The tmp name carries the pid so parallel test
@@ -3722,6 +3747,12 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // silently DROPS, a missing recall surface, non-ISO dates, and an oversized body (must be
         // decomposed). `atoms_for_lint` segments exactly as the recall resolver does.
         let atom_budget = atom_max_chars();
+        // The page's `## Superseded` delimiter (TRDD-57WJL5L2), and every `status: superseded` atom
+        // line found below — used by the two delimiter checks after this loop. memgrep's default
+        // SEARCH exclude is keyed on the `status:` prop, never on position; this pair of checks is
+        // the READABILITY layer that keeps the delimiter honest about what the metadata already says.
+        let superseded_heading = superseded_heading_line(&text);
+        let mut superseded_atom_lines: Vec<usize> = Vec::new();
         for a in atoms_for_lint(&text) {
             atom_ids
                 .entry(a.id.clone())
@@ -3762,6 +3793,28 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 ));
             }
             let props = parse_block_props(&a.props_raw);
+            if status_from_props(&props) == "superseded" {
+                superseded_atom_lines.push(a.line);
+                // WARN: memgrep already excludes this atom from search by its `status:` prop, so
+                // nothing is lost or unresolvable — this is purely the READABILITY convention (atoms
+                // above the delimiter should be current) drifting out of sync with the metadata.
+                if let Some(h) = superseded_heading
+                    && a.line < h
+                {
+                    violations.push((
+                        Severity::Warn,
+                        p.clone(),
+                        a.line,
+                        format!(
+                            "atom `^{}` is `status: superseded` but sits ABOVE the `## Superseded` \
+                             delimiter (line {h}) — move it below so the page's READABILITY order \
+                             matches the `status:` metadata memgrep already filters search on",
+                            a.id
+                        ),
+                        "superseded-atom-above-delimiter",
+                    ));
+                }
+            }
             let missing = |key: &str| props.get(key).map(|v| v.is_empty()).unwrap_or(true);
             if missing("keywords") {
                 violations.push((
@@ -3814,6 +3867,26 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     "atom-oversized",
                 ));
             }
+        }
+        // A page carrying `status: superseded` atoms but NO `## Superseded` heading at all — the
+        // delimiter convention was never adopted here, so a human reader has no signal that the
+        // page mixes current and retired facts (memgrep's search-side exclude still applies
+        // regardless — this is readability-only, hence WARN). Anchored on the FIRST superseded
+        // atom's line, since there is no heading line to anchor on.
+        if superseded_heading.is_none()
+            && let Some(&first_line) = superseded_atom_lines.first()
+        {
+            violations.push((
+                Severity::Warn,
+                p.clone(),
+                first_line,
+                format!(
+                    "page has {} `status: superseded` atom(s) but no `## Superseded` heading — \
+                     add the canonical delimiter so a human reader sees current facts first",
+                    superseded_atom_lines.len()
+                ),
+                "superseded-atom-no-delimiter-heading",
+            ));
         }
         // Lesson-level: a body-less lesson (invisible to `find --only-notes`), a supersession missing
         // its `SUPERSEDED BODY:` (the never-delete violation), an unquoted-prose `desc:`, and the
@@ -4163,6 +4236,12 @@ struct RecallArgs {
     /// index (one no corpus file is newer than) and otherwise walks.
     #[arg(long = "use-index")]
     use_index: bool,
+    /// Include `status: superseded` atoms in the results (default: excluded). A superseded atom is
+    /// history, not current guidance — keep it out of an ordinary recall by default, and opt in only
+    /// when the retired fact itself is what's being looked for (TRDD-57WJL5L2). Never suppresses the
+    /// SECOND HOP (`recall <ATOM-ID>`): an explicit address is an explicit request and always answers.
+    #[arg(long = "include-superseded")]
+    include_superseded: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -4365,7 +4444,12 @@ fn page_identity(name: Option<&str>, path: &Path) -> String {
 /// `resolve_atoms` for its body ATOMS). The page body is read lazily (only on a surface miss),
 /// preserving the walk's I/O profile; atoms add one `resolve_atoms` parse per page. Pages and atoms
 /// land in ONE list so `finalize_recall` interleaves them by score.
-fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<RecallScored> {
+fn gather_from_walk(
+    paths: &[PathBuf],
+    hidden: bool,
+    q: &RecallQuery,
+    include_superseded: bool,
+) -> Vec<RecallScored> {
     let mut all = Vec::new();
     for path in collect_md(paths, hidden) {
         if is_index_file(&path) {
@@ -4396,6 +4480,15 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<Rec
         // Body ATOMS: each ranks by its own keyword surface; the page's date is the fallback. A page
         // with no `^id [props]` markers yields none (today's free-prose corpus is unaffected).
         for atom in resolve_atoms(&p) {
+            // Default-EXCLUDE `status: superseded` atoms from SEARCH results (TRDD-57WJL5L2): a
+            // retired fact is history, not current guidance, and must not compete for rank against a
+            // live one unless the caller explicitly opted in. Filtered at the CONSUMER (here), not
+            // the producer (`resolve_atoms`), so the second-hop lookups (`recall_one_atom`, which
+            // walk `resolve_atoms` directly) are never affected — an explicit address is an explicit
+            // request and always answers, superseded or not.
+            if atom.status == "superseded" && !include_superseded {
+                continue;
+            }
             let kw = atom.keywords.join(" ");
             let body = atom.body.clone();
             let meta = atom_meta(
@@ -4421,7 +4514,11 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<Rec
 /// Gather scored candidates from the SQLite index (`memories` rows). The body is the stored text, so
 /// the surface/body matching is byte-identical to `gather_from_walk` — guaranteeing an index-backed
 /// recall returns the SAME results as the walk.
-fn gather_from_index(conn: &rusqlite::Connection, q: &RecallQuery) -> Result<Vec<RecallScored>> {
+fn gather_from_index(
+    conn: &rusqlite::Connection,
+    q: &RecallQuery,
+    include_superseded: bool,
+) -> Result<Vec<RecallScored>> {
     let mut all = Vec::new();
     for c in crate::index::recall_candidates(conn)? {
         let body = c.body;
@@ -4446,6 +4543,12 @@ fn gather_from_index(conn: &rusqlite::Connection, q: &RecallQuery) -> Result<Vec
     // stored `desc` + body are carried straight from the index readback, so the index path builds
     // the one-line listing summary WITHOUT re-parsing the page.
     for c in crate::index::recall_atom_candidates(conn)? {
+        // Same default-EXCLUDE as `gather_from_walk`, applied at this consumer for the INDEX path —
+        // filtering here (not inside `recall_atom_candidates` itself) covers both producers with one
+        // change and avoids double-filtering (TRDD-57WJL5L2).
+        if c.status == "superseded" && !include_superseded {
+            continue;
+        }
         let meta = atom_meta(
             c.page_path.clone(),
             PathBuf::from(&c.page_path),
@@ -4948,11 +5051,11 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
 
     let all = if use_index {
         match crate::index::open_existing(&root) {
-            Some(conn) => gather_from_index(&conn, &terms)?,
-            None => gather_from_walk(&a.paths, a.hidden, &terms),
+            Some(conn) => gather_from_index(&conn, &terms, a.include_superseded)?,
+            None => gather_from_walk(&a.paths, a.hidden, &terms, a.include_superseded),
         }
     } else {
-        gather_from_walk(&a.paths, a.hidden, &terms)
+        gather_from_walk(&a.paths, a.hidden, &terms, a.include_superseded)
     };
 
     finalize_recall(all, &a.as_finalize())
@@ -5019,6 +5122,11 @@ struct FindArgs {
     /// are always correct. Without it, `find` auto-uses a FRESH index and otherwise walks.
     #[arg(long = "use-index")]
     use_index: bool,
+    /// Include `status: superseded` atoms in the results (default: excluded — TRDD-57WJL5L2). See
+    /// `recall --include-superseded`. Ignored in `--only-notes` mode, whose lessons already stay
+    /// searchable by design regardless of status (see `render_lesson_line`).
+    #[arg(long = "include-superseded")]
+    include_superseded: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -5080,7 +5188,12 @@ fn find_score_note(q: &query_dsl::Query, m: CandidateMeta, body: &str) -> Option
 /// Gather `find` note candidates from the LIVE tree-walk: parse each note, build its surface, apply the
 /// DSL gate. Unlike recall, the body is read eagerly (the DSL can match a body-only term, so the whole
 /// surface must be available — there is no surface-then-body fallback here).
-fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Vec<RecallScored> {
+fn find_gather_walk(
+    paths: &[PathBuf],
+    hidden: bool,
+    q: &query_dsl::Query,
+    include_superseded: bool,
+) -> Vec<RecallScored> {
     let mut all = Vec::new();
     for path in collect_md(paths, hidden) {
         if is_index_file(&path) {
@@ -5112,6 +5225,11 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
         // atoms by their desc, exactly like recall). An atom's matchable surface is its keyword
         // array + its body — `desc` is display-only and is deliberately NOT matched against.
         for atom in resolve_atoms(&p) {
+            // Default-EXCLUDE `status: superseded` atoms from `find` too (TRDD-57WJL5L2) — same
+            // reasoning as `gather_from_walk`.
+            if atom.status == "superseded" && !include_superseded {
+                continue;
+            }
             let kw = atom.keywords.join(" ");
             let meta = atom_meta(
                 rel(&p),
@@ -5139,6 +5257,7 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
 fn find_gather_index(
     conn: &rusqlite::Connection,
     q: &query_dsl::Query,
+    include_superseded: bool,
 ) -> Result<Vec<RecallScored>> {
     let mut all = Vec::new();
     for c in crate::index::recall_candidates(conn)? {
@@ -5162,6 +5281,11 @@ fn find_gather_index(
     // Body ATOMS from the index, through the same DSL gate — mirrors `find_gather_walk`'s
     // `resolve_atoms` pass so index-backed `find` equals the walk (TRDD-AP2X9A0H item c).
     for c in crate::index::recall_atom_candidates(conn)? {
+        // Same default-EXCLUDE as `find_gather_walk`, applied at this consumer for the INDEX path
+        // (TRDD-57WJL5L2).
+        if c.status == "superseded" && !include_superseded {
+            continue;
+        }
         let meta = atom_meta(
             c.page_path.clone(),
             PathBuf::from(&c.page_path),
@@ -5294,11 +5418,11 @@ pub fn cmd_find_cli(args: &[String]) -> Result<()> {
     };
     let all = if use_index {
         match crate::index::open_existing(&root) {
-            Some(conn) => find_gather_index(&conn, &q)?,
-            None => find_gather_walk(&a.paths, a.hidden, &q),
+            Some(conn) => find_gather_index(&conn, &q, a.include_superseded)?,
+            None => find_gather_walk(&a.paths, a.hidden, &q, a.include_superseded),
         }
     } else {
-        find_gather_walk(&a.paths, a.hidden, &q)
+        find_gather_walk(&a.paths, a.hidden, &q, a.include_superseded)
     };
 
     finalize_recall(all, &a.as_finalize())
@@ -7457,6 +7581,204 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(meta.atom_desc.as_deref(), Some("the live fact"));
         assert!(!record.contains("SUPERSEDED"), "no marker on a live atom: {record:?}");
+    }
+
+    /// Write a two-atom page (one `status: valid`, one `status: superseded`), both sharing a keyword
+    /// so a single query hits both — the fixture every default-exclude test in this group shares
+    /// (TRDD-57WJL5L2). Returns `(dir, page)`.
+    fn superseded_filter_fixture(tag: &str) -> (PathBuf, PathBuf) {
+        let dir = lint_tmpdir(tag);
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-LIVE-0001 [keywords: rotator_widget, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+             the current fact.\n\n\
+             ^ATOM-DEAD-0002 [keywords: rotator_widget, ocd: 2026-01-01, lmd: 2026-01-01, \
+             status: superseded, superseded-by:ATOM-LIVE-0001]\nthe retired fact.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        (dir, page)
+    }
+
+    /// Every `atom_id` a `RecallScored` list carries, in row order.
+    fn scored_atom_ids(rows: &[RecallScored]) -> Vec<String> {
+        rows.iter().filter_map(|(_, _, _, _, _, _, _, aid, ..)| aid.clone()).collect()
+    }
+
+    #[test]
+    fn gather_from_walk_excludes_superseded_atoms_by_default() {
+        let (dir, _page) = superseded_filter_fixture("walk_recall_exclude");
+        let terms = RecallQuery::parse("rotator widget").unwrap();
+        let excluded = gather_from_walk(std::slice::from_ref(&dir), false, &terms, false);
+        let included = gather_from_walk(std::slice::from_ref(&dir), false, &terms, true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            scored_atom_ids(&excluded),
+            vec!["ATOM-LIVE-0001".to_string()],
+            "default excludes the superseded atom: {excluded:?}"
+        );
+        let ids = scored_atom_ids(&included);
+        assert!(
+            ids.contains(&"ATOM-LIVE-0001".to_string()) && ids.contains(&"ATOM-DEAD-0002".to_string()),
+            "--include-superseded restores it: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn find_gather_walk_excludes_superseded_atoms_by_default() {
+        let (dir, _page) = superseded_filter_fixture("walk_find_exclude");
+        let q = query_dsl::parse("rotator_widget").unwrap();
+        let excluded = find_gather_walk(std::slice::from_ref(&dir), false, &q, false);
+        let included = find_gather_walk(std::slice::from_ref(&dir), false, &q, true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            scored_atom_ids(&excluded),
+            vec!["ATOM-LIVE-0001".to_string()],
+            "find's default excludes the superseded atom: {excluded:?}"
+        );
+        let ids = scored_atom_ids(&included);
+        assert!(
+            ids.contains(&"ATOM-LIVE-0001".to_string()) && ids.contains(&"ATOM-DEAD-0002".to_string()),
+            "find --include-superseded restores it: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn gather_from_index_excludes_superseded_atoms_by_default() {
+        // Index-backed mirror of `gather_from_walk_excludes_superseded_atoms_by_default` — an
+        // index-backed recall must filter identically to the walk (TRDD-57WJL5L2).
+        let (dir, page) = superseded_filter_fixture("index_recall_exclude");
+        crate::index::reindex(&dir, std::slice::from_ref(&page), true).unwrap();
+        let conn = crate::index::open_existing(&dir).expect("index just built");
+        let terms = RecallQuery::parse("rotator widget").unwrap();
+        let excluded = gather_from_index(&conn, &terms, false).unwrap();
+        let included = gather_from_index(&conn, &terms, true).unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            scored_atom_ids(&excluded),
+            vec!["ATOM-LIVE-0001".to_string()],
+            "index-backed default excludes the superseded atom: {excluded:?}"
+        );
+        let ids = scored_atom_ids(&included);
+        assert!(
+            ids.contains(&"ATOM-LIVE-0001".to_string()) && ids.contains(&"ATOM-DEAD-0002".to_string()),
+            "index-backed --include-superseded restores it: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn find_gather_index_excludes_superseded_atoms_by_default() {
+        let (dir, page) = superseded_filter_fixture("index_find_exclude");
+        crate::index::reindex(&dir, std::slice::from_ref(&page), true).unwrap();
+        let conn = crate::index::open_existing(&dir).expect("index just built");
+        let q = query_dsl::parse("rotator_widget").unwrap();
+        let excluded = find_gather_index(&conn, &q, false).unwrap();
+        let included = find_gather_index(&conn, &q, true).unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            scored_atom_ids(&excluded),
+            vec!["ATOM-LIVE-0001".to_string()],
+            "index-backed find default excludes the superseded atom: {excluded:?}"
+        );
+        let ids = scored_atom_ids(&included);
+        assert!(
+            ids.contains(&"ATOM-LIVE-0001".to_string()) && ids.contains(&"ATOM-DEAD-0002".to_string()),
+            "index-backed find --include-superseded restores it: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn second_hop_by_id_returns_a_superseded_atom_with_no_flag() {
+        // An explicit address is an explicit request (TRDD-57WJL5L2 design refinement): the SECOND
+        // HOP must never apply the search-side default-exclude, with no flag needed.
+        let (dir, page) = superseded_filter_fixture("second_hop_no_filter");
+        let found = recall_one_atom(std::slice::from_ref(&dir), false, "ATOM-DEAD-0002", false);
+        // The same guarantee at the content layer `recall_one_atom` reads from: the full record
+        // (marker + body) resolves regardless of status.
+        let record = render_atom_record(&page, "ATOM-DEAD-0002", false, false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(found, "the second hop must find a superseded atom by id");
+        assert!(
+            record.contains("the retired fact."),
+            "the second hop's content is the full body, not suppressed: {record:?}"
+        );
+    }
+
+    #[test]
+    fn lint_warns_superseded_atom_above_the_delimiter_heading() {
+        let dir = lint_tmpdir("superseded_above_delimiter");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-DEAD-0001 [keywords: k, status: superseded]\nthe old fact.\n\n\
+             ## Superseded\n\n\
+             ^ATOM-DEAD-0002 [keywords: k, status: superseded]\nanother old fact.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        // The atom ABOVE the heading is flagged; the one BELOW it is not.
+        assert!(
+            v.iter().any(|(_, _, _, m, c)| *c == "superseded-atom-above-delimiter"
+                && m.contains("ATOM-DEAD-0001")),
+            "the atom above `## Superseded` must be flagged; got: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|(_, _, _, m, c)| *c == "superseded-atom-above-delimiter"
+                && m.contains("ATOM-DEAD-0002")),
+            "the atom already below `## Superseded` must not be flagged; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_warns_superseded_atoms_with_no_delimiter_heading_and_clean_page_passes() {
+        let dir = lint_tmpdir("superseded_no_heading");
+        // No `## Superseded` heading anywhere on the page, but it carries a superseded atom.
+        std::fs::write(
+            dir.join("bad.md"),
+            "---\nname: bad\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-DEAD-0003 [keywords: k, status: superseded]\nthe old fact.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        // The clean shape: the heading IS present, so no finding.
+        std::fs::write(
+            dir.join("ok.md"),
+            "---\nname: ok\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-DEAD-0004 [keywords: k, status: superseded]\nthe old fact.\n\n\
+             ## Superseded\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        // A page with no superseded atoms at all must never be flagged (it has nothing to delimit).
+        std::fs::write(
+            dir.join("clean.md"),
+            "---\nname: clean\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-LIVE-0005 [keywords: k]\nthe current fact.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            v.iter().any(|(_, p, _, _, c)| p.contains("bad.md")
+                && *c == "superseded-atom-no-delimiter-heading"),
+            "a superseded atom with no delimiter heading must be flagged; got: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|(_, p, _, _, c)| p.contains("ok.md")
+                && *c == "superseded-atom-no-delimiter-heading"),
+            "a page that already has the heading must not be flagged; got: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|(_, p, _, _, c)| p.contains("clean.md")
+                && (*c == "superseded-atom-no-delimiter-heading"
+                    || *c == "superseded-atom-above-delimiter")),
+            "a page with no superseded atoms must never be flagged by either check; got: {v:?}"
+        );
     }
 
     #[test]
