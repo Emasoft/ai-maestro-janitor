@@ -3,7 +3,7 @@ trdd-id: 3VW434Q8
 title: The ai-maestro fleet-inject channel reports success on spawn, not on delivery — a failed inject is invisible
 column: testing
 created: 2026-07-13T23:32:16+0200
-updated: 2026-07-13T23:37:52+0200
+updated: 2026-08-02T20:35:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -76,6 +76,8 @@ encoded the bug, so they were replaced by delivery-outcome tests: non-zero exit 
 → `False`, zero → `True`, plus the bound and `check=False` asserted. Full suite **12887 passed, 1
 skipped**; ruff clean. **Falsification verified:** neutering the check to `return True` failed
 `test_fire_aimaestro_nonzero_exit_is_a_failure`; reverted.
+
+**2026-08-02 triage (idle-19d reminder):** item (2) below is DONE — verified the dependency is posted on BOTH ai-maestro#54 and janitor#76 (one 3VW434Q8/fleet-inject mention each, checked via gh). Items (1) and (3) remain gated: (1) on the AWXK0RFT publish, (3) on a machine where `aimaestro-agent.sh` exists. The card is honestly `testing`, not stalled.
 
 **NEXT ACTION:** (1) ships on the next `publish.py` release — rides with the other unpushed commits,
 do NOT push standalone. (2) Post the janitor's dependency on ai-maestro#54 + janitor#76 (the gate
