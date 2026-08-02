@@ -3,7 +3,7 @@ trdd-id: K1RJUYGK
 title: Bound the injection budget of the janitor's no-matcher PreToolUse hooks (attribution of the cost RETRACTED)
 column: testing
 created: 2026-07-13T10:17:16+0200
-updated: 2026-07-13T15:20:00+0200
+updated: 2026-08-02T16:20:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: critical
@@ -13,7 +13,53 @@ implementation-commits: [d50fe8c, 6245379]
 released-in: v0.42.0
 ---
 
-## ⏵ PUBLISH STATE — 2026-07-13 (authoritative; supersedes older sections)
+## ⏵ MEASUREMENT STATE — 2026-08-02 (authoritative; supersedes the PUBLISH STATE below)
+
+**The required falsification HAS NOW BEEN RUN. Result: PARTIAL — a large real improvement, but
+the card's own criterion is NOT met. Column stays `testing`. Do NOT close this.**
+
+Ran `agentlenspro get_cache_break_report --sessionId <this session, on cache 2.3.0>` (the roll
+past 0.42.0 happened long ago — the card sat 20 days waiting for an event that had already
+occurred, the same stall as TRDD-5ZVS1DDP).
+
+**`hook: PreToolUse:*` has NOT left `topOffenders`.** It is still there, three entries:
+
+| rank | label | cause | n | wasted |
+|---|---|---|---|---|
+| 7 | `hook: PreToolUse:Bash` | INJECTED_BLOCK_CHANGED | 37 | 42,417 |
+| 9 | `hook: PreToolUse:Write` | INJECTED_BLOCK_CHANGED | 2 | 2,425 |
+| 10 | `hook: PreToolUse:CronList` | INJECTED_BLOCK_CHANGED | 2 | 1,510 |
+
+**What genuinely improved:** PreToolUse totals **46,352 of 6,483,710 wasted tokens = 0.71%**,
+at ranks 7/9/10 of 10. Against the RETRACTED original claim ("the machine's #1 cache breaker")
+that is a decisive demotion, and the fix in `d50fe8c`/`6245379` deserves the credit.
+
+**What FAILS the card's own bar:** the stated budget was *"≤2–3 strippable blocks per session,
+not 712"*. `PreToolUse:Bash` shows **n=37**. An order of magnitude better than 712, and an
+order of magnitude worse than the target. **Both facts are true and neither cancels the other**
+— "much better" is not the criterion the card wrote down.
+
+**The open question, and the actual NEXT ACTION:** `PreToolUse:Bash` is not one hook. The
+janitor registers several (`pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage`,
+`pre-tool-token-budget`), and AgentLens attributes the break to the EVENT, not to the script.
+So n=37 does not yet indict the two hooks this card fixed. **Identify which hook emits the
+varying block before changing anything** — this card has already been wrong once by attributing
+a cost to the wrong component (see the RETRACTION below), and repeating that mistake here would
+be the same error twice on the same card.
+
+**⚠️ The truncation trap this measurement nearly fell into.** The default report returns
+`breaks: top 5 of 40` and `topOffenders: top 5 of 10`, with `_truncated` set. Reading the
+5-row sample showed ZERO `PreToolUse` entries — i.e. it looked like a clean PASS. All three
+surviving entries sit at ranks 7, 9 and 10, *below the truncation boundary*. **Always pass
+`--full` before concluding an offender is absent**; an absence observed through a truncated
+window is not evidence of absence.
+
+**Out of scope, and confirmed by this run** (the "NOT ours" section below called these
+correctly): the dominant offenders are now `IDLE_TTL_EXPIRY` (2,705,875 — 42%), `skill catalog`
+(1,634,394 — 25%) and `agent catalog` (1,491,644 — 23%). Those three are **90% of all waste**
+and none is this card's.
+
+## ⏵ PUBLISH STATE — 2026-07-13 (superseded by the measurement above, kept for the record)
 
 **SHIPPED in v0.42.0** (release commit 86ddcd6; hook fixes d50fe8c + the review-pass
 correction 6245379). The fix is now in the published plugin — it is no longer inert.
