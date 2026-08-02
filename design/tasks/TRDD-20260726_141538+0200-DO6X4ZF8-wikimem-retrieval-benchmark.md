@@ -1,9 +1,9 @@
 ---
 trdd-id: DO6X4ZF8
 title: Wikimem retrieval benchmark — accuracy and end-to-end token cost, with a committed baseline
-column: ai_review
+column: human_review
 created: 2026-07-26T14:15:38+0200
-updated: 2026-07-26T19:49:48+0200
+updated: 2026-08-02T13:05:35+0200
 current-owner: 2f5bc976
 task-type: infra
 approval-tier: 0
@@ -12,7 +12,7 @@ release-via: publish
 impacts: [memgrep, wikimem]
 relevant-rules: []
 external-refs: [https://github.com/Emasoft/ai-maestro/issues/96]
-implementation-commits: [11d476b, 9ef241d, 873f11e, 5b03519, 83fac1d, 5f98788, cf3f67a, de1a89f, d6f271f, 0dff13e, 3409ae2, ff4625a]
+implementation-commits: [f0ef029, 11d476b, 9ef241d, 873f11e, 5b03519, 83fac1d, 5f98788, cf3f67a, de1a89f, d6f271f, 0dff13e, 3409ae2, ff4625a]
 ---
 
 # Wikimem retrieval benchmark — accuracy and end-to-end token cost
@@ -25,7 +25,20 @@ implementation-commits: [11d476b, 9ef241d, 873f11e, 5b03519, 83fac1d, 5f98788, c
   (**LEGACY**, pre-migration form — 21.7% / 0.3891 / 185.4). Output layers, the `recall <ATOM-ID>`
   second hop, the tiered keyphrase scorer, the recency tie-break and the cross-scope lint are all
   landed and tested.
-- **NEXT ACTION:** none for this TRDD — it is in `ai_review`. Full gate captured 2026-07-26T19:49
+- **AI REVIEW DONE 2026-08-02 (`ai_review → human_review`) — re-verified at CURRENT HEAD, not
+  taken on the 07-26 capture's word.** Re-run mattered: `77a193c` changed `memgrep`'s
+  `lint_paths` since that capture, so the committed baseline had to be re-measured against the
+  binary that exists now. All green — legacy `no change`, conformant `no change` (100% / MRR 1.0
+  / 273.0), lint-bench `no change` (0 FP / 0 FN, 27 codes), `cargo test --release` **127 passed**,
+  `pytest` **14,109 passed / 1 skipped**, `ruff` 0. Numbers differ from the 07-26 line below
+  (283.7 → 273.0 conformant; 221 → 127 cargo tests) because the corpus-path normalisation and a
+  crate split landed in between — the GATE is `no change` against each corpus's own baseline,
+  which is the claim that matters, not the absolute figures.
+  **One defect found and fixed during the review, not deferred:** `--check` scored a
+  corpus/baseline MISPAIRING as `REGRESSION 174.3 -> 273.0` instead of refusing it. Guarded in
+  `f0ef029` (compare the corpus each side was measured on; exit 2, never 1).
+  **Awaiting: the owner's call only.** Nothing is known-broken.
+- **NEXT ACTION:** none for this TRDD — it is in `human_review`. Full gate captured 2026-07-26T19:49
   at HEAD `c8d29cc`, all green: both benchmark corpora `no change` (conformant 100% / 1.0 / 283.7,
   legacy 21.7% / 0.3891 / 185.4), `ruff` 0, `mypy` 0 over 434 files, `pytest` 13687 passed /
   1 skipped, `cargo test --release` 221 passed. The follow-ups (#25 page-row hop key, #29
