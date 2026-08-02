@@ -1,9 +1,9 @@
 ---
 trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
-column: todo
+column: dev
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T08:05:00+0200
+updated: 2026-08-02T19:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -11,7 +11,22 @@ relevant-rules: [1]
 npt: [DOJ2LE1G]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
+
+**2026-08-02 19:35 — RE-MEASURED + FIRST BOUNDED PASS DISPATCHED (`column: dev`).**
+Fresh `memgrep lint` across all three scopes: the mechanical classes are CLEAN —
+0 unquoted-desc (the 4 from 2026-07-23 already fixed), 0 empty-lesson-body,
+0 superseded-without-body (the DOJ2LE1G gate holds). What remains is exactly the
+judgment class: **41 `atom-oversized`** — 6 LOCAL + 2 PROJECT + 33 USER. Dispatched the
+`janitor-memory-subconscious-agent` (background, user-visible in the session reply — the
+card's "user aware" condition) on the SMALL, recoverable scopes first: PROJECT (2,
+git-tracked) + LOCAL (6). Policy per this card: decompose via txn-gated atomize/`migrate`
+(the VJCMZ2OP verb, hardened today with malformed-props + already-on-dest pre-flights),
+lessons travel with their atom, verify lossless, NEVER delete; a page it cannot prove
+lossless is FLAGGED, not forced. USER's 33 wait for the next batch, judged on this one's
+report. Older context below.
+
+## ⏵ prior STATE — 2026-07-23
 
 **NPT DOJ2LE1G is DONE + LIVE** (add-lesson --supersedes + the 4 lint checks + binary
 installed), so the retroactive repair is now UNBLOCKED and TOOLING-READY. This is the only
