@@ -98,6 +98,88 @@ HARD_INTERRUPT_ESC_COUNT = 2
 # and an iTerm osascript `delay 0.6`.
 _ESC_SETTLE_S = "0.6"
 
+# --- READ-BACK VERIFICATION (owner directive 2026-08-02) --------------------------------
+#
+# "wait for the input prompt field to be empty ... after injecting, do not press enter
+#  immediately, but reread to verify that only the command is displayed ... otherwise
+#  simply try again every 5 seconds, until the field is empty again."
+#
+# WHY: typing blind into a pane is destructive in two directions. If the user is
+# mid-sentence, our text is spliced into THEIR draft — and the Enter we send submits the
+# mangled result as if they wrote it. Read-back turns a blind write into a checked one.
+#
+# ALL THREE CONSTANTS BELOW COME FROM A REAL CAPTURE, not from the docs, and the first one
+# is why sampling mattered: the marker is `❯` followed by U+00A0 NO-BREAK SPACE, not an
+# ASCII space. `line.startswith("❯ ")` never matches a live Claude Code prompt.
+_PROMPT_MARKER = "❯"          # ❯ — starts the input field line
+_NBSP = " "                   # what actually follows the marker
+_BOX_RULE = "─"               # ─ — the frame above/below the field; ends a wrapped field
+_PROMPT_POLL_INTERVAL_S = 5.0      # the owner's "try again after 5 seconds" (a FAILED attempt)
+_PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its own outage
+# Owner directive, refined 2026-08-02: *"even if the user is reported as present, it should not
+# stop the command! it should simply retry every 8 seconds! it must check if in the last 8
+# seconds nothing was typed by the user."*
+#
+# So presence DEFERS, it never CANCELS. The old contract dropped the command on the floor the
+# moment someone touched the keyboard — which is how a user who typed the command themselves got
+# `USER_PRESENT` and nothing else. Waiting costs a few seconds; discarding costs the request.
+_USER_QUIET_S = 8.0                # no keystroke for this long before we attempt
+_INJECT_GIVEUP_S = 3600.0          # see inject_until_sent for why "until sent" is still bounded
+
+
+def extract_prompt_field(pane_text: str) -> str | None:
+    """The CURRENT text of the input prompt field, or None when no field is found.
+
+    Returns "" for an empty field — a meaningful value, and deliberately distinct from the
+    None that means "could not read". Callers must not conflate them: unknown is never a
+    licence to type.
+
+    A long entry WRAPS onto following lines, so the field runs from the marker line to the
+    next box rule. Reads the LAST marker in the capture: scrollback can contain earlier
+    prompts, and only the live one is the field.
+    """
+    lines = pane_text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(_PROMPT_MARKER):
+            start = i
+    if start is None:
+        return None
+    head = lines[start].lstrip()[len(_PROMPT_MARKER):]
+    parts = [head]
+    for line in lines[start + 1:]:
+        if _BOX_RULE in line:
+            break
+        parts.append(line)
+    field = "".join(parts)
+    # Strip ONLY the NBSP separator and trailing terminal padding. A LEADING ORDINARY SPACE
+    # is deliberately preserved: the marker's separator is U+00A0, so an ASCII space after it
+    # is something the USER (or a botched paste) put there. `.strip()`ing it made " /compact"
+    # read as "/compact" and pass the shape check — the exact spacing the owner ruled out,
+    # and the form Claude Code treats as prose rather than a command.
+    return field.replace(_NBSP, "").rstrip()
+
+
+def prompt_field_is_empty(pane_text: str) -> bool:
+    """True ONLY when the field was read AND is empty. `None` (unreadable) is False, so an
+    unreadable pane is never mistaken for a free one."""
+    return extract_prompt_field(pane_text) == ""
+
+
+def prompt_field_shows_only(pane_text: str, command: str) -> bool:
+    """True iff the field contains EXACTLY `command` and nothing else.
+
+    The owner's shape requirement, enforced literally: `/any-command`, with no space before
+    or after the `/`. Anything else — leftover user text, a doubled paste, a stray leading
+    space that would make Claude Code treat the line as prose rather than a command — fails,
+    and the caller retries instead of pressing Enter on it.
+    """
+    field = extract_prompt_field(pane_text)
+    if field is None or field != command.strip():
+        return False
+    # No space anywhere, and none immediately after the `/` — the owner's literal shape.
+    return bool(re.fullmatch(r"/[^\s/][^\s]*", field))
+
 
 def applescript_quote(command: str) -> str:
     """`command` escaped for interpolation inside an AppleScript double-quoted string —
@@ -132,6 +214,219 @@ def iterm_esc_lines(indent: str = "            ") -> list[str]:
         out.append(f"{indent}write text (character id 27) without newline")
         out.append(f"{indent}delay {_ESC_SETTLE_S}")
     return out
+
+
+def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
+    """Steps that empty the input field WITHOUT submitting it, or None if unsupported.
+
+    `C-u` (kill-line) is used rather than ESC: in Claude Code ESC interrupts the turn, which is
+    a side effect we must not cause while merely tidying up after a bad injection. `C-a C-k` is
+    sent as well so a cursor left mid-line still clears to the end.
+    """
+    kind = terminal.get("kind", "")
+    if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
+        pane = terminal["pane"]
+        return [
+            ["RUN", "tmux", "send-keys", "-t", pane, "C-a"],
+            ["RUN", "tmux", "send-keys", "-t", pane, "C-k"],
+            ["RUN", "tmux", "send-keys", "-t", pane, "C-u"],
+        ]
+    return None
+
+
+def read_pane_text(terminal: Mapping[str, str]) -> str | None:
+    """Read a pane's visible text, or None when this channel cannot be read back.
+
+    Only tmux and iTerm can. `wtype`/`xdotool` are WRITE-ONLY key injectors with no way to
+    ask what is on screen, so on those channels the verification below is unavailable — the
+    caller must be told (None), never silently told "fine".
+    """
+    kind = terminal.get("kind", "")
+    try:
+        if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
+            proc = state.run_subprocess(
+                ["tmux", "capture-pane", "-p", "-t", terminal["pane"]],
+                timeout=10, capture=True, detector_name="terminal_trigger",
+            )
+            return proc.stdout if proc and proc.returncode == 0 else None
+        # Bare-UUID guard, mirroring fleet_inject.valid_session_id — the id is interpolated
+        # into an AppleScript string literal, so anything else could break out of it.
+        if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+            script = (
+                'tell application "iTerm2" to repeat with w in windows\n'
+                '  repeat with t in tabs of w\n    repeat with s in sessions of t\n'
+                f'      if id of s is "{terminal["session_id"]}" then return contents of s\n'
+                '    end repeat\n  end repeat\nend repeat'
+            )
+            proc = state.run_subprocess(
+                ["osascript", "-e", script], timeout=15, capture=True,
+                detector_name="terminal_trigger",
+            )
+            return proc.stdout if proc and proc.returncode == 0 else None
+    except Exception:  # noqa: BLE001 — unreadable is a real answer, not a crash
+        return None
+    return None
+
+
+def wait_for_empty_prompt(
+    terminal: Mapping[str, str],
+    *,
+    interval_s: float = _PROMPT_POLL_INTERVAL_S,
+    timeout_s: float = _PROMPT_POLL_TIMEOUT_S,
+    reader=read_pane_text,
+    sleeper=time.sleep,
+    clock=time.monotonic,
+) -> tuple[bool, str]:
+    """Block until the input field is EMPTY. Returns (ok, why).
+
+    `ok=False` means DO NOT TYPE. The unreadable case returns False on purpose: on a
+    write-only channel we cannot know whether the user is mid-sentence, and splicing our
+    command into their draft — then submitting it with Enter — is exactly the harm this
+    exists to prevent. Callers that must still fire on such channels have to opt in
+    explicitly, so the risk is visible at the call site rather than buried here.
+    """
+    deadline = clock() + timeout_s
+    while True:
+        text = reader(terminal)
+        if text is None:
+            return False, "pane not readable on this channel"
+        if prompt_field_is_empty(text):
+            return True, "prompt field empty"
+        if clock() >= deadline:
+            return False, f"prompt field still busy after {timeout_s:.0f}s"
+        sleeper(interval_s)
+
+
+def verify_then_submit(
+    terminal: Mapping[str, str],
+    command: str,
+    *,
+    submit,
+    attempts: int = 3,
+    interval_s: float = _PROMPT_POLL_INTERVAL_S,
+    reader=read_pane_text,
+    sleeper=time.sleep,
+) -> tuple[bool, str]:
+    """After typing `command`, RE-READ and press Enter only if the field shows exactly it.
+
+    `submit` is the callable that actually sends Enter; it is injected so the decision is
+    testable without a terminal. Returns (submitted, why).
+
+    Not pressing Enter is the safe outcome: the text sits in the field where the user can
+    see and fix it. Pressing Enter on a field we could not verify is the unsafe one — it
+    commits whatever is there, under the user's name.
+    """
+    for i in range(attempts):
+        text = reader(terminal)
+        if text is not None and prompt_field_shows_only(text, command):
+            submit()
+            return True, "verified; submitted"
+        if i + 1 < attempts:
+            sleeper(interval_s)
+    field = extract_prompt_field(reader(terminal) or "")
+    return False, f"field did not settle to {command!r} (saw {field!r}) — NOT submitting"
+
+
+def inject_until_sent(
+    terminal: Mapping[str, str],
+    command: str,
+    *,
+    type_fn,
+    submit_fn,
+    clear_fn=None,
+    quiet_s: float = _USER_QUIET_S,
+    retry_s: float = _PROMPT_POLL_INTERVAL_S,
+    giveup_s: float = _INJECT_GIVEUP_S,
+    reader=read_pane_text,
+    is_typing=None,
+    sleeper=time.sleep,
+    clock=time.monotonic,
+) -> tuple[bool, str]:
+    """Keep trying until the command is actually SENT. Returns (sent, why).
+
+    The owner's loop, exactly:
+
+      1. wait until the user has typed NOTHING for `quiet_s` (8 s) — presence DEFERS, never
+         cancels; a present user is a reason to wait, not to discard their command;
+      2. then ATTEMPT: the field must be empty -> type the command -> RE-READ -> the field
+         must show exactly `/command` -> only then Enter;
+      3. any failure -> sleep `retry_s` (5 s) and go back to 1.
+
+    Step 1 is re-checked on EVERY pass, not once at the start: the user may begin typing
+    between the quiet check and the read-back, and this is precisely the window where typing
+    blind splices our text into their sentence.
+
+    "Until sent" is bounded by `giveup_s` and that is deliberate. This runs inside hooks and a
+    daemon beat, where a call that never returns is not persistence — it is an outage that also
+    silences the heartbeat. Giving up is LOUD (returned + logged), never a silent success.
+
+    `type_fn` / `submit_fn` are injected so the decision logic is testable without a terminal,
+    and so the caller keeps ownership of which channel actually types.
+    """
+    def _default_is_typing(_t: Mapping[str, str]) -> bool:
+        try:
+            import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
+
+            return user_intent.user_is_present(idle_s=int(quiet_s), env=os.environ)
+        except Exception:  # noqa: BLE001
+            return False  # unknown presence must not block a requested command forever
+
+    typing_probe = _default_is_typing if is_typing is None else is_typing
+
+    deadline = clock() + giveup_s
+    last = "not attempted"
+    while True:
+        if clock() >= deadline:
+            state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
+            return False, f"gave up after {giveup_s:.0f}s ({last})"
+
+        if typing_probe(terminal):
+            last = f"user typed within {quiet_s:.0f}s — deferring"
+            sleeper(quiet_s)
+            continue
+
+        text = reader(terminal)
+        if text is None:
+            # Write-only channel (wtype/xdotool): nothing can be read back, so neither the
+            # empty-check nor the verify is possible. Retrying cannot make it readable —
+            # report instead of looping forever pretending to verify.
+            return False, "pane not readable on this channel — cannot verify"
+        if not prompt_field_is_empty(text):
+            last = f"field not empty ({extract_prompt_field(text)!r})"
+            sleeper(retry_s)
+            continue
+
+        type_fn()
+        after = reader(terminal)
+        if after is not None and prompt_field_shows_only(after, command):
+            submit_fn()
+            return True, "verified; submitted"
+
+        # MALFORMED — and CLEARING IT IS NOT OPTIONAL. Our own bad text is now sitting in the
+        # field, so the next pass's empty-check would see it, wait, see it again... forever.
+        # Without this the loop DEADLOCKS on its own garbage: it can recover from the user
+        # being busy but never from its own failed injection. (Owner's worked example,
+        # 2026-08-02: *"if it is malformed, it will clear the input field and retry the check
+        # and will type the command again"*.)
+        last = f"field did not settle to {command!r} (saw {extract_prompt_field(after or '')!r})"
+
+        # DID THE USER TYPE BETWEEN OUR INJECTION AND THIS READ-BACK? If so the field is
+        # malformed BECAUSE IT NOW CONTAINS THEIR KEYSTROKES, and clearing it would delete
+        # what they just wrote — turning a cosmetic retry into data loss. Back off the full
+        # QUIET window instead and start over; their text is theirs to finish or discard.
+        # (Owner, 2026-08-02: *"if the user typed anything between the injection and the
+        # verification, even if the input field is malformed, it should stop and retry after
+        # 8 seconds"*.) Checked BEFORE `clear_fn` precisely because the clear is the
+        # destructive step.
+        if typing_probe(terminal):
+            last += " — user typed during injection; backing off without clearing"
+            sleeper(quiet_s)
+            continue
+
+        if clear_fn is None:
+            return False, last + " — and no clear_fn to undo it; refusing to loop on our own text"
+        clear_fn()
+        sleeper(retry_s)
 
 
 def build_tmux_steps(
