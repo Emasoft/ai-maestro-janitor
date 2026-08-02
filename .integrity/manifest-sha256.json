@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "df8a25951dbaa823af1e56ee54f0386ea9c671d7f08db93b7ead3b77be2ace9b",
-    "README.md": "bd2690fc99b51f85da0bd0feb9374de6f6ffe931a1284ee6077191470b2cb2b5",
+    "CLAUDE.md": "5d8aa9af905e1638b6904bc5b992113ec6cc650e4f3cbaa7ca0d411f3e7e4fab",
+    "README.md": "f458ae4edd783bc558d913a5a41b9260328170ea0c41273529b439e69ba99364",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -34,8 +34,6 @@
     "skills/janitor-findings/SKILL.md": "983a981413bca05ae9f9f2f0dae4ae5f6a786f022428085c3fc5ab1c5545bea7",
     "skills/janitor-fork-pr-cache-audit/SKILL.md": "44bf2b993c66fd863d7e7c342b67c671a048ddcbbd4183a9f2f4d0252b73f2a8",
     "skills/janitor-github-config-fix/SKILL.md": "ba66e740426bf933623cfbf34bd79ed9779a8b2b37901d642699fc6713644a11",
-    "skills/janitor-github-issues-monitor-off/SKILL.md": "3bc1d598ea3456b74defe1278409c3561085216d4e9d2615b0ff7e9d241ea0f2",
-    "skills/janitor-github-issues-monitor-on/SKILL.md": "09911f52ce45d8a408ecc963fe0ff630769fd3588a2c0368e60078fcd8ce78a9",
     "skills/janitor-github-workflow-create/SKILL.md": "6364f8f8aa4cdea14b10ff6d7a52b7f4bc95334bb51c67546629de0c44d89440",
     "skills/janitor-github-workflow-doctor/SKILL.md": "de36cef5cf0e44ae69e0679440d36ff114b0f042a7b9778c6690169ba88700c8",
     "skills/janitor-global-arm/SKILL.md": "7c0490ff16ad93578de315cf1e87c834682f22bd430361acc146b533feacb10b",
@@ -43,8 +41,6 @@
     "skills/janitor-global-reload-skills/SKILL.md": "82d2ec46a31083d9915a0946d18697a529d0278487c74c7b1cd0833553e01904",
     "skills/janitor-handoff-and-clear/SKILL.md": "c3210999aa2a285f514cc0bef560b80c7fac318a8ca0357205d659bfcdf1d55e",
     "skills/janitor-identify-environment/SKILL.md": "896d0c18a9a1530d3bcce51297a4e71aa6e38a6e8596365690c6c2b6cbdb84d3",
-    "skills/janitor-issues-watch-off/SKILL.md": "1a163f12c46531b014de90f4e04c1fbe1d4b7c44c403955768f6479325b0f942",
-    "skills/janitor-issues-watch-on/SKILL.md": "467bd5c74916188d9df48edf396d6b8a39a458e5649e1b88289276446b8f5751",
     "skills/janitor-memory-atomize/SKILL.md": "061cb26794454be4ca573a00a0e527e51b9e11543fb9bb1cb533b1cad4b06c40",
     "skills/janitor-memory-bootstrap/SKILL.md": "d121d601e0be1bb00b6649c5b6cb08a48c75307349ecae0c7a4ef0df9b427594",
     "skills/janitor-memory-conflict/SKILL.md": "d163a2ad3fcb8f359e5ff07b50d141b75684e07e2fc9970070f73f00df41566f",

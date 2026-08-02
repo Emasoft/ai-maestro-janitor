@@ -378,10 +378,10 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
-`janitor-github-issues-monitor-on` ↔ `-off` and `janitor-issues-watch-on` ↔ `-off` (all four
-now VESTIGIAL — both features are always-on chores as of 2026-08-02; the `-on` pair only
-re-baselines, and whether the `-off` pair should exist at all is an open owner decision,
-since a per-feature silent disable is the shape the 2026-07-31 directive removed),
+(the four `janitor-issues-watch-{on,off}` / `janitor-github-issues-monitor-{on,off}` skills were
+DELETED on 2026-08-02 by owner order — both features are always-on chores, so the `-on` pair
+had nothing to enable and the `-off` pair was exactly the per-feature silent disable the
+2026-07-31 directive removed; arm/disarm is the only switch, plus the two config knobs),
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
 `scripts/compact_trigger.py`; SOFT/enqueue by default since TRDD-0GPQROC1 — `/compact`
 runs when the turn ends; `--hard` = ESC-interrupt for emergencies (the ≥85% enforcement

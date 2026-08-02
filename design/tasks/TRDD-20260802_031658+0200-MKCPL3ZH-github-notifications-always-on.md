@@ -24,8 +24,9 @@ labels: [github, notifications, heartbeat, always-on, security]
 **STATUS: IMPLEMENTED, full suite green (14057 passed, 1 skipped), ruff + pyright clean.**
 Commits `559930a` (implementation) and `a2d43cf` (tests). Ships on the next `publish.py`.
 
-**NEXT ACTION:** one open OWNER decision, below — the four vestigial on/off skills. Nothing
-else is blocking; the feature is complete and verified.
+**NEXT ACTION:** none. The last open decision (the four vestigial on/off skills) was RESOLVED
+by the owner the same night — *"delete the vestigial skills and commands. complete all tasks
+and publish"* — and they are deleted. Card moves to `testing` → publish.
 
 ## The directive
 
@@ -111,15 +112,26 @@ the real detector against a real git repo with a fake `gh` (only the external se
 faked). M4 (silent but never seeds — fine on fire 1, floods on fire 2), M5 (legacy precedence
 swapped), M6 (copy→move) all go red now.
 
-## OPEN DECISION — owner
+## RESOLVED — the four on/off skills are deleted
 
-The four on/off skills (`janitor-issues-watch-{on,off}`,
-`janitor-github-issues-monitor-{on,off}`) are now vestigial. **Nothing was deleted**: the
-question was asked and went unanswered, and RULE 0 forbids deleting files not committed this
-session. The `-on` pair only re-baselines; the `-off` pair still works, which leaves two
-per-feature silent-disable switches — the exact shape the 2026-07-31 directive ("remove the
-very option of disabling the janitor features") removed, because a project sitting un-watched
-looks identical to a healthy one. Recommendation: delete all four. Needs explicit approval.
+Asked, initially unanswered (so nothing was touched), then decided by the owner the same
+night: *"delete the vestigial skills and commands. complete all tasks and publish"*. All four
+`SKILL.md` files removed with `git rm`, from a clean tree at `3e83dac`, so each is restorable
+with `git checkout 3e83dac -- <path>`.
+
+The reasoning they were measured against: the `-on` pair had nothing left to enable, and the
+`-off` pair was exactly the per-feature silent disable the 2026-07-31 directive ("remove the
+very option of disabling the janitor features") removed — a project sitting un-watched looks
+identical to a healthy one from the outside. Arm/disarm remains the only switch; the two
+config knobs remain for a deliberate, visible opt-out.
+
+**Derived task the deletion forced:** `.integrity/manifest-sha256.json` pinned all four files
+by hash, so removing them without regenerating it would have made `janitor-self-integrity`
+report four missing files on every fire — a self-inflicted tamper alarm. Regenerated
+(74 → 70 entries); the detector runs clean.
+
+No `commands/` entries existed for these features, so "skills and commands" resolved to the
+four skills alone — verified before deleting rather than assumed.
 
 ## Notes
 
