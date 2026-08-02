@@ -1,15 +1,15 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: todo
+column: testing
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-02T14:55:00+0200
+updated: 2026-08-02T15:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 blocked-by: []
-implementation-commits: [d2a5204]
+implementation-commits: [d2a5204, 67802e0]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
@@ -41,11 +41,31 @@ was wrong" — in this very section. The transcript then showed 285 s ≈ `*/5`:
 one level below it. **A metric's UNIT is part of the claim**; neither the tool nor the advisor
 was wrong, and neither was checkable without going to the transcript.
 
-**REVISED NEXT ACTION — measure before building anything here.** With the pin removed, an idle
-session should now demote to SLOW `*/30` (6× fewer fires) on its own. Re-check
-`IDLE_FLEET_KEEPWARM` after this ships. **If it is gone, this card is superseded by `d2a5204`
-and should be closed, not implemented** — the auto-clear machinery would have been an elaborate
-mitigation for a one-line staleness bug, and would have *appeared* to work.
+### ✅ SHIPPED (`67802e0`) — and my "may be superseded" call above was WRONG
+
+**OWNER REAFFIRMED the directive (2026-08-02, second statement), and the measurement in our own
+tree proves them right.** I had written that `d2a5204` might supersede this card. It does not,
+and `refresh_floor`'s own docstring is the disproof: a real compaction went **343,007 → 308,644
+— only 10%**, because the base install *and the summary itself* reload every time. That floor is
+*"a property of the install, not a number we get to choose."*
+
+So `/compact` provably **cannot** go below ~308k here. An abandoned session costs ≥ floor × 0.1
+per fire **forever**, and compacting again reclaims nothing. `/clear` is the ONLY lever that
+drops the summary and gets under the floor — which is exactly what "reduce the context to a
+minimum" means.
+
+The two fixes **compose**: `d2a5204` cut the NUMBER of fires (a stale directive was pinning idle
+sessions to FAST); this cuts the SIZE of each. A small context at FAST beats a fat one at SLOW.
+
+**Shipped:** `cold_cache_compact.should_clear_when_long_idle` (pure) + its knobs/cooldown, and
+`dispatch._phase_idle_clear_nudge`, wired immediately before the keep-going nudge so "shrink,
+then continue" is the reading order. Gates: own knob (NOT coupled to the compact master), 6 h
+idle, 350 k context (above the 308,644 floor), 2 h cooldown. **An UNKNOWN context or idle age is
+a VETO** — `None` must never read as "small" or "idle forever" at the moment we know least.
+Mutation-verified. Full suite 14,124.
+
+**NEXT ACTION:** observe it fire once on a real long-idle session, then decide whether the 6 h /
+350 k defaults are right. Nothing else is pending.
 
 ### Verdict: NOT as external injection — a SELF-NUDGE, and probably not yet
 
