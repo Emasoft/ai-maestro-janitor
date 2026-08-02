@@ -3,7 +3,7 @@ trdd-id: EUWIHP0G
 title: Auto-compact a large context on resume after a cold-cache gap or login to save the 5h window
 column: ai_review
 created: 2026-07-13T22:15:59+0200
-updated: 2026-07-29T03:02:50+0200
+updated: 2026-08-02T13:05:35+0200
 current-owner: janitor-session
 task-type: feature
 severity: high
@@ -101,7 +101,16 @@ threshold to 270_000 turns 6 of the 8 red. This exists because the sibling wirin
 previously exercised the real resolution.
 
 **NEXT ACTION:** none blocking. The card's original acceptance criterion is retired; the mechanism
-is verified at the real threshold. Ready for `testing → ai_review` on the owner's call.
+is verified at the real threshold.
+
+**2026-08-02 — prose/frontmatter mismatch corrected.** This line used to end "Ready for
+`testing → ai_review` on the owner's call" while `column:` already read `ai_review` — the move had
+happened and the STATE block still described it as pending. That is check3 drift, and it is worse
+than a stale date: a reader who trusts the STATE block (as its own header instructs) concludes the
+card awaits a transition that already occurred, and the only way to catch it is to cross-read the
+frontmatter the STATE block claims to supersede. Left in `ai_review`, which is where it is. What
+it actually awaits is a real cold-cache resume at the 270k threshold, to observe the compact fire
+in the wild — the same shape of open observation as TRDD-HI0BGQGJ, and not forceable honestly.
 
 **Knobs:** `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED` (on), `..._MIN_CONTEXT_TOKENS`
 (270000), `..._MIN_IDLE_SECONDS` (3600), `..._COOLDOWN_SECONDS` (600).
