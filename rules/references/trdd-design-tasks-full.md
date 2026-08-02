@@ -829,3 +829,22 @@ itself blocked?") prefer `findtrdd.py --where ...` over chained `grep`.
 
 TRDDs are specifically for **non-trivial design tasks** that will be
 picked up later and need to survive as tracked artifacts of the project.
+
+## Why the collision check is `find -iname`, and never `ls <glob>`
+
+Relocated from the base rule (2026-08-02) for the corpus floor cap. The base rule keeps the
+NORMATIVE form — `find … -iname … | grep -q .`, never `ls <glob>`. This is why each half matters,
+which a reader only needs when tempted to "simplify" it:
+
+- **`ls <glob>` instead of `find`.** An unmatched glob is passed through literally, so `ls` lists
+  the CWD and exits 0 — the check reports "id taken" for every candidate, and the generate loop
+  never terminates. (Same defect class as `~/.claude/rules/never-count-files-with-ls-glob.md`.)
+- **`-iname` instead of `-name`.** A case-SENSITIVE check calls a case-FOLDING id free. The write
+  then lands on the existing card's path on a case-insensitive filesystem (macOS default, and
+  Windows) — a SILENT overwrite of an audit artifact, which is the one file class that cannot
+  tolerate one: the record of a decision is destroyed by the record of the next decision.
+
+The `-iname` form is also load-bearing INDEFINITELY, not as a migration aid: legacy lowercase
+UUID ids remain permanently valid because they are cited in immutable commit subjects, so
+renaming them would destroy the provenance the citation exists to provide. Measured on one live
+board: 76% of cards still carried the legacy form.

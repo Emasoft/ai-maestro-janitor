@@ -428,3 +428,19 @@ If a project currently has rules scattered across `CLAUDE.md`,
 
 This migration is itself a TRDD with `task-type: docs` and
 `relevant-rules: []` (since PRRD doesn't yet exist).
+
+## How `prrd-edit.py` enforces the authority table
+
+Relocated from the base rule (2026-08-02) to keep the shipped corpus under its floor cap. The
+authority TABLE stays in the base rule — it is normative and every agent needs it. What lives
+here is the tool's behaviour when that table is violated:
+
+- a non-MANAGER **silver** edit is refused — `403 — propose via COS`;
+- a MANAGER **golden** edit is refused — `403 — golden rules are user-only`;
+- outside AI Maestro (a solo project, no manager session) the human user IS the manager, so
+  `prrd-edit.py --user` skips the check.
+
+The refusals are the reason an agent that believes a golden rule is wrong files a proposal and
+waits, rather than editing and explaining afterwards: the edit does not land, so there is nothing
+to explain. An agent that cannot reach `prrd-edit.py` must still behave as if these refusals
+applied — the tool enforces the rule, it is not the source of it.

@@ -58,11 +58,9 @@ machine-private) — see step 1.
 2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
    UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id (no UUID), unique across
    **BOTH roots** (the collision check scans both). Test for a taken id with
-   `find … -iname … | grep -q .`, **never** `ls <glob>` — an unmatched glob can make `ls`
-   list the cwd and exit 0 → an infinite regenerate loop. **`-iname`, NOT `-name`:** a
-   case-SENSITIVE collision check calls a case-folding id FREE, and the write then lands on
-   the existing card's path on a case-insensitive filesystem — a silent overwrite of an audit
-   artifact. Id/timestamp recipe: the reference.
+   `find … -iname … | grep -q .` — **never** `ls <glob>`, and **`-iname`, never `-name`**
+   (both spellings are load-bearing; the failure each prevents is in the reference, with the
+   id/timestamp recipe).
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
    every commit that implements it, and in any TaskCreate entry that tracks it.

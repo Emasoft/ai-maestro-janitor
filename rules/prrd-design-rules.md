@@ -81,10 +81,9 @@ a floating claim. Use the pinned form when the claim is about the rule as it exi
 | **MANAGER** | **NO** — may only forward the user's intent | add/revise/delete without user approval |
 | every other agent | no | no — **propose** instead |
 
-`prrd-edit.py` enforces this: a non-MANAGER silver edit is refused (`403 — propose via
-COS`); a MANAGER golden edit is refused (`403 — golden rules are user-only`). Outside AI
-Maestro (a solo project with no manager session) the human user IS the manager —
-`prrd-edit.py --user` skips the check.
+`prrd-edit.py` enforces this table and refuses a violating edit outright (the `403`s, and the
+solo-project `--user` case, are in the FULL REFERENCE). An agent with no access to that tool
+must behave as if the refusals applied — the tool enforces the rule, it is not its source.
 
 ## Cross-reference with TRDDs
 
@@ -101,9 +100,13 @@ Every AI Maestro project's PRRD SHOULD carry this as its first golden rule: ever
 that writes to GitHub (issue, comment, PR, review, discussion, release note) MUST begin the
 body with a one-line self-identification of which agent/role/plugin authored it, because
 all AI Maestro agents share the single human-owner GitHub identity. Recommended line:
-`_Posted by the Claude developing **<plugin-or-role>** (via the shared @owner gh auth)._`
+`_Posted by the Claude developing **<plugin-or-role>** (via the shared repo-owner gh auth)._`
 Commits SHOULD carry an `Agent: <plugin-slug>` trailer. It is GOLDEN because it is an
 anti-impersonation convention the MANAGER must not be able to weaken.
+
+**The byline carries NO `@`**: it read `@owner` — a real org — and every agent copying it paged
+strangers. Backticks do not protect a TEMPLATE; it is copied OUT of them. See
+`~/.claude/rules/github-mentions.md`.
 
 ## Does NOT apply to
 
