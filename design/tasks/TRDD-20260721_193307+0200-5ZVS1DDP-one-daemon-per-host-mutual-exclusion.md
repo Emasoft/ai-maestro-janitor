@@ -3,17 +3,60 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-07-21T21:05:00+0200
+updated: 2026-08-02T16:10:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
+eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
 
-**SHIPPED in v0.59.0 (`419a470`). Column `testing` — needs a real server to soak against.**
+**STILL `testing`, and that is CORRECT. Shipped v0.59.0 (`419a470`); the real-server soak is
+DONE (observed live 2026-08-02, evidence below) — but the soak was only ONE of this card's
+three remaining conditions. Items 2 and 3 of "REMAINING" below are still open, and item 2 is a
+SILENT SAFETY GAP that is live right now.**
+
+**⚠️ I moved this card to `complete` on the strength of the soak alone and reverted it in the
+same session.** The soak was the FIRST listed condition and the one I had just proved, so it
+read as *the* blocker. It was not. This is exactly the defect TRDD-N7NZOYAK describes — one
+DONE-marked line masking every still-open one — committed against a card whose own body listed
+the others eight lines further down. **Satisfying the condition you just measured is not
+evidence about the conditions you did not.**
+
+### ✅ SOAK OBSERVED IN PRODUCTION 2026-08-02 — condition 1 of 3, closed
+
+The card sat in `testing` for 11 days waiting on "a real server to soak against". That server
+was running the whole time; nobody looked. Measured on this host, all four facts at once:
+
+- **A real ai-maestro server is live:** pid 95175, `~/ai-maestro/node_modules/tsx` under node,
+  **up 3 days**. Its liveness probe was **24.8 s** fresh (well inside the 90 s window) and the
+  claimed pid answered `kill(pid, 0)` — so the probe is not merely present, it is TRUE.
+- **`server_is_alive()` → True**, `server_runs_chores()` → True, capabilities
+  `{singleton-chores, family-a}`.
+- **ZERO janitor daemons running** — §7.2's exit, doing exactly its job, unprompted.
+- `daemon_pid()` → None and the daemon heartbeat is **36.5 h** stale, i.e. it has been yielding
+  for the server's whole run rather than exiting once and creeping back.
+- `tests/test_one_daemon_per_host.py` — 10 passed.
+
+That is parts (1) and (3) demonstrated together on live infrastructure: the loop exited AND
+`ensure_daemon_running()` kept refusing across ~36 h of ordinary heartbeats from armed
+sessions. Part (3) is the one that makes the other three non-theatre, and it is the one a
+unit test can least convincingly prove.
+
+**⚠️ The "0 janitor daemons" figure nearly became a FALSE ALARM twice, both my own error:**
+first `grep -c "daemon.py"` on a `ps` snapshot returned 1 — the snapshotting shell's OWN argv
+carried the pattern, because `ps > file` and the grep were one compound command (snapshot-first
+does NOT defeat self-match when the snapshotting command itself contains the needle; the
+`[d]aemon` bracket trick does). Then "0 ai-maestro server processes" looked like a probe bug
+reporting a phantom server — I had grepped `aimaestro`, and the path is `ai-maestro`. Both
+readings would have manufactured a defect out of a healthy system.
+
+**NEXT ACTION:** work EHT **TRDD-KQ9WM4TZ** (freeze recovery is dark while a server runs — the
+live gap). This card stays `testing` until that EHT is terminal AND condition 3's blocker
+TRDD-QK7M2B0X lands its shared locks. Nothing else here is forceable.
 
 All four parts landed, each closing a distinct way the exit gets silently undone:
 (1) loop exit on fresh liveness, ordered after kill-switch and BEFORE maintenance/pause;
@@ -34,15 +77,20 @@ minute. Without that fix this TRDD could not be released reliably.
 
 **REMAINING before this can leave `testing`:**
 
-1. **Soak against a REAL running server.** Everything here is verified against a synthetic
-   liveness file. Unverified in the wild: the ≤90 s handoff in both directions, and that a
-   pm2 restart cycle does not produce a spawn/exit flap.
-2. **Freeze recovery must land somewhere** — the ONE chore that structurally cannot move to
-   a per-repo cron (a frozen session's own cron is what has stopped). Asked of ai-maestro on
-   #79 item 1. Until they confirm, a live server means standalone `#N` sessions have NO
-   freeze recovery, silently. If they decline, keep a stopgap here rather than let it dark.
+1. ~~**Soak against a REAL running server.**~~ **✅ DONE 2026-08-02** — see the soak section
+   above. Note what is STILL unverified even so: the ≤90 s handoff in the OTHER direction
+   (server stops → daemon resumes) and that a pm2 restart cycle produces no spawn/exit flap.
+   Both need the server to actually stop, which cannot be forced on a borrowed host; neither
+   blocks this card, and both are covered by the STALE-liveness unit test.
+2. **Freeze recovery must land somewhere** — **STILL OPEN, and LIVE ON THIS HOST RIGHT NOW.**
+   The ONE chore that structurally cannot move to a per-repo cron (a frozen session's own cron
+   is what has stopped). Asked of ai-maestro on #79 item 1. A server IS running here (pid 95175,
+   3 days), so standalone `#N` sessions on this machine have NO freeze recovery **at this
+   moment**, silently — the soak did not fix this, it CONFIRMED the precondition for it. If
+   they decline, keep a stopgap here rather than let it go dark. Tracked as EHT TRDD-KQ9WM4TZ.
 3. The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
    `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.
+   **STILL OPEN**; QK7M2B0X is at `column: dev`, so this is genuinely blocked, not stalled.
 
 **SUPERSEDED — do NOT carry forward:** the "NOT STARTED / get an owner decision" text this
 block replaced, and rev 4's "the daemon keeps running and yields the absorbed chores".
