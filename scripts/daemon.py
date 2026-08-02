@@ -1246,8 +1246,8 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # human notification naming the project. notify's content-hash dedupe + the
         # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
         # ESC is the unwedge (same policy _fire_fleet_stop already applies).
-        # TRDD-8IZ8COQ8 — the session is parked on a question meant for a HUMAN
-        # (ExitPlanMode / AskUserQuestion / a permission prompt). It looks IDENTICAL to a
+        # TRDD-8IZ8COQ8 — the session is parked on a question meant for a HUMAN (an
+        # unanswered ExitPlanMode / AskUserQuestion). It looks IDENTICAL to a
         # dead one: a blocked turn appends nothing and cannot fire its cron, so the tests
         # this loop already ran read `cron_dead`. Measured in this repo on 2026-07-17 — an
         # ExitPlanMode call, 33 minutes of silence, then the guardian typed `/janitor-arm`

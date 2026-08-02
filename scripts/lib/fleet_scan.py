@@ -308,10 +308,21 @@ def substantive_age_from_tail(
     return fallback_age, trailing_enqueues
 
 
+# Tools whose ONLY possible answer comes from a person, so an unanswered call to one is
+# proof the session is blocked on a human — never on a machine that will finish on its own.
+# Deliberately a NAME allow-list, not "any unanswered tool_use": an unanswered call also
+# describes a tool that is merely still RUNNING (Bash timeouts here are 20 minutes, which
+# outlives the staleness threshold), and mislabelling a working session as "waiting on YOUR
+# answer" is a worse failure than the missed recovery it causes. A permission prompt on an
+# ARBITRARY tool is the same hazard and is NOT covered — it is indistinguishable from a
+# slow tool with the signals available here (see the card's follow-up).
+_HUMAN_FACING_TOOLS = frozenset({"ExitPlanMode", "AskUserQuestion"})
+
+
 def awaiting_user_decision(tail: list[str]) -> bool:
-    """True iff the transcript tail ends on an UNANSWERED ``tool_use`` — the session is
-    parked on a question meant for a HUMAN (``ExitPlanMode``, ``AskUserQuestion``, a
-    permission prompt), not dead.
+    """True iff the transcript tail ends on an UNANSWERED call to a HUMAN-FACING tool
+    (``ExitPlanMode`` / ``AskUserQuestion``) — the session is parked on a question meant
+    for a person, not dead.
 
     TRDD-8IZ8COQ8. A blocked session is indistinguishable from a dead one by the signals
     the guardian had: its transcript stops appending and its cron cannot fire, because
@@ -350,13 +361,14 @@ def awaiting_user_decision(tail: list[str]) -> bool:
         for b in blocks:
             if b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 answered.add(b["tool_use_id"])
-        pending = [
-            b["id"]
-            for b in blocks
-            if b.get("type") == "tool_use" and isinstance(b.get("id"), str)
+        calls = [
+            b for b in blocks if b.get("type") == "tool_use" and isinstance(b.get("id"), str)
         ]
-        if pending:
-            return any(tid not in answered for tid in pending)
+        if calls:
+            return any(
+                b["id"] not in answered and b.get("name") in _HUMAN_FACING_TOOLS
+                for b in calls
+            )
         if any(b.get("type") == "tool_result" for b in blocks):
             continue  # a results-only record: keep walking back to the call it answers
         return False

@@ -111,6 +111,20 @@ ESC-first rungs because the ESC *is* the unwedge; an ESC into a pending approval
 human's decision**. Neuter-tested — with the guard disabled the beat fires, and the frozen case
 sends ESC.
 
+**Correction, same session (`<pending>`).** The first cut of the predicate was "tail ends on ANY
+unanswered `tool_use`" — a **false positive**, caught by asking how this card interacts with
+TRDD-WKTD5JTC (whose whole design is *injecting ESC*). An unanswered call also describes a tool
+that is merely still RUNNING; Bash timeouts in this project are 20 minutes, which outlives the
+staleness threshold. So a session executing a long command would have been declined recovery AND
+pushed a HIGH notification claiming it "waits on YOUR answer". The misleading notification is the
+worse half — a human told the wrong thing acts on it. Narrowed to a NAME allow-list
+(`ExitPlanMode`, `AskUserQuestion`), which covers the measured 2026-07-17 incident exactly.
+
+**KNOWN GAP, stated rather than hidden:** a **permission prompt on an arbitrary tool** is the same
+hazard and is **NOT** covered — with the signals available here it is indistinguishable from a slow
+tool. That is the honest boundary of this fix, and the reason the guard is an allow-list rather
+than a heuristic.
+
 **Why this stays out of `complete`:** the guard ships with the next publish like everything else.
 
 ## Notes and lessons learned
@@ -127,6 +141,15 @@ sends ESC.
   weeks of "why did it mis-resolve?" were aimed at a bug that did not exist. DO measure the
   premise FIRST when the evidence is still on disk; here `recovery-audit.ndjson` and the
   transcripts both survived and settled it in two reads.
+
+[^4]: [id:ATOM-8IZ8-BROAD, status:valid, keywords:"unanswered tool_use also means the tool is still running, guard fired on a long bash command, notification told the human something false", ocd:2026-08-02, lmd:2026-08-02]
+  DO NOT infer "blocked on a human" from ANY unanswered `tool_use`, BECAUSE the same shape
+  describes a tool that is merely still RUNNING — a 20-minute Bash timeout outlives the
+  staleness threshold — so the guard would decline recovery for a WORKING session and push
+  a notification claiming it waits on an answer nobody owes. DO gate on the tool NAME
+  (`ExitPlanMode` / `AskUserQuestion`), and state the uncovered case (a permission prompt
+  on an arbitrary tool) rather than stretching the heuristic to reach it. A fail-safe
+  guard can still lie, and the lie travels further than the missed action.
 
 [^3]: [id:ATOM-8IZ8-SILENT, status:valid, keywords:"session waiting for approval looks dead, guardian typed into a permission prompt, blocked turn cannot fire its own cron", ocd:2026-08-02, lmd:2026-08-02]
   DO NOT treat "no transcript growth AND no cron fire" as evidence a session is DEAD,

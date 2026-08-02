@@ -344,6 +344,17 @@ def test_awaiting_user_decision_sees_through_trailing_enqueues() -> None:
     assert fs.awaiting_user_decision(tail) is True
 
 
+def test_awaiting_user_decision_false_for_a_merely_long_running_tool() -> None:
+    """An unanswered tool_use ALSO describes a tool that is simply still RUNNING. Bash
+    timeouts here are 20 minutes, which outlives the staleness threshold, so a broad
+    predicate would decline recovery for a working session AND push a human notification
+    claiming it "waits on YOUR answer" — false, and the misleading half is worse than the
+    missed recovery. Only tools that genuinely address a PERSON count."""
+    now = 1_784_300_000
+    tail = [_tool_use_line(now - 2000, "toolu_BASH", name="Bash")]
+    assert fs.awaiting_user_decision(tail) is False
+
+
 def test_awaiting_user_decision_false_on_a_plain_stale_session() -> None:
     """A genuinely idle/dead session ends on ordinary content — it must remain recoverable,
     or this guard would disable fleet recovery entirely."""
