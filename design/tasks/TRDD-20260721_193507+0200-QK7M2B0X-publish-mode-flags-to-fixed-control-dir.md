@@ -3,12 +3,12 @@ trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
 column: dev
 created: 2026-07-21T19:35:07+0200
-updated: 2026-07-22T01:27:00+0200
+updated: 2026-08-02T14:15:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-implementation-commits: [9116b22, 627610b, 78879d4]
+implementation-commits: [9116b22, 627610b, 78879d4, 2b2be24]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
@@ -42,14 +42,28 @@ NEW-then-OLD, releasing the half it took if the other is contended. Public
 `tests/test_control_dir_locks.py`. `ticket-dispatch.lock` deliberately did NOT move — no
 second owner dispatches a janitor ticket, and the scope rule is AUDIENCE.
 
-**NEXT ACTION (phase B step 2):** the `*.last-run.ts` stamps → **then, separately and last,
-the singleton** (`daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts`) under TRDD-2U8AH82F's
-**flock-moves-LAST** invariant: take the NEW lock BEFORE retiring the OLD one. Ordering is
-not taste — a mode flag moved at a bad moment costs one duplicated chore; a flock moved at a
-bad moment costs a SECOND DAEMON, with a live ai-maestro server already on the host. The
-singleton move CANNOT reuse `_acquire_dual_flock` as-is: that primitive releases both halves
-on partial failure, whereas the singleton must hold the new lock ACROSS the retirement of
-the old one.
+**Phase B step 2, FIRST HALF — the `*.last-run.ts` stamps — SHIPPED (`2b2be24`, 2026-08-02).**
+`gs.last_run_path()` writes `control_dir()`; `gs.read_last_run()` reads all three eras and takes
+`max()`. That read is the OPPOSITE of the flags' first-found, and the difference is the whole
+half: during the upgrade window a 0.6x daemon still stamps `global_state_dir()`, so a new-path-only
+read sees 0 == "never ran" and re-runs the chore — for `marketplace-refresh` that is the duplicated
+bulk `claude plugin marketplace update` issue #7 exists to prevent, re-introduced by the move meant
+to make coordination visible. Newest-wins can only DEFER a chore by ≤ its own interval. The
+`.failcount` deliberately stayed put (private state; the scope rule is AUDIENCE, not kind) and that
+absence is pinned by a test. `daemon_watchdog` keys off `last_run_filename`, not `task_name`, so a
+caller whose tag ≠ stem cannot alarm on another chore's stamp. Tests: 6 new in
+`test_control_dir_flags.py`; mutation-verified (narrowing the read reds the upgrade-window and
+corrupt-stamp cases). Two `test_daemon_bulk_lane.py` assertions moved from the old path to the
+public `read_last_run` contract so they survive the singleton move too.
+
+**NEXT ACTION (phase B step 2, SECOND HALF — the singleton):** `daemon.pid`, `daemon.flock`,
+`daemon.heartbeat.ts` under TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW lock
+BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment costs one
+duplicated chore; a flock moved at a bad moment costs a SECOND DAEMON, with a live ai-maestro
+server already on the host. It **CANNOT reuse `_acquire_dual_flock`**: that primitive releases both
+halves on partial failure, whereas the singleton must hold the new lock ACROSS retirement of the
+old one — so it needs its own primitive, not a call to that one. Fold in the `_MIGRATION_SKIP`
+follow-up below at the same time.
 
 **Follow-up noticed while moving the locks (not done, deliberately out of step 1):**
 `_MIGRATION_SKIP` names only `marketplace-op.lock` and `oauth-rotator-tick.lock`, so
