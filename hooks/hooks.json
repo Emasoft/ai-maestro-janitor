@@ -211,6 +211,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-end.py",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

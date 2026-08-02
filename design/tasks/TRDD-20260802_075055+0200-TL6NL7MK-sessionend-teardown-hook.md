@@ -1,9 +1,9 @@
 ---
 trdd-id: TL6NL7MK
 title: The janitor has no SessionEnd teardown hook — nothing runs when a session terminates
-column: todo
+column: testing
 created: 2026-08-02T07:50:55+0200
-updated: 2026-08-02T07:50:55+0200
+updated: 2026-08-02T19:50:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: MEDIUM
@@ -11,16 +11,44 @@ scope: project
 release-via: publish
 parent-trdd: null
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [pending]
 ---
 
 # `SessionEnd` teardown — the janitor registers no hook at session termination
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-**Not started.** NPT #1 of TRDD-9K0O5YBQ's Claude-Code compatibility audit, extracted 2026-08-02
-so it is visible on the board (rule 9 — a derived task written as a bullet inside an audit is a
-task nobody can see).
+**✅ IMPLEMENTED 2026-08-02 19:50. Column `testing` — awaiting one REAL termination.**
+
+**Step 0 verified against the INSTALLED CLI, not the docs** (the card's own trap #3):
+`SessionEnd` is present in the 2.1.220 Mach-O binary (strings probe, ×24 — same order as the
+known-working `PostCompact` ×23). Shipped:
+
+- `scripts/hooks/on-session-end.py` — exactly TWO side effects, each DECIDED against what
+  exists (not assumed): (1) `sync_user_memory_mirror()` at teardown — the SessionStart call
+  STAYS (it owns the RESTORE direction); this closes the "a session's own USER-memory writes
+  wait a whole session for the next START sync" loss window; same THIN-harness gate as
+  SessionStart (#J never writes outside the project). (2) `session-clean-exit.ts` stamp — the
+  breadcrumb that lets fleet diagnostics tell a clean exit from a died session.
+- **Deliberately NOT done, with the why in the hook docstring:** never clears
+  `rate-limited.flag`/`resume-after-compact.flag` (they are the CROSS-SESSION resume
+  mechanism — project-scoped, consumed by the NEXT session's heartbeat; clearing them at
+  teardown would strand every resume spanning a restart); no state-cleanup sweeps (the purge
+  detectors own that — a duplicate is a second writer).
+- Zero stdout / zero `additionalContext` (TRDD-K1RJUYGK) — side effects + stderr only, the
+  on-stop-failure shape; bare `main()` so the exit code can never turn non-zero.
+- `hooks/hooks.json` registers `SessionEnd` (timeout 10).
+- Tests `tests/test_on_session_end.py` (4, real subprocess runs, no mocks): stamp+mirror on
+  standalone; stamp-only on thin-harness; garbage stdin exits 0; **resume flags survive
+  teardown**. Plus `test_hooks_execute.py` 26 green over the extended hooks.json.
+
+**NEXT ACTION (testing):** the registration reaches live sessions only via the plugin cache,
+so after the next publish + update, observe ONE real session termination leaving
+`session-clean-exit.ts` (+ a fresh mirror mtime) — then `complete`. Publish is currently
+gated on TRDD-AWXK0RFT.
+
+*(superseded original entry: "Not started. NPT #1 of TRDD-9K0O5YBQ's compatibility audit,
+extracted 2026-08-02 (rule 9).")*
 
 ## The gap
 
