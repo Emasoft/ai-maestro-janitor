@@ -1,9 +1,9 @@
 ---
 trdd-id: FQXBURNR
 title: Burn-rate-aware proactive oauth rotation — rotate on projected exhaustion, learn the effective cap
-column: todo
+column: testing
 created: 2026-07-17T16:24:20+0200
-updated: 2026-07-17T16:24:20+0200
+updated: 2026-08-02T18:58:27+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -40,9 +40,32 @@ EFFECTIVE cap below 100% — real 429s land while the usage endpoint still reads
 **Constraints:** R16 untouched (read-only usage probes; no token-handling changes);
 fail-open — no samples / flat slope ⇒ today's threshold behavior, byte-for-byte.
 
-**NEXT ACTION:** implement after v0.50.0 ships (parent H7NVKSAX ships the starvation fix;
-this EHT closes the remaining detection gap). Pure helpers + tests first, then the
-`cmd_auto` wiring.
+### ✅ 2026-08-02 18:58 — IMPLEMENTED. Column `testing` — awaiting one real burn-triggered rotation.
+
+**Shipped:** `scripts/oauth_rotator/burn_gate.py` (pure, no I/O, no keychain — R16 untouched)
++ 4 minimal `cmd_auto` wiring points + 16 tests:
+
+1. **Projected exhaustion** — per-(account, window) bounded sample ring in `state.json`
+   (`usage_samples`, ring-capped 12), least-squares slope over FRESH samples (≥3, ≥2 min
+   span, ≤30 min old), `minutes_to_wall` vs the LEARNED cap when one exists; the live
+   account rotates when the wall is inside ROTATOR_ROTATE_HORIZON_MIN (15) even below the
+   threshold. The incident shape (6%/min at 61%) projects ~6.5 min and trips; the same ring
+   spanning a window reset yields a declining slope → None → fail-open.
+2. **Learned effective cap** — a DEBOUNCED live 429 records the ring's freshest util% into
+   `learned_caps` (capped 5); the near bar becomes min(configured, min(caps) − 5), floored
+   at 50% so one absurd sample cannot spin every tick into a rotation. A later steady 61%
+   under a learned 63% cap rotates (tested) — the "429 at 61% while /usage reads fine" case.
+3. **Selection** — alternates' probes feed their own rings; a candidate whose OWN wall
+   projects inside the horizon is filtered with a `walls-soon` verdict. Drain-first is
+   UNCHANGED (filter only, never re-order). Sparse history ⇒ never filtered (fail-open).
+4. **Fail-open contract pinned by tests**: empty/corrupt state, <3 samples, flat/declining
+   slope, stale samples, no caps — every path returns neutral and the pure-threshold
+   behavior stands. Full rotator/oauth cluster: 463 green.
+
+**NEXT ACTION (testing):** observe ONE real `+BURN[...]` rotation (or a `walls-soon`
+candidate filter) in `_decide`'s log on this host, then `complete`. Knobs are plain
+ROTATOR_* envs like their siblings (HORIZON_MIN / CAP_MARGIN / SAMPLE_KEEP / CAP_KEEP /
+SAMPLE_MAX_AGE_S / EFFECTIVE_FLOOR_PCT).
 
 ## Notes and lessons learned
 

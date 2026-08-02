@@ -64,6 +64,7 @@ from pathlib import Path
 # is pure-stdlib, so it adds no PEP-723 deps.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir — so `import cascade` resolves under any loader
+import burn_gate  # noqa: E402  # scripts/oauth_rotator/burn_gate.py — pure fast-burn/learned-cap gate (TRDD-FQXBURNR)
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
@@ -1756,6 +1757,12 @@ def cmd_auto() -> int:
     if live_status == 429:
         streak = int(state.get("live_429_streak", 0)) + 1
         state["live_429_streak"] = streak
+        if streak >= LIVE_429_DEBOUNCE and live_email:
+            # A DEBOUNCED 429 is a real limit — record where the wall actually was as an
+            # effective-cap sample (TRDD-FQXBURNR). The 61%-then-hard-429 incident means the
+            # cap can sit far below the configured threshold; learning it makes the next
+            # near-limit check on this account honest.
+            burn_gate.observe_wall(state, live_email, time.time())
         save_state(state)
         if streak < LIVE_429_DEBOUNCE:
             _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient usage-endpoint throttle, not a real limit; deferring rotation" % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
@@ -1765,10 +1772,24 @@ def cmd_auto() -> int:
     elif live_status == 200:
         if state.get("live_429_streak"):
             state["live_429_streak"] = 0
-            save_state(state)
+        # Feed the per-tick reading into the burn ring (TRDD-FQXBURNR) BEFORE deciding, so
+        # this very tick's sample participates in the slope. Bounded (ring-capped) and
+        # persisted with the streak reset in ONE save below.
+        if live_email:
+            burn_gate.observe(state, live_email, time.time(), fh, sd)
+        save_state(state)
         # Usage near a limit OR the token is about to expire locally (proactive pre-expiry swap).
         near = is_near_limit(fh, sd) or live_expired
         live_desc = "5h=%s 7d=%s%s" % (fh_s, sd_s, " +LOCALLY-EXPIRING" if live_expired else "")
+        if not near and live_email:
+            # The threshold did not trip — ask the burn gate (TRDD-FQXBURNR): a projected
+            # wall inside the horizon, or a reading at/over the LEARNED cap bar, rotates
+            # NOW. Fail-open by construction: no samples / flat slope / no caps ⇒ None ⇒
+            # the pure-threshold behavior above stands byte-for-byte.
+            burn_why = burn_gate.live_burn_verdict(state, live_email, time.time())
+            if burn_why:
+                near = True
+                live_desc += " +BURN[%s]" % burn_why
     elif live_status in (401, 403):
         near = True  # server REJECTED the token (expired/invalid) — authoritative death signal
         live_desc = "token REJECTED (HTTP %d) — expired/invalid" % live_status
@@ -1908,9 +1929,26 @@ def cmd_auto() -> int:
             if bfh is None or bsd is None:
                 verdicts.append("%s:unknown-usage" % email)
                 continue  # unknown usage -> not a safe target
+            # Feed the alternate's reading into ITS burn ring too (TRDD-FQXBURNR) — probes
+            # only happen while a rotation is being considered, so history is sparse, but
+            # across consecutive near-ticks it is exactly the slope that predicts whether
+            # this candidate walls right after we land on it (the 42→61%-in-3-min shape).
+            burn_gate.observe(state, email, time.time(), bfh, bsd)
+            meta_dirty = True
             if not is_safe_alternate(bfh, bsd):
                 verdicts.append("%s:util(5h=%.0f,7d=%.0f)" % (email, bfh, bsd))
                 continue  # itself near a limit -> skip
+            rings2 = burn_gate.account_rings(state, email)
+            caps2 = burn_gate.account_caps(state, email)
+            if any(
+                burn_gate.candidate_walls_soon(rings2.get(w, []), caps2.get(w, []), time.time())
+                for w in ("5h", "7d")
+            ):
+                # Below SAFE but burning toward its wall inside the horizon — rotating onto
+                # it buys minutes, not a session (the second half of the 2026-07-17
+                # incident). Fail-open: sparse history simply never trips this.
+                verdicts.append("%s:walls-soon" % email)
+                continue
             candidates.append((email, b, bfh, bsd))
         else:
             eh = expires_in_h(b)
