@@ -333,7 +333,23 @@ def main() -> int:
         if not a.baseline.is_file():
             print(f"no baseline at {a.baseline} — run --write-baseline first", file=sys.stderr)
             return 2
-        ok, msgs = compare(res, json.loads(a.baseline.read_text(encoding="utf-8")), a.tolerance)
+        base = json.loads(a.baseline.read_text(encoding="utf-8"))
+        # Fail fast on a corpus/baseline MISPAIRING rather than reporting its numbers as a
+        # regression. `--corpus` and `--baseline` default independently, so measuring the
+        # conformant corpus without also redirecting the baseline compares it against the
+        # LEGACY numbers and prints a precise, confident, entirely false
+        # "REGRESSION mean_total_tokens: 174.3 -> 273.0". Comparing the RECORDED corpora
+        # (rather than checking which flags were passed) also catches a `--baseline` aimed
+        # at the wrong file — the same wrong answer arrived at from the other direction.
+        if base.get("corpus") and base["corpus"] != res["corpus"]:
+            print(
+                f"baseline/corpus mismatch: baseline was measured on {base['corpus']}, "
+                f"this run measured {res['corpus']} — pass the matching --baseline. "
+                "Refusing to compare (the difference would read as a regression).",
+                file=sys.stderr,
+            )
+            return 2
+        ok, msgs = compare(res, base, a.tolerance)
         for m in msgs:
             print(f"  {m}")
         print("  no change" if not msgs else "")

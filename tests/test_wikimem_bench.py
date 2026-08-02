@@ -96,6 +96,31 @@ def test_conformant_retrieval_has_not_regressed():
 
 
 @requires_memgrep
+def test_a_corpus_baseline_mispairing_is_refused_not_reported_as_a_regression():
+    """🐌 `--corpus` and `--baseline` default INDEPENDENTLY, so measuring the conformant corpus
+    while forgetting to redirect the baseline compares it against the legacy numbers.
+
+    That produced `REGRESSION mean_total_tokens: 174.3 -> 273.0 (limit 177.8)` — a precise,
+    confident, entirely false report, indistinguishable from a real regression by anything except
+    knowing which flags were passed. The danger is the direction it fails in: the operator's next
+    move is to go hunting for a performance bug that does not exist, or to "re-baseline" and
+    thereby destroy the real committed numbers.
+
+    The guard compares the corpus each side was MEASURED on rather than inspecting the flags, so
+    it equally catches a `--baseline` aimed at the wrong file. Exit 2 (a usage error), never 1 —
+    a caller must be able to tell "you asked the wrong question" from "the answer got worse"."""
+    proc = subprocess.run(
+        [sys.executable, str(_BENCH), "--check", "--corpus", str(_CONFORMANT_CORPUS)],
+        capture_output=True, text=True, timeout=600, cwd=str(_REPO), env=_bench_env(),
+    )
+    assert proc.returncode == 2, (
+        "a corpus/baseline mispairing must be REFUSED, not scored:\n" + proc.stdout + proc.stderr
+    )
+    assert "mismatch" in proc.stderr, proc.stderr
+    assert "REGRESSION" not in proc.stdout, "the mispairing was still reported as a regression"
+
+
+@requires_memgrep
 def test_conformant_corpus_retrieves_every_query_at_rank_one():
     """On a spec-conformant corpus retrieval is PERFECT — and this pins it there.
 
