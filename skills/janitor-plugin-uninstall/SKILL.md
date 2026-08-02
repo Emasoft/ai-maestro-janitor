@@ -25,6 +25,17 @@ Inside the harness the server owns each agent's plugin set, so a direct `claude 
 there mutates config the server believes it owns and the next reconcile silently reverts it.
 The script REFUSES to fall back to `claude` in that case rather than appear to succeed.
 
+> **IRON RULE — talk to ai-maestro through its SCRIPTS, never its HTTP API.** Every
+> interaction goes through the frozen CLI (`aimaestro-*.sh`, `amp-*.sh`, `aid-*.sh`). An agent
+> MUST NOT call `/api/*` or `:23000` directly — not with `curl`, not from a hook, a script, or
+> a skill. The scripts are the supported, versioned surface; the HTTP routes are internal and
+> change without notice.
+>
+> **If the CLI lacks the verb you need, that is a gap to REPORT, never a licence to bypass.**
+> Reaching for the API, overloading an unrelated flag, or dropping a side-channel file for the
+> server to poll are the same violation in three costumes. File it against ai-maestro and wait
+> for the verb.
+
 ## Usage
 
 ```bash

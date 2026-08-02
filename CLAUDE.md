@@ -36,6 +36,17 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
   agents.
 - **Actuation exclusion:** the #N daemon's fleet recovery/stop marks server-owned agents
   (`server_owned` diagnosis) and NEVER types into their panes — unknown ⇒ HANDS OFF.
+- **IRON RULE — the ai-maestro boundary is the SCRIPTS, never the HTTP API** (owner directive
+  2026-08-02). Every interaction goes through the frozen CLI (`aimaestro-*.sh`, `amp-*.sh`,
+  `aid-*.sh`); no plugin element may call `/api/*` or `:23000` directly, from any surface —
+  code, hook, script, skill, or agent. **And every SKILL that touches the boundary must SAY
+  so**, not merely avoid the API: a skill that leaves it unstated lets the next agent infer
+  the API is fair game. **A missing verb is a gap to REPORT, never a licence to bypass** —
+  calling the API, overloading an unrelated flag (`--tags` for a security signal), or dropping
+  a side-channel file for the server to poll are one violation in three costumes. Measured
+  instance: setting `contextPoisoned` (janitor#167) is blocked precisely here, because
+  `cmd_update`'s option allow-list has no such flag — reported to ai-maestro rather than
+  worked around.
 - **Chore coordination (Phase B2, BINARY since TRDD-LU0C5KAR — owner directive
   2026-07-17):** responsibility follows server LIVENESS. A fresh auth-free probe file
   `~/.aimaestro/server-liveness.json` (`{ts,pid,capabilities}`, 30 s beat / 90 s
