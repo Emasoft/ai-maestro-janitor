@@ -3,7 +3,7 @@ trdd-id: 157OH2D7
 title: Fleet GitHub-config + security audit across all plugin repos with an on-demand fix skill
 column: testing
 created: 2026-07-13T21:26:13+0200
-updated: 2026-07-13T22:05:00+0200
+updated: 2026-08-02T17:26:00+0200
 current-owner: janitor-session
 task-type: security
 severity: high
@@ -53,8 +53,30 @@ linear-history emit. Remaining before `complete`: (1) ships on the next `publish
 UNPROTECTED) — a REMOTE-mutation Tier-2 action that awaits explicit USER go-ahead (do not run
 `--apply` unprompted).
 
-**NEXT ACTION:** await USER decision on running `/janitor-github-config-fix --all --apply`
-against the live fleet, then the next release. Nothing else forceable.
+### ✅ 2026-08-02 — the awaited decision was GIVEN and the fix APPLIED to the live fleet
+
+Owner chose "dry-run first", reviewed the plan, then authorized the apply. Both ran.
+
+**Dry-run (read-only, 13 repos):** 11 already compliant; 2 findings —
+`ai-maestro-assistant-role-agent` `NO_TAG_PROTECT`, `ai-maestro-web-scenario-tester`
+`NO_REQUIRED_CHECKS`. Nothing mutated.
+
+**Apply:** the three ratified baseline rulesets updated idempotent-by-name
+(`baseline-history-protect`, `baseline-pr-and-checks`, `baseline-tag-protect`); the six
+legacy ruleset names confirmed absent. **Verified by an INDEPENDENT read-only re-run**, not
+by the apply's own report: `role-agent` no longer appears. **Fleet is 12 of 13 compliant.**
+
+**The 1 remaining is STRUCTURALLY out of this tool's reach, not a failed fix.**
+`web-scenario-tester` still reports `NO_REQUIRED_CHECKS`, and the applier says so itself:
+*"workflow/CI content findings route to /janitor-github-workflow-doctor +
+/janitor-security-agent"*. A required-status-check ruleset can only require CONTEXTS that a
+CI workflow defines; that repo's workflows define none, so there is nothing for a ruleset to
+require. Applying harder cannot fix it — authoring the workflow can.
+
+**NEXT ACTION:** run `/janitor-github-workflow-doctor` against
+`Emasoft/ai-maestro-web-scenario-tester` to give it CI check contexts, then re-run
+`github_config_fix.py --all` (read-only) and confirm the fleet reads 13/13. That is the only
+remaining work on this card.
 
 **Load-bearing facts / gotchas:**
 - Reuse, don't reinvent: `branch_protection_lib.apply_baseline_rulesets` /
