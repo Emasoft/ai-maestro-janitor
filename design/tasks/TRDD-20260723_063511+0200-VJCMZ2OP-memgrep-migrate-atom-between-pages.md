@@ -3,12 +3,12 @@ trdd-id: VJCMZ2OP
 title: memgrep migrate — move an atom and all its baggage between wikimem pages
 column: testing
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T07:35:00+0200
+updated: 2026-08-02T16:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
 relevant-rules: [1]
-implementation-commits: [d9ef41f]
+implementation-commits: [d9ef41f, 1530145]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
@@ -35,9 +35,51 @@ dest collision, source cleaned, both pages lint clean). All in `scripts/memgrep/
 **Pure core:** `migrate_compute(from_text, to_text, atom) -> MigrateResult` (no IO/reindex) is
 the unit-tested seam; `cmd_migrate_cli` is the read → compute → write-dest → write-source shell.
 
-**NEXT ACTION:** none for the verb itself. Fold 1e here — add an atom↔lesson-travel assertion
-to `memory_edit_verify.py` as the SAFETY NET for HAND-moves (migrate is self-verified). Rebuild + install the binary at the end of all phases. Minor cosmetic: dest gains a double blank line
-before the spliced atom (lint-clean, harmless) — tidy if convenient.
+### ✅ 2026-08-02 — item 1e SHIPPED, binary CONFIRMED installed, bullets 1+2 verified for real
+
+**1e DONE** (`1530145`): `memory_edit_verify.atom_lessons_travel` + `atom_footnote_citations`,
+6 tests, mutation-verified. It closes a gap NO existing invariant saw: hand-move atom `^X` and
+drop its `[^3]` citation, and the source keeps a legal ORPHAN DEF while the dest cites nothing —
+`footnote_refs_resolve` and `no_new_dangling_footnote_refs` BOTH pass while the lesson is
+silently severed from its fact. Keyed on the ATOM, not the page.
+
+**Binary: already installed** — `~/.cargo/bin/memgrep migrate --help` resolves. No rebuild owed.
+
+**Verification bullets 1 and 2 now EXERCISED FOR REAL** (scratch corpus built with the write
+verbs so the input was provably lint-clean, then migrated):
+- shared ref + collision: mover's exclusive lesson MOVED to dest as `[^2]`, the shared lesson
+  COPIED to dest as `[^3]`, the shared def STAYED on source where `^stayer` still resolves,
+  both pages lint clean, report `1 moved, 1 shared/copied`. Exactly the documented design.
+
+### ⚠️ BULLET 3 IS NOT SATISFIED — a lint-DIRTY source is neither refused nor migrated correctly
+
+Bullet 3 requires: *"Migrate with a deliberately malformed source: the pre-flight validate/fix
+runs first (or the migrate refuses with a clear message) — BOTH pages remain well-formed, never
+corrupted."* Measured: **it does neither.**
+
+On a source whose atom props are malformed (space-separated `[id:X status:active keywords:y]`
+instead of the canonical comma-separated form — `memgrep lint` calls it `atom-no-keywords`),
+migrate **exits 0**, reports `1 footnote(s) moved, 0 shared/copied` — and writes a dest whose
+atom body reads `The moving fact.[^2][^2]`: the SAME footnote cited twice, the shared lesson
+never copied, one citation now silently pointing at the wrong lesson.
+
+**Why the guard misses it, and it is not an oversight in the guard:** the documented pre-flight
+is *footnote-integrity, not full lint*. The malformed page had **no dangling footnote** — every
+ref resolved — so footnote-integrity correctly passed, and the props parser then mis-attributed
+ownership. The guard is doing what it says; the gap is that ATOM-PROPS well-formedness is not
+part of what it says.
+
+**NEXT ACTION:** make the pre-flight also refuse a source/dest whose ATOM PROPS do not parse
+(reuse `memgrep lint`'s `atom-no-keywords`/props check, not full lint — full lint would block a
+migrate on an unrelated one-sided link, which the design deliberately allows). Then re-run
+bullet 3. Bullets 4 (mid-transaction abort) and 5 (`cargo test`) remain unexercised.
+
+**⚠️ I first reported this as "migrate silently corrupts data" — that was WRONG and I retract
+it.** The corruption is real but it is *caused by* malformed INPUT, not by migrate mishandling
+good input; on a clean corpus migrate is correct (above). I had hand-written the first fixture
+with non-canonical atom props, so the tool was fed something no write-verb would ever produce.
+**Build fixtures with the write verbs** (`new-page`/`add-atom`/`add-lesson`) and lint them
+BEFORE trusting a failure — otherwise the bug you file is your own.
 
 ## The command (USER, verbatim intent)
 
