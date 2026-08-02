@@ -1,8 +1,8 @@
 ---
 name: memory-system
-description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence"
+description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update"
 ocd: 2026-06-13
-lmd: 2026-06-20
+lmd: 2026-08-02
 metadata:
   node_type: memory
   type: project
@@ -324,6 +324,28 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
 - [[reference_cpv_dotclaude_gitignore_fp]] — why memory lives under `.claude/` in
   the first place, and the CPV `--strict` false-positive that decision trips.
 
+
+^ATOM-EG1F-FJJM [desc:"memgrep is a per-host cargo install, NOT a shipped artifact — its logic version-skews across machines and a plugin update never fixes it.", keywords: memgrep_binary_is_stale_on_this_host lint_reports_errors_another_host_does_not_see cargo_install_does_not_roll_with_the_plugin_update memgrep_version_skew_across_machines permanent_findings_that_no_edit_clears, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+
+**`memgrep` is built and installed PER HOST (`cargo install --path
+scripts/memgrep`), so it does NOT roll forward when the plugin updates.** The
+plugin ships the Rust *source*; every machine compiles its own binary into
+`$HOME/.cargo/bin`. Two hosts on the same plugin version can therefore run
+different recall/lint/index LOGIC indefinitely, and no plugin update will ever
+reconcile them.
+
+The tell is a finding that **one host reports and another cannot reproduce**,
+especially one that never changes. Measured on janitor#165: a downstream host
+reported 5 permanent lint ERRORs on every heartbeat, while this host reported
+`none at or above ERROR` from the same detector on the same code — the filter
+that excluded those files (`collect_md`'s `is_index_file` guard, added
+2026-07-07) was simply not in the reporter's binary.
+
+Before treating a cross-host discrepancy as a code defect, reconcile the
+binaries: `cd <checkout>/scripts/memgrep && cargo install --path .` on the host
+that sees it. That is also the recovery after ANY edit to the crate — a source
+change is invisible until reinstalled. [^6]
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0001, status:valid, keywords:"memgrep_links_to_from_inverted verify_directional_flags_asymmetric_fixture one_sided_link_defect", ocd:2026-06-13, lmd:2026-06-13] `memgrep links --to NOTE` returns NOTE's
@@ -363,3 +385,4 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
   human-maintained index any more. Lesson: never put a growing index in the agent's
   context window; let the search engine own it (unlimited, invisible). The daily harvest
   chore and the deprecation stub keep it that way against agents who re-add to MEMORY.md.
+[^6]: [id:ATOM-Y1XB-UMXQ, status:valid, desc:"janitor#165 — the reported symptom was unreproducible here because the reporter's memgrep predated the fix.", keywords:"another_host_reports_a_finding_i_cannot_reproduce filed_a_bug_for_a_stale_binary cross_host_discrepancy_is_not_always_a_code_defect", ocd:2026-08-02, lmd:2026-08-02] DO NOT treat "another host reports a finding this host cannot reproduce" as proof of a code defect, BECAUSE any per-host-compiled tool (memgrep) can run older logic indefinitely while both hosts sit on the same plugin version, so the discrepancy is evidence about the BINARIES before it is evidence about the code. DO reconcile the binaries first (`cargo install --path scripts/memgrep`), and say which half you actually verified when you answer.
