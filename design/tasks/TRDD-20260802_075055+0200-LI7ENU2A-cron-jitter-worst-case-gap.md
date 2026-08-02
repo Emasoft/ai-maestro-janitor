@@ -3,7 +3,7 @@ trdd-id: LI7ENU2A
 title: The cadence tiers' recovery-latency claim ignores cron jitter, and the two sources for it disagree
 column: todo
 created: 2026-08-02T07:50:55+0200
-updated: 2026-08-02T07:50:55+0200
+updated: 2026-08-02T08:16:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: docs
 severity: LOW
@@ -49,18 +49,49 @@ it. The correction belongs in the places a reader actually consults for current 
 
 Both should state the gap as a RANGE with its source and date, not a single number.
 
-## Worth measuring, not just documenting
+## Worth measuring — but the data does NOT exist yet (corrected 2026-08-02, same day)
 
-The honest fix is one observation: the heartbeat writes its own fire times. Compare consecutive
-fire timestamps at a known armed tier (`.janitor/state/armed-cadence.cron` records it) and report
-the OBSERVED distribution. A measured p50/p95 gap on this machine beats both documents, and the
-janitor already has the data — `token-meter.jsonl` carries a per-heartbeat record.
+~~The honest fix is one observation: the heartbeat writes its own fire times … the janitor
+already has the data — `token-meter.jsonl` carries a per-heartbeat record.~~
+
+**That premise is WRONG, and I wrote it. `token-meter.jsonl` records turn END, not fire time.**
+Its `ts` comes from the **Stop hook**, so it is offset from the fire by however long the turn ran —
+minutes, on a working session. Attempted anyway, then caught by the shape of the result:
+
+- **Inter-record gaps** (n=1,278): p50 **286 s** against a nominal 300, and **903 s** against 900.
+  Useful as an end-to-end cadence observation — the typical spacing does track the armed tier — but
+  it is *turn-to-turn* spacing, and a long gap cannot be told apart from a SKIPPED fire.
+- **Lateness past the `*/5` wall-clock mark** (`ts mod 300`; valid at any tier since 300 divides
+  900 and 1800, and a skip does not shift the phase) — n=1,292: p50 **121 s**, p90 266, p95 279,
+  max 299. **Near-perfectly UNIFORM across [0,300).** That is not what jitter looks like; it is the
+  signature of timestamps that are not phase-locked to the cron marks at all — exactly what
+  turn-END times produce. The measurement measures turn duration, not jitter.
+
+Reporting either as "measured jitter" would have manufactured a number more confident than both
+documents and wrong. Do not resurrect them for that purpose.
+
+**Nothing else records a fire time.** `dispatch.log` logs EVENTS, not every fire; the
+`last-run-<detector>.ts` stamps hold only the most recent run; there is no `last-fire` stamp.
+
+**So this card now has a prerequisite:** stamp the fire. The dispatcher already writes to
+`.janitor/state/` on every fire, so the minimal change is one atomic append of the fire epoch
+(bounded like every other append — see the S3/S4 boundedness invariants). Only then is the
+distribution measurable, and only then should any number replace the two contradicting documents.
+
+**Checked and dismissed while looking:** `dispatch.log` carries 1,644 lines reading
+`detector 'report-to-trdd-drift' missing`, which looks like a live defect. It is not — every
+occurrence is dated **2026-06-04 … 2026-06-12** under session `4eb7bf5d`, from before that
+detector shipped. It is present today in BOTH the repo and the installed 2.3.0 cache (verified by
+`ls`, same 12,623 bytes).
 
 ## Verification
 
 - The stated latency in `CLAUDE.md` and `heartbeat_cadence.py` names a range, its source, and the
   date it was checked.
-- If measured: the observed inter-fire gaps at `*/5` and `*/15`, with n.
 - No claim survives that says a tier's recovery latency is exactly its period.
+- **If a number is quoted, it must come from FIRE timestamps.** Any figure derived from
+  `token-meter.jsonl` is turn-END data and must be rejected in review — the uniform
+  `ts mod 300` distribution above is the tell.
+- The prerequisite fire-stamp lands first, bounded (no unbounded append).
 
 ## Notes and lessons learned
