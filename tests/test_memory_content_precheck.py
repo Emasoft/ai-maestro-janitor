@@ -391,6 +391,27 @@ _RETRO_CONVERTED = (
 )
 
 
+def test_repair_has_work_true_on_superseded_atom_without_delimiter(tmp_path):
+    """TRDD-QKWU26ZG: superseded atoms but NO `## Superseded` section — the
+    lint WARN `superseded-atom-no-delimiter-heading` shape — is repair work."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CONVERTED)
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_superseded_atom_above_delimiter(tmp_path):
+    """TRDD-QKWU26ZG: a superseded atom ABOVE the `## Superseded` heading — the
+    lint WARN `superseded-atom-above-delimiter` shape — is repair work."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CONVERTED + "\n\n## Superseded")
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_false_on_superseded_atom_below_delimiter(tmp_path):
+    """TRDD-QKWU26ZG: the fixed shape — superseded atoms below `## Superseded` —
+    is NOT repair work (and a live atom above stays irrelevant to the check)."""
+    _shaped(tmp_path, "a.md", body="A live fact line.\n\n## Superseded\n\n" + _RETRO_CONVERTED)
+    assert mcp.repair_has_work(tmp_path) is False
+
+
 def test_retro_lesson_has_work_true_for_pointerless_superseded_atom(tmp_path):
     """A curated page with a status:superseded atom marker and NO superseded-by:
     pointer is the retro skill's exact candidate -> work."""

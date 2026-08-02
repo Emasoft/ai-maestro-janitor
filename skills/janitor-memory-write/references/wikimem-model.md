@@ -423,6 +423,23 @@ the fact moves forward clean; the history/WHY persists as a guardrail so the nex
 session can't repeat the old mistake or re-litigate a settled flip. Mechanics are
 in the UPDATE skill.
 
+### The `## Superseded` section — where retired ATOMS live (TRDD-57WJL5L2/QKWU26ZG)
+
+An atom retired in place (its marker carries `status: superseded` +
+`superseded-by:<lesson-id>`) SITS below a **`## Superseded`** section heading —
+exactly that spelling; memgrep's `superseded_heading_line` is the SSOT — placed
+after the live atoms and before `## Notes and lessons learned`. Two layers, keep
+them straight: **correctness** is status-keyed, never positional — memgrep
+default-excludes `status:superseded` atoms from search wherever they sit
+(`--include-superseded` restores them; an ADDRESSED `recall <ATOM-ID>` always
+returns them) — while the section is the **readability** layer, so a human
+reading the page sees current facts first. `memgrep lint` WARNs on a superseded
+atom above the heading (`superseded-atom-above-delimiter`) and on superseded
+atoms with no heading at all (`superseded-atom-no-delimiter-heading`); the
+REPAIR pass clears both by moving the atom's block below the section VERBATIM
+(reorder only, never reword — the lessons stay pooled in Notes, every `[^N]` ref
+keeps resolving).
+
 ## Provenance — `commits:` / `trdd:` and the WHY-resolution chain
 
 A memory that records a **code change** SHOULD carry its provenance: the

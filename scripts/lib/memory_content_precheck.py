@@ -315,6 +315,24 @@ def _page_needs_repair(text: str) -> bool:
         # (TRDD-3SOO1RWE: extending the precheck is safe ONLY because the repair skill
         # now backfills descs — the WN7M829Y scope note forbade flagging defects the
         # pass cannot fix; this one it can, via the same SSOT check.)
+    # Mis-placed superseded atoms (TRDD-QKWU26ZG — mirrors memgrep's two lint WARNs,
+    # `superseded-atom-no-delimiter-heading` / `superseded-atom-above-delimiter`).
+    # Safe to flag for the same TRDD-3SOO1RWE reason: the repair skill now performs
+    # the verbatim move-below-the-delimiter fix, landing in the same change as this.
+    lines = text.splitlines()
+    sup_idx = [
+        i for i, ln in enumerate(lines)
+        if (m := memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln))
+        and _SUPERSEDED_STATUS_RE.search(m.group(2))
+    ]
+    if sup_idx:
+        heading = next(
+            (i for i, ln in enumerate(lines) if ln.strip() == _SUPERSEDED_HEADING), None
+        )
+        if heading is None:
+            return True  # superseded atoms but no `## Superseded` section at all
+        if any(i < heading for i in sup_idx):
+            return True  # a superseded atom still sits ABOVE the delimiter
     return False
 
 
@@ -369,6 +387,14 @@ def _has_substantive_body(body: str) -> bool:
     return False
 
 
+# The superseded status value, tolerant of the `superseeded` misspelling exactly as
+# memgrep's own parser is (a misspelled retirement must not be invisible). Shared by
+# the retro-lesson precheck and the repair delimiter check (TRDD-QKWU26ZG).
+_SUPERSEDED_STATUS_RE = re.compile(r"status\s*:\s*supers?e+ded")
+# The canonical readability delimiter (SSOT spelling: memgrep's superseded_heading_line).
+_SUPERSEDED_HEADING = "## Superseded"
+
+
 def retro_lesson_has_work(root: Path) -> bool:
     """True iff some CURATED wiki page in `root` carries an atom marker that is
     `status:superseded` but has NO `superseded-by:` forward pointer — the exact
@@ -397,7 +423,7 @@ def retro_lesson_has_work(root: Path) -> bool:
             if not m:
                 continue
             props = m.group(2)
-            superseded = bool(re.search(r"status\s*:\s*supers?e+ded", props))
+            superseded = bool(_SUPERSEDED_STATUS_RE.search(props))
             has_pointer = bool(re.search(r"supers?e+ded-by\s*:", props))
             if superseded and not has_pointer:
                 return True

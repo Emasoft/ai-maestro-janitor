@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-repair
-description: REPAIR — the autonomous page-shape / metadata fixer for the memory wiki. Fires on the bare [janitor-memory-repair] heartbeat marker (or /janitor-memory-repair). Finds malformed wikimem pages — missing ocd/lmd/node_type/tier or the Notes section, no frontmatter, an INVERTED tier shape (an aspect built like a component), an answer-shaped description — and fixes each IN PLACE via the memory_txn_cli --op repair transaction, which proves every lesson and the birth date survive. Bounded, crash-safe, disable-able. One of the seven wikimem-editor passes (split/consolidate/conflict/repair/atomize/harvest/retro-lesson).
+description: REPAIR — the autonomous page-shape / metadata fixer for the memory wiki. Fires on the bare [janitor-memory-repair] heartbeat marker (or /janitor-memory-repair). Finds malformed wikimem pages — missing ocd/lmd/node_type/tier or the Notes section, no frontmatter, an INVERTED tier shape (an aspect built like a component), an answer-shaped description, a superseded atom above or without the `## Superseded` delimiter — and fixes each IN PLACE via the memory_txn_cli --op repair transaction, which proves every lesson and the birth date survive. Bounded, crash-safe, disable-able. One of the seven wikimem-editor passes (split/consolidate/conflict/repair/atomize/harvest/retro-lesson).
 ---
 
 # Janitor memory — REPAIR (page-shape / metadata backfill)
@@ -94,6 +94,19 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **A page's OWN one-sided link** → only the reciprocal that lives on THIS page is
   in scope (the librarian backfills reciprocals on OTHER pages; repair is
   single-page).
+- **Superseded atom above / without the `## Superseded` delimiter** (TRDD-QKWU26ZG —
+  the readability layer of the status-keyed default-exclude; memgrep lint WARNs
+  `superseded-atom-no-delimiter-heading` and `superseded-atom-above-delimiter` name
+  these two shapes): when a page carries `status:superseded` atom markers, ensure a
+  `## Superseded` section exists (exactly that spelling — memgrep's
+  `superseded_heading_line` is the SSOT), placed after the live atoms and BEFORE
+  `## Notes and lessons learned`, and MOVE each superseded atom's whole block
+  (marker line + body lines, up to the next marker/heading) below it **VERBATIM** —
+  byte-identical lines, order among the moved atoms preserved. Lessons stay pooled
+  in the Notes section (a within-page move keeps every `[^N]` ref resolving).
+  Correctness does not depend on position (the exclude keys on the `status:` prop);
+  this move is purely so humans read current facts first. Never change the atom's
+  props while moving it; never move a `status:valid` atom.
 - **Atom `desc:` incomplete** (TRDD-3SOO1RWE — `verify_repair` refuses a repair that
   leaves one): every `^id [...]` atom marker must carry a `desc:` that is PRESENT,
   ≤200 chars, and either QUOTED (`desc:"…"`, the canonical form) or an unquoted clean
@@ -115,6 +128,8 @@ uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" begin "<scope_root>" repa
 #   - keep EVERY existing fact + EVERY [^N] lesson byte-identical
 #   - add the '## Notes and lessons learned' section if missing
 #   - fix an inverted tier shape; correct an answer-shaped description
+#   - move superseded atoms VERBATIM below a '## Superseded' section (add it before
+#     the Notes section when missing) — reorder only, never reword (TRDD-QKWU26ZG)
 #   - DO NOT add/remove other pages, DO NOT delete the source (1 write, 0 deletes)
 uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <txn_id> --op repair
 #   → committed <id> (repair): 1 write(s), 0 delete(s)
