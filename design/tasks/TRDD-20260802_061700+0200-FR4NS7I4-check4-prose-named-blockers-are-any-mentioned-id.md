@@ -1,9 +1,9 @@
 ---
 trdd-id: FR4NS7I4
 title: check4 reads every TRDD id mentioned on a held card as one of its blockers
-column: todo
+column: testing
 created: 2026-08-02T06:17:00+0200
-updated: 2026-08-02T06:17:00+0200
+updated: 2026-08-02T06:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: LOW
@@ -16,6 +16,40 @@ implementation-commits: []
 # check4 reads every TRDD id mentioned on a held card as one of its blockers
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+
+### 2026-08-02 — FIXED the same session it was filed (`todo → testing`)
+
+**The open boundary question is answered by evidence, not taste: PARAGRAPH, not line.** The card
+below warned that a card writing its blocker on one line and the id on the next is the shape most
+likely to regress. It is not hypothetical — it is the corpus's ONLY true positive:
+TRDD-3XS3PDCF's *"HARVEST precheck stays BLOCKED (not merely deferred) … see TRDD-ab232dbd"*
+wraps across two lines. A same-line rule would have dropped the one case the widening exists for,
+so the scope is the blank-line-separated paragraph.
+
+**Measured on the live corpus before writing any code**, both ways over every card:
+
+| | prose-named candidates |
+|---|---|
+| whole-body (before) | **52** |
+| paragraph-scoped (after) | **23** |
+
+and on the two open cards that motivated it, TRDD-2C8XFOW9 goes **4 → 0** and TRDD-AM8JD9SG
+**8 → 0**, while TRDD-3XS3PDCF still yields `ab232dbd`. Board-wide the reconciler now reports
+**zero** stale-blockers, and every one it stopped reporting was a reuse citation.
+
+**Implementation.** `_paragraph_spans(text)` returns offsets, not substrings, so the match runs on
+the MASKED body and the ids are read from the ORIGINAL one — legitimate only because
+`_mask_inline_code` is length-preserving, which is now stated at its definition so a future
+"optimisation" to deletion cannot silently break the slicing.
+
+**The frontmatter path is untouched** — a declared `blocked-by:` is authoritative whatever the body
+says, pinned by its own test so a later narrowing of the prose path cannot bleed into it.
+
+Tests: 3 added (true positive spanning lines; citation in another paragraph; frontmatter-only), the
+second confirmed failing first with `['3b9b2040', 'aebedbff'] == []`. 57 in `test_trdd_common.py`,
+187 across the TRDD suite, **14062 full-suite**, ruff clean.
+
+Remaining: rides the next publish. `release-via: publish` ⇒ terminal column will be `published`.
 
 **Precision noise, not a wrong close** — this is the sibling finding of TRDD-N7NZOYAK (which
 was a correctness bug and is fixed). Filed separately per rule 13: different mechanism,

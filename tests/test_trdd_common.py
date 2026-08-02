@@ -454,6 +454,60 @@ def test_check4_prose_named_blocker_now_terminal():
     assert stale == ["3b9b2040"]
 
 
+def test_check4_prose_blocker_spanning_lines_in_one_paragraph_is_reported():
+    """The prose-named blocker is scoped to the PARAGRAPH, not the line
+    (TRDD-FR4NS7I4).
+
+    A real blocker declaration routinely wraps: the block word lands on one line
+    and the id on the next. That shape is the reason the scope is a paragraph and
+    not a line — taken from TRDD-3XS3PDCF's live text, which is the corpus's true
+    positive for this check."""
+    rec = _record(
+        column="dev",
+        blocked_by="[]",
+        body=(
+            "\n## STATE\n"
+            "- HARVEST precheck stays BLOCKED (not merely deferred) because the\n"
+            "  work-predicate is in flux — see TRDD-3b9b2040.\n"
+        ),
+    )
+    stale = tc.check4_stale_blockers(rec, _column_of({"3b9b2040": "published"}))
+    assert stale == ["3b9b2040"]
+
+
+def test_check4_citation_in_another_paragraph_is_not_a_blocker():
+    """An id cited ELSEWHERE in the body is not a blocker just because the card's
+    prose says blocked somewhere (TRDD-FR4NS7I4).
+
+    Live shape: TRDD-2C8XFOW9 is correctly blocked on an out-of-repo issue and
+    cites EQ792YPX / T7N67AQP to REUSE them — it is the EHT of the first and takes
+    a presence gate from the second, so their being terminal is what makes them
+    useful. Whole-body scoping reported all of them, on a card that was already
+    right and so could not be fixed by editing it."""
+    rec = _record(
+        column="dev",
+        blocked_by="[]",
+        body=(
+            "\n## STATE\n"
+            "This card is BLOCKED on an upstream answer.\n"
+            "\n"
+            "Reuse notes: this is the EHT of TRDD-3b9b2040, and it takes the\n"
+            "presence gate from TRDD-aebedbff.\n"
+        ),
+    )
+    stale = tc.check4_stale_blockers(
+        rec, _column_of({"3b9b2040": "published", "aebedbff": "complete"})
+    )
+    assert stale == []
+
+
+def test_check4_frontmatter_blocker_reported_even_without_block_prose():
+    """Narrowing the PROSE path must not touch the frontmatter path: a declared
+    blocked-by is authoritative whatever the body says (TRDD-FR4NS7I4)."""
+    rec = _record(column="blocked", blocked_by="[TRDD-3b9b2040]", body="\nno block language here\n")
+    assert tc.check4_stale_blockers(rec, _column_of({"3b9b2040": "published"})) == ["3b9b2040"]
+
+
 def test_check4_silent_when_self_terminal():
     rec = _record(column="published", blocked_by="[TRDD-3b9b2040]")
     assert tc.check4_stale_blockers(rec, _column_of({"3b9b2040": "published"})) == []

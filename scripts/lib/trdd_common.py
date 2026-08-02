@@ -602,8 +602,34 @@ def _mask_inline_code(text: str) -> str:
     Length-preserving (not deletion) so byte offsets of the surrounding prose are
     unchanged. Used by Check 3 so 'block' appearing inside `inline code` (a code
     token quoted as code, never a live block declaration) is not matched.
+
+    The length-preserving property is also what lets Check 4 slice the ORIGINAL
+    body at offsets computed on the MASKED body (see `_paragraph_spans`).
     """
     return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """`(start, end)` offsets of the blank-line-separated paragraphs in `text`.
+
+    Offsets rather than substrings because the caller matches on the MASKED body
+    and extracts ids from the ORIGINAL one; `_mask_inline_code` preserves length,
+    so one set of offsets indexes both.
+    """
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    pos = 0
+    for line in text.splitlines(keepends=True):
+        if line.strip():
+            if start is None:
+                start = pos
+        elif start is not None:
+            spans.append((start, pos))
+            start = None
+        pos += len(line)
+    if start is not None:
+        spans.append((start, pos))
+    return spans
 
 
 def check1_shipped_but_open(record: TrddRecord, commit_in_released_tag) -> bool:
@@ -700,10 +726,29 @@ def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:
     # Prose-named blockers count only when the TRDD prose actually says blocked
     # (inline-code masked, so a code-tag like `DECOUPLE-BLOCKED` doesn't qualify —
     # issue #65 class b; the same discrimination Check 3 uses).
-    if _BLOCKED_PROSE_RE.search(_mask_inline_code(record.body)):
-        for uid in extract_trdd_refs(record.body):
-            if uid not in candidates and uid != record.uid:
-                candidates.append(uid)
+    #
+    # SCOPED TO THE PARAGRAPH, not the whole body (TRDD-FR4NS7I4). The two
+    # conditions used to be asked independently of the entire body — "does the
+    # prose say blocked ANYWHERE" and "is an id mentioned ANYWHERE" — so on a card
+    # that IS legitimately held, every id it cited became one of its blockers.
+    # Measured on the live corpus: 52 prose-named candidates -> 23, with the two
+    # open held cards going to zero (TRDD-2C8XFOW9 4 -> 0, TRDD-AM8JD9SG 8 -> 0)
+    # while the corpus's true positive survives (TRDD-3XS3PDCF -> ab232dbd).
+    #
+    # A paragraph, NOT a line: that true positive wraps — "stays BLOCKED … see
+    # TRDD-xxxx" spans two lines — which is the ordinary shape of a real blocker
+    # declaration, so a same-line rule would have dropped the one case the
+    # widening exists for.
+    masked = _mask_inline_code(record.body)
+    if _BLOCKED_PROSE_RE.search(masked):
+        for lo, hi in _paragraph_spans(masked):
+            if not _BLOCKED_PROSE_RE.search(masked[lo:hi]):
+                continue
+            # Match on the masked slice, read ids from the ORIGINAL one: masking is
+            # length-preserving, so the same offsets index both.
+            for uid in extract_trdd_refs(record.body[lo:hi]):
+                if uid not in candidates and uid != record.uid:
+                    candidates.append(uid)
     stale: list[str] = []
     for uid in candidates:
         if column_of(uid) in BLOCKER_CLEARED_COLUMNS:
