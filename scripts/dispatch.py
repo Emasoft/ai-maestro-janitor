@@ -174,6 +174,15 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # enough to notice a newly-installed malicious package within one
     # heartbeat window.
     ("ai-context-poisoning", 3600, "CLAUDE_PLUGIN_OPTION_AI_CONTEXT_POISONING_INTERVAL"),
+    # agent-context-integrity is the OTHER half of the same threat (janitor#167):
+    # ai-context-poisoning above catches a dependency that WRITES a context file;
+    # this one catches a context file that arrived ALREADY POISONED via clone /
+    # pull / a merged PR. That vector needs no execution at all, and CLAUDE.md is
+    # auto-loaded into every session — so it was simultaneously the cheapest attack
+    # and, until now, the only one with no automatic check. Cadence 1800s: the
+    # trigger is a git operation, which is far more frequent than an install, and
+    # the content-hash short-circuit makes an unchanged tree free.
+    ("agent-context-integrity", 1800, "CLAUDE_PLUGIN_OPTION_AGENT_CONTEXT_INTEGRITY_INTERVAL"),
     # mcp-rugpull fingerprints every installed MCP server's identity
     # (command/args/url/local-script content/npx-resolved version) on first
     # run, then alerts on any drift. Catches the rug-pull attack shape

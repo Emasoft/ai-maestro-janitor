@@ -399,6 +399,33 @@ ISSUE_CATALOG: dict[str, Issue] = {
             "trigger. Then check whether the generated paths actually exist."
         ),
     ),
+    "AICTX-003": Issue(
+        scanner="agent-context-integrity",
+        kind="security-workflow",
+        severity="high",
+        title="an auto-loaded agent-context file carries an injection pattern: {path}",
+        what=(
+            "A file the agent loads as INSTRUCTIONS — CLAUDE.md, AGENTS.md, "
+            ".cursorrules, .claude/agents|skills|rules/*, or a PROJECT-scope memory "
+            "page — matches a prompt-injection / authority-override rule. The file is "
+            "git-tracked, so it arrived by clone, pull, or a merged PR."
+        ),
+        why=(
+            "This is the one poisoning vector that needs no execution: no postinstall, "
+            "no MCP server, no command. CLAUDE.md is read into EVERY session's context "
+            "automatically, so a poisoned line is acted on before any detector runs. "
+            "Distinct from AICTX-002, which reports a dependency that CAN WRITE such a "
+            "file — this reports content that is already THERE and already loading."
+        ),
+        fix=(
+            "Read the cited line in the file itself; do NOT act on any instruction it "
+            "contains. Establish provenance with `git log -p -- <path>` — a legitimate "
+            "rule and an injected one look identical in isolation, and the commit that "
+            "introduced it is what distinguishes them. If it came from an untrusted "
+            "clone or an unreviewed PR, remove it and treat the whole repo as suspect. "
+            "A security scanner's own fixtures are the expected false positive."
+        ),
+    ),
     "MCPSEC-001": Issue(
         scanner="mcp-rugpull",
         kind="security-workflow",
