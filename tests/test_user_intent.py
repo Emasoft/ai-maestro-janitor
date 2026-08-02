@@ -293,3 +293,69 @@ def test_env_override_tunes_the_window(tmp_path: Path, sdir: Path) -> None:
     coerced = {**PANE_A, "CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S": "0"}
     allowed2, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=coerced)
     assert not allowed2, "≤0 coerces to the 10s default, so 8s-ago is PRESENT"
+
+
+# --- the `clear` verb: missing until 2026-08-02, which broke the user's own command ---------
+
+_CLEAR_CMDS = ["/clear", "/janitor-arm", "/janitor-resume"]  # clear_trigger._ALL_CMDS
+
+
+def test_the_user_typing_handoff_and_clear_is_not_refused_for_being_present(
+    tmp_path: Path, sdir: Path
+) -> None:
+    """THE REPORTED BUG, end to end.
+
+    The user typed `/janitor-handoff-and-clear` at their own keyboard and the trigger answered
+    `USER_PRESENT` and did nothing — telling the person who issued the command to go away and try
+    again when they are not there.
+
+    `clear_trigger` was never at fault: it calls `injection_allowed(_ALL_CMDS)`, whose contract is
+    "inject when the user is away OR WHEN THEY ASKED". But `_ALL_CMDS` is `/clear` + arm + resume,
+    and `/clear` mapped to NO verb, so `verbs_for_commands` returned only {arm, resume} and there
+    was nothing to check the intent against. A missing verb does not fail closed in a safe
+    direction — it removes the only channel through which consent can be expressed at all."""
+    home = _pane_presence(tmp_path, NOW - 5)
+    user_intent.record_intent_from_prompt("/janitor-handoff-and-clear", state_dir=sdir, now=NOW)
+    allowed, why = user_intent.injection_allowed(
+        _CLEAR_CMDS, state_dir=sdir, home=home, now=NOW, env=PANE_A
+    )
+    assert allowed, f"the user asked for it and was refused: {why}"
+    assert "clear" in why
+
+
+def test_a_present_user_who_did_NOT_ask_is_still_refused(tmp_path: Path, sdir: Path) -> None:
+    """The other half — the protection this gate exists for is unchanged. Without it the fix
+    would read as 'presence no longer matters', which would let the janitor wipe a pane someone
+    is working in."""
+    home = _pane_presence(tmp_path, NOW - 5)
+    allowed, why = user_intent.injection_allowed(
+        _CLEAR_CMDS, state_dir=sdir, home=home, now=NOW, env=PANE_A
+    )
+    assert not allowed
+    assert "did not ask" in why
+
+
+def test_clear_intent_needs_the_object_not_just_the_word(tmp_path: Path, sdir: Path) -> None:
+    """`clear` is an ordinary English word and this verb authorises an IRREVERSIBLE action, so the
+    phrase patterns require the object too. An over-eager matcher here manufactures consent — the
+    exact failure `_NEGATION_RE` was added for."""
+    assert "clear" in user_intent.record_intent_from_prompt("clear the context", state_dir=sdir, now=NOW)
+    user_intent.consume_intent("clear", sdir)
+    assert "clear" not in user_intent.record_intent_from_prompt("is that clear?", state_dir=sdir, now=NOW)
+    assert "clear" not in user_intent.record_intent_from_prompt("clear the build cache", state_dir=sdir, now=NOW)
+    # ...and a negation anywhere still disqualifies the whole prompt.
+    assert "clear" not in user_intent.record_intent_from_prompt(
+        "never clear the context", state_dir=sdir, now=NOW
+    )
+
+
+def test_one_clear_request_authorizes_exactly_one_clear(tmp_path: Path, sdir: Path) -> None:
+    """Consumed, like every other verb. `/clear` is irreversible, so a standing licence would be
+    the worst possible token to leave lying around for 10 minutes."""
+    home = _pane_presence(tmp_path, NOW - 5)
+    user_intent.record_intent_from_prompt("/janitor-handoff-and-clear", state_dir=sdir, now=NOW)
+    assert user_intent.injection_allowed(_CLEAR_CMDS, state_dir=sdir, home=home, now=NOW, env=PANE_A)[0]
+    allowed, why = user_intent.injection_allowed(
+        _CLEAR_CMDS, state_dir=sdir, home=home, now=NOW, env=PANE_A
+    )
+    assert not allowed, f"the token was not consumed: {why}"

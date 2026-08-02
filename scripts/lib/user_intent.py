@@ -79,6 +79,19 @@ _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
     "reload-skills": ("/janitor-reload-skills", "/reload-skills"),
     "compact": ("/janitor-compact-context", "/compact", "/janitor-write-handoff"),
     "resume": ("/janitor-resume",),
+    # MISSING UNTIL 2026-08-02, and its absence broke the user's own command. `clear_trigger`
+    # correctly asks `injection_allowed(_ALL_CMDS)` — whose contract is "inject when the user is
+    # away OR WHEN THEY ASKED" — but `_ALL_CMDS` is ['/clear', '/janitor-arm', '/janitor-resume']
+    # and `/clear` mapped to NO verb, so `verbs_for_commands` returned only {arm, resume}. There
+    # was nothing to check the intent AGAINST: the user typed `/janitor-handoff-and-clear`
+    # themselves, no token was ever stamped, and the gate refused with USER_PRESENT — telling the
+    # person at the keyboard to go away and try again when they are not there.
+    #
+    # The presence gate exists to stop the JANITOR typing into a pane someone is working in. When
+    # the user issues the command, their presence is the AUTHORIZATION, not the objection. A verb
+    # missing from this map does not fail closed in a safe direction — it silently removes the
+    # only channel through which consent can be expressed at all.
+    "clear": ("/janitor-handoff-and-clear", "/clear"),
 }
 
 # Natural-language forms that unambiguously request a verb. Kept TIGHT: an over-eager pattern here
@@ -98,6 +111,13 @@ _VERB_PHRASES: dict[str, tuple[str, ...]] = {
     "reload": (r"\breload\b[^.!?]{0,20}\bplugins?\b",),
     "reload-skills": (r"\breload\b[^.!?]{0,20}\bskills?\b",),
     "compact": (r"\bcompact\b[^.!?]{0,30}\b(context|conversation|session)\b",),
+    # Deliberately NOT a bare `\bclear\b`: "clear" is an ordinary English word ("is that clear",
+    # "clear the error") and this verb authorises an IRREVERSIBLE action. Both forms below require
+    # the object as well, so only a sentence actually about clearing the context matches.
+    "clear": (
+        r"\bhandoff[- ]and[- ]clear\b",
+        r"\bclear\b[^.!?]{0,30}\b(context|conversation|session)\b",
+    ),
 }
 
 # A prompt carrying a negation anywhere is NEVER treated as a request. This is not paranoia: the very
