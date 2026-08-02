@@ -1,9 +1,9 @@
 ---
 trdd-id: I6ZZWVDN
 title: Measure the janitor's remaining two injected blocks — SessionStart compact and StopFailure rate_limit
-column: todo
+column: testing
 created: 2026-08-02T06:24:29+0200
-updated: 2026-08-02T06:24:29+0200
+updated: 2026-08-02T07:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 severity: MEDIUM
@@ -17,6 +17,54 @@ implementation-commits: []
 # Measure the janitor's remaining two injected blocks (SessionStart:compact, StopFailure:rate_limit)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+
+### 2026-08-02 — MEASURED. One row answered, one row NOT measurable yet (`todo → testing`)
+
+Report: `reports/I6ZZWVDN/20260802_070929+0200-sessionstart-stopfailure-injection-cost.md`
+(gitignored). Session `e804d2c9`, opus-5, 221 breaks / 5,643,196 wasted / $32.45.
+
+**`SessionStart` → verdict (b): real, once per session, and NOT fixable by shrinking it.**
+It appears as `hook: SessionStart:resume` with **`occurrences: 1`** — exactly the budget
+TRDD-K1RJUYGK set as acceptable, against `PostToolUse:Edit` at 51 and `PreToolUse:Bash` at 32 in
+the same table. Three findings that decide the "no action" call:
+
+1. **Not attributable to the janitor from the label.** The label names the EVENT, and **nine**
+   things register on `SessionStart` (8 plugins + `~/.claude/settings.json`). Unlike `Stop` — where
+   SLFMG704 checked every registrant and found none injects — the janitor **is** a genuine
+   contributor (its breadcrumb / TRDD-STATE / arm-nudge go to stdout, which the spec says becomes
+   context). So the true claim is *"one of ≥9 contributors to a once-per-session block"*, never
+   *"the janitor's 263k"*.
+2. **The 263,023 tokens are POSITIONAL, not the block's size.** A prefix break re-bills everything
+   after the changed block, so the figure measures where it sits, not how big it is.
+3. **Therefore shrinking the janitor's output cannot fix it** — that is precisely the remedy
+   TRDD-YRPUSIFY shipped and that was falsified: the block is re-written regardless of what it
+   says. And even removing the janitor's contribution entirely leaves the break, because the other
+   eight registrants still change the block.
+
+**`StopFailure:rate_limit` → NOT resolved, and deliberately not claimed as cleared.** It is absent
+from the report — but the hook **has not fired since 2026-07-17**: `stop-failure.log` has 0 entries
+dated today (last four all 2026-07-17T20:16–20:20, session `c8a95d7e`), its own
+`window-exhaustion.jsonl` artifact stops at `2026-07-17T20:20:25`, and there is no
+`rate-limited.flag`. Absence is only evidence if the thing ran; calling this clean would be the
+same error as declaring a detector healthy from a run in which it never executed. **To resolve:
+re-measure a session whose `stop-failure.log` shows a same-day fire.** It cannot be forced honestly
+— it needs a real rate-limit.
+
+**`SessionStart:compact` specifically was not observable here and that is expected**, not a gap in
+the method: this session started by RESUME, and an in-session auto-compaction fires `PostCompact`,
+not a fresh `SessionStart`. Only a session a compaction actually started can show `:compact`.
+
+**Incidental, and larger than this card's subject — routed, not buried.** `IDLE_TTL_EXPIRY` cost
+**81 occurrences / 2,676,704 tokens / $15.39** in this one session — 47% of its total waste and
+~10× the SessionStart row. That is TRDD-EUWIHP0G's subject (cold-cache compact), measured live.
+Also: across 914 request bodies in 17 sessions, the cross-session classifier's `HOOK_INJECTION`
+cause does **not appear at all** among its 8 ranked causes or 12 ranked actors — hook injection is
+not a leading cost anywhere in the scan.
+
+**Tooling note for the next run:** `--full` is required on both `get_cache_break_report` and
+`get_cache_break_causes`; without it the payload is silently shaped to the top 5 and the
+`_truncated` notice is easy to miss (it cost a wrong "HOOK_INJECTION is absent" reading here until
+the untruncated pull contradicted the truncated one).
 
 **Not started. Extracted from TRDD-SLFMG704 on 2026-08-02**, where it sat as an inline "NPT"
 bullet on a card whose own scope (hand the cache-thrash finding to OTHER plugins) had finished.
