@@ -1229,24 +1229,6 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # the hard rung `relaunch` and no longer lands here.)
             _decline("declined_unwired", action, None)
             continue
-        if sl.is_hard_rung(action):
-            # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
-            # kill-path gates live in ONE reviewed place; executes only behind the
-            # DEFAULT-OFF opt-in — else dry-run-logs the built plan.
-            _run_hard_restart(
-                inst, tag=tag, fire=fire, attempts=attempts,
-                identity=identity, sf=sf, now=now, audit=_audit, decline=_decline,
-            )
-            continue
-        # TRDD-8DR0X08A F2 — wedged-target short-circuit. Queued-but-never-executed
-        # commands at the transcript tail PROVE typed input is not executing in this
-        # pane (a stuck turn: permission dialog / pending question). A SOFT injection
-        # would only grow that queue — the exact "janitor keeps printing commands"
-        # pile-up the owner reported — so never type again: spend an attempt (the
-        # 4-attempt budget must still walk to crash_loop, not loop) and push ONE
-        # human notification naming the project. notify's content-hash dedupe + the
-        # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
-        # ESC is the unwedge (same policy _fire_fleet_stop already applies).
         # TRDD-8IZ8COQ8 — the session is parked on a question meant for a HUMAN (an
         # unanswered ExitPlanMode / AskUserQuestion). It looks IDENTICAL to a
         # dead one: a blocked turn appends nothing and cannot fire its cron, so the tests
@@ -1258,11 +1240,22 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # worse than doing nothing. The wedged check below cannot cover this — its
         # evidence (queued unexecuted commands) only exists once something has ALREADY
         # been typed, so it catches the second injection and never the first.
+        #
+        # PLACEMENT + BUDGET are both load-bearing (2026-08-02 review finding): this
+        # guard must run BEFORE the hard-rung dispatch below — placed after it, a
+        # frozen+awaiting session collected declined soft nudges until action_for
+        # escalated to force_restart, which dispatched without ever reaching this
+        # check, SIGKILLing a session that was merely waiting on the human. And it
+        # must NOT spend attempts++ — spending budget for an action never tried is
+        # what walked the ladder to the hard rung in the first place (the same
+        # never-spend rule _decline follows). last_ts still advances so the
+        # cooldown paces the re-check.
         if getattr(inst, "awaiting_user", False):
-            sig = f"declined_awaiting_user:{action}"
+            action_label = action
+            sig = f"declined_awaiting_user:{action_label}"
             _write_recovery_state(
                 sf,
-                {"attempts": attempts + 1, "last_ts": now, "identity": identity,
+                {"attempts": attempts, "last_ts": now, "identity": identity,
                  "last_audit": sig},
             )
             state.log_line(
@@ -1283,6 +1276,26 @@ def task_session_liveness(fleet: list | None = None) -> None:
             except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
                 pass
             continue
+        if sl.is_hard_rung(action):
+            # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
+            # kill-path gates live in ONE reviewed place; executes only behind the
+            # DEFAULT-OFF opt-in — else dry-run-logs the built plan. Runs AFTER the
+            # awaiting_user guard above, by design — that guard outranks every rung.
+            _run_hard_restart(
+                inst, tag=tag, fire=fire, attempts=attempts,
+                identity=identity, sf=sf, now=now, audit=_audit, decline=_decline,
+            )
+            continue
+        # TRDD-8DR0X08A F2 — wedged-target short-circuit. Queued-but-never-executed
+        # commands at the transcript tail PROVE typed input is not executing in this
+        # pane (a stuck turn: permission dialog / pending question). A SOFT injection
+        # would only grow that queue — the exact "janitor keeps printing commands"
+        # pile-up the owner reported — so never type again: spend an attempt (the
+        # 4-attempt budget must still walk to crash_loop, not loop) and push ONE
+        # human notification naming the project. notify's content-hash dedupe + the
+        # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
+        # ESC is the unwedge (same policy _fire_fleet_stop already applies) — and hard
+        # rungs dispatched above anyway, so only soft actions reach this check.
         if getattr(inst, "trailing_enqueues", 0) >= 1 and not fr.injection_is_hard(
             inst.diagnosis
         ):

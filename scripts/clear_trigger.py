@@ -335,6 +335,7 @@ def _run_chain_payload(payload_b64: str) -> int:
         return 0
 
     directive = data["directive"]
+    persisted = {"done": False}
 
     def _persist_resume_state() -> None:
         # Called by inject_until_sent IMMEDIATELY before Enter on /clear, and nowhere else.
@@ -343,6 +344,7 @@ def _run_chain_payload(payload_b64: str) -> int:
         # /clear that never happened, and the next heartbeat would consume it.
         _write_directive(directive)
         _write_clear_marker(directive)
+        persisted["done"] = True
 
     try:
         ok, why = terminal_trigger.run_chained_inject(
@@ -355,15 +357,25 @@ def _run_chain_payload(payload_b64: str) -> int:
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
         if not ok:
-            # Nothing was cleared, so any state we wrote is a lie the next heartbeat would act
-            # on. Remove it. Best-effort: a failed unlink is logged, never raised.
-            for name in ("resume-after-clear.flag", "resume-after-clear.ts", "resume-directive.txt"):
-                try:
-                    (sd / name).unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError as exc:
-                    state.log_line("clear-trigger", f"chain: could not clear {name}: {exc}")
+            # 2026-08-02 review finding: the old cleanup here unconditionally unlinked
+            # resume-after-clear.{flag,ts} AND resume-directive.txt on ANY chain failure.
+            # Both directions of that were wrong, so there is deliberately NO cleanup now:
+            # - persist NEVER ran (give-up before typing) ⇒ this child wrote NOTHING, and
+            #   resume-directive.txt is SHARED with the compact-resume flow — the unlink was
+            #   deleting a directive another flow owned, breaking its pending resume.
+            # - persist RAN ⇒ /clear was VERIFIED-submitted (pre_submit fires only
+            #   immediately before the verified Enter), so a later-stage failure (the
+            #   clear-observed gate timing out on slow SessionStart hooks, the bootstrap
+            #   injection giving up) does NOT mean /clear didn't run — and the resume state
+            #   is the cleared session's ONLY lifeline; deleting it stranded the session
+            #   unarmed and unresumable. The narrow residue (Enter verified-typed yet the
+            #   clear genuinely never ran) costs one benign spurious [janitor-resume] on a
+            #   live session — strictly cheaper than stranding a cleared one.
+            state.log_line(
+                "clear-trigger",
+                "chain: resume state "
+                + ("KEPT (persisted at verified submit)" if persisted["done"] else "untouched (nothing was written)"),
+            )
         return 0 if ok else 1
     finally:
         try:
@@ -515,7 +527,14 @@ def main() -> int:
     #    Deferral does not reintroduce that: the wait below returns BEFORE any state is
     #    written, so a give-up still writes nothing.
     if not args.dry_run:
-        free, why = terminal_trigger.wait_until_pane_free(_this_terminal())
+        # BOUNDED wait (2026-08-02 review finding): the library default give-up is the
+        # injector's 3600s, sized for the DETACHED child — but this call blocks main()
+        # (the user's own foreground /janitor-handoff-and-clear turn), and the presence
+        # probe's first rung is MACHINE-WIDE HID idle, so typing in any other app kept
+        # this spinning for up to an hour while the session looked hung. Two minutes is
+        # enough for "finish the sentence you were typing"; past that, defer loudly and
+        # let the user re-run — the detached child keeps the long-patience behavior.
+        free, why = terminal_trigger.wait_until_pane_free(_this_terminal(), giveup_s=120)
         if not free:
             print(f"DEFERRED {why}", file=sys.stderr)
             return 0

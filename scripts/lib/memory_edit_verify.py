@@ -220,19 +220,53 @@ def extract_lessons(text: str) -> list[str]:
     return out
 
 
+# The `keywords:` value inside a lesson's ADDRESS bracket — quoted (canonical) or bare.
+# Scanned on the RAW def line, not the normalized body: `_normalize_lesson` strips the
+# whole bracket, which is correct for BODY comparison but is exactly why keyword fidelity
+# needs its own extraction (the 2026-08-02 widening removed the accidental coverage the
+# old narrow strip provided).
+_LESSON_DEF_BRACKET_RE = re.compile(r"^\s*\[\^[^\]]+\]:\s*\[([^\]]*)\]", re.MULTILINE)
+_KEYWORDS_VALUE_RE = re.compile(r'keywords:\s*(?:"([^"]*)"|([^,\]]*))')
+
+
+def _lesson_keyword_phrases(text: str) -> set[str]:
+    """Every keyword PHRASE carried by any lesson's address bracket in `text`.
+    Phrases are the whitespace-separated `underscore_joined` tokens of each
+    `keywords:` value. Fences masked (a documented example is not a lesson)."""
+    phrases: set[str] = set()
+    for bracket in _LESSON_DEF_BRACKET_RE.findall(_mask_code_fences(text)):
+        m = _KEYWORDS_VALUE_RE.search(bracket)
+        if m:
+            phrases.update((m.group(1) or m.group(2) or "").split())
+    return phrases
+
+
 def lessons_preserved(sources: list[str], result: str) -> tuple[bool, list[str]]:
     """STRICT: every source lesson's substantive body must survive into `result`.
 
     A lesson is preserved iff its normalized body is a SUBSTRING of the result's
     normalized lessons blob — substring (not equality) so the agent may COMPOUND a
     lesson (append later history) without false-failing, while a DROP (body absent)
-    or a REWORD (body text changed) is caught. Returns (ok, [missing bodies])."""
+    or a REWORD (body text changed) is caught.
+
+    ALSO guards the lessons' RECALL SURFACE: every keyword phrase present in a
+    source lesson's address bracket must survive somewhere in the result's lesson
+    brackets. The bracket's other metadata (id/status/ocd/lmd) legitimately mutates
+    — renumber, date-bump, id-backfill — but `keywords:` IS the memory's findability
+    (no keywords ⇒ no recall), so the 2026-08-02 metadata-strip widening (needed to
+    end the id-grammar deadlock) must not leave keyword DELETION unverified.
+    Returns (ok, [missing bodies/keyword phrases])."""
     result_blob = " ␟ ".join(extract_lessons(result))
     missing: list[str] = []
     for src in sources:
         for body in extract_lessons(src):
             if body not in result_blob:
                 missing.append(body)
+    result_kw = _lesson_keyword_phrases(result)
+    for src in sources:
+        lost_kw = _lesson_keyword_phrases(src) - result_kw
+        if lost_kw:
+            missing.append("lesson keyword phrase(s) lost: " + " ".join(sorted(lost_kw)))
     return (not missing, missing)
 
 
@@ -689,7 +723,12 @@ def _mask_code_fences(text: str) -> str:
     for line in text.splitlines(keepends=True):
         stripped = line.rstrip("\n")
         nl = line[len(stripped) :]
-        if stripped.lstrip().startswith("```"):
+        core = stripped.lstrip()
+        # A fence DELIMITER line never carries a SECOND ``` later on the same line
+        # (issue #178's defect class): a prose line beginning with an inline span
+        # ('```x``` or …') has its closer inline and must NOT flip the toggle, or
+        # everything to the next real fence is silently masked.
+        if core.startswith("```") and "```" not in core[3:]:
             in_fence = not in_fence
             out.append(" " * len(stripped) + nl)
             continue
@@ -1017,6 +1056,15 @@ def verify_merge(
     if not ok:
         reasons.append("orphaned shared footnote ref(s) introduced: " + ", ".join(fn))
 
+    # TRDD-VJCMZ2OP item 1e — an atom that moves into the merged page must keep its
+    # [^N] citations. Defined and tested since the card landed but never COMPOSED here,
+    # so a hand-merge could orphan a lesson from its atom and still commit (the review
+    # finding of 2026-08-02): footnote_refs_resolve permits the orphan def and
+    # no_new_dangling_footnote_refs sees no new dangling ref.
+    ok, lost = atom_lessons_travel(source_texts, [result_text])
+    if not ok:
+        reasons.append("atom lesson citation(s) lost in merge: " + ", ".join(lost))
+
     return (not reasons, reasons)
 
 
@@ -1096,6 +1144,12 @@ def verify_split(
     ok, fn = no_new_dangling_footnote_refs([source_text], [overview_text, *subpage_texts])
     if not ok:
         reasons.append("orphaned shared footnote ref(s) introduced: " + ", ".join(fn))
+
+    # TRDD-VJCMZ2OP item 1e — same composition gap as verify_merge (2026-08-02 review):
+    # an atom landing on a sub-page must keep its [^N] citations wherever it now lives.
+    ok, lost = atom_lessons_travel([source_text], [overview_text, *subpage_texts])
+    if not ok:
+        reasons.append("atom lesson citation(s) lost in split: " + ", ".join(lost))
 
     return (not reasons, reasons)
 
@@ -1199,12 +1253,10 @@ _ATOM_DESC_QUOTED_RE = re.compile(r'(?:^|[\[,])\s*desc\s*:\s*"([^"]*)"')
 _ATOM_DESC_UNQUOTED_RE = re.compile(r"(?:^|[\[,])\s*desc\s*:\s*([^,\]]*)")
 _ATOM_DESC_MAX = 200
 # Fenced code can carry marker-SHAPED example lines (janitor#152's lesson from the other
-# direction); strip fences before scanning so an example can never flag a violation.
-# The opener line must contain NO second ``` (issue #178's defect class): a prose line
-# starting with an INLINE span ('```x``` or …') would otherwise open a phantom block
-# that swallows real atoms up to the next genuine fence — violations silently missed.
-# `[^\n]` (not `.`) bounds the guard to the opener's own line despite the s-flag.
-_FENCED_BLOCK_RE = re.compile(r"(?ms)^\s*```(?:(?!```)[^\n])*\n.*?^\s*```\s*?$")
+# direction); fences are masked via the SHARED `_mask_code_fences` (which carries the
+# issue-#178 inline-span guard) so this scanner and every other fence-aware check in the
+# module agree on what a fence is — a second bespoke regex here was how #178's bug got
+# fixed twice and still survived in the shared helper.
 
 
 def atom_desc_violations(text: str) -> list[str]:
@@ -1228,7 +1280,7 @@ def atom_desc_violations(text: str) -> list[str]:
             "page has duplicate '## Notes and lessons learned' headings — "
             "merge them before atom descs can be checked"
         ]
-    for line in _FENCED_BLOCK_RE.sub("", body).splitlines():
+    for line in _mask_code_fences(body).splitlines():
         m = _ATOM_MARKER_PROPS_RE.match(line)
         if not m:
             continue

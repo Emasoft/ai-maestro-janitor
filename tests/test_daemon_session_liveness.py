@@ -246,7 +246,11 @@ def test_session_awaiting_a_human_answer_is_never_typed_at(tmp_path, monkeypatch
     assert "AWAITING USER" in _log(tmp_path)
     sf = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-a")
     st = json.loads(sf.read_text(encoding="utf-8"))
-    assert st["attempts"] == 1                            # budget consumed, not reset
+    # 2026-08-02 review fix: the awaiting decline must NOT spend attempts — spending
+    # budget for an action never tried is what walked action_for to force_restart,
+    # which dispatched before the guard ran. last_ts still advances (cooldown pacing).
+    assert st["attempts"] == 0                            # budget NOT spent on a decline
+    assert st["last_ts"] > 0
     assert st["last_audit"] == "declined_awaiting_user:rearm"
     assert pushes and pushes[0]["code"] == "FLEET-AWAITING-USER"
     assert pushes[0]["project"] == "proj-a"
