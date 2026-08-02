@@ -56,6 +56,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import git_utils  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -116,7 +117,13 @@ def _enumerate_suspicious_binaries(root: Path) -> list[Path]:
     out: list[Path] = []
     skip = {"node_modules", ".venv", "venv", "env", ".git", ".trashcan",
             "dist", "build", "target", "__pycache__"}
-    for path in root.rglob("*"):
+    # GITIGNORED blobs are not this project's shipped surface (janitor#99). Measured
+    # downstream: 313 of 313 binaries in the tree were gitignored, ALL under
+    # `downloads_dev/` — a downloaded research corpus — and this scorer read them as a
+    # dropper shape, reporting 393 on a repo whose tracked surface is clean. The
+    # hard-coded `skip` set above can never keep up with a project's own `*_dev/`
+    # conventions; the project's .gitignore already states them. Batched + fail-open.
+    for path in git_utils.drop_gitignored(sorted(root.rglob("*")), root=root):
         if not path.is_file():
             continue
         if any(part in skip for part in path.parts):
@@ -227,7 +234,9 @@ def _score_code_vs_readme_ratio(root: Path, readme: Path | None) -> tuple[int, l
     skip = {"node_modules", ".venv", "venv", "env", ".git", ".trashcan",
             "dist", "build", "target", "__pycache__"}
     src_bytes = 0
-    for path in root.rglob("*"):
+    # Same filter as the binary walk: the source-mass denominator must be measured over
+    # the SAME population as the numerator, or a corpus dir inflates one side only.
+    for path in git_utils.drop_gitignored(sorted(root.rglob("*")), root=root):
         if not path.is_file():
             continue
         if any(part in skip for part in path.parts):

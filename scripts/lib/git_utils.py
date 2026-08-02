@@ -22,15 +22,20 @@ if _LIB_DIR not in sys.path:
 import state  # noqa: E402  (after sys.path bootstrap)
 
 
-def _git(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
+def _git(
+    *args: str, cwd: Optional[Path] = None, _stdin: Optional[str] = None
+) -> subprocess.CompletedProcess[str]:
     """Run a git command with text output, never raises on non-zero.
 
     Centralised so we get consistent capture behaviour. Callers inspect
-    .returncode and .stdout themselves.
+    .returncode and .stdout themselves. `_stdin` feeds a payload to commands that
+    read one (`check-ignore --stdin`) so a large batch costs ONE fork instead of
+    one per item; it is underscore-prefixed to keep it out of the *args passthrough.
     """
     return subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd is not None else None,
+        input=_stdin,
         capture_output=True,
         text=True,
         check=False,
@@ -182,3 +187,43 @@ def scope_tracking_status(rel: str) -> str:
         return GITIGNORED
 
     return AMBIGUOUS
+
+
+def drop_gitignored(paths: list[Path], *, root: Path) -> list[Path]:
+    """Return `paths` minus the ones git ignores, order preserved (janitor#99).
+
+    THE SHARED WALK FILTER for scanners that `rglob` a working tree. Without it a
+    detector scores whatever happens to be on disk — including a DOWNLOADED RESEARCH
+    CORPUS under gitignored `*_dev/` dirs — as if it were the project's own supply
+    chain. Measured downstream on AgentlensPro: 313 of 313 binaries in the tree were
+    gitignored, all under `downloads_dev/`, and `repo-trust-score` reported 393
+    ("dropper-shape") for a repo whose TRACKED surface is clean. The tracked surface is
+    what the project actually ships, so it is what a supply-chain scanner may judge.
+
+    BATCHED — exactly one `git check-ignore --stdin` for the whole walk, never one
+    subprocess per path. A heartbeat detector that forks 300+ times per fire is its own
+    defect, and that is the scale this filter is for. `-z` on both ends so a path with a
+    newline or a space in it cannot split a record.
+
+    FAILS OPEN in every failure mode — git missing, not a repo, a git error, an
+    unparseable answer: the input is returned UNCHANGED. Suppressing findings on an
+    unreadable signal is the one direction a security scanner must never take, and it
+    is the direction that looks like success (fewer findings) while being blind.
+    """
+    if not paths:
+        return list(paths)  # no fork for an empty batch — the clean-tree common case
+    try:
+        proc = _git(
+            "check-ignore", "-z", "--stdin",
+            cwd=root,
+            _stdin="\0".join(str(p) for p in paths) + "\0",
+        )
+    except OSError:
+        return list(paths)  # git missing / unrunnable → fail OPEN
+    # 0 = some path is ignored, 1 = none are, >=2 = a real error (not a repo, bad args).
+    if proc.returncode >= 2:
+        return list(paths)  # fail OPEN — never treat "cannot tell" as "not ignored"
+    if proc.returncode == 1:
+        return list(paths)  # nothing ignored
+    ignored = {line for line in proc.stdout.split("\0") if line}
+    return [p for p in paths if str(p) not in ignored]

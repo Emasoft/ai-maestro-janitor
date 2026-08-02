@@ -36,6 +36,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import git_utils  # type: ignore[import-not-found]  # noqa: E402
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
@@ -248,7 +249,15 @@ def _scan_project(project_root: Path) -> list[str]:
     skipped = 0
     live: list[str] = []
     for lockname, (ecosystem, parser) in _LOCKFILE_PARSERS.items():
-        for path in project_root.rglob(lockname):
+        # GITIGNORED lockfiles are not this project's supply chain (janitor#99). A
+        # downloaded research corpus under `downloads_dev/` is never installed, built or
+        # shipped, yet its lockfiles were scored as if they were — flagging `preact`,
+        # `gaxios`, `ofetch` and `color` as typosquats on a repo whose own dashboard
+        # framework IS preact. The tracked surface is what ships, so it is what we judge.
+        # Batched + fail-open: unreadable git ⇒ nothing is filtered.
+        for path in git_utils.drop_gitignored(
+            sorted(project_root.rglob(lockname)), root=project_root
+        ):
             # Skip vendored / cached lockfiles.
             if any(part in skip_dirs for part in path.parts):
                 continue
@@ -301,7 +310,11 @@ def _content_signature(project_root: Path) -> str:
     """Cheap dedupe — mtime + size of every supported lockfile."""
     h = hashlib.sha256()
     for lockname in _LOCKFILE_PARSERS:
-        for path in sorted(project_root.rglob(lockname)):
+        # Same filter as the scan itself — otherwise the signature changes when an
+        # IGNORED corpus file is touched and the detector re-runs for nothing.
+        for path in git_utils.drop_gitignored(
+            sorted(project_root.rglob(lockname)), root=project_root
+        ):
             if any(part in {"node_modules", ".venv", "venv", "env",
                             "vendor", "third_party", ".git"}
                    for part in path.parts):
