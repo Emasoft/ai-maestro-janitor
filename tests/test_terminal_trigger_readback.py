@@ -172,17 +172,21 @@ def test_a_present_user_DEFERS_the_command_instead_of_cancelling_it() -> None:
     assert slept[:2] == [8.0, 8.0], "must defer in 8s steps while the user types"
 
 
-def test_a_busy_field_retries_after_5_seconds_and_eventually_sends() -> None:
+def test_a_busy_field_rechecks_after_8_seconds_and_eventually_sends() -> None:
+    """RULE 1: *"inject the command only when the input field is empty, otherwise recheck after
+    8 seconds"*. The two intervals are different on purpose — 8s is "a human is composing, wait
+    for them", 5s is "our own attempt did not take". A busy field is the FORMER."""
     slept: list[float] = []
     sent: list[str] = []
     ok, _ = tt.inject_until_sent(
         {"kind": "tmux", "pane": "%1"}, "/compact",
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
         reader=_seq(_pane("half a sentence"), _pane(""), _pane("/compact")),
         is_typing=lambda _t: False, sleeper=slept.append, clock=lambda: 0.0,
     )
     assert ok and sent == ["Enter"]
-    assert slept == [5.0], "a FAILED attempt retries after 5s, per the directive"
+    assert slept == [8.0], "a non-empty field means a human is composing — wait the 8s window"
 
 
 def test_a_failed_verify_retries_rather_than_pressing_enter() -> None:
@@ -273,7 +277,7 @@ def test_the_owners_worked_example_end_to_end() -> None:
     )
     assert ok, why
     assert sent == ["Enter"], "Enter only after the form verified"
-    assert slept == [5.0, 5.0], "busy field re-checks every 5s until it clears"
+    assert slept == [8.0, 8.0], "busy field re-checks every 8s until the human submits"
 
 
 def test_a_malformed_injection_is_CLEARED_or_the_loop_deadlocks_on_its_own_text() -> None:
@@ -391,3 +395,107 @@ def test_a_malformed_field_with_the_user_QUIET_is_still_cleared() -> None:
     )
     assert ok and sent == ["Enter"]
     assert cleared == ["C-u"], "our own malformed text must still be cleared"
+
+
+def test_the_8s_quiet_window_gates_the_WHOLE_procedure_not_just_the_typing() -> None:
+    """*"the procedure is not started if the user has typed anything in the last 8 seconds.
+    8 seconds before must be free of any user typing, only then the procedure start and the
+    input field checked"* (owner, 2026-08-02).
+
+    So the quiet check STRICTLY PRECEDES the field read — the pane is not even inspected while
+    a human is mid-keystroke. Asserted by ordering, not by outcome: the reader must not be
+    called at all on a pass where the user is typing."""
+    reads: list[str] = []
+
+    def _reader(_t):
+        reads.append("read")
+        return _pane("")
+
+    typing = iter([True, True, False])
+    slept: list[float] = []
+    sent: list[str] = []
+    ok, _ = tt.wait_until_pane_free(
+        {"kind": "tmux", "pane": "%1"},
+        reader=_reader, is_typing=lambda _t: next(typing),
+        sleeper=slept.append, clock=lambda: 0.0,
+    )
+    assert ok
+    assert slept == [8.0, 8.0], "two typing passes -> two 8s waits"
+    assert reads == ["read"], "the pane must NOT be read while the user is typing"
+    assert sent == []
+
+
+def test_a_keystroke_RESETS_the_window_it_does_not_merely_delay_it() -> None:
+    """*"any human keystroke resets the counter. 8 seconds must be counted before the procedure
+    is started. if an user type anything, the counter restarts from 0."*  (owner, 2026-08-02).
+
+    There is no counter variable to reset, and that is the design: the probe reads the HID idle
+    timer — *time since the last keystroke* — so the window restarts at every key by
+    construction. A hand-rolled countdown is what would drift, because it can only observe the
+    keystrokes that happen to land while it is looking.
+
+    Asserted by ORDERING over four consecutive typing passes: each one must produce a fresh full
+    window and NO pane read. A loop that merely delayed once and then proceeded would read the
+    pane on pass 2 — which is the regression this pins."""
+    log: list[str] = []
+    typing = iter([True, True, True, True, False])
+
+    def _probe(_t):
+        t = next(typing)
+        log.append(f"probe={t}")
+        return t
+
+    def _reader(_t):
+        log.append("read")
+        return _pane("")
+
+    ok, _ = tt.wait_until_pane_free(
+        {"kind": "tmux", "pane": "%1"},
+        reader=_reader, is_typing=_probe,
+        sleeper=lambda s: log.append(f"wait{s:.0f}"), clock=lambda: 0.0,
+    )
+    assert ok
+    assert log == [
+        "probe=True", "wait8", "probe=True", "wait8",
+        "probe=True", "wait8", "probe=True", "wait8",
+        "probe=False", "read",
+    ], "every keystroke must restart a FULL window, and never a pane read while typing"
+
+
+def test_an_abort_mid_procedure_restarts_the_window_it_does_not_resume() -> None:
+    """The second half of the same directive: *"if the procedure was already started, it must be
+    stopped immediately and the counter reset again."*
+
+    So after a mid-injection abort the loop must go back to the TOP — probing for quiet before it
+    touches the pane again — rather than resuming at the retry it was in the middle of. Ordering
+    proves it: the event right after the abort is a `probe`, and the wait is the 8 s QUIET window,
+    never the 5 s OUR-failed-attempt retry."""
+    log: list[str] = []
+    typing = iter([False, True, False, False])
+    reads = iter([_pane(""), _pane("/compact half-typed by a human"), _pane(""), _pane("/compact")])
+
+    def _probe(_t):
+        t = next(typing)
+        log.append(f"probe={t}")
+        return t
+
+    def _reader(_t):
+        log.append("read")
+        return next(reads)
+
+    sent: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: log.append("type"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: log.append("CLEAR"),
+        reader=_reader, is_typing=_probe,
+        sleeper=lambda s: log.append(f"wait{s:.0f}"), clock=lambda: 0.0,
+    )
+    assert ok, why
+    assert log == [
+        "probe=False", "read", "type", "read",   # injected, then the human typed
+        "probe=True", "wait8",                   # STOP: no cleanup, full window restarts
+        "probe=False", "read", "type", "read",   # start over from the top
+    ], "an abort must re-enter the quiet window, not resume the 5s retry"
+    assert "CLEAR" not in log, "the user's own keystrokes must never be cleared"
+    assert sent == ["Enter"]

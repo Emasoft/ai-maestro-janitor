@@ -124,7 +124,17 @@ _PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its o
 # moment someone touched the keyboard — which is how a user who typed the command themselves got
 # `USER_PRESENT` and nothing else. Waiting costs a few seconds; discarding costs the request.
 _USER_QUIET_S = 8.0                # no keystroke for this long before we attempt
-_INJECT_GIVEUP_S = 3600.0          # see inject_until_sent for why "until sent" is still bounded
+
+
+def _inject_giveup_s() -> float:
+    """How long the deferral may persist before reporting DEFERRED. Env-overridable so tests
+    can force the give-up path without waiting an hour — and so an operator can shorten it on a
+    host where a pane is chronically busy. Resolved at CALL time, never frozen at import."""
+    raw = os.environ.get("JANITOR_INJECT_GIVEUP_S", "").strip()
+    try:
+        return max(0.0, float(raw)) if raw else 3600.0
+    except ValueError:
+        return 3600.0
 
 
 def extract_prompt_field(pane_text: str) -> str | None:
@@ -327,6 +337,60 @@ def verify_then_submit(
     return False, f"field did not settle to {command!r} (saw {field!r}) — NOT submitting"
 
 
+def wait_until_pane_free(
+    terminal: Mapping[str, str],
+    *,
+    quiet_s: float = _USER_QUIET_S,
+    giveup_s: float | None = None,
+    reader=read_pane_text,
+    is_typing=None,
+    sleeper=time.sleep,
+    clock=time.monotonic,
+) -> tuple[bool, str]:
+    """RULES 1 + 2 only, for callers whose actual typing happens LATER in a detached child.
+
+    Blocks until BOTH hold: the user has typed nothing for `quiet_s`, AND the input field is
+    empty. Returns (free, why) — `free=False` means do not proceed.
+
+    This exists because `clear_trigger` fires a DELAYED, detached keystroke phase: the typing
+    does not happen here, so `inject_until_sent`'s read-back (rule 3) cannot apply. What CAN
+    be checked here is whether a human is using the pane right now — and while the agent is
+    mid-turn the field is empty unless the user is TYPING AHEAD, which is precisely the case
+    rules 1 and 2 exist to catch.
+
+    Unreadable channels return True ("cannot tell"), NOT False. That is the opposite of
+    `wait_for_empty_prompt`, and deliberate: there, refusing merely skips an optimisation;
+    here, refusing would resurrect the presence-cancel the owner removed — a command the user
+    typed would be silently dropped on any pane we cannot read. Deferring to the caller's own
+    timeout is the lesser failure.
+    """
+    def _default_probe(_t: Mapping[str, str]) -> bool:
+        try:
+            import user_intent  # noqa: PLC0415
+
+            return user_intent.user_is_present(idle_s=int(quiet_s), env=os.environ)
+        except Exception:  # noqa: BLE001
+            return False
+
+    probe = _default_probe if is_typing is None else is_typing
+    giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
+    deadline = clock() + giveup_s
+    while True:
+        if probe(terminal):
+            if clock() >= deadline:
+                return False, f"user still typing after {giveup_s:.0f}s"
+            sleeper(quiet_s)
+            continue
+        text = reader(terminal)
+        if text is None:
+            return True, "pane not readable — proceeding rather than dropping the command"
+        if prompt_field_is_empty(text):
+            return True, "pane free"
+        if clock() >= deadline:
+            return False, f"field still busy after {giveup_s:.0f}s"
+        sleeper(quiet_s)
+
+
 def inject_until_sent(
     terminal: Mapping[str, str],
     command: str,
@@ -336,7 +400,7 @@ def inject_until_sent(
     clear_fn=None,
     quiet_s: float = _USER_QUIET_S,
     retry_s: float = _PROMPT_POLL_INTERVAL_S,
-    giveup_s: float = _INJECT_GIVEUP_S,
+    giveup_s: float | None = None,
     reader=read_pane_text,
     is_typing=None,
     sleeper=time.sleep,
@@ -344,24 +408,29 @@ def inject_until_sent(
 ) -> tuple[bool, str]:
     """Keep trying until the command is actually SENT. Returns (sent, why).
 
-    The owner's loop, exactly:
+    THE THREE RULES (owner, 2026-08-02 — these REPLACE the old presence-cancel entirely):
 
-      1. wait until the user has typed NOTHING for `quiet_s` (8 s) — presence DEFERS, never
-         cancels; a present user is a reason to wait, not to discard their command;
-      2. then ATTEMPT: the field must be empty -> type the command -> RE-READ -> the field
-         must show exactly `/command` -> only then Enter;
-      3. any failure -> sleep `retry_s` (5 s) and go back to 1.
+      1. Inject ONLY when the input field is EMPTY; otherwise re-check after `quiet_s` (8 s).
+      2. The moment the user types ANY key, STOP the procedure — **no cleanup, just stop** —
+         and retry after `quiet_s` (8 s).
+      3. After injection, if the command is MALFORMED **and no key was typed**, clear the field
+         and inject again, retrying until it verifies. Only then press Enter.
 
-    Step 1 is re-checked on EVERY pass, not once at the start: the user may begin typing
-    between the quiet check and the read-back, and this is precisely the window where typing
-    blind splices our text into their sentence.
+    Rule 2 is why the old "user is present -> cancel" behaviour is gone, not merely softened:
+    presence now DEFERS. Cancelling is what produced a user typing
+    `/janitor-handoff-and-clear` at their own keyboard and being told `USER_PRESENT`.
 
-    "Until sent" is bounded by `giveup_s` and that is deliberate. This runs inside hooks and a
-    daemon beat, where a call that never returns is not persistence — it is an outage that also
+    "No cleanup" in rule 2 is load-bearing and is NOT a simplification for its own sake: if the
+    user has started typing, the field contains THEIR keystrokes, so the clear from rule 3
+    would delete what they just wrote. Stopping without touching anything is the only safe
+    response to "a human is using this pane".
+
+    "Until sent" is bounded by `giveup_s`, deliberately. This runs inside hooks and a daemon
+    beat, where a call that never returns is not persistence — it is an outage that also
     silences the heartbeat. Giving up is LOUD (returned + logged), never a silent success.
 
-    `type_fn` / `submit_fn` are injected so the decision logic is testable without a terminal,
-    and so the caller keeps ownership of which channel actually types.
+    `type_fn` / `submit_fn` / `clear_fn` are injected so the decision logic is testable without
+    a terminal, and so the caller keeps ownership of which channel actually types.
     """
     def _default_is_typing(_t: Mapping[str, str]) -> bool:
         try:
@@ -373,6 +442,7 @@ def inject_until_sent(
 
     typing_probe = _default_is_typing if is_typing is None else is_typing
 
+    giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
     deadline = clock() + giveup_s
     last = "not attempted"
     while True:
@@ -391,9 +461,12 @@ def inject_until_sent(
             # empty-check nor the verify is possible. Retrying cannot make it readable —
             # report instead of looping forever pretending to verify.
             return False, "pane not readable on this channel — cannot verify"
+        # RULE 1 — inject only into an EMPTY field; otherwise re-check after the 8 s window.
+        # Uses `quiet_s`, not `retry_s`: a non-empty field means a human is composing, and the
+        # owner's rule for "wait for the human" is 8 s. `retry_s` is for OUR failed attempt.
         if not prompt_field_is_empty(text):
             last = f"field not empty ({extract_prompt_field(text)!r})"
-            sleeper(retry_s)
+            sleeper(quiet_s)
             continue
 
         type_fn()

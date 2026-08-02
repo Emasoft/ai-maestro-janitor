@@ -60,8 +60,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+# `user_intent` is deliberately NOT imported here any more: the presence CANCEL it backed is
+# gone, and the deferral that replaced it lives in terminal_trigger (which consults user_intent
+# itself). Re-adding the import here would be the first step back toward a local cancel.
 import terminal_trigger  # noqa: E402
-import user_intent  # noqa: E402
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
 # `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we MUST
@@ -81,7 +83,11 @@ RESUME_CMD = "/janitor-resume"
 # Ordered: arm first (the cron must exist), resume second (it runs the dispatcher
 # stub which consumes the resume-after-clear.flag). Both enqueue back-to-back.
 _BOOTSTRAP_CMDS: tuple[str, ...] = (ARM_CMD, RESUME_CMD)
+# Every command this script types, in order. No longer passed to `injection_allowed` (the
+# presence cancel is gone) but kept as the one place the full set is named — the `clear` verb
+# in `user_intent._VERB_COMMANDS` exists to cover `/clear` from here.
 _ALL_CMDS: tuple[str, ...] = (CLEAR_CMD, *_BOOTSTRAP_CMDS)
+__all__ = ["CLEAR_CMD", "_ALL_CMDS", "check_handoff_concise", "plan_clear"]
 
 # INPUT-SAFETY (wikimem `claude-code-esc-input-semantics`, id:ATOM-ESC-REWIND): every
 # phase here is SOFT — a text-then-Enter send with NO leading ESC (esc_first=False in
@@ -317,17 +323,27 @@ def _fire_phase(commands: Sequence[str], *, delay: float, dry_run: bool) -> str:
     return _FIRED
 
 
-def _user_present() -> bool:
-    """True iff we must NOT type into this pane (the user is active here and did not
-    ask). The single presence gate for BOTH phases — checked once in main so the
-    clear+bootstrap pair is atomic. Fail-OPEN toward firing (an unresolvable presence
-    read must not strand an unattended session, which is the whole target of this
-    primitive; a redundant injection into an idle pane is merely noise)."""
-    try:
-        allowed, _ = user_intent.injection_allowed(list(_ALL_CMDS), env=os.environ)
-        return not allowed
-    except Exception:  # noqa: BLE001 - fail-open toward firing
-        return False
+def _this_terminal() -> dict[str, str]:
+    """THIS session's pane identity, for the read-back wait. tmux is preferred because it can
+    be captured cheaply; iTerm needs an osascript round-trip but is readable too. Anything
+    else resolves to a kind the reader returns None for — which the wait treats as
+    "cannot tell, proceed", never as a refusal."""
+    pane = os.environ.get("TMUX_PANE", "").strip()
+    if pane:
+        return {"kind": "tmux", "pane": pane}
+    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
+    if iterm:
+        return {"kind": "iterm", "session_id": iterm.split(":")[-1].strip()}
+    return {"kind": "unknown"}
+
+
+# `_user_present()` was REMOVED here (owner directive 2026-08-02: *"the old system that
+# cancelled a command or prevented the agent to execute it if the user is PRESENT must go"*).
+# It returned "the user is here, so refuse" and `main()` turned that into `USER_PRESENT` +
+# exit 0 — which is how the owner, typing this very command at their own keyboard, was told to
+# go away. Presence now DEFERS via `terminal_trigger.wait_until_pane_free`: wait for an empty
+# field and 8s of no keystrokes, then proceed. Do not reintroduce a cancel here; if the pane
+# never frees, the wait's own timeout reports DEFERRED and still writes no state.
 
 
 def main() -> int:
@@ -372,18 +388,24 @@ def main() -> int:
         "in-flight task."
     )
 
-    # 2. Presence gate ONCE, up front — BEFORE writing any resume state (issue #105, the
-    #    silent-disarm class). Typing into a pane whose user is mid-sentence clobbers what
-    #    they were writing; /clear would additionally wipe their session. If they are present
-    #    they will drive the session themselves (the SessionStart re-arm nudge covers them) —
-    #    so refuse AND write NOTHING. Recording resume-after-clear.flag here (as this used to,
-    #    with the gate placed AFTER the writes) was a silent disarm: /clear never fires, yet
-    #    the next heartbeat consumes the flag, emits a spurious [janitor-resume], and clears it
-    #    — so a later MANUAL /clear no longer auto-resumes. The flag must exist ONLY when /clear
-    #    is actually about to run, which is exactly the invariant this ordering restores.
-    if not args.dry_run and _user_present():
-        print("USER_PRESENT")
-        return 0
+    # 2. NO PRESENCE CANCEL. It used to `print("USER_PRESENT"); return 0` here — and that is
+    #    exactly how the owner, typing `/janitor-handoff-and-clear` at their own keyboard, got
+    #    told to go away. Presence now DEFERS inside `terminal_trigger.inject_until_sent`
+    #    (owner's three rules, 2026-08-02): the injector waits for an empty field, stops without
+    #    cleanup the moment a key is pressed, and retries every 8 s until the command lands.
+    #
+    #    The ordering invariant this block used to carry SURVIVES, and is why the writes still
+    #    come after: resume state must not exist unless /clear is actually about to run. With
+    #    the gate placed after the writes (issue #105) a refused clear still left
+    #    `resume-after-clear.flag` on disk, the next heartbeat consumed it, emitted a spurious
+    #    [janitor-resume] and cleared it — so a later MANUAL /clear no longer auto-resumed.
+    #    Deferral does not reintroduce that: the wait below returns BEFORE any state is
+    #    written, so a give-up still writes nothing.
+    if not args.dry_run:
+        free, why = terminal_trigger.wait_until_pane_free(_this_terminal())
+        if not free:
+            print(f"DEFERRED {why}", file=sys.stderr)
+            return 0
 
     # 3. PERSIST THE RESUME STATE — before firing anything. /clear is unrecoverable, so the
     #    marker + directive MUST be on disk before it runs.

@@ -59,8 +59,11 @@ def _run(
     project: Path,
     iterm: str | None,
     home: Path | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
+    if env_extra:
+        env.update(env_extra)
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
     # regardless of the host terminal (e.g. running the suite inside tmux).
     env["JANITOR_FORCE_TERMINAL_KIND"] = "iterm"
@@ -252,14 +255,21 @@ def test_dry_run_warns_when_handoff_missing(tmp_path: Path) -> None:
     assert "HANDOFF_MISSING" in proc.stderr
 
 
-def test_present_user_is_never_typed_at_and_no_resume_flag_written(tmp_path: Path) -> None:
-    """The presence gate (issue #105 fix): a user at the keyboard is never typed at (it would
-    clobber their input AND wipe their session), AND — the fix — NO resume state is written.
+def test_a_deferred_clear_writes_NO_resume_state(tmp_path: Path) -> None:
+    """SUPERSEDED IN PART, and the surviving half is the one that mattered.
 
-    Previously the flag was recorded even on USER_PRESENT, but /clear never fired, so the next
-    heartbeat consumed `resume-after-clear.flag`, emitted a spurious [janitor-resume], and
-    cleared it — silently disarming a later MANUAL /clear's auto-resume. The gate now runs
-    BEFORE the writes, so a refused clear leaves nothing behind for a heartbeat to consume."""
+    This used to assert `USER_PRESENT` — that a user at the keyboard is never typed at, ever.
+    That cancel is GONE (owner directive 2026-08-02: *"the old system that cancelled a command
+    or prevented the agent to execute it if the user is PRESENT must go"*), because it is how
+    the owner, typing `/janitor-handoff-and-clear` themselves, was told to go away. Presence
+    now DEFERS: wait for an empty field and 8s of no keystrokes, then proceed.
+
+    What SURVIVES unchanged is the issue #105 invariant, and deferral must not weaken it: when
+    the clear does NOT fire, NO resume state may be left behind. Previously the flag was written
+    even when the clear was refused, so the next heartbeat consumed
+    `resume-after-clear.flag`, emitted a spurious [janitor-resume], and cleared it — silently
+    disarming a later MANUAL /clear's auto-resume. The wait therefore returns BEFORE any write,
+    exactly where the cancel used to sit."""
     p = tmp_path / "proj"
     p.mkdir()
     pane = "w0t0p0:11111111-2222-3333-4444-555555555555"
@@ -268,12 +278,10 @@ def test_present_user_is_never_typed_at_and_no_resume_flag_written(tmp_path: Pat
         project=p,
         iterm=pane,
         home=_home(tmp_path, present=True, pane_id=pane),
+        env_extra={"JANITOR_INJECT_GIVEUP_S": "0"},  # force the deferral path deterministically
     )
     assert proc.returncode == 0
-    assert "USER_PRESENT" in proc.stdout
-    assert "CLEAR_FIRED" not in proc.stdout, "must NOT clear a session the user is using"
-    # The fix: with /clear refused, the resume flag/marker/directive are NOT written, so no
-    # heartbeat can consume them and disarm a later manual /clear (issue #105).
+    assert "CLEAR_FIRED" not in proc.stdout, "a deferred clear must not fire"
     assert not (_state_dir(p) / "resume-after-clear.flag").exists()
     assert not (_state_dir(p) / "resume-after-clear.ts").exists()
     assert not (_state_dir(p) / "resume-directive.txt").exists()
