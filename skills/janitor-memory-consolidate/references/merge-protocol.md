@@ -114,13 +114,22 @@ redirect *anywhere in the scope* is caught. This is why step 5 (discover backlin
 via `memgrep links --from`) and step 6 (copy holders into staging and repoint
 them) are mandatory, not optional.
 
-**What the catalog does NOT cover — body-fact loss + the lead are YOURS.** Every
-failure above is machine-checked. Two page-quality rules are NOT: (1) a distinct
-*body* fact dropped while reorganizing — the verifier guards lessons byte-identically
-and forbids duplicate lines, but does not diff body facts (a strict body-superset
-check would false-fail on every legitimate dedup), so a fact you silently drop is
-gone forever; and (2) the one-sentence **lead** that makes C read as one topic.
-Both are enforced only by the agent in step 7. No-information-lost is the editor's
+**What the catalog does NOT cover — SHORT-form facts + the lead are YOURS.** Every
+failure above is machine-checked, and since issue #48 that INCLUDES body facts:
+`body_facts_preserved` requires every substantive body line of every source to
+survive as a SUBSTRING of the result. The old objection here — that a strict
+body-superset check would false-fail on every legitimate dedup — was solved by
+using substring rather than line-equality matching: a deduped fact still appears
+once, so it still matches, while a DROPPED or PARAPHRASED fact does not. (A fact
+demoted into a `[^N]` lesson also counts as preserved; the haystack is the whole
+page, because demotion is the correction protocol's mandated move, not a loss.)
+
+Two things remain YOURS: (1) the COARSE net's two by-design blind spots — it
+ignores any line under 24 chars and every `#` heading, so a fact carried only in a
+short bullet or a heading can still be dropped or rewritten silently (this is the
+documented issue-#91 shape, where a split condensed prose into shorter, WRONG path
+bullets and nothing caught it); and (2) the one-sentence **lead** that makes C read
+as one topic. Both are enforced only by the agent in step 7. No-information-lost is the editor's
 first law; for the body, you are its only guardian.
 
 ## Why backlink redirect is the load-bearing step

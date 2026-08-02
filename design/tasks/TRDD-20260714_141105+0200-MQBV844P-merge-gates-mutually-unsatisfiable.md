@@ -3,7 +3,7 @@ trdd-id: MQBV844P
 title: CONSOLIDATE can never merge two cross-linked pages — no_dangling_refs and body_facts_preserved are mutually unsatisfiable, and the LINK LAW guarantees every merge candidate is cross-linked
 column: todo
 created: 2026-07-14T14:11:05+0200
-updated: 2026-07-14T14:11:05+0200
+updated: 2026-08-02T07:34:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -14,7 +14,37 @@ relevant-rules: [1]
 
 # The two merge gates contradict each other, so CONSOLIDATE can never merge
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
+
+### 2026-08-02 — the DECISION is still yours; the one decision-INDEPENDENT item is done
+
+Pulled during a board drain and deliberately **not implemented**. The NEXT ACTION below is a
+choice between (a)/(b)/(c) on the memory system's ANTI-CORRUPTION gate, and this card's own
+argument for why an agent must not make it unsupervised is correct and stands: from outside,
+*"I relaxed `body_facts_preserved` and now the merge passes"* is exactly what a wrong fix looks
+like. It stays in `todo`, awaiting the user.
+
+**What WAS done — the stale doc, fixed, because it is false under all three options.** The card
+noted `merge-page-rules.md` still claims the verifier does not guard body facts. Verified against
+the code rather than taken on the card's word: `body_facts_preserved` is real
+(`memory_edit_verify.py:304`) and IS wired into `verify_merge` (:899). A SECOND site said the same
+thing and the card had not spotted it — `merge-protocol.md`, under *"What the catalog does NOT
+cover"*, even reproduced the reasoning issue #48 overturned (*"a strict body-superset check would
+false-fail on every legitimate dedup"*). Both told an editing agent it is the sole guard of body
+facts, which is the opposite of true, on the very pages an agent reads before merging.
+
+Corrected to what the check actually does, limits included rather than simply inverted: substring
+(not line-equality) matching, which is precisely what answers the old dedup objection — a deduped
+fact still appears once, so it still matches, while a dropped or paraphrased one does not; and a
+fact demoted into a `[^N]` lesson counts as preserved, because the haystack is the whole page.
+**The agent's own duty is narrowed, not removed:** the net is COARSE and has two blind spots BY
+DESIGN — lines under 24 chars and every `#` heading — which is the documented issue-#91 shape,
+where a split condensed prose into shorter, WRONG path bullets and nothing caught it. Short-form
+facts and the lead remain the editor's.
+
+This changes no gate and prejudges none of (a)/(b)/(c).
+
+## ⏵ STATE — 2026-07-14 (the analysis; unchanged)
 
 **The defect (PROVEN, not inferred).** For a merge of pages A+B (survivor B, retiring A), where B
 carries a `[[A]]` wikilink in body prose:

@@ -17,7 +17,13 @@ Rules for building the merged survivor page `C` in step 7 of the consolidation p
 
 ## What you must ensure (not verifier-checked)
 
-- **Preserve EVERY distinct body fact** — verify guards lessons, NOT body facts, so a dropped body fact is silently lost; dedup only identical facts, unsure → keep both.
+- **Preserve EVERY distinct body fact.** The verifier DOES guard body facts —
+  `body_facts_preserved` (issue #48) requires every substantive body line to survive as a
+  SUBSTRING of the result, so it allows reorganization, an added lead and dedup, but catches a
+  DROPPED or PARAPHRASED fact. It is a COARSE, sentence-shaped net with two blind spots BY
+  DESIGN: it ignores lines shorter than 24 chars, and every `#` heading. So a fact carried only
+  in a short bullet or a heading is still yours to protect, and the rule stands — dedup only
+  identical facts, unsure → keep both.
 - **Open C with a one-sentence lead** naming the merged subject (wikimem-model → "The lead") so it reads as ONE topic, then facets as `##` sections + one deduped `## Notes and lessons learned`.
 
 ## Frontmatter and link web
