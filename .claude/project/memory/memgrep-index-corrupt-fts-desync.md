@@ -18,6 +18,7 @@ The pages were never torn. Do **not** go hunting for a durability bug: memgrep s
 process being **killed** (only an OS/power crash can tear it) — so "an agent was killed by the rate
 limit" is **not** a sufficient explanation, and enabling WAL "harder" fixes nothing. [^1]
 
+^ATOM-MGDX-WHYD [desc:"a schema migration that DROP+CREATEs an FTS5 virtual table empties the index while the content table keeps every row, so the next reindex writes negative postings and SQLITE_CORRUPT_VTAB is raised deterministically", keywords: why_does_the_index_desync_after_a_schema_migration ALTER_cannot_add_an_FTS5_column DROP_CREATE_empties_the_virtual_table negative_postings_SQLITE_CORRUPT_VTAB manufactured_not_a_race, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Why it desyncs (the real bug, fixed 2026-07-14 in `scripts/memgrep/src/index.rs`).** A schema
 migration cannot `ALTER` an FTS5 column set, so it must `DROP` + re-`CREATE` the virtual table — which
 leaves the index **EMPTY while the content table keeps every row**. Clearing the `files` LEDGER does
@@ -28,6 +29,7 @@ contain; with `content=`, FTS5 **trusts** that delete rather than checking it, w
 and the next statement raises `SQLITE_CORRUPT_VTAB`. **The upgrade path manufactured the corruption,
 deterministically — it was never a race.**
 
+^ATOM-MGDX-BLND [desc:"every cheap SQLite health signal (integrity_check, row count, bare integrity-check) is blind to an FTS5 external-content desync — only the rank=1 form compares index against content", keywords: why_didnt_integrity_check_catch_the_corruption pragma_integrity_check_says_ok_but_index_is_corrupt count_from_notes_fts_reads_content_table_not_index bare_integrity_check_only_checks_internal_consistency rank_1_is_the_only_check_that_sees_it, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Why nobody caught it: every cheap signal is BLIND to this.**
 - `PRAGMA integrity_check` → **`ok`** (the file's pages really are fine).
 - `SELECT count(*) FROM notes_fts` → the **FULL row count**, because with `content=` the count reads the
@@ -37,6 +39,7 @@ deterministically — it was never a race.**
 - **Only `INSERT INTO t(t, rank) VALUES('integrity-check', 1)` compares the index against its content
   table.** That is the one check that sees it, and it is the one nobody was running.
 
+^ATOM-MGDX-HOWA [desc:"how to apply: rebuild an emptied FTS5 index with INSERT INTO t(t) VALUES('rebuild'), verify with rank=1, delete -wal/-shm together with index.db, and watch for SQLITE_BUSY under concurrent writers", keywords: how_do_I_fix_or_recover_a_corrupt_memgrep_index rebuild_the_virtual_table_primitive delete_index_db_by_hand_safely wal_shm_must_be_deleted_together sqlite_busy_concurrent_writers, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **How to apply.**
 - Repopulating an external-content FTS is `INSERT INTO t(t) VALUES('rebuild')` — the sanctioned
   primitive. Any DROP+CREATE of such a table MUST be followed by it.

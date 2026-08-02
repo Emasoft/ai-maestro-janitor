@@ -57,6 +57,7 @@ trigger frequency did. See [[debugging-methodology]] `^debug-re-derive-terminati
 until real work accumulates above it. It is NOT a permanent latch: a session that grows large again
 still gets its compaction.
 
+^ATOM-CMPF-LEAR [desc: the_floor_is_learned_not_assumed_stop_hook_stamps_it, keywords: when_is_the_floor_measured how_is_the_learned_floor_recorded stop_hook_earliest_observable_point post_compact_resume_stamps_last_compact_ts, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 The floor is LEARNED, never assumed: `post-compact-resume.py` stamps `last-compact.ts`, and the
 next **Stop** records the context it observes as the floor (`cold_cache_compact.refresh_floor`).
 **Stop is the earliest point at which the post-compaction size is observable at all** — PostCompact
@@ -64,6 +65,7 @@ itself is too early, because the compacted size does not exist until a turn has 
 Measuring at a turn's end can only OVER-state the floor, which under-states the gain and biases
 toward NOT firing: a missed optimization, never a destroyed context.
 
+^ATOM-CMPF-PRIO [desc: measurement_must_run_before_the_action_gates_that_veto_it, keywords: TRDD-28XF77X6 measurement_behind_cooldown_gate_never_ran floor_needs_learning_check_first record_floor_before_cooldown_check, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 **The measurement runs BEFORE the action gates** (TRDD-28XF77X6, fixed same day v0.49.0 shipped):
 both call sites check `cold_cache_compact.floor_needs_learning` (cheap: `last_compact > floor_ts`)
 and record the floor FIRST, then apply cooldown / user-present / active-waiting to the compact
@@ -72,6 +74,7 @@ auto-resume → `last-resume.ts`, 30-min recency; keep-going → active forever)
 placed behind them never ran in exactly the unattended sessions the trigger targets — v0.49.0
 shipped with the floor gate inert, saved only by the 350k threshold sitting above the ~308k floor. [^3]
 
+^ATOM-CMPF-HWTS [desc: last_compact_ts_is_a_high_water_timestamp_never_consume_once, keywords: is_last_compact_ts_a_flag_or_a_timestamp why_not_clear_last_compact_ts_after_reading high_water_mark_vs_consume_once_flag, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 `last-compact.ts` is a high-water TIMESTAMP, never a consume-once flag — a flag some reader clears
 could let a compaction go unobserved, and an unobserved compaction is one whose floor is never
 learned, which silently re-opens the loop.
