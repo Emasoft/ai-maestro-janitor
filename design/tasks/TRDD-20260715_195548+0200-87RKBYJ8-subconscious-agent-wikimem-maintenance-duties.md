@@ -3,7 +3,7 @@ trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
 column: todo
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-02T06:37:00+0200
+updated: 2026-08-02T19:12:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -121,9 +121,34 @@ agent loads. These duties EXTEND / TIGHTEN those.
 | 15b | description-named page → merge/rename | consolidate | 🟡 merge half LANDED 2026-07-16 (survivor rule + rename-candidate finding); rename executor MISSING |
 | 16-17 | prune/repair links; dangling → create | librarian (surface) | 🟡 librarian SURFACES (132 link findings); fixing executor MISSING |
 | 18 | TRDD backlinks per atom | — | ❌ NET-NEW |
-| 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | 🟡 shape ok; corpus-wide id-uniqueness check lands with TRDD-0NGYP3IG (ambiguous-id = error) |
+| 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | ✅ EXISTS — corpus-wide `atom-dup-id` landed (`memory.rs:3979`, Check 8, Severity::Error, every location reported; verified first-hand 2026-08-02) |
 | 20 | expander/reducer (hub/aspect/component) revalidation | write (at creation) + librarian | 🟡 flagged, not corrected |
 | 21 | scope validation + published-globally USER symlink | scope-leak detector | 🟡 privacy direction policed; symlink publishing infra MISSING (= issue **#52**) |
+
+### 2026-08-02 19:12 — independent duty-coverage RE-AUDIT folded in (verified)
+
+A lean-worker re-audited all 20 duty rows against the CURRENT tree with file:line citations:
+**6 COVERED / 10 PARTIAL / 4 MISSING** (report:
+`reports/lean-worker/20260802_190200+0200-87rkbyj8-duty-coverage.md`). Deltas vs the
+2026-07-16 table, each spot-verified FIRST-HAND before recording (decide-on-facts):
+
+- **Row 19 → ✅ COVERED** — `atom-dup-id` corpus-wide id-uniqueness is ON DISK
+  (`scripts/memgrep/src/memory.rs:3979`, Check 8, `Severity::Error`, reported at every
+  location). The old "lands with TRDD-0NGYP3IG" note is stale — it landed. Table row updated.
+- **Row 2 confirmed PARTIAL** — `verify_repair`'s `_REQUIRED_FM_KEYS`
+  (`memory_edit_verify.py:1106`) is PAGE-frontmatter only (`name, description, ocd, lmd,
+  node_type, type`); no atom-level `desc:` presence/length check anywhere in repair.
+- **Rows 7-8 confirmed MISSING** — zero hits for any superseded include/exclude or delimiter
+  machinery across `scripts/memgrep/src/*.rs` (grepped alternates: `include-superseded`,
+  `exclude…superseded`, `## Superseded`).
+- **Row 21 confirmed** — no `publish` subcommand in `main.rs`; the symlink appears only as a
+  test fixture (`memory.rs:7027-7051`). Still issue #52 territory.
+
+The audit's priority ordering matches this card's own NEXT ACTION step 2 order (7-8 first,
+then 2 / 9 / 16-17, then 14 / 13 / 18 / 21) — no re-prioritisation needed.
+
+**Step 3 CLOSED OUT:** issues #97 and #88 are both `CLOSED` on the tracker (checked
+2026-08-02) — the "close the two issues" leftover is done; nothing remains of step 3.
 
 ### 2026-08-02 — `dev → todo`. Real work, genuinely queued, and nobody is building it.
 
@@ -148,7 +173,8 @@ issues, not fixing anything.
 3. ~~Fix the split-oracle bugs (#97, #88)~~ **VERIFIED FIXED 2026-07-16** — already fixed on disk
    with regression tests (a prior session fixed them without closing the issues); each issue's own
    reproducer no longer reproduces, full pytest suite 13051 passed / 0 failed. Report:
-   `reports/memory-edit-verify/20260716_002102+0200-fix-issues-97-88.md`. Close the two issues.
+   `reports/memory-edit-verify/20260716_002102+0200-fix-issues-97-88.md`. ~~Close the two
+   issues~~ **both CLOSED on the tracker (verified 2026-08-02) — step 3 fully done.**
 4. Publish (skills + memgrep live in the plugin → release + cache update to deploy).
 
 ## Verification
