@@ -1,9 +1,9 @@
 ---
 trdd-id: DOJ2LE1G
 title: memgrep add-lesson gains --supersedes with SUPERSEDED BODY, and lint gains four checks
-column: dev
+column: complete
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T07:05:00+0200
+updated: 2026-08-02T06:36:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
@@ -49,6 +49,22 @@ many pre-existing footnote/link violations (USER: 74 `never-referenced` + 33 one
 47+14; LOCAL: 8+30). So the txn-commit gate MUST be a DELTA gate (block only on violations the
 edit INTRODUCES), NOT "block on any lint violation" — else every edit to a page with a
 pre-existing violation is rejected for an unrelated reason.
+
+### 2026-08-02 — CLOSED (`dev → complete`)
+
+THIS card's scope is `add-lesson --supersedes` / `--retire-atom` plus the four new `lint`
+checks, and its own DONE list above accounts for every item. Shipped in `f469f07`, released
+in **v0.61.0**, and exercised repeatedly since — the `--supersedes` protocol and the
+`oversized-atom` check (1500 chars) are both load-bearing in day-to-day wikimem editing, and
+`oversized-atom` fired correctly on four atoms authored this session.
+
+It sat in `dev` only because the STATE opens "implementing across the 4 TRDDs" — a note about
+the SIBLING cards' progress, not this one's. That sentence is why it read as in-flight for 9
+days: a card's column must describe ITS OWN work, and a status line about the wider effort
+belongs on the umbrella. The Phase-3 delta-gate caveat above is likewise a note FOR a sibling
+card, not remaining work here.
+
+`release-via:` is absent ⇒ `complete` is the terminal column.
 
 ## Part 1 — the lesson contract (the supersession protocol, enforced)
 

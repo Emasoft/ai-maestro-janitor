@@ -1,9 +1,9 @@
 ---
 trdd-id: 4ZTNMQL3
 title: Every wikimem write must route through a memgrep write verb, then validate+lint
-column: testing
+column: complete
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T07:55:00+0200
+updated: 2026-08-02T06:34:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: high
@@ -35,6 +35,22 @@ no knowledge lost, NOT syntax). The gate closes that hole; the rule supplies the
 **OPTIONAL REMAINING (not blocking):** add an operational pointer to the editorial `SKILL.md`
 files ("correct a wrong fact via `add-lesson --supersedes`, never overwrite"). Low marginal value
 now the rule is global. This TRDD can reach `complete` once that call is made.
+
+### 2026-08-02 — CALL MADE: decline the optional pointer. CLOSED.
+
+The card asked for exactly one judgment and then blocked on it, so it sat in `testing` for
+10 days waiting for a decision nobody was scheduled to make. Making it: **declined.**
+
+`~/.claude/rules/markdown-memory-recall.md` already carries the instruction verbatim under
+AUTHORING — *"Do NOT hand-author wikimem markdown … use the write verbs … Correct a wrong
+fact by SUPERSESSION, never a delete/overwrite"* — and that rule is installed at USER scope,
+so it loads in every session on this machine regardless of which skill is invoked. Copying it
+into each editorial `SKILL.md` would create a second place stating the same contract, i.e. a
+place for it to drift out of step with the rule that actually governs. The global rule is the
+single source of truth; the skills should keep pointing at it, not restate it.
+
+Nothing else is outstanding: the gate shipped (`ebd7445`, `33a1f7f`) and the rule is global.
+Closing `testing → complete`; `release-via:` is absent, so `complete` is the terminal column.
 
 ## The defect
 

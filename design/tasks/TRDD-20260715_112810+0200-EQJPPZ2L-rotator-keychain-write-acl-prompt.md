@@ -1,9 +1,9 @@
 ---
 trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
-column: dev
+column: complete
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T18:40:00+0200
+updated: 2026-08-02T06:38:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -46,6 +46,26 @@ here: publish → update cache → re-stage daemon closure → prove deployed co
 
 **ONLY REMAINING (separate follow-up, non-urgent):** the 98/99 switch policy — raise `SWITCH_AT_5H=98`,
 `SWITCH_AT_7D=99` + align `SAFE_*` (§policy below). Not blocking; rotation works at the current 97/90.
+
+### 2026-08-02 — CLOSED (`dev → complete`)
+
+The defect this card names — a keychain WRITE re-latching the rotator dead on every token
+refresh — is FIXED, shipped (`fa46a49`, `1cedf28`), released, and the STATE above already
+recorded it 🟢 LIVE ON PUBLISHED+DEPLOYED CODE on 2026-07-15. It then stayed in `dev` for 17
+days on the strength of its own "ONLY REMAINING" line.
+
+That line is a **different task**, and it says so: the 98/99 switch policy is a tuning change
+to rotation thresholds, not part of fixing an ACL prompt. TRDD rule 13 is one atomic task per
+card, so a follow-up of different scope does not hold its parent open — otherwise every card
+that ever suggests a next idea becomes immortal. Rotation works at the current 97/90 by the
+card's own assessment, so nothing is degraded by closing.
+
+The follow-up is not lost: the threshold policy is carried on the rotator umbrella
+TRDD-32acd15f (and referenced from 6AABK2BG / P7WU40G9), which is where a rotation-tuning
+decision belongs. Verified those cards mention it before closing this one, rather than
+assuming.
+
+`release-via:` is absent ⇒ `complete` is the terminal column.
 
 ---
 

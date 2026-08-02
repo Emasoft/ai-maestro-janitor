@@ -1,9 +1,9 @@
 ---
 trdd-id: YRPUSIFY
 title: Cache-optimize the hooks, spark agent, skills, commands, and rules — stop prefix invalidation + shrink the per-agent floor
-column: dev
+column: published
 created: 2026-07-02T15:18:48+0200
-updated: 2026-07-13T10:32:00+0200
+updated: 2026-08-02T06:40:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -131,6 +131,22 @@ symlinks into `~/.agents/` (all 5 preserved as symlinks; targets outside the edi
 
 **NEXT ACTION:** none for P2. P3 is optional/low-value. The janitor-shipped half of the floor
 lands automatically on the next publish.
+
+### 2026-08-02 — CLOSED (`dev → published`)
+
+P1 shipped in **v0.29.0** (`5687848`), P2 shipped (`460aad0`), and the card's own NEXT ACTION
+has read "none" since 2026-07-13 — it then sat in `dev` for 19 days on the strength of P3
+alone, which the same paragraph calls optional and low-value.
+
+**P3 declined, with the card's own reasoning:** it is a plugin-tree CPV cache pass, and the
+note above already records why it is worth less than it looks — plugin skills and commands
+load ON DEMAND, so they were never in the always-on per-agent floor this card set out to
+shrink. Doing it would not move the measured lever. If it is ever wanted it is a fresh card
+with a fresh measurement, not a 19-day tail on a delivered one.
+
+`release-via: publish` and the work is in a released tag, so the terminal column is
+**`published`**, not `completed` — rewriting it to `completed` would destroy the fact that it
+shipped (TRDD rule 12: published/live archive AS THEMSELVES).
 
 - **WHY (measured, reports/token-attribution + scratchpad/spark_cost_breakdown.py):** two spark
   agents: peak context ~246k/312k but cache_creation 1.86M/1.84M — a **~7.6× rewrite factor**
