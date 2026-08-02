@@ -1,9 +1,10 @@
 ---
 trdd-id: 8IZ8COQ8
 title: Repeated janitor-command injections pile up in a session's input queue
-column: todo
+column: testing
+implementation-commits: [d4498ff]
 created: 2026-07-17T14:14:09+0200
-updated: 2026-07-17T14:14:09+0200
+updated: 2026-08-02T10:34:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -22,7 +23,9 @@ compact long ago."*
 neither `resume-after-compact.flag` nor `rate-limited.flag` exists at fire time
 (`NOTHING_PENDING`). Tests: `tests/test_resume_trigger.py` gate section.
 
-**NEXT ACTION:** investigate the two REMAINING sources below and pick fixes.
+**NEXT ACTION:** none — the investigation is done and the fix shipped (`d4498ff`). Rides the
+next publish. See the 2026-08-02 section, which SUPERSEDES the open questions and the candidate
+list below.
 
 ## Evidence (recovery-audit.ndjson, global-state — read 2026-07-17 ~14:05)
 
@@ -65,9 +68,70 @@ inspectable from outside, so the ONLY lever is typing less.
   design, and the SessionStart re-arm nudge will heal a genuinely lapsed cron at the next
   boundary anyway.
 
+## 2026-08-02 — BOTH open questions answered by measurement, and the real defect is worse
+
+**SUPERSEDES the "Open questions" and "Candidate fixes" sections above.** Every claim here was
+measured from the surviving `recovery-audit.ndjson` (96 records from 2026-07-17) and this
+project's own transcripts, not reasoned from the code.
+
+**Q1 — answered, and its premise was FALSE.** The card assumed the transcript "should have been
+fresh (mid-turn, appending constantly)". It was not: at the 13:15:03 rearm the newest transcript
+line was **12:41:59 — 33.1 minutes stale**. `diagnose_root` reading `cron_dead` was **correct**;
+`transcript_age` did not mis-resolve. And the next line lands at **13:15:08 — 5 seconds after the
+injection**, so the injection also *worked*.
+
+**Q2 — same cause.** The unexplained ~47-minute gap is not a stalled input queue. The last line
+before the silence is an **`ExitPlanMode` tool_use**: the session was **blocked waiting for the
+user to approve a plan**.
+
+**The real defect.** A blocked turn appends nothing AND cannot fire its cron — both need the turn
+to end — so *a session waiting on a person is indistinguishable from a dead one* by every signal
+the guardian had. It typed `/janitor-arm` straight into the approval dialog. That is not the spam
+the user reported; it is an unattended machine answering a question addressed to a person.
+
+**Disposition of the three candidate fixes:**
+
+| candidate | verdict |
+|---|---|
+| busy-session guard | **SHIPPED ELSEWHERE** as TRDD-8DR0X08A F2 (`trailing_enqueues` wedge short-circuit), on stronger evidence than the transcript-freshness proxy this card proposed |
+| unconsumed-injection back-off | **SUPERSEDED** by the same F2 — the chief-of-staff 3×-rearm pattern it targeted is exactly what the wedge short-circuit declines (`declined_wedged` appears 20× in that day's audit) |
+| type-time re-check for the push | **NOT DONE, and now deprioritised** — real but narrow (a 2 s window between the fire-time flag check and the delayed keystrokes). It is a spam-reduction nicety; the awaiting-user guard is the safety fix |
+
+**The fix (`d4498ff`).** `fleet_scan.awaiting_user_decision(tail)` — the tail ends on a `tool_use`
+with no answering `tool_result` ⇒ the session is parked on a human decision. Surfaced as
+`Instance.awaiting_user` (one extra read of the tail already being parsed), guarded in BOTH typing
+paths: the recovery beat (decline + `FLEET-AWAITING-USER` push) and the resume-wake beat.
+
+`trailing_enqueues` could not have covered this: its evidence only exists once something has
+ALREADY been typed, so it catches the second injection and never the first — the one that reaches
+the dialog.
+
+**Deliberately stricter than the wedged guard: it blocks HARD rungs too.** The wedged check exempts
+ESC-first rungs because the ESC *is* the unwedge; an ESC into a pending approval **dismisses the
+human's decision**. Neuter-tested — with the guard disabled the beat fires, and the frozen case
+sends ESC.
+
+**Why this stays out of `complete`:** the guard ships with the next publish like everything else.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-QU3P-1LNJ, status:valid, keywords:"repeated janitor-resume injections queue pileup typed command spam", ocd:2026-07-17, lmd:2026-07-17]
   DO NOT type a self-trigger command without re-checking that its purpose still exists,
   BECAUSE typed commands enqueue behind long turns and flush much later as visible no-op
   spam. DO gate every typed self-command on the durable state it exists to consume.
+
+[^2]: [id:ATOM-8IZ8-PREM, status:valid, keywords:"card asserted the transcript should have been fresh, investigated the wrong bug for weeks, premise stated as evidence in a trdd", ocd:2026-08-02, lmd:2026-08-02]
+  DO NOT let a card's own STATE block assert an unmeasured premise ("its transcript should
+  have been fresh") and then frame the open questions around it, BECAUSE the premise was
+  FALSE — the transcript was 33 min stale, the diagnosis was right all along, and three
+  weeks of "why did it mis-resolve?" were aimed at a bug that did not exist. DO measure the
+  premise FIRST when the evidence is still on disk; here `recovery-audit.ndjson` and the
+  transcripts both survived and settled it in two reads.
+
+[^3]: [id:ATOM-8IZ8-SILENT, status:valid, keywords:"session waiting for approval looks dead, guardian typed into a permission prompt, blocked turn cannot fire its own cron", ocd:2026-08-02, lmd:2026-08-02]
+  DO NOT treat "no transcript growth AND no cron fire" as evidence a session is DEAD,
+  BECAUSE a session blocked on a human decision (ExitPlanMode / AskUserQuestion / a
+  permission prompt) produces exactly that signature — both signals need the turn to end,
+  and a pending dialog is what keeps it open. DO check for an unanswered `tool_use` at the
+  transcript tail before any automated actuation types into a pane; the cost of getting
+  this wrong is a machine answering a question meant for a person.
