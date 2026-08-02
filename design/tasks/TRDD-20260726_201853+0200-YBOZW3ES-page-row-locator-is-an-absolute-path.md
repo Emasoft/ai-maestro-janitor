@@ -1,9 +1,9 @@
 ---
 trdd-id: YBOZW3ES
 title: A page result's locator is an absolute path — the single most expensive field recall prints
-column: ai_review
+column: human_review
 created: 2026-07-26T20:18:53+0200
-updated: 2026-07-26T20:40:08+0200
+updated: 2026-08-02T13:05:35+0200
 current-owner: 2f5bc976
 task-type: refactor
 approval-tier: 0
@@ -22,7 +22,14 @@ implementation-commits: [5ed8155]
   `recall <page-name>` is an exact hop; walk and index verified byte-identical. Gate: cargo 225
   passed, pytest 13706 passed / 1 skipped, ruff + mypy clean, both benchmark baselines re-captured
   and re-verified `no change`.
-- **NEXT ACTION:** none — the TRDD is in `ai_review`. Nothing is known-broken.
+- **AI REVIEW DONE 2026-08-02 (`ai_review → human_review`).** Verified against the LIVE corpus,
+  not the fixture — the fixture is where this card's own STATE says the saving is understated ~8×,
+  so a fixture-only check would confirm the weakest form of the claim. `memgrep recall "memory
+  system" .claude/project/memory` returns slug/atom-id locators with **zero** `/Users/` paths in
+  the output. The retrieval gate is `no change` on both corpora at current HEAD (re-measured under
+  TRDD-DO6X4ZF8 after `77a193c` touched `lint_paths`), so the saving did not come at an accuracy
+  cost. **Awaiting: the owner's call only.** Nothing is known-broken.
+- **NEXT ACTION:** none — the TRDD is in `human_review`. Nothing is known-broken.
 - **Load-bearing facts:**
   - **the fixture UNDERSTATES the saving ~8×.** The benchmark corpora sit at a SHORT repo-relative
     path, so the change reads as 283.7 → 272.0 tok/query there, while the measured live-corpus
