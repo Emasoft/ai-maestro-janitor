@@ -11,7 +11,7 @@ scope: project
 release-via: publish
 parent-trdd: null
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [e0299af3]
 ---
 
 # The heartbeat cadence's latency claim is stated without jitter
