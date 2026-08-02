@@ -1,9 +1,10 @@
 ---
 trdd-id: RDFWQIFA
 title: disarmed.flag claims the USER opted out but any agent can forge it — an agent-initiated disarm permanently defeats the fleet guardian
-column: todo
+column: complete
+implementation-commits: [05e60c4, 48523ca, 0bdd3d4]
 created: 2026-07-14T13:35:09+0200
-updated: 2026-07-14T13:35:09+0200
+updated: 2026-08-02T07:22:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -13,6 +14,39 @@ relevant-rules: [1]
 ---
 
 # `disarmed.flag` claims the USER opted out, but any agent can forge it
+
+## ⏵ 2026-08-02 — CLOSED (`todo → complete`). Fixed, released, and all five acceptance items VERIFIED.
+
+The fix shipped as `scripts/disarm_guard.py::authority()`, which returns a reason only for real
+human authority — a fresh `user_intent.intent_fresh("disarm")` token (consumed on use, so one
+request disarms exactly once) or the genuine machine-wide kill-switch, read from real global state
+and failing **CLOSED** on an unreadable flag so a broken read can never invent authority. Landed in
+`05e60c4` + `48523ca` (the checklist that told the agent to forge the very flag the guard gates)
++ `0bdd3d4`, all contained in the released tag `ai-maestro-janitor--v0.45.0`.
+
+The card sat in `todo` with an empty `implementation-commits:` for 19 days — i.e. the board said
+CRITICAL-and-unstarted about a defect that was fixed and shipped. That field is now recorded, which
+is what made it invisible to every reconciliation pass.
+
+**The `## Verification` list below was run, not assumed** (2026-08-02):
+
+| # | acceptance item | evidence |
+|---|---|---|
+| 1 | agent-initiated disarm with no token ⇒ flag ABSENT | `test_an_agent_alone_cannot_write_the_flag` |
+| 2 | user types `/janitor-disarm` ⇒ token stamped, flag written | `test_a_user_request_records_the_flag` |
+| 3 | global stop ⇒ flag written on the real-global-state clause | `test_a_machine_wide_stop_authorizes_the_self_disarm` |
+| 4 | **falsify: neuter the token check ⇒ item 1 MUST fail** | **executed** — `authority()` forced to return `"user-asked"`, and **3 of 4** tests went red including item 1's; revert confirmed byte-clean (`git diff` empty) and 4/4 green again |
+| 5 | full suite + ruff | 59 disarm/user-intent tests green; 14,062 full-suite, 1 skipped; ruff clean |
+
+Item 4 is the one that mattered and the one that is normally skipped: a guard test that cannot be
+made to fail proves nothing about the guard. It was run for real and the revert verified, rather
+than reasoned about.
+
+Bonus invariant beyond the list, already pinned:
+`test_the_intent_is_spent_so_one_request_disarms_once` — the token is consumed, so a single user
+request cannot become a standing licence to disarm.
+
+`release-via:` is absent ⇒ `complete` is the terminal column (rule 12).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
 
