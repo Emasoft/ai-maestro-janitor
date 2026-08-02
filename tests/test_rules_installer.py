@@ -11,6 +11,7 @@ residue. HOME + CLAUDE_PROJECT_DIR are redirected to tmp dirs so the real
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -663,3 +664,23 @@ def test_every_slimmed_rule_points_at_its_full_reference():
         body = rule.read_text(encoding="utf-8")
         assert ref.name in body, f"{rule.name} does not point at its full reference {ref.name}"
         assert "rules-reference" in body, f"{rule.name} does not give the reference dir path"
+
+
+def test_every_full_reference_pointer_resolves_to_a_shipped_file():
+    """The COMPLEMENT of the test above, and the direction that actually goes wrong.
+
+    That one iterates over references that EXIST and proves each has an owning rule, so a rule
+    pointing at a reference that was never written — or was renamed — is invisible to it. This
+    walks the pointers instead. It is the failure mode the corpus cap actively pushes you into:
+    the sanctioned way to stay under the cap is to move detail out and leave a pointer, so every
+    trim is a chance to ship a pointer with nothing behind it. A reader who follows one and finds
+    nothing does not go looking — the knowledge reads as deleted."""
+    shipped = {p.name for p in (_PROJECT_ROOT / "rules" / "references").glob("*.md")}
+    pointer = re.compile(r"rules-reference/([A-Za-z0-9._-]+\.md)")
+    dangling = [
+        (rule.name, name)
+        for rule in sorted((_PROJECT_ROOT / "rules").glob("*.md"))
+        for name in pointer.findall(rule.read_text(encoding="utf-8"))
+        if name not in shipped
+    ]
+    assert not dangling, f"rules point at references that are not shipped: {dangling}"
