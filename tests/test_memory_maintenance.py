@@ -46,6 +46,7 @@ _MARKERS = {
     "repair": "[janitor-memory-repair]",
     "atomize": "[janitor-memory-atomize]",
     "harvest": "[janitor-memory-harvest]",
+    "retro-lesson": "[janitor-memory-retro-lesson]",
     "consolidate": "[janitor-memory-consolidate]",
     "conflict": "[janitor-memory-conflict]",
 }
@@ -110,6 +111,23 @@ def _write_curated_page(scope_dir: Path, *, name: str = "page.md", marker: bool)
         "ocd: 2026-07-01\nlmd: 2026-07-08\nmetadata:\n  node_type: memory\n"
         "  type: project\n  tier: component\n---\n\n"
         f"{mark}A durable fact line about the subject.\n\n"
+        "## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def _write_retro_candidate_page(scope_dir: Path, *, name: str = "retro.md") -> Path:
+    """A curated page holding a `status:superseded` atom marker WITHOUT a
+    `superseded-by:` pointer — retro-lesson's exact candidate (TRDD-J3ZH3RSI)."""
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    p = scope_dir / name
+    p.write_text(
+        f"---\nname: {name[:-3]}\ndescription: what breaks when X — symptoms\n"
+        "ocd: 2026-07-01\nlmd: 2026-07-08\nmetadata:\n  node_type: memory\n"
+        "  type: project\n  tier: component\n---\n\n"
+        '^old-fact [desc: "the old claim", status:superseded, keywords: old symptom]\n'
+        "The superseded old body.\n\n"
         "## Notes and lessons learned\n",
         encoding="utf-8",
     )
@@ -189,7 +207,7 @@ def fixture(tmp_path):
 # due -> the right bare marker
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("intervention", ["split", "repair", "atomize", "harvest", "consolidate", "conflict"])
+@pytest.mark.parametrize("intervention", ["split", "repair", "atomize", "harvest", "retro-lesson", "consolidate", "conflict"])
 def test_due_emits_the_right_bare_marker(fixture, intervention):
     """When exactly one intervention is enabled and due (fresh stamp), the detector
     emits EXACTLY that intervention's bare marker on its own line."""
@@ -200,6 +218,7 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
         "repair": "repair_per_day",
         "atomize": "atomize_per_day",
         "harvest": "harvest_per_day",
+        "retro-lesson": "retro_lesson_per_day",
         "consolidate": "consolidation_per_day",
         "conflict": "conflict_per_day",
     }
@@ -225,6 +244,10 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
         # harvest now also requires real work — an un-mirrored raw buffer note
         # (TRDD-3XS3PDCF follow-up, unblocked 2026-07-08).
         _write_raw_note(fixture["local"])
+    elif intervention == "retro-lesson":
+        # retro-lesson requires real work — a superseded-status atom with no
+        # superseded-by: pointer (TRDD-J3ZH3RSI).
+        _write_retro_candidate_page(fixture["local"])
     elif intervention == "conflict":
         # conflict now also requires real work — a surfaced candidate in the
         # librarian's proposal file (TRDD-3XS3PDCF follow-up).

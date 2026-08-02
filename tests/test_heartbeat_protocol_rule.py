@@ -38,6 +38,7 @@ _ALL_MARKERS = (
     "[janitor-memory-repair]",
     "[janitor-memory-atomize]",
     "[janitor-memory-harvest]",
+    "[janitor-memory-retro-lesson]",
 )
 
 

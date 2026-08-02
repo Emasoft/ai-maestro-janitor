@@ -35,7 +35,7 @@ exact-matches `[janitor-resume]`).
 | `[janitor-reload-skills]` | run `/janitor-reload-skills` — non-plugin skills (NOT /reload-plugins) |
 | `[janitor-self-disarm]` | run `/janitor-disarm` — machine-wide stop active; DELETE this cron |
 | `[janitor-resume]` | resume the prior/pending task — the PAYLOAD lines carry the directive (task; background agents to resume via SendMessage) |
-| `[janitor-memory-split]` `[janitor-memory-consolidate]` `[janitor-memory-conflict]` `[janitor-memory-repair]` `[janitor-memory-atomize]` `[janitor-memory-harvest]` | agent `janitor-memory-subconscious-agent`, pinned to Sonnet (never Opus): run that pass on the (scope, root) named in **`$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json`** — ABSOLUTE, a spawned agent's cwd is not the project root. **If it is absent or unreadable, STOP and report that** — do NOT fall back to "whichever is due" (#150). |
+| `[janitor-memory-split]` `[janitor-memory-consolidate]` `[janitor-memory-conflict]` `[janitor-memory-repair]` `[janitor-memory-atomize]` `[janitor-memory-harvest]` `[janitor-memory-retro-lesson]` | agent `janitor-memory-subconscious-agent`, pinned to Sonnet (never Opus): run that pass on the (scope, root) named in **`$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json`** — ABSOLUTE, a spawned agent's cwd is not the project root. **If it is absent or unreadable, STOP and report that** — do NOT fall back to "whichever is due" (#150). |
 | `[janitor-ticket]` | each following `T-XXXXXXXX · <agent>` line → that agent. Task: `Work janitor ticket T-XXXXXXXX. Load the janitor-support-work-ticket skill and follow it exactly.` Pass only the id. |
 
 **AGENT MARKERS** (the memory + ticket rows): spawn ONE background agent per item (Agent tool, the

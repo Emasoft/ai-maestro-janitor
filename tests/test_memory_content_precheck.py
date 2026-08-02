@@ -381,6 +381,57 @@ def test_content_has_work_atomize_delegates(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# retro_lesson_has_work (TRDD-J3ZH3RSI) — superseded atoms lacking the lesson link
+# --------------------------------------------------------------------------- #
+
+_RETRO_CANDIDATE = '^old-fact [desc: "the old claim", status:superseded, keywords: old symptom]\nThe old body.'
+_RETRO_CONVERTED = (
+    '^old-fact [desc: "the old claim", status: superseded, superseded-by:ATOM-L1, '
+    'keywords: old symptom]\nThe old body. [^1]'
+)
+
+
+def test_retro_lesson_has_work_true_for_pointerless_superseded_atom(tmp_path):
+    """A curated page with a status:superseded atom marker and NO superseded-by:
+    pointer is the retro skill's exact candidate -> work."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    assert mcp.retro_lesson_has_work(tmp_path) is True
+
+
+def test_retro_lesson_has_work_false_once_converted(tmp_path):
+    """The superseded-by: pointer is what the conversion stamps — with it present
+    the atom no longer matches, so the precheck CONVERGES after the pass."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CONVERTED)
+    assert mcp.retro_lesson_has_work(tmp_path) is False
+
+
+def test_retro_lesson_has_work_false_for_valid_atoms(tmp_path):
+    """Live (status-valid, or status-less) atoms are never retro candidates."""
+    _shaped(tmp_path, "a.md", marker=True)
+    assert mcp.retro_lesson_has_work(tmp_path) is False
+
+
+def test_retro_lesson_has_work_accepts_the_superseeded_misspelling(tmp_path):
+    """memgrep's parser tolerates the `superseeded` misspelling on the status value;
+    the precheck must match it too or a misspelled retirement is invisible."""
+    _shaped(tmp_path, "a.md", body='^old [desc: "d", status:superseeded, keywords: k]\nBody.')
+    assert mcp.retro_lesson_has_work(tmp_path) is True
+
+
+def test_retro_lesson_has_work_false_on_empty_and_missing_dir(tmp_path):
+    """An empty or non-existent corpus has no retro work (not an error)."""
+    assert mcp.retro_lesson_has_work(tmp_path) is False
+    assert mcp.retro_lesson_has_work(tmp_path / "nope") is False
+
+
+def test_content_has_work_retro_lesson_delegates(tmp_path):
+    """retro-lesson routes through retro_lesson_has_work (False then True round-trip)."""
+    assert mcp.content_has_work("retro-lesson", tmp_path, split_max_bytes=_CAP) is False
+    _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    assert mcp.content_has_work("retro-lesson", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
 # FAIL-OPEN on unreadable pages (libs audit L-11)
 # --------------------------------------------------------------------------- #
 

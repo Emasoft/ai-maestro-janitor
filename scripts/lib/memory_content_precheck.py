@@ -31,7 +31,8 @@
 # the librarian detector's job; the conflict PASS itself consumes the librarian's
 # `### Conflict candidates` section ("Empty/absent → stop" is the skill's own
 # precondition), so its due-ness IS mechanically precheckable (see
-# conflict_has_work). With that, every one of the six chores is gated.
+# conflict_has_work). With that, every one of the seven chores is gated
+# (RETRO-LESSON joined with its own structural gate — TRDD-J3ZH3RSI).
 #
 # CONSOLIDATE's precheck is STRUCTURAL-ONLY, not a full content gate. A merge is
 # governed by `memory_edit_verify.is_legal_merge`, whose THREE refusal grounds are
@@ -368,6 +369,41 @@ def _has_substantive_body(body: str) -> bool:
     return False
 
 
+def retro_lesson_has_work(root: Path) -> bool:
+    """True iff some CURATED wiki page in `root` carries an atom marker that is
+    `status:superseded` but has NO `superseded-by:` forward pointer — the exact
+    structural signature of "superseded-but-not-yet-lesson-form" (TRDD-J3ZH3RSI,
+    parent duty 9).
+
+    WHY this discriminator: `memgrep add-lesson --supersedes --retire-atom` is the
+    ONE conversion path, and it stamps `status: superseded, superseded-by:<lesson-id>`
+    together — so a pointer-less superseded atom is one that never went through the
+    conversion. The pointer is also what the retro skill MUST complete (memory.rs's
+    retire step is idempotent-skipped when a `status:` prop already exists, so the
+    skill appends the pointer itself via the repair-op txn) — which is what makes
+    this precheck CONVERGE instead of re-firing forever on a converted atom.
+    Misspelling tolerance mirrors memgrep's own parser (`superseeded` accepted on
+    both the status value and the pointer key). Unreadable pages fail OPEN; RAW
+    buffer notes are never candidates (coexistence discriminator)."""
+    for p in _candidate_pages(root):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            return True  # FAIL-OPEN: unreadable → not provably idle
+        if not memory_scopes.is_curated_wiki_page(text):
+            continue  # RAW buffer note — never a retro-lesson candidate
+        for ln in text.splitlines():
+            m = memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln)
+            if not m:
+                continue
+            props = m.group(2)
+            superseded = bool(re.search(r"status\s*:\s*supers?e+ded", props))
+            has_pointer = bool(re.search(r"supers?e+ded-by\s*:", props))
+            if superseded and not has_pointer:
+                return True
+    return False
+
+
 def atomize_has_work(root: Path) -> bool:
     """True iff some CURATED wiki page in `root` is still FREE-PROSE — no
     `^id [keywords: …]` atom marker yet — with a substantive body to mark
@@ -560,6 +596,11 @@ def content_has_work(
         if scope is None:
             return True
         return harvest_has_work(scope, root)
+    if intervention == "retro-lesson":
+        # STRUCTURAL gate (TRDD-J3ZH3RSI): a superseded-status atom marker with no
+        # superseded-by: pointer — the not-yet-converted signature. No such atom
+        # anywhere → the retro pass can only abstain → suppress (PROVEN idle).
+        return retro_lesson_has_work(root)
     if intervention == "conflict":
         # The pass consumes the librarian's surfaced candidates ("Empty/absent →
         # stop" is the skill's own precondition); discovery stays semantic and

@@ -53,7 +53,7 @@ _SEV_HIGH = "HIGH"
 _SEV_MEDIUM = "MEDIUM"
 
 # The subagent-spawn marker vocabulary this probe CARRIES. Two sources of truth
-# (ATOM-B0SA-MRKR): the six memory markers in detectors/memory-maintenance.py::_MARKERS,
+# (ATOM-B0SA-MRKR): the seven memory markers in detectors/memory-maintenance.py::_MARKERS,
 # AND the literal [janitor-ticket] in detectors/ticket-dispatch.py — the latter is NOT in
 # _MARKERS. Keep this list in sync with both source files (probe 4 asserts exactly that).
 _MEMORY_MARKERS = (
@@ -61,6 +61,7 @@ _MEMORY_MARKERS = (
     "[janitor-memory-repair]",
     "[janitor-memory-atomize]",
     "[janitor-memory-harvest]",
+    "[janitor-memory-retro-lesson]",
     "[janitor-memory-consolidate]",
     "[janitor-memory-conflict]",
 )

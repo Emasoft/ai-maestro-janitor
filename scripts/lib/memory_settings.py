@@ -44,12 +44,13 @@ DEFAULTS: dict = {
     "repair_per_day": 0,            # REPAIR pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
     "harvest_per_day": 0,           # HARVEST pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
     "atomize_per_day": 0,           # ATOMIZE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "retro_lesson_per_day": 0,      # RETRO-LESSON pass (TRDD-J3ZH3RSI) — OFF by default, same USER cost decision; opt in via /janitor-memory-frequency
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
     "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }
 
 _PER_DAY_KEYS = frozenset(
-    {"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day", "harvest_per_day", "atomize_per_day"}
+    {"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day", "harvest_per_day", "atomize_per_day", "retro_lesson_per_day"}
 )
 _INT_KEYS = frozenset({"split_max_bytes"})
 _BOOL_KEYS = frozenset({"edit_project_scope", "stagger_enabled"})
@@ -62,6 +63,7 @@ INTERVENTIONS: dict = {
     "repair": "repair_per_day",
     "harvest": "harvest_per_day",
     "atomize": "atomize_per_day",
+    "retro-lesson": "retro_lesson_per_day",
 }
 
 _SECONDS_PER_DAY = 86400

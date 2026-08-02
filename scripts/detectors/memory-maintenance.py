@@ -9,14 +9,15 @@ DETECT → SCHEDULE → EXECUTE → VERIFY). The DETECT layer (`memory-librarian
 SURFACES reorg candidates; this detector decides WHEN an editorial pass is due,
 deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron turn
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
-only EMITS one of six bare markers:
+only EMITS one of seven bare markers:
 
-    [janitor-memory-split]       → dispatch a background Sonnet agent: /janitor-memory-split
-    [janitor-memory-repair]      → dispatch a background Sonnet agent: /janitor-memory-repair
-    [janitor-memory-atomize]     → dispatch a background Sonnet agent: /janitor-memory-atomize
-    [janitor-memory-harvest]     → dispatch a background Sonnet agent: /janitor-memory-harvest
-    [janitor-memory-consolidate] → dispatch a background Sonnet agent: /janitor-memory-consolidate
-    [janitor-memory-conflict]    → dispatch a background Sonnet agent: /janitor-memory-conflict
+    [janitor-memory-split]        → dispatch a background Sonnet agent: /janitor-memory-split
+    [janitor-memory-repair]       → dispatch a background Sonnet agent: /janitor-memory-repair
+    [janitor-memory-atomize]      → dispatch a background Sonnet agent: /janitor-memory-atomize
+    [janitor-memory-harvest]      → dispatch a background Sonnet agent: /janitor-memory-harvest
+    [janitor-memory-retro-lesson] → dispatch a background Sonnet agent: /janitor-memory-retro-lesson
+    [janitor-memory-consolidate]  → dispatch a background Sonnet agent: /janitor-memory-consolidate
+    [janitor-memory-conflict]     → dispatch a background Sonnet agent: /janitor-memory-conflict
 
 The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
 spawn agents — the "a python detector cannot spawn agents, only the main loop can"
@@ -98,12 +99,16 @@ import state  # noqa: E402
 # on. Order is the round-robin priority WITHIN a chosen scope: split first (cheap,
 # size-triggered), then repair (page-shape/metadata backfill), then harvest
 # (incorporate stray MEMORY.md / loose .md memories into the wiki, once/day), then
-# consolidate (merge), then conflict (the costly fact-verify).
+# retro-lesson (backfill lesson form onto already-superseded atoms, TRDD-J3ZH3RSI —
+# after the structural passes so a page is well-formed before its history is
+# converted, before the costly merges), then consolidate (merge), then conflict
+# (the costly fact-verify).
 _MARKERS: list[tuple[str, str]] = [
     ("split", "[janitor-memory-split]"),
     ("repair", "[janitor-memory-repair]"),
     ("atomize", "[janitor-memory-atomize]"),
     ("harvest", "[janitor-memory-harvest]"),
+    ("retro-lesson", "[janitor-memory-retro-lesson]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
 ]
