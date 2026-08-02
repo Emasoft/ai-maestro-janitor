@@ -294,6 +294,45 @@ def read_flag_provenance(name: str) -> dict:
     return {"set_at": 0, "by": "unknown", "pid": 0, "reason": ""}
 
 
+def last_run_path(task: str) -> Path:
+    """WRITE path for one chore's completion stamp — `control_dir()/<task>.last-run.ts`
+    (TRDD-QK7M2B0X phase B step 2, ARCHITECTURE.md §7.1).
+
+    A last-run stamp is coordination data, not private daemon state: it is exactly what a
+    SECOND chore owner (a live ai-maestro server) must read to know whether a chore is
+    already covered. That audience — not the kind of the data — is what puts it on the
+    fixed control plane, where a foreign reader can stat ONE literal path instead of
+    reproducing `global_state_dir()`'s four-rung ladder.
+    """
+    return _control_path(f"{task}.last-run.ts")
+
+
+def read_last_run(task: str) -> int:
+    """One chore's completion epoch, taking the NEWEST across all three eras.
+
+    `max()` is load-bearing, and it is the opposite of the flags' first-found read. During
+    the upgrade window a 0.6x daemon still stamps `global_state_dir()` while a new one
+    stamps `control_dir()`. First-found on the new path alone would read 0 for a chore that
+    just ran, and 0 means "never ran" — so the task is immediately re-run. For
+    `marketplace-refresh` that is precisely the duplicated bulk `claude plugin marketplace
+    update` that issue #7 exists to prevent, re-introduced by the very move meant to make
+    coordination visible. Reading the max cannot make a chore run too EARLY; the worst it
+    can do is defer one by up to its own interval.
+    """
+    best = 0
+    for p in (
+        _control_path(f"{task}.last-run.ts"),
+        _old_global_state_path(f"{task}.last-run.ts"),
+        _legacy_global_state_dir() / f"{task}.last-run.ts",
+    ):
+        try:
+            if p.is_file():
+                best = max(best, int(p.read_text(encoding="utf-8").strip() or 0))
+        except (OSError, ValueError):
+            continue  # a corrupt/unreadable stamp must not mask a good one at another path
+    return best
+
+
 def _generation_from_flag(name: str) -> int:
     """Generation number for one of the two reload flags, across all three
     control-plane locations (max() wins — a stamp from ANY era/location still

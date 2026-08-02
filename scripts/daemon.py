@@ -1606,14 +1606,20 @@ class Task:
         self.background = background
         self._child: Optional[subprocess.Popen[bytes]] = None
         self._child_t0 = 0.0
-        self.last_run_path = gs.global_state_dir() / f"{name}.last-run.ts"
-        # Consecutive-failure streak (Pillar 1). Lives beside last-run.ts so a
-        # quarantine SURVIVES daemon restarts — a broken task does not get a clean
-        # slate just because the daemon respawned. Reset to 0 on the first success.
+        # WRITE to the fixed control plane (TRDD-QK7M2B0X phase B step 2): the completion
+        # stamp is what a live ai-maestro server reads to see whether a chore is already
+        # covered, so it must sit at a path a foreign process can stat literally.
+        self.last_run_path = gs.last_run_path(name)
+        # Consecutive-failure streak (Pillar 1) deliberately does NOT move: it is private
+        # daemon state — no second owner acts on it — and the scope rule is AUDIENCE, not
+        # kind. Moving it would widen the control plane for nothing.
         self.failcount_path = gs.global_state_dir() / f"{name}.failcount"
 
     def _last_run(self) -> int:
-        return state.read_int_state(self.last_run_path, 0)
+        # Dual-read (NEWEST wins), not a plain read of `last_run_path`: during the upgrade
+        # window a previous-release daemon still stamps global_state_dir(), and reading
+        # only the new path would see 0 == "never ran" and re-run the chore immediately.
+        return gs.read_last_run(self.name)
 
     def _failcount(self) -> int:
         return state.read_int_state(self.failcount_path, 0)

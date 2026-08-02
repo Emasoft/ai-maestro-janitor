@@ -71,8 +71,14 @@ def emit_if_daemon_stale(
     except Exception:
         pass
 
-    last_run_path = gs.global_state_dir() / last_run_filename
-    last_run = state.read_int_state(last_run_path, 0)
+    # Dual-read across all three control-plane eras (TRDD-QK7M2B0X phase B step 2). Keyed off
+    # `last_run_filename`, NOT `task_name`: the filename is the parameter that actually names
+    # the stamp, so a future caller whose drift tag differs from its stamp stem still reads its
+    # own file instead of silently reading a different chore's — which would alarm on the wrong
+    # daemon task, the one failure mode this watchdog must never have.
+    last_run = gs.read_last_run(last_run_filename[: -len(".last-run.ts")]
+                               if last_run_filename.endswith(".last-run.ts")
+                               else last_run_filename)
     if last_run <= 0:
         # Never completed once — daemon just started or task has not finished
         # yet. The stamp is written unconditionally in Task.run's finally, so a

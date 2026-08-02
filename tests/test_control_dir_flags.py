@@ -237,3 +237,80 @@ def test_retired_flags_have_clear_only(dirs: tuple[Path, Path]) -> None:
         (control / fname).write_text("left by an older janitor\n", encoding="utf-8")
         clear()
         assert not (control / fname).exists(), f"{fname} must be swept, not merely ignored"
+
+
+# ── Phase B step 2: the per-chore completion stamps ───────────────────────────────────
+#
+# A `<task>.last-run.ts` is coordination data, not private daemon state: it is what a live
+# ai-maestro server reads to decide whether a chore is already covered. That AUDIENCE is
+# why it belongs on the fixed control plane (ARCHITECTURE.md §7.1), and it is also why the
+# read semantics differ from the flags' — see the max() test below.
+
+
+def test_stamps_are_written_to_the_control_dir(dirs: tuple[Path, Path]) -> None:
+    """The WRITE path is the fixed control plane, so a foreign reader can stat ONE literal
+    path instead of reproducing `global_state_dir()`'s four-rung ladder — which it cannot,
+    and which fails silently as "flag absent" when guessed wrong."""
+    control, _gsd = dirs
+    gs = _gs()
+    assert gs.last_run_path("marketplace-refresh") == control / "marketplace-refresh.last-run.ts"
+
+
+def test_a_stamp_from_the_previous_release_still_counts(dirs: tuple[Path, Path]) -> None:
+    """THE upgrade-window test, and the reason this read takes max() rather than first-found.
+
+    A 0.6x daemon still stamps `global_state_dir()`. If the new code read only the control
+    dir it would see 0, and 0 means "never ran" — so the chore is re-run at once. For
+    `marketplace-refresh` that is the duplicated bulk `claude plugin marketplace update`
+    that issue #7 exists to prevent, re-introduced by the very move meant to make
+    coordination visible."""
+    _control, gsd = dirs
+    gs = _gs()
+    gsd.mkdir(parents=True, exist_ok=True)
+    (gsd / "marketplace-refresh.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    assert gs.read_last_run("marketplace-refresh") == 1700000000
+
+
+def test_the_newest_stamp_wins_across_eras(dirs: tuple[Path, Path]) -> None:
+    """max(), not first-found. Both eras can hold a stamp at once during the window, and
+    reading the newer one can only ever DEFER a chore by up to its own interval — whereas
+    reading the older one re-runs a chore that just completed."""
+    control, gsd = dirs
+    gs = _gs()
+    control.mkdir(parents=True, exist_ok=True)
+    gsd.mkdir(parents=True, exist_ok=True)
+    (gsd / "version-update.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    (control / "version-update.last-run.ts").write_text("1700009999\n", encoding="utf-8")
+    assert gs.read_last_run("version-update") == 1700009999
+    # ...and the same holds when the OLD path is the newer one (a previous-release daemon
+    # still running alongside): the point is recency, not location precedence.
+    (control / "version-update.last-run.ts").write_text("1700000001\n", encoding="utf-8")
+    assert gs.read_last_run("version-update") == 1700000001
+
+
+def test_a_corrupt_stamp_cannot_mask_a_good_one(dirs: tuple[Path, Path]) -> None:
+    """A garbage body at one path must not swallow a valid stamp at another. Failing closed
+    here would read as "never ran" and re-run a bulk chore — the same duplicate-work outcome
+    the whole dual-read exists to avoid."""
+    control, gsd = dirs
+    gs = _gs()
+    control.mkdir(parents=True, exist_ok=True)
+    gsd.mkdir(parents=True, exist_ok=True)
+    (control / "user-plugins-update.last-run.ts").write_text("not-a-number\n", encoding="utf-8")
+    (gsd / "user-plugins-update.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    assert gs.read_last_run("user-plugins-update") == 1700000000
+
+
+def test_an_absent_stamp_reads_zero_everywhere(dirs: tuple[Path, Path]) -> None:
+    """0 must still mean "no completion yet" — `Task.run` stamps unconditionally in its
+    `finally`, so a zero is genuinely never-completed, never failing-silently."""
+    gs = _gs()
+    assert gs.read_last_run("marketplace-refresh") == 0
+
+
+def test_the_failcount_deliberately_did_not_move(dirs: tuple[Path, Path]) -> None:
+    """Pinned as a shape. The failure streak is PRIVATE daemon state — no second owner acts
+    on it — and the scope rule is AUDIENCE, not kind. A later pass that moves it "for
+    consistency" widens the control plane for nothing, so the absence is asserted."""
+    gs = _gs()
+    assert not hasattr(gs, "failcount_path"), "the failcount must not gain a control-plane path"

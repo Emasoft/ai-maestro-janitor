@@ -14,6 +14,7 @@ guaranteed-inert task name), real sleeping subprocesses for the in-flight cases.
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 import time
@@ -84,7 +85,12 @@ def test_spawn_and_reap_success_stamps_last_run(isolated_env: Path) -> None:
     _wait_child_exit(t)
     t.poll_background()
     assert t._child is None
-    assert int((isolated_env / "noop.last-run.ts").read_text()) > 0
+    # Asserted through the PUBLIC read, not a path: that is what the daemon's due-logic
+    # actually calls, so it stays true across the remaining control-plane moves instead of
+    # pinning today's directory (TRDD-QK7M2B0X phase B step 2 moved the stamp here).
+    assert daemon.gs.read_last_run("noop") > 0
+    assert (Path(os.environ["JANITOR_CONTROL_DIR"]) / "noop.last-run.ts").is_file(), \
+        "the stamp must be WRITTEN to the fixed control plane a foreign reader can stat"
     assert not t.is_due()
 
 
@@ -95,8 +101,11 @@ def test_reap_failure_increments_failcount_and_stamps(isolated_env: Path) -> Non
     t.spawn_background()
     _wait_child_exit(t)
     t.poll_background()
+    # The failcount deliberately stays in global_state_dir(): it is PRIVATE daemon state,
+    # and the control-plane scope rule is AUDIENCE, not kind. The two assertions differing
+    # in location is the point, not an inconsistency.
     assert int((isolated_env / "no-such-task-xyz.failcount").read_text()) == 1
-    assert int((isolated_env / "no-such-task-xyz.last-run.ts").read_text()) > 0
+    assert daemon.gs.read_last_run("no-such-task-xyz") > 0
     assert not t.is_due()
 
 
