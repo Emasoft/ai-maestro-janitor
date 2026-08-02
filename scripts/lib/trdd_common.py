@@ -648,8 +648,16 @@ def check2_has_remaining_work(record: TrddRecord) -> bool:
     # still-pending NEXT-ACTION ("implement the two residuals", a "USER-GATED"
     # item). The real-board smoke test proved the whole-body check mislabeled
     # standing / partly-done TRDDs as closeable (TRDD-15ECPBSA precision fix).
+    #
+    # ANY-PENDING, not NONE-DONE (TRDD-N7NZOYAK). This was `not any(done)` — i.e.
+    # "remaining only if NONE of these lines is done" — so ONE done-marked
+    # next-action line masked every still-pending one, which is the same masking
+    # the per-line scoping above was added to stop, just one level down. A STATE
+    # block that records progress normally carries both shapes at once, so the
+    # trigger is ordinary authoring, and the failure direction is the expensive
+    # one: nobody re-reads a card the board has labelled closeable.
     na_lines = [m.group(0) for m in _NEXT_ACTION_RE.finditer(record.body)]
-    if na_lines and not any(_DONE_MARKER_RE.search(ln) for ln in na_lines):
+    if any(not _DONE_MARKER_RE.search(ln) for ln in na_lines):
         return True
     return False
 

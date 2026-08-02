@@ -3,7 +3,7 @@ trdd-id: 98ISATJZ
 title: Memory-system discoverability — own the design (janitor#62)
 column: published
 created: 2026-07-09T14:53:03+0200
-updated: 2026-08-02T07:05:00+0200
+updated: 2026-08-02T05:58:00+0200
 current-owner: janitor-dev
 assignee: janitor-dev
 priority: 4

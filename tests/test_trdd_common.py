@@ -348,6 +348,40 @@ def test_check2_done_marker_on_subpart_does_not_mask_pending_next_action():
     assert tc.check2_has_remaining_work(rec) is True
 
 
+def test_check2_done_next_action_line_does_not_mask_a_pending_one():
+    """A DONE-marked NEXT-ACTION line must not mask a still-pending NEXT-ACTION
+    line elsewhere on the card (TRDD-N7NZOYAK).
+
+    The per-line scoping fixed the case where the done marker sits on a
+    NON-next-action line, but the quantifier still read "remaining only if NONE
+    of these lines is done" — so one finished next action made the whole card
+    look closeable. Found in the wild: a STATE refresh added a table row
+    containing the phrase and a DONE marker, and the card's real pending action
+    four lines below stopped being counted."""
+    rec = _record(
+        body=(
+            "\n## STATE\n"
+            "| the NEXT ACTION list was stale | **DONE** — shipped in v0.45.0 |\n"
+            "**NEXT ACTION:** validate end-to-end against a real reauth\n"
+        )
+    )
+    assert tc.check2_has_remaining_work(rec) is True
+
+
+def test_check2_all_next_action_lines_done_is_not_remaining():
+    """The complement, so the fix cannot be satisfied by always returning True:
+    when EVERY next-action line carries a done marker there is no remaining
+    work."""
+    rec = _record(
+        body=(
+            "\n## STATE\n"
+            "- NEXT ACTION: land the migration ✅ DONE\n"
+            "- NEXT ACTION: publish it — SHIPPED in v1.2.3\n"
+        )
+    )
+    assert tc.check2_has_remaining_work(rec) is False
+
+
 # ── Check 3 — prose↔frontmatter mismatch ─────────────────────────────────────
 
 

@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: backburner
 blocked-by: [ai-maestro#75]
 created: 2026-07-17T02:21:39+0200
-updated: 2026-08-02T07:12:00+0200
+updated: 2026-08-02T06:02:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
