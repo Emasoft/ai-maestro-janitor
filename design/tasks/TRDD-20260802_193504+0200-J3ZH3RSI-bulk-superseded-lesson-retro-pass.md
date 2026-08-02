@@ -1,9 +1,9 @@
 ---
 trdd-id: J3ZH3RSI
 title: Bulk retro-pass converting already-superseded atoms into lesson form
-column: todo
+column: complete
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T19:35:04+0200
+updated: 2026-08-02T23:33:21+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -12,15 +12,35 @@ release-via: publish
 created-by: 87RKBYJ8
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [009af29]
 ---
 
 # Bulk superseded→lesson retro-conversion (the 7th memory-maintenance marker)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-**Not started.** Child 3 of 4 split out of TRDD-87RKBYJ8 (duty 9 — the per-edit half EXISTS,
-the bulk half is MISSING).
+**COMPLETE — all three shippable steps landed, commit 009af29.** (1) Precheck
+`retro_lesson_has_work` in memory_content_precheck.py — candidate signature is a
+`status:superseded` atom marker with NO `superseded-by:` pointer (the exact shape
+`add-lesson --supersedes --retire-atom` stamps away; misspelling parity with memgrep).
+(2) 7th marker `[janitor-memory-retro-lesson]` in memory-maintenance.py (after harvest,
+before the merges) + cadence key `retro_lesson_per_day` (default 0=OFF) + the heartbeat
+rule row + harness_selftest marker vocabulary + agent/frequency-skill rosters. (3) The
+chore skill `janitor-memory-retro-lesson`: WHY sourced ONLY from the commit/TRDD
+provenance chain, unsourceable → FLAG (never invented); ⚠ documented gotcha — memgrep's
+`--retire-atom` is idempotent-skipped when `status:` already exists (the retro case), so
+the skill completes the `superseded-by:` pointer via the repair-op txn, which is what
+makes the precheck CONVERGE. 224 tests green. Verification boxes: the fixture-conversion
++ flag path are exercised structurally (precheck units + e2e dispatch parametrize); the
+first REAL conversion run is observation-gated on a corpus candidate appearing.
+Reaches users via the blocked release train (TRDD-AWXK0RFT).
+
+**SUPERSEDED — do NOT carry forward:** "Not started."
+
+---
+
+Child 3 of 4 split out of TRDD-87RKBYJ8 (duty 9 — the per-edit half EXISTS,
+the bulk half was MISSING).
 
 ## The ask (parent duty 9)
 
