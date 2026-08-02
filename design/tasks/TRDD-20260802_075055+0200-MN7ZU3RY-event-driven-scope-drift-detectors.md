@@ -11,7 +11,7 @@ scope: project
 release-via: publish
 parent-trdd: null
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [a690f36c]
 ---
 
 # Make the scope-drift detectors event-driven (`ConfigChange` / `FileChanged`)

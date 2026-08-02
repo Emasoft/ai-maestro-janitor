@@ -13,6 +13,20 @@ npt: [DOJ2LE1G]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
 
+**2026-08-02 20:25 — PASS 1 VERIFIED; VERIFIER DEFECT IT FOUND IS FIXED; PASS 2a DISPATCHED.**
+Pass 1 result, re-verified first-hand (`memgrep lint` counts + `git show 834f9e2` — memory
+files only): **PROJECT 2→0** (committed `834f9e2`), **LOCAL 6→1** (7/8 decomposed, all
+oracle-gated, no fact/lesson lost). The 1 flagged page exposed a REAL pre-existing verifier
+defect, minimally reproduced and FIXED in `c05ab942`: `load_bearing_tokens` extracted a
+line-wrapped numeric-unit token with a literal `\n` while `_token_haystack` collapses
+whitespace — so a byte-identical NO-OP failed `fact_tokens_preserved`, permanently blocking
+atomize/repair on any page with a wrapped "N unit" phrase. Tokens are now normalized with the
+haystack's own collapse (regression test proves real mutations are still caught); the flagged
+page's no-op now passes (verified live). Pass 2a (that 1 LOCAL page) dispatched. **USER's 33
+remain — deliberately NOT one giant pass** (pass 1 cost ~347k agent tokens for 8 atoms; 33 in
+one run would blow the agent's window): queue ~3 bounded batches on subsequent turns.
+Report: `reports/janitor-memory-subconscious-agent/20260802_192922+0200-wn7m829y-oversized-pass1.md`.
+
 **2026-08-02 19:35 — RE-MEASURED + FIRST BOUNDED PASS DISPATCHED (`column: dev`).**
 Fresh `memgrep lint` across all three scopes: the mechanical classes are CLEAN —
 0 unquoted-desc (the 4 from 2026-07-23 already fixed), 0 empty-lesson-body,
