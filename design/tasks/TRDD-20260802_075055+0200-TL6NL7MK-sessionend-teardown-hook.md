@@ -11,7 +11,7 @@ scope: project
 release-via: publish
 parent-trdd: null
 relevant-rules: []
-implementation-commits: [pending]
+implementation-commits: [33a89b17]
 ---
 
 # `SessionEnd` teardown — the janitor registers no hook at session termination
