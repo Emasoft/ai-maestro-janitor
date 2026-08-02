@@ -15,7 +15,8 @@ This heartbeat detector calls `project_memory_tracked.ensure_tracked`, which:
   * else APPENDS the canonical exception triplet (idempotent + atomic);
   * and flags `needs-manual` when a directory-pruning ignore (bare `.claude/`)
     blocks git from descending so an exception can't apply — without ever
-    rewriting the existing ignore line.
+    rewriting the existing ignore line, and ROLLING BACK the trial append so
+    no provably-inert negation lines are left behind (janitor#180).
 
 It surfaces ONE drift line ONLY when ensure_tracked actually changed something
 ("exception-added") or a human must act ("needs-manual"); the result is deduped

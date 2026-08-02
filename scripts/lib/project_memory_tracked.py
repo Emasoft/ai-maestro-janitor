@@ -134,26 +134,57 @@ def ensure_tracked(repo_root: Path | str) -> tuple[str, str]:
             return ("already-tracked", f"{_PROBE_REL} is not ignored")
 
         # 3) Ignored → append the missing exception line(s) to .gitignore.
+        #    Capture the prior state FIRST: the append is a TRIAL whose effect
+        #    only the re-probe below can judge, and an ineffective append must
+        #    be rolled back (janitor#180 — the enforcer used to LEAVE provably
+        #    inert negations under a directory-pruning `.claude/`, dirtying the
+        #    consuming repo's tree and silently reversing a documented removal,
+        #    while achieving nothing: git never descends into a pruned dir).
         gitignore = root / ".gitignore"
+        prior_text: str | None = (
+            gitignore.read_text(encoding="utf-8", errors="replace")
+            if gitignore.exists() else None
+        )
         added = _append_missing_exceptions(gitignore)
+
+        def _roll_back() -> None:
+            """Restore .gitignore to its pre-append state (atomic). Only ever
+            called when `added` is non-empty — we never touch lines we did not
+            write this call."""
+            if prior_text is None:
+                gitignore.unlink(missing_ok=True)
+                return
+            tmp = gitignore.with_suffix(gitignore.suffix + f".tmp.{os.getpid()}")
+            tmp.write_text(prior_text, encoding="utf-8")
+            os.replace(tmp, gitignore)
 
         # Re-probe: did the exception take effect?
         ignored_after = _check_ignored(root)
         if ignored_after is None:
-            return ("error", "re-probe of git check-ignore failed after editing .gitignore")
+            # Effect unknown → never leave a mutation we cannot vouch for.
+            if added:
+                _roll_back()
+            return ("error", "re-probe of git check-ignore failed after editing .gitignore (append rolled back)")
         if not ignored_after:
             detail = ", ".join(added) if added else "exception lines already present"
             return ("exception-added", detail)
 
         # 4) STILL ignored → a directory-pruning ignore line prevents git from
         #    descending into .claude/, so a `!`-exception can never re-include
-        #    a child path. The enforcer must NOT rewrite the existing ignore
-        #    line (that's the user's deliberate config); surface it for a human.
+        #    a child path. The lines we just appended are therefore provably
+        #    INERT — remove them again (janitor#180): leaving them dirties the
+        #    tree for zero effect, and on a repo whose owner deliberately
+        #    removed them it silently reverses that decision. The enforcer
+        #    still never rewrites the user's own ignore line; a human must
+        #    change it (surfaced via the detector's needs-manual drift line).
+        if added:
+            _roll_back()
         return (
             "needs-manual",
             "a directory-pruning ignore like bare `.claude/` prevents git "
             "descending; change it to `.claude/**` so exceptions apply — "
-            "enforcer never rewrites an existing ignore line",
+            "enforcer never rewrites an existing ignore line (and leaves no "
+            "inert exception lines behind)",
         )
     except Exception as exc:  # noqa: BLE001 - never crash a caller (heartbeat)
         return ("error", f"unexpected failure: {exc}")

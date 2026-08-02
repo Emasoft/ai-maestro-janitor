@@ -153,6 +153,29 @@ def test_bare_claude_prune_is_needs_manual(tmp_path):
     assert ".claude/" in gi.read_text(encoding="utf-8").splitlines()
     assert _is_ignored(repo) is True
 
+    # janitor#180: the trial-appended negations are provably INERT under the
+    # prune, so they must be ROLLED BACK — the file is byte-identical to before
+    # (no dirty tree, no silent reversal of a documented removal).
+    assert gi.read_text(encoding="utf-8") == ".claude/\n"
+
+
+def test_bare_claude_prune_re_run_stays_clean(tmp_path):
+    """janitor#180 regression shape: the consuming repo's owner had REMOVED the
+    inert negations (with a forbidding comment) and the next enforcer run
+    re-appended them. With the rollback, any number of runs leaves the file
+    byte-identical and keeps reporting needs-manual."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    gi = repo / ".gitignore"
+    original = "# Do NOT re-add the memory negations — inert under the prune.\n.claude/\n"
+    gi.write_text(original, encoding="utf-8")
+    _make_memory_dir(repo)
+
+    for _ in range(3):
+        action, _detail = project_memory_tracked.ensure_tracked(repo)
+        assert action == "needs-manual"
+        assert gi.read_text(encoding="utf-8") == original
+
 
 # --- (e) idempotent: two runs, no duplicate lines ---------------------------
 
