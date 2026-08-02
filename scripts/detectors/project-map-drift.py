@@ -38,6 +38,7 @@ sys.path.insert(0, str(_LIB))
 
 import dedupe  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
+from repomap import claudemd_slim as cslim  # noqa: E402
 from repomap.markers import read_fence_header  # noqa: E402
 
 # Reuse the generator's digest so detector and generator can never disagree
@@ -45,6 +46,43 @@ from repomap.markers import read_fence_header  # noqa: E402
 sys.path.insert(0, str(_LIB.parent))
 from repomap.renderer import structure_hash  # noqa: E402
 from repomap_generate import extract_all, load_excludes, repo_digest  # type: ignore[import-not-found]  # noqa: E402
+
+
+def _slim_contract_nudge(root: Path, text: str) -> None:
+    """The slim-CLAUDE.md half (TRDD-H12K9JYX): when a janitor-managed CLAUDE.md (it
+    carries the map fence — that is what opted it in) violates the slim contract or its
+    wikimem index went stale, emit ONE deduped nudge. NUDGE-ONLY for the same two reasons
+    the map half never writes: the prompt-cache bust and the co-ownership race. The
+    dedupe key carries the corpus digest + a violation fingerprint so a FIXED contract
+    stays silent and a NEW violation re-fires."""
+    try:
+        pages = cslim.scan_pages(root / ".claude" / "project" / "memory")
+        if not pages:
+            # No PROJECT wikimem corpus → nothing to index, and the slim migration
+            # presupposes the memory system is bootstrapped (/janitor-memory-bootstrap).
+            # Nudging here would point at a command that can only refuse.
+            return
+        problems = cslim.slim_violations(text)
+        if cslim.index_is_stale(text, pages):
+            problems.append("wikimem index stale")
+    except Exception:
+        return  # malformed fences etc. — the CLI reports precisely when run
+    if not problems:
+        return
+    digest = cslim.corpus_digest(pages)
+    key = f"slim@{digest}@{len(problems)}:{problems[0][:40]}"
+    seen = Path(state.state_dir()) / "project-map-drift.seen"
+    line = dedupe.emit_once(
+        seen,
+        key,
+        "[project-map-drift] CLAUDE.md breaks the slim contract: "
+        + "; ".join(p.split(" (")[0] for p in problems[:3])
+        + ". Refresh the index with `uv run scripts/claudemd_slim.py index` or migrate "
+        "narrative into wikimem pages via /janitor-claude-md-slim — at a cache-cheap "
+        "moment; the janitor never rewrites CLAUDE.md itself.",
+    )
+    if line is not None:
+        print(line)
 
 
 def main() -> int:
@@ -58,11 +96,16 @@ def main() -> int:
     if not claude_md.is_file():
         return 0
     try:
-        header = read_fence_header(claude_md.read_text(encoding="utf-8"))
+        text = claude_md.read_text(encoding="utf-8")
+        header = read_fence_header(text)
     except Exception:
         return 0  # malformed/unreadable → the generator reports it when run
     if header is None:
         return 0  # no block yet — insertion is the on-command's job
+
+    # A map-managed CLAUDE.md is also slim-managed (owner directive 2026-08-02) — check
+    # the cheap half first; it needs no extraction.
+    _slim_contract_nudge(root, text)
 
     current = repo_digest(root)
     recorded = header.get("digest", "")
