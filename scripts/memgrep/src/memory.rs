@@ -3418,6 +3418,31 @@ fn downward_reason(to: ScopeLayer) -> &'static str {
 }
 
 fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
+    // A NON-PAGE is not a lint target, however the path arrived. `collect_md` filters the
+    // index/report family on a directory WALK, but an EXPLICITLY named file bypasses that ("the
+    // caller asked for it") — right for index/recall, wrong here: grading MEMORY.md or a
+    // `<detector>-proposed.md` report against the PAGE schema yields findings that are UNFIXABLE BY
+    // CONSTRUCTION. Those files must NOT carry `description:`/`ocd:`/`lmd:`/`## Notes and lessons
+    // learned`, and a real page never links BACK to a librarian report, so the LINK LAW is
+    // unsatisfiable there too — MEMORY.md's one bridge line is mandated one-way by the janitor
+    // itself. Downstream that meant the same ERRORs on every heartbeat forever, with no edit any
+    // agent could make to clear them (janitor#165).
+    //
+    // Filtered HERE, not inside the per-file loop, because `build_graph` below re-collects from
+    // `paths` independently — a loop-local skip silenced the frontmatter checks and left the
+    // link-law pass still ingesting reports as link SOURCES.
+    let paths: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| !(p.is_file() && is_index_file(p)))
+        .cloned()
+        .collect();
+    // Every named path was a non-page ⟹ nothing to lint. Returning early is load-bearing: an EMPTY
+    // slice makes `collect_md` default to `["."]`, so falling through would silently lint the whole
+    // current directory instead of the file the caller named.
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let paths = &paths[..];
     let mut violations: Vec<Violation> = Vec::new();
     // atom id → every place it is declared. Accumulated across the whole corpus because uniqueness
     // is the one atom property a single file cannot decide (Check 8, after the per-file loop).
@@ -6339,6 +6364,80 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             v.is_empty(),
             "clean corpus must produce no violations; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_skips_non_pages_even_when_named_explicitly() {
+        // janitor#165. `collect_md` filters the index/report family on a directory WALK but lets an
+        // EXPLICITLY named file through ("the caller asked for it"). For lint that carve-out
+        // produces findings NO ONE CAN EVER FIX: a `*-proposed.md` detector report and the
+        // harness's MEMORY.md are not pages, so they must not carry `description:`/`ocd:`/`lmd:`/
+        // `## Notes and lessons learned` — every fire re-reported the same ERRORs forever.
+        //
+        // Both spellings must agree: `lint <dir>` already skipped them, `lint <file>` did not.
+        let dir = lint_tmpdir("non_pages");
+        // Deliberately as page-invalid as the real artifacts are: no frontmatter at all, plus a
+        // `[^7]` reference with no definition (the librarian's report cites footnote MARKERS from
+        // the pages it surveys, which is why `footnote-dangling-ref` fired on it too). Each also
+        // links to `page` — the LINK LAW half: a real page never links BACK to a report, so a
+        // `link-one-sided` WARN there is as unfixable as the ERRORs, and it lives in a SEPARATE
+        // corpus-wide pass that re-collects the paths on its own.
+        for name in ["MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"] {
+            std::fs::write(
+                dir.join(name),
+                "a report body citing [^7], listing [[page]].\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            dir.join("page.md"),
+            "---\nname: page\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"a real page\"\n---\n\
+             body.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let by_dir = lint_paths(std::slice::from_ref(&dir), false);
+        let named: Vec<PathBuf> = ["MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"]
+            .iter()
+            .map(|n| dir.join(n))
+            .collect();
+        let by_file = lint_paths(&named, false);
+        // The real page must STILL be graded — a filter that over-reaches silences the linter.
+        let page_only = lint_paths(&[dir.join("page.md")], false);
+        std::fs::write(dir.join("page.md"), "no frontmatter, not a page shape.\n").unwrap();
+        let broken_page = lint_paths(&[dir.join("page.md")], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(by_dir.is_empty(), "walk must skip non-pages; got: {by_dir:?}");
+        assert!(
+            by_file.is_empty(),
+            "an explicitly NAMED non-page must be skipped too, or its findings are unfixable \
+             by construction; got: {by_file:?}"
+        );
+        assert!(page_only.is_empty(), "a clean page must pass: {page_only:?}");
+        assert!(
+            !broken_page.is_empty(),
+            "the filter must not swallow a REAL page's violations — an empty result here would \
+             mean lint went silent instead of selective"
+        );
+    }
+
+    #[test]
+    fn lint_of_only_non_pages_does_not_fall_back_to_linting_the_cwd() {
+        // The trap the janitor#165 fix opens: filtering every named path away leaves an EMPTY
+        // slice, and `collect_md` reads empty as `["."]`. Without the early return, asking to lint
+        // ONE report would silently lint the whole current directory — findings from files the
+        // caller never named, attributed to a command they never ran.
+        let dir = lint_tmpdir("only_non_pages");
+        std::fs::write(dir.join("MEMORY.md"), "an index, not a page.\n").unwrap();
+        // A page-invalid `.md` in the CWD: it must NOT appear, because it was never asked for.
+        let cwd_decoy = std::env::current_dir().unwrap().join("zz_lint_cwd_decoy.md");
+        std::fs::write(&cwd_decoy, "no frontmatter — would violate if linted.\n").unwrap();
+        let v = lint_paths(&[dir.join("MEMORY.md")], false);
+        let _ = std::fs::remove_file(&cwd_decoy);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            v.is_empty(),
+            "must return empty, NOT fall through to a cwd walk; got: {v:?}"
         );
     }
 
