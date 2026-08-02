@@ -489,7 +489,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0a1baa9a15b6 digest=6b8381ea6c9e generated=2026-08-01T05:26:15+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=cd90ff035eb0 digest=522a3c68231b generated=2026-08-02T06:18:20+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -555,6 +555,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/detectors/dirty-tree.py` — Dirty-tree detector — Python port of dirty-tree.sh.
   · main() -> int
 `scripts/detectors/fleet-github-config.py` — fleet-github-config — SURFACE the daemon's fleet GitHub-config findings (TRDD-157OH2D7).
+  · main() -> int
+`scripts/detectors/gh-reply-watch.py` — gh-reply-watch — notify the main Claude when someone REPLIES to a thread this project opened.
   · main() -> int
 `scripts/detectors/github-issues-watch.py` — github-issues-watch — notify the main Claude of new issues / new comments (TRDD-2KQQAEPP).
   · main() -> int
@@ -692,7 +694,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/gh_issues_monitor/gh_notify_poll.py` — Watch for replies to the GitHub threads THIS project's Claude opened.
   · project_slug(root) -> str
-  · state_dir() -> str — This project's registry + poll cursor, under the janitor's DATA dir.
+  · state_dir() -> str — This project's registry + poll cursor, stored INSIDE the project.
   · load_state() -> dict
   · load_registry() -> dict
   · key(repo, number) -> str
@@ -1604,10 +1606,12 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · projected_exhaustion_epoch(resets_at_epoch, window_s, util_pct, now) -> int | None — Epoch when this window reaches 100% util at its current AVERAGE pace.
   · worst_window_burn(windows, *, now) -> dict | None — The single most-alarming usage window across a fleet of windows.
 `scripts/lib/token_burn.py` — Pure window burn-rate decision layer (TRDD-OY0W6LX5).
+  · model_windows_from_usage(usage, now) -> list[dict] — Per-window burn inputs for every MODEL-SCOPED limit in the payload's `limits[]`.
   · account_prefix(email) -> str — The privacy-safe account label for a drift line: the local part of the email only
   · windows_from_usage(usage, now) -> list[dict] — Parse a raw `/api/oauth/usage` payload into per-window burn inputs for `now`.
+  · session_is_open(usage, now) -> bool | None — Does this account have an OPEN 5h SESSION window right now?
   · window_starts(accounts_usage, now) -> tuple[int | None, int | None] — The LIVE subscription windows' START epochs `(w5_lo, w7_lo)` — `resets_at − window_s`.
-  · format_burn_line(label, window) -> str — Render ONE tripped window as the base drift line (no top-consumer clause — the
+  · format_burn_line(label, window, *, live) -> str — Render ONE tripped window as the base drift line (no top-consumer clause — the
   · evaluate_trips(accounts_usage, now, ratio, min_util) -> list[dict] — The pure burn verdict: one trip per (account, window) whose burn ratio ≥ `ratio`.
   · evaluate(accounts_usage, now, ratio, min_util) -> list[str] — The detector's pure decision helper: the rendered burn drift lines (no top-consumer
 `scripts/lib/token_graph.py` — Terminal token-usage graphs (TRDD-4MMXTJFB).
@@ -1681,6 +1685,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · reset_ua_cache() -> None — Test seam: forget the per-process UA so a fresh derivation can be observed.
   · read_cache(key) -> dict | None — The last payload cached for this account, or None. Never raises.
   · cache_age(key, *, now) -> float | None — Seconds since this account's cache was written, or None when there is none.
+  · retire_seconds() -> int — Age past which a probe entry is litter that can never serve a read again.
+  · prune_retired(*, now, max_age_s) -> int — Delete probe entries older than `max_age_s`. Returns how many files were removed.
   · write_cache(key, payload) -> bool — Persist a fetched payload atomically. Returns True iff the write landed.
   · read_cooldown(key) -> tuple[float, int] — `(until_epoch, consecutive_429_count)`; `(0.0, 0)` when absent or unreadable.
   · in_cooldown(key, *, now) -> bool
