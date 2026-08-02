@@ -1377,3 +1377,24 @@ def test_body_minus_lessons_does_not_raise_on_an_inline_heading_mention():
     )
     out = v._body_minus_lessons(meta)  # must not raise
     assert "mentioned here inline" in out.lower()
+
+
+def test_fact_tokens_preserved_noop_passes_when_numeric_unit_line_wraps():
+    """The WN7M829Y editorial-pass defect (2026-08-02): a numeric-unit phrase that
+    LINE-WRAPS between number and unit ("3\\ndays") used to be extracted with a
+    literal newline, which no whitespace-collapsed haystack can contain — so a
+    byte-identical NO-OP failed fact_tokens_preserved and every atomize/repair
+    commit on the page was permanently blocked. Tokens are now normalized with
+    the same collapse the haystack uses."""
+    a = _note(body=(
+        "The purge detector removes report files older than 3\n"
+        "days after each run, and nothing else on disk.\n"
+    ))
+    ok, missing = v.fact_tokens_preserved([a], a)  # byte-identical no-op
+    assert ok, f"a no-op must never lose tokens; missing={missing}"
+    # The token itself survives extraction in collapsed form (coverage not narrowed).
+    assert any("3 days" in t for t in v.load_bearing_tokens(a))
+    # And a REAL mutation of the wrapped constant is still caught.
+    mutated = a.replace("3\ndays", "30\ndays")
+    ok2, missing2 = v.fact_tokens_preserved([a], mutated)
+    assert not ok2 and any("3 days" in m for m in missing2)

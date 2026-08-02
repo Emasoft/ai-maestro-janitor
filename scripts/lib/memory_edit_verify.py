@@ -441,7 +441,14 @@ def load_bearing_tokens(text: str) -> set[str]:
     tokens.update(_SEMVER_RE.findall(body))
     tokens.update(_HEX_ID_RE.findall(body))
     tokens.update(_NUMERIC_UNIT_RE.findall(body))
-    return tokens
+    # Normalize each token with the SAME whitespace collapse `_token_haystack` applies
+    # to the comparison target. Without this, a numeric-unit phrase that happens to
+    # LINE-WRAP between number and unit ("3\ndays") is extracted with a literal
+    # newline that no collapsed haystack can ever contain — so `fact_tokens_preserved`
+    # fails even on a byte-identical no-op, permanently blocking every atomize/repair
+    # commit on that page (found by the WN7M829Y editorial pass, 2026-08-02; the
+    # asymmetry, not the content, was the defect).
+    return {re.sub(r"\s+", " ", t) for t in tokens}
 
 
 def _token_haystack(text: str) -> str:
