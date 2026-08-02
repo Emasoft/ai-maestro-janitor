@@ -1,23 +1,40 @@
 ---
 trdd-id: X6N7I8CA
 title: check-login verifies WHOSE session the profile holds, not just that one exists
-column: todo
+column: complete
 created: 2026-08-02T21:26:43+0200
-updated: 2026-08-02T21:26:43+0200
+updated: 2026-08-02T23:24:09+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
 scope: project
 release-via: publish
 external-refs: [179]
-implementation-commits: []
+implementation-commits: [35eaf8c]
 ---
 
 # `check-login.sh` ✓s a profile signed into a DIFFERENT account (janitor#179)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-**Not started.** Filed from the peer report janitor#179 (the ai-maestro Claude), claim
+**COMPLETE — implemented as options 2+3 (honesty), commit 35eaf8c.** Option 1 (offline
+identity cross-check) was verified UNAVAILABLE: cookie values are encrypted, and no
+on-disk identity artifact exists (state.json slots / cookie-jar snapshots are keyed by
+the email the profile was FILED under — the same unverified label). The only identity
+oracle is the capture's online `/roles` probe (slot_capture_browser.py:483, which already
+re-files under the ACTUAL account on mismatch). Shipped: check-login.sh ✓ lines claim
+"a session is SAVED" + owner-unverified caveat (never "<email>: logged in"); the exit-0
+contract (session saved & persisted) is unchanged for callers. lifetime-status.sh: ok
+verdict → "ok (session saved; owner unverified)"; both clean exits print the shared
+IDENTITY_CAVEAT; the bare "nothing to do" all-clear is gone. Wording-contract tests in
+tests/test_oauth_helper_scripts.py pin both shapes against regression (25 pass).
+Reaches users via the blocked release train (TRDD-AWXK0RFT) — nothing further to do here.
+
+**SUPERSEDED — do NOT carry forward:** "Not started."
+
+---
+
+Filed from the peer report janitor#179 (the ai-maestro Claude), claim
 VERIFIED first-hand 2026-08-02 before filing: in `scripts/oauth_rotator/check-login.sh`
 the `email` argument is a DISPLAY LABEL only — the check is "a persistent claude.ai
 `sessionKey` cookie exists and is unexpired" (or ≥5 persistent cookies), never WHOSE
