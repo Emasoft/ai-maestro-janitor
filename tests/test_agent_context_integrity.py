@@ -242,3 +242,30 @@ def test_poisoned_reason_is_bounded_and_empty_when_clean() -> None:
     reason = aci.poisoned_reason(fs)
     assert "and 7 more" in reason
     assert reason.count("[r]") == 3
+
+
+def test_every_rule_severity_is_reported() -> None:
+    """Pins the CONTRACT the removed severity filter used to pretend to enforce.
+
+    The detector once carried `_REPORTABLE = {"critical","high","medium"}`. Neutering it to
+    always-True reddened ZERO of 10 tests — a finding, not a clean bill. Measuring the rule
+    table explained why: it emits CRITICAL/HIGH/MEDIUM and nothing below, so the set excluded
+    nothing that exists. Correct, the filter was a no-op; wrong (the raw-case compare it
+    shipped with), it silenced the entire detector. Pure downside, unpinnable by any input.
+
+    So the filter is gone and this guards the assumption that justified removing it. The day
+    someone adds a LOW/INFO rule, this reddens and the decision gets made deliberately —
+    case-insensitively, and with a test that can fail — instead of a filter being re-added on
+    the belief that it already worked."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+    import agent_config_patterns as acp  # type: ignore[import-not-found]
+
+    emitted = {r.severity.strip().lower() for r in acp.RULES}
+    unexpected = emitted - {"critical", "high", "medium"}
+    assert not unexpected, (
+        f"agent_config_patterns now emits {sorted(unexpected)}, which agent-context-integrity "
+        "reports unconditionally. Decide whether those belong in a heartbeat drift line; if "
+        "not, add a CASE-INSENSITIVE filter and a test that fails without it."
+    )

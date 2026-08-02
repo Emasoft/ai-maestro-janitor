@@ -74,22 +74,24 @@ _GLOBS = (
 # A single pathological file must not burn the heartbeat budget.
 _PER_FILE_BYTE_CAP = 512 * 1024
 _MAX_FILES_DEFAULT = 400
-# Only these severities are worth waking anyone for. `scan_text` also emits informational
-# matches, and a detector that reports everything teaches the reader to discount it.
+# THERE IS DELIBERATELY NO SEVERITY FILTER. Every rule in `agent_config_patterns.RULES` is
+# reported, and that is a measured decision, not an omission.
 #
-# CASE IS LOAD-BEARING HERE — the two libraries speak different vocabularies:
-# `agent_config_patterns` emits UPPERCASE ("CRITICAL"/"HIGH"/"MEDIUM"/"LOW"), while
-# `issue_catalog` is keyed on lowercase. The first cut of this detector compared the raw
-# `f.severity` against a lowercase set, so the gate matched NOTHING and the detector was
-# silent on a blatantly poisoned CLAUDE.md while type-checking and linting clean. Caught only
-# by running it end-to-end. Normalise on the way in (`_reportable`) and on the way out (the
-# `raise_issue` call) — never compare raw.
-_REPORTABLE = frozenset({"critical", "high", "medium"})
-
-
-def _reportable(severity: str) -> bool:
-    """Case-insensitive severity gate. See `_REPORTABLE` for why this is not `in`."""
-    return severity.strip().lower() in _REPORTABLE
+# The first cut carried `_REPORTABLE = {"critical","high","medium"}` and compared the raw
+# `f.severity` against it — but the lib emits UPPERCASE, so the gate matched NOTHING and the
+# detector was SILENT on a blatantly poisoned CLAUDE.md while passing ruff and pyright.
+#
+# Fixing the case was not the end of it. A neuter (`_reportable` → always True) reddened ZERO
+# of the 10 tests, which is a finding rather than a clean bill — so the filter was measured
+# instead of defended: the rule table emits CRITICAL(11) / HIGH(9) / MEDIUM(1) and NOTHING
+# below, so the set excluded nothing that exists. That makes it pure downside — correct, it
+# was a no-op; wrong, it silenced the whole detector — and no input could pin it.
+#
+# The contract is pinned by `test_every_rule_severity_is_reported` instead: the day a LOW/INFO
+# rule is added, that test reddens and someone decides deliberately, with a case-insensitive
+# comparison, and a test that can actually fail. Until then a filter here is a trap.
+#
+# `issue_catalog` IS keyed lowercase, so the `raise_issue` call still normalises on the way OUT.
 
 
 def _max_files() -> int:
@@ -147,9 +149,9 @@ def _scan(
         rel = str(path.relative_to(project_root))
         # `filename` is the FP-hardening hint: it suppresses rules that would otherwise fire
         # on a security tool's own IOC catalogues and red-team fixtures.
-        for f in acp.scan_text(text, file_kind=_file_kind(path), filename=rel):
-            if _reportable(f.severity):
-                out.append((rel, f))
+        out.extend(
+            (rel, f) for f in acp.scan_text(text, file_kind=_file_kind(path), filename=rel)
+        )
     return out
 
 
