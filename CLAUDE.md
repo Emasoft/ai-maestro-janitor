@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e8b33cab1187 digest=0f2669f88bd2 generated=2026-08-02T18:44:59+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6ce3e2f14968 digest=6da64e7a9c40 generated=2026-08-03T01:42:29+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -268,13 +268,21 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · gather_before(now) -> dict
   · gather_after(before, now) -> dict
   · main() -> int
+`scripts/hooks/on-config-change.py` — ConfigChange hook — event-driven fast path for the config scope-drift detectors
+  · main() -> int
+`scripts/hooks/on-file-changed.py` — FileChanged hook — event-driven fast path for the file-watch scope-drift detectors
+  · main() -> int
 `scripts/hooks/on-prompt-submit-autorecall.py` — UserPromptSubmit hook — automatic memory recall, ON by default (issues #16, #45).
   · main() -> int
 `scripts/hooks/on-prompt-submit-user-mem.py` — UserPromptSubmit hook — the PRIVATE user-memory commands (TRDD-4334aad0).
   · main() -> int
 `scripts/hooks/on-prompt-submit.py` — UserPromptSubmit hook — host-level user-presence breadcrumb (TRDD-fb4850b5).
   · main() -> int
+`scripts/hooks/on-session-end.py` — SessionEnd hook — the janitor's teardown path (TRDD-TL6NL7MK).
+  · main() -> int
 `scripts/hooks/on-session-start-trdd-state.py` — SessionStart hook — actively surface in-progress TRDD STATE blocks on resume.
+  · main() -> int
+`scripts/hooks/on-session-start-watchpaths.py` — SessionStart hook (watchPaths declaration only) — arms the FileChanged watch
   · main() -> int
 `scripts/hooks/on-session-start.py` — SessionStart hook — Python port of on-session-start.sh.
   · main() -> int
@@ -730,6 +738,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
   · consolidate_has_work(root, *, last_fingerprint, stamp_age_s, recheck_after_s) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
   · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
+  · retro_lesson_has_work(root) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
   · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
   · conflict_pairs(root) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
   · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
@@ -759,6 +768,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages, fact_source_texts) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
   · verify_split(source_text, source_meta, subpage_texts, subpage_metas, overview_text, page_sizes, max_bytes, unsplittable, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a SPLIT lost nothing before its transaction commits.
   · verify_repair(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an in-place page REPAIR lost nothing AND actually completed the page.
+  · atom_desc_violations(text) -> list[str] — Every atom marker whose `desc:` is MISSING, UNQUOTED, or over the 200-char cap —
   · verify_atomize(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an ATOMIZE pass (TRDD-3b9b2040) ONLY added `^id [keywords:…]` markers and lost nothing.
 `scripts/lib/memory_guard.py` — Tier-1 OOM memory-guard primitives (TRDD-7100178d, Pillar 4 / Phase 5).
   · ProcRow — One parsed `ps -axo pid,ppid,rss,etime,command` row.
@@ -1123,8 +1133,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · build_xdotool_steps(commands, *, esc_first) -> list[list[str]] — The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · run_chained_inject(terminal, *, first, then, gate_stamp, gate_baseline, pre_submit_first, gate_timeout_s, giveup_s, sleeper) -> tuple[bool, str] — Type `first`, wait for the session it creates to actually EXIST, then type each of
+  · fire_detached_argv(delay_s, argv, *, abort_unless_any) -> None — PUBLIC: run one fixed argv through the SAME detached delayed child as the
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
-  · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
+  · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence, abort_unless_any) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
   · main() -> int
 `scripts/lib/ticket_proposal.py` — The PROJECT-domain bridge: propose → approve → ticket (TRDD-CGYMUKO6).
   · parse_trdd_ref(ref) -> str | None — Accept `TRDD-35AC8I8D` or a bare `35AC8I8D`; return the canonical UPPERCASE id, else None.
@@ -1339,6 +1350,21 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/migrate_memory_scope.py` — Memory scope-migration helper (TRDD-47df698b) — re-scope a LOCAL memory corpus
   · main() -> int
+`scripts/oauth_rotator/burn_gate.py` — Burn-rate-aware proactive rotation — the PURE decision layer (TRDD-FQXBURNR).
+  · record_sample(samples, ts, util, keep) -> list — Append one `(ts, util%)` reading to a ring, returning the new ring (bounded, sorted
+  · slope_pct_per_min(samples, now, max_age_s) -> float | None — Least-squares slope of the FRESH samples, in %/minute. None (⇒ fail-open) when
+  · minutes_to_wall(samples, now, cap_pct, max_age_s) -> float | None — Projected minutes until the account's util reaches `cap_pct` at the RECENT slope.
+  · record_cap_sample(caps, samples, now, keep) -> list — On a CONFIRMED (debounced) live 429, record the last recently-sampled util% as an
+  · effective_switch_at(configured, caps, margin) -> float — The near-limit bar for one (account, window): the configured threshold, lowered to
+  · projected_near(samples, caps, now, horizon_min) -> bool — The FAST-BURN gate for the LIVE account: True when the projected wall — at the
+  · candidate_walls_soon(samples, caps, now, horizon_min) -> bool — The SELECTION filter: True when an alternate's own recent slope projects ITS wall
+  · account_rings(state, email) -> dict — The `{window: ring}` dict for one account, from `state['usage_samples']`.
+  · account_caps(state, email) -> dict
+  · store_rings(state, email, rings) -> None
+  · store_caps(state, email, caps) -> None
+  · observe(state, email, now, fh, sd) -> None — Record one tick's `(5h, 7d)` readings for `email` into the state dict, bounded.
+  · observe_wall(state, email, now) -> None — Record a CONFIRMED 429 as effective-cap samples for `email` (per window, from each
+  · live_burn_verdict(state, email, now, *, horizon_min) -> str | None — The whole live-account fast-burn/learned-cap decision in one call: a short human
 `scripts/oauth_rotator/cascade.py` — The OAuth-rotator cascade — ONE paradigm in three parts, each falling back to
   · CascadeLeg — Which leg of the ROTATE→RENEW→REAUTH cascade an ALTERNATE account sits in.
   · AccountState — The cascade-relevant facts about ONE account — all non-secret metadata.
