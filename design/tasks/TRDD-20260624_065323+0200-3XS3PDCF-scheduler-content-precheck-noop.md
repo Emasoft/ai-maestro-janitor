@@ -1,9 +1,10 @@
 ---
 trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
-column: dev
+column: published
+implementation-commits: [441d467, 636e7df, c065959, 10f899b, f2056ca, 473e417, bacf677]
 created: 2026-06-24T06:53:23+0200
-updated: 2026-07-09T15:33:52+0200
+updated: 2026-08-02T06:24:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -22,7 +23,48 @@ external-refs: []
 
 # TRDD-3XS3PDCF — scheduler-side cheap content-precheck to eliminate no-op memory-agent spawns
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
+
+### 2026-08-02 — CLOSED (`dev → published`). Both remaining items resolved; the body's BLOCK notes are dead.
+
+All six chores are gated and every commit is in a released tag. The two follow-ups the
+2026-07-04 reconciliation left in scope have both been settled — **in code, with the reasoning
+written into the module**, which is why nothing on the card moved to record it:
+
+- **Split refinement — resolved by being REFUTED, then improved.** `memory_content_precheck.py`
+  now carries the re-derivation verbatim: the once-planned narrowing to "over-cap AND splittable"
+  is *OBSOLETE and must NOT be added* — since issues #57/#58 every over-cap page gives the agent
+  work, so narrowing would silently drop mis-tier reports. The real cost was then removed from the
+  other side (`bacf677`, v0.63.3, issue #114): an over-cap `tier: component` is the one case the
+  skill must refuse, so it moved to a `stat`-and-frontmatter channel (`oversized_mistiered_pages`)
+  instead of burning ~260k tokens per dispatch to re-derive the same refusal.
+- **"Consolidate still drains" — bounded by the UNCHANGED-CORPUS fingerprint gate** (`473e417`,
+  v0.45.0): identical fingerprint ⇒ the agent has already read exactly this content, so
+  re-spawning it provably cannot produce a different answer. Any mutation re-arms it immediately
+  and the suppression expires after 7 days.
+
+**Re-tested 2026-08-02, and the honest result is that I found nothing to add.** I went looking for
+a tighter consolidate candidate filter and drafted two: extending the stopword list (measured:
+3 clusters → 3, and the clusters re-form on the next filler word) and a Jaccard-similarity gate
+(measured: the positive and negative classes overlap, and a 0.15 threshold keeps only 1 of 4 true
+families). Both were refuted against the live corpus and neither shipped — which matters here
+because it is the second independent confirmation of what the module already argues: a keyword
+proxy for *subject-sameness* both over- and under-fires, and its under-fire silently destroys a
+real merge. The fingerprint gate is not a placeholder for a better filter; it is the sound one.
+
+**The `BLOCKED` paragraphs below are SUPERSEDED — do NOT act on them.** They say the harvest
+precheck is blocked on TRDD-ab232dbd / issues #231/#232; the same card records it UNBLOCKED on
+2026-07-08 and IMPLEMENTED that night (`10f899b`). Only the follow-ups section was never updated,
+which is what made the reconciler read a live block that has not existed for three weeks.
+
+**The `### NEXT ACTION` list further down is likewise spent** — it is the original 2026-06-24
+5-step plan, and steps 1–5 all landed (441d467 split, 636e7df consolidate-structural,
+c065959 repair/atomize, 10f899b harvest, f2056ca conflict).
+
+`release-via: publish` + released ⇒ terminal column **`published`** (rule 12), and
+`implementation-commits:` is now recorded — it was empty for all seven.
+
+### The original STATE, from 2026-06-24 (superseded where the entry above says so)
 
 **2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** the split-MVP is PUBLISHED (441d467, in v0.18.1 — the "committed locally, NOT yet published" note below is SUPERSEDED); consolidate gained its own structural precheck via TRDD-8UD3Q7K5/issue #64 (636e7df, v0.24.15). Remaining in-scope follow-ups: harvest precheck (UNBLOCKED 2026-07-08 — see the entry below), split refinement (memory_content_precheck.py:142 documents them as follow-ups).
 
