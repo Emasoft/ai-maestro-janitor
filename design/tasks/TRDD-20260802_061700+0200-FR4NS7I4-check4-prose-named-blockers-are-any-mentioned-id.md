@@ -36,7 +36,7 @@ if _BLOCKED_PROSE_RE.search(_mask_inline_code(record.body)):
 ```
 
 The two conditions are evaluated over the **whole body**, independently: *does this card's
-prose say blocked ANYWHERE* and *does it mention a TRDD id ANYWHERE*. Nothing requires the
+prose carry block-language ANYWHERE* and *does it mention a TRDD id ANYWHERE*. Nothing requires the
 two to be near each other, so on a card that is legitimately held, **every** id it cites —
 a sibling, a superseded card, a thing to reuse — is treated as one of its blockers, and each
 one that has since gone terminal is reported as a cleared blocker to act on.
@@ -60,20 +60,20 @@ written down once.
 
 Require **proximity**: promote a prose-named id only when it appears on the same line as, or
 within a sentence of, the block-language match — the same discrimination `check3` already
-applies by masking inline code. That keeps the case the widening was for ("BLOCKED on
-TRDD-XXXX" written in prose but never encoded in `blocked-by:`) and drops the case it was
+applies by masking inline code. That keeps the case the widening was for (`BLOCKED-on
+TRDD-XXXX` written in prose but never encoded in `blocked-by:`) and drops the case it was
 never for (a citation elsewhere in a long body).
 
 Watch the boundary before changing it: a card that writes its blocker on one line and the id
 on the next is the shape most likely to regress, so the regression tests must include both
-"blocked on <id>, same line" and "blocked … <id> two lines later" and state which one the new
-rule intends to keep.
+`blocked-on <id>` on ONE line and the same words split across TWO lines, and state which one
+the new rule intends to keep.
 
 ## Verification
 
 - A card with block-prose and an unrelated terminal TRDD citation far from it ⇒ NOT reported
   (fails today, using 2C8XFOW9's real shape).
-- A card whose prose says "blocked on TRDD-XXXX" with XXXX terminal ⇒ still reported.
+- A card whose prose says `blocked-on TRDD-XXXX` with XXXX terminal ⇒ still reported.
 - A card with a terminal id in `blocked-by:` ⇒ still reported, regardless of prose.
 - Re-run over the live board: the stale-blocker count should drop to the cards that name a
   blocker deliberately, and no card that named one should stop being reported.
