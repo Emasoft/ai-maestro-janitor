@@ -13,6 +13,13 @@ npt: [DOJ2LE1G]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
 
+**2026-08-02 19:45 — PASS 2a VERIFIED: LOCAL 1→0.** The page the verifier defect blocked
+(`reference_publish_cargo_clippy_bindgen_flaky.md`) decomposed clean on the first try after
+`c05ab942` — the fix is proven end-to-end, not just in the unit test. PROJECT and LOCAL are
+now **fully clean (8/8 decomposed, 0 flagged remaining)**. Remaining: USER scope's 33, in
+~3 bounded batches (batch 1 dispatched this turn). Report:
+`reports/janitor-memory-subconscious-agent/20260802_193740+0200-wn7m829y-oversized-pass2a.md`.
+
 **2026-08-02 20:25 — PASS 1 VERIFIED; VERIFIER DEFECT IT FOUND IS FIXED; PASS 2a DISPATCHED.**
 Pass 1 result, re-verified first-hand (`memgrep lint` counts + `git show 834f9e2` — memory
 files only): **PROJECT 2→0** (committed `834f9e2`), **LOCAL 6→1** (7/8 decomposed, all
