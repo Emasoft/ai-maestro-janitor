@@ -3,14 +3,14 @@ trdd-id: N7NZOYAK
 title: check2 lets one DONE-marked NEXT-ACTION line mask every still-pending one
 column: testing
 created: 2026-08-02T06:06:23+0200
-updated: 2026-08-02T06:18:00+0200
+updated: 2026-08-02T13:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: HIGH
 scope: project
 release-via: publish
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [77b9ba2]
 ---
 
 # check2 lets one DONE-marked NEXT-ACTION line mask every still-pending one

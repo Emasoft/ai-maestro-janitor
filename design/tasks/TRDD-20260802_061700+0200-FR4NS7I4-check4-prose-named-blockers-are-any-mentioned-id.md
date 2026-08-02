@@ -3,14 +3,14 @@ trdd-id: FR4NS7I4
 title: check4 reads every TRDD id mentioned on a held card as one of its blockers
 column: testing
 created: 2026-08-02T06:17:00+0200
-updated: 2026-08-02T06:52:00+0200
+updated: 2026-08-02T13:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: LOW
 scope: project
 release-via: publish
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [7786f14]
 ---
 
 # check4 reads every TRDD id mentioned on a held card as one of its blockers
