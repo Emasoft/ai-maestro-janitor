@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-02T14:19:42+0200
+updated: 2026-08-02T14:32:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -13,9 +13,48 @@ blocked-by: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-**Not started. Awaiting a fable-advisor verdict** (requested 2026-08-02, covering both this and
-TRDD-QK7M2B0X's singleton move). Do NOT implement before reading it — the central question is
-whether auto-`/clear` on another session is defensible at all, and `/clear` is irreversible.
+**Not started. FABLE-ADVISOR VERDICT RECEIVED 2026-08-02 — it RE-SCOPES this card. Read the
+verdict section below BEFORE the design notes further down, which were written on a premise that
+turned out to be false.**
+
+### ⚠️ THE PREMISE WAS WRONG — diagnose before building
+
+I filed this card assuming the janitor's own heartbeat drove the 92 s keep-warm fires. **It
+cannot have.** Verified first-hand: the cadence tiers are FAST `*/5` = **300 s**, MID `*/15` =
+900 s, SLOW `*/30` = 1800 s. A 92 s median gap is **faster than the fastest tier**, so something
+other than the janitor cron drove those turns.
+
+**STEP 1 IS THEREFORE DIAGNOSIS, NOT IMPLEMENTATION:** read that session's transcript tail and
+establish what actually triggered each turn. Building an auto-clear mechanism on the assumption
+it was our cron would be a fix aimed at a cause that does not exist — and it would appear to
+work, because clearing the context reduces the cost of whatever the real driver is too.
+
+### Verdict: NOT as external injection — a SELF-NUDGE, and probably not yet
+
+- **Do not let the daemon (or any outside actor) type `/clear` into another session.**
+  `clear_trigger.py` is built as a SELF-trigger: it resolves the pane from its OWN
+  `$ITERM_SESSION_ID`, validates a handoff the MODEL authored that turn, and writes resume state
+  synchronously because there is no PostClear hook. An external `/clear` has none of that —
+  nobody authored a fresh handoff, and `/clear` with a stale or absent one is unrecoverable loss.
+- **The safe owner is the session's OWN dispatch, and the safety then comes free.** A session
+  parked on `ExitPlanMode`/`AskUserQuestion` or mid-long-tool cannot end its turn, so its cron
+  never fires. A heartbeat-owned nudge therefore *structurally cannot* clear a blocked or busy
+  session — the property the acceptance list below was trying to buy with tests.
+  Mechanism: dispatch emits a marker → the model writes a FRESH handoff that turn → it invokes
+  the existing skill, which runs `clear_trigger` with its own presence gate. **Never a
+  `fleet_inject` keystroke path for `/clear`.**
+- **`/compact` + the SLOW tier may already capture most of the win.** The idle burn is dominated
+  by the ~308 k install floor (measured 343,007 → 308,644), so `/clear` reloads the same base
+  prefix and beats `/compact` only by the summary + residue — a modest slice of ~507 k/fire.
+  Cutting FIRES (`*/30` = 6× fewer) dwarfs cutting per-fire size.
+- **The asymmetry is the whole answer:** being wrong that compact suffices costs measurable
+  dollars, checkable in `token-meter.jsonl` after a week. Auto-`/clear` misfiring ONCE on a
+  session with real in-flight state is unrecoverable.
+
+**Owner directive reconciliation:** the directive said *force the agent to run
+`/janitor-handoff-and-clear`*. The verdict does not refuse it — the agent still runs exactly that
+skill. It changes only WHO pulls the trigger: the session's own heartbeat rather than keystrokes
+typed in from outside. That preserves the intent and removes the unrecoverable failure mode.
 
 **OWNER DIRECTIVE (2026-08-02, verbatim):** *"when that happens, you should force the agent to
 run `/janitor-handoff-and-clear`, so to reduce the context to a minimum."*

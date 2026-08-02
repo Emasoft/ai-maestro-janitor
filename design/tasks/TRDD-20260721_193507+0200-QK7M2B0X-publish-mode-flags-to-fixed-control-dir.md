@@ -3,7 +3,7 @@ trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
 column: dev
 created: 2026-07-21T19:35:07+0200
-updated: 2026-08-02T14:15:00+0200
+updated: 2026-08-02T14:32:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -56,9 +56,45 @@ caller whose tag ≠ stem cannot alarm on another chore's stamp. Tests: 6 new in
 corrupt-stamp cases). Two `test_daemon_bulk_lane.py` assertions moved from the old path to the
 public `read_last_run` contract so they survive the singleton move too.
 
-**NEXT ACTION (phase B step 2, SECOND HALF — the singleton):** `daemon.pid`, `daemon.flock`,
-`daemon.heartbeat.ts` under TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW lock
-BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment costs one
+### FABLE-ADVISOR VERDICT 2026-08-02 — PROCEED, but the plan below was INCOMPLETE
+
+Verdict: *"the silent hazard is not the flock, it's the pid/heartbeat READERS."* Verified
+first-hand before recording: `daemon_pid()` reads a single `_pid_path()` and `read_heartbeat()`
+a single `_heartbeat_path()` — neither dual-reads.
+
+1. **DUAL-WRITE `daemon.pid` + `daemon.heartbeat.ts` to BOTH paths during the window.** This is
+   the ROLE INVERSION that makes the singleton unlike the stamps: for stamps the writers were
+   old and the readers new, so `read_last_run`'s `max()` fixed it from the reading side. Here the
+   writer is NEW and the readers are OLD — a 0.6x session's `daemon_is_alive()` reads only
+   `global_state_dir()`, sees nothing, concludes DEAD, and spawn-churns into the held lock.
+   Bounded by the crash-loop breaker, but noisy, and invisible from the new daemon's side.
+   **Early signal that this was forgotten: `daemon.spawn-history` filling during the upgrade.**
+2. **The two-daemon window is AVOIDABLE, not unavoidable.** Non-blocking NEW-then-OLD, exit on
+   partial; `daemon_needs_restart`/`_restart_decision` already SIGTERMs a stale-version daemon on
+   the first new-code heartbeat, so it closes fast regardless.
+3. **Make it DETECTABLE anyway:** each tick, cross-check the OTHER era's `daemon.pid` — a live
+   foreign pid ≠ self ⇒ `findings_ledger.record()` + a drift line. Converts a silent
+   double-daemon into an indexed finding.
+4. **`_try_flock` treats an UNOPENABLE control_dir as HELD** — so an unwritable
+   `~/.claude/janitor-control/` means the daemon never starts, silently. That path needs a LOUD
+   finding, not a log line. Reuse `_same_file` for the self-deadlock case.
+5. **Pointer-file alternative REJECTED.** §7.2's one-daemon-by-CONTENTION needs both parties on
+   the SAME inode; a pointer adds foreign parse logic + TOCTOU, and its miss-mode ("pointer
+   absent → no lock → run anyway") is exactly the silent-ignore this card exists to kill.
+6. **"Hold new across retirement of old" is SOUND** — "retirement" is a code event two releases
+   out, not a runtime step. At runtime it is just "hold both fds for the daemon's lifetime",
+   which `daemon.py` already does with the 2U8AH82F migration fd. Crash mid-transition is safe:
+   flocks die with the process, and a stale pid/heartbeat means respawn.
+
+**Recommended primitive:** `acquire_singleton_dual(blocking=...)` — non-blocking NEW-then-OLD,
+exit/wait on partial, fds never released (a blocking variant is deadlock-free because the
+acquisition order is total). NOT `_acquire_dual_flock`, which releases both halves on partial
+failure.
+
+**NEXT ACTION (phase B step 2, SECOND HALF — the singleton):** implement the above —
+`acquire_singleton_dual` + dual-WRITE of pid/heartbeat + the cross-era pid check + the
+unwritable-control_dir finding, then `daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts` under
+TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW lock BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment costs one
 duplicated chore; a flock moved at a bad moment costs a SECOND DAEMON, with a live ai-maestro
 server already on the host. It **CANNOT reuse `_acquire_dual_flock`**: that primitive releases both
 halves on partial failure, whereas the singleton must hold the new lock ACROSS retirement of the
