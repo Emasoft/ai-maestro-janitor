@@ -1,9 +1,9 @@
 ---
 trdd-id: 57WJL5L2
 title: Superseded-atoms-below-a-delimiter convention + memgrep default-exclude
-column: dev
+column: complete
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T23:38:00+0200
+updated: 2026-08-02T23:39:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -12,16 +12,38 @@ release-via: publish
 created-by: 87RKBYJ8
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [cceb229]
 ---
 
 # Superseded atoms below a delimiter — memgrep excludes them by default
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-**Not started.** Child 1 of 4 split out of TRDD-87RKBYJ8 (duties 7-8 — the HIGHEST-value gap
+**COMPLETE — the CORRECTNESS layer shipped as designed, commit cceb229.** Implemented per
+the design refinement below (status-keyed, NOT positional): default-exclude of
+`status:superseded` atoms in all 4 search paths (walk+index × recall+find, filtered at
+the consumer; index producers untouched), `--include-superseded` on recall/find, the
+second-hop by-id/by-name exception (addressed lookups never filter — pinned by test),
+superseded LESSONS deliberately still searchable (pre-existing documented intent), and
+both lint WARNs (`superseded-atom-above-delimiter`, `superseded-atom-no-delimiter-heading`;
+`## Superseded` heading = canonical spelling, `superseded_heading_line` fence-aware SSOT).
+Bench gate: ONE query removed (its only ground-truth atom is deliberately superseded —
+no honest atom-level target remains), baselines regenerated; hand-verified every metric
+delta is exactly that one query's arithmetic — filter NOT weakened. 271 crate tests +
+clippy + both bench gates + live installed-binary behavioral checks all green.
+Implemented by a background Sonnet worker from this card's spec; reviewed, gates re-run
+first-hand, committed by the orchestrating session. **The READABILITY layer (reorder
+pass + model-page doc) split to [[TRDD-QKWU26ZG]]** per this card's own refinement —
+the WARNs fire today; QKWU26ZG ships what clears them. Ships via the blocked release
+train (TRDD-AWXK0RFT).
+
+**SUPERSEDED — do NOT carry forward:** "Not started."
+
+---
+
+Child 1 of 4 split out of TRDD-87RKBYJ8 (duties 7-8 — the HIGHEST-value gap
 per both the card's own NEXT ACTION and the independent 2026-08-02 re-audit: every `recall`
-today mixes obsolete facts with current ones).
+before this change mixed obsolete facts with current ones).
 
 **DESIGN REFINEMENT (2026-08-02 19:55, recorded before implementation):** key the
 default-EXCLUDE on the atom's own **`status:` prop** (atoms already carry
