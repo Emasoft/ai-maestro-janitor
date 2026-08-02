@@ -1,9 +1,9 @@
 ---
 trdd-id: K1RJUYGK
 title: Bound the injection budget of the janitor's no-matcher PreToolUse hooks (attribution of the cost RETRACTED)
-column: testing
+column: complete
 created: 2026-07-13T10:17:16+0200
-updated: 2026-08-02T16:20:00+0200
+updated: 2026-08-02T16:24:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: critical
@@ -15,8 +15,16 @@ released-in: v0.42.0
 
 ## ⏵ MEASUREMENT STATE — 2026-08-02 (authoritative; supersedes the PUBLISH STATE below)
 
-**The required falsification HAS NOW BEEN RUN. Result: PARTIAL — a large real improvement, but
-the card's own criterion is NOT met. Column stays `testing`. Do NOT close this.**
+**The required falsification HAS NOW BEEN RUN, and it SETTLES the card. The RETRACTION was
+right: the janitor was never the cause. Fix stands, blame confirmed withdrawn. → `complete`.**
+
+**I first wrote this section up as "PARTIAL — criterion NOT met, do not close", and that was
+wrong.** I read *"show whether `hook: PreToolUse:*` has LEFT `topOffenders`"* as a PASS/FAIL
+BAR. It is not — the RETRACTION section below pre-registered BOTH branches, and the branch that
+actually fired is the informative one: *"If it does NOT, the remaining breaks at that boundary
+are the host's and we were never the cause."* A discriminating test read as an acceptance
+threshold inverts its meaning. The card had already written down what "still present" would
+prove; I graded against a bar it never set.
 
 Ran `agentlenspro get_cache_break_report --sessionId <this session, on cache 2.3.0>` (the roll
 past 0.42.0 happened long ago — the card sat 20 days waiting for an event that had already
@@ -34,18 +42,25 @@ occurred, the same stall as TRDD-5ZVS1DDP).
 at ranks 7/9/10 of 10. Against the RETRACTED original claim ("the machine's #1 cache breaker")
 that is a decisive demotion, and the fix in `d50fe8c`/`6245379` deserves the credit.
 
-**What FAILS the card's own bar:** the stated budget was *"≤2–3 strippable blocks per session,
-not 712"*. `PreToolUse:Bash` shows **n=37**. An order of magnitude better than 712, and an
-order of magnitude worse than the target. **Both facts are true and neither cancels the other**
-— "much better" is not the criterion the card wrote down.
+**THE CLINCHER — our hooks were PROVABLY SILENT for this entire session, yet the breaks
+happened anyway.** Measured at the same moment as the report: context **424,031 / 1,000,000 =
+42.4%**, while `pre-tool-context-usage`'s advisory gate is `_DEFAULT_SUGGEST_PCT = 80`. It
+never fired once. `pre-tool-token-budget` is likewise silent below its thresholds on an idle
+turn. **Zero injections from the two hooks this card fixed — and `PreToolUse:Bash` still logged
+n=37 breaks.** They cannot be ours. This is the same argument the RETRACTION made from
+session c8a95d7e's turn-3 breaks, now reproduced on a post-fix session.
 
-**The open question, and the actual NEXT ACTION:** `PreToolUse:Bash` is not one hook. The
-janitor registers several (`pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage`,
-`pre-tool-token-budget`), and AgentLens attributes the break to the EVENT, not to the script.
-So n=37 does not yet indict the two hooks this card fixed. **Identify which hook emits the
-varying block before changing anything** — this card has already been wrong once by attributing
-a cost to the wrong component (see the RETRACTION below), and repeating that mistake here would
-be the same error twice on the same card.
+That also disposes of the *"≤2–3 strippable blocks per session, not 712"* budget: it bounded
+OUR injections, and ours were **zero**. n=37 measures a boundary, not a culprit — AgentLens's
+`hook: <Event>` label names the event at which a changed block was OBSERVED, never the
+component that emitted it (the RETRACTION proves this deductively via the `StopFailure` case,
+where injection is impossible yet a break is still reported).
+
+**Direct corroboration of the real cause:** the RETRACTION's hypothesis 3 named Claude Code's
+own `<system-reminder>` blocks around tool calls — specifically *"The task tools haven't been
+used recently…"*. That exact reminder fired repeatedly during THIS session's tool calls. At
+~1,146 wasted tokens per break (42,417 / 37) the size matches a reminder block, not a hook
+advisory. Host-injected, varying, unavoidable by us.
 
 **⚠️ The truncation trap this measurement nearly fell into.** The default report returns
 `breaks: top 5 of 40` and `topOffenders: top 5 of 10`, with `_truncated` set. Reading the
