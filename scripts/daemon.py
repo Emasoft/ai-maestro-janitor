@@ -67,6 +67,7 @@ import daemon_path  # noqa: E402  # restore a usable tool PATH under launchd (TR
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TRDD-1T53EKTN)
 import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
+import findings_ledger  # noqa: E402  # the ONE finding choke point (TRDD-FENWWB4E)
 import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
@@ -1930,6 +1931,36 @@ def _sleep_seconds(tasks: list[Task], yielded: set[str], bulk_busy: bool) -> int
     return max(1, min(_LOOP_CEILING_SEC, next_due))
 
 
+def _report_foreign_era_daemon(self_pid: int, reported: set[int]) -> None:
+    """Detect a SECOND daemon publishing itself at another era's path (TRDD-QK7M2B0X).
+
+    `acquire_singleton_dual` is supposed to make this impossible — it holds every era's
+    inode, so a peer of either era must lose. But "impossible by construction" is a claim,
+    and an unverified claim about a singleton is exactly how the last two-daemon bug stayed
+    hidden: `daemon.heartbeat.ts` kept advancing, so the host looked healthy while two
+    processes ran the same chores. This costs one stat plus one `kill(pid, 0)` per era per
+    tick and turns that silence into an indexed HIGH finding.
+
+    `reported` is the caller's per-process dedupe set: the condition persists across every
+    tick, and an append-only ledger growing by a line per tick is its own outage.
+    """
+    try:
+        foreign = gs.foreign_era_daemons(self_pid)
+    except Exception as exc:  # noqa: BLE001 — a diagnostic must never stop the loop
+        state.log_line("daemon", f"foreign-era daemon check skipped: {exc}")
+        return
+    for era, pid in foreign:
+        if pid in reported:
+            continue
+        reported.add(pid)
+        msg = f"second daemon detected: pid {pid} published at the {era} era path (this daemon is {self_pid})"
+        state.log_line("daemon", msg)
+        try:
+            findings_ledger.record(sev="HIGH", code="DAEMON-DOUBLE", src="daemon", msg=msg)
+        except Exception as exc:  # noqa: BLE001 — an unfilable finding must not stop the loop
+            state.log_line("daemon", f"DAEMON-DOUBLE ledger write failed: {exc}")
+
+
 def _consume_version_update_request(tasks: list[Task]) -> bool:
     """Release-triggered self-update consume (TRDD-Y9KM5RCJ).
 
@@ -2142,8 +2173,13 @@ def main() -> int:
     # while a session-spawned daemon holds it. Blocking makes it wait idle (zero churn) and
     # take over when the holder exits. A session-spawned daemon stays non-blocking (loser
     # exits). (TRDD-71ABD7V7.)
-    flock_fd = gs.acquire_singleton_flock(blocking=_KEEPALIVE_INSTANCE)
-    if flock_fd is None:
+    # Dual-era (TRDD-QK7M2B0X phase B step 2): the singleton is held on control_dir()'s
+    # daemon.flock AND the old global_state_dir() one for the transition window. A 0.6x
+    # daemon knows only the old inode, and flock(2) excludes only processes contending on
+    # the SAME file — so holding just the new path would let both eras believe they are the
+    # machine's single writer, which is the two-daemon condition §7.2 exists to prevent.
+    flock_handle = gs.acquire_singleton_dual(blocking=_KEEPALIVE_INSTANCE)
+    if flock_handle is None:
         return 0
 
     # TRDD-2U8AH82F: one-time staged handover legacy → plugin DATA dir. Runs ONLY
@@ -2218,6 +2254,7 @@ def main() -> int:
 
     exit_reason = "signal"
     last_keepalive_check = 0.0  # wall-clock stamp gating the keepalive self-heal cadence
+    foreign_daemons_reported: set[int] = set()  # per-process dedupe for DAEMON-DOUBLE
     chores_yielded_last_loop = False  # Phase B2 transition logging (yield ↔ resume), not per-tick spam
     try:
         while _running:
@@ -2298,6 +2335,12 @@ def main() -> int:
 
             gs.write_heartbeat()
 
+            # Verify the singleton actually held, every tick. Placed right after the beat
+            # because the beat is what made the last two-daemon incident invisible: it kept
+            # advancing while two processes ran the same chores, so "the daemon looks alive"
+            # was true and useless. Cheap, fail-open, deduped per process.
+            _report_foreign_era_daemon(pid, foreign_daemons_reported)
+
             # L0 self-heal (OS-spawned daemon ONLY): on a slow cadence, re-stage + exit for
             # respawn when a newer cache version exists, so it converges to current code with
             # no session involvement. Instant no-op for a session-spawned daemon.
@@ -2333,7 +2376,7 @@ def main() -> int:
             _uninstall_os_keepalive()
         state.log_line("daemon", f"stopping ({exit_reason})")
         gs.remove_daemon_pid()
-        gs.release_singleton_flock(flock_fd)
+        gs.release_singleton_dual(flock_handle)
         state.rotate_log_if_big("daemon")
 
     return 0

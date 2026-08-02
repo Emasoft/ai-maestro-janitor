@@ -1,9 +1,9 @@
 ---
 trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
-column: dev
+column: testing
 created: 2026-07-21T19:35:07+0200
-updated: 2026-08-02T14:32:00+0200
+updated: 2026-08-02T18:32:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -41,6 +41,42 @@ NEW-then-OLD, releasing the half it took if the other is contended. Public
 `acquire_*_lock()` now returns an OPAQUE handle (a tuple), never a bare fd. Tests:
 `tests/test_control_dir_locks.py`. `ticket-dispatch.lock` deliberately did NOT move — no
 second owner dispatches a janitor ticket, and the scope rule is AUDIENCE.
+
+**Phase B step 2, SECOND HALF — the SINGLETON — SHIPPED 2026-08-02.** Full suite
+14,184 passed / 1 skipped. Column `testing`. All six advisor items landed:
+
+- `_singleton_paths(name)` — ONE dual-era path list (`(era, path)`, NEW-first, realpath-deduped)
+  shared by reads, writes AND locks, so the sets cannot disagree. The legacy rung reuses
+  `_legacy_read_path`'s predicate, so a WRITE can never resurrect the tombstoned legacy dir.
+- `acquire_singleton_dual` / `release_singleton_dual` — holds EVERY era's `daemon.flock`
+  NEW-then-OLD; partial hold releases and loses; `blocking=True` preserved for the L0 keepalive
+  (`_try_flock` grew the blocking variant). The old single-fd `acquire_singleton_flock` API is
+  GONE (grep-verified zero callers). NOT built on `_acquire_dual_flock` — that one releases both
+  halves on partial failure; the singleton must hold new ACROSS retirement of old.
+- pid/heartbeat DUAL-WRITE (`write_daemon_pid`, `write_heartbeat` → every era) + era-aware reads:
+  `read_heartbeat` = max() across eras, `daemon_pid` = LIVE-PREFERRING (a stale pid at one era
+  cannot shadow the live daemon at another; stale-vs-absent stays distinguishable).
+- Cross-era detector `foreign_era_daemons()` + `daemon._report_foreign_era_daemon` each tick
+  (right after the beat — the beat is what made the last double-daemon invisible) →
+  `DAEMON-DOUBLE` HIGH finding, per-process deduped.
+- Unwritable `control_dir()` → `CONTROL-DIR-UNWRITABLE` HIGH finding via
+  `_report_control_dir_unwritable` (once per process per path), wired into `_try_flock` and
+  `acquire_singleton_dual`. `_same_file` reused for the same-inode case inside `_singleton_paths`.
+- `_MIGRATION_SKIP` += `settings-ensurer.lock`, `ticket-dispatch.lock` (the follow-up folded in).
+- Drive-by, same defect class: `fleet_status.py` hand-resolved the LEGACY-era heartbeat/stamp
+  paths only (daemon reported DEAD on every migrated/fresh host) → now uses `gs.read_heartbeat()`
+  + `gs.read_last_run()`.
+
+Tests: singleton cluster rewritten as BEHAVIOR tests — foreign-PROCESS flock probes (subprocess),
+not argv-shape asserts, per the `61252a9` lesson; dual-write/era-read round-trips; live-preferring
+pid; `foreign_era_daemons`; old-era holder denies + loser leaks nothing. Mutation-verified: dropping
+the old-era half of the hold reds `test_singleton_dual_holds_every_era` +
+`test_singleton_dual_loses_to_old_era_holder`. 123 pass in the control-dir cluster, 199 in the
+daemon-adjacent cluster.
+
+⚠️ Lesson RE-LEARNED the hard way this session: reverted the mutation with a bare
+`git checkout -- <file>` while the real work was still UNCOMMITTED — it wiped the fix along with
+the neuter (the `9f7ec64` lesson, verbatim). Re-applied from context. COMMIT BEFORE MUTATING.
 
 **Phase B step 2, FIRST HALF — the `*.last-run.ts` stamps — SHIPPED (`2b2be24`, 2026-08-02).**
 `gs.last_run_path()` writes `control_dir()`; `gs.read_last_run()` reads all three eras and takes
@@ -91,15 +127,12 @@ exit/wait on partial, fds never released (a blocking variant is deadlock-free be
 acquisition order is total). NOT `_acquire_dual_flock`, which releases both halves on partial
 failure.
 
-**NEXT ACTION (phase B step 2, SECOND HALF — the singleton):** implement the above —
-`acquire_singleton_dual` + dual-WRITE of pid/heartbeat + the cross-era pid check + the
-unwritable-control_dir finding, then `daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts` under
-TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW lock BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment costs one
-duplicated chore; a flock moved at a bad moment costs a SECOND DAEMON, with a live ai-maestro
-server already on the host. It **CANNOT reuse `_acquire_dual_flock`**: that primitive releases both
-halves on partial failure, whereas the singleton must hold the new lock ACROSS retirement of the
-old one — so it needs its own primitive, not a call to that one. Fold in the `_MIGRATION_SKIP`
-follow-up below at the same time.
+**NEXT ACTION (testing):** OBSERVE one real daemon generation-handoff on this host after the
+next release rolls (old daemon SIGTERM'd by `daemon_needs_restart`, new one acquires the dual
+singleton, `DAEMON-DOUBLE` stays absent from the ledger, `daemon.spawn-history` does NOT fill).
+After that, chore migration (`cache-prune`, `rules-cleanup`, `github-config-audit`,
+`memory-guard` → per-repo heartbeat) unblocks, and the transitional fallbacks retire two
+releases out (step 5).
 
 **Follow-up noticed while moving the locks (not done, deliberately out of step 1):**
 `_MIGRATION_SKIP` names only `marketplace-op.lock` and `oauth-rotator-tick.lock`, so

@@ -398,14 +398,20 @@ def main() -> int:
     # realpath-based LOCAL slug below) could silently drift from the real roots.
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     import fleet_scan  # noqa: E402  -- local lib module
+    import global_state as gs  # noqa: E402  -- local lib module
     import memory_scopes  # noqa: E402  -- local lib module
 
-    gstate = home / ".claude" / "janitor-global-state"
     global_mem = memory_scopes.resolve_user_dir()
     global_wikimem = _count_md(global_mem)
-    daemon_hb = _read_epoch(str(gstate / "daemon.heartbeat.ts"))
+    # Through the SSOT readers, never a hand-resolved literal: this used to stat only the
+    # pre-2U8AH82F legacy dir, so on any migrated or fresh host it reported the daemon DEAD
+    # while it was beating happily at the current era's path (TRDD-QK7M2B0X). The dual-era
+    # readers see every generation's stamp.
+    hb = gs.read_heartbeat()
+    daemon_hb = hb if hb > 0 else None
     daemon_alive = daemon_hb is not None and (now - daemon_hb) < 600
-    mkt_ts = _read_epoch(str(gstate / "marketplace-refresh.last-run.ts"))
+    mkt = gs.read_last_run("marketplace-refresh")
+    mkt_ts = mkt if mkt > 0 else None
 
     cache_root = home / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
     versions = sorted(

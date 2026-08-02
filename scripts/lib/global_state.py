@@ -364,6 +364,13 @@ _MIGRATION_SKIP = frozenset(
         "daemon.pid",
         "marketplace-op.lock",
         "oauth-rotator-tick.lock",
+        # The remaining flocks, for the set's OWN stated reason: the enumeration had simply
+        # not caught up with the locks that exist today. Copying a lock file copies zero
+        # kernel state, so each copy is an empty decoy at a path a reader can mistake for
+        # the live inode. Folded in with the singleton move (TRDD-QK7M2B0X) rather than as
+        # a cosmetic edit of its own — migration code is not touched for tidiness.
+        "settings-ensurer.lock",
+        "ticket-dispatch.lock",
     }
 )
 
@@ -436,16 +443,11 @@ def migrate_global_state_to_data_dir() -> Optional[int]:
 # ---------- file paths (private; callers use the named helpers below) -------
 
 
-def _flock_path() -> Path:
-    return global_state_dir() / "daemon.flock"
-
-
-def _pid_path() -> Path:
-    return global_state_dir() / "daemon.pid"
-
-
-def _heartbeat_path() -> Path:
-    return global_state_dir() / "daemon.heartbeat.ts"
+# `daemon.flock` / `daemon.pid` / `daemon.heartbeat.ts` deliberately have NO single-path
+# helper. They are the SINGLETON, and the singleton is dual-era for the transition window
+# (TRDD-QK7M2B0X phase B step 2) — a helper returning one path could only ever name half
+# the truth, and every caller that took that half would silently exclude nobody. Use
+# `_singleton_paths` above.
 
 
 def _killswitch_path() -> Path:
@@ -493,40 +495,163 @@ def _ticket_dispatch_lock_path() -> Path:
     return global_state_dir() / "ticket-dispatch.lock"
 
 
-def daemon_pid() -> Optional[int]:
-    """Read daemon.pid → int, or None if missing / malformed."""
-    p = _pid_path()
-    if not p.is_file():
+# ---------- singleton sentinels: DUAL-ERA paths (TRDD-QK7M2B0X phase B step 2) -----
+#
+# `daemon.pid` and `daemon.heartbeat.ts` move to control_dir() with the singleton, and
+# that move INVERTS the role the last-run stamps had. For the stamps the writers were OLD
+# and the readers NEW, so `read_last_run`'s max() fixed the whole problem from the reading
+# side. Here the writer is NEW and the readers are OLD: a 0.6x session's `daemon_is_alive()`
+# reads only `global_state_dir()`, finds nothing, concludes DEAD, and spawn-churns against a
+# lock it can never take. No reading-side change can reach that session's code — so the new
+# writer must DUAL-WRITE, and the new reader dual-reads for the mirror case (an OLD daemon
+# that publishes only the old path).
+#
+# Early signal that the dual-write was dropped or broken: `daemon.spawn-history` filling up
+# during an upgrade window.
+
+
+def _singleton_paths(name: str) -> tuple[tuple[str, Path], ...]:
+    """Every era's location for a singleton sentinel as `(era_label, path)`, NEW-first,
+    deduped by realpath. ONE list for reading, writing AND locking — deliberately not
+    three, because a read set and a write set that disagree is a sentinel published where
+    nobody looks.
+
+    Deduping is not tidiness. On a host where two eras resolve to ONE directory (a test
+    harness, `$JANITOR_GLOBAL_STATE_DIR`, a forwarding symlink) the same inode would appear
+    twice — harmless to read, FATAL to flock, because flock(2) conflicts with itself across
+    two open file descriptions in the same process, so the second open would deny us our
+    own lock and the daemon would never start (ATOM-QK7M-0002).
+
+    The legacy rung comes from `_legacy_read_path`, which already encodes the whole
+    predicate: absent under an explicit `$JANITOR_GLOBAL_STATE_DIR` redirect, absent unless
+    the dir ALREADY exists, absent while it is still the resolved `global_state_dir()`.
+    Reusing it (rather than re-deriving `legacy / name`) is what stops a WRITE from
+    recreating a dir TRDD-2U8AH82F deliberately tombstoned — a resurrected legacy dir is a
+    read-fallback the migration retired, and `_legacy_read_path` would start honoring it
+    again on a host that never had one.
+    """
+    out: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    candidates: list[tuple[str, Path]] = [
+        ("control", _control_path(name)),
+        ("global-state", _old_global_state_path(name)),
+    ]
+    legacy = _legacy_read_path(name)
+    if legacy is not None:
+        candidates.append(("legacy", legacy))
+    for era, path in candidates:
+        key = os.path.realpath(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((era, path))
+    return tuple(out)
+
+
+def _read_pid_file(path: Path) -> Optional[int]:
+    """One era's pid file as an int, or None when missing / unreadable / malformed."""
+    if not path.is_file():
         return None
     try:
-        raw = p.read_text(encoding="utf-8").strip()
+        raw = path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    if not raw or not raw.isdigit():
-        return None
-    return int(raw)
+    return int(raw) if raw.isdigit() else None
+
+
+def daemon_pid() -> Optional[int]:
+    """Read daemon.pid → int, or None if missing / malformed at EVERY era.
+
+    LIVE-PREFERRING across eras, not first-found. During the upgrade window a stale pid can
+    sit at one path while the daemon that actually holds the singleton published another;
+    first-found would then hand callers a dead pid, `daemon_is_alive()` would say DEAD, and
+    every session would try to spawn. The flock still stops the second daemon — that is what
+    it is for — but the visible result is spawn→abort churn that fills `daemon.spawn-history`
+    and reads exactly like a crash loop, which is how the previous singleton bug hid.
+    Preferring a pid that names a LIVE process answers what every caller is really asking.
+    When none is live we still return the first one found, so "stale pid file" stays
+    distinguishable from "no pid file at all".
+    """
+    first: Optional[int] = None
+    for _, path in _singleton_paths("daemon.pid"):
+        pid = _read_pid_file(path)
+        if pid is None:
+            continue
+        if first is None:
+            first = pid
+        if _process_exists(pid):
+            return pid
+    return first
 
 
 def write_daemon_pid(pid: int) -> None:
-    state.atomic_write(_pid_path(), str(int(pid)))
+    """Publish the daemon's pid at EVERY era's path (see the dual-write note above)."""
+    value = str(int(pid))
+    for _, path in _singleton_paths("daemon.pid"):
+        try:
+            state.atomic_write(path, value)
+        except OSError:
+            continue  # one unwritable era must never stop the canonical one
 
 
 def remove_daemon_pid() -> None:
-    try:
-        _pid_path().unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        # Best-effort cleanup; the next daemon will overwrite anyway.
-        pass
+    """Clear the pid from every era. A clear that missed one would leave a shutdown daemon
+    still advertising itself to whichever reader resolves that path."""
+    for _, path in _singleton_paths("daemon.pid"):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # Best-effort cleanup; the next daemon will overwrite anyway.
+            pass
 
 
 def write_heartbeat(now: Optional[int] = None) -> None:
-    state.atomic_write(_heartbeat_path(), str(int(now if now is not None else time.time())))
+    """Stamp the liveness beat at EVERY era's path (see the dual-write note above)."""
+    value = str(int(now if now is not None else time.time()))
+    for _, path in _singleton_paths("daemon.heartbeat.ts"):
+        try:
+            state.atomic_write(path, value)
+        except OSError:
+            continue
 
 
 def read_heartbeat() -> int:
-    return state.read_int_state(_heartbeat_path(), 0)
+    """The NEWEST liveness beat across every era.
+
+    max(), for `read_last_run`'s reason plus a sharper one: during the window a 0.6x daemon
+    beats only at `global_state_dir()`, so a new-path-only read returns 0 — and 0 means "no
+    heartbeat", i.e. DEAD. Every new session would then try to spawn a second daemon against
+    a perfectly healthy old one. max() cannot invent liveness: a stale file stays stale
+    against `now`, and only a LIVE daemon can write a recent beat anywhere.
+    """
+    best = 0
+    for _, path in _singleton_paths("daemon.heartbeat.ts"):
+        best = max(best, state.read_int_state(path, 0))
+    return best
+
+
+def foreign_era_daemons(self_pid: Optional[int] = None) -> list[tuple[str, int]]:
+    """Every era whose `daemon.pid` names a LIVE process that is not `self_pid`.
+
+    The dual-lock below closes the window that would let two daemons coexist — but
+    "closed by construction" is a claim, and an unverified claim about a singleton is
+    precisely how the two-daemon bug hid the first time. This is the detector. It costs one
+    stat plus one `kill(pid, 0)` per era per tick and converts a silent double-daemon into
+    an indexed finding. Returns `[(era_label, pid), …]`, empty on a healthy host.
+    """
+    me = int(self_pid) if self_pid is not None else os.getpid()
+    out: list[tuple[str, int]] = []
+    seen: set[int] = set()
+    for era, path in _singleton_paths("daemon.pid"):
+        pid = _read_pid_file(path)
+        if pid is None or pid == me or pid in seen:
+            continue
+        seen.add(pid)
+        if _process_exists(pid):
+            out.append((era, pid))
+    return out
 
 
 def kill_switch_present() -> bool:
@@ -864,76 +989,6 @@ def daemon_is_alive(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     return (int(time.time()) - hb) <= max_silence_s
 
 
-# ---------- singleton flock ----------------------------------------------
-
-
-def acquire_singleton_flock(*, blocking: bool = False) -> Optional[int]:
-    """Acquire the exclusive flock on daemon.flock.
-
-    Default (``blocking=False``): NON-blocking. Returns the fd on success — caller
-    MUST keep it open for the daemon's lifetime — or None when another instance
-    already holds the lock (the safe singleton semantic for a session-spawned
-    daemon that loses the race: don't block, just abort).
-
-    ``blocking=True``: WAIT for the lock instead of aborting. This is for the
-    OS-keepalive (L0) daemon, which runs under launchd/systemd KeepAlive: if it
-    aborted on a held lock it would IMMEDIATELY be respawned, busy-looping
-    spawn→abort→respawn every ThrottleInterval whenever a session-spawned daemon
-    holds the singleton. Instead it blocks (idle, zero churn) until the holder
-    exits, then takes over (TRDD-71ABD7V7). Safe because while blocked it has not
-    yet written its pid or installed signal handlers, so a launchd bootout SIGTERM
-    kills it cleanly via the default disposition with nothing to unwind.
-
-    The flock is the source of truth for "is a daemon alive RIGHT NOW". The PID
-    file and heartbeat are diagnostic conveniences; the flock is what actually
-    prevents two daemons from running.
-    """
-    init_global_state()
-    path = _flock_path()
-    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
-    lock_op = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
-    try:
-        while True:
-            try:
-                fcntl.flock(fd, lock_op)
-                return fd
-            except InterruptedError:
-                # A signal interrupted a BLOCKING wait → retry. (Non-blocking never
-                # blocks, so it never raises this; if it somehow does, fall through to
-                # the unexpected-error path below.)
-                if blocking:
-                    continue
-                raise
-    except (BlockingIOError, OSError) as exc:
-        # EAGAIN / EWOULDBLOCK → already held; anything else → unexpected.
-        try:
-            os.close(fd)
-        finally:
-            pass
-        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
-            return None
-        # Unexpected — surface to logs but don't crash the caller.
-        state.log_line("daemon", f"unexpected flock error: {exc}")
-        return None
-
-
-def release_singleton_flock(fd: int) -> None:
-    """Close the fd; the kernel releases the flock as a side effect.
-
-    Best-effort: a daemon shutting down would prefer a clean release, but
-    the kernel will release on process death regardless, so closing twice
-    or closing a stale fd is harmless.
-    """
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    except OSError:
-        pass
-    try:
-        os.close(fd)
-    except OSError:
-        pass
-
-
 # ---------- transitional DUAL-LOCK primitive (TRDD-QK7M2B0X phase B) ------
 #
 # Moving a coordination lock is not the same problem as moving a flag, and the
@@ -959,23 +1014,81 @@ def release_singleton_flock(fd: int) -> None:
 LockHandle = Tuple[int, ...]
 
 
-def _try_flock(path: Path, *, log_channel: str) -> Optional[int]:
-    """Open `path` (creating it) and take a non-blocking exclusive flock.
+# Paths already reported as unopenable, so the finding is filed at most ONCE per process
+# per path. The daemon retries every tick, and an append-only ledger growing by a line a
+# tick is its own outage — the boundedness invariant (TRDD-7IUTRX29 S3/S4) applies to
+# alarms exactly as it does to self-heals.
+_CONTROL_UNWRITABLE_REPORTED: set[str] = set()
+
+
+def _report_control_dir_unwritable(path: Path, exc: BaseException, log_channel: str) -> None:
+    """A coordination file under `control_dir()` could not even be OPENED — file a FINDING.
+
+    `_try_flock` treats an unopenable lock as HELD, which is the only safe reading: a caller
+    without the lock has no exclusion. But applied to the control plane, that safety becomes
+    a silent shutdown — an unwritable `~/.claude/janitor-control/` makes every coordination
+    lock unavailable AND the daemon singleton unacquirable, so the daemon never starts and
+    nothing anywhere says why. That is the exact looks-fine-ignores-the-control-plane failure
+    this directory was created to END, so it gets an indexed finding rather than a log line
+    a human would have to already suspect something to go looking for.
+    """
+    key = str(path)
+    if key in _CONTROL_UNWRITABLE_REPORTED:
+        return
+    _CONTROL_UNWRITABLE_REPORTED.add(key)
+    state.log_line(log_channel, f"control plane UNWRITABLE at {path}: {exc}")
+    try:
+        import findings_ledger  # local import: keeps the ledger off every hook's import path
+
+        findings_ledger.record(
+            sev="HIGH",
+            code="CONTROL-DIR-UNWRITABLE",
+            src="global-state",
+            msg=(
+                f"control plane unusable ({path.name}): {exc.__class__.__name__} — "
+                "the daemon and every coordination lock are blocked"
+            ),
+        )
+    except Exception:  # noqa: BLE001 — a finding that cannot be filed must never break locking
+        pass
+
+
+def _try_flock(path: Path, *, log_channel: str, blocking: bool = False) -> Optional[int]:
+    """Open `path` (creating it) and take an exclusive flock.
 
     Returns the fd on success, or None when the lock is unavailable — whether because
     another process holds it (EAGAIN, the ordinary skip path) or because the file could
-    not be opened at all. An unopenable lock file is reported to the log and then treated
-    as HELD, never as free: a caller that cannot take the lock has no exclusion, and
-    running the chore anyway is the corruption this module exists to prevent.
+    not be opened at all. An unopenable lock file is reported and then treated as HELD,
+    never as free: a caller that cannot take the lock has no exclusion, and running the
+    chore anyway is the corruption this module exists to prevent. When the unopenable path
+    is on the CONTROL PLANE the report is an indexed finding, not just a log line — see
+    `_report_control_dir_unwritable`.
+
+    `blocking=True` WAITS instead of skipping. Only the singleton uses it (the OS-keepalive
+    daemon, which would otherwise busy-loop spawn→abort→respawn under launchd KeepAlive);
+    every chore lock stays non-blocking, where a loser skipping its turn is deadlock-proof
+    and costs at most one cadence.
     """
     try:
         fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as exc:
-        state.log_line(log_channel, f"cannot open lock file {path}: {exc} — treating as held")
+        if _same_file(path.parent, control_dir()):
+            _report_control_dir_unwritable(path, exc, log_channel)
+        else:
+            state.log_line(log_channel, f"cannot open lock file {path}: {exc} — treating as held")
         return None
+    lock_op = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
+        while True:
+            try:
+                fcntl.flock(fd, lock_op)
+                return fd
+            except InterruptedError:
+                # A signal interrupted a BLOCKING wait → retry. Non-blocking never blocks,
+                # so it cannot raise this; if it somehow does, fall through to the error path.
+                if blocking:
+                    continue
+                raise
     except (BlockingIOError, OSError) as exc:
         try:
             os.close(fd)
@@ -1041,6 +1154,66 @@ def _release_dual_flock(handle: LockHandle) -> None:
             os.close(fd)
         except OSError:
             pass
+
+
+# ---------- the DAEMON SINGLETON, dual-era (TRDD-QK7M2B0X phase B step 2) ------------
+#
+# The singleton needs its OWN primitive and CANNOT call `_acquire_dual_flock`. That one
+# RELEASES both halves on partial failure, which is right for a chore lock (skip this
+# round, the cadence brings you back in 20 minutes) and wrong here: the singleton must be
+# able to HOLD the new lock ACROSS the retirement of the old one — TRDD-2U8AH82F's
+# flock-moves-LAST invariant, which is also exactly what `migrate_global_state_to_data_dir`
+# does one step later in daemon startup.
+#
+# Order is NEW-then-OLD, as everywhere else in this module, and being TOTAL it cannot
+# deadlock even in the blocking variant: every participant queues on the same inode first.
+#
+# The asymmetry that justifies spelling all this out: a mode flag moved at a bad moment
+# costs ONE duplicated chore. A flock moved at a bad moment costs a SECOND DAEMON — on a
+# host that may already be running an ai-maestro server.
+
+
+def acquire_singleton_dual(*, blocking: bool = False) -> Optional[LockHandle]:
+    """Acquire the daemon singleton on EVERY era's `daemon.flock`, NEW path first.
+
+    Returns an opaque handle the caller MUST keep alive for the daemon's lifetime (closing
+    any fd releases that half), or None when ANY era is unavailable — a partial hold
+    excludes only part of the fleet, which is indistinguishable from no singleton at all,
+    so the loser releases what it took and exits.
+
+    Default `blocking=False`: a session-spawned daemon that loses the race just aborts.
+
+    `blocking=True`: WAIT rather than abort. This is for the OS-keepalive (L0) daemon under
+    launchd/systemd KeepAlive, which would otherwise be respawned immediately and busy-loop
+    spawn→abort→respawn every ThrottleInterval while a session-spawned daemon holds the
+    singleton. Blocking makes it idle at zero churn until the holder exits (TRDD-71ABD7V7).
+    Safe to interrupt: while blocked it has not written its pid or installed handlers, so a
+    bootout SIGTERM kills it cleanly with nothing to unwind.
+
+    The flock — not the pid file, not the heartbeat — is the truth about "is a daemon alive
+    RIGHT NOW". Those two are diagnostics; only the kernel's lock state actually excludes.
+    """
+    control = control_dir()
+    try:
+        control.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _report_control_dir_unwritable(control / "daemon.flock", exc, "daemon")
+        return None
+    init_global_state()
+    fds: list[int] = []
+    for _, path in _singleton_paths("daemon.flock"):
+        fd = _try_flock(path, log_channel="daemon", blocking=blocking)
+        if fd is None:
+            _release_dual_flock(tuple(fds))
+            return None
+        fds.append(fd)
+    return tuple(fds)
+
+
+def release_singleton_dual(handle: LockHandle) -> None:
+    """Release every era's singleton flock. Best-effort — the kernel frees them on process
+    death regardless, so a double release or a stale fd is harmless."""
+    _release_dual_flock(handle)
 
 
 # ---------- marketplace-operation lock -----------------------------------

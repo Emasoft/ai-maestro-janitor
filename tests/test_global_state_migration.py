@@ -80,6 +80,10 @@ def test_migration_copies_state_stamps_marker_and_tombstones(
     (legacy / "snapshots" / "ps.txt").write_text("x\n", encoding="utf-8")
     (legacy / "daemon.pid").write_text("999\n", encoding="utf-8")
     (legacy / "daemon.flock").write_text("", encoding="utf-8")
+    # Every OTHER flock too: a copied lock file carries zero kernel state, so each copy
+    # would be an empty decoy at a path a reader can mistake for the live inode.
+    (legacy / "settings-ensurer.lock").write_text("", encoding="utf-8")
+    (legacy / "ticket-dispatch.lock").write_text("", encoding="utf-8")
     fd = gs.migrate_global_state_to_data_dir()
     assert fd is not None
     try:
@@ -87,12 +91,20 @@ def test_migration_copies_state_stamps_marker_and_tombstones(
         assert (data / "marketplace-refresh.last-run.ts").is_file()
         assert (data / "snapshots" / "ps.txt").is_file()
         assert not (data / "daemon.pid").exists(), "pid is re-published, never copied"
+        for lock in ("daemon.flock", "settings-ensurer.lock", "ticket-dispatch.lock"):
+            # NB: daemon.flock DOES exist at data — created by the migration's own
+            # flock-moves-LAST acquisition, never by the copy. The other locks must be
+            # absent entirely: no kernel state copies, so a copy is only a decoy.
+            if lock != "daemon.flock":
+                assert not (data / lock).exists(), f"{lock} must not be copied"
         assert (data / gs._MIGRATION_MARKER).is_file()
         assert (legacy / "README-MOVED.txt").is_file()
         assert gs.global_state_dir() == data
         # Flock-moves-LAST: the returned fd HOLDS the new lock — a second daemon
-        # resolving the new dir must lose the singleton race.
-        assert gs.acquire_singleton_flock() is None
+        # resolving the new dir must lose the singleton race. (The dual acquire probes
+        # the migrated data-dir inode too, and flock conflicts across open file
+        # descriptions even in-process, so the held migration fd denies it.)
+        assert gs.acquire_singleton_dual() is None
     finally:
         os.close(fd)
 

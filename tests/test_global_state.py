@@ -62,31 +62,91 @@ def test_init_global_state_creates_dir(state_dir: Path) -> None:
     assert state_dir.is_dir()
 
 
-def test_singleton_flock_first_acquires_second_fails(state_dir: Path) -> None:
-    """One process holding the flock blocks every other acquire attempt."""
+def test_singleton_dual_first_acquires_second_fails(state_dir: Path) -> None:
+    """One process holding the singleton blocks every other acquire attempt."""
     gs = _gs()
-    fd1 = gs.acquire_singleton_flock()
-    assert fd1 is not None, "first acquire must succeed"
+    h1 = gs.acquire_singleton_dual()
+    assert h1 is not None, "first acquire must succeed"
     try:
-        fd2 = gs.acquire_singleton_flock()
-        assert fd2 is None, "second acquire must be denied while fd1 holds the lock"
+        h2 = gs.acquire_singleton_dual()
+        assert h2 is None, "second acquire must be denied while h1 holds the lock"
     finally:
-        gs.release_singleton_flock(fd1)
+        gs.release_singleton_dual(h1)
 
 
-def test_singleton_flock_released_lets_next_acquire(state_dir: Path) -> None:
-    """Releasing the flock lets a subsequent acquire succeed (no stale state)."""
+def test_singleton_dual_released_lets_next_acquire(state_dir: Path) -> None:
+    """Releasing the singleton lets a subsequent acquire succeed (no stale state)."""
     gs = _gs()
-    fd1 = gs.acquire_singleton_flock()
-    assert fd1 is not None
-    gs.release_singleton_flock(fd1)
-    fd2 = gs.acquire_singleton_flock()
-    assert fd2 is not None
-    gs.release_singleton_flock(fd2)
+    h1 = gs.acquire_singleton_dual()
+    assert h1 is not None
+    gs.release_singleton_dual(h1)
+    h2 = gs.acquire_singleton_dual()
+    assert h2 is not None
+    gs.release_singleton_dual(h2)
 
 
-def test_singleton_flock_blocking_waits_then_takes_over(state_dir: Path) -> None:
-    """blocking=True WAITS for a held lock and acquires it once released — instead of
+def test_singleton_dual_holds_every_era(state_dir: Path, tmp_path: Path) -> None:
+    """The handle holds control_dir() AND the old global_state_dir() inode (TRDD-QK7M2B0X
+    phase B step 2). A 0.6x daemon knows only the old inode, so a hold that skipped it
+    would let both eras win their own lock and each believe it is the machine's single
+    writer — the two-daemon condition §7.2 exists to prevent. Verified from a SEPARATE
+    process because flock is per-open-file-description: an in-process probe of an inode we
+    already hold would conflict with ourselves and prove nothing about a foreign peer."""
+    gs = _gs()
+    h = gs.acquire_singleton_dual()
+    assert h is not None
+    try:
+        assert len(h) == 2, "distinct control/global-state dirs must yield two held inodes"
+        for path in (
+            gs.control_dir() / "daemon.flock",
+            gs.global_state_dir() / "daemon.flock",
+        ):
+            probe = subprocess.run(
+                [sys.executable, "-c", (
+                    "import fcntl,sys\n"
+                    "fd=open(sys.argv[1],'a+')\n"
+                    "try:\n"
+                    "    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)\n"
+                    "except OSError:\n"
+                    "    sys.exit(3)\n"
+                    "sys.exit(0)\n"
+                ), str(path)],
+                timeout=10,
+            )
+            assert probe.returncode == 3, f"{path} must be HELD against a foreign process"
+    finally:
+        gs.release_singleton_dual(h)
+
+
+def test_singleton_dual_loses_to_old_era_holder(state_dir: Path) -> None:
+    """A 0.6x-era daemon holding ONLY the old global_state_dir() inode must still deny the
+    new-code singleton — and the loser must release the control half it already took, so
+    nothing leaks and a later acquire (after the old daemon exits) succeeds."""
+    gs = _gs()
+    gs.init_global_state()
+    old_holder = subprocess.Popen(
+        [sys.executable, "-c", (
+            "import fcntl,sys,time\n"
+            "fd=open(sys.argv[1],'a+')\n"
+            "fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)\n"
+            "print('held',flush=True)\n"
+            "time.sleep(30)\n"
+        ), str(gs.global_state_dir() / "daemon.flock")],
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert old_holder.stdout is not None and old_holder.stdout.readline().strip() == "held"
+        assert gs.acquire_singleton_dual() is None, "old-era holder must deny the dual acquire"
+    finally:
+        old_holder.kill()
+        old_holder.wait(10)
+    h = gs.acquire_singleton_dual()
+    assert h is not None, "after the old daemon exits, the singleton must be acquirable — a leaked control-half fd would deny us here"
+    gs.release_singleton_dual(h)
+
+
+def test_singleton_dual_blocking_waits_then_takes_over(state_dir: Path) -> None:
+    """blocking=True WAITS for a held singleton and acquires it once released — instead of
     returning None — so the L0 keepalive daemon idles rather than spawn→abort→respawn
     churning under launchd's KeepAlive while a session daemon holds the singleton
     (TRDD-71ABD7V7). flock is per-open-file-description, so a second open in this same
@@ -95,28 +155,90 @@ def test_singleton_flock_blocking_waits_then_takes_over(state_dir: Path) -> None
 
     gs = _gs()
     gs.init_global_state()
-    holder = gs.acquire_singleton_flock()
+    holder = gs.acquire_singleton_dual()
     assert holder is not None
-    assert gs.acquire_singleton_flock() is None, "non-blocking acquire must fail while held"
+    assert gs.acquire_singleton_dual() is None, "non-blocking acquire must fail while held"
 
-    result: dict[str, int | None] = {}
+    result: dict[str, object] = {}
     started = threading.Event()
 
     def waiter() -> None:
         started.set()
-        result["fd"] = gs.acquire_singleton_flock(blocking=True)  # must BLOCK until released
+        result["h"] = gs.acquire_singleton_dual(blocking=True)  # must BLOCK until released
 
     t = threading.Thread(target=waiter, daemon=True)
     t.start()
     assert started.wait(2)
     time.sleep(0.3)
-    assert "fd" not in result, "blocking acquire returned while the lock was still held"
+    assert "h" not in result, "blocking acquire returned while the lock was still held"
 
-    gs.release_singleton_flock(holder)  # now the waiter should wake and take over
+    gs.release_singleton_dual(holder)  # now the waiter should wake and take over
     t.join(3)
     assert not t.is_alive(), "blocking acquire never returned after the lock was released"
-    assert result.get("fd") is not None
-    gs.release_singleton_flock(result["fd"])  # type: ignore[arg-type]
+    assert result.get("h") is not None
+    gs.release_singleton_dual(result["h"])  # type: ignore[arg-type]
+
+
+def test_singleton_sentinels_dual_write_and_era_reads(state_dir: Path) -> None:
+    """pid + heartbeat land at BOTH eras' paths, and the readers see a stamp from EITHER
+    era alone (TRDD-QK7M2B0X phase B step 2). The write side covers the OLD reader (a 0.6x
+    session's `daemon_is_alive()` resolves only global_state_dir() — nothing reading-side
+    can reach that code, so the new writer must publish there); the read side covers the
+    OLD writer (a 0.6x daemon beats only the old path — a new-path-only read would call a
+    healthy daemon dead and spawn-churn against its lock)."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(os.getpid())
+    gs.write_heartbeat(now=1_700_000_000)
+    for base in (gs.control_dir(), gs.global_state_dir()):
+        assert (base / "daemon.pid").read_text().strip() == str(os.getpid()), base
+        assert (base / "daemon.heartbeat.ts").read_text().strip() == "1700000000", base
+
+    # Old-writer direction: wipe, then stamp ONLY the old path — readers must still see it.
+    gs.remove_daemon_pid()
+    for base in (gs.control_dir(), gs.global_state_dir()):
+        assert not (base / "daemon.pid").exists()
+        (base / "daemon.heartbeat.ts").unlink()
+    (gs.global_state_dir() / "daemon.pid").write_text(str(os.getpid()), encoding="utf-8")
+    (gs.global_state_dir() / "daemon.heartbeat.ts").write_text("1700000042", encoding="utf-8")
+    assert gs.daemon_pid() == os.getpid()
+    assert gs.read_heartbeat() == 1_700_000_042
+
+
+def test_daemon_pid_prefers_live_process_across_eras(state_dir: Path) -> None:
+    """A stale pid at the first-probed era must not shadow the LIVE daemon's pid at
+    another — first-found would report the dead one, `daemon_is_alive()` would say DEAD,
+    and every session would spawn-churn against the held flock (the crash-loop lookalike
+    that hid the previous singleton bug)."""
+    gs = _gs()
+    gs.init_global_state()
+    (gs.control_dir() / "daemon.pid").parent.mkdir(parents=True, exist_ok=True)
+    (gs.control_dir() / "daemon.pid").write_text("999999", encoding="utf-8")  # dead
+    (gs.global_state_dir() / "daemon.pid").write_text(str(os.getpid()), encoding="utf-8")
+    assert gs.daemon_pid() == os.getpid(), "the LIVE pid must win over a dead one at an earlier era"
+    # With no live pid anywhere, the first found is still returned (stale ≠ absent).
+    (gs.global_state_dir() / "daemon.pid").write_text("999998", encoding="utf-8")
+    assert gs.daemon_pid() == 999_999
+
+
+def test_foreign_era_daemons_detects_second_daemon(state_dir: Path) -> None:
+    """A LIVE pid published at any era that is not self is reported `(era, pid)` — the
+    detector that turns a silent double-daemon into an indexed finding. Dead pids and
+    self are not findings."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.foreign_era_daemons(os.getpid()) == []
+    (gs.global_state_dir() / "daemon.pid").write_text("999999", encoding="utf-8")  # dead
+    assert gs.foreign_era_daemons(os.getpid()) == [], "a dead pid is stale litter, not a second daemon"
+    (gs.global_state_dir() / "daemon.pid").write_text(str(os.getpid()), encoding="utf-8")
+    assert gs.foreign_era_daemons(os.getpid()) == [], "self is never foreign"
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        (gs.global_state_dir() / "daemon.pid").write_text(str(other.pid), encoding="utf-8")
+        assert gs.foreign_era_daemons(os.getpid()) == [("global-state", other.pid)]
+    finally:
+        other.kill()
+        other.wait(10)
 
 
 def test_detector_lock_is_single_writer(state_dir: Path, tmp_path: Path) -> None:
