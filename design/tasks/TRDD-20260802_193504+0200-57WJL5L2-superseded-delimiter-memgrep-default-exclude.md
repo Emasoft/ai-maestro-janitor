@@ -1,9 +1,9 @@
 ---
 trdd-id: 57WJL5L2
 title: Superseded-atoms-below-a-delimiter convention + memgrep default-exclude
-column: todo
+column: dev
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T19:35:04+0200
+updated: 2026-08-02T23:38:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
