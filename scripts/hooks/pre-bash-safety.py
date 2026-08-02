@@ -232,11 +232,26 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # The one mention the owner sanctioned: the PRRD G1.1 self-identification line naming the
 # shared account. Anything else is paging a third party from the owner's identity.
 _ALLOWED_MENTION = "emasoft"
-# NO trailing `\b`. GitHub usernames cannot contain `_`, so it renders `@lru_cache` as a
-# mention of **@lru** plus the literal `_cache` — but `\b` finds no boundary between `u` and
-# `_` (both are word chars), so a `\b`-anchored pattern MISSES the exact shape that pages a
-# stranger from pasted Python. The first cut had it, and it let `@lru_cache` through.
-_MENTION_RE = re.compile(r"(?<![A-Za-z0-9._%+\-/])@([A-Za-z0-9][A-Za-z0-9-]{0,38})")
+# DERIVED FROM MEASUREMENT, not from reasoning about GitHub. Settled with `gh api markdown`
+# (GFM renderer, no posting) after janitor#172 showed my earlier claims were false:
+#
+#   @janitor  @manager  @staticmethod  @foo-bar  @1234  @janitor.  (@janitor)   -> LINKIFIED
+#   @lru_cache   @types/node   @foo/bar   x@janitor   user@gmail.com            -> plain text
+#
+# So the rule is: not preceded by a word char, name is [A-Za-z0-9][A-Za-z0-9-]*, and NOT
+# followed by a word char, `_`, `-` or `/`.
+#   * the trailing `/` exclusion is why `@types/node` and `@foo/bar` page nobody (GitHub reads
+#     `@org/team`, which needs org context);
+#   * the `_` exclusion is why `@lru_cache` is inert — I had claimed it pages @lru and REMOVED
+#     the boundary anchor to "fix" that. It never did. The anchor was right all along;
+#   * the LOOKBEHIND is what makes emails inert (`user@gmail.com` has `r` before the `@`), so
+#     no separate email carve-out is needed here. Emails are still denied below — but as PII,
+#     which is what they actually are, not as mentions.
+#
+# Getting this wrong in the permissive direction misses a real page; getting it wrong in the
+# strict direction reddens every workflow snippet with `actions/checkout@v4` and every quoted
+# address, which is how a guard earns being switched off.
+_MENTION_RE = re.compile(r"(?<![A-Za-z0-9._%+\-/])@([A-Za-z0-9][A-Za-z0-9-]{0,38})(?![A-Za-z0-9_/-])")
 # GitHub does NOT linkify a mention inside a code span or fence. So `@staticmethod`,
 # `@types/node`, `@pytest.mark.slow` in backticks page nobody, and flagging them would make
 # the guard fire on ordinary engineering prose — which is how a guard gets deleted. Strip code
