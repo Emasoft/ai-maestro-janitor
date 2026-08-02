@@ -1,9 +1,11 @@
 ---
 trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by: [57WJL5L2, AZ6QRK0D, J3ZH3RSI, 3SOO1RWE]
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-02T19:12:00+0200
+updated: 2026-08-02T19:38:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -124,6 +126,24 @@ agent loads. These duties EXTEND / TIGHTEN those.
 | 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | ✅ EXISTS — corpus-wide `atom-dup-id` landed (`memory.rs:3979`, Check 8, Severity::Error, every location reported; verified first-hand 2026-08-02) |
 | 20 | expander/reducer (hub/aspect/component) revalidation | write (at creation) + librarian | 🟡 flagged, not corrected |
 | 21 | scope validation + published-globally USER symlink | scope-leak detector | 🟡 privacy direction policed; symlink publishing infra MISSING (= issue **#52**) |
+
+### 2026-08-02 19:38 — SPLIT into 4 child TRDDs; parent `blocked` on them (rule 13)
+
+The card's own resume note says pulling it means SPLITTING it, not implementing four
+features under one id. Done — the four NET-NEW pieces are now their own cards, in the
+parent's priority order, each carrying the audit's verified facts + smallest step:
+
+1. **TRDD-57WJL5L2** — duties 7-8: superseded-below-delimiter convention + memgrep
+   default-exclude + reorder pass (highest value — recall currently mixes obsolete facts in).
+2. **TRDD-AZ6QRK0D** — duty 21: `published-globally` → real USER-scope symlink mechanism
+   (coordinate with issue #52).
+3. **TRDD-J3ZH3RSI** — duty 9: bulk superseded→lesson retro-pass (7th maintenance marker).
+4. **TRDD-3SOO1RWE** — duty 2: atom `desc` backfill/validation in repair (cheapest).
+
+This card is now the SPEC + reconciliation ledger and sits `blocked` on the four (its step 4,
+publish, follows them). The remaining PARTIAL/MISSING rows NOT split out (11, 13, 14, 15,
+15b-rename, 16-17, 18) stay recorded in the gap table for future increments — split them out
+the same way when their turn comes; do not implement them under this id either.
 
 ### 2026-08-02 19:12 — independent duty-coverage RE-AUDIT folded in (verified)
 
