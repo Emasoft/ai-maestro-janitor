@@ -141,6 +141,12 @@ def parse_frontmatter(text: str) -> dict:
 # --------------------------------------------------------------------------- #
 
 
+# The lesson-metadata keys memgrep's `split_note_metadata` recognizes inside the ONE bracket
+# it reads after `[^N]:`. Kept as an explicit allow-list rather than "any `[k:v]`" so a lesson
+# that legitimately OPENS with bracketed prose keeps that prose in its comparable text.
+_LESSON_META_KEYS = r"id|status|keywords|ocd|lmd|desc|supersedes|superseded-by"
+
+
 def _normalize_lesson(body: str) -> str:
     """Reduce a lesson to its substantive text for drop/reword detection: strip
     the `[^N]:` footnote marker and a leading `[ocd:… lmd:…]` metadata prefix
@@ -151,7 +157,23 @@ def _normalize_lesson(body: str) -> str:
     # Strip a leading metadata prefix in ANY spelling — `[ocd:… lmd:…]` (canonical),
     # `[lmd:…]` alone, or two separate `[ocd:…] [lmd:…]` brackets — so a legal
     # metadata-format change is not misread as a reworded lesson (audit Finding 2).
-    body = re.sub(r"^\s*(?:\[(?:ocd|lmd):[^\]]*\]\s*)+", "", body)
+    #
+    # KEYED ON THE WHOLE RECOGNIZED KEY SET, not just ocd/lmd (2026-08-02). Restricting it
+    # to those two made the oracle DEADLOCK against memgrep's own grammar, and the deadlock
+    # was total — no arrangement could satisfy both. `split_note_metadata` treats ONLY the
+    # first bracket after `[^N]:` as metadata, so a stable `id:` MUST go inside that bracket;
+    # but a legacy bracket leading with `keywords:` was not stripped here, so adding `id:` to
+    # it broke the literal-substring fidelity check and `verify_repair` refused the edit. Put
+    # `id:` in a second bracket instead and the parser stops seeing it (trailing) or drops
+    # `keywords` from metadata (leading) — all four arrangements were empirically tested
+    # against the real binary. Result: three lessons could never be given the stable id the
+    # linter demands, and the repair correctly refused rather than corrupt them.
+    #
+    # FAITHFUL to this function's stated intent, not a loosening of it: the bracket is the
+    # lesson's ADDRESS, never its claim. `DO NOT … BECAUSE … DO …` must survive verbatim and
+    # is untouched by any metadata edit. Only recognized keys are stripped, so a lesson
+    # opening with a markdown link (`[text](url)`) keeps its content.
+    body = re.sub(rf"^\s*(?:\[(?:{_LESSON_META_KEYS}):[^\]]*\]\s*)+", "", body)
     body = re.sub(r"\s+", " ", body)
     return body.strip()
 

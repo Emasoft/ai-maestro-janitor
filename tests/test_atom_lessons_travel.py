@@ -77,3 +77,39 @@ def test_multiple_atoms_only_the_offender_is_named() -> None:
     ok, lost = mev.atom_lessons_travel([src], [res])
     assert not ok
     assert lost == ["^beta#[^2]"], lost
+
+
+# --- the keywords-led metadata bracket deadlock (2026-08-02) ------------------
+
+
+def test_adding_an_id_to_a_KEYWORDS_led_bracket_is_not_a_reworded_lesson() -> None:
+    """THE DEADLOCK. memgrep reads only the FIRST bracket after `[^N]:` as metadata, so a
+    stable `id:` must go inside it. Before this fix `_normalize_lesson` stripped a leading
+    bracket only when it began `ocd:`/`lmd:` — so a legacy `keywords:`-led bracket stayed in
+    the compared text, adding `id:` broke the literal-substring check, and `verify_repair`
+    refused. Every alternative arrangement failed too (id in a 2nd leading bracket drops
+    keywords from metadata; trailing, the parser stops seeing id), so three lessons could
+    never be given the id the linter demands."""
+    before = '[^1]: [keywords:"a_phrase another", ocd:2026-08-01, lmd:2026-08-01]\nDO NOT x, BECAUSE y. DO z instead.'
+    after = '[^1]: [id:ATOM-AAAA-1111, keywords:"a_phrase another", ocd:2026-08-01, lmd:2026-08-02]\nDO NOT x, BECAUSE y. DO z instead.'
+    assert mev._normalize_lesson(before) == mev._normalize_lesson(after)
+    ok, missing = mev.lessons_preserved([f"## Notes and lessons learned\n\n{before}\n"],
+                                        f"## Notes and lessons learned\n\n{after}\n")
+    assert ok, f"adding a stable id must not read as a dropped lesson: {missing}"
+
+
+def test_the_CLAIM_still_cannot_be_reworded_under_cover_of_metadata() -> None:
+    """The complement — otherwise the fix would hand every editor a licence to rewrite the
+    lesson body while calling it a metadata change."""
+    before = '[^1]: [keywords:"k", ocd:2026-08-01]\nDO NOT x, BECAUSE y. DO z instead.'
+    reworded = '[^1]: [id:ATOM-AAAA-1111, keywords:"k", ocd:2026-08-01]\nDO NOT q, BECAUSE r. DO s instead.'
+    ok, _ = mev.lessons_preserved([f"## Notes and lessons learned\n\n{before}\n"],
+                                  f"## Notes and lessons learned\n\n{reworded}\n")
+    assert not ok, "the DO-NOT/BECAUSE/DO claim must still be protected verbatim"
+
+
+def test_a_lesson_opening_with_a_markdown_LINK_keeps_its_content() -> None:
+    """Why the strip is an explicit key allow-list and not 'any [..] bracket': a lesson that
+    legitimately opens with bracketed prose must keep that prose in its comparable text."""
+    body = "[^1]: [see the docs](https://example.invalid) DO NOT x, BECAUSE y. DO z."
+    assert "see the docs" in mev._normalize_lesson(body)
