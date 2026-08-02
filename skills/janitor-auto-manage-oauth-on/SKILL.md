@@ -138,8 +138,13 @@ tick, and the stalled nudge tells you when to step in).
    # Count known accounts from the KEYCHAIN via the rotator (known-emails), NOT the
    # plaintext slots/*.json the keychain migration deletes — those read 0 on every
    # migrated machine (audit C2 class).
-   VER="$(ls -d "$HOME"/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/*/scripts/oauth_rotator/rotator.py 2>/dev/null | sort -V | tail -1 || true)"
-   N=$( [ -n "$VER" ] && uv run "$VER" known-emails 2>/dev/null | grep -c . || echo 0 )
+   # Use THIS plugin's own root — never glob the cache. Two reasons the old form was
+   # wrong: the cache is EPHEMERAL (GC'd ~7d after an update, so a resolved path can
+   # vanish under you), and `ls -d <glob>` passes an UNMATCHED glob through literally,
+   # so a miss yields a bogus path instead of an empty result. ${CLAUDE_PLUGIN_ROOT} is
+   # the running version by construction and needs no version sort.
+   ROT="${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotator.py"
+   N=$( [ -f "$ROT" ] && uv run "$ROT" known-emails 2>/dev/null | grep -c . || echo 0 )
    echo "Janitor OAuth rotator: ON (daemon oauth-rotator-tick every 60s, threshold 97%, drain-first). Known accounts: ${N:-0}. ${N:-0} < 2 ⇒ capture a 2nd account before rotation can fire (run /janitor-refresh-cc-logins — it seeds via open-login.sh then auto-bootstraps a refresh-bearing slot). Ensure /janitor-arm has armed the heartbeat so the daemon stays alive. Disable with /janitor-auto-manage-oauth-off."
    ```
 

@@ -21,11 +21,19 @@ declined to clear it unilaterally.**
 
 ### ⚠️ IMPACT IS NOT "79 UNPUSHED COMMITS" — EVERY FIX SHIPPED TODAY IS INERT
 
-Skills invoke their backing scripts by ABSOLUTE path into the **plugin CACHE**
-(`~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/scripts/…`), i.e. the
-PUBLISHED version — never the working tree. So until a release lands, the repo fixes do not
-exist as far as any `/janitor-*` skill is concerned. Measured 2026-08-02 (grep counts,
-cached v2.3.0 vs repo):
+Skills invoke their backing scripts via **`${CLAUDE_PLUGIN_ROOT}`**, which resolves at load
+time to `~/.claude/plugins/cache/…/<ver>/` — the PUBLISHED version, never the working tree.
+So until a release lands, the repo fixes do not exist as far as any `/janitor-*` skill is
+concerned.
+
+*(Corrected 2026-08-02: I first wrote that SKILL.md "hard-codes an absolute versioned path".
+It does not — the source uses the variable, and it auto-rolls correctly; I had read the
+RESOLVED text the harness substitutes and mistaken it for the source. The CONCLUSION below
+is unaffected — the variable still points at the published cache — but the mechanism was
+wrong, and a false claim about how skills resolve paths would send the next reader hunting a
+bug that isn't there.)*
+
+Measured 2026-08-02 (grep counts, cached v2.3.0 vs repo):
 
 | symbol | cached v2.3.0 (what the skill RUNS) | repo (fixed) |
 |---|---|---|
