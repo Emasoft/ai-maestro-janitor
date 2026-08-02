@@ -1,10 +1,11 @@
 ---
 trdd-id: 8IZ8COQ8
 title: Repeated janitor-command injections pile up in a session's input queue
-column: testing
+column: complete
 implementation-commits: [d4498ff, b60f07a]
+eht: [DXM75JB2]
 created: 2026-07-17T14:14:09+0200
-updated: 2026-08-02T10:34:00+0200
+updated: 2026-08-02T13:05:35+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -23,9 +24,18 @@ compact long ago."*
 neither `resume-after-compact.flag` nor `rate-limited.flag` exists at fire time
 (`NOTHING_PENDING`). Tests: `tests/test_resume_trigger.py` gate section.
 
-**NEXT ACTION:** none — the investigation is done and the fix shipped (`d4498ff`). Rides the
-next publish. See the 2026-08-02 section, which SUPERSEDES the open questions and the candidate
-list below.
+**CLOSED 2026-08-02 (`testing → complete`).** The fix shipped (`d4498ff`, corrected by
+`b60f07a`); its 55 tests pass. Rides the next publish. Both open questions were answered by
+measurement, and the answer changed the defect: see the 2026-08-02 section, which SUPERSEDES
+the open questions and the candidate list below.
+
+**NEXT ACTION:** none on this card — it is terminal. The single candidate fix that did NOT ship
+(the push's type-time re-check) is now **`TRDD-DXM75JB2`** in `todo`, filed as this card's EHT
+so it is not archived along with the card that deferred it. Do not reopen this one for it.
+
+**SUPERSEDED — do NOT carry forward:** the "Open questions" section (Q1's premise was FALSE —
+the transcript was 33 min stale, so `diagnose_root` was right) and two of the three "Candidate
+fixes" (busy-session guard and unconsumed-injection back-off both shipped as TRDD-8DR0X08A F2).
 
 ## Evidence (recovery-audit.ndjson, global-state — read 2026-07-17 ~14:05)
 

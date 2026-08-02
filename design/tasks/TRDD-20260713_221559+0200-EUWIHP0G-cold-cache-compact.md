@@ -109,8 +109,13 @@ happened and the STATE block still described it as pending. That is check3 drift
 than a stale date: a reader who trusts the STATE block (as its own header instructs) concludes the
 card awaits a transition that already occurred, and the only way to catch it is to cross-read the
 frontmatter the STATE block claims to supersede. Left in `ai_review`, which is where it is. What
-it actually awaits is a real cold-cache resume at the 270k threshold, to observe the compact fire
-in the wild — the same shape of open observation as TRDD-HI0BGQGJ, and not forceable honestly.
+it actually awaits is a real cold-cache resume at the **harness-relative** threshold (716_000 on
+this machine; unreachable where `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is unset), to observe the
+compact fire in the wild — the same shape of open observation as TRDD-HI0BGQGJ, and not forceable
+honestly. **Not 270k** — the first draft of this very note said 270k, which is precisely the
+retired number the 2026-07-29 section forbids acting on. Writing it down twice in one card is the
+evidence that a superseded figure stays quotable long after it is retired: it reads as the card's
+own number because it once was.
 
 **Knobs:** `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED` (on), `..._MIN_CONTEXT_TOKENS`
 (270000), `..._MIN_IDLE_SECONDS` (3600), `..._COOLDOWN_SECONDS` (600).
