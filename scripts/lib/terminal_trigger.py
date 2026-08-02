@@ -244,6 +244,28 @@ def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | No
     return None
 
 
+# How many CONSECUTIVE failed pane reads on a READABLE channel to tolerate before giving up.
+# Small on purpose: a genuinely wedged pane should be reported, not polled forever — but one
+# osascript timeout must not kill a procedure that is otherwise fine.
+_MAX_TRANSIENT_UNREADABLE = 3
+
+
+def channel_is_readable(terminal: Mapping[str, str]) -> bool:
+    """True iff this channel CAN be read back at all — i.e. a None from `read_pane_text` means
+    "the read failed", not "reading is impossible here".
+
+    Mirrors `read_pane_text`'s own dispatch, including its id validation: a tmux pane or iTerm
+    session id that fails validation is not readable, so a tampered id degrades to the
+    write-only path rather than being retried three times against an argv we refused to build.
+    """
+    kind = terminal.get("kind", "")
+    if kind == "tmux":
+        return valid_tmux_pane(terminal.get("pane", ""))
+    if kind == "iterm":
+        return bool(re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")))
+    return False
+
+
 def build_type_only_steps(
     terminal: Mapping[str, str], command: str
 ) -> list[list[str]] | None:
@@ -449,6 +471,7 @@ def inject_until_sent(
     type_fn,
     submit_fn,
     clear_fn=None,
+    pre_submit=None,
     quiet_s: float = _USER_QUIET_S,
     retry_s: float = _PROMPT_POLL_INTERVAL_S,
     giveup_s: float | None = None,
@@ -496,6 +519,7 @@ def inject_until_sent(
     giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
     deadline = clock() + giveup_s
     last = "not attempted"
+    unreadable = 0  # CONSECUTIVE failed reads on a readable channel; reset by any good read
     while True:
         if clock() >= deadline:
             state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
@@ -508,10 +532,22 @@ def inject_until_sent(
 
         text = reader(terminal)
         if text is None:
-            # Write-only channel (wtype/xdotool): nothing can be read back, so neither the
-            # empty-check nor the verify is possible. Retrying cannot make it readable —
-            # report instead of looping forever pretending to verify.
-            return False, "pane not readable on this channel — cannot verify"
+            # TWO different Nones, and conflating them was a real defect (TRDD-0BVF4K7E):
+            #   * a WRITE-ONLY channel (wtype/xdotool) can NEVER be read — retrying cannot
+            #     make it readable, so report instead of looping forever pretending to verify;
+            #   * a READABLE channel (tmux/iTerm) that returned None once is a TRANSIENT
+            #     failure — an osascript timeout, a `tmux capture-pane` losing a race with a
+            #     redraw. Aborting the whole procedure on one blip is why a detached run could
+            #     die on its first hiccup while the pane was perfectly fine.
+            if not channel_is_readable(terminal):
+                return False, "pane not readable on this channel — cannot verify"
+            unreadable += 1
+            if unreadable > _MAX_TRANSIENT_UNREADABLE:
+                return False, f"pane unreadable {unreadable}x in a row — giving up"
+            last = f"pane read failed ({unreadable}x) — retrying"
+            sleeper(retry_s)
+            continue
+        unreadable = 0
         # RULE 1 — inject only into an EMPTY field; otherwise re-check after the 8 s window.
         # Uses `quiet_s`, not `retry_s`: a non-empty field means a human is composing, and the
         # owner's rule for "wait for the human" is 8 s. `retry_s` is for OUR failed attempt.
@@ -523,6 +559,16 @@ def inject_until_sent(
         type_fn()
         after = reader(terminal)
         if after is not None and prompt_field_shows_only(after, command):
+            # `pre_submit` runs HERE and nowhere else: the field is verified and Enter is the
+            # very next act, so any state it records cannot outlive a command that never ran.
+            # `clear_trigger` writes its resume flags from here — writing them earlier (as it
+            # used to, before firing) meant a give-up during the 8s waits left
+            # `resume-after-clear.flag` on disk for a /clear that never happened, and the next
+            # heartbeat consumed it: issue #105, re-introduced by the very deferral that makes
+            # the injector safe. Raising here aborts BEFORE Enter — refusing to submit is the
+            # safe direction, so the exception is deliberately not caught.
+            if pre_submit is not None:
+                pre_submit()
             submit_fn()
             return True, "verified; submitted"
 
@@ -678,6 +724,82 @@ def _encode_payload(delay_s: float, steps: list[list[str]]) -> str:
 # which can only ever guess.
 
 
+def run_chained_inject(
+    terminal: Mapping[str, str],
+    *,
+    first: str,
+    then: Sequence[str],
+    gate_stamp: Path,
+    gate_baseline: int,
+    pre_submit_first=None,
+    gate_timeout_s: float = 180.0,
+    giveup_s: float | None = None,
+    sleeper=time.sleep,
+) -> tuple[bool, str]:
+    """Type `first`, wait for the session it creates to actually EXIST, then type each of
+    `then`. Every command is read back and verified before its Enter. Returns (ok, why).
+
+    THIS IS THE WHOLE POINT OF THE REDESIGN. `clear_trigger` used to fire two INDEPENDENT
+    delayed children — `/clear` at t=2s, the bootstrap at t=10s — each typing blind. Applying
+    rule 3 to each of those separately would be WORSE than leaving it alone: the moment phase A
+    can defer (rule 2 — the user touched the keyboard), phase B's wall-clock timer decouples
+    from it, so the bootstrap's `/janitor-resume` lands in the UN-CLEARED session, the
+    dispatcher consumes `resume-after-clear.flag`, and the `/clear` that finally arrives leaves
+    a session that is unarmed AND unresumable. Chaining on the VERIFIED SUBMIT — never on a
+    clock — is what makes deferral safe.
+
+    The gate is `clear-observed.ts`, stamped by the SessionStart hook on `source == "clear"`:
+    the only unambiguous evidence that /clear happened. `gate_baseline` is read BEFORE typing,
+    and the wait requires STRICTLY newer, so an earlier clear's stamp cannot satisfy it.
+    Parsing the pane for a "fresh-looking" prompt would only ever be a guess.
+    """
+    steps_type = build_type_only_steps(terminal, first)
+    steps_submit = build_submit_steps(terminal)
+    if steps_type is None or steps_submit is None:
+        return False, f"channel {terminal.get('kind', '?')!r} cannot type-then-verify"
+
+    def _runner(cmd: str):
+        def _do() -> None:
+            plan = build_type_only_steps(terminal, cmd)
+            if plan:
+                _run_steps(plan)
+        return _do
+
+    def _submit() -> None:
+        plan = build_submit_steps(terminal)
+        if plan:
+            _run_steps(plan)
+
+    def _clear() -> None:
+        plan = build_clear_field_steps(terminal)
+        if plan:
+            _run_steps(plan)
+
+    ok, why = inject_until_sent(
+        terminal, first,
+        type_fn=_runner(first), submit_fn=_submit, clear_fn=_clear,
+        pre_submit=pre_submit_first, giveup_s=giveup_s, sleeper=sleeper,
+    )
+    if not ok:
+        return False, f"{first} not sent: {why}"
+
+    if not _await_fresh_session(gate_stamp, gate_baseline, timeout_s=gate_timeout_s, sleeper=sleeper):
+        # The fresh session never appeared. STOP — do not type the bootstrap into whatever is
+        # there now. This is the exact stranding the chain exists to prevent, and reporting a
+        # session that needs a manual `/janitor-arm` beats silently arming the wrong one.
+        return False, f"{first} submitted but no fresh session within {gate_timeout_s:.0f}s"
+
+    for cmd in then:
+        ok, why = inject_until_sent(
+            terminal, cmd,
+            type_fn=_runner(cmd), submit_fn=_submit, clear_fn=_clear,
+            giveup_s=giveup_s, sleeper=sleeper,
+        )
+        if not ok:
+            return False, f"{cmd} not sent: {why}"
+    return True, "chain complete"
+
+
 def _await_fresh_session(
     stamp: Path, baseline: int, *, timeout_s: float, sleeper=time.sleep, clock=time.monotonic
 ) -> bool:
@@ -708,7 +830,15 @@ def _run_send_payload(payload_b64: str) -> int:
     except (ValueError, json.JSONDecodeError):
         return 2
     time.sleep(max(0.0, float(data.get("delay", 0.0))))
-    for step in data.get("steps", []):
+    _run_steps(data.get("steps", []))
+    return 0
+
+
+def _run_steps(steps) -> None:
+    """Execute RUN/SLEEP-tagged argv steps. Extracted from `_run_send_payload` so the CHAINED
+    injector runs keystrokes through the exact same executor as the blind one — two copies of
+    this loop would drift, and the copy that drifts is the one that types into a user's pane."""
+    for step in steps:
         if not step:
             continue
         tag, rest = step[0], step[1:]
@@ -723,7 +853,6 @@ def _run_send_payload(payload_b64: str) -> int:
                 check=False,
                 timeout=10,
             )
-    return 0
 
 
 def _fire_detached_steps(delay_s: float, steps: list[list[str]]) -> None:

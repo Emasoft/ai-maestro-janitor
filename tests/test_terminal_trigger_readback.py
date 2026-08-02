@@ -580,3 +580,159 @@ def test_an_absent_or_corrupt_stamp_reads_as_NOT_YET_never_as_ready(tmp_path) ->
     assert tt._await_fresh_session(
         corrupt, 0, timeout_s=1, sleeper=lambda _s: None, clock=iter([0.0, 9.0]).__next__
     ) is False
+
+
+# --- TRDD-0BVF4K7E phase 2: the CHAINED injector ----------------------------
+
+
+def _chain_env(gate_path, *, gate_writes_on_submit=True):
+    """A fake pane that always verifies, plus a gate stamp the submit optionally advances."""
+    log: list[str] = []
+    state = {"typed": None}
+
+    def reader(_t):
+        return _pane(state["typed"] or "")
+
+    def make(cmd):
+        def _type():
+            state["typed"] = cmd
+            log.append(f"type:{cmd}")
+        return _type
+
+    def submit():
+        log.append(f"submit:{state['typed']}")
+        if gate_writes_on_submit and state["typed"] == "/clear":
+            gate_path.write_text("999", encoding="utf-8")
+        state["typed"] = ""
+    return log, state, reader, make, submit
+
+
+def test_the_chain_submits_clear_THEN_waits_THEN_bootstraps(tmp_path, monkeypatch) -> None:
+    """The ordering that makes deferral safe: the bootstrap is typed only AFTER /clear is
+    verified-and-submitted AND the fresh session has actually stamped clear-observed.ts."""
+    gate = tmp_path / "clear-observed.ts"
+    gate.write_text("100", encoding="utf-8")
+    log, st, reader, make, submit = _chain_env(gate)
+
+    monkeypatch.setattr(tt, "build_type_only_steps", lambda t, c: [["RUN", "true"]])
+    monkeypatch.setattr(tt, "build_submit_steps", lambda t: [["RUN", "true"]])
+    monkeypatch.setattr(tt, "build_clear_field_steps", lambda t: [["RUN", "true"]])
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: None)
+
+    def fake_inject(terminal, command, *, type_fn, submit_fn, clear_fn=None,
+                    pre_submit=None, **kw):
+        make(command)()
+        if pre_submit is not None:
+            pre_submit()
+        submit()
+        return True, "verified; submitted"
+
+    monkeypatch.setattr(tt, "inject_until_sent", fake_inject)
+    ok, why = tt.run_chained_inject(
+        {"kind": "tmux", "pane": "%1"}, first="/clear",
+        then=["/janitor-arm", "/janitor-resume"],
+        gate_stamp=gate, gate_baseline=100, sleeper=lambda _s: None,
+    )
+    assert ok, why
+    assert log == [
+        "type:/clear", "submit:/clear",
+        "type:/janitor-arm", "submit:/janitor-arm",
+        "type:/janitor-resume", "submit:/janitor-resume",
+    ]
+
+
+def test_the_bootstrap_is_NOT_typed_when_the_fresh_session_never_appears(tmp_path, monkeypatch) -> None:
+    """THE stranding bug this design exists to prevent. If /clear was submitted but no fresh
+    session stamps the gate, the chain must STOP — never type /janitor-resume into the
+    un-cleared session, where the dispatcher would eat resume-after-clear.flag and the late
+    /clear would leave a session both unarmed and unresumable."""
+    gate = tmp_path / "clear-observed.ts"
+    gate.write_text("100", encoding="utf-8")
+    log: list[str] = []
+
+    def fake_inject(terminal, command, *, type_fn, submit_fn, clear_fn=None,
+                    pre_submit=None, **kw):
+        log.append(command)
+        if pre_submit is not None:
+            pre_submit()
+        return True, "verified; submitted"
+
+    monkeypatch.setattr(tt, "inject_until_sent", fake_inject)
+    monkeypatch.setattr(tt, "build_type_only_steps", lambda t, c: [["RUN", "true"]])
+    monkeypatch.setattr(tt, "build_submit_steps", lambda t: [["RUN", "true"]])
+    ok, why = tt.run_chained_inject(
+        {"kind": "tmux", "pane": "%1"}, first="/clear",
+        then=["/janitor-arm", "/janitor-resume"],
+        gate_stamp=gate, gate_baseline=100,   # never advances
+        gate_timeout_s=3, sleeper=lambda _s: None,
+    )
+    assert not ok
+    assert "no fresh session" in why
+    assert log == ["/clear"], "the bootstrap must NOT be typed into the un-cleared session"
+
+
+def test_pre_submit_runs_ONLY_when_the_field_verified(monkeypatch) -> None:
+    """The #105 invariant at its new home: resume state is written in the instant between
+    'the field reads exactly /clear' and Enter — never on a pass that failed to verify."""
+    wrote: list[str] = []
+    sent: list[str] = []
+    ok, _ = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/clear",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None, pre_submit=lambda: wrote.append("flags"),
+        reader=_seq(_pane(""), _pane("/clea"), _pane(""), _pane("/clear")),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok
+    assert wrote == ["flags"], "written exactly once, on the verified pass"
+    assert sent == ["Enter"]
+
+
+def test_a_chain_that_never_verifies_writes_NO_resume_state() -> None:
+    """The complement, and the whole reason pre_submit exists: a chain that gives up must
+    leave nothing behind for the next heartbeat to act on."""
+    wrote: list[str] = []
+    sent: list[str] = []
+    ticks = {"t": 0.0}
+
+    def _clock() -> float:
+        # A COUNTER, not a fixed sequence: the loop polls the clock a variable number of
+        # times per pass, so a short iterator raises StopIteration from inside the loop and
+        # the test fails for the wrong reason (it did, on first run).
+        ticks["t"] += 10.0
+        return ticks["t"]
+
+    ok, _ = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/clear",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None, pre_submit=lambda: wrote.append("flags"),
+        reader=lambda _t: _pane("the user is typing"),
+        is_typing=lambda _t: False, sleeper=lambda _s: None,
+        giveup_s=30.0, clock=_clock,
+    )
+    assert not ok
+    assert wrote == [], "no clear happened, so no resume state may exist"
+    assert sent == []
+
+
+def test_a_transient_unreadable_pane_RETRIES_instead_of_aborting() -> None:
+    """A single osascript timeout must not kill a detached chain. But a WRITE-ONLY channel
+    still fails fast — retrying cannot make wtype readable."""
+    reads = iter([None, None, _pane(""), _pane("/compact")])
+    sent: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        reader=lambda _t: next(reads), is_typing=lambda _t: False,
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok, why
+    assert sent == ["Enter"]
+
+    ok2, why2 = tt.inject_until_sent(
+        {"kind": "wtype"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: None,
+        reader=lambda _t: None, is_typing=lambda _t: False,
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert not ok2 and "not readable" in why2

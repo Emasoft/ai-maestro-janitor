@@ -184,9 +184,20 @@ def test_uuid_regex_accepts_real_rejects_injection() -> None:
 
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
-def test_dry_run_writes_resume_state_and_plan(tmp_path: Path) -> None:
-    """--dry-run: resume-directive + resume-after-clear marker written, plan printed
-    (/clear THEN bootstrap), NOTHING fired."""
+def test_dry_run_shows_the_CHAINED_plan_and_writes_NOTHING(tmp_path: Path) -> None:
+    """--dry-run: the plan is printed (/clear THEN bootstrap), nothing fired, and — since
+    TRDD-0BVF4K7E phase 2 — NO resume state is written.
+
+    This test previously asserted the OPPOSITE (that a dry run persists the resume marker),
+    and the change is deliberate, not a relaxation. The resume state is now written by the
+    chained child at `pre_submit`, i.e. in the instant between "the field verifies as exactly
+    /clear" and "Enter". That is the only moment at which "a clear is about to happen" is
+    actually TRUE. Writing it from `main()` — as the old code did, and as this test encoded —
+    means a chain that later DEFERS past its deadline (rule 2: the user started typing) leaves
+    `resume-after-clear.flag` on disk for a clear that never ran.
+
+    A dry run firing nothing must therefore write nothing; anything else is a mutation from a
+    command whose whole contract is that it does not mutate."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run(
@@ -199,31 +210,29 @@ def test_dry_run_writes_resume_state_and_plan(tmp_path: Path) -> None:
         iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
     )
     assert proc.returncode == 0, proc.stderr
-    assert "DIRECTIVE_WRITTEN" in proc.stdout
-    assert "CLEAR_MARKER_WRITTEN" in proc.stdout
     # The plan must show /clear BEFORE the bootstrap, and name both bootstrap commands.
     out = proc.stdout
-    assert "DRY_RUN would fire /clear" in out
+    assert "DRY_RUN would chain /clear" in out
     assert out.index("/clear") < out.index("/janitor-arm") < out.index("/janitor-resume")
     assert "CLEAR_FIRED" not in out, "dry-run must not fire"
+    assert "CLEAR_CHAIN_SPAWNED" not in out, "dry-run must not spawn the chain either"
     sd = _state_dir(p)
-    assert (sd / "resume-directive.txt").is_file()
-    assert (sd / "resume-after-clear.flag").read_text(encoding="utf-8").startswith("read the handoff")
-    assert (sd / "resume-after-clear.ts").is_file()
+    for name in ("resume-directive.txt", "resume-after-clear.flag", "resume-after-clear.ts"):
+        assert not (sd / name).exists(), f"a dry run must not write {name}"
 
 
-def test_dry_run_default_directive_when_omitted(tmp_path: Path) -> None:
-    """No --directive: a fallback pointer at the link-only handoff is still persisted,
-    so the post-clear cron always has a resume target (no PostClear hook to synthesise one)."""
+def test_the_chain_is_spawned_on_a_readable_channel(tmp_path: Path) -> None:
+    """A real (non-dry) run on a readable channel takes the CHAINED path — one verified
+    sequence — and still writes no state up front; the child owns that now."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run(
-        ["--dry-run"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
-    )
+    proc = _run([], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0, proc.stderr
-    flag = _state_dir(p) / "resume-after-clear.flag"
-    assert flag.is_file()
-    assert "agent-handoff.md" in flag.read_text(encoding="utf-8"), "fallback points at the handoff"
+    assert "CLEAR_CHAIN_SPAWNED" in proc.stdout
+    sd = _state_dir(p)
+    assert not (sd / "resume-after-clear.flag").exists(), (
+        "the flag must not exist until the child is about to press Enter on /clear (issue #105)"
+    )
 
 
 def test_dry_run_warns_on_bloated_handoff(tmp_path: Path) -> None:

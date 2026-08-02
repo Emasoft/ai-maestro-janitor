@@ -51,6 +51,9 @@ manual clear + re-arm still auto-resumes).
 from __future__ import annotations
 
 import argparse
+import base64
+import fcntl
+import json
 import os
 import re
 import subprocess
@@ -63,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # `user_intent` is deliberately NOT imported here any more: the presence CANCEL it backed is
 # gone, and the deferral that replaced it lives in terminal_trigger (which consults user_intent
 # itself). Re-adding the import here would be the first step back toward a local cancel.
+import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
@@ -277,6 +281,110 @@ def _fire(script: str) -> None:
     )
 
 
+# --- the CHAINED child (TRDD-0BVF4K7E phase 2) ------------------------------
+#
+# Replaces the two independent blind timers. Everything below runs in a DETACHED child,
+# because the keystrokes must land after THIS turn ends — but unlike the old design the child
+# now verifies each command before submitting it, and phase B chains on phase A's verified
+# submit instead of a wall clock.
+
+_GATE_STAMP = "clear-observed.ts"
+_CHAIN_LOCK = "clear-chain.lock"
+
+
+def _gate_baseline() -> int:
+    """The `clear-observed.ts` value BEFORE we type /clear. The chain waits for STRICTLY
+    greater, so a stamp from an earlier clear can never be mistaken for this one."""
+    try:
+        return int((_project_root() / ".janitor" / "state" / _GATE_STAMP).read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def _run_chain_payload(payload_b64: str) -> int:
+    """CHILD role. Sleep out the settle delay, then run the whole verified chain under a
+    singleton lock. Never raises — but ALWAYS logs its outcome.
+
+    The log line is not decoration. The child's stdio is DEVNULL (it must outlive this turn),
+    so `run_chained_inject`'s `(ok, why)` reaches nobody otherwise — a give-up would be
+    indistinguishable from success, which is the silent-failure shape this project treats as a
+    defect in its own right.
+    """
+    try:
+        data = json.loads(base64.b64decode(payload_b64.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return 2
+    time.sleep(max(0.0, float(data.get("delay", 0.0))))
+
+    sd = Path(data["state_dir"])
+    lock_path = sd / _CHAIN_LOCK
+    try:
+        sd.mkdir(parents=True, exist_ok=True)
+        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        state.log_line("clear-trigger", f"chain: cannot open lock {lock_path}: {exc}")
+        return 1
+    try:
+        # NON-BLOCKING: a second /janitor-handoff-and-clear while one is already pending must
+        # NOT queue up behind it — that is how you get two /clear commands typed into one
+        # session, the second landing in the fresh one.
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        state.log_line("clear-trigger", "chain: another clear chain is already pending — skipping")
+        os.close(lock_fd)
+        return 0
+
+    directive = data["directive"]
+
+    def _persist_resume_state() -> None:
+        # Called by inject_until_sent IMMEDIATELY before Enter on /clear, and nowhere else.
+        # main() used to write these before firing; once the child can defer for minutes, that
+        # ordering resurrects issue #105 — a give-up would leave resume-after-clear.flag for a
+        # /clear that never happened, and the next heartbeat would consume it.
+        _write_directive(directive)
+        _write_clear_marker(directive)
+
+    try:
+        ok, why = terminal_trigger.run_chained_inject(
+            data["terminal"],
+            first=data["first"],
+            then=list(data["then"]),
+            gate_stamp=sd / _GATE_STAMP,
+            gate_baseline=int(data["gate_baseline"]),
+            pre_submit_first=_persist_resume_state,
+        )
+        state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
+        if not ok:
+            # Nothing was cleared, so any state we wrote is a lie the next heartbeat would act
+            # on. Remove it. Best-effort: a failed unlink is logged, never raised.
+            for name in ("resume-after-clear.flag", "resume-after-clear.ts", "resume-directive.txt"):
+                try:
+                    (sd / name).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    state.log_line("clear-trigger", f"chain: could not clear {name}: {exc}")
+        return 0 if ok else 1
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+
+
+def _spawn_chain(payload: dict) -> None:
+    """Launch the chained child fully detached so this turn can end (which is what lets the
+    typed /clear actually run)."""
+    blob = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
+        [sys.executable, str(Path(__file__).resolve()), "--__chain", blob],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 # Phase outcome constants — what _fire_phase reports back to main.
 _FIRED = "FIRED"
 _DRY = "DRY"
@@ -347,6 +455,11 @@ def _this_terminal() -> dict[str, str]:
 
 
 def main() -> int:
+    # CHILD entry: `clear_trigger.py --__chain <base64-payload>`. Checked before argparse so
+    # the child never has to satisfy the human-facing flag surface.
+    if len(sys.argv) >= 3 and sys.argv[1] == "--__chain":
+        return _run_chain_payload(sys.argv[2])
+
     ap = argparse.ArgumentParser(
         description="Persist a link-only handoff + resume marker, then self-trigger "
         "/clear and bootstrap the fresh session to re-arm + resume."
@@ -407,12 +520,17 @@ def main() -> int:
             print(f"DEFERRED {why}", file=sys.stderr)
             return 0
 
-    # 3. PERSIST THE RESUME STATE — before firing anything. /clear is unrecoverable, so the
-    #    marker + directive MUST be on disk before it runs.
-    dpath = _write_directive(directive)
-    mpath = _write_clear_marker(directive)
-    print(f"DIRECTIVE_WRITTEN {dpath}")
-    print(f"CLEAR_MARKER_WRITTEN {mpath}")
+    # 3. THE RESUME STATE IS NO LONGER WRITTEN HERE (TRDD-0BVF4K7E phase 2). It is written by
+    #    the chained child, immediately before the VERIFIED Enter on /clear.
+    #
+    #    The invariant is unchanged and still load-bearing: resume state must exist before
+    #    /clear runs, because /clear is unrecoverable and there is no PostClear hook. What
+    #    changed is that the child can now DEFER for minutes (rule 2 — the user is typing), and
+    #    writing here would mean a deferral that times out leaves `resume-after-clear.flag` on
+    #    disk for a clear that never happened. The next heartbeat consumes it, emits a spurious
+    #    [janitor-resume], and a later MANUAL /clear no longer auto-resumes — issue #105,
+    #    re-introduced by the deferral that makes the injector safe. `pre_submit` is the only
+    #    point where "about to clear" is actually true.
 
     # 4. Validate the handoff against the concise-but-exhaustive contract (WARN-only;
     #    /clear still proceeds). A missing handoff on an unrecoverable /clear is worth
@@ -435,16 +553,40 @@ def main() -> int:
     #    at the turn boundary and the bootstrap lands on the fresh idle prompt.
     delay = args.delay
     settle = args.clear_settle
-    status_a = _fire_phase([CLEAR_CMD], delay=delay, dry_run=args.dry_run)
-    status_b = _fire_phase(list(_BOOTSTRAP_CMDS), delay=delay + settle, dry_run=args.dry_run)
+    terminal = _this_terminal()
 
     if args.dry_run:
         boot = ", ".join(_BOOTSTRAP_CMDS)
-        print(
-            f"DRY_RUN would fire {CLEAR_CMD} after {delay}s, then {boot} after "
-            f"{delay + settle}s"
-        )
+        print(f"DRY_RUN would chain {CLEAR_CMD} then {boot} on {terminal.get('kind', '?')}")
         return 0
+
+    # ONE chained child, not two blind timers. Phase B waits for phase A's VERIFIED submit
+    # plus a real fresh-session signal, so a deferral can never decouple them and strand the
+    # session unarmed. `--clear-settle` is retained only as the CHANNEL-UNAVAILABLE fallback
+    # below; the chain itself gates on `clear-observed.ts`, not on that clock.
+    if terminal_trigger.channel_is_readable(terminal):
+        _spawn_chain({
+            "delay": delay,
+            "terminal": terminal,
+            "first": CLEAR_CMD,
+            "then": list(_BOOTSTRAP_CMDS),
+            "state_dir": str(_project_root() / ".janitor" / "state"),
+            "gate_baseline": _gate_baseline(),
+            "directive": directive,
+        })
+        print("CLEAR_CHAIN_SPAWNED")
+        return 0
+
+    # UNREADABLE CHANNEL (wtype/xdotool, or an unresolvable pane): the chain cannot verify
+    # anything there, so fall back to the legacy blind two-phase send rather than refusing —
+    # refusing would discard a command the user typed themselves, which is the behaviour the
+    # owner removed. The resume state must then be written HERE, since no pre_submit runs.
+    dpath = _write_directive(directive)
+    mpath = _write_clear_marker(directive)
+    print(f"DIRECTIVE_WRITTEN {dpath}")
+    print(f"CLEAR_MARKER_WRITTEN {mpath}")
+    status_a = _fire_phase([CLEAR_CMD], delay=delay, dry_run=args.dry_run)
+    status_b = _fire_phase(list(_BOOTSTRAP_CMDS), delay=delay + settle, dry_run=args.dry_run)
     # Both phases share the same pane, so they degrade together: if the pane isn't
     # automatable, NEITHER fired. The resume state is still recorded, so a manual
     # /clear + /janitor-arm still auto-resumes.
