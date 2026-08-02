@@ -1,9 +1,10 @@
 ---
 trdd-id: CI6ZTNB9
 title: The cadence FAST probe counts the janitor's OWN background agents, so memory chores force re-arm churn
-column: testing
+column: human_review
+implementation-commits: [1516fee, 78e413d]
 created: 2026-07-15T04:47:24+0200
-updated: 2026-07-16T03:20:26+0200
+updated: 2026-08-02T13:40:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -17,9 +18,21 @@ parent-trdd: 0QQX9H0G
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-16
 
-**NEXT ACTION:** none — BOTH halves of issue #89 are implemented, tested, and lint-clean.
-Awaiting human review (`testing` → `ai_review`/`human_review` → `complete`) and a commit (no git
-command was run under this pass — the constraint of the assigning task).
+**2026-08-02 — AI REVIEW PERFORMED (`testing → human_review`).** The line below asked for exactly
+this, so it was done rather than deferred again:
+
+- **"and a commit" is STALE — both halves are in `main`.** `git log -S` on the named symbols:
+  `1516fee` (half 1, `is_janitor_agent`) and `78e413d` (half 2, `should_emit_renew`). The card was
+  written under a no-git constraint and nobody came back to record the outcome.
+- **`implementation-commits:` was EMPTY and is now filled.** That is the backtracking field — the
+  one that lets a bug found later be traced to the change that introduced it. A card whose code
+  shipped under a no-git constraint is the exact case where it silently stays empty, because the
+  pass that wrote the code was forbidden from being the pass that recorded it.
+- **Tests re-run at current HEAD:** `test_dispatch_cadence.py` + `test_heartbeat_cadence.py`
+  **72 passed**. Full suite green (14,111).
+
+**NEXT ACTION:** none — awaiting the owner's call only. BOTH halves of issue #89 are implemented,
+committed, tested, and lint-clean.
 
 **Half 1 (self-exclusion, this TRDD's original scope) — DONE, already landed on `main` before this
 pass** (verified in the live tree, not re-implemented): `pending_agents.is_janitor_agent` /
