@@ -100,8 +100,8 @@ reading is wrong, not the old one.
 ## Do NOT bundle
 
 Working the same board turned up a second, separate reconciler precision issue — `check4` treats
-**any** TRDD id mentioned in the body of a card whose prose says blocked as a prose-named blocker,
-so a legitimately-blocked card that cites terminal siblings for REUSE (TRDD-2C8XFOW9 cites
+**any** TRDD id mentioned in the body of a card whose prose trips the same block-language scan as a
+prose-named blocker, so a genuinely-held card that cites terminal siblings for REUSE (TRDD-2C8XFOW9 cites
 EQ792YPX and T7N67AQP that way) reports permanent phantom "stale blockers". That is noise, not a
 wrong close, and it is a different mechanism. Separate card, per rule 13 — not a second item here.
 

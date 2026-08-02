@@ -161,9 +161,9 @@ sev-gated, deduped, capped) INSTEAD OF / IN ADDITION TO rotating silently.
 Reuse existing plumbing end-to-end — no new notification channel, no new
 burn-math, just a cross-check at the rotation decision point.
 
-**Open design question:** should an anomalous-burn rotation be BLOCKED
-(rotate only after human ack) or merely ESCALATED (rotate as today, but push
-loudly)? Blocking risks stalling a legitimately busy session that the human
+**Open design question:** should an anomalous-burn rotation be `HOLD-FOR-ACK`
+(rotate only after human ack) or merely `ESCALATE` (rotate as today, but push
+loudly)? Holding risks stalling a legitimately busy session that the human
 is asleep for; escalate-only risks the same 3-account drain repeating before
 the human sees the push. Recommend escalate-only for v1 (matches every other
 `notify.py` caller's fail-open posture) with a v2 follow-up TRDD for

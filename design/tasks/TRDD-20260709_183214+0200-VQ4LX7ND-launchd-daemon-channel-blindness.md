@@ -1,9 +1,9 @@
 ---
 trdd-id: VQ4LX7ND
 title: Launchd guardian resolves no injection channel — PATH stripped, TCC absent
-column: dev
+column: testing
 created: 2026-07-09T18:32:14+0200
-updated: 2026-07-09T18:48:00+0200
+updated: 2026-08-02T06:38:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -31,7 +31,7 @@ attempts: 1
 test-failures: 0
 last-test-result: pass
 last-test-at: 2026-07-09T18:25:00+0200
-implementation-commits: [2ff5c7c]
+implementation-commits: [2ff5c7c, 43f3f2a]
 published-version: 0.35.5
 published-at: 2026-07-09T18:28:00+0200
 external-refs: []
@@ -64,22 +64,42 @@ dead channel degraded into a **mute skip loop** for hours." That half is now clo
 
 - `fleet_scan.iterm_automation_blocked()` detects the exact signature — iTerm is running
   yet osascript enumerated ZERO sessions. A running iTerm always has ≥1 session, so an
-  empty result cannot mean "no sessions"; the Apple Event was blocked.
+  empty result cannot mean "no sessions"; the Apple Event was DENIED-BY-TCC.
 - `record_iterm_automation_state()` stamps it; `dispatch._phase_iterm_automation_alarm()`
   emits ONE line naming the CONSEQUENCE (the guardian cannot rescue a frozen Claude in any
   iTerm pane; tmux is unaffected) and the REMEDY (System Settings → Privacy & Security →
   Automation). Once per occurrence, and it SELF-CLEARS the moment sessions come back.
 
 **The launch-path rewrite is NOT done, deliberately.** "Give the LaunchAgent a stable
-binary identity" is still the right fix, but both obvious routes are blocked, and the
+binary identity" is still the right fix, but both obvious routes were ruled out, and the
 blast radius of getting it wrong is *the machine-wide guardian never starts*:
+
+> **2026-08-02 — one of the two routes is OPEN again.** The CPV bullet below was wrong on the
+> day it was written (see its correction), so the standing decision now rests on ONLY two legs,
+> not three: the TCC root cause is still INFERRED rather than verified, and the blast radius is
+> still the whole machine's guardian. Those two are enough to keep declining a speculative
+> rewrite — but "CPV forbids it" is no longer one of the reasons, and anyone re-deciding this
+> should not count it.
 
 - **Point the plist at a stable system interpreter — DEAD.** `/usr/bin/python3` on this
   machine is **3.9.6** (Xcode's); the janitor requires ≥3.11. Verified, not assumed.
-- **A stable wrapper/bundle as `ProgramArguments[0]` — BLOCKED by CPV.** The persistence
+- **A stable wrapper/bundle as `ProgramArguments[0]` — ~~REFUSED-BY-CPV~~ (see correction).** The persistence
   discriminator (CPV issue #152) can only resolve a plist whose program folds to the
   in-tree scanned entry, which is why `keepalive_install.sh` bakes the interpreter into
   the RUNTIME plist only. A new binary identity at a DATA path would trip it at publish.
+
+  **CORRECTION 2026-08-02 — this premise was already false when it was written.** CPV issue
+  #152 was closed **COMPLETED on 2026-06-24**, two weeks BEFORE this card was filed, and it
+  shipped in CPV **v2.146.0** (`scripts/cpv_persistence_target.py`): the C1 fold now
+  recognises a hard-coded `~/.claude/plugins/data/<slug>/<rest>` target in the `~`, `$HOME`
+  and `${HOME}` forms, resolves it to `plugin_root/<rest>`, and scans that in-tree source —
+  the janitor's own `dispatcher-stub.py` launcher is named in the resolution as exactly this
+  case. So a stable launcher at a DATA path is ALLOWED.
+
+  **But read the fold's limit before acting on it:** it allows a *source* launcher that folds
+  to an existing in-tree file which scans clean. A **binary** is still rejected, as is a
+  residual `$VAR`, an out-of-tree symlink, or any target with no readable in-tree source. This
+  bullet said "wrapper/bundle" — the *wrapper* half is unblocked, the *bundle* half is not.
 - The live plist's `ProgramArguments[0]` is already the STABLE `/opt/homebrew/bin/uv`; the
   per-version python only appears because uv re-execs into its managed toolchain.
 - And the TCC root cause is still **INFERRED, not verified** — the TRDD says so itself
