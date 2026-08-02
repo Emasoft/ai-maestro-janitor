@@ -214,6 +214,55 @@ def check_sensitive_write(command: str) -> str | None:
     return None
 
 
+# ── Outbound-publication guard (owner incident 2026-08-02) ──────────────────────────────
+# A `gh issue create` / `gh * comment` PUBLISHES to a repo that may be PUBLIC and whose edit
+# history survives redaction. Two payload classes must never leave this machine inside one.
+#
+# THE INCIDENT: pasting a tool's own table output — `agentlenspro get_account_status --all`,
+# whose rows are ACCOUNT EMAILS — into two public issues. That did two separate harms at once:
+# it published the owner's three private account identities, AND GitHub parsed the `@gmail` in
+# each address as a USERNAME MENTION, paging a real uninvolved account three times per issue.
+# Neither was intended and neither was visible in the text being pasted; the second was not
+# even a thought. That is what makes it a guard rather than a lesson.
+_GH_PUBLISH_RE = re.compile(
+    r"\bgh\s+(?:issue|pr|release|gist)\s+(?:create|comment|edit|review)\b"
+    r"|\bgh\s+api\b[^|;]*-X\s*(?:POST|PATCH|PUT)\b"
+)
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# The one mention the owner sanctioned: the PRRD G1.1 self-identification line naming the
+# shared account. Anything else is paging a third party from the owner's identity.
+_ALLOWED_MENTION = "emasoft"
+_MENTION_RE = re.compile(r"(?<![A-Za-z0-9._%+-])@([A-Za-z0-9][A-Za-z0-9-]{0,38})\b")
+
+
+def check_outbound_publication(command: str) -> str | None:
+    """Deny a `gh` publish whose payload carries an email or a non-owner @mention.
+
+    Checks the RAW command, not a normalised form: the payload is usually a heredoc or a
+    `$(cat <<'EOF' …)` block, and the addresses sit inside it verbatim."""
+    if not _GH_PUBLISH_RE.search(command):
+        return None
+    emails = sorted(set(_EMAIL_RE.findall(command)))
+    if emails:
+        return (
+            f"this gh publish carries {len(emails)} email address(es) "
+            f"(e.g. {emails[0][:3]}…) — the repo may be PUBLIC and GitHub keeps edit history, "
+            "so redaction later does not undo it. Replace them with placeholders "
+            "(<account-A>) before publishing. NOTE an address also becomes an @mention: "
+            "`user@gmail.com` pages the real GitHub account `@gmail`."
+        )
+    strangers = sorted({
+        m.lower() for m in _MENTION_RE.findall(command) if m.lower() != _ALLOWED_MENTION
+    })
+    if strangers:
+        return (
+            f"this gh publish @mentions {strangers} — that pages real GitHub accounts from "
+            f"the owner's identity. Only @{_ALLOWED_MENTION} (the PRRD G1.1 self-ID line) is "
+            "sanctioned; name anyone else without the @."
+        )
+    return None
+
+
 def main() -> int:
     if not _is_truthy_env(
         "CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED", False,
@@ -231,7 +280,11 @@ def main() -> int:
     tool_input = data.get("tool_input") or {}
     cmd = tool_input.get("command", "") or ""
 
-    reason = check_compositional_exfil(cmd) or check_sensitive_write(cmd)
+    reason = (
+        check_compositional_exfil(cmd)
+        or check_sensitive_write(cmd)
+        or check_outbound_publication(cmd)
+    )
     if reason is None:
         return 0  # silent allow
 

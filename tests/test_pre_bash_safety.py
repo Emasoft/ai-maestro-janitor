@@ -266,3 +266,56 @@ def test_benign_redirect_to_nonsensitive_path_is_silent() -> None:
     """A redirect alone is not suspicious — a DENY still needs a sensitive path."""
     r = _run("echo hi > /tmp/harmless.txt")
     assert _decision(r) is None
+
+
+# ── Outbound-publication guard (owner incident 2026-08-02) ──────────────────────────────
+
+def _outbound(cmd: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pbs", _HOOK)
+    assert spec and spec.loader
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.check_outbound_publication(cmd)
+
+
+def test_gh_publish_carrying_an_email_is_denied() -> None:
+    """THE incident: a tool's own table output was pasted into two PUBLIC issues. It leaked
+    three of the owner's account identities AND — because GitHub reads `@gmail` in an address
+    as a username — paged a real uninvolved account three times per issue. Neither harm was
+    visible in the text being pasted."""
+    cmd = """gh issue create --repo Emasoft/AgentlensPro --body "$(cat <<'EOF'
+*  75099fe9  someone@gmail.com   21% aged
+EOF
+)" """
+    reason = _outbound(cmd)
+    assert reason and "email" in reason.lower(), reason
+    assert "@gmail" in reason, "the reason must name the mention harm, not just the leak"
+
+
+def test_gh_publish_mentioning_a_stranger_is_denied() -> None:
+    """An @mention pages a real account FROM THE OWNER'S IDENTITY. Only the sanctioned
+    self-identification line may carry one."""
+    cmd = 'gh issue comment 9 --repo Emasoft/AgentlensPro --body "thanks @someone-else for this"'
+    reason = _outbound(cmd)
+    assert reason and "someone-else" in reason, reason
+
+
+def test_the_sanctioned_self_id_line_is_allowed() -> None:
+    """The PRRD G1.1 line names the shared account by design. A guard that blocks the
+    mandated format would be 'fixed' by deleting the guard within a day."""
+    cmd = ('gh issue comment 9 --repo Emasoft/ai-maestro-janitor --body '
+           '"_Posted by the Claude developing **x** (via the shared @Emasoft gh auth)._"')
+    assert _outbound(cmd) is None
+
+
+def test_non_publishing_gh_commands_are_untouched() -> None:
+    """Reading is not publishing. A guard that fires on `gh issue view` makes every read
+    interactive and gets disabled."""
+    assert _outbound("gh issue view 9 --repo Emasoft/AgentlensPro --json body") is None
+    assert _outbound("gh pr list --repo Emasoft/ai-maestro-janitor") is None
+
+
+def test_ordinary_publish_without_pii_is_allowed() -> None:
+    cmd = 'gh issue create --repo Emasoft/ai-maestro-janitor --title t --body "a normal report"'
+    assert _outbound(cmd) is None
