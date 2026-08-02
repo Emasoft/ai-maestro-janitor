@@ -1,9 +1,9 @@
 ---
 trdd-id: DLI76AUC
 title: The heartbeat re-arm is a model turn, so the dynamic cadence can cost more than it saves
-column: dev
+column: backburner
 created: 2026-07-14T21:34:32+0200
-updated: 2026-07-29T00:32:41+0200
+updated: 2026-08-02T06:35:00+0200
 current-owner: janitor-session
 task-type: refactor
 scope: project
@@ -15,7 +15,25 @@ parent-trdd: 0QQX9H0G
 
 # The heartbeat re-arm is a model turn
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
+
+### 2026-08-02 — `dev → backburner`. Nothing is being built here; it is waiting on a decision.
+
+Items 2–4 shipped, and item 1(b) shipped by another route, so the entire remaining scope is
+**item 1(a) — retune `heartbeat_cadence_demote_fires` from 2 to ~9 at `*/5`** — which this card's
+own NEXT ACTION marks *"awaiting the USER's decision. Do not start it unprompted."*
+
+`backburner`, not `blocked`: the thing being waited on is a human decision, and there is no id for
+that. `blocked-by:` must name something the board can resolve — an open card or a tracked external
+issue (the shape `TRDD-2C8XFOW9` uses for `ai-maestro#75`) — and inventing an entry for "ask the
+user" puts an unresolvable reference on the board. `backburner` is the honest resting state and is
+the one the drain-the-pipeline rule exempts. `dev` was claiming someone is tuning this right now;
+nobody has since 2026-07-29.
+
+**Read item 1's own note before touching it**, because half of it already exists: 1(b), the hard
+re-arm cooldown, shipped as `should_emit_renew(…, dwell_s)` via TRDD-CI6ZTNB9. Rebuilding a
+cooldown that is already live is the precise failure this project keeps meeting from the other
+side — a check that exists, runs, and is assumed absent.
 
 **NEXT ACTION:** Items 2, 3, 4 are DONE (commits `ea6a3b9`, `48523ca`, `a66c7a5`, `1959abc`).
 The only open work is §Deferred item #1 — still **awaiting the USER's decision**. Do not start it

@@ -1,9 +1,10 @@
 ---
 trdd-id: 47df698b-d946-4c53-9ce4-d40d1b76a1d4
 title: Memory scope-migration helper — re-scope LOCAL to PROJECT (ai-maestro corpus, option b)
-column: dev
+column: published
+implementation-commits: [4aa8613, ea5fae3]
 created: 2026-06-20T05:08:07+0200
-updated: 2026-07-11T15:05:00+0200
+updated: 2026-08-02T06:33:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -82,6 +83,29 @@ the shipped build):
 - *"(or an explicit opt-in flag)"* on the ownership guard — REJECTED (see guard 1 above).
 
 **2026-07-04 board-reconciliation (TRDD-GB3Z9U9J):** Phase 1 (read-only classifier + reviewable plan) shipped — `scripts/migrate_memory_scope.py` + `scripts/lib/memory_migrate.py` in-tree.
+
+### 2026-08-02 — CLOSED (`dev → published`). Phase 2 shipped too; the rest is another project's session.
+
+The 2026-07-04 note above stopped at Phase 1, which is why this stayed in `dev` for four weeks —
+but **Phase 2 landed as well** (`ea5fae3`, `memory_migrate.apply_plan`, 27 tests in
+`tests/test_memory_migrate.py`), and both it and the Phase-1 classifier (`4aa8613`) are contained
+in the released tag `ai-maestro-janitor--v0.45.0`. Verified by reading the module and running the
+tests, not from the card.
+
+**What this card promised is therefore delivered in full.** Its scope, fixed by the USER's
+option (b) on 2026-06-20, is *write a migration helper the ai-maestro Claude runs* — a general
+LOCAL→PROJECT re-scoping tool with the four fail-CLOSED guards. It never included performing the
+ai-maestro corpus migration.
+
+**The remaining step is not janitor work, by this card's own load-bearing contract**, which the
+NEXT ACTION below states outright: the OWNING project's Claude runs `--apply` in ITS OWN session,
+and this session must never run it against
+`~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory` — that is exactly the cross-project
+mutation the guards refuse, and `~/.claude/rules/how-to-fix-issues-of-other-projects.md` forbids
+it independently. A card cannot stay open waiting for an action it is forbidden to take; holding
+it in `dev` implied someone here was still going to do it.
+
+`release-via: publish` + released ⇒ **`published`** (rule 12). `implementation-commits:` recorded.
 
 - **Origin:** the USER chose **option (b)** for the mis-scoped ai-maestro fleet
   corpus (2026-06-20): *write a migration helper the ai-maestro Claude runs* — NOT

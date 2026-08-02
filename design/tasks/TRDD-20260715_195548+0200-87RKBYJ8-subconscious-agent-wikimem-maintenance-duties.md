@@ -1,9 +1,9 @@
 ---
 trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
-column: dev
+column: todo
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-16T09:20:00+0200
+updated: 2026-08-02T06:37:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -124,6 +124,20 @@ agent loads. These duties EXTEND / TIGHTEN those.
 | 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | 🟡 shape ok; corpus-wide id-uniqueness check lands with TRDD-0NGYP3IG (ambiguous-id = error) |
 | 20 | expander/reducer (hub/aspect/component) revalidation | write (at creation) + librarian | 🟡 flagged, not corrected |
 | 21 | scope validation + published-globally USER symlink | scope-leak detector | 🟡 privacy direction policed; symlink publishing infra MISSING (= issue **#52**) |
+
+### 2026-08-02 — `dev → todo`. Real work, genuinely queued, and nobody is building it.
+
+Step 1 is done and step 3 is verified-fixed; step 2 is four NET-NEW pieces that have not been
+started, and step 4 depends on step 2. Nothing has moved since 2026-07-16, so `dev` was asserting
+an activity that is not happening — and the pipeline rule is explicit that an untrue column is
+worse than an unstarted card, because it hides the stall from the only view anyone checks.
+`todo` says what is true: ready to be pulled.
+
+Two things a resumer should not re-derive: **step 2's own note says each of the four is likely its
+own child TRDD** (rule 13 — one atomic task per card), so pulling this card means splitting it,
+not implementing four features under one id. And **step 3's issues #97/#88 are fixed on disk with
+regression tests** by a session that never closed them — the remaining act there is closing the
+issues, not fixing anything.
 
 ## NEXT ACTION
 1. ~~Reconcile → gap list~~ **DONE 2026-07-16 (table above).**
