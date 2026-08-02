@@ -8,6 +8,7 @@ it must stay silent both when disabled and when it cannot resolve a repo.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -213,3 +214,76 @@ def test_an_empty_seen_map_still_reports_everything() -> None:
     silently swallow whatever arrived while it was broken."""
     current = [_issue(1, "2026-01-01T00:00:00Z"), _issue(2, "2026-01-02T00:00:00Z")]
     assert len(list(iw.diff_issues({}, current))) == 2
+
+
+# ---------- the first-fire baseline, END TO END ----------
+#
+# The two pure tests above pin the ARITHMETIC of the baseline; they do NOT reach the
+# detector's use of it. Proven by mutation: deleting the detector's `if not
+# seen_path.exists()` branch left all 22 tests green while the anti-flood guard was gone.
+# These run the real detector against a real git repo so that mutation goes red.
+
+
+def _fake_gh_issue_list(bin_dir: Path, issues: list[dict]) -> None:
+    """A `gh` on PATH that answers `gh issue list --json ...` with `issues`."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"sys.stdout.write({json.dumps(issues)!r})\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+
+
+def _github_project(tmp_path: Path, issues: list[dict]) -> Path:
+    """A real git repo with a GitHub origin, plus a fake `gh`. Only the external service
+    is faked — the detector, git, and every state file are real."""
+    project = tmp_path / "proj"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True, timeout=60)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
+        cwd=project, check=True, timeout=60,
+    )
+    _fake_gh_issue_list(project / "bin", issues)
+    return project
+
+
+def _run_with_gh(project: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(_PROJECT_ROOT / "scripts" / "detectors" / "github-issues-watch.py")],
+        capture_output=True, text=True, check=False, timeout=180,
+        env={
+            "PATH": f"{project / 'bin'}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            "HOME": str(project),
+            "CLAUDE_PROJECT_DIR": str(project),
+        },
+    )
+
+
+def test_first_fire_reports_nothing_and_writes_the_baseline(tmp_path: Path) -> None:
+    """THE anti-flood guard. Always-on means every project's first fire would otherwise
+    diff an open tracker against an empty map — 43 issues on this repo when measured."""
+    project = _github_project(tmp_path, [_issue(1, "T1"), _issue(2, "T2"), _issue(3, "T3")])
+    proc = _run_with_gh(project)
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "", "the first fire must not report the existing backlog"
+    seen = project / ".janitor" / "state" / "issues-watch-seen.json"
+    assert seen.is_file(), "the baseline must be written, or the NEXT fire floods instead"
+    assert set(json.loads(seen.read_text())) == {"1", "2", "3"}
+
+
+def test_the_second_fire_reports_only_what_moved(tmp_path: Path) -> None:
+    """Proves the silence above is a BASELINE and not the detector being broken: the same
+    setup reports on the next fire, and reports only the issue whose updatedAt changed."""
+    project = _github_project(tmp_path, [_issue(1, "T1"), _issue(2, "T2")])
+    assert _run_with_gh(project).stdout.strip() == ""
+
+    _fake_gh_issue_list(project / "bin", [_issue(1, "T1"), _issue(2, "T2-CHANGED")])
+    proc = _run_with_gh(project)
+    assert proc.returncode == 0
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    assert len(lines) == 1, proc.stdout
+    assert "#2" in lines[0]

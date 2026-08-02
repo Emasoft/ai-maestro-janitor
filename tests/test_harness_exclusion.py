@@ -260,8 +260,16 @@ def test_dispatch_detector_roster_is_filtered_in_harness() -> None:
     ):
         assert not dispatch._detector_runs_in_harness(name), name
     for name in ("dirty-tree", "trdd-drift", "token-usage-anomaly", "supply-chain-fingerprints",
-                 "memory-maintenance", "screenshot-purge"):
+                 "memory-maintenance", "screenshot-purge",
+                 # The 2026-08-02 always-on directive requires BOTH GitHub notification
+                 # chores to work "inside ai-maestro harness and outside". Both are
+                 # workdir-scoped — issues-watch keeps its seen-map in `.janitor/state/`,
+                 # gh-reply-watch its registry in `.janitor/gh-issues-monitor/` — so
+                 # neither belongs in the gated set. Pinned so a later roster sweep cannot
+                 # quietly gate them and half-revoke the directive.
+                 "github-issues-watch", "gh-reply-watch"):
         assert dispatch._detector_runs_in_harness(name), name
+        assert name in {n for n, _i, _e in dispatch._DETECTORS}, f"{name} left the roster"
     # Every gated name must actually exist in the roster — a typo here would silently
     # gate nothing.
     roster = {n for n, _i, _e in dispatch._DETECTORS}

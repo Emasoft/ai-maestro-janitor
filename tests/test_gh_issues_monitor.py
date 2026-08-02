@@ -184,21 +184,27 @@ def test_a_degraded_gh_says_so_once_then_stays_quiet(poll, tmp_path, monkeypatch
 # ---------- state location + migration ----------
 
 
-def test_state_dir_lives_under_the_plugin_data_dir(tmp_path, monkeypatch) -> None:
-    """The registry is a RECORD OF WORK, so it goes in DATA (survives plugin updates,
-    purged only on uninstall) — never `.janitor/state/`, which is documented as
-    regeneratable and safe to delete."""
+def test_state_dir_lives_inside_the_project(tmp_path, monkeypatch) -> None:
+    """OWNER DIRECTIVE 2026-08-02: "store the tracking data locally". Slug-keyed subdirs of
+    a machine-global dir gave per-project SEPARATION but not LOCALITY — keyed by absolute
+    path, so moving a checkout orphaned its registry.
+
+    `.janitor/gh-issues-monitor/`, NOT `.janitor/state/`: the registry is a RECORD OF WORK
+    filled by the PostToolUse hook as `gh` commands happen, and `.janitor/state/` is
+    documented as regeneratable and safe to delete. Nothing can rebuild a lost registry."""
     monkeypatch.delenv("GH_ISSUES_MONITOR_STATE_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    proj = tmp_path / "proj"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
     mod = _load(_POLL_SRC, "gh_notify_poll_loc_ut")
     resolved = Path(mod.state_dir())
-    assert "plugins/data/ai-maestro-janitor-ai-maestro-plugins/gh-issues-monitor" in resolved.as_posix()
-    assert ".janitor" not in resolved.as_posix()
+    assert resolved == proj / ".janitor" / "gh-issues-monitor"
+    assert "plugins/data" not in resolved.as_posix(), "must no longer live in the global DATA dir"
+    assert ".janitor/state" not in resolved.as_posix(), "must stay out of the disposable zone"
 
 
 def test_the_standalone_skills_registry_is_migrated_by_copy(tmp_path, monkeypatch) -> None:
-    """A host running the pre-port standalone skill has a registry at the old path. It is
+    """A host running the pre-port standalone skill has a registry at the oldest path. It is
     COPIED, not moved: losing the record of which threads a project opened cannot be
     undone by re-running anything, and a rollback must still find it."""
     monkeypatch.delenv("GH_ISSUES_MONITOR_STATE_DIR", raising=False)
@@ -207,7 +213,7 @@ def test_the_standalone_skills_registry_is_migrated_by_copy(tmp_path, monkeypatc
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
     mod = _load(_POLL_SRC, "gh_notify_poll_mig_ut")
 
-    legacy = mod._legacy_state_dir(mod.project_slug(str(proj)))
+    legacy = mod._legacy_standalone_dir(mod.project_slug(str(proj)))
     legacy.mkdir(parents=True)
     (legacy / "registry.json").write_text(json.dumps({"o/r#1": {"repo": "o/r"}}), encoding="utf-8")
 
@@ -216,20 +222,56 @@ def test_the_standalone_skills_registry_is_migrated_by_copy(tmp_path, monkeypatc
     assert (legacy / "registry.json").exists(), "the legacy copy must survive a rollback"
 
 
+def test_the_data_dir_registry_is_migrated_by_copy(tmp_path, monkeypatch) -> None:
+    """The SECOND legacy location — where the port kept it before it moved into the project.
+    Every host that ran the port has data here, so skipping this hop would silently drop
+    every thread registered since the port."""
+    monkeypatch.delenv("GH_ISSUES_MONITOR_STATE_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    proj = tmp_path / "proj"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    mod = _load(_POLL_SRC, "gh_notify_poll_mig3_ut")
+
+    legacy = mod._legacy_data_dir(mod.project_slug(str(proj)))
+    legacy.mkdir(parents=True)
+    (legacy / "registry.json").write_text(json.dumps({"o/r#5": {"repo": "o/r"}}), encoding="utf-8")
+
+    resolved = Path(mod.state_dir())
+    assert json.loads((resolved / "registry.json").read_text())["o/r#5"]["repo"] == "o/r"
+    assert (legacy / "registry.json").exists(), "copy, never move"
+
+
+def test_the_data_dir_wins_over_the_older_standalone_dir(tmp_path, monkeypatch) -> None:
+    """With BOTH legacy locations present, the NEWER one is authoritative — the standalone
+    dir is a pre-port fossil and must not clobber threads registered since."""
+    monkeypatch.delenv("GH_ISSUES_MONITOR_STATE_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    proj = tmp_path / "proj"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    mod = _load(_POLL_SRC, "gh_notify_poll_mig4_ut")
+
+    slug = mod.project_slug(str(proj))
+    for d, payload in ((mod._legacy_standalone_dir(slug), {"old/one#1": {}}),
+                       (mod._legacy_data_dir(slug), {"new/one#2": {}})):
+        d.mkdir(parents=True)
+        (d / "registry.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    assert json.loads((Path(mod.state_dir()) / "registry.json").read_text()) == {"new/one#2": {}}
+
+
 def test_migration_does_not_overwrite_an_existing_registry(tmp_path, monkeypatch) -> None:
-    """Once the janitor's own registry exists it is authoritative — a stale legacy dir
-    must never clobber threads registered since the port."""
+    """Once the LOCAL registry exists it is authoritative — a stale legacy dir must never
+    clobber threads registered since the move."""
     monkeypatch.delenv("GH_ISSUES_MONITOR_STATE_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     proj = tmp_path / "proj"
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
     mod = _load(_POLL_SRC, "gh_notify_poll_mig2_ut")
 
-    slug = mod.project_slug(str(proj))
-    legacy = mod._legacy_state_dir(slug)
+    legacy = mod._legacy_data_dir(mod.project_slug(str(proj)))
     legacy.mkdir(parents=True)
     (legacy / "registry.json").write_text(json.dumps({"old/one#1": {}}), encoding="utf-8")
-    target = Path(tmp_path) / ".claude" / "plugins" / "data" / mod.JANITOR_DATA_DIR_NAME / "gh-issues-monitor" / slug
+    target = proj / ".janitor" / "gh-issues-monitor"
     target.mkdir(parents=True)
     (target / "registry.json").write_text(json.dumps({"new/one#2": {}}), encoding="utf-8")
 
