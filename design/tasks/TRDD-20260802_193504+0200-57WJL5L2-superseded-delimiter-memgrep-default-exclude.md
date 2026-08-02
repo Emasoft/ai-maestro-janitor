@@ -23,6 +23,23 @@ implementation-commits: []
 per both the card's own NEXT ACTION and the independent 2026-08-02 re-audit: every `recall`
 today mixes obsolete facts with current ones).
 
+**DESIGN REFINEMENT (2026-08-02 19:55, recorded before implementation):** key the
+default-EXCLUDE on the atom's own **`status:` prop** (atoms already carry
+`status:valid` / `status:superseded` in their marker props — authoritative, position-independent
+metadata memgrep already parses), NOT on body position relative to a delimiter. A positional
+mechanism is fragile (one mis-placed atom silently flips its visibility) and demands the
+reorder pass for CORRECTNESS; status-keyed filtering is correct immediately, and the
+delimiter + reorder pass become the READABILITY layer (humans see current facts first), with
+the lint check (`superseded atom above the delimiter` = WARN) tying the two together. The
+duty's stated GOAL is "memgrep shows only up-to-date atoms by default, excluded unless the
+filter params request them" — the delimiter was the suggested mechanism, not the goal.
+⚠ Implementation gotchas found while sizing: BOTH the index-backed and the walk recall paths
+must filter (`memory.rs` `recall_*` + `find_gather_walk`, `index.rs` `recall_*_candidates`);
+the SECOND HOP (`recall <ATOM-ID>`) must STILL return a superseded atom when addressed by id
+(an explicit address is an explicit request); and `scripts/wikimem_bench.py`'s regression gate
+(accuracy may never drop) must be re-run — if any benchmark-expected atom is superseded, the
+bench expectations need reconciling, not the filter weakening.
+
 ## The ask (from the parent's duty rows 7-8, MISSING as of the 2026-08-02 audit)
 
 Page body STRUCTURE: up-to-date atoms in the UPPER part, superseded/lessons-learned atoms in
