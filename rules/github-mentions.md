@@ -24,6 +24,11 @@ its domain. Still never paste one — that is PII, a separate and sufficient rea
 3. **Pasted TOOL OUTPUT is the usual cause** — read any payload you did not author for
    identifiers first. Redaction is not undo: repos may be public and edit history is kept.
 
-The self-ID line names the owner in **plain words**; the `@` only adds a notification. Enforced by
-`pre-bash-safety.check_outbound_publication`, which allows a backticked form — a guard that
-reddens on correct writing gets deleted.
+The self-ID line names the owner in **plain words**; the `@` only adds a notification. The rule
+binds ON ITS OWN — treat it as manual discipline. An enforcement guard exists in the janitor's
+tree (`pre-bash-safety.check_outbound_publication`, allowing backticked forms — a guard that
+reddens on correct writing gets deleted), but do NOT assume your installed version carries it:
+verify with `grep -rl check_outbound_publication <your installed plugin cache>` before relying
+on it. A rule that CLAIMS enforcement it cannot prove stops its reader from checking — the
+janitor#171 lesson: the claim shipped ahead of the guard and a real account got paged under the
+belief a guard covered it.
