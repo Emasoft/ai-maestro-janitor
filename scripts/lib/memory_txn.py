@@ -99,7 +99,14 @@ def _scope_lock_path(scope_root: Path) -> Path:
     # Machine-wide (under global_state_dir) but keyed by the scope root so two
     # passes on DIFFERENT scopes can commit in parallel while two passes on the
     # SAME scope serialize. 16 hex of sha256 is collision-free in practice.
-    h = hashlib.sha256(str(scope_root).encode("utf-8")).hexdigest()[:16]
+    #
+    # REALPATH first (TRDD-7YHT3FNK P3): memgrep's Rust write_gate canonicalizes
+    # the scope root before hashing, so the Python side must hash the SAME string
+    # or a symlinked invocation (e.g. /tmp vs /private/tmp on macOS, or a future
+    # published-globally symlink) forks the lock and the two languages stop
+    # excluding each other — the exact corruption class this lock exists to kill.
+    # Path.resolve() is non-strict, so a not-yet-created root still resolves.
+    h = hashlib.sha256(str(Path(scope_root).resolve()).encode("utf-8")).hexdigest()[:16]
     return global_state.global_state_dir() / f"memory-maint-{h}.lock"
 
 

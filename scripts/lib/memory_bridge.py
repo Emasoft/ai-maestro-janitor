@@ -29,6 +29,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import memory_txn  # noqa: E402  -- sibling lib (the scope commit lock, TRDD-7YHT3FNK P3)
 import state  # noqa: E402  -- sibling lib
 
 # The harness's file. We never create it — creation is the harness's business; a
@@ -46,6 +47,7 @@ OUTCOME_NO_OVERVIEW = "no-overview"     # no wiki entry page → nothing to brid
 OUTCOME_PRESENT = "present"             # the link is already there → file untouched
 OUTCOME_ADDED = "added"                 # the line was missing/deleted → one line appended
 OUTCOME_ERROR = "error"                 # unreadable/unwritable → fail OPEN, never raise
+OUTCOME_LOCK_HELD = "lock-held"         # scope lock busy → skip; SessionStart re-runs next session
 
 
 def find_overview_page(scope_root: Path | str) -> Path | None:
@@ -123,19 +125,35 @@ def ensure_bridge_line(scope_root: Path | str) -> str:
     if overview is None:
         return OUTCOME_NO_OVERVIEW  # nothing to point at; /janitor-memory-bootstrap seeds it
 
+    # The read→decide→append below rides the SCOPE's commit lock (TRDD-7YHT3FNK P3):
+    # the old lock-less shape captured the file's bytes, then atomically wrote
+    # bytes+line — clobbering anything another janitor writer landed in between
+    # (atomic-vs-lost-update: the rename was atomic, the READ was stale). Under the
+    # shared scope lock every janitor writer serializes; the read happens INSIDE the
+    # lock so the appended base is fresh by construction. Residual (documented): the
+    # HARNESS's own MEMORY.md writes take no lock — that window is minimized, not
+    # closed, and append-only keeps its blast radius to one duplicate-able line.
+    # Skip-if-held is correct here: SessionStart re-runs this every session.
     try:
-        text = memory_md.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return OUTCOME_ERROR
+        with memory_txn.commit_lock(Path(scope_root)) as held:
+            if not held:
+                return OUTCOME_LOCK_HELD
+            try:
+                text = memory_md.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                return OUTCOME_ERROR
 
-    if has_bridge(text, overview):
-        return OUTCOME_PRESENT
+            if has_bridge(text, overview):
+                return OUTCOME_PRESENT
 
-    # Append-only. Preserve the file's exact existing bytes; add a separating newline
-    # only when the file does not already end with one (never collapse or reflow).
-    sep = "" if text.endswith("\n") or not text else "\n"
-    try:
-        state.atomic_write(memory_md, f"{text}{sep}{bridge_line(scope_root, overview)}\n")
-    except OSError:
+            # Append-only. Preserve the file's exact existing bytes; add a separating
+            # newline only when the file does not already end with one (never collapse
+            # or reflow).
+            sep = "" if text.endswith("\n") or not text else "\n"
+            try:
+                state.atomic_write(memory_md, f"{text}{sep}{bridge_line(scope_root, overview)}\n")
+            except OSError:
+                return OUTCOME_ERROR
+            return OUTCOME_ADDED
+    except Exception:  # noqa: BLE001 — the SessionStart path must never raise
         return OUTCOME_ERROR
-    return OUTCOME_ADDED

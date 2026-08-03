@@ -186,3 +186,43 @@ def test_accepts_a_string_scope_root(tmp_path: Path) -> None:
 def test_never_raises_on_unreadable_scope(tmp_path: Path) -> None:
     """Runs on the SessionStart path — it must fail OPEN, never cost a session."""
     assert mbr.ensure_bridge_line(tmp_path / "does-not-exist") == mbr.OUTCOME_NO_MEMORY_MD
+
+
+def test_lock_held_skips_without_touching_the_file(tmp_path: Path, monkeypatch) -> None:
+    """TRDD-7YHT3FNK P3: the append rides the scope's commit lock; a held lock means
+    another janitor writer is mid-edit — skip (SessionStart re-runs next session)
+    and leave MEMORY.md byte-identical."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    root = _scope(tmp_path)
+    before = (root / mbr.MEMORY_MD).read_text(encoding="utf-8")
+    import memory_txn
+    with memory_txn.commit_lock(root) as held:
+        assert held is True
+        # Same process re-acquisition would deadlock/no-op differently per-OS; probe
+        # via a CHILD process, the real contention shape.
+        import subprocess
+        import sys as _sys
+        code = (
+            "import sys; sys.path.insert(0, %r); import memory_bridge as m; "
+            "print(m.ensure_bridge_line(%r))" % (str(Path(mbr.__file__).parent), str(root))
+        )
+        out = subprocess.run(
+            [_sys.executable, "-c", code],
+            capture_output=True, text=True, timeout=30,
+            env={**__import__("os").environ, "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate")},
+        )
+    assert out.stdout.strip() == mbr.OUTCOME_LOCK_HELD, out.stderr
+    assert (root / mbr.MEMORY_MD).read_text(encoding="utf-8") == before
+
+
+def test_scope_lock_path_resolves_symlinks(tmp_path: Path, monkeypatch) -> None:
+    """TRDD-7YHT3FNK P3: memgrep's Rust write_gate hashes the CANONICAL scope root;
+    the Python side must hash the same string or a symlinked invocation forks the
+    lock and the two languages stop excluding each other."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    import memory_txn
+    real = tmp_path / "real-memory"
+    real.mkdir()
+    link = tmp_path / "link-memory"
+    link.symlink_to(real)
+    assert memory_txn._scope_lock_path(link) == memory_txn._scope_lock_path(real)
