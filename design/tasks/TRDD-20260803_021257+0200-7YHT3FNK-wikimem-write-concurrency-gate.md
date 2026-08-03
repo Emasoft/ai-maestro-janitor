@@ -16,9 +16,18 @@ implementation-commits: []
 
 # Wikimem write-concurrency gate (USER directive 2026-08-03)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-03
 
-**In dev — Phase 1 starting.** USER directive (2026-08-03, verbatim intent): corruption
+**In dev — P1 LANDED (ea05bc5), P3 LANDED (70fd8a1: realpath lock parity pinned by a
+symlink test; bridge append under the scope lock with OUTCOME_LOCK_HELD; CLAUDE.md
+writers AUDITED already-compliant — flock at claudemd_slim.py:118 + stat-CAS +
+narrative invariant, no redundant machinery added), P2 in flight (background worker:
+the `memgrep edit` replace primitive), P4 after P2 (docs mandate — must document the
+shipped `edit` surface, so it waits for P2).
+P1 verified first-hand: 279 crate tests, clippy, both benches "no change", LIVE
+Python↔Rust lock-file parity probe (same scope root → same memory-maint-<sha16>.lock
+from both languages), live CAS refusal with the canonical message + byte-identical
+page, correct-hash acceptance.** USER directive (2026-08-03, verbatim intent): corruption
 risk is high with many agents editing the same LOCAL/PROJECT/USER wikimem files (and, in
 future, symlinked published-globally pages) because there is no central lock system.
 Every edit tool must integrate a transaction discipline: atomic changes, locks, write
