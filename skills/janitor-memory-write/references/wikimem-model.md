@@ -493,6 +493,15 @@ whole point is that token spend stays proportional to the task.
 
 ## memgrep — the instrument (which command does what)
 
+**Concurrent-edit discipline (TRDD-7YHT3FNK).** Many agents edit the same corpus, so
+every memgrep WRITE verb takes the scope's write lock (shared with the Python txn
+core — cross-language mutual exclusion) and accepts `--base-sha256` compare-and-swap.
+The two sanctioned edit paths for any wikimem page are the memgrep verbs and the
+harness Edit tool (its own old-string + changed-on-disk guards); raw shell edits
+(`sed`/heredoc/redirection) are a violation — no lock, no staleness check. On the
+refusal "The content of the wikimem file changed since your command was enqueued.
+Please reread the file first." — re-read, recompute against the fresh text, retry.
+
 memgrep is the *tool*; these skills are the *rules*. Command semantics below are
 EMPIRICALLY VERIFIED against memgrep 0.1.0 — note especially the `links` flags:
 **`--to NOTE` = NOTE's OUT-links (where NOTE points); `--from NOTE` = NOTE's
@@ -501,6 +510,7 @@ named note".
 
 | Operation | memgrep |
 |---|---|
+| In-place replace-X-with-Y on a page (scope-locked; exact-unique-match CAS) | `memgrep edit --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]` |
 | Symptom recall (pages + `[^N]` lessons + body atoms, interleaved) | `memgrep recall "<symptom>" <roots…>` |
 | Atoms harvested FROM a Claude buffer note (provenance) | `memgrep find-claude-mem-ref <buffer.md> <dir>` |
 | List hub pages (then match their `globs` against the file you're editing) | `memgrep -l <dir> --where 'fm.tier "hub"' \| sort -u` |

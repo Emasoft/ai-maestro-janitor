@@ -114,10 +114,12 @@ guardrail):
 
 1. **Clean the fact in place.** Replace the wrong statement in the body with the
    correct one. The body is always the current truth — no "we used to think X"
-   clutter inline. (No memgrep verb yet rewrites a fact in place, renames, or
-   reshapes a page — those verbs are future work, TRDD-R02HTRUD follow-up; until
-   they land, do the in-place clean with the Edit tool, and hand the heavier
-   reshapes of §3 to the `janitor-memory-subconscious-agent`.)
+   clutter inline. Two sanctioned paths (TRDD-7YHT3FNK — never raw shell, which has
+   neither lock nor staleness guard): `memgrep edit --page <page> --old-file F1
+   --new-file F2` (scope-locked, applies only on an exact unique match of the
+   original text; on its changed-since-enqueued refusal, re-read and retry), or the
+   harness Edit tool (its own old-string + changed-on-disk guards). Hand the heavier
+   reshapes of §3 to the `janitor-memory-subconscious-agent`.
 2. **Demote the error to a dated lesson — the WHY is the point.** Add it with
    `memgrep add-lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
    (the DO-NOT/BECAUSE/DO text on stdin) — the tool files the numbered entry under

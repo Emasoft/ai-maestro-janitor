@@ -17,10 +17,8 @@ missing half: how to **RECALL** them, and the discipline that makes recall work.
 
 > **FULL REFERENCE (read on demand — do NOT paste it here):**
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/rules-reference/markdown-memory-recall-full.md`
-> It holds the file/folder inventory ("I found this on disk — is it safe to touch?"), the
-> complete `memgrep` flag surface, the wikimem data model, the dual-test evaluation method,
-> and the rationale. Read it when you need a detail below expanded. Everything here is
-> normative on its own.
+> It holds the disk inventory, the full `memgrep` flag surface, the wikimem data model, and
+> the rationale — read on demand. Everything here is normative on its own.
 
 ## THE PROACTIVE-USE CONTRACT (do this UNPROMPTED — the whole point of memory)
 
@@ -46,10 +44,9 @@ commitments, for every agent, in every project:
 subject, or would it still be true of a completely different bug in a completely different
 system?* Subject-specific → the subject's page. A transferable way of WORKING (how to diagnose,
 verify, falsify) → **the methodology page that owns it** (`debugging-methodology`), nearly
-always **USER** scope. A general lesson parked in a case page is off-topic pollution AND scatters
-the methodology, so the page that should own it owns nothing. SURVEY before minting a new
-methodology page; when you MOVE a lesson, leave a `[[link]]`, not a hole (nothing is deleted,
-only relocated). Rationale + routing table: the FULL REFERENCE above.
+always **USER** scope. A general lesson parked in a case page pollutes it AND scatters the
+methodology. SURVEY before minting a methodology page; a MOVED lesson leaves a `[[link]]`,
+not a hole (nothing deleted, only relocated). Rationale + routing: the FULL REFERENCE above.
 
 ## The one law that makes memory work: index by the QUESTION, not the answer
 
@@ -72,8 +69,7 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; HARD-CODED —
         # never ${CLAUDE_PLUGIN_DATA}, that is the RUNNING plugin's dir, not the janitor's
 ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done
-        # ARRAY, not a space-joined string: zsh does not word-split an unquoted "$ROOTS", so the
-        # string form passes every root as ONE bogus path and silently returns 0 results.
+        # ARRAY — zsh passes an unquoted string "$ROOTS" as ONE bogus path (silent 0 results).
 SYMPTOM="the user's words / the error / the symptom"   # NOT the answer's jargon
 
 if command -v memgrep >/dev/null 2>&1; then
@@ -87,9 +83,8 @@ Read the top 1–3 notes. On conflict the MORE SPECIFIC scope wins: **LOCAL > PR
 Nothing returned ⇒ the memory doesn't exist yet — write one after solving the problem. No
 `memgrep`? `cargo install --path <…>/ai-maestro-janitor/scripts/memgrep`.
 
-Other commands: `memgrep find "+must -exclude \"exact phrase\"" <dir>` (keyword DSL;
-`--only-notes` searches the lessons), `memgrep overview <dir>` (the project's entry-point
-page), `memgrep reindex <dir>` (refresh the SQLite sidecar).
+Other commands: `memgrep find` (keyword DSL; `--only-notes` = lessons), `overview` (the
+entry-point page), `reindex` (refresh the SQLite sidecar).
 
 **Recall is TWO HOPS.** Hop 1 prints a lean triage row per hit —
 `<lmd>⇥<id-or-path>⇥<description>`, TAB columns so `cut -f2` is exact. The description is a
@@ -99,8 +94,8 @@ triage surface, **not the answer**: pick ONE, then hop:
 memgrep recall <ATOM-ID> <dir>     # that ONE atom in full, with its lessons
 ```
 
-Measured 247 tokens/query vs 441 always-rich, same accuracy. `--output medium|full` and
-`--with-keywords`/`--with-notes` widen it (details: the FULL REFERENCE).
+`--output medium|full` / `--with-keywords` / `--with-notes` widen it (details: the FULL
+REFERENCE).
 
 ## Memory scopes — pick by what the note CONTAINS
 
@@ -121,9 +116,8 @@ cross-linked. **UNSURE → LOCAL.**
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
-Reading ANY memory means also reading its `[^N]` lessons — *why* the facts are what they are and
-*what not to repeat*. They arrive with the SECOND HOP, not with every search hit: "read the
-notes" means take the hop on the note you chose, not skim whatever the search dumped.
+Reading ANY memory includes its `[^N]` lessons (the why + the what-not-to-repeat). They arrive
+with the SECOND HOP — take the hop on the note you chose.
 
 ## The note format
 
@@ -143,21 +137,24 @@ instead.` ONE lesson = ONE mistake, ≤3 lines, all three parts.
 **`keywords:` is the RECALL SURFACE** — the SYMPTOM phrases a future session will search with,
 not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.**
 
-**Two syntaxes.** The VERB's `--keywords` takes a **COMMA-separated** list, spaces allowed, and
-underscore-joins each phrase for you. The **STORED** props block is the opposite — space-separated
-phrases, so a comma hand-written there silently DROPS the rest (another reason not to hand-author).
-Pre-joining, or omitting the commas, collapses every phrase into ONE unfindable string.
+**Two syntaxes.** The VERB's `--keywords` is **COMMA-separated** (spaces ok; it underscore-joins
+each phrase). The **STORED** props block is space-separated — a hand-written comma there silently
+DROPS the rest (another reason not to hand-author).
 
 Full field grammar + supersession: the FULL REFERENCE above.
 
 ## AUTHORING — route writes through a memgrep verb, then validate
 
 Do NOT hand-author wikimem markdown (the source of unquoted `desc:`, body-less `[^N]`, oversized
-atoms) — use the write verbs (`new-page`/`add-atom`/`add-lesson`/`migrate`). Correct a wrong fact
-by SUPERSESSION, never a delete/overwrite: `add-lesson --supersedes` embeds the verbatim
-`SUPERSEDED BODY:` and keeps the SAME id (a `-v2` duplicate is the anti-pattern). Run
+atoms) — use the write verbs (`new-page`/`add-atom`/`add-lesson`/`migrate`/`edit`). Correct a
+wrong fact by SUPERSESSION, never a delete/overwrite: `add-lesson --supersedes` embeds the
+verbatim `SUPERSEDED BODY:` and keeps the SAME id (a `-v2` duplicate is the anti-pattern). Run
 `memgrep validate <page> && memgrep lint <page>` after EVERY edit. Verb flags + the
 supersession/travel protocol: the FULL REFERENCE above.
+
+**CONCURRENT EDITING (TRDD-7YHT3FNK).** Write verbs are scope-LOCKED + `--base-sha256` CAS;
+`memgrep edit` = exact-unique-match replace. Edit pages ONLY via memgrep verbs or the Edit tool —
+never raw shell. On the "changed since enqueued" refusal: re-read, recompute, retry.
 
 ## The wiki layer (wikimem)
 
@@ -173,13 +170,12 @@ edit.
 
 ## MEMORY.md — the two systems COEXIST; the janitor maintains ONE line
 
-`MEMORY.md` is the **harness's** and **not deprecated**. The janitor maintains **exactly ONE line**
-in it: a link to the project's main wikimem page (`<project>-overview.md`) — the bridge between the
-two systems. VERIFY it is there, RE-ADD if deleted, **touch nothing else**. *"Recall runs through
-memgrep"* = where SEARCH happens, NOT a licence to empty or stub it.
+`MEMORY.md` is the **harness's**, not deprecated. The janitor maintains **exactly ONE line** in
+it — the bridge link to `<project>-overview.md`: VERIFY, RE-ADD if deleted, **touch nothing
+else**. "Recall runs through memgrep" is NOT a licence to empty or stub it.
 
 ## Separation of powers
 
 The **janitor** reorganizes structure and *surfaces* contradictions but never edits a fact. An
 **agent** creates and corrects content but never reorganizes. Executable protocol: the skills
-`/janitor-memory-recall|write|update|bootstrap` (bootstrap stands up a project's wikimem once).
+`/janitor-memory-recall|write|update|bootstrap`.
