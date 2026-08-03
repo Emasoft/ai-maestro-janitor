@@ -406,6 +406,9 @@ fn main() -> Result<()> {
         // MOVE verb (TRDD-VJCMZ2OP) — relocate an atom + its baggage between pages, renumbering
         // footnotes and validating BOTH pages, so the move can never corrupt either.
         Some("migrate") => return memory::cmd_migrate_cli(&raw[2..]),
+        // EDIT verb (TRDD-7YHT3FNK Phase 2) — the sanctioned replace-X-with-Y primitive: locked,
+        // CAS-checked, refuses on ambiguity (multiple matches) or staleness (zero matches / bad hash).
+        Some("edit") => return memory::cmd_edit_cli(&raw[2..]),
         _ => {}
     }
 

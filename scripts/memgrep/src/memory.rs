@@ -11,7 +11,7 @@ use crate::predicate::{LinkDir, LinkSets};
 use crate::query_dsl;
 use crate::search::Cmp;
 use crate::write_gate;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use ignore::WalkBuilder;
 use regex::Regex;
@@ -3140,6 +3140,97 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Parser)]
+#[command(
+    name = "memgrep edit",
+    about = "the sanctioned replace-X-with-Y primitive for a wikimem page (locked, CAS-checked, refuses on ambiguity or staleness)"
+)]
+struct EditArgs {
+    /// The wikimem page (`.md`) to edit — must already exist.
+    #[arg(long = "page")]
+    page: PathBuf,
+    /// Path to a file holding the OLD text (the exact substring to find) — raw bytes, never
+    /// interpreted. Must be non-empty.
+    #[arg(long = "old-file")]
+    old_file: PathBuf,
+    /// Path to a file holding the NEW text to replace it with — raw bytes, never interpreted.
+    #[arg(long = "new-file")]
+    new_file: PathBuf,
+    /// Compare-and-swap staleness guard (TRDD-7YHT3FNK): the sha256-hex of the page's bytes as
+    /// the caller last read them. Checked UNDER the write lock, before anything is read for the
+    /// replace itself; on mismatch (including a page that vanished) nothing is written and the
+    /// command fails with the canonical refusal. Omit to write unconditionally (still
+    /// lock-serialized).
+    #[arg(long = "base-sha256")]
+    base_sha256: Option<String>,
+    /// Replace every occurrence of the old text, not just a lone unique one. Without this flag,
+    /// more than one match is refused (ambiguous — the caller must narrow the old text or opt in
+    /// explicitly).
+    #[arg(long = "replace-all")]
+    replace_all: bool,
+    /// Also descend into hidden files/dirs when reindexing the scope (default off).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep edit --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]
+/// [--hidden]` — the sanctioned replace-X-with-Y primitive (TRDD-7YHT3FNK Phase 2). Holds the
+/// page's scope write-lock (same lock formula as every other write verb / a Python
+/// wikimem-editor transaction) from before the CAS check through the write, so no other writer
+/// can interleave a mutation of this page while this command runs.
+///
+/// The OLD/NEW text is read from FILES rather than argv — both are raw DATA (never
+/// interpreted), and a plain substring match is used (no regex): zero occurrences means the live
+/// page no longer contains the text the caller expected, which is exactly the "changed since your
+/// command was enqueued" case, so it is refused with the CANONICAL `write_gate::STALE_MSG`
+/// verbatim rather than a bespoke "not found" message — one refusal wording for "the page moved
+/// out from under you", whether the cause was a stale hash or stale content. More than one match
+/// without `--replace-all` is refused as ambiguous (a distinct failure mode: the text IS still
+/// there, just not unique) so a ham-fisted replace can never silently touch the wrong occurrence.
+pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
+    let a = EditArgs::parse_from(std::iter::once("edit".to_string()).chain(args.iter().cloned()));
+
+    let old = std::fs::read_to_string(&a.old_file)
+        .with_context(|| format!("read --old-file {}", a.old_file.display()))?;
+    let new = std::fs::read_to_string(&a.new_file)
+        .with_context(|| format!("read --new-file {}", a.new_file.display()))?;
+    if old.is_empty() {
+        anyhow::bail!("--old-file must be non-empty");
+    }
+    if old == new {
+        anyhow::bail!("old and new are identical — nothing to do");
+    }
+
+    // Lock BEFORE reading the live page, held through the write + reindex (TRDD-7YHT3FNK).
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
+    if let Some(base) = a.base_sha256.as_deref() {
+        write_gate::check_base(&a.page, base)?;
+    }
+    let text = md::read_text(&a.page).ok_or_else(|| anyhow::anyhow!(write_gate::STALE_MSG))?;
+
+    let count = text.matches(old.as_str()).count();
+    if count == 0 {
+        // The old text the caller last saw is no longer present — same class of problem the CAS
+        // check exists to catch, so it gets the SAME canonical wording (see doc comment above).
+        anyhow::bail!(write_gate::STALE_MSG);
+    }
+    if count > 1 && !a.replace_all {
+        anyhow::bail!(
+            "old text matches {count} locations — make it unique or pass --replace-all"
+        );
+    }
+
+    let out = if a.replace_all {
+        text.replace(old.as_str(), new.as_str())
+    } else {
+        text.replacen(old.as_str(), new.as_str(), 1)
+    };
+    atomic_write_page(&a.page, &out)?;
+    reindex_owning_scope(&a.page, a.hidden)?;
+    println!("{}\tedited ({count} replacement(s))", rel(&a.page));
+    Ok(())
+}
+
 // ─────────────────────────── `memgrep lint` ───────────────────────────
 
 /// Replace every backtick-delimited INLINE-code span in `raw` with same-length spaces, so a literal
@@ -5635,6 +5726,7 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     // ── the tiered, keyphrase-aware scorer (WM-SCORE-04/05/06) ──────────────────────────────
     //
@@ -7954,5 +8046,257 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let m = |id: &str| atom_id_matches(id, "ATOM-AAAA-BBBB");
         let (marker, last) = locate_atom_body_matching(text, &m).expect("atom located");
         assert_eq!(last, marker, "no prose to anchor to → fall back to the marker line");
+    }
+
+    // ── `memgrep edit` (TRDD-7YHT3FNK Phase 2) ──────────────────────────────────────────────
+    //
+    // `cmd_edit_cli` is exercised IN-PROCESS (not via the CLI binary) because the lock-timeout
+    // test needs to hold the scope's `write_gate` lock from the SAME process while calling the
+    // command — mirroring `write_gate::tests::acquire_times_out_when_lock_is_held`. Every test
+    // here sets `JANITOR_GLOBAL_STATE_DIR` to a throwaway temp dir so it never touches the real
+    // `~/.claude/...` lock files, and holds `EDIT_ENV_MUTEX` for its whole body since that env
+    // var (and `MEMGREP_LOCK_TIMEOUT_S`) is process-wide while `cargo test` runs tests in
+    // parallel threads by default (same reasoning as `write_gate::tests::ENV_MUTEX`).
+    static EDIT_ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn edit_test_tmpdir(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!(
+            "memgrep-edit-test-{label}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A fresh `<scope>/memory/p.md` page (so `write_gate::scope_root_for` finds the canonical
+    /// `memory`-named ancestor, exactly like a real wikimem page) plus its enclosing scratch dir.
+    fn edit_test_scope(label: &str, page_body: &str) -> (PathBuf, PathBuf) {
+        let scope = edit_test_tmpdir(label);
+        let memory_dir = scope.join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        std::fs::write(&page, page_body).unwrap();
+        (scope, page)
+    }
+
+    fn edit_test_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, content).unwrap();
+        p
+    }
+
+    fn edit_args(page: &Path, old: &Path, new: &Path, extra: &[&str]) -> Vec<String> {
+        let mut v = vec![
+            "--page".to_string(),
+            page.to_str().unwrap().to_string(),
+            "--old-file".to_string(),
+            old.to_str().unwrap().to_string(),
+            "--new-file".to_string(),
+            new.to_str().unwrap().to_string(),
+        ];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    }
+
+    fn sha256_hex_of(text: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(text.as_bytes());
+        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn edit_replaces_a_unique_match() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-unique");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope(
+            "scope-unique",
+            "---\nname: p\n---\nhello world\nunrelated atom untouched\n",
+        );
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "goodbye world");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "unique-match edit must succeed: {res:?}");
+        assert!(content.contains("goodbye world"), "old replaced: {content}");
+        assert!(
+            content.contains("unrelated atom untouched"),
+            "content elsewhere on the page must survive untouched: {content}"
+        );
+    }
+
+    #[test]
+    fn edit_refuses_with_the_canonical_stale_message_when_old_text_is_absent() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-absent");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-absent", "hello world\n");
+        let old = edit_test_file(&scope, "old.txt", "not present anywhere on the page");
+        let new = edit_test_file(&scope, "new.txt", "x");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("zero matches must refuse");
+        assert_eq!(
+            err.to_string(),
+            write_gate::STALE_MSG,
+            "a zero-match old-file is exactly the changed-since-enqueued case — same canonical wording"
+        );
+        assert_eq!(content_after, "hello world\n", "page byte-identical after refusal");
+    }
+
+    #[test]
+    fn edit_refuses_an_ambiguous_multi_match_without_replace_all() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-ambiguous");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-ambiguous", "dup dup dup\n");
+        let old = edit_test_file(&scope, "old.txt", "dup");
+        let new = edit_test_file(&scope, "new.txt", "DUP");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("3 matches without --replace-all must refuse as ambiguous");
+        assert!(
+            err.to_string().contains('3'),
+            "the refusal must name the match count: {err}"
+        );
+        assert_eq!(content_after, "dup dup dup\n", "page byte-identical after an ambiguity refusal");
+    }
+
+    #[test]
+    fn edit_replace_all_replaces_every_match() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-replace-all");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-replace-all", "dup dup dup\n");
+        let old = edit_test_file(&scope, "old.txt", "dup");
+        let new = edit_test_file(&scope, "new.txt", "DUP");
+        let args = edit_args(&page, &old, &new, &["--replace-all"]);
+
+        let res = cmd_edit_cli(&args);
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "--replace-all must succeed: {res:?}");
+        assert_eq!(content_after, "DUP DUP DUP\n", "every occurrence replaced");
+    }
+
+    #[test]
+    fn edit_refuses_with_the_canonical_stale_message_on_a_wrong_base_sha256() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-badhash");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-badhash", "hello world\n");
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "bye world");
+        // Deliberately wrong: the real hash of the page, with its last hex digit flipped.
+        let mut wrong_hash = sha256_hex_of("hello world\n");
+        wrong_hash.replace_range(63..64, if wrong_hash.ends_with('0') { "1" } else { "0" });
+        let args = edit_args(&page, &old, &new, &["--base-sha256", &wrong_hash]);
+
+        let res = cmd_edit_cli(&args);
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("a mismatched --base-sha256 must refuse");
+        assert_eq!(err.to_string(), write_gate::STALE_MSG);
+        assert_eq!(content_after, "hello world\n", "page byte-identical after a CAS refusal");
+    }
+
+    #[test]
+    fn edit_times_out_bounded_while_another_writer_holds_the_scope_lock() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-lockheld");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
+        }
+
+        let (scope, page) = edit_test_scope("scope-lockheld", "hello world\n");
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "bye world");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        // Hold the scope's write lock — mirrors `write_gate::tests::acquire_times_out_when_lock_is_held`.
+        let held = write_gate::acquire(&write_gate::scope_root_for(&page)).expect("hold lock");
+        let started = std::time::Instant::now();
+        let res = cmd_edit_cli(&args);
+        let elapsed = started.elapsed();
+        drop(held);
+
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("edit must refuse while the scope lock is held by another writer");
+        assert!(
+            err.to_string().to_lowercase().contains("timed out"),
+            "{err}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "must not wildly overshoot the 1s MEMGREP_LOCK_TIMEOUT_S"
+        );
+        assert_eq!(content_after, "hello world\n", "page byte-identical after a lock-timeout refusal");
     }
 }
