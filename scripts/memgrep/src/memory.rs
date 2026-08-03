@@ -10,6 +10,7 @@ use crate::md;
 use crate::predicate::{LinkDir, LinkSets};
 use crate::query_dsl;
 use crate::search::Cmp;
+use crate::write_gate;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use ignore::WalkBuilder;
@@ -2244,12 +2245,23 @@ struct AddAtomArgs {
     /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
     #[arg(long = "hidden")]
     hidden: bool,
+    /// Compare-and-swap staleness guard (TRDD-7YHT3FNK): the sha256-hex of the page's bytes as
+    /// the caller last read them. Checked UNDER the write lock, before anything is mutated; on
+    /// mismatch (including a page that vanished) nothing is written and the command fails with
+    /// the canonical refusal. Omit to write unconditionally (still lock-serialized).
+    #[arg(long = "base-sha256")]
+    base_sha256: Option<String>,
 }
 
-/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …]` (body on stdin). Synthesise a
-/// corpus-unique id + today's dates, emit the exact `^id [desc:"…", keywords: …, type: …, ocd:…,
-/// lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the page (before the lessons section if any),
-/// write atomically, reindex the scope. Prints `<id>\t<page>`.
+/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …] [--base-sha256 …]` (body on
+/// stdin). Synthesise a corpus-unique id + today's dates, emit the exact `^id [desc:"…",
+/// keywords: …, type: …, ocd:…, lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the page
+/// (before the lessons section if any), write atomically, reindex the scope. Prints
+/// `<id>\t<page>`.
+///
+/// Holds the page's scope write-lock (TRDD-7YHT3FNK) from BEFORE the read through the write, so
+/// no other memgrep write verb (or a Python wikimem-editor transaction, same lock formula) can
+/// interleave a mutation of this page while this command runs.
 pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     let a = AddAtomArgs::parse_from(
         std::iter::once("add-atom".to_string()).chain(args.iter().cloned()),
@@ -2262,6 +2274,11 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
         );
     }
     let body = read_body_from_stdin()?;
+
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
+    if let Some(base) = a.base_sha256.as_deref() {
+        write_gate::check_base(&a.page, base)?;
+    }
     let text = md::read_text(&a.page)
         .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable — create it first with `memgrep new-page`", a.page.display()))?;
 
@@ -2366,6 +2383,11 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     if page_type.is_empty() {
         anyhow::bail!("--type must not be empty (metadata.type: user|feedback|project|reference)");
     }
+    // The target does not exist yet (that's the whole point of new-page), so its scope root is
+    // derived from the PARENT dir — TRDD-7YHT3FNK Phase 1. The lock is held from before the
+    // existence check through the write, so two concurrent `new-page` calls for the same path
+    // can never both pass the check and race the create.
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.path))?;
     if a.path.exists() {
         anyhow::bail!("{} already exists — new-page never overwrites an existing page", a.path.display());
     }
@@ -2476,6 +2498,12 @@ struct AddLessonArgs {
     /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
     #[arg(long = "hidden")]
     hidden: bool,
+    /// Compare-and-swap staleness guard (TRDD-7YHT3FNK): the sha256-hex of the page's bytes as
+    /// the caller last read them. Checked UNDER the write lock, before anything is mutated; on
+    /// mismatch (including a page that vanished) nothing is written and the command fails with
+    /// the canonical refusal. Omit to write unconditionally (still lock-serialized).
+    #[arg(long = "base-sha256")]
+    base_sha256: Option<String>,
 }
 
 /// `memgrep add-lesson --page P --atom ID --keywords "…" [--desc …]` (lesson text on stdin). Allocate
@@ -2499,6 +2527,10 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // newlines so the `[^N]:` definition stays a single, parser-clean line.
     let mut lesson_text = lesson_text.split_whitespace().collect::<Vec<_>>().join(" ");
 
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
+    if let Some(base) = a.base_sha256.as_deref() {
+        write_gate::check_base(&a.page, base)?;
+    }
     let text = md::read_text(&a.page)
         .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable", a.page.display()))?;
 
@@ -2857,6 +2889,12 @@ struct MigrateArgs {
     /// Also descend into hidden files/dirs when reindexing (default off).
     #[arg(long = "hidden")]
     hidden: bool,
+    /// Compare-and-swap staleness guard (TRDD-7YHT3FNK), checked against the `--from` page's
+    /// current bytes (the page the caller read to decide what to migrate). On mismatch nothing
+    /// is written and the command fails with the canonical refusal. Omit to write
+    /// unconditionally (still lock-serialized on both scopes).
+    #[arg(long = "base-sha256")]
+    base_sha256: Option<String>,
 }
 
 /// The pure result of a migration: the two rewritten page texts + the moved/shared footnote counts.
@@ -3052,6 +3090,32 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
     );
     if a.from == a.to {
         anyhow::bail!("--from and --to are the same page — nothing to migrate");
+    }
+
+    // Lock BOTH scopes (a migration mutates two pages, possibly in different scopes). Acquire in
+    // a FIXED order (sorted by lock path) regardless of --from/--to argument order, so two
+    // concurrent migrations that name the same pair of scopes in opposite --from/--to order can
+    // never deadlock against each other.
+    let from_scope = write_gate::scope_root_for(&a.from);
+    let to_scope = write_gate::scope_root_for(&a.to);
+    let (_g1, _g2) = if from_scope == to_scope {
+        (Some(write_gate::acquire(&from_scope)?), None)
+    } else {
+        let from_lock = write_gate::lock_path_for(&from_scope);
+        let to_lock = write_gate::lock_path_for(&to_scope);
+        if from_lock <= to_lock {
+            let g1 = write_gate::acquire(&from_scope)?;
+            let g2 = write_gate::acquire(&to_scope)?;
+            (Some(g1), Some(g2))
+        } else {
+            let g2 = write_gate::acquire(&to_scope)?;
+            let g1 = write_gate::acquire(&from_scope)?;
+            (Some(g1), Some(g2))
+        }
+    };
+
+    if let Some(base) = a.base_sha256.as_deref() {
+        write_gate::check_base(&a.from, base)?;
     }
     let from_text = md::read_text(&a.from)
         .ok_or_else(|| anyhow::anyhow!("--from page {} does not exist or is unreadable", a.from.display()))?;

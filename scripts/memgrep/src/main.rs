@@ -14,6 +14,7 @@ mod predicate;
 mod query_dsl;
 mod search;
 mod where_dsl;
+mod write_gate;
 
 use anyhow::Result;
 use clap::Parser;
