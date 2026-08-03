@@ -1,9 +1,9 @@
 ---
 trdd-id: 7YHT3FNK
 title: Every wikimem edit path gains locks plus compare-and-swap staleness refusal
-column: dev
+column: complete
 created: 2026-08-03T02:12:57+0200
-updated: 2026-08-03T02:12:57+0200
+updated: 2026-08-03T02:35:26+0200
 current-owner: janitor-session
 task-type: feature
 severity: high
@@ -11,19 +11,28 @@ scope: project
 release-via: publish
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [ea05bc5, 70fd8a1, c7cd177, 954ba2a]
 ---
 
 # Wikimem write-concurrency gate (USER directive 2026-08-03)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-03
 
-**In dev — P1 LANDED (ea05bc5), P3 LANDED (70fd8a1: realpath lock parity pinned by a
-symlink test; bridge append under the scope lock with OUTCOME_LOCK_HELD; CLAUDE.md
-writers AUDITED already-compliant — flock at claudemd_slim.py:118 + stat-CAS +
-narrative invariant, no redundant machinery added), P2 in flight (background worker:
-the `memgrep edit` replace primitive), P4 after P2 (docs mandate — must document the
-shipped `edit` surface, so it waits for P2).
+**COMPLETE — all four phases landed.** P1 ea05bc5 (memgrep write_gate: scope locks +
+`--base-sha256` CAS on all 4 write verbs; LIVE Python↔Rust lock parity proven — same
+scope root → same memory-maint-<sha16>.lock from both languages; flock wait with
+bounded timeout IS the write queue; migrate locks both scopes sorted). P3 70fd8a1
+(Python realpath lock parity pinned by a symlink test; bridge append under the scope
+lock with OUTCOME_LOCK_HELD; CLAUDE.md writers AUDITED already-compliant — flock at
+claudemd_slim.py:118 + stat-CAS + narrative invariant — no redundant machinery). P2
+c7cd177 (`memgrep edit`: exact-unique-match replace, 0-match/CAS-mismatch → the
+canonical STALE_MSG verbatim + nothing written, multi-match refusal unless
+--replace-all; verified live through the installed binary). P4 954ba2a (the mandate
+on every doc surface: memgrep verbs or the harness Edit tool are the ONLY sanctioned
+edit paths, raw shell is a violation, refusal → re-read → retry; the shipped-rules
+context-floor cap was paid for by compressing pointer-able prose, both cap tests
+green). 285 crate + 180 Python + 873 doc-suite tests green. Every verification box
+below is checked. Ships via the blocked release train (TRDD-AWXK0RFT).
 P1 verified first-hand: 279 crate tests, clippy, both benches "no change", LIVE
 Python↔Rust lock-file parity probe (same scope root → same memory-maint-<sha16>.lock
 from both languages), live CAS refusal with the canonical message + byte-identical
