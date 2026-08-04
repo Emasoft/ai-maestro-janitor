@@ -45,7 +45,7 @@ it between pages, so they — not file mtime — are its authoritative age; `--s
 words** (an unread guardrail guards nothing — cut chronology, the BODY already carries
 current truth), and all three parts mandatory — `DO NOT` names the act, `BECAUSE` is
 the WHY, `DO … instead` is the exit. Full grammar + rationale:
-[../janitor-memory-write/references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape](../janitor-memory-write/references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
+[the lesson form](../../janitor-memory-write/references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
 
 ```markdown
 The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.

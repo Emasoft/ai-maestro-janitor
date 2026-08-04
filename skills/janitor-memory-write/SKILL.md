@@ -164,17 +164,12 @@ both ends now.
 
 ### 6. Index it (automatic — leave MEMORY.md to the harness)
 
-The wiki index is 100% memgrep's — the agent-invisible SQLite `.memgrep/index.db`,
-refreshed AUTOMATICALLY by every write verb (`new-page` / `add-atom` /
-`add-lesson`), so there is nothing to do here. A manual `memgrep reindex "$MEMDIR"`
-is available if ever needed (recall also falls back to a live walk when the index is
-stale).
+Nothing to do — every write verb refreshes memgrep's agent-invisible SQLite index
+automatically (`memgrep reindex "$MEMDIR"` exists if ever needed).
 
-`MEMORY.md` belongs to the **harness** and is **not deprecated**. The two memory
-systems COEXIST. The janitor maintains **exactly ONE line** in it: a link to this
-project's main wikimem page (`<project>-overview.md`) — the bridge between the two
-systems. Verify that line is present; re-add it if it was deleted. **Interfere with
-nothing else in the file.** Full contract:
+The harness `MEMORY.md` is **not deprecated**; the two systems COEXIST. The janitor
+maintains **exactly ONE line** in it — a link to this project's `<project>-overview.md`.
+Verify it is present, re-add if deleted, **interfere with nothing else**. Full contract:
 `~/.claude/rules/markdown-memory-recall.md`.
 
 ### 7. Sanity-check
