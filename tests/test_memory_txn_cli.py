@@ -454,6 +454,32 @@ def test_merge_refuses_a_second_write_even_for_a_backlink_holder(tmp_path):
     assert not (scope / "holder.md").exists(), "nor written the holder into the live tree"
 
 
+def test_merge_refusal_names_the_two_transaction_workaround(tmp_path):
+    """Issue #145: the reference doc and this check used to disagree (the doc
+    promised holder rewrites "ride along fine"; the code has always refused
+    them), so every agent hitting the refusal had to re-derive the same
+    two-transaction workaround from scratch. The refusal message now carries
+    that guidance itself, so it can no longer drift out of sync with a
+    reference doc the way the prose did.
+    """
+    scope, txn_id = _survivor_merge_txn(
+        tmp_path,
+        _note(
+            "a", ocd="2026-05-01", lmd="2026-06-18",
+            body="Auth uses JWT.\nTokens expire in 30s.",
+            lessons="[^1]: cap is 3, verified against source.\n[^2]: 30s timeout per config.\n",
+        ),
+    )
+    (_staging(scope, txn_id) / "holder.md").write_text(
+        _note("holder", ocd="2026-05-01", lmd="2026-06-18", body="See [[a]] for the details."),
+        encoding="utf-8",
+    )
+    rc, err = _run_err("commit", scope, txn_id, "--op", "merge")
+    assert rc != 0
+    assert "--op repair" in err, f"the refusal must name the holder-first workaround: {err!r}"
+    assert "FIRST" in err, f"the ORDER (holder before merge) must be explicit: {err!r}"
+
+
 def test_merge_into_survivor_dropping_survivors_lesson_fails(tmp_path):
     """The exact H-1 hole: the survivor keeps B's content but LOSES its own
     lesson + fact — the verifier must now refuse (it used to pass)."""

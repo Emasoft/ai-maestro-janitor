@@ -910,6 +910,64 @@ def _lessons_span(body_lines: list[str]) -> tuple[int, int]:
     return start, len(body_lines)
 
 
+def _mask_inline_code(raw: str) -> str:
+    """Replace every backtick-delimited inline-code span with same-length spaces.
+
+    Mirrors memgrep's `mask_inline_code` (memory.rs) so a literal `` `[^N]` `` in
+    prose — e.g. "see `[^5]` on the target page", a cross-page pointer — is not
+    mistaken for a live footnote reference (issue #187). The fenced-block case is
+    already handled by the caller's fence strip; this covers the inline case. A
+    simple per-line toggle: inline code never spans lines in markdown, unlike a
+    fence or an HTML comment.
+    """
+    out_chars: list[str] = []
+    in_code = False
+    for ch in raw:
+        if ch == "`":
+            in_code = not in_code
+            out_chars.append(" ")
+        elif in_code:
+            out_chars.append(" ")
+        else:
+            out_chars.append(ch)
+    return "".join(out_chars)
+
+
+def _mask_html_comment(raw: str, in_comment: bool) -> tuple[str, bool]:
+    """Replace HTML-comment content (`<!-- … -->`, which may SPAN MULTIPLE LINES)
+    with same-length spaces, mirroring memgrep's `mask_html_comment` (janitor#173):
+    the mandatory landing-zone comment under `## Notes and lessons learned`
+    (`<!-- standing landing zone for [^N] correction lessons; none yet -->`)
+    carries a literal `[^N]` that must never register as a live reference.
+
+    `in_comment` is the open/close state carried in from the PREVIOUS line — the
+    caller MUST feed every line through this in source order, even one it will
+    otherwise discard (e.g. a fenced-code line), or a comment that opens/closes
+    around the skipped line desyncs the cross-line state for the rest of the
+    file. Returns `(masked_line, new_in_comment_state)`.
+    """
+    out: list[str] = []
+    rest = raw
+    while True:
+        if in_comment:
+            idx = rest.find("-->")
+            if idx == -1:
+                out.append(" " * len(rest))
+                return "".join(out), True
+            out.append(" " * (idx + 3))
+            rest = rest[idx + 3 :]
+            in_comment = False
+        else:
+            idx = rest.find("<!--")
+            if idx == -1:
+                out.append(rest)
+                return "".join(out), False
+            out.append(rest[:idx])
+            out.append("    ")
+            rest = rest[idx + 4 :]
+            in_comment = True
+
+
 def _scan_page_shape(note: str, text: str) -> list[str]:
     """Per-note structural-integrity checks → list of one-line issue strings.
 
@@ -921,7 +979,10 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
       (b) unresolved footnotes — a body `[^N]` with no `[^N]:` definition, and a
           dangling `[^N]:` definition no body references (memgrep silently
           ignores BOTH — verified live — so a botched correction/move leaves a
-          broken reference that never surfaces);
+          broken reference that never surfaces). Scanned with fenced blocks,
+          inline code spans, and HTML comments all masked to literal-text
+          (issue #187/#173) — a `[^N]` quoted for documentation, in any of those
+          three contexts, is not a live reference;
       (c) frontmatter missing `description` or `name` (the recall-load-bearing
           keys — a note with no `description` is unrecallable-by-symptom);
       (d) missing `ocd`/`lmd` per-element dates (ADVISORY — older notes predate
@@ -939,14 +1000,29 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     # heading or a `[^N]` must never satisfy or violate a shape rule. memgrep's
     # AST parser already excludes fences from the LINK graph; this keeps the
     # line-wise shape scan consistent with it (simulation S10b).
+    #
+    # `footnote_lines` is the SAME fence-stripped set, additionally masked for
+    # inline code and HTML comments — literal-text contexts the footnote scan
+    # alone must ignore (issue #187/#173; the other checks below don't need this,
+    # a heading or a section marker inside backticks/a comment is not their
+    # concern). Every line is fed through `_mask_html_comment` BEFORE the fence
+    # check, even one about to be dropped as fenced, so a comment opening/closing
+    # around a skipped fenced line cannot desync the cross-line `in_html_comment`
+    # state — mirroring memgrep's own masking order (memory.rs,
+    # `footnote_integrity_violations`).
     stripped: list[str] = []
+    footnote_lines: list[str] = []
     in_fence = False
+    in_html_comment = False
     for ln in body_lines:
+        comment_masked, in_html_comment = _mask_html_comment(ln, in_html_comment)
         if _FENCE_RE.match(ln):
             in_fence = not in_fence
             continue
-        if not in_fence:
-            stripped.append(ln)
+        if in_fence:
+            continue
+        stripped.append(ln)
+        footnote_lines.append(_mask_inline_code(comment_masked))
     body_lines = stripped
     issues: list[str] = []
 
@@ -974,9 +1050,12 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     # only ever appears under the lessons section, which is in the body, but scan
     # the whole text to be robust to layout). A def line ALSO contains the `[^N]`
     # ref shape, so collect defs first and subtract them from the ref scan.
-    def_ns = {m.group("n") for ln in body_lines for m in [_FOOTNOTE_DEF_RE.match(ln)] if m}
+    # Scanned over `footnote_lines` (inline-code and HTML-comment masked), never
+    # `body_lines` directly, so a `[^N]` quoted in prose or in the mandatory
+    # landing-zone comment cannot register as a live ref or def (issue #187/#173).
+    def_ns = {m.group("n") for ln in footnote_lines for m in [_FOOTNOTE_DEF_RE.match(ln)] if m}
     ref_ns: set[str] = set()
-    for ln in body_lines:
+    for ln in footnote_lines:
         if _FOOTNOTE_DEF_RE.match(ln):
             continue  # the `[^N]:` on a def line is the definition, not a ref
         for m in _FOOTNOTE_REF_RE.finditer(ln):
@@ -996,9 +1075,12 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     # INFO with a conditional wording, not a defect. Outside the section an
     # uncited def is still a real leftover (a botched correction or move).
     lessons_start, lessons_end = _lessons_span(body_lines)
+    # `footnote_lines` is index-aligned with `body_lines` (both built in the same
+    # loop, skipping the same fenced lines together), so `lessons_span`'s indices
+    # apply unchanged.
     stray_defs = {
         m.group("n")
-        for i, ln in enumerate(body_lines)
+        for i, ln in enumerate(footnote_lines)
         for m in [_FOOTNOTE_DEF_RE.match(ln)]
         if m and not (lessons_start <= i < lessons_end)
     }

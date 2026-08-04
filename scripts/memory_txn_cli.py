@@ -242,8 +242,22 @@ def _verify_merge(txn, writes, deletes):
                 return False, [f"illegal merge (source #{i} vs #1): {why}"]
 
     if len(writes) != 1:
+        # janitor#145: the one-write rule is deliberate, not a limitation to route
+        # around — verify_merge proves knowledge preservation between the SOURCES
+        # and the SURVIVOR only, so admitting an extra (e.g. backlink-holder) write
+        # would let an UNVERIFIED edit ride inside a verified transaction. A
+        # holder must be repointed in its OWN prior `--op repair` transaction
+        # first (verify_merge's no_dangling_refs then refuses the merge until
+        # that lands, so holder-first is the only order that can commit at all).
+        # The guidance is spelled out HERE, in the refusal itself, rather than
+        # left to a reference doc: a prose doc can drift out of sync with this
+        # check (it did — janitor#145), but an error message cannot drift from
+        # the code that raises it.
         raise MemoryTxnError(
-            f"merge expects exactly ONE surviving page, found {len(writes)} write(s)"
+            f"merge expects exactly ONE surviving page, found {len(writes)} write(s) — "
+            "a backlink holder cannot ride along in this transaction; repoint it in "
+            "a separate 'commit --op repair' transaction FIRST, then retry the merge "
+            "with only the merge sources staged"
         )
     result_rel, result_text = next(iter(writes.items()))
     result_meta = verify.parse_frontmatter(result_text)

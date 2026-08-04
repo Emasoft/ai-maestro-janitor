@@ -1657,3 +1657,45 @@ def test_scan_page_shape_real_fence_still_strips_its_content():
     )
     findings = librarian._scan_page_shape("t.md", text)
     assert any("Notes and lessons" in f for f in findings)
+
+
+def test_scan_page_shape_footnote_ref_inside_code_span_not_flagged_as_dangling():
+    """Issue #187: a `[^N]` inside a code span is literal prose — e.g. a cross-page
+    pointer like "see `[^5]` on the target page" — not a live in-page reference.
+    Before the fix, `_scan_page_shape` scanned the raw (unmasked) line and reported
+    this as `footnote ref(s) with no definition`, punishing the correctly-formed
+    page for the construct that is hardest to express any other way."""
+    text = (
+        "---\nname: t\ndescription: d\n---\n"
+        "component page `[[other-page]]` (its third block + `[^5]`).\n\n"
+        "## Notes and lessons learned\n"
+    )
+    findings = librarian._scan_page_shape("t.md", text)
+    assert not any("no definition" in f for f in findings), findings
+
+
+def test_scan_page_shape_footnote_ref_inside_html_comment_not_flagged_as_dangling():
+    """Mirrors memgrep's `mask_html_comment` fix (janitor#173, commit c7923b3e): a
+    `[^N]` written inside an `<!-- ... -->` comment is documentation, not a live
+    reference, so it must not be reported as a dangling ref either."""
+    text = (
+        "---\nname: t\ndescription: d\n---\n"
+        "Body text.\n\n"
+        "<!-- example: a lesson footnote looks like [^7] on the source page -->\n\n"
+        "## Notes and lessons learned\n"
+    )
+    findings = librarian._scan_page_shape("t.md", text)
+    assert not any("no definition" in f for f in findings), findings
+
+
+def test_scan_page_shape_footnote_ref_in_live_prose_still_flagged():
+    """The complement: a REAL in-page `[^N]` reference — outside any code span,
+    fence, or HTML comment — with no matching definition must still be flagged.
+    The masking fix must not silence a genuine dangling reference."""
+    text = (
+        "---\nname: t\ndescription: d\n---\n"
+        "A fact with a broken footnote[^9]. No def below.\n\n"
+        "## Notes and lessons learned\n"
+    )
+    findings = librarian._scan_page_shape("t.md", text)
+    assert any("[^9]" in f and "no definition" in f for f in findings), findings
