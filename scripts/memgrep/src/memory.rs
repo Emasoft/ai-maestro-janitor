@@ -538,11 +538,42 @@ fn split_note_metadata(body: &str) -> (Option<String>, String) {
     if bytes.first() != Some(&b'[') {
         return (None, body.to_string());
     }
-    // Find the matching close bracket of the opening `[` (no nested brackets expected in metadata).
-    let Some(close_rel) = body[1..].find(']') else {
-        return (None, body.to_string());
+    // Find the matching close bracket of the opening `[`, IGNORING any bracket that sits inside a
+    // double-QUOTED value (janitor#184). The old scan took the first `]` unconditionally, on the
+    // stated assumption that metadata holds no nested brackets — but `desc:"…"` is free prose, so a
+    // desc like `The [1m] tag …` (written through `add-lesson --desc`, the SANCTIONED verb) ended
+    // the block early. Everything after it, INCLUDING the literal `keywords:"…"`, was then parsed
+    // as the lesson BODY, and lint reported the lesson as having no recall keywords.
+    //
+    // That failure hides itself: a symptom query still finds the lesson, because the leaked
+    // metadata now sits in the body and gets full-texted. So the keywords look alive while the
+    // structured field is gone — retrievable by accident, not by its recall surface.
+    //
+    // Quote-awareness here (rather than escaping `[`/`]` on write) repairs the WHOLE existing
+    // corpus, not just pages written after the fix. It mirrors what the props splitter already
+    // does for commas inside quoted values.
+    let mut close_quote_aware: Option<usize> = None;
+    let mut in_quotes = false;
+    for (i, ch) in body.char_indices().skip(1) {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ']' if !in_quotes => {
+                close_quote_aware = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    // Fall back to the naive first `]` when the quote-aware scan finds none — that happens only on
+    // an UNBALANCED quote, where refusing to parse would be a new failure this fix introduced.
+    // Never worse than the previous behaviour.
+    let close = match close_quote_aware {
+        Some(i) => i,
+        None => match body[1..].find(']') {
+            Some(rel) => 1 + rel,
+            None => return (None, body.to_string()),
+        },
     };
-    let close = 1 + close_rel; // index of `]` in `body`
     // If the char right after `]` is `(`, this is a markdown link `[text](url)` → NOT metadata.
     if body[close + 1..].starts_with('(') {
         return (None, body.to_string());
@@ -5908,6 +5939,60 @@ mod tests {
         );
         assert_eq!(ocd.as_deref(), Some("2026-07-13"));
         assert_eq!(lmd.as_deref(), Some("2026-07-13"));
+    }
+
+    #[test]
+    fn split_note_metadata_ignores_brackets_inside_a_quoted_desc() {
+        // janitor#184. `add-lesson --desc` takes free prose, so a desc may legitimately contain
+        // `[1m]`. The block scan used to stop at that inner `]`, leaving `keywords:"…"` in the
+        // BODY — a lesson written through the SANCTIONED verb that its own lint then rejected.
+        //
+        // THE BRACKET IS THE TEST. The control below (identical but for the brackets) passes
+        // under both the old and fixed scan, so only the bracketed case distinguishes them.
+        let body = "[id:ATOM-AAAA-BBBB, status:valid, desc:\"The [1m] tag short-circuits it.\", \
+                    keywords:\"alpha beta\", ocd:2026-08-04, lmd:2026-08-04] DO NOT x, BECAUSE y. DO z.";
+        let (meta, rest) = split_note_metadata(body);
+        let meta = meta.expect("a bracketed desc must still yield a metadata block");
+        assert!(
+            meta.contains("keywords:\"alpha beta\""),
+            "keywords must stay INSIDE the metadata, got: {meta}"
+        );
+        assert!(
+            rest.starts_with("DO NOT x"),
+            "the body must start at the WHY text, not mid-metadata, got: {rest}"
+        );
+        assert_eq!(
+            parse_note_keywords(&meta),
+            "alpha beta",
+            "the recall surface must survive a bracket in the desc"
+        );
+
+        // Control: same shape, no brackets in the desc.
+        let plain = "[id:ATOM-AAAA-BBBB, desc:\"The 1m tag short-circuits it.\", \
+                     keywords:\"alpha beta\"] DO NOT x, BECAUSE y. DO z.";
+        let (m2, r2) = split_note_metadata(plain);
+        assert_eq!(parse_note_keywords(&m2.unwrap()), "alpha beta");
+        assert!(r2.starts_with("DO NOT x"));
+    }
+
+    #[test]
+    fn split_note_metadata_still_leaves_a_markdown_link_lesson_intact() {
+        // The quote-aware scan must not disturb the OTHER reason a lesson starts with `[`:
+        // a markdown link. `]` followed by `(` is a link, never metadata.
+        let body = "[issue #184](https://example.invalid/184) is the report.";
+        let (meta, rest) = split_note_metadata(body);
+        assert!(meta.is_none(), "a leading markdown link is not metadata");
+        assert_eq!(rest, body, "a link-leading lesson must survive byte-identical");
+    }
+
+    #[test]
+    fn split_note_metadata_unbalanced_quote_falls_back_not_forward() {
+        // An odd quote count leaves the quote-aware scan with no close bracket. Falling back to
+        // the naive first `]` keeps the previous behaviour instead of introducing a NEW way to
+        // lose a lesson's metadata — the fix must never be worse than what it replaced.
+        let body = "[id:ATOM-AAAA-BBBB, desc:\"unterminated, keywords:\"alpha\"] DO NOT x.";
+        let (meta, _rest) = split_note_metadata(body);
+        assert!(meta.is_some(), "an unbalanced quote must still parse as metadata");
     }
 
     #[test]
