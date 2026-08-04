@@ -1658,13 +1658,33 @@ def _phase_idle_clear_nudge() -> bool:
             esc_first=False,
             respect_user_presence=True,
         )
-        # STAMP ONLY ON A SEND. The cooldown exists so a CLEARED session does not re-clear;
-        # stamping it after a REFUSED send would instead mean "the user happened to be typing
-        # at 03:00, so skip the clear for two hours" — the veto silently becoming a mute. Not
-        # stamping makes the next heartbeat retry, which is the coarse outer retry; the 8s
-        # inner retry is `terminal_trigger.inject_until_sent`'s three rules and is NOT what
-        # this call reaches today (see the phase docstring).
-        if sent == terminal_trigger.USER_PRESENT:
+        # STAMP ONLY ON A SEND — and "a send" means the keystrokes ACTUALLY WENT OUT, i.e. a
+        # `FIRED:` status. The cooldown exists so a CLEARED session does not re-clear; stamping
+        # it after a REFUSED send would instead mean "the user happened to be typing at 03:00,
+        # so skip the clear for two hours" — the veto silently becoming a mute. Not stamping
+        # makes the next heartbeat retry, which is the coarse outer retry; the 8s inner retry is
+        # `terminal_trigger.inject_until_sent`'s three rules and is NOT what this call reaches
+        # today (see the phase docstring).
+        #
+        # `send_self_command` has FIVE outcomes, and only ONE of them typed anything:
+        # `FIRED:<channel>` (sent), `USER_PRESENT` (refused), `USE_ITERM_PATH` (iTerm/unknown —
+        # the caller is expected to run its own osascript path), `NO_AUTO_TERMINAL:<kind>`
+        # (delegated kind with no reachable target) and `DRY_RUN:…`. Testing only for
+        # USER_PRESENT counted the three NON-sends as sends, so on iTerm — the owner's own
+        # terminal — this phase stamped a 2h cooldown and printed "firing
+        # /janitor-handoff-and-clear" while NOTHING was typed into the pane: the feature was
+        # silently dead AND claimed to have worked. Every sibling trigger script
+        # (compact_trigger, clear_trigger, reload_trigger, resume_trigger,
+        # reload_skills_trigger) checks `!= USE_ITERM_PATH` before believing the send; this one
+        # did not. Positive test on FIRED:, so a future added status can never again default to
+        # "assume it worked".
+        if not sent.startswith("FIRED:"):
+            # No cooldown stamp: the next heartbeat must retry rather than mute the lever for
+            # two hours over a send that never happened. Logged (not printed) so an abandoned
+            # session does not emit a line every 5 minutes that nobody is there to read.
+            state.log_line(
+                "dispatch", f"idle-clear: not injected ({sent}) — not stamping, will retry"
+            )
             return False
         cold_cache_compact.mark_clear_fired(sd, now=now)
         print(

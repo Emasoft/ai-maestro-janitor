@@ -259,10 +259,24 @@ impl Drop for WriteGuard {
 /// while holding the scope's `WriteGuard` — otherwise a concurrent writer could mutate the page
 /// between this check and the caller's own write, defeating the whole point of the CAS.
 ///
-/// Fails with `STALE_MSG` verbatim on any mismatch, INCLUDING an unreadable/missing page (a
-/// page that vanished since the caller last read it is exactly as stale as one that changed).
+/// Fails with `STALE_MSG` verbatim on a hash mismatch and on a MISSING page (a page that
+/// vanished since the caller last read it is exactly as stale as one that changed).
+///
+/// EVERY OTHER read failure gets its REAL error, because `STALE_MSG` is an INSTRUCTION, not
+/// just a label: an agent that sees it re-reads the page and retries. Collapsing `NotFound`
+/// together with permission-denied / EIO / a directory-in-the-way meant a lock-held,
+/// definitely-not-stale failure told the caller "the content changed, reread the file" — so it
+/// re-read, computed the SAME hash, retried, and looped until something else gave up, with the
+/// real cause (a `chmod 000` page, a failing disk) never once named. Only `NotFound` is
+/// genuinely a staleness claim; the rest are I/O faults and must say so.
 pub fn check_base(page: &Path, base_sha256: &str) -> Result<()> {
-    let bytes = std::fs::read(page).map_err(|_| anyhow::anyhow!(STALE_MSG))?;
+    let bytes = std::fs::read(page).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            anyhow::anyhow!(STALE_MSG)
+        } else {
+            anyhow::anyhow!("read {} for the base-hash check: {e}", page.display())
+        }
+    })?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();

@@ -478,3 +478,32 @@ def test_binary_in_a_tracked_scripts_dir_is_still_flagged(tmp_path: Path) -> Non
     assert "binary-magic" in r.stdout, (
         f"a tracked binary in scripts/ must still be flagged; got: {r.stdout!r}"
     )
+
+
+def test_gitignore_filter_still_applies_when_the_file_budget_is_exhausted(tmp_path: Path) -> None:
+    """REGRESSION (found in review, 2026-08-04). `_walk_targets` bailed out of the walk with a
+    bare `return out` the moment `len(out) >= max_files`, which skipped the
+    `git_utils.drop_gitignored(...)` on the function's LAST line.
+
+    That lost the filter in the one situation where it matters most: a large gitignored corpus
+    (a `downloads_dev/` research tree, a local build output) is exactly what fills the budget
+    mid-walk, so every candidate collected up to the cap was scanned and could raise findings —
+    the precise janitor#99 false-positive class the filter was added to kill. The tail comment
+    even claims the filter is "applied to the FINAL candidate list, after the budget cap"; it
+    was not.
+
+    Budget of 2 with 4 gitignored binaries guarantees the early return is the path taken."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("/downloads_corpus/\n", encoding="utf-8")
+    d = tmp_path / "downloads_corpus" / "scripts"
+    d.mkdir(parents=True)
+    for i in range(4):
+        (d / f"tool{i}").write_bytes(_ELF)
+    r = _run(
+        tmp_path,
+        env_overrides={"CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_MAX_FILES": "2"},
+    )
+    assert r.returncode == 0
+    assert "downloads_corpus" not in r.stdout, (
+        "the budget early-return skipped the gitignore filter; got: " + repr(r.stdout)
+    )

@@ -184,12 +184,17 @@ def test_a_note_that_MENTIONS_the_module_does_silence_it(tmp_path, home):
     """The other half, so the fix is a real gate and not just 'always nudge': coverage is per
     MODULE. A note naming every changed module leaves nothing uncovered → silent. Without
     this the detector would be unsilenceable, which is how a nudge becomes noise and gets
-    turned off."""
+    turned off.
+
+    The note names the FILES (`f0.py`), not the bare stems: coverage matches on the basename
+    WITH its extension, because a bare stem that is also an ordinary English word made any
+    prose mention count as coverage and silenced the nudge forever (`state` matched 32 of this
+    repo's 48 PROJECT notes). See `_uncovered_modules`."""
     repo = tmp_path / "repo"
     _init_repo(repo)
     for i in range(4):
         _commit(repo, f"src/f{i}.py", f"x={i}\n", f"feat: thing {i}")
-    _write_note(repo, "fresh.md", age_s=-300, body="covers f0 f1 f2 f3 in detail")
+    _write_note(repo, "fresh.md", age_s=-300, body="covers f0.py f1.py f2.py f3.py in detail")
     assert _run(repo, home) == ""
 
 

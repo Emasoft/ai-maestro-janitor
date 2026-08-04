@@ -402,3 +402,52 @@ def test_sanitize_redacts_emails_so_forwarded_github_text_cannot_carry_pii() -> 
     assert "@gmail" not in out, "the domain is PII too — redact the whole address, not just the local part"
     assert "⟦janitor-self-disarm⟧" in out, "marker defanging must still work"
     assert state.sanitize_for_drift_line("branch feat/x") == "branch feat/x"
+
+
+def test_gh_api_mutations_without_a_short_method_flag_are_still_guarded() -> None:
+    """THE BYPASS THIS GUARD SHIPPED WITH (found in review, 2026-08-04).
+
+    `_GH_PUBLISH_RE`'s `gh api` clause matched only `-X POST|PATCH|PUT`, but `gh api` has three
+    ways to mutate and that is one of them:
+
+      * `--method POST` / `--method=POST` — the long spelling of the same flag. It contains no
+        `-X` anywhere, so it matched nothing. This repo's own scripts use the long form.
+      * NO method flag at all. From `gh api --help`: *"The default HTTP request method is GET
+        normally and POST if any parameters were added."* So `gh api <path> -f body=...` posts a
+        comment with no method anywhere on the command line — the most natural way to script a
+        comment was a total bypass of the PII/mention guard.
+
+    Both carry exactly the payload the 2026-08-02 incident published, so a guard blind to them
+    is a guard the incident walks straight around. Case-insensitive on the method token too."""
+    body = """-f body="$(cat <<'EOF'
+| account | usage |
+| owner@example.com | 41% |
+EOF
+)" """
+    for cmd in (
+        f"gh api repos/Emasoft/x/issues/9/comments --method POST {body}",
+        f"gh api repos/Emasoft/x/issues/9/comments --method=POST {body}",
+        f"gh api repos/Emasoft/x/issues/9/comments {body}",
+        f"gh api repos/Emasoft/x/issues/9/comments -X post {body}",
+        f"gh api repos/Emasoft/x/issues/9/comments -XPOST {body}",
+    ):
+        reason = _outbound(cmd)
+        assert reason is not None, f"outbound guard missed a real gh api mutation: {cmd[:60]}"
+        assert "email address" in reason
+
+
+def test_gh_api_mutation_without_method_flag_catches_stranger_mentions() -> None:
+    """The mention half of the same bypass — an implicit-POST `gh api` comment pages a real
+    account exactly as `gh issue comment` would."""
+    cmd = 'gh api repos/Emasoft/x/issues/9/comments -f body="routing to @someone-else"'
+    reason = _outbound(cmd)
+    assert reason is not None
+    assert "someone-else" in reason
+
+
+def test_gh_api_reads_are_still_not_publications() -> None:
+    """The other direction, because a guard that fires on every `gh api` read is a guard that
+    gets switched off. A GET has no `-f`/`-F` and no mutating method, so it stays silent."""
+    assert _outbound("gh api repos/Emasoft/x/issues/9") is None
+    assert _outbound("gh api user --jq .login") is None
+    assert _outbound("gh api repos/Emasoft/x/releases/latest --jq .tag_name") is None

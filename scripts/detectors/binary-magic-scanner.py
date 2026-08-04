@@ -365,7 +365,15 @@ def _walk_targets(root: Path, max_files: int) -> list[Path]:
             continue
         for fname in filenames:
             if len(out) >= max_files:
-                return out
+                # BUDGET EXHAUSTED — stop walking, but STILL go through the gitignore filter.
+                # A bare `return out` here skipped it, so the one case where the filter matters
+                # MOST silently lost it: a large gitignored corpus (a `downloads_dev/` research
+                # tree, a local build output) is exactly what fills the budget mid-walk, and
+                # every one of those candidates was then scanned and could raise findings — the
+                # precise false-positive class janitor#99 added the filter to kill. The filter
+                # is also what the comment at the tail of this function claims is "applied to
+                # the FINAL candidate list, after the budget cap"; this makes that true.
+                return git_utils.drop_gitignored(out, root=root)
             if fname.lower() in _SAFE_FILENAMES:
                 continue
             # Allowlist tokenizer-vocab artifacts by name (issue #40,

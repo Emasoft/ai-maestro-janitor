@@ -2055,8 +2055,15 @@ def test_main_stamps_fire_time_even_on_the_earliest_early_return(
 # --------------------------------------------------------------------------- #
 
 
-def _arm_idle_clear(dispatch, monkeypatch, *, idle_s, present=False, active=False, ctx=500_000):
-    """Put the phase in the state where only the decision under test differs."""
+def _arm_idle_clear(
+    dispatch, monkeypatch, *, idle_s, present=False, active=False, ctx=500_000, status="FIRED:x"
+):
+    """Put the phase in the state where only the decision under test differs.
+
+    `status` is what the stubbed `send_self_command` returns. It is a PARAMETER, not the
+    hardcoded "FIRED:x" it used to be, because that hardcoding is what hid a real bug: the
+    real function has five outcomes and only one of them typed anything, so a stub that always
+    reports success cannot tell a working phase from one that believes every refusal."""
     sent: list = []
     import cold_cache_compact
     import fleet_scan
@@ -2069,7 +2076,7 @@ def _arm_idle_clear(dispatch, monkeypatch, *, idle_s, present=False, active=Fals
     monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
     monkeypatch.setattr(
-        terminal_trigger, "send_self_command", lambda cmd, **kw: sent.append((cmd, kw)) or "FIRED:x"
+        terminal_trigger, "send_self_command", lambda cmd, **kw: sent.append((cmd, kw)) or status
     )
     return sent
 
@@ -2119,6 +2126,39 @@ def test_idle_clear_never_fires_on_a_live_session(env_isolation: dict, monkeypat
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, active=True)
     assert dispatch._phase_idle_clear_nudge() is False
     assert sent == []
+
+
+def test_idle_clear_does_not_claim_a_send_that_never_happened(env_isolation: dict, monkeypatch) -> None:
+    """REGRESSION (found in review, 2026-08-04). `send_self_command` has FIVE outcomes and only
+    `FIRED:` typed anything. The phase tested just `== USER_PRESENT`, so it counted
+    `USE_ITERM_PATH`, `NO_AUTO_TERMINAL:<kind>` and `DRY_RUN:` as sends — and `USE_ITERM_PATH`
+    is what iTerm, the owner's own terminal, returns.
+
+    The damage was double: it stamped the 2h cooldown (muting the lever on the very next
+    heartbeat, so the outer retry never ran) and printed "firing /janitor-handoff-and-clear"
+    while the pane received nothing. A silently-dead feature that reports success is worse than
+    one that reports failure. Every sibling trigger script checks `!= USE_ITERM_PATH`.
+
+    Each non-FIRED status is asserted separately so a future refactor cannot let one carry the
+    others. The cooldown is asserted at the STAMP call rather than by re-firing, so the check is
+    about this phase's decision and not about state-dir persistence between cases."""
+    import cold_cache_compact
+
+    stamped: list = []
+    for status in ("USE_ITERM_PATH", "NO_AUTO_TERMINAL:iterm", "DRY_RUN:tmux:%1:/x@2s"):
+        dispatch = _import_dispatch()
+        sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, status=status)
+        monkeypatch.setattr(
+            cold_cache_compact, "mark_clear_fired", lambda sd, **kw: stamped.append(kw)
+        )
+        assert dispatch._phase_idle_clear_nudge() is False, (
+            f"{status} is not a send — the phase must not report having fired"
+        )
+        assert len(sent) == 1, f"{status}: the attempt itself should still be made"
+        assert stamped == [], (
+            f"{status} stamped the 2h cooldown for a send that never happened — "
+            "the next heartbeat's retry is now muted"
+        )
 
 
 def test_idle_clear_does_not_refire_during_cooldown(env_isolation: dict, monkeypatch) -> None:

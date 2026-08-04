@@ -224,9 +224,28 @@ def check_sensitive_write(command: str) -> str | None:
 # each address as a USERNAME MENTION, paging a real uninvolved account three times per issue.
 # Neither was intended and neither was visible in the text being pasted; the second was not
 # even a thought. That is what makes it a guard rather than a lesson.
+#
+# THE `gh api` CLAUSE IS THREE ALTERNATIVES, NOT ONE, because `gh api` has three ways to
+# mutate and the first version of this guard only recognised one of them:
+#   * `-X POST` / `-XPOST` — the short flag (what the original clause matched);
+#   * `--method POST` / `--method=POST` — the long flag, which contains no `-X` at all and so
+#     sailed straight past. This repo's own test suite uses the long form;
+#   * NO method flag at all — `gh api <path> -f body=…`. Straight from `gh api --help`:
+#     "The default HTTP request method is GET normally and POST **if any parameters were
+#     added**." So `gh api repos/o/r/issues/1/comments -f body="$(cat …)"` publishes a comment
+#     with no method flag anywhere on the line. That was a total bypass of the PII/mention
+#     guard via the single most natural way to script a comment.
+# The method token is matched case-insensitively (`(?i:…)`, a SCOPED flag so the rest of the
+# pattern stays case-sensitive and `gh`/`GH` do not both match).
+# DELETE is included: it publishes nothing, but the deny only fires when the payload ALSO
+# carries an email or a stranger mention, so a mutation carrying either is worth stopping.
+# A `-f` with an explicit `--method GET` is a read, and this over-matches it; that costs an
+# "ask" on a GET whose query string contains an email address, which is vanishingly rare and
+# the right direction to be wrong in.
 _GH_PUBLISH_RE = re.compile(
     r"\bgh\s+(?:issue|pr|release|gist)\s+(?:create|comment|edit|review)\b"
-    r"|\bgh\s+api\b[^|;]*-X\s*(?:POST|PATCH|PUT)\b"
+    r"|\bgh\s+api\b[^|;]*(?:-X|--method)[\s=]*(?i:POST|PATCH|PUT|DELETE)\b"
+    r"|\bgh\s+api\b[^|;]*(?:-f|-F|--raw-field|--field)[\s=]"
 )
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # The one mention the owner sanctioned: the PRRD G1.1 self-identification line naming the

@@ -469,8 +469,19 @@ def _this_terminal() -> dict[str, str]:
 def main() -> int:
     # CHILD entry: `clear_trigger.py --__chain <base64-payload>`. Checked before argparse so
     # the child never has to satisfy the human-facing flag surface.
+    #
+    # Wrapped so `_run_chain_payload`'s "never raises — but ALWAYS logs its outcome" contract is
+    # enforced at the BOUNDARY. Its own body is a bare try/finally (the finally releases the
+    # chain flock but catches nothing), so anything raised inside — e.g. a hung `osascript`
+    # surfacing as `subprocess.TimeoutExpired` from the step executor — used to kill this
+    # DEVNULL-stdio child with no log line at all, which is exactly the "give-up
+    # indistinguishable from success" shape the docstring calls a defect in its own right.
     if len(sys.argv) >= 3 and sys.argv[1] == "--__chain":
-        return _run_chain_payload(sys.argv[2])
+        try:
+            return _run_chain_payload(sys.argv[2])
+        except Exception as exc:  # noqa: BLE001 - a detached child must log, never vanish
+            state.log_line("clear-trigger", f"chain: ABORTED by an unhandled error — {exc!r}")
+            return 1
 
     ap = argparse.ArgumentParser(
         description="Persist a link-only handoff + resume marker, then self-trigger "

@@ -2176,6 +2176,46 @@ fn superseded_heading_line(text: &str) -> Option<usize> {
     None
 }
 
+/// Read a page for a READ-MODIFY-WRITE verb: strict UTF-8, real errors named.
+///
+/// The write verbs must NOT go through `md::read_text` (TRDD-7YHT3FNK). That reader is built
+/// for SCANNING — it answers `Option`, so every distinct failure (missing, unreadable, over the
+/// size cap, binary) collapses into one `None` the caller can only guess at, and, decisively,
+/// it falls back to `String::from_utf8_lossy` on invalid UTF-8 (`md.rs`, the `from_utf8` match).
+/// A lossy decode is harmless when you are only searching it; it is CORRUPTION when the verb
+/// then writes that same String back over the page, because every invalid byte returns to disk
+/// as U+FFFD, permanently, with no error and no diff the caller ever sees.
+///
+/// The compare-and-swap gives NO protection against this: `check_base` hashes the RAW BYTES, so
+/// a page with invalid UTF-8 passes the CAS cleanly and is mangled on the way out. Losing
+/// knowledge silently is precisely what the write gate exists to prevent, so the correct
+/// behaviour is to REFUSE the page and say why — fail fast, never a lossy round-trip.
+fn read_page_for_write(page: &Path) -> Result<String> {
+    let meta = std::fs::metadata(page)
+        .with_context(|| format!("stat {}", page.display()))?;
+    if !meta.is_file() {
+        anyhow::bail!("{} is not a regular file", page.display());
+    }
+    if meta.len() > md::MAX_FILE_BYTES {
+        anyhow::bail!(
+            "{} is {} bytes, over the {}-byte page cap — refusing to rewrite it",
+            page.display(),
+            meta.len(),
+            md::MAX_FILE_BYTES
+        );
+    }
+    let bytes = std::fs::read(page).with_context(|| format!("read {}", page.display()))?;
+    String::from_utf8(bytes).map_err(|e| {
+        anyhow::anyhow!(
+            "{} is not valid UTF-8 (first invalid byte at offset {}) — refusing to rewrite it, \
+             because writing back the lossily-decoded text would silently replace that byte \
+             (and every other invalid one) with U+FFFD. Repair the page's encoding first.",
+            page.display(),
+            e.utf8_error().valid_up_to()
+        )
+    })
+}
+
 /// Atomic page write (unique tmp in the SAME dir, then rename) — the tmp-then-rename discipline the
 /// index-markdown writer (memory.rs) and the SQLite ledger (index.rs) already use, so a concurrent
 /// `recall`/reader never observes a half-written page. The tmp name carries the pid so parallel test
@@ -2310,8 +2350,12 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     if let Some(base) = a.base_sha256.as_deref() {
         write_gate::check_base(&a.page, base)?;
     }
-    let text = md::read_text(&a.page)
-        .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable — create it first with `memgrep new-page`", a.page.display()))?;
+    let text = read_page_for_write(&a.page).with_context(|| {
+        format!(
+            "cannot add an atom to {} — create the page first with `memgrep new-page`",
+            a.page.display()
+        )
+    })?;
 
     // Uniqueness is checked across the WHOLE owning scope (the page's parent dir), not just this
     // page — an atom id must be corpus-unique, and the scope is what `recall` walks.
@@ -2562,8 +2606,7 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     if let Some(base) = a.base_sha256.as_deref() {
         write_gate::check_base(&a.page, base)?;
     }
-    let text = md::read_text(&a.page)
-        .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable", a.page.display()))?;
+    let text = read_page_for_write(&a.page)?;
 
     // Resolve the target atom to its body extent ON THIS PAGE. `atom` accepts the `^name` sigil form.
     let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
@@ -3148,10 +3191,11 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
     if let Some(base) = a.base_sha256.as_deref() {
         write_gate::check_base(&a.from, base)?;
     }
-    let from_text = md::read_text(&a.from)
-        .ok_or_else(|| anyhow::anyhow!("--from page {} does not exist or is unreadable", a.from.display()))?;
-    let to_text = md::read_text(&a.to)
-        .ok_or_else(|| anyhow::anyhow!("--to page {} does not exist or is unreadable", a.to.display()))?;
+    // BOTH pages are rewritten by this verb, so BOTH go through the strict reader — a lossy
+    // decode of the destination corrupts it just as thoroughly as one of the source, and only
+    // `--from` is covered by the CAS.
+    let from_text = read_page_for_write(&a.from).context("--from page")?;
+    let to_text = read_page_for_write(&a.to).context("--to page")?;
 
     let r = migrate_compute(&from_text, &to_text, &a.atom)?;
 
@@ -3237,7 +3281,15 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
     if let Some(base) = a.base_sha256.as_deref() {
         write_gate::check_base(&a.page, base)?;
     }
-    let text = md::read_text(&a.page).ok_or_else(|| anyhow::anyhow!(write_gate::STALE_MSG))?;
+    // A VANISHED page is stale (the CAS says the same); anything else — unreadable, oversized,
+    // not valid UTF-8 — gets its real cause. `STALE_MSG` is an instruction to reread and retry,
+    // so handing it to a caller whose page is `chmod 000` sent it round that loop forever while
+    // never naming the fault.
+    let text = if a.page.exists() {
+        read_page_for_write(&a.page)?
+    } else {
+        anyhow::bail!(write_gate::STALE_MSG)
+    };
 
     let count = text.matches(old.as_str()).count();
     if count == 0 {
@@ -8317,6 +8369,61 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
         assert!(res.is_ok(), "--replace-all must succeed: {res:?}");
         assert_eq!(content_after, "DUP DUP DUP\n", "every occurrence replaced");
+    }
+
+    #[test]
+    fn edit_refuses_a_non_utf8_page_instead_of_lossily_rewriting_it() {
+        // REGRESSION (found in review, 2026-08-04). The write verbs read through
+        // `md::read_text`, which falls back to `String::from_utf8_lossy`, and then wrote that
+        // String straight back with `atomic_write_page` — so ONE invalid byte anywhere on the
+        // page came back as U+FFFD, permanently, with no error and no diff the caller ever saw.
+        //
+        // The CAS is no defence: `check_base` hashes the RAW BYTES, so the page passes the
+        // staleness check cleanly and is mangled on the way out. Silent knowledge loss in the
+        // one primitive documented as the ONLY sanctioned edit path is exactly what this whole
+        // module exists to prevent, so the page must be REFUSED, not round-tripped.
+        //
+        // Asserts on the BYTES, not on the error text: the invariant is "the page on disk is
+        // untouched", and a test that only checked the message would still pass if the refusal
+        // happened after the write.
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-nonutf8");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let scope = edit_test_tmpdir("scope-nonutf8");
+        let memory_dir = scope.join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        // Valid text plus a lone 0x80 continuation byte — invalid UTF-8, no NUL (so it is not
+        // rejected as "binary" either), which is what a Latin-1 paste or a truncated multi-byte
+        // sequence from an earlier botched write actually looks like.
+        let raw: Vec<u8> = b"hello world\nca\x80fe\n".to_vec();
+        std::fs::write(&page, &raw).unwrap();
+
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "bye world");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let bytes_after = std::fs::read(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("a non-UTF-8 page must be refused, not lossily rewritten");
+        assert!(
+            err.to_string().contains("not valid UTF-8"),
+            "the refusal must name the real cause, got: {err}"
+        );
+        assert_eq!(
+            bytes_after, raw,
+            "the page was rewritten — the invalid byte was replaced with U+FFFD"
+        );
     }
 
     #[test]

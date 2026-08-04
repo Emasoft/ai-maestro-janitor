@@ -593,6 +593,13 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
 
     d = sd / "resume-directive.txt"
     d.write_text("continue TRDD-SOMETHING")
+    # PIN the mtime instead of racing the wall clock. `now` is sampled ABOVE, before the write,
+    # so if the write crosses a second boundary — routine under a loaded full-suite run —
+    # `st_mtime` lands one second AHEAD of `now`, `age` is -1, and the production code's
+    # `0 <= age` clock-skew guard correctly rejects it. The assertion below then fails on a
+    # brand-new directive and the test looks flaky while the code under test is fine. Every
+    # other case here already sets its own mtime; this one just inherited the clock.
+    os.utime(d, (now, now))
 
     # Fresh: still FAST — the signal must keep working for a real, current wait.
     assert dispatch._cadence_active_waiting(sd, now) is True

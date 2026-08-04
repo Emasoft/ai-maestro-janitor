@@ -894,7 +894,20 @@ def _run_send_payload(payload_b64: str) -> int:
 def _run_steps(steps) -> None:
     """Execute RUN/SLEEP-tagged argv steps. Extracted from `_run_send_payload` so the CHAINED
     injector runs keystrokes through the exact same executor as the blind one — two copies of
-    this loop would drift, and the copy that drifts is the one that types into a user's pane."""
+    this loop would drift, and the copy that drifts is the one that types into a user's pane.
+
+    NEVER RAISES. `check=False` only suppresses a non-zero EXIT; `timeout=` still raises
+    `subprocess.TimeoutExpired`, and OSError is raised when the binary is missing. Both used to
+    escape this function into a DETACHED child whose stdio is DEVNULL — so a hung `osascript`
+    (the macOS TCC automation prompt blocking iTerm control, the exact condition
+    `fleet_scan.iterm_automation_blocked` exists to detect) killed the child mid-chain with a
+    traceback nobody could ever see, skipping `clear_trigger._run_chain_payload`'s outcome log
+    and breaking both children's documented "never raises, always logs" contract. A silent
+    give-up is indistinguishable from success, which is the failure shape this module exists to
+    prevent — so a failed step is LOGGED and the sequence STOPS. Stopping (rather than typing
+    the remaining steps into a pane whose earlier keystrokes never landed) is the safe
+    direction: the caller's read-back verification is the authority on whether the send worked,
+    and it now sees an unchanged field instead of a dead child."""
     for step in steps:
         if not step:
             continue
@@ -902,14 +915,27 @@ def _run_steps(steps) -> None:
         if tag == "SLEEP" and rest:
             time.sleep(max(0.0, float(rest[0])))
         elif tag == "RUN" and rest:
-            subprocess.run(  # noqa: S603 - fixed argv, no shell; values are validated/literal
-                rest,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=10,
-            )
+            try:
+                subprocess.run(  # noqa: S603 - fixed argv, no shell; values are validated/literal
+                    rest,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=10,
+                )
+            except subprocess.TimeoutExpired:
+                state.log_line(
+                    "terminal_trigger",
+                    f"send step timed out after 10s ({rest[0]}) — aborting the remaining steps",
+                )
+                return
+            except OSError as exc:
+                state.log_line(
+                    "terminal_trigger",
+                    f"send step could not run ({rest[0]}): {exc} — aborting the remaining steps",
+                )
+                return
 
 
 def _fire_detached_steps(
@@ -1250,8 +1276,15 @@ def send_self_command(
 
 def main() -> int:
     # Child entry: `terminal_trigger.py --__send <base64-plan>`.
+    # Wrapped so the child's "never raises" contract is enforced at the BOUNDARY, not only by
+    # every callee remembering it. This process is detached with DEVNULL stdio, so an escaping
+    # exception is a traceback written to nowhere — indistinguishable from a successful send.
     if len(sys.argv) >= 3 and sys.argv[1] == "--__send":
-        return _run_send_payload(sys.argv[2])
+        try:
+            return _run_send_payload(sys.argv[2])
+        except Exception as exc:  # noqa: BLE001 - a detached child must log, never vanish
+            state.log_line("terminal_trigger", f"send child aborted: {exc!r}")
+            return 1
 
     import argparse
 

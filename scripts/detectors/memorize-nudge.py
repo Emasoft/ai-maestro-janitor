@@ -141,19 +141,31 @@ def _is_substantive(subject: str, files: list[str]) -> bool:
 
 
 def _uncovered_modules(changed: dict[str, int], scope_dirs: list[tuple[str, Path]]) -> list[str]:
-    """The module stems that CHANGED but that no memory note anywhere MENTIONS.
+    """The module FILENAMES that CHANGED but that no memory note anywhere MENTIONS.
 
-    This is the coverage signal the recency window never had. `changed` maps a module stem
-    (a source file's basename without extension) to how many substantive commits touched it;
-    a stem is COVERED if any LOCAL/PROJECT note's text contains it. Returns the uncovered
-    stems, most-churned first.
+    This is the coverage signal the recency window never had. `changed` maps a source file's
+    BASENAME WITH ITS EXTENSION (`state.py`, not `state`) to how many substantive commits
+    touched it; a module is COVERED if any LOCAL/PROJECT note's text contains that filename.
+    Returns the uncovered filenames, most-churned first.
+
+    THE EXTENSION IS LOAD-BEARING, and dropping it inverted this function's own safety claim.
+    Matching the bare STEM as an unanchored substring means a module whose stem is an ordinary
+    English word is "covered" by any note that happens to use that word: measured against this
+    repo's PROJECT corpus on 2026-08-04, the stem `state` matched 32 of 48 notes and `auth` 30
+    of 48, so `scripts/lib/state.py` could churn indefinitely and never be nudged about. That
+    is FALSE SILENCE — the exact direction the docstring below claims cannot happen — and it is
+    invisible, because a nudge that never fires looks identical to a corpus that is up to date.
+    Word-boundary anchoring does NOT fix it (`\\bstate\\b` still matches the English word; it
+    matched all 13 stems tested). Requiring `state.py` does: it flipped `markers`, `renderer`,
+    `posture`, `suppression`, `tickets` and `memory` from "covered" to correctly uncovered,
+    while a page that genuinely discusses a module names the file.
 
     WHY MENTION AND NOT `globs:` OWNERSHIP: the wikimem model reserves `globs:` for exactly
     this, but measured 2026-08-04 not one page in this corpus declares it, so an ownership
-    query would compute over an empty relation and call EVERYTHING uncovered. A substring
+    query would compute over an empty relation and call EVERYTHING uncovered. A filename
     mention is weaker but true today, and it fails in the safe direction — a page that
-    discusses a module almost always names it, so false NUDGES are the error mode, not false
-    silence. Swap in `globs:` once pages carry it."""
+    discusses a module almost always names its file, so false NUDGES are the error mode, not
+    false silence. Swap in `globs:` once pages carry it."""
     if not changed:
         return []
     corpus: list[str] = []
@@ -166,22 +178,26 @@ def _uncovered_modules(changed: dict[str, int], scope_dirs: list[tuple[str, Path
             except OSError:
                 continue
     blob = "\n".join(corpus)
-    uncovered = [stem for stem in changed if stem not in blob]
+    uncovered = [name for name in changed if name not in blob]
     uncovered.sort(key=lambda s: (-changed[s], s))
     return uncovered
 
 
 def _changed_modules(root: Path, secs: int) -> dict[str, int]:
-    """{module stem: substantive commits touching it} over the window. Source files only —
-    a doc or config churn is not knowledge that needs capturing."""
+    """{module FILENAME: substantive commits touching it} over the window. Source files only —
+    a doc or config churn is not knowledge that needs capturing.
+
+    Keyed on the basename WITH its extension (`state.py`), not the bare stem — see
+    `_uncovered_modules` for why the extension is what keeps the coverage check honest. The
+    `test_` skip still looks at the STEM, since that prefix is about the file's role."""
     out: dict[str, int] = {}
     for _subject, files in _substantive_records(root, secs, max_count=_MAX_COVERAGE_COMMITS):
         for f in files:
             if not f.endswith((".py", ".rs", ".ts", ".js", ".sh")):
                 continue
-            stem = Path(f).stem
-            if stem and not stem.startswith("test_"):
-                out[stem] = out.get(stem, 0) + 1
+            name = Path(f).name
+            if name and not Path(f).stem.startswith("test_"):
+                out[name] = out.get(name, 0) + 1
     return out
 
 
