@@ -1071,6 +1071,25 @@ def test_main_full_fire_runs_the_whole_roster_with_a_retired_sentinel_present(
     assert not (state.state_dir() / "maintenance-mode").exists(), "the retired sentinel is swept"
 
 
+def test_sweep_retired_sentinels_removes_keep_going_off(env_isolation: dict) -> None:
+    """janitor#185: `keep-going-off` (the retired `/janitor-keep-going off` sentinel) was
+    missing from `state.RETIRED_SENTINELS`, so neither this sweep nor `/janitor-arm`'s ever
+    removed it — a MANAGER agent measured one dated 13+ days on a real host. It must now be
+    swept exactly like the other three retired flags. FAILS before the fix (the file
+    survives the sweep untouched); PASSES after."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    flag = state.state_dir() / "keep-going-off"
+    flag.write_text("keep-going-off: full-mode continue-nudge suppressed", encoding="utf-8")
+    assert "keep-going-off" in state.RETIRED_SENTINELS
+
+    dispatch._sweep_retired_sentinels()
+
+    assert not flag.exists(), "keep-going-off must be swept like the other retired sentinels"
+
+
 def test_main_under_kill_switch_self_disarms_even_with_a_retired_sentinel(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1208,6 +1227,81 @@ def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeyp
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"the retired knob still silenced it: {out!r}"
+
+
+def _write_trdd(project: Path, uid8: str, column: str) -> None:
+    """A minimal TRDD fixture at `project`/design/tasks/, on the given column."""
+    tasks = project / "design" / "tasks"
+    tasks.mkdir(parents=True, exist_ok=True)
+    (tasks / f"TRDD-20260101_000000+0000-{uid8}-x.md").write_text(
+        "---\n"
+        f"trdd-id: {uid8}\n"
+        "title: x\n"
+        f"column: {column}\n"
+        "created: 2026-01-01T00:00:00+0000\n"
+        "updated: 2026-01-01T00:00:00+0000\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+
+def test_phase_keep_going_nudge_degrades_once_the_named_trdd_is_terminal(env_isolation: dict) -> None:
+    """janitor#185: a `resume-directive.txt` naming an already-SHIPPED TRDD (column
+    `complete`) must degrade to the safe generic nudge instead of re-citing the stale
+    directive forever — reproduces the MANAGER's report: a directive kept being read as
+    "the current target" heartbeat after heartbeat with no check that the work was done.
+    FAILS before the fix (the old code only checked file presence, so it kept citing the
+    directive here); PASSES after."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _write_trdd(env_isolation["project"], "ABCD1234", "complete")
+    (state.state_dir() / "resume-directive.txt").write_text(
+        "continue TRDD-ABCD1234 (shipped work) — read its STATE block first, then proceed.",
+        encoding="utf-8",
+    )
+
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], (
+        f"a directive naming a shipped TRDD must degrade to the generic nudge, got {out!r}"
+    )
+
+
+def test_phase_keep_going_nudge_still_cites_a_live_directive(env_isolation: dict) -> None:
+    """Control case for #185: a directive naming a TRDD that is still OPEN (column `dev`,
+    non-terminal) keeps pointing at the file — the fix must not silence a genuinely
+    current directive, only a stale one."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _write_trdd(env_isolation["project"], "ABCD1234", "dev")
+    (state.state_dir() / "resume-directive.txt").write_text(
+        "continue TRDD-ABCD1234 (still in progress) — read its STATE block first.",
+        encoding="utf-8",
+    )
+
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "resume-directive.txt" in out, f"a live directive must still be cited, got {out!r}"
+
+
+def test_phase_keep_going_nudge_directive_with_no_trdd_ref_still_cited(env_isolation: dict) -> None:
+    """A directive naming NO TRDD at all (most agent-authored handoffs point at the
+    link-only handoff file instead) cannot be verified done — the fail-open default is
+    unchanged: keep citing it, never silently drop the only pointer to possibly-real
+    unfinished work."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "resume-directive.txt").write_text(
+        "read .janitor/state/agent-handoff.md FIRST, then resume your prior in-flight task.",
+        encoding="utf-8",
+    )
+
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "resume-directive.txt" in out, f"an unverifiable directive must still be cited, got {out!r}"
 
 
 def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -93,14 +93,14 @@ def test_compute_verdicts_flags_failures() -> None:
     mod = _import()
     before = {
         "ts": 1000,
-        "cron_id": "sameid",
+        "cron_id": "beforeid",
         "context_tokens": 400000,
         "handoff_links": ["page-a"],
         "resume_flag_present": True,
     }
     after = {
         "ts": 1100,
-        "cron_id": "sameid",  # unchanged → /clear did not re-arm
+        "cron_id": "",  # gone after /clear, and no re-arm observed → genuinely broken
         "context_tokens": 390000,  # did not collapse
         "resume_flag_present": True,  # not consumed
         "armed_at_ts": 500,  # predates the snapshot
@@ -112,6 +112,35 @@ def test_compute_verdicts_flags_failures() -> None:
     assert v["handoff_links_resolve"]["status"] == "FAIL"
     assert v["resume_flag_consumed"]["status"] == "FAIL"
     assert v["session_restarted"]["status"] == "FAIL"
+
+
+def test_compute_verdicts_cron_survived_unchanged_is_healthy_not_a_failure() -> None:
+    """#186 regression: /clear does not always destroy the session cron (SessionStart's
+    re-arm is CONDITIONAL — "if it is missing" — so a cron that never went missing is
+    correctly never re-armed). A prior version of this harness asserted destruction +
+    recreation UNCONDITIONALLY and reported FAIL on a real, healthy machine where the
+    cron simply survived `/clear` with the SAME id — the false assumption was the
+    harness's, not the primitive's. Both the cron check and the dependent re-arm check
+    must read this as healthy (PASS / SKIP), never FAIL."""
+    mod = _import()
+    before = {
+        "ts": 1000,
+        "cron_id": "4deceffa",
+        "context_tokens": 400000,
+        "handoff_links": [],
+        "resume_flag_present": False,
+    }
+    after = {
+        "ts": 1100,
+        "cron_id": "4deceffa",  # UNCHANGED — this build's /clear does not drop the cron
+        "context_tokens": 40000,
+        "resume_flag_present": False,
+        "armed_at_ts": 500,  # predates the snapshot — no fresh re-arm, because none was needed
+        "links_resolved": {},
+    }
+    v = mod.compute_verdicts(before, after)
+    assert v["cron_recreated"]["status"] == "PASS", v["cron_recreated"]
+    assert v["session_restarted"]["status"] == "SKIP", v["session_restarted"]
 
 
 def test_compute_verdicts_skips_on_missing_signals() -> None:

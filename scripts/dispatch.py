@@ -1699,6 +1699,54 @@ def _phase_idle_clear_nudge() -> bool:
         return False
 
 
+def _directive_task_is_terminal(directive_text: str) -> bool:
+    """True iff EVERY `TRDD-<id8>` the directive names has already reached a terminal
+    column (published/complete/live/failed/superseded/cancelled/refused) — i.e. the task
+    the directive points at has SHIPPED. (janitor#185)
+
+    WHY: `_phase_keep_going_nudge` used to gate solely on `resume-directive.txt` existing
+    and being non-empty, never on whether the work it names is DONE. A directive most
+    commonly reads "continue TRDD-<id8> (...)" — `post-compact-resume.py::_inflight_trdd_
+    directive`'s own fallback shape — so once that TRDD ships the file becomes stale
+    content the nudge kept re-citing as "the current target" on every single heartbeat,
+    forever (nothing but `post-compact-resume.py`'s one-shot compact consumer ever unlinks
+    it, and a compaction may never land — see the cadence-bounding comment two phases up).
+    Measured report (a MANAGER agent, #185): the nudge fired in its generic form for hours
+    with no directive file present at all, which isolates the defect to exactly this
+    file-derived branch — the fix is to degrade to that same safe generic form once the
+    named task is verifiably done, not to add an off-switch or stop the nudge firing.
+
+    FAIL-OPEN to False (⇒ caller keeps pointing at the file) on: a directive naming no TRDD
+    at all (most agent-authored handoffs point at a link-only handoff file instead — nothing
+    here can verify those, so the existing "always mention it" behavior is the correct,
+    unchanged default); a referenced id this board has no file for (could be a different
+    scope this session can't see, or a typo — never silently drop the only pointer to a
+    possibly-real, still-open task); any import/read fault. Only a directive whose every
+    named TRDD resolves to a terminal column is safe to drop from the nudge.
+    """
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the other lib imports in this file
+
+        ids = trdd_common.extract_trdd_refs(directive_text)
+        if not ids:
+            return False
+        columns: dict[str, str] = {}
+        project_root = str(state.project_root())
+        for folder in trdd_common.DESIGN_FOLDERS:
+            for _scope, path in trdd_common.trdd_files(folder, project_root):
+                uid = trdd_common.extract_uid(path.name)
+                if uid and uid not in columns:
+                    _status, column = trdd_common.parse_trdd_state(path)
+                    columns[uid] = column
+        for uid in ids:
+            column = columns.get(uid)
+            if not column or not trdd_common.is_terminal_column(column):
+                return False
+        return True
+    except Exception:  # noqa: BLE001 -- an optimization must never break the always-on nudge
+        return False
+
+
 def _phase_keep_going_nudge() -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working. UNCONDITIONAL.
 
@@ -1747,7 +1795,15 @@ def _phase_keep_going_nudge() -> None:
     try:
         directive_file = state.state_dir() / "resume-directive.txt"
         if directive_file.is_file() and directive_file.stat().st_size > 0:
-            bits.append("read .janitor/state/resume-directive.txt for the current target")
+            # janitor#185: a directive naming an already-SHIPPED TRDD is stale content,
+            # not a current target — degrade to the generic form below instead of
+            # re-citing it forever. See _directive_task_is_terminal's docstring.
+            try:
+                directive_text = directive_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                directive_text = ""
+            if not _directive_task_is_terminal(directive_text):
+                bits.append("read .janitor/state/resume-directive.txt for the current target")
     except OSError:
         pass
     n = _pending_agent_count()

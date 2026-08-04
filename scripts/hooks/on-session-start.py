@@ -170,6 +170,63 @@ def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - loca
         state.log_line("session-start", f"cron-liveness nudge skipped: {exc}")
 
 
+def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: Path) -> None:  # noqa: ANN001 - local module type
+    """janitor#129 — the per-machine half of #112: seed a minimal `*-overview.md` entry
+    page for a LOCAL/USER memory scope that has none yet.
+
+    #112 shipped the PROJECT overview IN THE REPO, so every cloner inherits it for free.
+    LOCAL (`~/.claude/projects/<slug>/memory/`) and USER (the plugin DATA dir) live
+    OUTSIDE any repo and ship with nothing — so on a fresh machine, or a project newly
+    adopting the janitor, `memory_bridge.find_overview_page` returns None for both,
+    `ensure_bridge_line` returns `OUTCOME_NO_OVERVIEW`, and those two scopes have no
+    entry point at all. Nothing errors; the only symptom is `memgrep overview
+    <local-or-user-memdir>` saying "no `<project>-overview.md`" — the exact condition
+    #112 fixed, just per-machine instead of repo-wide.
+
+    NEVER for PROJECT scope — that page is the repo's own, authored deliberately; an
+    auto-seeded stub would compete with a curated hub and land in someone's `git status`.
+    Idempotent (only writes when `find_overview_page` finds nothing — never touches an
+    existing page) and fail-open (a seeding fault must never cost a session), mirroring
+    the bridge line it feeds.
+    """
+    if scope_name == "PROJECT":
+        return
+    try:
+        if memory_bridge.find_overview_page(scope_root) is not None:
+            return  # already seeded (by this hook, /janitor-memory-bootstrap, or by hand)
+        scope_root = Path(scope_root)
+        if not scope_root.is_dir():
+            return
+        project_name = Path(state.project_root()).name or "project"
+        stem = f"{project_name}-{scope_name.lower()}-overview"
+        target = scope_root / f"{stem}.md"
+        if target.exists():
+            return  # race with another session between the check above and here
+        from datetime import datetime  # noqa: PLC0415 - local: not needed on the hot path
+
+        now = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+        body = (
+            "---\n"
+            f"name: {stem}\n"
+            f'description: "{scope_name} memory scope entry point for {project_name}"\n'
+            f"ocd: {now}\n"
+            f"lmd: {now}\n"
+            "metadata: {node_type: memory, type: overview, tier: hub}\n"
+            "---\n\n"
+            f"# {project_name} — {scope_name} memory overview\n\n"
+            f"This is the entry point for the {scope_name}-scope memory of "
+            f"**{project_name}**. It was seeded empty by SessionStart because no "
+            "`*-overview.md` page existed yet in this scope (janitor#129) — replace "
+            f"this stub the first time you write real {scope_name}-scope knowledge here.\n\n"
+            f'Recall by symptom: `memgrep recall "<symptom>" {scope_root}`.\n\n'
+            "## Notes and lessons learned\n"
+        )
+        state.atomic_write(target, body)
+        state.log_line("session-start", f"seeded a stub {scope_name} overview page: {target}")
+    except Exception as exc:  # noqa: BLE001 -- fail OPEN; a seeding fault never costs a session
+        state.log_line("session-start", f"{scope_name} overview seed skipped: {exc}")
+
+
 def main() -> int:
     # All side-effecting code lives inside main() so the hook script is
     # safely importable (no module-scope sys.exit, no module-scope
@@ -458,6 +515,7 @@ def main() -> int:
         from lib import memory_bridge  # noqa: E402  -- local package, not PyPI
 
         for _scope_name, _scope_root in memory_scopes.resolve_scope_dirs():
+            _seed_overview_if_absent(state, memory_bridge, _scope_name, _scope_root)
             outcome = memory_bridge.ensure_bridge_line(_scope_root)
             if outcome == memory_bridge.OUTCOME_ADDED:
                 state.log_line(

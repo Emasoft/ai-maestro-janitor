@@ -6,14 +6,24 @@
 
 The handoff+clear primitive rests on several assumptions that must be PROVEN LIVE,
 not inferred:
-  1. `/clear` DESTROYS the session-scoped heartbeat cron, and the post-clear
-     bootstrap RE-ARMS it (a NEW cron id ⇒ both happened).
+  1. The heartbeat cron is HEALTHY after `/clear` — either it SURVIVES unchanged
+     (the common case: `/clear` resets the conversation but keeps the same process,
+     so the in-memory cron usually just survives it) or it is destroyed-and-recreated
+     on builds where `/clear` does drop it. `on-session-start.py`'s own re-arm nudge
+     is CONDITIONAL — "if it is missing, run /janitor-arm" — so a cron that never went
+     missing is never re-armed, and that is healthy, not a defect (see #186; a prior
+     version of this harness asserted destruction+recreation UNCONDITIONALLY and
+     FAILED on a build where the cron simply survived — the false assumption, not the
+     primitive). Only a cron that is GONE after `/clear` and never comes back is real.
   2. `/clear` collapses the context to base-size (the whole reason to prefer it
      over `/compact`).
   3. The link-only handoff is RECOVERABLE — every `[[wikimem link]]` it carries
      resolves via memgrep in the fresh session.
   4. The `resume-after-clear.flag` is consumed and `[janitor-resume]` is emitted.
-  5. SessionStart fired on `source=clear` and re-armed AFTER the clear.
+  5. SessionStart re-armed AFTER the clear — but ONLY when assumption 1 found the
+     cron missing/destroyed. When the cron simply survived unchanged, SessionStart's
+     conditional re-arm correctly did nothing, so "no fresh re-arm" there is the
+     healthy outcome (#186), not a failure.
 
 This harness spans the boundary with a PERSISTENT log that survives /clear
 (`.janitor/state/handoff-clear-verify.json` — a filesystem file, not session
@@ -97,13 +107,33 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     """
     v: dict[str, dict] = {}
 
-    # 1. /clear destroyed the session cron AND the bootstrap re-armed it → a NEW id.
+    # 1. The heartbeat cron is HEALTHY after /clear — either it SURVIVED unchanged (the
+    #    common case: /clear does not restart the process, so the in-memory cron usually
+    #    just survives, and SessionStart's re-arm is CONDITIONAL — "if missing" — so it
+    #    correctly does nothing) or it was destroyed-and-recreated (a build where /clear
+    #    does drop it). Both are healthy. #186: a prior version of this check FAILED on
+    #    the survived-unchanged case, asserting destruction+recreation as if it were
+    #    unconditional — that assumption, not the primitive, was wrong. Only a cron that
+    #    is GONE after /clear and never came back is a real failure.
     b_id = (before.get("cron_id") or "").strip()
     a_id = (after.get("cron_id") or "").strip()
+    cron_survived_unchanged = bool(b_id) and a_id == b_id
     if not a_id:
-        v["cron_recreated"] = _verdict("SKIP", "no cron id after /clear (re-arm not observed yet)")
-    elif b_id and a_id == b_id:
-        v["cron_recreated"] = _verdict("FAIL", f"cron id unchanged ({a_id}) — /clear did NOT re-arm")
+        if b_id:
+            v["cron_recreated"] = _verdict(
+                "FAIL", f"cron {b_id} existed before /clear but is GONE after, and was not re-armed"
+            )
+        else:
+            v["cron_recreated"] = _verdict(
+                "SKIP", "no cron id observed before or after (re-arm not observed yet)"
+            )
+    elif cron_survived_unchanged:
+        v["cron_recreated"] = _verdict(
+            "PASS",
+            f"cron {a_id} survived /clear unchanged — this build does not drop the session "
+            "cron on /clear, so SessionStart's conditional re-arm ('if missing') correctly "
+            "did nothing (see #186)",
+        )
     else:
         v["cron_recreated"] = _verdict(
             "PASS", f"cron id changed {b_id or '∅'} → {a_id} (destroyed by /clear, recreated by re-arm)"
@@ -154,9 +184,17 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
         v["resume_flag_consumed"] = _verdict("PASS", "resume-after-clear flag consumed (resume fired)")
 
     # 5. a re-arm happened AFTER the before-snapshot ⇒ SessionStart+bootstrap ran on clear.
+    #    A re-arm is only EXPECTED when assumption 1 found the cron missing/destroyed —
+    #    on a build where /clear leaves the cron alone, SessionStart's conditional arm
+    #    ("if missing") correctly does nothing, so "no fresh re-arm timestamp" there is
+    #    the healthy outcome, not a failure (#186's second false unconditional assumption).
     b_ts = before.get("ts")
     a_armed = after.get("armed_at_ts")
-    if not isinstance(b_ts, int) or not isinstance(a_armed, int) or a_armed <= 0:
+    if cron_survived_unchanged:
+        v["session_restarted"] = _verdict(
+            "SKIP", "cron survived /clear unchanged — no re-arm was needed (see cron_recreated)"
+        )
+    elif not isinstance(b_ts, int) or not isinstance(a_armed, int) or a_armed <= 0:
         v["session_restarted"] = _verdict("SKIP", "no post-clear re-arm timestamp observed")
     elif a_armed >= b_ts:
         v["session_restarted"] = _verdict(
@@ -172,11 +210,11 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
 def render_report(before: dict, after: dict, verdicts: dict) -> str:
     """A PASS/FAIL table + the raw before/after snapshots, as markdown. Pure."""
     order = [
-        ("cron_recreated", "cron destroyed by /clear + re-armed"),
+        ("cron_recreated", "heartbeat cron survives or is re-armed after /clear"),
         ("context_collapsed", "context collapsed to base size"),
         ("handoff_links_resolve", "every [[handoff link]] resolves"),
         ("resume_flag_consumed", "resume-after-clear flag consumed"),
-        ("session_restarted", "SessionStart re-armed after /clear"),
+        ("session_restarted", "SessionStart re-armed after /clear, if a re-arm was needed"),
     ]
     icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "⚪"}
     n_pass = sum(1 for k, _ in order if verdicts.get(k, {}).get("status") == "PASS")

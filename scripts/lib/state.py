@@ -45,6 +45,14 @@ RETIRED_SENTINELS = (
     # for the same reason as the others: an inert flag on disk makes a healthy host look
     # configured, and the next reader has to prove it means nothing.
     "issues-watch.flag",
+    # The `/janitor-keep-going off` sentinel (owner directive 2026-07-31, same ruling that
+    # retired the three above). Nothing has read this file since the off-switch it backed was
+    # removed — `_phase_keep_going_nudge` is unconditional now — but it was never added HERE,
+    # so neither this sweep nor arm_prepare's ever swept it. Measured live (janitor#185): a
+    # host carried `keep-going-off` dated 13+ days with every heartbeat firing correctly the
+    # whole time — the exact "inert litter looks like live config" trap the comment above
+    # names for the other three.
+    "keep-going-off",
 )
 
 # Written by the StopFailure hook on any turn-ending API error, cleared by
