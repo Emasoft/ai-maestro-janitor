@@ -325,6 +325,27 @@ rather than reading the parser's output.
 **Generalisable form: wherever a tool both READS through a parser and WRITES new identifiers, the
 parser's blind spots become the writer's collision domain.** Allocate against the raw source.
 
+`WM-ATOM-09` **spec-stage-atoms-cite-their-TRDDs** — an atom MAY describe a SPEC that is not
+implemented yet; a design that exists only in a closed card is a design the next session
+re-derives. But a spec-stage atom `MUST` name the TRDD(s) currently created **and approved** to
+implement it, so a reader can always tell "decided" from "built" and can reach the work in
+flight. An atom stating unimplemented behaviour with no TRDD citation is a lint target: it
+reads as description of the running system and will be trusted as such.
+
+`WM-ATOM-10` **implementation-supersedes-the-spec-atom** — when the work lands, the spec-stage
+atom is SUPERSEDED (never rewritten in place, never deleted) by an atom describing the ACTUAL
+implementation, via the WM-LES-06 `--supersedes` protocol. The completed TRDD ids travel DOWN
+with the superseded body — they belong to the historical claim, not the current one — and the
+new atom links back to the superseding lesson. So a page reads, top to bottom: what the system
+does now, then what was specified and by which cards it was delivered.
+
+Rationale: the two states have opposite failure modes. A spec-stage atom that never gets
+superseded silently becomes a lie about the running system; an implementation atom that
+discards its TRDD history destroys the provenance chain
+(`memory.commits` → `memory.trdd` → `implementation-commits` → `git show`) that the conflict
+pass needs to distinguish a FALSE memory from a SUPERSEDED one. Citing forward while
+unimplemented and demoting the citation on landing preserves both.
+
 ## WM-LES — the lesson form + the supersession protocol
 
 `WM-LES-01` **lesson-is-an-atom-and-a-guardrail** — a `[^N]:` footnote whose bracketed metadata
