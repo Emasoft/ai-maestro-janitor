@@ -673,12 +673,33 @@ def canonicalize_retired_links(text: str, retired_slugs, survivor_slug: str) -> 
     return out
 
 
-def no_dangling_refs(live_pages: dict, retired_slugs) -> tuple[bool, list[str]]:
+def no_dangling_refs(
+    live_pages: dict, retired_slugs, survivor_slug: str | None = None
+) -> tuple[bool, list[str]]:
     """After a merge/split removes some slugs, NO surviving page may still
     `[[link]]` to a retired slug. `live_pages` is {slug_or_path: text}; returns
     (ok, ["holder -> retired", …]). This is the verify half of the LINK-LAW
-    redirect the executor performs; a non-empty result means a redirect was missed."""
-    retired = set(retired_slugs)
+    redirect the executor performs; a non-empty result means a redirect was missed.
+
+    `survivor_slug` is EXEMPT (janitor#183). The executor half,
+    `canonicalize_retired_links`, already skips the survivor — deliberately, since a link to the
+    page that survives is the correct end state of a redirect, not a dangling one. This verifier
+    had no `survivor_slug` parameter at all, so it could not agree with it, and the two halves of
+    the same LINK-LAW check disagreed about the same edge.
+
+    Harmless while the slugs differ; fatal when they COLLIDE — i.e. a same-`name:` DUPLICATE PAIR
+    (one slug, two paths), which is the most obvious thing consolidation exists to merge. There
+    `retired_slugs` contains the survivor's own slug, so every live backlink `[[that-slug]]` —
+    which after the merge correctly resolves to the survivor — was reported dangling, the
+    transaction self-aborted per contract, and that whole class of merge could never complete.
+    Reported by a peer agent against a real LOCAL corpus; the abort was the fail-safe working
+    correctly on a false alarm.
+
+    Optional so every existing caller keeps its meaning; `verify_merge` passes the survivor it
+    already computes for `canonicalize_retired_links`, which makes the two halves agree BY
+    CONSTRUCTION rather than by coincidence.
+    """
+    retired = set(retired_slugs) - ({survivor_slug} if survivor_slug else set())
     dangling: list[str] = []
     for holder, text in live_pages.items():
         for target in _wikilinks(text):
@@ -1048,7 +1069,9 @@ def verify_merge(
 
     live_after = dict(other_live_pages or {})
     live_after["__merged_result__"] = result_text
-    ok, dangling = no_dangling_refs(live_after, retired_slugs)
+    # `survivor` (computed above for canonicalize_retired_links) is passed here too, so the
+    # executor and verifier halves of the LINK LAW agree by construction — see janitor#183.
+    ok, dangling = no_dangling_refs(live_after, retired_slugs, survivor_slug=survivor or None)
     if not ok:
         reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
 

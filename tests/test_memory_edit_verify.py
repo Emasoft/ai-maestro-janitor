@@ -332,6 +332,50 @@ def test_verify_merge_fails_on_paraphrased_body_fact():
     assert not ok and any("paraphrased body fact" in r for r in reasons)
 
 
+def test_no_dangling_refs_exempts_the_survivor_slug():
+    """janitor#183: a link to the SURVIVOR is not dangling, even when the survivor's slug is
+    also in `retired_slugs`.
+
+    That collision is not hypothetical — it is exactly a same-`name:` DUPLICATE PAIR (one slug,
+    two paths), which is the single most obvious thing a consolidate pass exists to merge.
+    """
+    live = {"other": "see [[dup]] for the details"}
+    # Without the exemption the survivor's own slug reads as retired and every backlink to it
+    # is reported dangling.
+    ok, dangling = v.no_dangling_refs(live, {"dup"}, survivor_slug="dup")
+    assert ok, f"a link to the survivor must not be dangling, got {dangling}"
+    # …and the check must still CATCH a genuinely missed redirect.
+    ok, dangling = v.no_dangling_refs(live, {"dup"}, survivor_slug="something-else")
+    assert not ok and dangling == ["other -> [[dup]]"]
+
+
+def test_verify_merge_accepts_a_same_name_duplicate_pair():
+    """janitor#183, end-to-end: merging a same-`name:` duplicate pair must VERIFY CLEAN.
+
+    THE FIXTURE IS THE TEST. Both sources carry the identical `name:`, so the survivor's slug
+    lands inside `retired_slugs` and a live third page's `[[dup]]` backlink — which after the
+    merge correctly resolves to the survivor — used to be flagged dangling. The transaction then
+    self-aborted per contract, so this whole class of consolidation could never complete.
+
+    A distinct-slug fixture passes under both the buggy and the fixed code, which is why the
+    duplicate PAIR is load-bearing here: it is the only shape that distinguishes them.
+    """
+    a = _note(name="dup", body="The scanner skips third-party catalogs by design.")
+    b = _note(name="dup", body="Issue sixty-seven was closed as not auto-clearable.")
+    result = _note(name="dup", body=(
+        "The scanner skips third-party catalogs by design.\n"
+        "Issue sixty-seven was closed as not auto-clearable."
+    ))
+    backlinker = "A third page that legitimately points at [[dup]] and must keep resolving."
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result),
+        {"dup"},                       # the retired slug IS the survivor's slug
+        {"backlinker": backlinker},
+    )
+    assert ok, f"a correct duplicate-pair merge must verify clean, got {reasons}"
+
+
 def test_verify_split_fails_on_paraphrased_body_fact():
     """Issue #48: verify_split catches a sub-page that paraphrased a source fact."""
     src = _note(name="page", body=(
