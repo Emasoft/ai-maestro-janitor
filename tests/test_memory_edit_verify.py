@@ -376,6 +376,68 @@ def test_verify_merge_accepts_a_same_name_duplicate_pair():
     assert ok, f"a correct duplicate-pair merge must verify clean, got {reasons}"
 
 
+def test_redirect_memory_md_links_repoints_only_the_target():
+    """janitor#182: the pointer is redirected; the human-written title and hook survive verbatim."""
+    md = (
+        "# MEMORY\n"
+        "- [#67 closed - won't auto-clear 3rd-party catalogs](issue-67-closed.md) — the hook text\n"
+        "- [something else](unrelated.md) — untouched\n"
+    )
+    out = v.redirect_memory_md_links(md, {"issue-67-closed"}, "issue-70b-scanning")
+    assert "](issue-70b-scanning.md)" in out
+    assert "issue-67-closed.md" not in out
+    # everything except the link target is byte-identical
+    assert "#67 closed - won't auto-clear 3rd-party catalogs" in out and "— the hook text" in out
+    assert "](unrelated.md)" in out, "an unrelated pointer must not be touched"
+    # a link to the SURVIVOR is never rewritten onto itself
+    assert v.redirect_memory_md_links(md, {"issue-67-closed"}, "issue-67-closed") == md
+
+
+def test_no_dangling_memory_md_refs_catches_the_rotted_pointer():
+    """The verify half: a MEMORY.md line still aimed at a deleted page fails."""
+    md = "- [gone](issue-67-closed.md) — hook\n- [survivor](issue-70b-scanning.md) — hook\n"
+    ok, dangling = v.no_dangling_memory_md_refs(md, {"issue-67-closed"}, "issue-70b-scanning")
+    assert not ok and dangling == ["MEMORY.md -> issue-67-closed.md"]
+    # after the redirect it passes
+    fixed = v.redirect_memory_md_links(md, {"issue-67-closed"}, "issue-70b-scanning")
+    ok, _ = v.no_dangling_memory_md_refs(fixed, {"issue-67-closed"}, "issue-70b-scanning")
+    assert ok
+
+
+def test_verify_merge_fails_when_the_memory_md_pointer_was_left_dangling():
+    """janitor#182 end-to-end: the merge is otherwise perfect and must still FAIL, because a
+    session following that index line reads the note as missing rather than merged.
+
+    Also pins the opt-in: the SAME merge with no MEMORY.md supplied passes, so a caller that
+    asserts nothing about the second index does not get a phantom guarantee either way.
+    """
+    a = _note(name="gone", body="Third-party catalogs are skipped by design.")
+    b = _note(name="keeps", body="Issue sixty-seven was closed as not auto-clearable.")
+    result = _note(name="keeps", body=(
+        "Third-party catalogs are skipped by design.\n"
+        "Issue sixty-seven was closed as not auto-clearable."
+    ))
+    metas = [v.parse_frontmatter(a), v.parse_frontmatter(b)]
+    stale_md = "- [the merged-away page](gone.md) — hook\n"
+
+    ok, reasons = v.verify_merge(
+        [a, b], metas, result, v.parse_frontmatter(result), {"gone"}, {},
+        memory_md_text=stale_md,
+    )
+    assert not ok and any("dangling MEMORY.md pointer" in r for r in reasons)
+
+    ok, _ = v.verify_merge(
+        [a, b], metas, result, v.parse_frontmatter(result), {"gone"}, {},
+        memory_md_text=v.redirect_memory_md_links(stale_md, {"gone"}, "keeps"),
+    )
+    assert ok, "after the redirect the same merge must verify clean"
+
+    ok, _ = v.verify_merge(
+        [a, b], metas, result, v.parse_frontmatter(result), {"gone"}, {},
+    )
+    assert ok, "with no MEMORY.md supplied the check must stay silent, not invent a pass or a fail"
+
+
 def test_verify_split_fails_on_paraphrased_body_fact():
     """Issue #48: verify_split catches a sub-page that paraphrased a source fact."""
     src = _note(name="page", body=(

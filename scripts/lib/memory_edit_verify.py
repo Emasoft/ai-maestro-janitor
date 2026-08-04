@@ -673,6 +673,62 @@ def canonicalize_retired_links(text: str, retired_slugs, survivor_slug: str) -> 
     return out
 
 
+_MD_LINK_RE = re.compile(r"\]\(\s*([A-Za-z0-9._/-]+\.md)\s*\)")
+
+
+def redirect_memory_md_links(text: str, retired_slugs, survivor_slug: str) -> str:
+    """Repoint every `](<retired>.md)` markdown link in MEMORY.md at `<survivor>.md` (janitor#182).
+
+    The harness `MEMORY.md` is a SECOND index, separate from the wikimem `[[wikilink]]` graph, and
+    the merge path never touched it: a consolidate pass deleted the merged-away page and redirected
+    its wikilinks, while MEMORY.md kept its own line pointing at a file that no longer exists. A
+    future session then follows that link, finds nothing, and reads the note as MISSING rather than
+    MERGED — the single outcome consolidation exists to make impossible ("never delete knowledge,
+    relocate it"). The knowledge WAS relocated; only the pointer rotted.
+
+    This REDIRECTS, it does not curate. Only the link TARGET inside `](…)` changes; the line's
+    human-written title and hook survive byte-for-byte, and no line is added, removed, or
+    reordered. That is what keeps it compatible with the standing rule that the janitor maintains
+    exactly ONE line in MEMORY.md (the wikimem bridge) and touches nothing else — repairing a
+    pointer the janitor's own deletion broke is not curation of someone else's index.
+    """
+    survivor = (survivor_slug or "").strip()
+    retired = {s.strip() for s in retired_slugs if s and s.strip()} - {survivor}
+    if not survivor or not retired:
+        return text
+
+    def _swap(m: re.Match[str]) -> str:
+        target = m.group(1)
+        stem = target.rsplit("/", 1)[-1][: -len(".md")]
+        if stem not in retired:
+            return m.group(0)
+        prefix = target[: len(target) - len(target.rsplit("/", 1)[-1])]
+        return f"]({prefix}{survivor}.md)"
+
+    return _MD_LINK_RE.sub(_swap, text)
+
+
+def no_dangling_memory_md_refs(
+    memory_md_text: str, retired_slugs, survivor_slug: str | None = None
+) -> tuple[bool, list[str]]:
+    """The verify half of `redirect_memory_md_links` (janitor#182): no MEMORY.md link may still
+    point at a retired page. Returns (ok, ["MEMORY.md -> retired.md", …]).
+
+    Deliberately a SEPARATE oracle from `no_dangling_refs` rather than a widening of it: that one
+    reads `[[wikilinks]]` in wiki pages, this one reads `](path.md)` in the harness index. Folding
+    them together would hide which index is broken in the failure message, and they are repaired by
+    different edits.
+    """
+    survivor = (survivor_slug or "").strip()
+    retired = {s.strip() for s in retired_slugs if s and s.strip()} - {survivor}
+    dangling = [
+        f"MEMORY.md -> {t}"
+        for t in _MD_LINK_RE.findall(memory_md_text or "")
+        if t.rsplit("/", 1)[-1][: -len(".md")] in retired
+    ]
+    return (not dangling, dangling)
+
+
 def no_dangling_refs(
     live_pages: dict, retired_slugs, survivor_slug: str | None = None
 ) -> tuple[bool, list[str]]:
@@ -989,6 +1045,7 @@ def verify_merge(
     retired_slugs,
     other_live_pages: dict,
     fact_source_texts: list[str] | None = None,
+    memory_md_text: str | None = None,
 ) -> tuple[bool, list[str]]:
     """Prove a MERGE lost nothing before its transaction commits.
 
@@ -1074,6 +1131,17 @@ def verify_merge(
     ok, dangling = no_dangling_refs(live_after, retired_slugs, survivor_slug=survivor or None)
     if not ok:
         reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
+
+    # janitor#182 — the SECOND index. Opt-in: a caller that does not hand us MEMORY.md is not
+    # asserting anything about it, so absence stays silent rather than becoming a phantom pass.
+    # When it IS supplied, a pointer left aimed at a page this merge deleted fails the merge, the
+    # same way a missed wikilink redirect does.
+    if memory_md_text is not None:
+        ok, md_dangling = no_dangling_memory_md_refs(
+            memory_md_text, retired_slugs, survivor_slug=survivor or None
+        )
+        if not ok:
+            reasons.append("dangling MEMORY.md pointer(s): " + "; ".join(md_dangling))
 
     ok, fn = no_new_dangling_footnote_refs(source_texts, [result_text])
     if not ok:

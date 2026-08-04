@@ -209,6 +209,24 @@ auto-edited — grep for them and **surface** any hits as
 `[janitor-memory] prose mentions of retired slug <A>/<B> in <scope>: <files> (review)`.
 Do not edit other scopes.
 
+**THE SECOND INDEX — `MEMORY.md` (janitor#182, mandatory).** `memgrep links` sees only the
+wikimem `[[wikilink]]` graph. The harness `MEMORY.md` at the scope root is a SEPARATE index with
+its own `- [Title](page.md) — hook` lines, and a merge that deletes the retired page leaves its
+line pointing at a file that no longer exists. A future session follows it, finds nothing, and
+reads the note as **missing** rather than **merged** — the one outcome consolidation exists to
+prevent. Check it, and stage it whenever it points at a retired slug:
+
+```bash
+grep -n "](${B_SLUG}.md)" "$MEMDIR/MEMORY.md"   # and $A_SLUG if A is the one retiring
+```
+
+If it matches, copy `MEMORY.md` into staging with the other holders and **redirect the target
+only** — `](retired.md)` → `](survivor.md)` — leaving the title and hook text byte-for-byte. This
+is a POINTER REPAIR, not curation: you are fixing a link your own deletion broke. It does not
+license editing, reordering, or pruning any other line in that file, which remains the harness's.
+`memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
+`no_dangling_memory_md_refs()` is the matching check.
+
 ### 6-9. Execute the merge through the transaction core
 
 The full executable sequence (begin/staging commands, holder-copy loop, commit,
@@ -220,7 +238,8 @@ retry/rollback walkthrough) lives in
   step-5 backlink holder into staging too (`mkdir -p` its parent first — a nested
   `wikimem/` holder has no staged parent, L6).
 - Edit ONLY under `$STAGING`: overwrite A's copy with the merged page `C`, `rm`
-  B's copy, repoint `[[B]]` → the survivor's slug in every holder copy.
+  B's copy, repoint `[[B]]` → the survivor's slug in every holder copy, and — when step 5 found a
+  match — repoint the `MEMORY.md` pointer the same way (target only).
 - Build `C` per [merge-page-rules](references/merge-page-rules.md): every `[^N]`
   lesson byte-identical, `ocd = min(A,B)`, `lmd = today`, one-sentence lead, no
   duplicate lines, no link to a retired slug, all edge sections merged + deduped.
