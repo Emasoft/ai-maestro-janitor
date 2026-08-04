@@ -38,8 +38,8 @@ candidate appearing (none exists today). Ships via the blocked release train
 ---
 
 Split out of TRDD-57WJL5L2 per its own design refinement: the
-CORRECTNESS layer shipped there (status-keyed default-exclude + `--include-superseded`
-+ the two lint WARNs, commit cceb229) and is complete without this; the delimiter +
+CORRECTNESS layer shipped there (status-keyed default-exclude + `--include-superseded` +
+the two lint WARNs, commit cceb229) and is complete without this; the delimiter +
 reorder are the READABILITY layer (humans see current facts first). The lint WARNs
 (`superseded-atom-above-delimiter`, `superseded-atom-no-delimiter-heading`) already
 fire — this card ships the thing that CLEARS them.

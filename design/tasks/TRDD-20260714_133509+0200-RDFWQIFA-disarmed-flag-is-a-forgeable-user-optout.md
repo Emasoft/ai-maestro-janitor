@@ -21,8 +21,8 @@ The fix shipped as `scripts/disarm_guard.py::authority()`, which returns a reaso
 human authority — a fresh `user_intent.intent_fresh("disarm")` token (consumed on use, so one
 request disarms exactly once) or the genuine machine-wide kill-switch, read from real global state
 and failing **CLOSED** on an unreadable flag so a broken read can never invent authority. Landed in
-`05e60c4` + `48523ca` (the checklist that told the agent to forge the very flag the guard gates)
-+ `0bdd3d4`, all contained in the released tag `ai-maestro-janitor--v0.45.0`.
+`05e60c4` + `48523ca` (the checklist that told the agent to forge the very flag the guard gates) +
+`0bdd3d4`, all contained in the released tag `ai-maestro-janitor--v0.45.0`.
 
 The card sat in `todo` with an empty `implementation-commits:` for 19 days — i.e. the board said
 CRITICAL-and-unstarted about a defect that was fixed and shipped. That field is now recorded, which

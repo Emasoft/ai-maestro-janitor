@@ -64,8 +64,8 @@ second owner dispatches a janitor ticket, and the scope rule is AUDIENCE.
   `acquire_singleton_dual`. `_same_file` reused for the same-inode case inside `_singleton_paths`.
 - `_MIGRATION_SKIP` += `settings-ensurer.lock`, `ticket-dispatch.lock` (the follow-up folded in).
 - Drive-by, same defect class: `fleet_status.py` hand-resolved the LEGACY-era heartbeat/stamp
-  paths only (daemon reported DEAD on every migrated/fresh host) → now uses `gs.read_heartbeat()`
-  + `gs.read_last_run()`.
+  paths only (daemon reported DEAD on every migrated/fresh host) → now uses `gs.read_heartbeat()` +
+  `gs.read_last_run()`.
 
 Tests: singleton cluster rewritten as BEHAVIOR tests — foreign-PROCESS flock probes (subprocess),
 not argv-shape asserts, per the `61252a9` lesson; dual-write/era-read round-trips; live-preferring

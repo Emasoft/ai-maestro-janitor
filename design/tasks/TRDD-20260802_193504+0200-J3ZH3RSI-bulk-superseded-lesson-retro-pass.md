@@ -30,8 +30,8 @@ chore skill `janitor-memory-retro-lesson`: WHY sourced ONLY from the commit/TRDD
 provenance chain, unsourceable → FLAG (never invented); ⚠ documented gotcha — memgrep's
 `--retire-atom` is idempotent-skipped when `status:` already exists (the retro case), so
 the skill completes the `superseded-by:` pointer via the repair-op txn, which is what
-makes the precheck CONVERGE. 224 tests green. Verification boxes: the fixture-conversion
-+ flag path are exercised structurally (precheck units + e2e dispatch parametrize); the
+makes the precheck CONVERGE. 224 tests green. Verification boxes: the fixture-conversion +
+flag path are exercised structurally (precheck units + e2e dispatch parametrize); the
 first REAL conversion run is observation-gated on a corpus candidate appearing.
 Reaches users via the blocked release train (TRDD-AWXK0RFT).
 

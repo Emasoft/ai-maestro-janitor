@@ -22,8 +22,8 @@ the last comment on the thread is our own measurement, no owner/server reply). C
 
 ### What shipped
 
-`scripts/detectors/peer-freeze-recovery.py` + roster entry (300s) + `_NON_HARNESS_DETECTORS`
-+ 3 plugin.json knobs (`peer_recovery_enabled`/`_interval`/`_interval_s`). Design:
+`scripts/detectors/peer-freeze-recovery.py` + roster entry (300s) + `_NON_HARNESS_DETECTORS` +
+3 plugin.json knobs (`peer_recovery_enabled`/`_interval`/`_interval_s`). Design:
 
 - **Reuses the daemon's beat VERBATIM** — `daemon.task_session_liveness(fleet=peers)` (the
   parameter existed for tests; now it is the handoff surface). Diagnosis ladder, typing gate,
