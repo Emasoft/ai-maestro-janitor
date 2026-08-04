@@ -187,11 +187,9 @@ non-overlapping with other hubs (one file → one functionality).
 
 Then two proofs — a page that merely EXISTS is not yet a memory:
 
-- **`memgrep validate <page> && memgrep lint <page>` BEFORE *and* AFTER** — unquoted `desc:`,
-  unreferenced `[^N]`, oversized atoms, one-sided links. The BEFORE run gives you the baseline
-  that makes "fix YOURS, not the backlog" decidable; without it you cannot tell which findings
-  you just introduced. Links run LOCAL → PROJECT → USER and laterally — a USER page linking
-  DOWN is `link-downward-cross-scope` and is a defect.
+- **`validate` + `lint` BEFORE *and* AFTER** — the BEFORE run is the baseline that makes "fix
+  YOURS, not the backlog" decidable. Links go LOCAL → PROJECT → USER and laterally; a USER
+  page linking DOWN is a defect (`WM-AUTH-02`/`02a`).
 - **RE-RECALL it** with a future session's symptom words. No hit ⇒ indexed by the
   answer, not the question; not real yet.
 

@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-repair
-description: REPAIR — the autonomous page-shape / metadata fixer for the memory wiki. Fires on the bare [janitor-memory-repair] heartbeat marker (or /janitor-memory-repair). Finds malformed wikimem pages — missing ocd/lmd/node_type/tier or the Notes section, no frontmatter, an INVERTED tier shape (an aspect built like a component), an answer-shaped description, a superseded atom above or without the `## Superseded` delimiter — and fixes each IN PLACE via the memory_txn_cli --op repair transaction, which proves every lesson and the birth date survive. Bounded, crash-safe, disable-able. One of the seven wikimem-editor passes (split/consolidate/conflict/repair/atomize/harvest/retro-lesson).
+description: "REPAIR — the autonomous page-shape / metadata fixer for the memory wiki. Fires on the bare [janitor-memory-repair] heartbeat marker (or /janitor-memory-repair). Finds structurally malformed wikimem pages (bad or missing frontmatter, wrong tier shape, a superseded atom out of place) and fixes each IN PLACE through the repair transaction, which proves no lesson and no birth date is lost. One of the seven wikimem-editor passes."
 ---
 
 # Janitor memory — REPAIR (page-shape / metadata backfill)
