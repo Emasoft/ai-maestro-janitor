@@ -792,105 +792,6 @@ def _pending_external_agent_count() -> int:
         return 0
 
 
-def _maybe_cold_compact_on_rate_limit(sd: Path, age: int, now: int) -> bool:
-    """Cold-cache branch of the rate-limit resume (TRDD-EUWIHP0G).
-
-    When the in-session rate-limit gap outlived the 1h prompt-cache TTL
-    (`age >= min_idle`) AND the resumed context is large, self-fire a SOFT /compact
-    BEFORE resuming, so the inevitable cold cache-creation write shrinks ~600k → ~50k
-    and the rest of the 5h window (plus every future cold resume) runs cheap. The
-    resume is NOT lost: compact_trigger records a resume directive and the existing
-    post-compact-resume flow (+ the HI0BGQGJ push) emits `[janitor-resume]` AFTER the
-    compaction.
-
-    Returns True iff it actually fired the compact — the caller then returns early,
-    skipping the normal `[janitor-resume]` cue (that cue arrives post-compaction
-    instead). Returns False on any gate miss (disabled / cooldown / warm cache / small
-    context) OR when the session can't self-compact (headless / NO_ITERM) — the caller
-    then falls through to the normal resume, so a resume is NEVER stalled behind a
-    compact that can't run. Fully wrapped: a fault degrades to the normal resume path.
-
-    The self-compact runs SOFT because a heartbeat fire is itself a turn — an ESC
-    would be wrong; SOFT enqueues /compact so it runs when this fire's turn ends. We
-    invoke compact_trigger SYNCHRONOUSLY only to read COMPACT_FIRED vs NO_ITERM (the
-    actual keystroke is detached inside it, so this returns in well under a second).
-    """
-    try:
-        import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
-
-        # The REPEAT guard (USER directive 2026-08-04) replaces the old 10-min cooldown here: it
-        # blocks when a compaction LANDED by ANY route inside the 65-min window — ours, one the
-        # user ran by hand, or the harness's own auto-compact (all three write last-compact.ts via
-        # the PostCompact hook) — plus our own fire that may still be landing.
-        if not cold_cache_compact.enabled() or cold_cache_compact.recently_compacted(sd, now=now):
-            return False
-        min_idle = cold_cache_compact.min_idle_seconds()
-        # The ONE condition (USER directive 2026-08-04): the last turn is older than the TTL, so
-        # the prompt cache is cold. No transcript I/O is needed at all any more — the size clause
-        # it used to feed is gone (see `should_compact_on_resume` for why it was wrong).
-        if not cold_cache_compact.should_compact_after_idle(age, min_idle_s=min_idle):
-            return False
-
-        compact_py = _HERE / "compact_trigger.py"
-        if not compact_py.is_file():
-            return False
-        directive = (
-            f"cold-cache resume: rate limit cleared after {age}s and the context was large — "
-            "after this compaction, continue your prior pending task (read the newest in-flight "
-            "TRDD's STATE block first)."
-        )
-        proc = state.run_subprocess(
-            [sys.executable, str(compact_py), "--directive", directive],
-            timeout=20,
-            capture=True,
-            detector_name="dispatch",
-        )
-        fired = bool(proc and proc.returncode == 0 and "COMPACT_FIRED" in (proc.stdout or ""))
-        if not fired:
-            # Headless / NO_ITERM / trigger failed — do NOT stall the resume; the
-            # caller falls through to the normal [janitor-resume] cue.
-            return False
-
-        # Committed: stamp the cooldown (blocks a re-fire on the next beat, shared with
-        # the SessionStart path) + the resume stamp (keep the cadence FAST — we ARE
-        # resuming, just via a compact detour), clear the rate-limit + any stale
-        # compact-resume flags, then emit an informational NON-marker notice (NOT
-        # `[janitor-resume]`, so this turn does NOT begin resuming into a context that
-        # is about to be compacted). The real resume arrives after the compaction.
-        cold_cache_compact.mark_fired(sd, now=now)
-        _stamp_resume(sd, now)
-        # This branch returns True before the normal _phase_rate_limit_recovery cleanup
-        # runs, so it must clear the POST-event resume flags itself, else a redundant
-        # [janitor-resume] fires after the compact. It must NOT touch
-        # `resume-after-clear.*`: that is a PRE-marker for a /clear that has not run yet
-        # (see `_phase_clear_resume`) — consuming it here silently strands the fresh
-        # session with no cue at all.
-        for p in (
-            sd / "rate-limited.flag",
-            sd / "rate-limited-since.ts",
-            sd / "resume-after-compact.flag",
-            sd / "resume-after-compact.ts",
-        ):
-            try:
-                p.unlink()
-            except FileNotFoundError:
-                pass
-        print(
-            f"[janitor] rate limit cleared after {age}s and the prompt cache has gone cold (last "
-            "turn older than the TTL). A /compact was queued and runs when this turn ends — do NOT "
-            "start work now; the session auto-resumes your task after the compaction shrinks the "
-            "context (saving the 5h window)."
-        )
-        state.log_line(
-            "dispatch",
-            f"cold-cache compact fired on rate-limit resume (last turn {age}s ago >= {min_idle}s)",
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001 -- degrade to the normal resume path; never stall
-        state.log_line("dispatch", f"cold-cache rate-limit branch skipped: {exc}")
-        return False
-
-
 def _phase_rate_limit_recovery() -> bool:
     """Return True if a [janitor-resume] line was emitted (caller should exit)."""
     flag = state.state_dir() / "rate-limited.flag"
@@ -901,14 +802,6 @@ def _phase_rate_limit_recovery() -> bool:
     now = int(time.time())
     since = state.read_int_state(since_file, now)
     age = now - since
-
-    # Cold-cache branch (TRDD-EUWIHP0G): if the rate-limit gap outlived the prompt-cache
-    # TTL AND the resumed context is large, self-fire /compact FIRST so the inevitable
-    # cold cache-creation write shrinks ~600k → ~50k; the resume is preserved and arrives
-    # AFTER the compaction (post-compact-resume + the HI0BGQGJ push). Falls through to the
-    # normal cue below when it can't/shouldn't fire, so a resume is never stalled.
-    if _maybe_cold_compact_on_rate_limit(state.state_dir(), age, now):
-        return True
 
     # F7 (wikimem audit): the marker is emitted BARE on its own line — same
     # whole-line-only contract as renew/reload/memory markers — with the prose

@@ -1,40 +1,33 @@
-"""The cold-compact THRESHOLD contract — harness-relative, and read off a real transcript.
+"""The compact THRESHOLD contract — harness-relative, exercised against real files.
 
-WHY THIS FILE EXISTS. `test_on_session_start_cold_cache.py` pins the *wiring* (which source
-values fire, the cooldown, the disabled switch) and to do that it stubs the two things this
-file refuses to stub: it monkeypatches `context_tokens_for` so the size is deterministic, and
-it sets `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS=350000` while DELETING
+WHY THIS FILE EXISTS. The wiring tests stub the two things this file refuses to stub: they
+monkeypatch `context_tokens_for` so the size is deterministic, and they pin
+`CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS` while DELETING
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. Both are correct choices for a wiring test — and together
-they mean nothing in the suite ever exercised the harness-relative threshold resolution
-(owner directive 2026-07-18) or a real transcript flowing into the gate.
+they mean nothing else in the suite exercises the harness-relative threshold resolution
+(owner directive 2026-07-18) or a real transcript flowing into the reader.
 
-WHAT THE HARNESS-RELATIVE NUMBER STILL GOVERNS (2026-08-04). `min_context_tokens()` is
-unchanged and still resolves relative to `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — it gates the
-PROACTIVE warm-idle path, whose job really is "has the harness's own auto-compaction failed?".
-The resolution tests below are therefore still live and still correct.
+WHAT THIS THRESHOLD GOVERNS, as of 2026-08-04. `min_context_tokens()` gates the PROACTIVE
+warm-idle path ONLY, whose question genuinely is "has the harness's own auto-compaction
+failed?" — so expressing it relative to the harness's compact point is right there.
 
-WHAT IT NO LONGER GOVERNS, and the incident that proves why. The two CACHE-EXPIRED gates
-(`should_compact_on_resume`, `should_compact_after_idle`) used to consult it too. That made
-them DEAD CODE: with the window at 700000 the bar resolved to 716_000 while the harness itself
-compacts at 666_000, so no context could reach it. The USER hit this on 2026-08-04 — several
-instances idle since the previous day, each carrying 500-600k, none compacted, every one paying
-a full cold cache-write on its first turn. Their ruling: *"simply check the last turn datetime.
-if it is older than 55 minutes, it should inject the compact command. no matter the value of the
-context."* The prompt cache expires on TIME, not on size, and the window is a per-project knob
-they change often — so coupling an unrelated bar to it made the trigger swing for no reason.
+It used to gate the two CACHE-EXPIRED paths as well, and that was wrong twice over. It made
+them unreachable (with the window at 700000 the bar resolved to 716_000 while the harness
+compacts at 666_000), which is how the USER's 500-600k idle sessions went uncompacted on
+2026-08-04. And the deeper answer was that those paths should not exist at all: compaction is
+NOT performed by a cheaper model — Anthropic's docs bill it as "an additional sampling step"
+over the full pre-compaction context — so compacting because the cache went cold pays the very
+cost it was meant to avoid. Both gates were REMOVED, with their knobs and tests.
 
-The old tripwire here asserted the opposite ("a 270k context must NOT fire") and has been
-INVERTED rather than deleted, because the direction of the guard is the whole value:
-`test_the_tripwire_a_small_cold_context_MUST_fire` now catches anyone re-coupling the cold path
-to a size bar. Fix the criterion, never the code — in whichever direction the owner has ruled.
+The tripwire that used to live here ("a 270k context must NOT fire") went with them: with no
+cache-expired gate left, there is nothing for it to guard.
 
-Everything here is real: real transcript files, real mtimes, real env resolution, no stubs.
+Everything here is real: real transcript files, real env resolution, no stubs.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -154,69 +147,3 @@ def test_a_real_transcript_resolves_its_context_size(tmp_path: Path):
     t = _transcript(tmp_path / "s.jsonl", 750_000)
 
     assert ccc.context_tokens_for(t) == 750_000
-
-
-def test_the_gate_fires_on_an_old_transcript_and_stays_quiet_on_a_fresh_one(tmp_path: Path):
-    """End to end on real files: the gate reads the last-turn time off an actual transcript's
-    mtime, fires when it is past the TTL and stays quiet when it is not.
-
-    Both halves matter — an "it fires" test alone passes just as well on a gate that always
-    fires, which is how a regression reaches production looking green.
-    """
-    now = 1_800_000_000
-    old = _transcript(tmp_path / "old.jsonl", 40_000)     # SMALL and stale
-    fresh = _transcript(tmp_path / "fresh.jsonl", 900_000)  # HUGE and warm
-    os.utime(old, (now - 86_400, now - 86_400))           # last turn: yesterday
-    os.utime(fresh, (now - 60, now - 60))                 # last turn: a minute ago
-
-    old_age = ccc.last_turn_age_for(old, now=now)
-    fresh_age = ccc.last_turn_age_for(fresh, now=now)
-    assert old_age == 86_400
-    assert fresh_age == 60
-
-    min_idle = ccc.min_idle_seconds()
-    assert ccc.should_compact_on_resume(old_age, min_idle_s=min_idle) is True
-    assert ccc.should_compact_on_resume(fresh_age, min_idle_s=min_idle) is False
-
-
-def test_the_tripwire_a_small_cold_context_MUST_fire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """THE TRIPWIRE, INVERTED by USER directive 2026-08-04.
-
-    It used to assert that a 270k context must NOT fire, guarding the harness-relative
-    threshold. That guard is what made the feature dead code: with
-    `CLAUDE_CODE_AUTO_COMPACT_WINDOW=700000` the bar resolved to 716_000 while the harness
-    itself compacts at 666_000, so NO context could ever reach it and a resumed 500-600k
-    session was never compacted — it paid a full cold cache-write on its first turn instead.
-
-    The USER's rule is now: *"simply check the last turn datetime. if it is older than 55
-    minutes, it should inject the compact command. no matter the value of the context."* So a
-    SMALL, COLD context must fire, and the auto-compact window — a per-project setting they
-    change often — must not influence it at all. If this test ever goes green-by-NOT-firing,
-    someone has re-coupled the cold path to a size bar and reintroduced the burn.
-    """
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-    now = 1_800_000_000
-    t = _transcript(tmp_path / "small_but_cold.jsonl", 40_000)
-    os.utime(t, (now - 4_000, now - 4_000))
-
-    assert ccc.context_tokens_for(t) == 40_000            # genuinely small…
-    age = ccc.last_turn_age_for(t, now=now)
-    assert ccc.should_compact_on_resume(age, min_idle_s=ccc.min_idle_seconds()) is True
-
-    # …and the window knob must not move that verdict, at any value.
-    for window in ("100000", "700000", "2000000"):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", window)
-        assert ccc.should_compact_on_resume(age, min_idle_s=ccc.min_idle_seconds()) is True
-
-
-def test_last_turn_age_refuses_to_invent_evidence(tmp_path: Path):
-    """Absence of evidence is not evidence of expiry: an unreadable transcript and a
-    future mtime (clock skew / a touched file) both yield None, and None never fires."""
-    now = 1_800_000_000
-    assert ccc.last_turn_age_for(None, now=now) is None
-    assert ccc.last_turn_age_for(tmp_path / "does-not-exist.jsonl", now=now) is None
-
-    future = _transcript(tmp_path / "future.jsonl", 50_000)
-    os.utime(future, (now + 5_000, now + 5_000))
-    assert ccc.last_turn_age_for(future, now=now) is None
-    assert ccc.should_compact_on_resume(None, min_idle_s=ccc.min_idle_seconds()) is False

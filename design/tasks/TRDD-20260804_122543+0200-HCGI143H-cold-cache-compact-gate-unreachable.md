@@ -1,9 +1,9 @@
 ---
 trdd-id: HCGI143H
 title: The cold-cache compact gate is unreachable so a resumed 600k session is never compacted
-column: testing
+column: superseded
 created: 2026-08-04T12:25:43+0200
-updated: 2026-08-04T13:05:00+0200
+updated: 2026-08-04T14:20:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
@@ -16,7 +16,43 @@ implementation-commits: []
 
 # Cold-cache compact never fires — the threshold sits above where the harness already compacts
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-04
+## ⏵ STATE — READ THIS FIRST — SUPERSEDED, THE FEATURE WAS REMOVED — 2026-08-04
+
+**OUTCOME: the bug below was real and was fixed (169bd32e) — and then the ENTIRE FEATURE was
+removed hours later (USER directive), because verification killed its founding premise.**
+
+The USER asked the question nobody had asked: *"if the compact command was a turn itself, then
+this whole hook would be useless. I only decided to do this because I believed that claude code
+would use a lesser model to compact the context. verify."*
+
+**VERIFIED FALSE.** Anthropic's compaction documentation states: *"Compaction requires an
+additional sampling step, which contributes to rate limits and billing."* Its usage example bills
+the compaction iteration at the FULL pre-compaction context size
+(`"type": "compaction", "input_tokens": 180000`), with the explicit warning that top-level
+`input_tokens` do NOT include it and must be summed across `usage.iterations`. No smaller model is
+named anywhere — the same model does both. Independently corroborated: a `/compact` on an expired
+cache "re-processes the entire context at full price".
+
+So a cache-EXPIRED `/compact` pays exactly the cost it existed to avoid, and on a session nobody
+resumes it converts **zero cost into one full-price sampling step over the whole context**. No
+threshold and no cadence rescues that, so the gates were removed rather than retuned.
+
+**Scope of the removal (USER-chosen, of three options offered):** the two cache-expired paths ONLY
+— `_maybe_cold_compact_on_session_start`, `_maybe_cold_compact_on_rate_limit`, their gates
+(`should_compact_on_resume`, `should_compact_after_idle`, `last_turn_age_for`,
+`recently_compacted`), their knobs, and their tests. **KEPT:** the PROACTIVE warm-idle compact,
+whose arithmetic survives the same scrutiny — it pays a ~0.1× cache READ while warm so the next
+cold event reads ~30k instead of ~600k, a real saving rather than a rearrangement of an
+unavoidable cost — and the 6h idle `/clear` lever.
+
+**The durable lesson is the verification, not the fix.** A feature can be built, measured,
+debugged, fixed, tested to 14k green, and still be worthless, because none of that ever questions
+the premise. The one question that mattered took ten minutes to answer and deleted the feature.
+
+*(Everything below is the original, now-historical bug analysis. It remains accurate about WHY the
+gate never fired; it is simply no longer about live code.)*
+
+## ⏵ ORIGINAL STATE (historical) — 2026-08-04
 
 **Reported by the USER 2026-08-04:** they restarted several Claude Code instances that had
 been idle since the previous day, each carrying 500–600k of context. The janitor should have

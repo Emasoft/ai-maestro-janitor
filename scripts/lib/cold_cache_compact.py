@@ -1,20 +1,37 @@
-"""Cold-cache auto-compact policy + readers (TRDD-EUWIHP0G).
+"""Auto-compact policy + readers — the PREVENTIVE (warm) lever only.
 
-After a >1h stop (rate limit; the user exits + relaunches; a logout/login) the 1h prompt-cache
-TTL has expired, so the first resumed turn re-writes the WHOLE context as a cache-creation
-(~600k avg) — and a write at the 1-hour TTL is billed at **2×**, the priciest token class there
-is, so a cold resume costs ~1.2M weighted and can swallow a large slice of the 5h window in a
-single turn. This module decides WHEN to auto-inject `/compact` so the large context is shrunk
-— after which the rest of the window runs cheap (~50k) and every future cold resume costs ~50k
-instead of ~600k. (It cannot avoid the IMMEDIATE cold write — any first turn pays that — see the
-TRDD; the win is ongoing + future.)
+## The cache-EXPIRED levers were REMOVED, 2026-08-04 (USER directive) — do not re-add them
+
+Two gates used to live here — `should_compact_on_resume` (SessionStart) and
+`should_compact_after_idle` (the heartbeat's rate-limit path). Both fired when the prompt cache
+had gone COLD, on the theory that compacting first would avoid the expensive cache-creation
+re-write of a large context. **That theory was wrong, and the feature was removed rather than
+fixed.**
+
+The premise was that Claude Code summarises with a cheaper model, making the compaction itself
+nearly free. VERIFIED FALSE against Anthropic's own compaction documentation: *"Compaction
+requires an additional sampling step, which contributes to rate limits and billing"*, its usage
+example bills the compaction iteration at the FULL pre-compaction context size, and no smaller
+model is used — the same model does both. So a cold-cache `/compact` pays the very cost it was
+meant to avoid, and on a session nobody resumes it converts **zero cost into one full-price
+sampling step over the whole context**.
+
+The `/compact` cannot be free at any threshold or cadence, so no tuning rescues those gates;
+they are gone, along with their knobs (`…_MIN_IDLE_SECONDS`, the repeat guard) and their tests.
+
+## What REMAINS, and why it survives the same scrutiny
+
+`should_compact_proactively_idle` fires while the cache is still WARM and the user is absent.
+Its arithmetic is genuinely different: it pays a cache READ (~0.1×) now to make the NEXT cold
+event read ~30k instead of ~600k — a real saving, where the cold gates only moved an unavoidable
+cost around. The long-idle `/clear` lever is likewise unaffected (its own knob, its own
+rationale in the CLEAR section below).
 
 Split like the rest of the codebase (pure policy vs I/O):
-  * `should_compact_on_resume` / `should_compact_after_idle` are PURE + unit-testable.
+  * `should_compact_proactively_idle` / `should_clear_when_long_idle` are PURE + unit-testable.
   * the reader helpers do best-effort filesystem I/O and never raise.
 
-The CALLERS (the SessionStart hook + dispatch's rate-limit path) fire `/compact` via the existing
-`scripts/compact_trigger.py` (SOFT — the resumed REPL is idle). This module only decides + reads.
+The CALLERS fire `/compact` via `scripts/compact_trigger.py`. This module only decides + reads.
 """
 
 from __future__ import annotations
@@ -35,7 +52,6 @@ import token_meter  # noqa: E402  -- sibling lib
 # --- config knobs (userConfig → env; read via the shared coercers) ----------
 ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED"
 MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS"
-MIN_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_IDLE_SECONDS"
 COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_COOLDOWN_SECONDS"
 # TRDD-D3PROACT: the PREVENTIVE knob. The two gates above are REACTIVE — they shrink a large
 # context only AFTER a cold event already paid the 2× write (rate-limit resume, SessionStart).
@@ -70,19 +86,7 @@ DEFAULT_HARNESS_BACKSTOP_MARGIN = 50_000
 # Shares the knob the context-watchdog hook reads, so both agree on the window.
 CONTEXT_WINDOW_ENV = "CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"
 DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
-# 55 min, NOT the full 3600s TTL (USER directive 2026-08-04). The idle we measure is the age at
-# CHECK time, but the compact turn runs a little later, and the TTL boundary is not observable from
-# here — waiting for a full hour means the common near-boundary case goes cold before we act. Firing
-# 5 min early costs nothing (the session is idle by construction) and catches it.
-DEFAULT_MIN_IDLE_SECONDS = 3_300
 DEFAULT_COOLDOWN_SECONDS = 600        # don't re-fire within 10 min (before the compact lands)
-# The REPEAT guard (USER directive 2026-08-04): "ensure that a compact did not happen already in
-# the latest 1h (or better in the last 65 minutes, to be safe), to avoid repeating the compact
-# multiple times." 65 min, deliberately LONGER than the 55-min expiry trigger — otherwise a session
-# that is permanently idle would re-arm its own trigger the moment the guard lapsed and compact on
-# a loop. Guard > trigger is what makes at most one compaction per idle stretch.
-RECOMPACT_GUARD_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_RECOMPACT_GUARD_SECONDS"
-DEFAULT_RECOMPACT_GUARD_SECONDS = 3_900
 DEFAULT_MIN_GAIN_TOKENS = 150_000     # reclaimable tokens below which a lossy compact isn't worth it
 
 _FIRED_STAMP = "cold-compact-fired.ts"
@@ -160,10 +164,6 @@ def min_context_tokens() -> int:
         token_meter._DEFAULT_COMPACT_SUMMARY_OVERHEAD,
     )
     return max(window - overhead + margin, DEFAULT_MIN_CONTEXT_TOKENS)
-
-
-def min_idle_seconds() -> int:
-    return state.coerce_int(os.environ.get(MIN_IDLE_ENV), DEFAULT_MIN_IDLE_SECONDS)
 
 
 def cooldown_seconds() -> int:
@@ -246,36 +246,6 @@ def should_clear_when_long_idle(
         return False
     return context_tokens >= min_context_tokens
 
-def should_compact_on_resume(idle_seconds: int | None, *, min_idle_s: int) -> bool:
-    """SessionStart (startup/resume) gate: THE LAST TURN IS OLDER THAN THE TTL. PURE.
-
-    ONE condition, by USER directive 2026-08-04: *"you must simply check the last turn datetime. if
-    it is older than 55 minutes, it should inject the compact command. no matter the value of the
-    context."* The trigger is cache expiry, nothing else.
-
-    SUPERSEDES the previous size gate (`context_tokens >= min_context_tokens`), which was derived
-    from `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and therefore sat ABOVE the point where the harness
-    itself auto-compacts (measured live 2026-08-04: bar 716,000 vs harness 666,000) — unreachable,
-    so a resumed 500-600k session was never compacted and its first turn paid the full cold write.
-    The window is also a per-project setting the USER changes often, which silently swung this
-    unrelated bar with it. Age is the honest signal: the prompt cache expires on TIME, not on size.
-
-    `idle_seconds is None` (no readable transcript ⇒ no last-turn time) does NOT fire: we compact on
-    a POSITIVE observation of expiry, never on the absence of evidence.
-    """
-    return idle_seconds is not None and idle_seconds >= min_idle_s
-
-
-def should_compact_after_idle(idle_seconds: int, *, min_idle_s: int) -> bool:
-    """Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold — the last turn is older
-    than the TTL. PURE. Same ONE condition as `should_compact_on_resume`, and for the same reason
-    (USER directive 2026-08-04): the two paths differ only in WHERE the last-turn age comes from
-    (a fresh process reads it off the transcript; here the heartbeat already knows it), never in
-    what makes a compaction due. The size clause was dropped with the same rationale — see
-    `should_compact_on_resume`."""
-    return idle_seconds >= min_idle_s
-
-
 def should_compact_proactively_idle(
     context_tokens: int | None,
     *,
@@ -317,29 +287,6 @@ def should_compact_proactively_idle(
 
 
 # --- best-effort readers (never raise) --------------------------------------
-
-def last_turn_age_for(
-    transcript_path: str | os.PathLike[str] | None, *, now: int
-) -> int | None:
-    """Seconds since the LAST TURN of a transcript, or None when it cannot be observed.
-
-    The transcript is append-only and is written as each turn completes, so its mtime IS the last
-    turn's wall-clock time — no parsing, no reading the file, and correct across a process restart
-    (which is exactly when the resume path needs it). This is the signal the USER named on
-    2026-08-04: "simply check the last turn datetime".
-
-    None on an absent/unreadable transcript, and on a mtime in the FUTURE (a clock skew or a
-    touched file): a negative age is not evidence of expiry, and the gates must fire only on a
-    positive observation.
-    """
-    if transcript_path is None:
-        return None
-    mtime = state.file_mtime(Path(transcript_path))
-    if mtime <= 0:
-        return None
-    age = now - int(mtime)
-    return age if age >= 0 else None
-
 
 def context_tokens_for(transcript_path: str | os.PathLike[str] | None) -> int | None:
     """Live context occupancy for a transcript, or None when unknown. Thin, never-raising wrapper
@@ -390,37 +337,6 @@ def mark_fired(state_dir: Path, *, now: int) -> None:
         state.atomic_write(state_dir / _FIRED_STAMP, str(now))
     except OSError:
         pass
-
-
-def recompact_guard_seconds() -> int:
-    return state.coerce_int(
-        os.environ.get(RECOMPACT_GUARD_ENV), DEFAULT_RECOMPACT_GUARD_SECONDS
-    )
-
-
-def recently_compacted(state_dir: Path, *, now: int) -> bool:
-    """True iff a compaction HAPPENED — or was fired and may still be landing — inside the guard
-    window. The cache-expired paths check this so one idle stretch produces at most one compaction
-    (USER directive 2026-08-04: "ensure that a compact did not happen already in the latest ...
-    65 minutes, to avoid repeating the compact multiple times").
-
-    TWO stamps, because "a compact happened" is broader than "we fired one":
-      * `last-compact.ts` — written by the PostCompact hook when a compaction actually LANDS. This
-        is the load-bearing one: it also covers a compaction the USER ran by hand and one the
-        harness auto-fired, neither of which the janitor would otherwise know about.
-      * `cold-compact-fired.ts` — our own fire, which may not have landed yet. Without it the
-        window between firing and landing would let a second fire through.
-
-    A read error reads as "not recently compacted" (fail toward acting) — the same direction
-    `in_cooldown` documents, because a corrupt stamp must not disable the feature outright. The
-    cost of that choice is bounded to one extra compaction, and the stamps are written atomically.
-    """
-    window = recompact_guard_seconds()
-    for name in (_LAST_COMPACT_STAMP, _FIRED_STAMP):
-        last = state.read_int_state(state_dir / name, 0)
-        if last > 0 and 0 <= now - last < window:
-            return True
-    return False
 
 
 # --- the post-compaction floor (what makes the preventive trigger terminate) -------

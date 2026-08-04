@@ -1899,8 +1899,6 @@ def test_rate_limit_phase_flushes_bare_resume_and_returns(env_isolation: dict, m
     via _emit_decision AT the decision and returns True — the marker is already on
     stdout at the moment it returns (auto-flush, not deferred to end-of-main)."""
     dispatch = _import_dispatch()
-    # keep the normal (non-cold) resume path deterministic + hermetic.
-    monkeypatch.setattr(dispatch, "_maybe_cold_compact_on_rate_limit", lambda *a, **k: False)
     sd = _seed_state_dir(dispatch)
     (sd / "rate-limited.flag").write_text("")
 
@@ -1978,7 +1976,6 @@ def test_main_rate_limited_and_idle_still_resumes_never_quiet(env_isolation: dic
     dispatch = _import_dispatch()
     # HOME isolation: main()'s user-presence breadcrumb writes ~/.aimaestro — keep it off real HOME.
     _isolate_home(env_isolation, monkeypatch)
-    monkeypatch.setattr(dispatch, "_maybe_cold_compact_on_rate_limit", lambda *a, **k: False)
     sd = _seed_state_dir(dispatch)
     (sd / "rate-limited.flag").write_text("")
 
