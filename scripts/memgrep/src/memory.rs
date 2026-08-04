@@ -4493,9 +4493,15 @@ type RecallRanked = (
 /// `DETECTOR_OUTPUT_SUFFIX`): the memory detectors drop plain-markdown reports named
 /// `<detector>-proposed.md` into the scanned dir; ranking/indexing them let the librarian's own
 /// report outrank a real note for reorganization-symptom queries.
+/// The harness memory-index filename. ONE definition — it was duplicated across five sites
+/// (the index-file test here plus four in the lint fixtures), which is the hardcoded-literal
+/// smell the project rules forbid: a rename would have had five edit sites and any missed one
+/// fails silently. Mirrors the Python SSOT `memory_bridge.MEMORY_MD`.
+pub(crate) const MEMORY_MD: &str = "MEMORY.md";
+
 fn is_index_file(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-        n.eq_ignore_ascii_case("MEMORY.md")
+        n.eq_ignore_ascii_case(MEMORY_MD)
             || n.eq_ignore_ascii_case("memory-index.md")
             || n.to_ascii_lowercase().ends_with("-proposed.md")
     })
@@ -6801,7 +6807,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // links to `page` — the LINK LAW half: a real page never links BACK to a report, so a
         // `link-one-sided` WARN there is as unfixable as the ERRORs, and it lives in a SEPARATE
         // corpus-wide pass that re-collects the paths on its own.
-        for name in ["MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"] {
+        for name in [MEMORY_MD, "memory-index.md", "memory-reorg-proposed.md"] {
             std::fs::write(
                 dir.join(name),
                 "a report body citing [^7], listing [[page]].\n",
@@ -6815,7 +6821,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         )
         .unwrap();
         let by_dir = lint_paths(std::slice::from_ref(&dir), false);
-        let named: Vec<PathBuf> = ["MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"]
+        let named: Vec<PathBuf> = [MEMORY_MD, "memory-index.md", "memory-reorg-proposed.md"]
             .iter()
             .map(|n| dir.join(n))
             .collect();
@@ -6846,11 +6852,11 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // ONE report would silently lint the whole current directory — findings from files the
         // caller never named, attributed to a command they never ran.
         let dir = lint_tmpdir("only_non_pages");
-        std::fs::write(dir.join("MEMORY.md"), "an index, not a page.\n").unwrap();
+        std::fs::write(dir.join(MEMORY_MD), "an index, not a page.\n").unwrap();
         // A page-invalid `.md` in the CWD: it must NOT appear, because it was never asked for.
         let cwd_decoy = std::env::current_dir().unwrap().join("zz_lint_cwd_decoy.md");
         std::fs::write(&cwd_decoy, "no frontmatter — would violate if linted.\n").unwrap();
-        let v = lint_paths(&[dir.join("MEMORY.md")], false);
+        let v = lint_paths(&[dir.join(MEMORY_MD)], false);
         let _ = std::fs::remove_file(&cwd_decoy);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(

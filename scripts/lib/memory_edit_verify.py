@@ -21,6 +21,18 @@ import re
 
 _LESSONS_HEADING = "## Notes and lessons learned"
 
+# The harness index filename, from the module that OWNS it (`memory_bridge.MEMORY_MD`) rather
+# than a second literal — one source of truth, so a rename has a single edit site. Imported
+# lazily inside the one function that needs it: this module is imported by hooks on a hot path
+# and must not pull in the bridge's dependency chain (memory_txn, state) at import time.
+def _memory_md_name() -> str:
+    try:
+        import memory_bridge  # noqa: PLC0415 - lazy: keeps the hot import path light
+
+        return memory_bridge.MEMORY_MD
+    except Exception:  # noqa: BLE001 - a verifier must never fail on a message string
+        return "the harness memory index"
+
 # Core shape of an ATOMIZE block-property marker — `^<id> [<props>]` (kebab id, a
 # bracketed props blob). Shared so BOTH the atomize verifier (`_ATOM_MARKER_RE`,
 # full-line, defined below) AND `extract_lessons`' footnote-capture stop-set key on
@@ -1141,7 +1153,9 @@ def verify_merge(
             memory_md_text, retired_slugs, survivor_slug=survivor or None
         )
         if not ok:
-            reasons.append("dangling MEMORY.md pointer(s): " + "; ".join(md_dangling))
+            # Name the harness index via the constant that OWNS it (memory_bridge.MEMORY_MD)
+            # rather than a second literal — one source of truth (janitor#182 follow-up).
+            reasons.append(f"dangling {_memory_md_name()} pointer(s): " + "; ".join(md_dangling))
 
     ok, fn = no_new_dangling_footnote_refs(source_texts, [result_text])
     if not ok:
