@@ -78,8 +78,10 @@ _BOOKKEEPING_BASENAMES = frozenset(
 _RELEASE_SUBJECT = ("chore(release)", "chore: release", "bump version")
 
 _MAX_WINDOW_S = 14 * 86400  # never look back further than 14 days for "recent"
-_MAX_COMMITS = 50           # bound the git scan
+_MAX_COMMITS = 50           # bound the git scan (subject list only — see _MAX_COVERAGE_COMMITS)
+_MAX_COVERAGE_COMMITS = 600  # the coverage scan must span the WHOLE window, not 50 commits
 _SUBJ_TRUNC = 64            # truncate the latest subject in the nudge line
+_MAX_NAMED_MODULES = 6      # name the worst offenders; a wall of stems is not actionable
 
 
 def _session_key() -> str:
@@ -138,6 +140,51 @@ def _is_substantive(subject: str, files: list[str]) -> bool:
     return False
 
 
+def _uncovered_modules(changed: dict[str, int], scope_dirs: list[tuple[str, Path]]) -> list[str]:
+    """The module stems that CHANGED but that no memory note anywhere MENTIONS.
+
+    This is the coverage signal the recency window never had. `changed` maps a module stem
+    (a source file's basename without extension) to how many substantive commits touched it;
+    a stem is COVERED if any LOCAL/PROJECT note's text contains it. Returns the uncovered
+    stems, most-churned first.
+
+    WHY MENTION AND NOT `globs:` OWNERSHIP: the wikimem model reserves `globs:` for exactly
+    this, but measured 2026-08-04 not one page in this corpus declares it, so an ownership
+    query would compute over an empty relation and call EVERYTHING uncovered. A substring
+    mention is weaker but true today, and it fails in the safe direction — a page that
+    discusses a module almost always names it, so false NUDGES are the error mode, not false
+    silence. Swap in `globs:` once pages carry it."""
+    if not changed:
+        return []
+    corpus: list[str] = []
+    for label, d in scope_dirs:
+        if label == "USER":
+            continue
+        for note in _note_files(d):
+            try:
+                corpus.append(note.read_text(errors="replace"))
+            except OSError:
+                continue
+    blob = "\n".join(corpus)
+    uncovered = [stem for stem in changed if stem not in blob]
+    uncovered.sort(key=lambda s: (-changed[s], s))
+    return uncovered
+
+
+def _changed_modules(root: Path, secs: int) -> dict[str, int]:
+    """{module stem: substantive commits touching it} over the window. Source files only —
+    a doc or config churn is not knowledge that needs capturing."""
+    out: dict[str, int] = {}
+    for _subject, files in _substantive_records(root, secs, max_count=_MAX_COVERAGE_COMMITS):
+        for f in files:
+            if not f.endswith((".py", ".rs", ".ts", ".js", ".sh")):
+                continue
+            stem = Path(f).stem
+            if stem and not stem.startswith("test_"):
+                out[stem] = out.get(stem, 0) + 1
+    return out
+
+
 def _substantive_commits_since(root: Path, secs: int) -> list[str]:
     """Subjects of substantive commits in the last `secs` seconds, newest first.
 
@@ -162,8 +209,16 @@ def _substantive_commits_since(root: Path, secs: int) -> list[str]:
     )
     if proc is None or proc.returncode != 0 or not proc.stdout:
         return []
-    subjects: list[str] = []
-    for chunk in proc.stdout.split("\x01"):
+    return [subject for subject, _files in _parse_log(proc.stdout)]
+
+
+def _parse_log(stdout: str) -> list[tuple[str, list[str]]]:
+    """(subject, files) for each SUBSTANTIVE commit in a `_LOG_FORMAT` payload. PURE.
+
+    Split out so the coverage scan reuses the FILES the log already carries — the old code
+    parsed `--name-only`, used it for the substantive test, and threw it away."""
+    records: list[tuple[str, list[str]]] = []
+    for chunk in stdout.split("\x01"):
         if not chunk.strip():
             continue
         lines = chunk.split("\n")
@@ -173,8 +228,39 @@ def _substantive_commits_since(root: Path, secs: int) -> list[str]:
         _sha, subject = header.split("\x1f", 1)
         files = [ln for ln in lines[1:] if ln.strip()]
         if _is_substantive(subject, files):
-            subjects.append(subject)
-    return subjects
+            records.append((subject, files))
+    return records
+
+
+def _substantive_records(root: Path, secs: int, *, max_count: int = _MAX_COMMITS) -> list[tuple[str, list[str]]]:
+    """`_substantive_commits_since` but keeping each commit's file list.
+
+    `max_count` is separate from the nudge's own `_MAX_COMMITS` because the two scans want
+    different things. The SUBJECT list only needs enough to say "N+ commits" — 50 is plenty.
+    The COVERAGE scan needs the whole window, and truncating it reintroduces the exact bug
+    this detector was just fixed for: measured 2026-08-04, this repo took 66 substantive
+    commits in three days, so a 50-commit cap could not see back even two days — the
+    injection commits that motivated the fix read as UNCHANGED, and their module as covered.
+    A cap that silently shortens the window is indistinguishable from having no gap."""
+    if secs <= 0:
+        return []
+    proc = state.run_subprocess(
+        [
+            "git", "log",
+            f"--since={secs} seconds ago",
+            f"--max-count={max_count}",
+            "--no-merges",
+            "--name-only",
+            "--pretty=format:%x01%H%x1f%s",
+        ],
+        timeout=15,
+        cwd=str(root),
+        capture=True,
+        detector_name="memorize-nudge",
+    )
+    if proc is None or proc.returncode != 0 or not proc.stdout:
+        return []
+    return _parse_log(proc.stdout)
 
 
 def main() -> int:
@@ -205,20 +291,38 @@ def main() -> int:
         return 0
 
     scope_dirs = memory_scopes.resolve_scope_dirs()
-    last_mem, note_count = _last_memory_mtime(scope_dirs)
+    _note_count_only, note_count = _last_memory_mtime(scope_dirs)
 
     # ADOPTION GATE: by default stay silent unless the wiki is in use here.
     if require_adoption and note_count == 0:
         return 0
 
     now = int(time.time())
-    # Window: commits newer than the last memory note, capped at 14 days. An empty
-    # wiki (last_mem == 0, adoption gate off) looks back the full window.
-    cutoff = max(last_mem, now - _MAX_WINDOW_S)
-    secs = max(0, now - cutoff)
+    # WINDOW IS THE FULL 14 DAYS, NOT "since the last memory note" (fixed 2026-08-04).
+    #
+    # It used to be `cutoff = max(last_mem, now - _MAX_WINDOW_S)`, so the newest mtime of ANY
+    # note on ANY subject moved the cutoff forward and permanently discarded every uncaptured
+    # commit behind it. That measured RECENCY OF WRITING, not COVERAGE OF WORK, and it made
+    # the detector blindest exactly when the agent was most diligent: memorizing topic A hid
+    # topic B forever.
+    #
+    # Measured, the miss that forced this: on 2026-08-02 seven commits landed on the keystroke
+    # injector — including the owner's three ratified rules — interleaved with eight memory
+    # commits about other subjects. Each of those eight pushed the cutoff past the injection
+    # commits, so the nudge never fired for them and structurally never could. Two days later
+    # the mechanism was re-derived from scratch, wrongly, because nothing in the corpus
+    # recorded it. `last_mem` is still read for the ADOPTION gate; it no longer gates time.
+    secs = _MAX_WINDOW_S
     subjects = _substantive_commits_since(root, secs)
 
     if len(subjects) < max(1, min_commits):
+        return 0
+
+    # COVERAGE, not recency: nudge only about modules that changed and that NO note mentions.
+    # This is what makes a memory write silence the nudge for the thing it actually covered,
+    # and only that thing — the property the old window claimed and did not have.
+    uncovered = _uncovered_modules(_changed_modules(root, secs), scope_dirs)
+    if not uncovered:
         return 0
 
     raw_latest = subjects[0]
@@ -226,9 +330,13 @@ def main() -> int:
     latest = state.sanitize_for_drift_line(clipped)
     n = len(subjects)
     more = "" if n < _MAX_COMMITS else "+"  # we capped the scan; show it's a floor
+    named = ", ".join(uncovered[:_MAX_NAMED_MODULES])
+    if len(uncovered) > _MAX_NAMED_MODULES:
+        named += f" (+{len(uncovered) - _MAX_NAMED_MODULES} more)"
     msg = (
-        f"[memorize-nudge] {n}{more} substantive commit(s) since the last memory "
-        f'note (latest: "{latest}"). Capture what changed + WHY in the wiki — '
+        f"[memorize-nudge] {n}{more} substantive commit(s) in the last 14d changed code that "
+        f"NO memory note mentions: {state.sanitize_for_drift_line(named)} "
+        f'(latest: "{latest}"). Capture what changed + WHY in the wiki — '
         f"/janitor-memory-write (PROJECT scope for architecture/code knowledge, "
         f"LOCAL for machine-specific). Recall first (/janitor-memory-recall) so you "
         f"update an existing page, not duplicate it."

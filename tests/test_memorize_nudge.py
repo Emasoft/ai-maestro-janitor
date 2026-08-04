@@ -61,13 +61,16 @@ def _commit(repo: Path, rel: str, content: str, msg: str) -> None:
     _git(repo, "commit", "-q", "-m", msg)
 
 
-def _write_note(repo: Path, name: str, *, age_s: float) -> Path:
+def _write_note(repo: Path, name: str, *, age_s: float, body: str = "body") -> Path:
     """Write a PROJECT-scope memory note whose mtime is `age_s` seconds in the
-    past (negative age_s → in the future, i.e. 'memorized after the commits')."""
+    past (negative age_s → in the future, i.e. 'memorized after the commits').
+
+    `body` is what the note SAYS — load-bearing since coverage is decided by whether any
+    note MENTIONS a changed module, not by mtime."""
     mem = repo / ".claude" / "project" / "memory"
     mem.mkdir(parents=True, exist_ok=True)
     note = mem / name
-    note.write_text("---\nname: x\n---\nbody\n", encoding="utf-8")
+    note.write_text(f"---\nname: x\n---\n{body}\n", encoding="utf-8")
     t = time.time() - age_s
     os.utime(note, (t, t))
     return note
@@ -156,17 +159,37 @@ def test_bookkeeping_commits_do_not_count(tmp_path, home):
     assert _run(repo, home) == ""
 
 
-def test_silent_when_note_is_newer_than_commits(tmp_path, home):
-    """A note written AFTER the commits (gap closed) → window collapses → silent.
+def test_a_note_about_something_ELSE_does_not_silence_the_nudge(tmp_path, home):
+    """THE DEFECT THIS DETECTOR SHIPPED WITH (fixed 2026-08-04). A note newer than the
+    commits used to collapse the window to zero — regardless of what the note was ABOUT — so
+    memorizing topic A hid topic B permanently, and the more diligently the agent wrote, the
+    blinder the detector got.
 
-    The note mtime is set 5 min in the future so it is unambiguously newer than
-    the just-made commits — the deterministic stand-in for 'already memorized'.
-    """
+    Measured miss: seven commits landed on the keystroke injector interleaved with eight
+    memory commits on other subjects; each pushed the cutoff past the injection commits, so
+    the nudge never fired and the mechanism was re-derived from scratch two days later.
+
+    A fresh note that never names `f0`..`f3` must NOT buy silence for them."""
     repo = tmp_path / "repo"
     _init_repo(repo)
     for i in range(4):
         _commit(repo, f"src/f{i}.py", f"x={i}\n", f"feat: thing {i}")
-    _write_note(repo, "fresh.md", age_s=-300)  # mtime = now + 5 min
+    _write_note(repo, "fresh.md", age_s=-300, body="something entirely unrelated")
+    out = _run(repo, home)
+    assert "[memorize-nudge]" in out, "an unrelated note still silences the nudge"
+    assert "f0" in out, "the nudge must NAME the uncovered module, not just count commits"
+
+
+def test_a_note_that_MENTIONS_the_module_does_silence_it(tmp_path, home):
+    """The other half, so the fix is a real gate and not just 'always nudge': coverage is per
+    MODULE. A note naming every changed module leaves nothing uncovered → silent. Without
+    this the detector would be unsilenceable, which is how a nudge becomes noise and gets
+    turned off."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    for i in range(4):
+        _commit(repo, f"src/f{i}.py", f"x={i}\n", f"feat: thing {i}")
+    _write_note(repo, "fresh.md", age_s=-300, body="covers f0 f1 f2 f3 in detail")
     assert _run(repo, home) == ""
 
 
