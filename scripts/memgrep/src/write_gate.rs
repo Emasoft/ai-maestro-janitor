@@ -300,6 +300,21 @@ mod tests {
     // serialize the WHOLE binary's 150+ unrelated tests just to fix two of them here.
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
+    /// Take `ENV_MUTEX` WITHOUT propagating poison.
+    ///
+    /// `.lock().unwrap()` turns one failing test into three: the first test to panic poisons the
+    /// mutex, and every later test that touches it then fails with `PoisonError` instead of its
+    /// own verdict — so the run reports a cascade and hides which test actually broke. Observed
+    /// exactly that way (3 "failures", 8/8 green when re-run serially), which also makes the
+    /// suite look flaky when only one test is at fault.
+    ///
+    /// Recovering the guard is right HERE specifically because the mutex protects no invariant of
+    /// its own: it guards process-global env vars, and every test that takes it sets the vars it
+    /// needs before reading them. There is no state a panicking sibling could leave inconsistent.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     /// A fresh, empty temp dir under the OS temp root — never touches the real
@@ -322,7 +337,7 @@ mod tests {
 
     #[test]
     fn lock_path_for_matches_python_sha16_formula() {
-        let _env = ENV_MUTEX.lock().unwrap();
+        let _env = env_lock();
         let state_dir = tmpdir("state");
         unsafe {
             std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
@@ -461,7 +476,7 @@ mod tests {
 
     #[test]
     fn acquire_serializes_two_concurrent_holders() {
-        let _env = ENV_MUTEX.lock().unwrap();
+        let _env = env_lock();
         let state_dir = tmpdir("state-contend");
         unsafe {
             std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
@@ -497,7 +512,7 @@ mod tests {
 
     #[test]
     fn acquire_times_out_when_lock_is_held() {
-        let _env = ENV_MUTEX.lock().unwrap();
+        let _env = env_lock();
         let state_dir = tmpdir("state-timeout");
         unsafe {
             std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
