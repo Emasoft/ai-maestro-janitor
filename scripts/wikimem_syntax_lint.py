@@ -125,7 +125,11 @@ def main() -> int:
     ap.add_argument(
         "--min-severity",
         choices=[s.lower() for s in SEVERITIES],
-        help="Exit non-zero only at or above this severity (memgrep's default: error).",
+        help=(
+            "Exit non-zero only at or above this severity (memgrep's default: error). Affects "
+            "the EXIT CODE only, not stdout: every finding still prints regardless of this flag "
+            "(janitor#138) — pipe through `grep '^ERROR'` (or WARN/INFO) to filter what you read."
+        ),
     )
     args = ap.parse_args()
 

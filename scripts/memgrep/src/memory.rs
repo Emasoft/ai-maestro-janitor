@@ -2860,11 +2860,17 @@ fn footnote_integrity_violations(text: &str) -> Vec<String> {
     let ctx = md::build_context(text, lines.len());
     let mut refs: BTreeSet<String> = BTreeSet::new();
     let mut defs: BTreeSet<String> = BTreeSet::new();
+    let mut in_html_comment = false;
     for (i, raw) in lines.iter().enumerate() {
+        // Feed EVERY line through the comment mask, even one we are about to skip below, so
+        // `in_html_comment`'s cross-line state cannot desync around a fenced block (janitor#173:
+        // an HTML comment's literal `[^N]` — e.g. the mandatory landing-zone comment — must never
+        // count as a live footnote reference here either, the same defect `lint` had).
+        let masked = mask_html_comment(raw, &mut in_html_comment);
         if *ctx.in_code.get(i).unwrap_or(&false) {
             continue;
         }
-        for (label, is_def) in scan_footnotes(&mask_inline_code(raw)) {
+        for (label, is_def) in scan_footnotes(&mask_inline_code(&masked)) {
             if is_def {
                 defs.insert(label);
             } else {
@@ -3334,6 +3340,54 @@ fn mask_inline_code(raw: &str) -> String {
         }
     }
     out
+}
+
+/// Replace HTML-comment content (`<!-- … -->`, which may SPAN MULTIPLE LINES) with same-length
+/// spaces, so a literal `[^N]` written for documentation purposes inside a comment is not mistaken
+/// for a live footnote reference (janitor#173). The concrete trigger: the memory model MANDATES a
+/// standing landing-zone comment under every page's `## Notes and lessons learned` heading —
+/// `<!-- standing landing zone for [^N] correction lessons; none yet -->` — and that literal `[^N]`
+/// was being scanned as body prose, because fences (`ctx.in_code`) and inline code
+/// (`mask_inline_code`) were already masked but HTML comments were not. On one corpus this was 8/8
+/// of the `footnote-dangling-ref` ERRORs, i.e. the whole tier carried no signal.
+///
+/// `in_comment` carries the open/close state ACROSS LINES (mirroring how `ctx.in_code` tracks a
+/// fence across lines) — the caller owns one `bool` per file and must feed every line of that file
+/// through this function, in source order, even lines it will otherwise discard (e.g. fenced-code
+/// lines), or a comment that opens/closes around a skipped line desyncs the state. Handles more than
+/// one comment per line. Length-preserving in bytes, like `mask_inline_code`, so byte-offset logic
+/// downstream (e.g. `scan_footnotes`'s label positions) stays valid.
+fn mask_html_comment(raw: &str, in_comment: &mut bool) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    loop {
+        if *in_comment {
+            match rest.find("-->") {
+                Some(idx) => {
+                    out.push_str(&" ".repeat(idx + 3));
+                    rest = &rest[idx + 3..];
+                    *in_comment = false;
+                }
+                None => {
+                    out.push_str(&" ".repeat(rest.len()));
+                    return out;
+                }
+            }
+        } else {
+            match rest.find("<!--") {
+                Some(idx) => {
+                    out.push_str(&rest[..idx]);
+                    out.push_str("    "); // mask the 4-byte "<!--" delimiter itself
+                    rest = &rest[idx + 4..];
+                    *in_comment = true;
+                }
+                None => {
+                    out.push_str(rest);
+                    return out;
+                }
+            }
+        }
+    }
 }
 
 /// True iff a raw block-props / lesson-meta string carries a `desc:` value that is UNQUOTED and would
@@ -3859,14 +3913,22 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // conclude the linter is wrong and move on, and the lesson stays orphaned. Measured on
         // the USER corpus when the issue was filed: 9 of 101 findings were this.
         let mut hidden_ref_lines: BTreeMap<String, usize> = BTreeMap::new();
+        // Cross-line HTML-comment state (janitor#173) — fed EVERY line below, including a fenced
+        // one we are about to skip, so a comment spanning around a fence cannot desync it.
+        let mut in_html_comment = false;
         for (i, raw) in lines.iter().enumerate() {
             let line_no = i + 1; // 1-based, matching ctx.in_code's indexing
             let in_fence = *ctx.in_code.get(i).unwrap_or(&false);
-            // Mask INLINE-code spans too, so a literal `[^N]` in example prose is not a false ref.
+            // Mask HTML comments (janitor#173: the mandatory `## Notes and lessons learned`
+            // landing-zone comment `<!-- … [^N] … -->` was scanned as body prose — an HTML comment
+            // is not rendered content, exactly like a fence or an inline-code span, but it was the
+            // one mask missing from the set) and INLINE-code spans, so a literal `[^N]` in a
+            // comment or example prose is not a false ref.
+            let comment_masked = mask_html_comment(raw, &mut in_html_comment);
             let visible = if in_fence {
                 Vec::new() // inside a fenced code block — not real footnote syntax
             } else {
-                scan_footnotes(&mask_inline_code(raw))
+                scan_footnotes(&mask_inline_code(&comment_masked))
             };
             for (label, is_def) in &visible {
                 let table = if *is_def {
@@ -7110,6 +7172,34 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     }
 
     #[test]
+    fn mask_html_comment_blanks_a_footnote_on_a_single_line() {
+        // janitor#173, unit level. A literal `[^N]` inside `<!-- … -->` must not read as a
+        // footnote, and the byte length must be preserved (downstream code relies on that, like
+        // `mask_inline_code` already does).
+        let mut in_comment = false;
+        let raw = "prose <!-- a [^99] note --> more prose";
+        let masked = mask_html_comment(raw, &mut in_comment);
+        assert!(!masked.contains("[^99]"), "commented `[^99]` must be masked: {masked}");
+        assert!(masked.contains("prose") && masked.contains("more prose"), "got: {masked}");
+        assert_eq!(masked.len(), raw.len(), "masking must preserve byte length: {masked}");
+        assert!(!in_comment, "the comment closed on this line, so state must reset: {masked}");
+    }
+
+    #[test]
+    fn mask_html_comment_carries_open_state_across_lines() {
+        // A comment opened but not yet closed on this line must leave the state OPEN, mirroring
+        // how `ctx.in_code` tracks an unclosed fence — the next call (next line) must mask
+        // everything until the closing `-->` is found.
+        let mut in_comment = false;
+        let opened = mask_html_comment("<!-- opens here, no close on this line [^1]", &mut in_comment);
+        assert!(!opened.contains("[^1]"), "got: {opened}");
+        assert!(in_comment, "the comment did not close, so state must stay open");
+        let closed = mask_html_comment("still inside [^2] and closes -->", &mut in_comment);
+        assert!(!closed.contains("[^2]"), "got: {closed}");
+        assert!(!in_comment, "the comment closed, so state must reset");
+    }
+
+    #[test]
     fn collapse_strip_anchors_removes_footnote_anchors_and_collapses_ws() {
         assert_eq!(collapse_strip_anchors("some   fact [^3] more"), "some fact more");
     }
@@ -7270,6 +7360,69 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             !has_violation(&v, "INSIDE a code span"),
             "there is no hidden citation to point at; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn a_footnote_marker_inside_the_mandatory_landing_zone_comment_is_not_a_dangling_ref() {
+        // janitor#173. Every page's `## Notes and lessons learned` section carries a MANDATORY
+        // standing landing-zone comment even when empty: `<!-- standing landing zone for [^N]
+        // correction lessons; none yet -->`. That literal `[^N]` was scanned as body prose because
+        // fences and inline-code spans were masked before the footnote scan but HTML comments were
+        // not — on a live corpus this was 8/8 of the `footnote-dangling-ref` ERRORs, i.e. the tier
+        // carried no signal at all.
+        let dir = lint_tmpdir("landing_zone_comment");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             prose with no real footnotes.\n\n## Notes and lessons learned\n\
+             <!-- standing landing zone for [^N] correction lessons; none yet -->\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !has_code(&v, "footnote-dangling-ref"),
+            "a [^N] inside an HTML comment is not rendered content, exactly like a fence or an \
+             inline-code span; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn a_footnote_marker_inside_a_multiline_html_comment_is_not_a_dangling_ref() {
+        // The comment-mask state must carry ACROSS lines (like `ctx.in_code` does for a fence) —
+        // a comment opened on one line and closed several lines later must mask every line in
+        // between, not just the line the delimiter is on.
+        let dir = lint_tmpdir("multiline_comment");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             prose with no real footnotes.\n\n## Notes and lessons learned\n\
+             <!-- a comment spanning\nmultiple lines with [^N] inside\nand closing here -->\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!has_code(&v, "footnote-dangling-ref"), "got: {v:?}");
+    }
+
+    #[test]
+    fn a_genuine_dangling_ref_next_to_an_html_comment_is_still_caught() {
+        // The mask must not become a blanket suppressor: a REAL dangling reference outside any
+        // comment on the same page must still fire, proving the fix does not just silence the rule.
+        let dir = lint_tmpdir("real_ref_plus_comment");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body cites a real dangling ref.[^7]\n\n## Notes and lessons learned\n\
+             <!-- standing landing zone for [^N] correction lessons; none yet -->\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            has_code(&v, "footnote-dangling-ref"),
+            "the real [^7] reference has no definition and must still be flagged; got: {v:?}"
         );
     }
 
