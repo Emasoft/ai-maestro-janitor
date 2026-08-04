@@ -49,10 +49,15 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
     The bound guards against an import accidentally dragging in a large subtree; it
     is deliberately loose (headroom for legitimate new daemon modules) because the
     sharp assertion is the pattern-lib leak check below. Raised 30 -> 40 when
-    `daemon_path.py` legitimately joined the closure (TRDD-VQ4LX7ND).
+    `daemon_path.py` legitimately joined the closure (TRDD-VQ4LX7ND), and 40 -> 45
+    when `oauth_rotator/burn_gate.py` did the same (TRDD-FQXBURNR, 2026-08-02) — the
+    burn-aware rotation gate is genuinely daemon-imported, so the cap was simply stale
+    and the suite had been red since. Headroom widened to 45 rather than nudged to 41
+    so the NEXT legitimate module does not re-break the build; a leap past 45 is the
+    signal this bound exists to catch.
     """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 40, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= 45, f"closure unexpectedly large: {len(closure)}"
     leaked = [p.name for p in closure if p.name.endswith("_patterns.py")]
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 
