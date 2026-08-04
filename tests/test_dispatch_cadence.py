@@ -396,13 +396,13 @@ def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
 
     (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     assert dispatch._cadence_active_waiting(sd, now) is True
     (sd / "resume-directive.txt").unlink()
 
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 1)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 1)
     assert dispatch._cadence_active_waiting(sd, now) is True
 
 
@@ -418,7 +418,7 @@ def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
     dispatch = _import_dispatch()
     sd = _state(proj)
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
     (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, int(time.time())) is True
@@ -436,7 +436,7 @@ def test_ratelimit_resume_demotes_only_with_fresh_coverage(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
     (sd / "last-resume.ts").write_text(str(now))
 
     assert dispatch._cadence_active_waiting(sd, now) is True  # no coverage → FAST
@@ -460,7 +460,7 @@ def test_coverage_ignored_when_feature_disabled(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
     (sd / "last-resume.ts").write_text(str(now))
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, now) is True
@@ -589,7 +589,7 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
 
     d = sd / "resume-directive.txt"
     d.write_text("continue TRDD-SOMETHING")

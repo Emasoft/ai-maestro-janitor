@@ -602,7 +602,7 @@ def test_cadence_probe_ignores_a_lone_janitor_memory_agent(iso) -> None:
     now = int(time.time())
     pa.add("mem-1", "janitor-memory-subconscious-agent", now=now)
     dispatch = _import_dispatch()
-    assert dispatch._pending_external_agent_count() == 0
+    assert dispatch._fresh_external_agent_count(now) == 0
     assert dispatch._pending_agent_count() == 1  # the resume path still sees it
     assert dispatch._cadence_active_waiting(state.state_dir(), now) is False
 
@@ -614,7 +614,33 @@ def test_cadence_probe_still_flips_for_a_user_agent(iso) -> None:
     now = int(time.time())
     pa.add("user-fork", "a real background task", now=now)
     dispatch = _import_dispatch()
-    assert dispatch._pending_external_agent_count() == 1
+    assert dispatch._fresh_external_agent_count(now) == 1
+    assert dispatch._cadence_active_waiting(state.state_dir(), now) is True
+
+
+def test_cadence_probe_ignores_a_long_dead_agent(iso) -> None:
+    """A STALE manifest entry must NOT pin the FAST tier. Nothing clears an entry except
+    the 7-day sweep — the documented SubagentStop payload has no agent_id — so before the
+    age bound a single agent that died mid-run held the session at `*/5` for a WEEK.
+
+    Measured 2026-08-04: 12 workflow-subagents spawned two days earlier kept this session
+    FAST for 111 consecutive fires (~12 no-op wake-ups/hour re-reading a 180k context)
+    until the window-burn-rate alarm named the host as the fleet's top consumer at 2.6x
+    linear pace. The resume path still lists the entry — only its claim to mean 'actively
+    waiting RIGHT NOW' expires."""
+    state, pa = iso["state"], iso["pa"]
+    now = int(time.time())
+    pa.add("dead-fork", "a background task that died", now=now - 2 * 24 * 3600)
+    dispatch = _import_dispatch()
+    assert dispatch._fresh_external_agent_count(now) == 0
+    assert dispatch._cadence_active_waiting(state.state_dir(), now) is False, (
+        "a two-day-dead agent still pins FAST — the idle-burn defect is back"
+    )
+    # ...and it is still LISTED, because a corpse must remain resumable/nameable.
+    assert dispatch._pending_agent_count() == 1
+    # Boundary, so the window cannot be silently widened.
+    pa.add("fresh-fork", "a live background task", now=now - (dispatch._RESUME_RECENCY_WINDOW_S - 60))
+    assert dispatch._fresh_external_agent_count(now) == 1
     assert dispatch._cadence_active_waiting(state.state_dir(), now) is True
 
 

@@ -767,8 +767,9 @@ def _pending_agent_count() -> int:
     """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0.
 
     Counts ALL agents — used by the resume nudge (an agent that died must still be
-    named for a SendMessage-resume, janitor-spawned or not). The CADENCE probe uses
-    `_pending_external_agent_count` instead (TRDD-CI6ZTNB9)."""
+    named for a SendMessage-resume, janitor-spawned or not — and a WEEK-old corpse is
+    still worth naming, which is exactly why this count must not drive the cadence).
+    The CADENCE probe uses `_fresh_external_agent_count` instead (TRDD-CI6ZTNB9)."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
@@ -777,17 +778,30 @@ def _pending_agent_count() -> int:
         return 0
 
 
-def _pending_external_agent_count() -> int:
-    """Background agents the manifest lists EXCLUDING the janitor's own housekeeping
-    agents (memory-maintenance / security) — the count the cadence FAST probe must
-    use (TRDD-CI6ZTNB9 / issue #89). The janitor spawns those agents itself via the
-    `[janitor-memory-*]` markers, so counting them makes the cadence controller
-    react to a signal it produces — two wasted re-arm turns per memory chore. A
-    USER-spawned background agent still counts (a real time-sensitive wait). Fail-open 0."""
+def _fresh_external_agent_count(now: int) -> int:
+    """Background agents that are EXTERNAL and RECENT — the count the cadence FAST
+    probe must use.
+
+    EXTERNAL (TRDD-CI6ZTNB9 / issue #89): a janitor-spawned memory/security agent is
+    housekeeping the janitor queued, not a time-sensitive wait. Counting it makes the
+    controller react to a signal it produces — two wasted re-arm turns per memory
+    chore. A USER-spawned background agent still counts.
+
+    RECENT (2026-08-04): reported within `_RESUME_RECENCY_WINDOW_S`. Without the age
+    bound a DEAD agent is indistinguishable from a working one for a full week,
+    because nothing clears a manifest entry except the 7-day sweep — see
+    `_cadence_active_waiting` for the measurement that forced this.
+
+    Fail-open 0 — a controller that cannot read the manifest must fall back to the
+    CHEAP tier, never pin the expensive one."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
-        return len(pending_agents.pending_external())
+        return sum(
+            1
+            for e in pending_agents.pending_external(now)
+            if 0 <= now - int(e.get("ts", 0)) < _RESUME_RECENCY_WINDOW_S
+        )
     except Exception:  # noqa: BLE001
         return 0
 
@@ -1944,7 +1958,26 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     # here would make this controller react to its own output and re-arm twice per
     # memory chore. The resume/directive signals above are legitimate and unchanged;
     # only this pending-agent term was self-perturbing.
-    return _pending_external_agent_count() > 0
+    #
+    # AGE-BOUNDED for exactly the reason the directive branch above is, which this
+    # branch was missing. A manifest entry CANNOT be cleared by SubagentStop — the
+    # documented payload carries no `agent_id` (pinned by
+    # test_stop_hook_without_id_is_a_noop) — so the only cleanup is the 7-day
+    # MAX_AGE_S sweep. An agent that died mid-run therefore keeps asserting "in
+    # flight" for a WEEK, and this branch turned that stale assertion into a FAST
+    # `*/5` pin for the same week.
+    #
+    # Measured 2026-08-04: 12 workflow-subagents spawned 2026-08-02 (none of whose
+    # SubagentStop fired) held this session at FAST for 111 consecutive fires — ~12
+    # no-op wake-ups per hour re-reading a 180k context — until the window-burn-rate
+    # alarm surfaced this host as the fleet's top consumer at 2.6x linear pace on the
+    # 7d window, projecting exhaustion 104h before reset.
+    #
+    # A genuinely in-flight agent still pins FAST: the bound is the SAME window the
+    # resume and directive branches use, and no polling cadence helps an agent that
+    # stopped reporting half a day ago. Like those branches this bounds only the
+    # CADENCE claim — the entries are still listed by the nudge and still resumable.
+    return _fresh_external_agent_count(now) > 0
 
 
 def _stamp_resume(sd: Path, now: int) -> None:
