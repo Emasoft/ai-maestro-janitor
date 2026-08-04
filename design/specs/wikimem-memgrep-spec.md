@@ -890,9 +890,24 @@ write goes through a memgrep write verb (`new-page` / `add-atom` / `add-lesson` 
 which synthesise valid syntax by construction. Hand-editing is reserved for an in-place REPAIR
 of existing prose, and even then the atom/lesson SYNTAX `MUST` match what the verbs emit.
 
-`WM-AUTH-02` **validate-and-lint-after-every-edit** — `MUST`: every editorial step ends with
-`memgrep validate <page> && memgrep lint <page>`. A non-zero exit is a defect to fix NOW,
-before moving on.
+`WM-AUTH-02` **validate-and-lint-BEFORE-AND-AFTER-every-edit** — `MUST`: every editorial step
+BOTH begins and ends with `memgrep validate <page> && memgrep lint <page>`. A non-zero exit
+after the edit is a defect to fix NOW, before moving on.
+
+The BEFORE half is not symmetry for its own sake — without it there is no way to tell a defect
+you INTRODUCED from one that was already there, so every pre-existing finding gets attributed
+to the current edit (or, worse, the current edit's damage hides inside a pile of old findings
+and is never noticed). Measured 2026-08-04: a session added 8 `link-one-sided` violations while
+repairing the memory system and only caught them because a heartbeat happened to report the
+corpus total moving 47 → 55. A per-page before/after delta makes that automatic instead of
+lucky.
+
+`WM-AUTH-02a` **check-the-scope-direction-too** — `MUST`: the after-pass includes the
+cross-scope link direction (WM-SCOPE). Links run LOCAL → PROJECT → USER and laterally;
+a USER page linking DOWN to a PROJECT or LOCAL page is `link-downward-cross-scope` and is a
+defect, because the USER corpus is machine-wide while its target may not exist in the next
+project at all — a downward link is a reference the reader can be structurally unable to
+resolve.
 
 `WM-AUTH-03` **pick-scope-first** — `MUST`: run the WM-SCOPE-03 write gate BEFORE writing and
 route LOCAL / PROJECT / USER accordingly; unsure → LOCAL.

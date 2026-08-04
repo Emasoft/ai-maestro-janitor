@@ -247,8 +247,17 @@ you left no dangling edge.
 - `memgrep links --broken` over the scope shows no new dangling `[[link]]` you
   introduced (an intentional link to a yet-to-write page is fine; note it).
 - One-component-one-page still holds (you didn't fragment an element).
-- **`memgrep lint <page>` CLEAN** for every page touched. Fix YOURS; leave
-  pre-existing ones to the memory agent's backlog.
+- **`memgrep validate <page> && memgrep lint <page>` BEFORE *and* AFTER** every page you
+  touch. The BEFORE run is what makes "fix YOURS, leave pre-existing ones to the memory
+  agent's backlog" a decidable rule instead of a guess — without a baseline you cannot tell
+  which findings you introduced, and your own damage hides inside the pile of old ones.
+  (Measured 2026-08-04: 8 `link-one-sided` violations were introduced while repairing the
+  memory system and only caught because a heartbeat happened to report the corpus total
+  moving 47 → 55.)
+- **Link DIRECTION is part of the after-check**: links go LOCAL → PROJECT → USER and
+  laterally. A USER page linking DOWN to a PROJECT/LOCAL page is `link-downward-cross-scope`
+  — the USER corpus is machine-wide, but its target may not exist in the next project at all,
+  so a downward link is a reference the reader can be structurally unable to resolve.
 - **RE-RECALL what you wrote** with a future session's symptom words. No hit ⇒ the
   description gate failed; not real yet.
 
