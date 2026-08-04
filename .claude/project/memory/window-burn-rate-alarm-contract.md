@@ -74,6 +74,9 @@ throttle. That ordering is pinned by a test, not by comment.
 
 ## See also
 
+- [[janitor-beat-tasks-and-limitations]] — what one heartbeat fire actually costs, measured — the input to this alarm.
+
+
 - [[janitor-architecture]] — the hub this component sits under: the heartbeat /
   daemon split, the detector roster, and the TOKEN-QUIETNESS invariant that gates
   where this alarm may surface.

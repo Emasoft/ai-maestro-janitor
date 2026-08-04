@@ -144,6 +144,9 @@ user plugins EXCEPT the ai-maestro fleet").
 
 ## See also
 
+- [[claude-md-canonical-form]] — the per-turn cost measured here is WHY CLAUDE.md is capped to five elements.
+
+
 - [[oauth-rotation-renew-reauth]] — what the 60 s `oauth-rotator-tick` / 10 min
   supervisor beats actually do.
 - [[agentlens-diagnostics-integration]] — the observability detectors' optional

@@ -54,6 +54,10 @@ commands indefinitely — a queue of operations fires whenever the turn happens 
 
 Typing a command into a session's own pane is SOLVED — do not re-derive it. THE THREE RULES (owner, 2026-08-02), implemented in `terminal_trigger.inject_until_sent`: (1) inject ONLY when the input field is EMPTY, else re-check after an 8s quiet window; (2) the moment the user types any key, STOP — no cleanup, just stop; (3) after typing, RE-READ the field and submit only if it shows exactly the intended command. These **REPLACE the old presence-cancel entirely** — "the user is present" means WAIT AND RETRY, never abandon. THE TRAP: `send_self_command(respect_user_presence=True)` is that retired presence-cancel, still in the tree. It checks once, returns `USER_PRESENT`, and gives up — so a caller who picks the obvious-looking public API silently gets one-shot behaviour and no retry. Reach for `inject_until_sent`; treat `send_self_command`'s presence gate as legacy. CHANNEL ASYMMETRY, load-bearing: the rules need a READ-BACK, so they hold only on tmux (`capture-pane`) and iTerm (AppleScript). An ai-maestro agent is reached via `aimaestro-agent.sh session command`, which is WRITE-ONLY — the frozen CLI has no pane/field verb — so rules 1 and 3 are unenforceable there and a command typed mid-turn merely ENQUEUES (no raw-ESC primitive either). `channel_is_readable()` exists for exactly this split. Gap filed upstream as Emasoft/ai-maestro#110. [^3]
 
+## See also
+
+- [[janitor-compaction-floor-gate]] — the clear/compact levers whose keystrokes obey the injector rules on this page.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-ESC-FLOOD, status:valid, keywords:"janitor-arm flood buffered keystrokes retrying in Xm typed command accumulates input line rate limited", ocd:2026-07-18, lmd:2026-07-18]

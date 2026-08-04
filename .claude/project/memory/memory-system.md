@@ -311,7 +311,8 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
 
 ## See also
 
-- `[[feedback_memory_system_is_more_than_memgrep]]` — the system is {tool · rules ·
+- [[claude-md-canonical-form]] — CLAUDE.md is the index over this corpus; what may live in it, and the migration contract.
+- [[feedback_memory_system_is_more_than_memgrep]] — the system is {tool · rules ·
   skills · hooks}, not just the memgrep binary.
 - `[[reference_memgrep_links_to_from_semantics]]` — the `links --to`/`--from`
   directional-flag gotcha (intuition inverts them).

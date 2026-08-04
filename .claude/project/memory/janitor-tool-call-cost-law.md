@@ -63,6 +63,9 @@ publish that name to every cloner. Downward references exist for precisely this 
 
 ## See also
 
+- [[janitor-beat-tasks-and-limitations]] — the measured per-fire cost that this law predicts.
+
+
 - [[janitor-compaction-floor-gate]] — this law is WHY the janitor compacts an idle context at
   all (context size is the cost multiplier); that page owns when compacting is worth it, and
   the post-compaction FLOOR that caps how much it can ever buy back.

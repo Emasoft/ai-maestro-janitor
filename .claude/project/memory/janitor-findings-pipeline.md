@@ -33,4 +33,8 @@ metadata:
 
 - [[janitor-architecture]] — the architecture hub.
 
+## See also
+
+- [[janitor-detector-and-hook-roster]] — the detectors that raise the findings this pipeline records.
+
 ## Notes and lessons learned

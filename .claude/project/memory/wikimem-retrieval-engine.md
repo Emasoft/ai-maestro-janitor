@@ -54,6 +54,9 @@ semantic judgement (oversized atom). ERROR is corruption or invisibility. On the
 
 ## See also
 
+- [[feedback_memory_system_is_more_than_memgrep]] — the write-side gates (scope lock, CAS) that produce what this engine retrieves.
+
+
 - `[[memory-system]]` — the surrounding system this engine serves: the three scopes, where
   memories live, and the recall-before-acting protocol.
 
