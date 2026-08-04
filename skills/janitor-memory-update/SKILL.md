@@ -37,16 +37,50 @@ correction protocol (§2). Proactively keep each project's **PROJECT-scope**
 pages current as you touch the code — architecture hub, key-solution components,
 publish/deploy pipeline — so knowledge stays git-tracked and shared, not stale.
 
-## THE UPDATE INVARIANT — a superseded memory is NEVER deleted; it becomes a lesson
+## THE UPDATE INVARIANT — a superseded memory is NEVER deleted; it is MOVED DOWN
 
 Governs EVERY update, not just explicit corrections. Whenever an edit
 **supersedes** an existing memory — a corrected fact, a reversed decision, a
 changed value, an abandoned approach — the old memory is never silently
-overwritten: the body is cleaned to the current truth, and the superseded
-statement is DEMOTED to a dated `[^N]` lesson carrying the WHY (mechanics in
-§2). RULE 0 + the Bug-Autopsy directive applied to memory — the fact moves
-forward clean, the history persists as a guardrail against repeating the old
-mistake. §1 and §3 below MUST apply this same invariant when replacing content.
+overwritten. The new atom REPLACES the old one in the live section, and the old
+atom is **moved down below the page's `## Superseded` heading** and marked
+`status: superseded` + `superseded-by:<new id>`. An atom may carry an UNBOUNDED
+chain of these — v1 → v2 → v3 — and `recall` shows only the current truth unless
+asked with `--include-superseded`.
+
+**A LESSON IS NOT PART OF THAT.** A `[^N]` lesson records that something WENT
+WRONG and must not be repeated. Most updates are not mistakes, and attaching a
+lesson to one manufactures a fake mistake — which pollutes the guardrail surface
+that is read as "things to not repeat".
+
+> **The owner's example, and the whole rule in one story.** You decide to change a
+> dialog box's background from blue to green. There is no lesson learned. It is
+> only a change. The old memory — *"all dialog boxes of this component have a
+> blue background"* — is simply superseded by *"all dialog boxes of this
+> component have a green background"*. The new atom replaces the old atom, and
+> the old atom is moved down to the notes and marked as superseded. Simple, end
+> of the story. **No lesson learned needed.**
+
+So, deciding between the two:
+
+| what happened | what to write |
+|---|---|
+| The fact changed, was refined, or the design was revised as intended | **Supersede only.** New atom up top, old atom moved down, marked. No lesson. |
+| Something went wrong, and a future session could repeat it | Supersede **and** add a `[^N]` lesson (`DO NOT … BECAUSE … DO … instead`). |
+
+**Every substantive change supersedes.** The only edit-in-place exception is a
+pure typo or formatting slip that changes no fact. "I only added a clause" is not
+an exception — an added clause changes what the atom asserts, and a reader who
+acted on the old assertion has no way to see it ever differed.
+
+Spec: `WM-LES-09` (supersession is not a lesson), `WM-LES-10` (every substantive
+change supersedes). §1 and §3 below MUST apply this same invariant when replacing
+content.
+
+> **TOOLING NOTE (2026-08-04):** no verb yet performs a lesson-free supersession —
+> `add-lesson --supersedes` requires a lesson. Until **TRDD-3PWQK8NM** lands, do
+> the move by hand-editing ONLY if you cannot avoid it, and never fabricate a
+> lesson to satisfy the tool.
 
 ## 0. Find the page
 
@@ -89,8 +123,10 @@ in a new page):
    synthesises the `^id [keywords:…]` grammar, so never hand-write the atom marker.
    **If instead it SUPERSEDES a statement already on the page** (replaces a value,
    reverses a prior choice), this is not a plain add — apply THE UPDATE INVARIANT:
-   clean the body to the new truth AND demote the old statement to a `[^N]` lesson
-   with the WHY (§2). Only a genuinely NEW, additive fact skips the demotion.
+   the new atom goes up top and the OLD atom is moved down below `## Superseded`,
+   marked `status: superseded` + `superseded-by:<new id>`. Add a `[^N]` lesson
+   ONLY if something went wrong (blue→green is a change, not a mistake). Only a
+   genuinely NEW, additive fact skips the supersession entirely.
 2. Update the edges if the change adds/removes a relation — and per THE LINK LAW
    (every link bidirectional, always), edit BOTH ends in the same pass: a
    component now obeying a new rule → the component's `## Governed by` AND that

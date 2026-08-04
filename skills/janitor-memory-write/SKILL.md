@@ -6,8 +6,9 @@ description: MEMORIZE — capture a durable decision/fact into the project's mem
 # Janitor memory — MEMORIZE
 
 > **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY to create a
-> page, add ONE atomic memory, or correct a single fact (clean in place + demote the
-> superseded statement to a dated `[^N]` lesson with its WHY). COMPLEX re-editing (merge,
+> page, add ONE atomic memory, or supersede a single fact (new atom on top, old atom moved
+> down below `## Superseded` and marked — a lesson ONLY if something went wrong; see the
+> UPDATE INVARIANT in `/janitor-memory-update`). COMPLEX re-editing (merge,
 > split, cross-page conflicts, shape repair, dedup, link redirects, harvest, any multi-page
 > reorg) belongs to the **`janitor-memory-subconscious-agent`** — note it and move on; the
 > `memory-maintenance` scheduler dispatches it.

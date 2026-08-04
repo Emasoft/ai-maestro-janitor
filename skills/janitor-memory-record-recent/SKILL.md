@@ -112,10 +112,11 @@ to each change, then hand the work to the skill that owns it:
 - **A fitting page exists, fact still holds** → ADD the atomic memory to that page
   → **`/janitor-memory-update`**.
 - **A fitting page exists but the change CONTRADICTS it** (a protocol changed, a
-  value flipped, an approach was abandoned) → UPDATE via the **correction
-  protocol**: clean the fact in place to the new truth AND demote the superseded
-  statement to a dated `[^N]` lesson carrying its WHY (never delete it) →
-  **`/janitor-memory-update`** (it owns the 2-step correction mechanics).
+  value flipped, an approach was abandoned) → UPDATE via the **supersession
+  protocol**: the new atom replaces the old one up top, and the old atom is moved
+  down below `## Superseded` and marked (never deleted). A dated `[^N]` lesson is
+  added ONLY when something went WRONG — a plain change (blue→green) is not a
+  mistake and needs none → **`/janitor-memory-update`** (it owns the mechanics).
 - **No page fits** → CREATE a new page → **`/janitor-memory-write`**, which runs
   the SHAPE decision for you:
   - new functionality area → a **`hub`**;
