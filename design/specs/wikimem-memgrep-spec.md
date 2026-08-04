@@ -384,6 +384,26 @@ removal of a page whose atoms all migrated away.
 contains the literal `SUPERSEDED BODY:` marker carrying the verbatim old atom body. A
 supersession without it is a WM-LINT `superseded-without-body` defect AND a WM-LES-06 violation.
 
+`WM-LES-09` **supersession-is-not-a-lesson** — `MUST`: an atom carries an UNBOUNDED chain of
+superseded versions, and a superseded version `MAY` have no lesson attached. A lesson records
+that something WENT WRONG; when an implementation simply lands as designed, or a fact is
+refined, nothing went wrong and there is nothing to guard against. The correct act is then:
+update the atom body to the new truth and demote the previous body to a dated superseded
+version beneath it — a CHANGELOG entry, not a guardrail. Forcing a lesson here manufactures a
+fake mistake and pollutes the guardrail surface, which is read as "things to not repeat".
+
+`WM-LES-10` **every-substantive-change-supersedes** — `MUST`: every change to an atom's meaning
+creates a superseded version. The ONLY edit-in-place exception is a pure typo / formatting slip
+that changes no fact (WM-LES-06). "I only added a clause" is not an exception: an added clause
+changes what the atom asserts, and a reader who acted on the old assertion has no way to see it
+ever differed. The chain — newest truth on top, each prior body dated beneath it — is the
+atom's history, and it is the only record of WHEN a fact became true.
+
+> **TOOLING GAP (2026-08-04, WM-ATOM-09 forward-citation):** no verb implements a lesson-free
+> supersession today — `add-lesson --supersedes` is the only path and it REQUIRES a lesson,
+> which WM-LES-09 forbids for a clean update. Approved card: **TRDD-3PWQK8NM**. Until it lands,
+> a clean update is the one case where the chain cannot be recorded as specified.
+
 `WM-LES-08` **lessons-travel-with-their-atom** — an atom's dated superseded-lessons ARE its
 changelog; on a WM-MIG move they TRAVEL with the atom (with the references they use), except a
 reference also cited by another atom, which stays and is copied.
