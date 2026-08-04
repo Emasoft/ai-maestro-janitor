@@ -252,10 +252,24 @@ def agents_home() -> str:
 
 
 def root_under_agents_home(root: str | None) -> bool:
-    """True iff `root` sits inside the agents home — the REGISTRY-FREE harness signal."""
+    """True iff `root` sits inside the agents home — the REGISTRY-FREE harness signal.
+
+    `root` arrives from `fleet_scan.find_janitor_root`, which ALWAYS runs the cwd through
+    `os.path.realpath` (a kernel realpath). `agents_home()` builds its answer from `$HOME`
+    (or `AIMAESTRO_AGENTS_HOME`) WITHOUT realpath'ing it, so a lexical `==`/`startswith`
+    compare is asymmetric: on a host where the agents home is itself reached via a symlink
+    (a symlinked `$HOME`, an NFS mount, or an override pointed at `/tmp/...` rather than
+    its macOS realpath `/private/tmp/...`) the two strings name the SAME directory yet
+    never match — this instance is then treated as NOT harness-owned, the exact
+    fail-open-in-the-wrong-direction the daemon's hands-off doctrine above depends on
+    getting right. Same lesson as janitor#142's "canonicalize before comparing paths"
+    (measured there on ai-maestro's own agent-registry compare, called out as applying to
+    the janitor's own tooling too) — resolve `base` here rather than trust it comes in
+    canonical.
+    """
     if not root:
         return False
-    base = agents_home()
+    base = os.path.realpath(agents_home())
     return root == base or root.startswith(base + "/")
 
 

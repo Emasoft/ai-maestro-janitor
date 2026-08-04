@@ -61,7 +61,33 @@ def _bench_env() -> dict[str, str]:
 
 @requires_memgrep
 def test_retrieval_has_not_regressed():
-    """🐌 The frozen benchmark still meets the committed baseline for accuracy and token cost."""
+    """🐌 The frozen (legacy, intentionally comma-form) benchmark still meets its baseline.
+
+    `--allow-dropped-keywords` is required here (issue #119): this corpus is deliberately kept
+    in the pre-migration comma form (see tests/wikimem_bench/README.md), so it lints
+    atom-dropped-props-dirty on purpose — the fixture the fail-fast gate below exists to allow.
+    """
+    proc = subprocess.run(
+        [sys.executable, str(_BENCH), "--check", "--allow-dropped-keywords"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        cwd=str(_REPO),
+        env=_bench_env(),
+    )
+    assert proc.returncode == 0, f"wikimem retrieval regressed against tests/wikimem_bench/baseline.json:\n{proc.stdout}\n{proc.stderr}"
+
+
+@requires_memgrep
+def test_legacy_corpus_is_refused_without_the_dropped_keywords_flag():
+    """🐌 A corpus with atom-dropped-props findings is REFUSED, not silently scored (issue #119).
+
+    Before this gate existed, `wikimem_bench.py --check` on the legacy corpus (which lints
+    atom-dropped-props-dirty — see the sibling test) exited 0 and printed a confident accuracy
+    number, even though several atoms' recall surface is truncated by the parser bug it is
+    measuring around. hit@1/3/10 could not then tell "the ranker missed it" from "nothing could
+    ever have retrieved it". This proves the omitted flag now fails fast instead.
+    """
     proc = subprocess.run(
         [sys.executable, str(_BENCH), "--check"],
         capture_output=True,
@@ -70,7 +96,35 @@ def test_retrieval_has_not_regressed():
         cwd=str(_REPO),
         env=_bench_env(),
     )
-    assert proc.returncode == 0, f"wikimem retrieval regressed against tests/wikimem_bench/baseline.json:\n{proc.stdout}\n{proc.stderr}"
+    assert proc.returncode == 2, (
+        "a corpus with atom-dropped-props findings must be REFUSED, not scored:\n"
+        + proc.stdout + proc.stderr
+    )
+    assert "atom-dropped-props" in proc.stderr, proc.stderr
+    assert "REGRESSION" not in proc.stdout, "a refused corpus must not also report a score"
+
+
+@requires_memgrep
+def test_conformant_corpus_needs_no_dropped_keywords_flag():
+    """🐌 The PRIMARY (spec-conformant) corpus lints clean, so the fail-fast gate never fires
+    on it — the escape hatch is for the LEGACY fixture only, never for the number that matters.
+    """
+    proc = subprocess.run(
+        [
+            sys.executable, str(_BENCH), "--check",
+            "--corpus", str(_CONFORMANT_CORPUS),
+            "--baseline", str(_CONFORMANT_BASELINE),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        cwd=str(_REPO),
+        env=_bench_env(),
+    )
+    assert "atom-dropped-props" not in proc.stderr, (
+        "the conformant corpus must never need --allow-dropped-keywords:\n" + proc.stderr
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 
 
 @requires_memgrep

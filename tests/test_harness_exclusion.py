@@ -114,6 +114,35 @@ def test_agents_home_is_the_registry_free_signal(tmp_path: Path, monkeypatch: py
     assert hb.root_under_agents_home("/srv/aim-agents/carol") is True
 
 
+def test_root_under_agents_home_canonicalizes_a_symlinked_agents_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlinked (or otherwise non-canonical) agents home must still match — janitor#142's
+    "canonicalize before comparing paths" lesson, applied here.
+
+    `root_under_agents_home` receives `root` from `fleet_scan.find_janitor_root`, which
+    ALWAYS runs the scanned instance's cwd through `os.path.realpath`. Before this fix,
+    `agents_home()`'s own (possibly non-canonical) string was compared LEXICALLY against
+    that realpath'd root, so an agents home reached via a symlink — a symlinked `$HOME`, an
+    NFS mount, or `AIMAESTRO_AGENTS_HOME` pointed at a non-canonical path — never matched
+    even though the two strings name the SAME directory: the exclusion silently went
+    hands-off exactly where it should have been owned.
+    """
+    real_home = tmp_path / "real-agents-home"
+    real_home.mkdir()
+    symlinked_home = tmp_path / "symlinked-agents-home"
+    symlinked_home.symlink_to(real_home)
+    bob_dir = real_home / "bob"
+    bob_dir.mkdir()
+
+    monkeypatch.setenv(hb.AGENTS_HOME_ENV, str(symlinked_home))
+    # What find_janitor_root would hand in: os.path.realpath of the scanned cwd — resolved
+    # THROUGH the symlink, so it never contains the symlinked path's own text.
+    realpath_root = str(bob_dir.resolve())
+    assert symlinked_home.name not in realpath_root, "test setup: root must not lexically contain the symlink's own path"
+    assert hb.root_under_agents_home(realpath_root) is True
+
+
 # --- the roots cache ---------------------------------------------------------------
 
 def test_agent_roots_cache_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

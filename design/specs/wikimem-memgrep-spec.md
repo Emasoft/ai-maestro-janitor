@@ -867,6 +867,16 @@ a regression cannot ship quietly.
 to compare against every prior version. Re-capture only when the DEFAULT behaviour legitimately
 changed, and record the before/after numbers in the commit that does it.
 
+`WM-BENCH-06a` **a-clean-lint-is-a-precondition-of-a-valid-measurement** (issue #119) — `MUST`:
+the harness refuses to score a corpus `memgrep lint` reports an `atom-dropped-props` finding for
+(`--allow-dropped-keywords` required to override). A comma inside `keywords:` has everything
+after the first comma DISCARDED by the parser, so a truncated atom's recall surface makes
+`hit@1/3/10` unable to tell "the ranker missed it" from "nothing could ever have retrieved it" —
+the loss is silently absorbed into the baseline instead of reported, and a later ranker
+improvement earns no credit for a query that was structurally unretrievable. The one documented
+exception is WM-BENCH-06's own legacy fixture, which is INTENTIONALLY kept in the broken form and
+must pass the flag explicitly; the primary (conformant) corpus must never need it.
+
 `WM-BENCH-07` **measure-the-binary-under-test** — `MUST`: the harness runs the build being
 evaluated, not whatever is on `PATH`. Otherwise every measurement silently scores the INSTALLED
 build and reports the old numbers as the new build's improvement — a self-confirming result that

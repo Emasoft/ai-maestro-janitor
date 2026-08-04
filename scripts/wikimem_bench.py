@@ -30,6 +30,18 @@ return a bare listing and a hop becomes necessary. Assuming one or the other wou
 mis-score whichever end of that change is being measured, so the harness checks whether the
 target atom's body is already present in the search output and only pays for a hop when it is
 not. `hop_used` is reported per query.
+
+A CLEAN LINT IS A PRECONDITION OF A VALID MEASUREMENT (issue #119). An atom whose `keywords:`
+value contains a comma has everything after the first comma DISCARDED by memgrep's parser
+(`atom-dropped-props`) — its recall surface is silently truncated. On a corpus with that defect,
+`hit@1/3/10` cannot distinguish "the ranker missed it" from "nothing could ever have retrieved
+it": a truncated atom silently depresses the baseline, and a later ranker improvement gets no
+credit for a query that was structurally unretrievable. So `main()` refuses to score a corpus
+that lints `atom-dropped-props`-dirty unless the caller passes `--allow-dropped-keywords` —
+the escape hatch the LEGACY fixture corpus needs, because it is INTENTIONALLY kept in the
+pre-migration comma form (see `tests/wikimem_bench/README.md`) to track that exact trade
+against the repaired `wikimem-bench-conformant/` corpus. The PRIMARY corpus is never expected
+to need the flag; if it ever does, that is a real regression, not a fixture choice.
 """
 
 from __future__ import annotations
@@ -42,6 +54,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+import wikimem_syntax_lint
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_QUERIES = REPO / "tests" / "wikimem_bench" / "queries.json"
@@ -117,6 +131,25 @@ def corpus_arg(corpus: Path) -> str:
         return str(corpus.resolve().relative_to(REPO))
     except ValueError:
         return str(corpus)  # genuinely outside the repo (a --live spot check): nothing to normalise
+
+
+def dropped_props_findings(corpus: Path) -> list[str]:
+    """The `atom-dropped-props` finding lines for `corpus` (empty ⇒ clean). Issue #119.
+
+    Uses the SAME `MEMGREP` binary the rest of this file measures against (WM-BENCH-07: never
+    silently score a different build) rather than `wikimem_syntax_lint`'s own PATH/cargo-bin
+    resolution — only its pure `parse_findings` regex is reused, not its binary lookup.
+    """
+    proc = subprocess.run(
+        [MEMGREP, "lint", corpus_arg(corpus)],
+        capture_output=True, text=True, timeout=300, cwd=REPO,
+    )
+    findings = wikimem_syntax_lint.parse_findings(proc.stdout + proc.stderr)
+    return [
+        f"{f.sev} {f.path}:{f.line} [{f.code}] — {f.msg}"
+        for f in findings
+        if f.code == "atom-dropped-props"
+    ]
 
 
 def run_recall(query: str, corpus: Path, extra: list[str], top: int) -> str:
@@ -309,6 +342,15 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="compare against the baseline; non-zero on regression")
     ap.add_argument("--tolerance", type=float, default=0.02, help="allowed fractional token rise")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument(
+        "--allow-dropped-keywords",
+        action="store_true",
+        help=(
+            "measure a corpus even if memgrep lint reports atom-dropped-props (issue #119). "
+            "Only the LEGACY fixture corpus needs this — it is intentionally kept in the "
+            "pre-migration comma form; see tests/wikimem_bench/README.md."
+        ),
+    )
     a = ap.parse_args()
 
     spec = json.loads(a.queries.read_text(encoding="utf-8"))
@@ -316,6 +358,22 @@ def main() -> int:
     if not corpus.is_dir():
         print(f"corpus not found: {corpus}", file=sys.stderr)
         return 2
+
+    if not a.allow_dropped_keywords:
+        bad = dropped_props_findings(corpus)
+        if bad:
+            print(
+                f"wikimem_bench: refusing to measure {corpus} — memgrep lint reports "
+                f"{len(bad)} atom-dropped-props finding(s). A truncated recall surface makes "
+                "hit@1/3/10 unable to tell 'the ranker missed it' from 'nothing could ever have "
+                "retrieved it'. Fix the corpus's keywords: (join key-phrases with `_`, don't "
+                "comma-separate them), or pass --allow-dropped-keywords for a fixture that is "
+                "deliberately measuring the broken form:",
+                file=sys.stderr,
+            )
+            for line in bad:
+                print(f"  {line}", file=sys.stderr)
+            return 2
 
     res = score(spec["queries"], corpus, a.recall_args.split(), a.top)
     res["corpus"] = str(corpus.relative_to(REPO)) if corpus.is_relative_to(REPO) else str(corpus)

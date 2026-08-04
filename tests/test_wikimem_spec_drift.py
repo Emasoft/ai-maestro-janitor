@@ -28,6 +28,7 @@ from conftest import MEMGREP_BIN_PATH
 
 REPO = Path(__file__).resolve().parent.parent
 SPEC = REPO / "design" / "specs" / "wikimem-memgrep-spec.md"
+SKILL = REPO / "scripts" / "memgrep" / "SKILL.md"
 
 # The wikimem verbs, from main.rs's hand-rolled dispatch (it pre-empts clap, so `--help` has no
 # `Commands:` section to enumerate — hence the literal list, which the first test pins to source).
@@ -178,3 +179,43 @@ def test_the_spec_names_no_flag_that_does_not_exist() -> None:
     assert "--output" in promised, "the span scanner found no `--output`, a flag this spec certainly promises — it is matching nothing, so the assertion below would pass vacuously"
     phantom = sorted(promised - real)
     assert not phantom, f"{SPEC.name} names flags that memgrep does not accept: {phantom}. A spec that promises a flag invites someone to 'restore' it."
+
+
+_SPAN_FIRST_WORD = re.compile(r"^([a-z][a-z0-9-]*)")
+
+
+def _skill_documented_verbs() -> set[str]:
+    """Every verb SKILL.md documents as an INVOCATION — the first token of a backticked span
+    (`` `verb ARGS` ``, the shape every command-syntax mention in this file already uses).
+
+    Verb names are ordinary English words (`find`, `edit`, `atom`, `index`...), so a bare
+    substring/word-boundary search over the whole file would match them constantly in plain prose
+    ("an atom's body", "find the...") and pass whether or not the verb is actually documented as a
+    command. Scoping to backticked spans, and to the FIRST token of each span, is what makes a
+    match mean "this is command syntax" rather than "this English word occurs somewhere".
+    """
+    return {
+        m.group(1)
+        for span in _backticked_spans(SKILL.read_text(encoding="utf-8"))
+        if (m := _SPAN_FIRST_WORD.match(span))
+    }
+
+
+def test_every_verb_is_named_in_the_skill() -> None:
+    """Every verb `main.rs` dispatches must be documented in SKILL.md — the artefact an agent
+    actually LOADS into context (janitor#127).
+
+    `memgrep --help` listing a verb is not enough: an agent handed "your index is broken" reaches
+    for the skill, not `--help`. Measured on this file before the fix: `validate` — the one verb
+    the safety-critical repair protocol depends on (`memgrep validate <page> && memgrep lint
+    <page>`) — existed in the CLI with zero mention here, so the skill's own advice for a broken
+    index was `reindex`, which MEMGREP-011's catalog text says NOT to do. This is the mechanical
+    check the issue's own text asked for: it would have caught that the day `validate` landed.
+    """
+    documented = _skill_documented_verbs()
+    missing = sorted(v for v in VERBS if v not in documented)
+    assert not missing, (
+        f"{SKILL.name} never documents `memgrep {{{','.join(missing)}}}` as an invocation (a "
+        "backticked `verb ...` span) — an agent loading the skill cannot discover it. Add a "
+        "table row or example line."
+    )

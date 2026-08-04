@@ -11,11 +11,17 @@ corpora, each with its own committed baseline:
 Run them as:
 
 ```bash
-uv run scripts/wikimem_bench.py --check                                    # legacy
+uv run scripts/wikimem_bench.py --check --allow-dropped-keywords           # legacy
 uv run scripts/wikimem_bench.py --check \
   --corpus tests/fixtures/wikimem-bench-conformant \
   --baseline tests/wikimem_bench/baseline-conformant.json                  # primary
 ```
+
+**`--allow-dropped-keywords` is mandatory for the legacy run** (issue #119). The harness refuses
+to score any corpus `memgrep lint` reports an `atom-dropped-props` finding for: on such a corpus
+`hit@1/3/10` cannot tell "the ranker missed it" from "nothing could ever have retrieved it" — a
+truncated atom silently depresses the baseline instead of being reported. The legacy corpus below
+is the ONE deliberate exception; the primary corpus must never need the flag.
 
 Set `MEMGREP_BIN=/path/to/target/release/memgrep` to measure a build **before** installing it —
 otherwise every run silently scores whatever is on `PATH` and reports the old binary's numbers as

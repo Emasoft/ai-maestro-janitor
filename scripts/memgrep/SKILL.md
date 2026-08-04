@@ -24,6 +24,31 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
 | `lint <memdir>` | deterministic, FP-free note-integrity check — footnote balance (every `[^N]` ref has a `[^N]:` def and vice-versa), the bidirectional LINK LAW (A links `[[B]]` ⟹ B links back), and required fields (`ocd`/`lmd`/`description` + a `## Notes and lessons learned` section). Prints `path:line — what is wrong`; exits non-zero on any violation (usable as a pre-commit / write-skill gate) |
 | `fact [--cat/--comp/--session/--kind/--since/--until]` | query one-fact-per-line memory lines; `--with-notes` (OFF by default here) appends matched files' lessons |
+| `validate <memdir>...` | the index-safety CHECK — see "Validating the index" below before reaching for `reindex` |
+| `atom <ID> <memdir>` | print ONE atom's full record (content + resolved `[^N]` footnotes) by id — the same record `recall <ATOM-ID>` returns, callable directly when the id is already known |
+| `atom-page <ID> <memdir>` | print the path of the wikimem page that CURRENTLY holds an atom id (an atom can move via `migrate`) |
+| `overview <memdir>` | print the `<project>-overview.md` navigation entry page |
+| `add-atom --page P --keywords K [--desc D]` (body on stdin) | author a memory ATOM into an existing page — id/dates/syntax synthesised, so a malformed atom is impossible. The sanctioned way to add a fact; never hand-author the `^id [...]` marker |
+| `new-page --path P --tier hub\|aspect\|component --name N --description D --type PAGE_TYPE` | scaffold a new wikimem page with valid frontmatter + the mandatory `## Notes and lessons learned` section (refuses to overwrite) |
+| `add-lesson --page P --atom A --keywords K [--desc D] [--supersedes]` (DO-NOT/BECAUSE/DO on stdin) | author a `[^N]` lesson anchored to an atom's body; `--supersedes` embeds that atom's CURRENT verbatim body as a trailing `SUPERSEDED BODY:` block — the correction protocol, never a delete/overwrite |
+| `migrate --from F --to T <ATOM> [--base-sha256 H]` | move an atom AND its baggage (lessons, refs) between pages, renumbering footnotes; CAS-guarded against a stale read of `--from` |
+| `edit --page P --old-file O --new-file N [--base-sha256 H]` | the sanctioned replace-X-with-Y primitive for a page's existing text — locked, CAS-checked, refuses on ambiguity or staleness. The ONE sanctioned edit path for prose already on a page; never hand-edit wikimem markdown |
+
+### Validating the index — run this BEFORE `reindex`, not after
+
+`memgrep validate <memdir>...` is a NON-healing probe, on purpose: `index`/`reindex`/`recall` all
+self-heal on open, so a probe built on any of them always finds the index pristine — even when
+something keeps RE-breaking it. Per-root output line: `OK` (clean), `NONE` (no index built yet —
+not a defect), `STALE <root> […]` (the binary is NEWER than the on-disk schema — a normal,
+harmless state; the next `reindex`/`recall` migrates it forward, nothing is broken), or `FAIL
+<root> [MEMGREP-NNN] <reason>` (a real defect — do NOT reflexively `reindex`; look up `MEMGREP-NNN`
+in `docs/ISSUE-CODES.md` for the actual repair, because rebuilding is the WRONG fix for some codes).
+Exit code is 1 iff any root is `FAIL` — `STALE` alone exits 0.
+
+Every self-repair `index`/`reindex`/`recall` performs in passing is appended to
+`<memdir>/.memgrep/self-heal.log` (one `<epoch> <stage> <why>` line per repair). Read it before
+assuming a corruption is gone: a repair that keeps recurring means something keeps re-breaking the
+index, which is a code bug to hunt down, not a database to rebuild again.
 
 ### `recall` / `find` shared flags
 
