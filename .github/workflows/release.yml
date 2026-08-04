@@ -110,11 +110,11 @@ jobs:
           # alone. `|| true` and a discarded stdout: this step must never be able to fail
           # the release — even if the probe subcommand errors, uvx has already BUILT and
           # cached the package, which is the only thing being bought here.
-          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.1.0" \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.1.0" \
+            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the

@@ -97,7 +97,7 @@ jobs:
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
           run_cpv() {
-            timeout 300 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.1.0" \
+            timeout 300 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v4.2.0" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
