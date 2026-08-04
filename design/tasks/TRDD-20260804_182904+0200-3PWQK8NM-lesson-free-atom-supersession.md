@@ -43,11 +43,29 @@ and the old body is demoted beneath it in the same transaction. That reads corre
 (`add-atom --supersedes` = "this replaces that") and reuses the existing CAS + scope-lock
 write path.
 
+**MECHANISM — verified in the source 2026-08-04, correcting this card's first draft.** The page
+already has the container this needs and it is NOT a footnote: a canonical `## Superseded`
+delimiter heading (TRDD-57WJL5L2). Every `status: superseded` atom MUST sit BELOW it — `lint`
+enforces both directions (an atom marked superseded above the heading, and a page with
+superseded atoms but no heading) — and `recall` skips them unless `--include-superseded`. That
+is exactly the owner's "moved down to the notes as a superseded version", already implemented.
+
+So the operation is a MOVE plus an INSERT, not a footnote append:
+
+1. mark the target atom `status: superseded` + `superseded-by:<new atom id>`;
+2. MOVE it verbatim below the `## Superseded` heading (creating the heading if absent);
+3. insert the NEW atom, carrying the current truth, in the live section above.
+
+**ID CORRECTION**: this card first said "the atom KEEPS ITS ID", copied by analogy from the
+correct-in-place lesson path. That is WRONG here and would have been built wrong: both versions
+coexist on the page, so they cannot share an id. The SUPERSEDED atom keeps its original id and
+gains `superseded-by:`; the NEW atom gets a fresh id. The chain is by id-linkage, which is what
+makes it unbounded — v1 → v2 → v3, each pointing at its successor. The `-v2` anti-pattern being
+avoided is a duplicate LIVE atom, not a dated superseded one.
+
 MUST hold, inherited from the lesson-bearing path:
 
-- the old body is embedded VERBATIM as a dated superseded version — never dropped
-  (`WM-LES-06`, `WM-LES-07`);
-- the atom KEEPS ITS ID (a `-v2` duplicate is the anti-pattern);
+- the old body survives VERBATIM — never dropped, never summarised (`WM-LES-06`, `WM-LES-07`);
 - the chain is unbounded — N supersessions, newest truth on top, each prior body dated
   beneath it;
 - `--base-sha256` CAS + the scope write lock apply exactly as for every other write verb;
@@ -66,10 +84,11 @@ decides.
 ## 4. Acceptance
 
 - [ ] An atom can be superseded with NO lesson, in one transaction.
-- [ ] The old body survives verbatim, dated, beneath the new one.
-- [ ] The atom id is unchanged; no `-v2` page or atom appears.
-- [ ] A second supersession of the same atom appends rather than replacing the first (chain,
-      not a slot).
+- [ ] The old atom is moved BELOW `## Superseded`, verbatim, marked `status: superseded` +
+      `superseded-by:<new id>`; the heading is created when the page lacks one.
+- [ ] `recall` returns the NEW atom and skips the old one unless `--include-superseded`.
+- [ ] A second supersession chains (v1 → v2 → v3) rather than overwriting the first record.
+- [ ] No duplicate LIVE atom is left behind.
 - [ ] `validate` + `lint` clean; existing lesson-bearing supersession is unaffected.
 - [ ] Spec drift suite recognises the new verb (`tests/test_wikimem_spec_drift.py`).
 - [ ] The `WM-LES-10` lint check warns on a substantive in-place edit.
