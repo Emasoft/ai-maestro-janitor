@@ -317,45 +317,63 @@ def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:
 def _clear_kw(**over):
     kw = dict(
         user_present=False, active_waiting=False,
-        min_idle_s=21600, min_context_tokens=350_000,
+        min_idle_s=3600,
     )
     kw.update(over)
     return kw
 
 
-def test_long_idle_fat_session_is_cleared():
-    """The case the directive names: left alone a long time, big context, nobody waiting."""
-    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw()) is True
+def test_an_hour_of_nothing_but_heartbeats_is_cleared():
+    """The case the directive names (owner 2026-08-04): *"if the project main agent is just
+    running the janitor beats while doing nothing else for more than 1 hour, it MUST handoff
+    and clear automatically"*. One hour, nobody present, nothing waiting → clear."""
+    assert ccc.should_clear_when_long_idle(3_601, **_clear_kw()) is True
 
 
-def test_every_veto_blocks_the_clear_independently():
-    """Each gate alone must be sufficient to stop a DESTRUCTIVE action — checked one at a time
-    so a later refactor cannot quietly make one of them redundant and leave the others carrying
-    it. A `/clear` is irreversible; there is no partial credit for 'most gates held'."""
-    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw(user_present=True)) is False
-    assert ccc.should_clear_when_long_idle(500_000, 30_000, **_clear_kw(active_waiting=True)) is False
-    assert ccc.should_clear_when_long_idle(500_000, 100, **_clear_kw()) is False, "not idle long enough"
-    assert ccc.should_clear_when_long_idle(10_000, 30_000, **_clear_kw()) is False, "context too small"
+def test_context_size_is_NOT_a_gate():
+    """SIZE MUST NOT VETO. The previous 350k floor was reasoned from what a clear SAVES, but
+    the directive is about whether an abandoned session should keep its context alive at all —
+    and a threshold high enough to rarely be met is how the compact path became a feature that
+    could never fire (its 716k bar sat above the harness's own ~670k compaction point).
+
+    A tiny idle session still clears: it costs almost nothing and it is what was asked for."""
+    assert ccc.should_clear_when_long_idle(3_601, **_clear_kw()) is True  # size never consulted
+    import inspect
+
+    params = inspect.signature(ccc.should_clear_when_long_idle).parameters
+    assert "context_tokens" not in params and "min_context_tokens" not in params, (
+        "a size term is back in the clear gate — the directive says idle time decides"
+    )
 
 
-def test_an_UNKNOWN_measurement_never_authorizes_a_clear():
-    """`None` is not zero and must not read as 'small' or 'idle forever'.
-
-    `context_tokens_for` and `transcript_activity` both return None when they cannot read the
-    transcript — a fresh session, a moved checkout, a permissions error. Treating None as a
-    satisfied gate would clear a session precisely when we know least about it, which is the
-    worst possible moment for an irreversible action."""
-    assert ccc.should_clear_when_long_idle(None, 30_000, **_clear_kw()) is False
-    assert ccc.should_clear_when_long_idle(500_000, None, **_clear_kw()) is False
-    assert ccc.should_clear_when_long_idle(None, None, **_clear_kw()) is False
+def test_every_remaining_veto_blocks_the_clear_independently():
+    """Each surviving gate alone must stop a DESTRUCTIVE action — checked one at a time so a
+    refactor cannot quietly make one redundant and leave the others carrying it. A `/clear` is
+    irreversible; there is no partial credit for 'most gates held'."""
+    assert ccc.should_clear_when_long_idle(30_000, **_clear_kw(user_present=True)) is False
+    assert ccc.should_clear_when_long_idle(30_000, **_clear_kw(active_waiting=True)) is False
+    assert ccc.should_clear_when_long_idle(100, **_clear_kw()) is False, "not idle long enough"
+    assert ccc.should_clear_when_long_idle(3_599, **_clear_kw()) is False, "boundary: just under 1h"
 
 
-def test_the_clear_threshold_sits_ABOVE_the_compaction_floor():
-    """Load-bearing relationship, not a taste. `refresh_floor` measured a real compaction at
-    343,007 -> 308,644: the base install plus the summary reload every time, so that floor is a
-    property of the install. Below it `/clear` reclaims nothing `/compact` did not already, so
-    firing the destructive lever there would buy nothing. The default must stay above it."""
-    assert ccc.DEFAULT_CLEAR_MIN_CONTEXT_TOKENS > 308_644
+def test_an_UNKNOWN_idle_age_never_authorizes_a_clear():
+    """`None` is not zero and must not read as 'idle forever'. `transcript_activity` returns
+    None when it cannot read the transcript — a fresh session, a moved checkout, a permissions
+    error. Treating None as a satisfied gate would clear a session precisely when we know least
+    about it, which is the worst possible moment for an irreversible action.
+
+    Note this is now the ONLY None that can appear here: dropping the size term also dropped an
+    unknown-CONTEXT veto that silently disabled the lever on any unmeasurable transcript."""
+    assert ccc.should_clear_when_long_idle(None, **_clear_kw()) is False
+
+
+def test_the_idle_threshold_is_one_hour():
+    """Pinned because it is a stated directive, not a taste — and because the value it replaced
+    (6h) was chosen on the reasoning that an hour-idle session "may simply be between turns".
+    That reasoning does not survive the measurement source: the idle age fed in here is
+    SUBSTANTIVE (heartbeat enqueues discounted), so an hour of it is already an hour of nothing
+    but beats."""
+    assert ccc.DEFAULT_CLEAR_MIN_IDLE_SECONDS == 3600
 
 
 def test_clear_is_gated_by_its_own_knob_not_the_compact_master(monkeypatch):

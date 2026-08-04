@@ -2048,3 +2048,84 @@ def test_main_stamps_fire_time_even_on_the_earliest_early_return(
     _capture_stdout(dispatch.main)
     lines = [ln for ln in log.read_text().splitlines() if "fire epoch=" in ln]
     assert len(lines) == 2, "the stamp is per-fire, not once-per-session"
+
+
+# --------------------------------------------------------------------------- #
+# Idle handoff-and-clear — the phase FIRES the command, it does not ask for it
+# --------------------------------------------------------------------------- #
+
+
+def _arm_idle_clear(dispatch, monkeypatch, *, idle_s, present=False, active=False, ctx=500_000):
+    """Put the phase in the state where only the decision under test differs."""
+    sent: list = []
+    import cold_cache_compact
+    import fleet_scan
+    import terminal_trigger
+    import user_intent
+
+    monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: present)
+    monkeypatch.setattr(dispatch, "_cadence_active_waiting", lambda sd, now: active)
+    monkeypatch.setattr(fleet_scan, "transcript_activity", lambda root, now: (idle_s, 0, False))
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
+    monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
+    monkeypatch.setattr(
+        terminal_trigger, "send_self_command", lambda cmd, **kw: sent.append((cmd, kw)) or "FIRED:x"
+    )
+    return sent
+
+
+def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict, monkeypatch) -> None:
+    """The whole point (owner directive 2026-08-04): an abandoned session must handoff and
+    clear AUTOMATICALLY. This phase used to print 'run /janitor-handoff-and-clear' — which the
+    heartbeat protocol treats as payload to surface, not an instruction — so on exactly the
+    sessions it targets (nobody watching) it never happened. Assert the keystroke, not the
+    prose: a test that only checked stdout would have passed against the broken version."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200)
+    assert dispatch._phase_idle_clear_nudge() is True
+    assert len(sent) == 1, "the command was not injected"
+    assert sent[0][0] == "/janitor-handoff-and-clear"
+    # It must remain a SELF-trigger that respects a human at the keyboard.
+    assert sent[0][1].get("respect_user_presence") is True
+
+
+def test_idle_clear_fires_regardless_of_context_SIZE(env_isolation: dict, monkeypatch) -> None:
+    """Size is not a gate any more. A 40k idle session clears just like a 500k one — the
+    directive is about an abandoned session keeping its context alive, not about how much the
+    clear reclaims. The old 350k floor is exactly how the compact path became unreachable."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, ctx=40_000)
+    assert dispatch._phase_idle_clear_nudge() is True
+    assert [c for c, _ in sent] == ["/janitor-handoff-and-clear"]
+
+
+def test_idle_clear_holds_off_under_an_hour(env_isolation: dict, monkeypatch) -> None:
+    """Boundary, so the threshold cannot be silently widened back toward the old 6h."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=3_599)
+    assert dispatch._phase_idle_clear_nudge() is False
+    assert sent == []
+
+
+def test_idle_clear_never_fires_on_a_live_session(env_isolation: dict, monkeypatch) -> None:
+    """Two independent vetoes on an IRREVERSIBLE action, asserted separately so a refactor
+    cannot leave one carrying the other: a human at the keyboard, and a session waiting on a
+    resume. Each must block the keystroke, not merely the log line."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, present=True)
+    assert dispatch._phase_idle_clear_nudge() is False
+    assert sent == []
+
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, active=True)
+    assert dispatch._phase_idle_clear_nudge() is False
+    assert sent == []
+
+
+def test_idle_clear_does_not_refire_during_cooldown(env_isolation: dict, monkeypatch) -> None:
+    """A cleared session that goes idle again is not urgent, and re-firing would clear the
+    fresh post-clear context — including the handoff the previous clear just wrote."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200)
+    assert dispatch._phase_idle_clear_nudge() is True
+    assert dispatch._phase_idle_clear_nudge() is False, "fired twice inside the cooldown"
+    assert len(sent) == 1

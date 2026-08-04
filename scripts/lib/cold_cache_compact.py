@@ -111,15 +111,14 @@ _LAST_COMPACT_STAMP = "last-compact.ts"  # high-water mark, written by the PostC
 # than a fat one at SLOW.
 CLEAR_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_ENABLED"
 CLEAR_MIN_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_IDLE_SECONDS"
-CLEAR_MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
 CLEAR_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_COOLDOWN_SECONDS"
-# 6h: deliberately far longer than the compact path's 1h. "Left alone for a long time" is the
-# owner's phrase and the discriminator — a session idle for an hour may simply be between
-# turns; one idle for six, with no user input, is abandoned.
-DEFAULT_CLEAR_MIN_IDLE_SECONDS = 21600
-# Well above the ~308k compaction floor: below it there is nothing for `/clear` to reclaim that
-# `/compact` did not already, so firing the destructive lever would buy nothing.
-DEFAULT_CLEAR_MIN_CONTEXT_TOKENS = 350_000
+# 1h (owner directive 2026-08-04, overriding the earlier 6h): *"if the project main agent is
+# just running the janitor beats while doing nothing else for more than 1 hour, it MUST handoff
+# and clear automatically"*. The old 6h reasoned that an hour-idle session "may simply be
+# between turns" — but the idle clock this reads is SUBSTANTIVE age
+# (`fleet_scan.transcript_activity` discounts trailing heartbeat enqueues), so an hour of it
+# already means an hour of nothing but beats. There is no "between turns" left to protect.
+DEFAULT_CLEAR_MIN_IDLE_SECONDS = 3600
 DEFAULT_CLEAR_COOLDOWN_SECONDS = 7200  # 2h — a cleared session that re-fattens is not urgent
 _CLEAR_FIRED_STAMP = "idle-clear-fired.ts"
 
@@ -192,10 +191,6 @@ def clear_min_idle_seconds() -> int:
     return state.coerce_int(os.environ.get(CLEAR_MIN_IDLE_ENV), DEFAULT_CLEAR_MIN_IDLE_SECONDS)
 
 
-def clear_min_context_tokens() -> int:
-    return state.coerce_int(os.environ.get(CLEAR_MIN_CONTEXT_ENV), DEFAULT_CLEAR_MIN_CONTEXT_TOKENS)
-
-
 def clear_cooldown_seconds() -> int:
     return state.coerce_int(os.environ.get(CLEAR_COOLDOWN_ENV), DEFAULT_CLEAR_COOLDOWN_SECONDS)
 
@@ -216,21 +211,28 @@ def mark_clear_fired(state_dir: Path, *, now: int) -> None:
 # --- pure policy ------------------------------------------------------------
 
 def should_clear_when_long_idle(
-    context_tokens: int | None,
     idle_seconds: int | None,
     *,
     user_present: bool,
     active_waiting: bool,
     min_idle_s: int,
-    min_context_tokens: int,
 ) -> bool:
-    """PURE. Is this session abandoned-and-fat enough that `/clear` beats leaving it alone?
+    """PURE. Has this session done nothing but beat its heartbeat for long enough that
+    `/clear` beats leaving it alone?
 
-    Every gate is a veto, and `None` for either measurement is a veto too: an unknown context
-    or an unknown idle age must never authorize a DESTRUCTIVE action. Unlike the compact path
-    there is deliberately no `min_gain`/floor term — the whole point is that `/clear` goes
-    BELOW the compaction floor, so comparing against that floor would veto exactly the case
-    this exists for.
+    SIZE IS NOT A TERM (owner directive 2026-08-04, overriding the earlier 350k floor):
+    *"if the project main agent is just running the janitor beats while doing nothing else
+    for more than 1 hour, it MUST handoff and clear automatically"*. The old size gate was
+    reasoned from the compaction floor — below ~308k `/clear` reclaims little more than
+    `/compact` — but that argues about how much a clear SAVES, not whether an abandoned
+    session should keep its context alive, and it is the same class of mistake that made the
+    compact path unreachable: a threshold high enough to never be met is a feature that does
+    not exist. Dropping it also removes the unknown-context veto, which silently disabled the
+    lever on any session whose transcript could not be measured.
+
+    `None` idle is still a veto: an unknown idle age must never authorize a DESTRUCTIVE
+    action. `user_present` and `active_waiting` remain vetoes — a session someone is typing
+    into, or one waiting on a resume, is not abandoned.
 
     Note what is NOT checked here, because it cannot happen: a session parked on
     `ExitPlanMode`/`AskUserQuestion` or mid-long-tool cannot END ITS TURN, so its cron never
@@ -240,11 +242,9 @@ def should_clear_when_long_idle(
     """
     if user_present or active_waiting:
         return False
-    if context_tokens is None or idle_seconds is None:
+    if idle_seconds is None:
         return False
-    if idle_seconds < min_idle_s:
-        return False
-    return context_tokens >= min_context_tokens
+    return idle_seconds >= min_idle_s
 
 def should_compact_proactively_idle(
     context_tokens: int | None,

@@ -1590,11 +1590,17 @@ def _phase_idle_clear_nudge() -> bool:
     so an idle session demotes to the SLOW tier (fewer fires); this shrinks what each fire
     re-reads (smaller fires). A small context at FAST beats a fat one at SLOW.
 
-    WHY A NUDGE AND NOT AN INJECTION — the model must author a FRESH handoff in the same turn
-    it clears. `/clear` is irreversible and the handoff is the only survivor, so a keystroke
-    typed from outside (which cannot write one) would be data loss. `clear_trigger.py` is built
-    as a SELF-trigger for exactly this reason: it validates the handoff the model just wrote.
-    Never route this through `fleet_inject`.
+    WHY IT INJECTS (owner directive 2026-08-04, correcting this phase's original design) — it
+    used to only PRINT "run /janitor-handoff-and-clear". The heartbeat protocol treats a prose
+    line as PAYLOAD to surface, not an instruction to obey, so the lever depended on an
+    attentive reader — on precisely the sessions that by definition have none. It never fired.
+
+    Injecting is not "clearing from outside", which was the original objection: we type the
+    COMMAND into the session's own pane, so the MODEL runs it and authors the handoff first;
+    `clear_trigger.py` then validates that handoff and only then clears. The keystroke
+    machinery already solves delivery — `terminal_trigger` waits for an 8s quiet window,
+    re-reads the input field, and retries until the command is genuinely sent. Still a
+    SELF-trigger: never route this through `fleet_inject`.
 
     WHY IT CANNOT HIT A BUSY SESSION — a session parked on `ExitPlanMode`/`AskUserQuestion` or
     mid-long-tool cannot end its turn, so its cron never fires and this phase never runs. That
@@ -1607,6 +1613,7 @@ def _phase_idle_clear_nudge() -> bool:
         # and the heartbeat's hot path stays import-light.
         import cold_cache_compact  # noqa: PLC0415
         import fleet_scan  # noqa: PLC0415
+        import terminal_trigger  # noqa: PLC0415
         import user_intent  # noqa: PLC0415
 
         if not cold_cache_compact.clear_enabled():
@@ -1626,22 +1633,45 @@ def _phase_idle_clear_nudge() -> bool:
             cold_cache_compact.newest_transcript(root)
         )
         if not cold_cache_compact.should_clear_when_long_idle(
-            ctx,
             idle_s,
             user_present=present,
             active_waiting=active,
             min_idle_s=cold_cache_compact.clear_min_idle_seconds(),
-            min_context_tokens=cold_cache_compact.clear_min_context_tokens(),
         ):
             return False
-        cold_cache_compact.mark_clear_fired(sd, now=now)
         hours = (idle_s or 0) // 3600
+        # FIRE IT, don't ask for it (owner directive 2026-08-04: *"it MUST handoff and clear
+        # automatically"*). This used to print a prose line asking the model to run the
+        # command — which the heartbeat protocol correctly treats as PAYLOAD to surface, not
+        # an instruction to obey, so on a genuinely abandoned session (the only kind that
+        # reaches here) there was nobody to read it. A lever that needs an attentive reader
+        # is not automatic.
+        #
+        # Injecting is SAFE and is not "clearing from outside": we type the COMMAND, so the
+        # model itself runs it and authors the handoff before anything is dropped —
+        # `clear_trigger.py` validates that handoff and only then clears. The retry
+        # machinery is already solved in `terminal_trigger` (it waits for an 8s quiet
+        # window, re-reads the field, and keeps trying until the command is really SENT),
+        # so this is a call, not a mechanism to invent.
+        sent = terminal_trigger.send_self_command(
+            "/janitor-handoff-and-clear",
+            esc_first=False,
+            respect_user_presence=True,
+        )
+        # STAMP ONLY ON A SEND. The cooldown exists so a CLEARED session does not re-clear;
+        # stamping it after a REFUSED send would instead mean "the user happened to be typing
+        # at 03:00, so skip the clear for two hours" — the veto silently becoming a mute. Not
+        # stamping makes the next heartbeat retry, which is the coarse outer retry; the 8s
+        # inner retry is `terminal_trigger.inject_until_sent`'s three rules and is NOT what
+        # this call reaches today (see the phase docstring).
+        if sent == terminal_trigger.USER_PRESENT:
+            return False
+        cold_cache_compact.mark_clear_fired(sd, now=now)
         print(
-            f"[janitor-idle-clear] this session has been idle ~{hours}h with a large context "
-            f"(~{(ctx or 0) // 1000}k tokens) while its heartbeat keeps firing — every fire "
-            "re-reads that whole context. Run /janitor-handoff-and-clear NOW: it writes a "
-            "handoff first, then clears, so the next fires cost almost nothing. Compacting "
-            "instead would NOT help — it cannot go below its own floor."
+            f"[janitor-idle-clear] nothing but heartbeats for ~{hours}h "
+            f"(~{(ctx or 0) // 1000}k context) — firing /janitor-handoff-and-clear so the "
+            "next fires cost almost nothing. Compacting instead would NOT help: it cannot go "
+            "below its own floor."
         )
         return True
     except Exception as exc:  # never let a cost optimisation break the heartbeat
