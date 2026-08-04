@@ -882,6 +882,7 @@ add-atom
 new-page
 add-lesson
 migrate
+edit
 ```
 
 `WM-CLI-02` **read-verbs** — `recall` (rank by symptom), `find` (keyword DSL: `+must`,
@@ -891,10 +892,39 @@ migrate
 `basic`), `--with-keywords`, `--with-notes`/`--no-notes` — and `recall <ATOM-ID>` is the exact
 second hop. See WM-RCL-06/07/08, which own the contract.
 
+`WM-CLI-02a` **superseded-excluded-by-default** — `recall` and `find` `MUST` omit atoms marked
+`status:superseded` from their results unless `--include-superseded` is passed. A superseded atom
+is retained deliberately (the correction protocol demotes, never deletes — WM-LES), but it states
+something that is NO LONGER TRUE; surfacing it beside live atoms is how a reader acts on a fact
+the corpus already retracted. The flag exists for auditing the retraction history itself.
+
 `WM-CLI-03` **write-verbs-synthesise-syntax** — `new-page` (valid frontmatter + mandatory Notes
 section; refuses to overwrite), `add-atom` (`--desc` stored QUOTED ≤200 chars; id/dates/syntax
 synthesised so a malformed atom is impossible), `add-lesson` (anchors `[^N]` from the atom
 body; DO-NOT/BECAUSE/DO on stdin).
+
+`WM-CLI-11` **write-concurrency-gate** (TRDD-7YHT3FNK) — EVERY write verb `MUST` hold the
+scope's write lock for the whole read→modify→write, and `MUST` accept an optional
+`--base-sha256 <hex>` compare-and-swap guard. The lock is `flock(EX)` on
+`<global-state>/memory-maint-<sha16>.lock`, where `sha16` is the first 16 hex of sha256 over the
+REALPATH-resolved scope-root path string — computed identically in Rust and Python so memgrep
+and the Python transaction core mutually exclude, and so a symlinked page takes its canonical
+scope's lock instead of forking a second one. Acquisition BLOCKS with a bounded timeout
+(`MEMGREP_LOCK_TIMEOUT_S`, default 10s): the kernel's flock queue IS the write queue, so
+concurrent writers serialise rather than fail. When `--base-sha256` is supplied and the live
+page's hash differs at lock-acquisition time, the verb `MUST` write nothing and fail with
+EXACTLY: `The content of the wikimem file changed since your command was enqueued. Please reread
+the file first.` Verbs invoked WITHOUT the flag are still lost-update-safe, because their read
+now happens under the lock. `migrate` locks BOTH scopes, ordered by lock path, so two migrations
+in opposite directions cannot deadlock.
+
+`WM-CLI-12` **edit-is-the-replace-primitive** (TRDD-7YHT3FNK) — `memgrep edit --page <PAGE>
+--old-file <F1> --new-file <F2>` is the sanctioned replace-X-with-Y primitive for a live page: raw bytes,
+plain substring, NEVER a regex. It `MUST` apply only when the old text matches the page exactly
+and UNIQUELY. Zero matches, or a `--base-sha256` mismatch, `MUST` produce the WM-CLI-11 refusal
+verbatim and write nothing; more than one match `MUST` be refused naming the count unless
+`--replace-all` opts in explicitly. It exists so an agent can edit a page WITHOUT reading the
+whole page into context — which is why it, and not raw shell, is the scriptable path.
 
 Their flags, which WM-CLI-10 holds them to:
 

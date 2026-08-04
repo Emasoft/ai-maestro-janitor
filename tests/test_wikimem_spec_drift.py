@@ -48,6 +48,7 @@ VERBS = (
     "new-page",
     "add-lesson",
     "migrate",
+    "edit",
 )
 
 # Flags the spec deliberately does not describe, each with the reason it is exempt. An allowlist
