@@ -282,6 +282,54 @@ def test_start_hook_records_agent(iso) -> None:
     assert [e["agentId"] for e in data] == ["abc999"]
 
 
+def test_start_hook_drops_the_parent_sessions_transcript(iso) -> None:
+    """A transcript whose stem == session_id is the SESSION's file, not the agent's, so it
+    is NOT stored. Measured 2026-08-04: workflow-spawned subagents get the parent session's
+    transcript_path in this payload (12 of them, all pointing at the live session), while an
+    Agent-tool spawn recorded its own. Keeping it would make respawn_prompt() rebuild the
+    SESSION's first user message as if it were the agent's job — a silent, plausible,
+    completely unrelated respawn. Empty means 'unrecoverable', which is the truth."""
+    project = iso["project"]
+    sid = "be8c05d6-8513-4f84-8980-7fe885a361a0"
+    res = _run_hook(
+        _START_HOOK,
+        {
+            "hook_event_name": "SubagentStart",
+            "agent_id": "wf001",
+            "session_id": sid,
+            "transcript_path": f"/tmp/projects/whatever/{sid}.jsonl",
+            "cwd": str(project),
+        },
+        project,
+    )
+    assert res.returncode == 0, res.stderr
+    data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
+    assert [e["agentId"] for e in data] == ["wf001"]
+    assert data[0]["transcript"] == ""
+
+
+def test_start_hook_keeps_a_genuine_agent_transcript(iso) -> None:
+    """The guard must reject ONLY the session's own file. An agent whose transcript stem
+    differs from session_id owns that transcript, and it stays — otherwise the fix would
+    delete the recovery handle it exists to protect (the janitor's own Agent-tool spawns
+    are exactly this shape)."""
+    project = iso["project"]
+    res = _run_hook(
+        _START_HOOK,
+        {
+            "hook_event_name": "SubagentStart",
+            "agent_id": "mem001",
+            "session_id": "be8c05d6-8513-4f84-8980-7fe885a361a0",
+            "transcript_path": "/tmp/projects/whatever/e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl",
+            "cwd": str(project),
+        },
+        project,
+    )
+    assert res.returncode == 0, res.stderr
+    data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
+    assert data[0]["transcript"] == "/tmp/projects/whatever/e804d2c9-f6af-400e-a6ce-ddd09d54ed45.jsonl"
+
+
 def test_stop_hook_removes_agent(iso) -> None:
     """A SubagentStop that DOES carry agent_id clears the matching entry."""
     project, pa = iso["project"], iso["pa"]

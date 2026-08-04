@@ -52,6 +52,19 @@ def main() -> int:
             # this agent ever fails, its transcript is the only faithful source of the
             # job it was given (its first user message IS the spawn prompt).
             transcript = str(payload.get("transcript_path", "") or "")
+            # ...but ONLY when it is the AGENT's own transcript. Workflow-spawned
+            # subagents get the PARENT SESSION's transcript_path in this payload
+            # (measured 2026-08-04: 12 workflow-subagents all recorded the parent's
+            # file, while an Agent-tool spawn in the same manifest recorded its own).
+            # Storing that turns the recovery handle into a trap — respawn_prompt
+            # would read the SESSION's first user message and rebuild a completely
+            # unrelated job, silently and plausibly. Transcripts are named
+            # `<session-id>.jsonl`, so a stem equal to session_id PROVES the file is
+            # the session's, not the agent's. Empty is honest: spawn_prompt("")
+            # already yields "" and the caller reports the prompt as unrecoverable.
+            session_id = str(payload.get("session_id", "") or "").strip()
+            if session_id and transcript and Path(transcript).stem == session_id:
+                transcript = ""
     except (ValueError, TypeError):
         return 0
     if not agent_id.strip():
