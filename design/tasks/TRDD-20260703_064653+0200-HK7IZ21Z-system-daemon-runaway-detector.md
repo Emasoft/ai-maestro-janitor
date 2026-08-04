@@ -1,9 +1,9 @@
 ---
 trdd-id: HK7IZ21Z
 title: Failure-class detector — warn on fseventsd/mds/any process RAM-CPU runaway + disk pressure
-column: backburner
+column: todo
 created: 2026-07-03T06:46:53+0200
-updated: 2026-07-03T06:46:53+0200
+updated: 2026-08-05T01:30:23+0200
 current-owner: janitor-session
 assignee: null
 priority: 3
@@ -23,7 +23,18 @@ implementation-commits: []
 
 # TRDD-HK7IZ21Z — system-daemon runaway detector (the fseventsd-class safety net)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-05
+
+**2026-08-05 board triage (`backburner → todo`):** this card's own NEXT ACTION was "promote
+from backburner when the parent's release ships." Verified, not assumed: the parent
+TRDD-ZNN0UK5K is `column: complete`, and its fix commit `33ef7eb` is an ancestor of `HEAD`
+and contained in every tag from `v1.0.0` through `v2.3.0` (`git merge-base --is-ancestor` +
+`git tag --contains`, both run fresh). Grepped `scripts/` and `tests/` for
+`system-daemon-runaway` / `system_daemon_runaway` — nothing exists yet, so this is real,
+unstarted work, not a done-but-unclosed card. Moved to `todo` (ready to pull), not `dev`
+(nobody is building it right now). The design below is unchanged and still the plan to build.
+
+## ⏵ STATE (original) — 2026-07-03
 
 - **Parent:** TRDD-ZNN0UK5K fixed the janitor's OWN cause of a 39GB fseventsd
   runaway (keepalive restage churn + test pollution — commit 33ef7eb, rechecked
