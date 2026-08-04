@@ -406,7 +406,42 @@ def _project_uses_pnpm(root: Path) -> bool:
     return (root / "pnpm-lock.yaml").exists() or (root / _PNPM_SETTINGS_FILE).exists()
 
 
-def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
+def _pnpm_workspace_covers(root: Path, threshold: int, keys: Iterable[str]) -> bool:
+    """True iff `pnpm-workspace.yaml` — the file pnpm ACTUALLY reads — already carries
+    an equal-or-stronger value for EVERY key in `keys` (janitor#174).
+
+    Used to decide whether `package.json#pnpm`'s copies of the same keys are a real
+    safeguard gap or an inert duplicate. Presence of the keys in package.json says
+    nothing about the repo's actual protection — only pnpm-workspace.yaml does — so
+    this re-derives the SAME pass/fail predicate `_audit_pnpm_workspace` uses for its
+    own findings, rather than assuming "misplaced" means "unprotected". A repo whose
+    workspace file is correctly hardened but ALSO carries stale, inert copies in
+    package.json#pnpm was reported as "a safety knob is disabled" (`PKGPOL-001`,
+    re-filed as TRDD-JJFGDV3W then TRDD-COQE20VR) when the safeguard was active the
+    whole time — a false alarm at the same severity as a genuine gap.
+    """
+    p = root / _PNPM_SETTINGS_FILE
+    if not p.is_file():
+        return False
+    y = _parse_yaml(_read_text(p))
+    for key in keys:
+        if key == "minimumReleaseAge":
+            age = _as_int(y.get("minimumReleaseAge"))
+            if age is None or age < threshold:
+                return False
+        elif key == "trustPolicy":
+            if str(y.get("trustPolicy") or "").strip().lower() != "no-downgrade":
+                return False
+        elif key == "blockExoticSubdeps":
+            bes = y.get("blockExoticSubdeps")
+            if bes is None or not _is_truthy(bes):
+                return False
+        else:  # pragma: no cover - defensive; _PNPM_POLICY_KEYS is the only caller input
+            return False
+    return True
+
+
+def _audit_pjson_pnpm(root: Path, threshold: int, issues: list[str]) -> None:
     """Flag pnpm POLICY keys parked in `package.json#pnpm`, where pnpm ignores them.
 
     This function used to PROPOSE that location and then read the keys back from it
@@ -420,6 +455,14 @@ def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
     `patchedDependencies` genuinely live there — which is exactly why the near-miss
     survived review. Only these three POLICY keys are misplaced, so only they are
     flagged, and the remedy names the file that actually takes effect.
+
+    Before flagging, check whether `pnpm-workspace.yaml` already carries an
+    equal-or-stronger value for every misplaced key (janitor#174): pnpm never reads
+    them from package.json, so whether the safeguard is DISABLED is decided entirely
+    by the workspace file, not by what package.json happens to still contain. When
+    the workspace file already covers it, these are inert duplicate copies — worth
+    cleaning up, but not "a safety knob is disabled", and `_audit_pnpm_workspace`
+    already reports the workspace file's own gaps if it does NOT cover them.
     """
     p = root / "package.json"
     if not p.is_file():
@@ -429,11 +472,14 @@ def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
     if not isinstance(pnpm, dict) or not pnpm:
         return
     misplaced = [k for k in _PNPM_POLICY_KEYS if k in pnpm]
-    if misplaced:
-        issues.append(
-            f"package.json#pnpm sets {', '.join(misplaced)} but pnpm does NOT read "
-            f"settings from package.json — move to {_PNPM_SETTINGS_FILE} (verified pnpm 11)"
-        )
+    if not misplaced:
+        return
+    if _pnpm_workspace_covers(root, threshold, misplaced):
+        return
+    issues.append(
+        f"package.json#pnpm sets {', '.join(misplaced)} but pnpm does NOT read "
+        f"settings from package.json — move to {_PNPM_SETTINGS_FILE} (verified pnpm 11)"
+    )
 
 
 def _audit_pnpm_workspace(root: Path, threshold: int, issues: list[str]) -> None:

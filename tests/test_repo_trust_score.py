@@ -109,6 +109,41 @@ def test_silent_with_one_binary_in_examples_dir(tmp_path: Path) -> None:
     assert r.stdout == ""
 
 
+def test_silent_on_canon_compliant_bin_only_plugin(tmp_path: Path) -> None:
+    """janitor#159: a plugin shipping per-platform binaries under bin/ — the layout
+    claude-plugins-validation's ship-only-binary canon MANDATES — must not be
+    penalised for the layout alone. tests + CI + LICENSE + real source (no other
+    dropper signal) → the promo-dir bonus must not apply, keeping the score well
+    under threshold. Two .exe artifacts under bin/ previously consumed half the
+    8-point budget (2 x (1 base + 1 promo-dir bonus) = 4) purely from following the
+    canon; verified this repro against repo-trust-score.py:72,82,113,142."""
+    _seed_legitimate_project(tmp_path)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "pss-windows-x86_64.exe").write_bytes(b"MZ" + b"\x00" * 200)
+    (tmp_path / "bin" / "pss-windows-arm64.exe").write_bytes(b"MZ" + b"\x00" * 200)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_fires_on_bin_binaries_corroborated_by_missing_essentials(tmp_path: Path) -> None:
+    """The corroboration gate is a REAL predicate, not a blanket silence: bin/
+    binaries in a repo that ALSO lacks tests/CI/LICENSE (a genuine corroborating
+    dropper signal) must still contribute the promo-dir bonus and can still cross
+    threshold — dropping the bare bin/ signal must not blind the detector to a
+    dropper that actually uses the bin/ shape."""
+    (tmp_path / "bin").mkdir()
+    for name in ("a.exe", "b.exe", "c.dll", "d.dll", "e.so"):
+        (tmp_path / "bin" / name).write_bytes(b"MZ" + b"\x00" * 100)
+    (tmp_path / "README.md").write_text(
+        "# X\n\nFor Windows users, download from bin/a.exe\n", encoding="utf-8",
+    )
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[repo-trust-score]" in r.stdout
+    assert "promo-dir" in r.stdout
+
+
 # ---------- Fires on the dropper pattern --------------------------------
 
 

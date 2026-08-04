@@ -329,6 +329,22 @@ def test_cache_miss_only_wording_omits_compact_recommendation(tmp_path: Path) ->
     assert "/compact" not in ctx
 
 
+def test_cache_miss_note_states_both_ttl_tiers(tmp_path: Path) -> None:
+    """janitor#163: the cache-write rate is TTL-tiered — ~1.25x for a 5-minute cache
+    entry (subagents / usage-credit sessions) but ~2x for the 1-hour entry that a
+    subscription's main-conversation turn gets by default, which the janitor cannot
+    observe from inside this hook. Stating one flat "~1.25x" understated the
+    dominant case (a subscription main turn) by 60% (measured: 4 consecutive turns
+    matched Claude Code's own cost delta at the 1h rate, not the 5m rate). The note
+    must name BOTH tiers rather than assert a single, sometimes-wrong number."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=80_000))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE_HARD: "75000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "1.25x" in ctx and "2x" in ctx
+
+
 def test_output_only_wording_keeps_compact_recommendation(tmp_path: Path) -> None:
     """An output-driven hard trip (no cache-miss signal) keeps the /compact
     recommendation — it's legitimately correct there."""

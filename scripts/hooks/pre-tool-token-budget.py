@@ -257,10 +257,12 @@ def _deny(reason: str) -> dict:
 
 _CACHE_MISS_NOTE = (
     "A cache-miss write happens once when the prompt prefix changes (an idle gap "
-    ">5 min, or a recent compaction) and is billed ~1.25x — a one-time WRITE cost, not "
-    "standing context size. That write already happened and cannot be undone; see "
-    "/janitor-token-report --live or the context-window % shown by the context watchdog "
-    "if you suspect the context itself is bloated."
+    ">5 min, or a recent compaction) and is billed at a TTL-tiered rate — ~1.25x for "
+    "a 5-minute cache entry (subagents, usage-credit sessions), ~2x for a 1-hour entry "
+    "(the default for a subscription's main-conversation turn) — a one-time WRITE "
+    "cost, not standing context size. That write already happened and cannot be "
+    "undone; see /janitor-token-report --live or the context-window % shown by the "
+    "context watchdog if you suspect the context itself is bloated."
 )
 
 

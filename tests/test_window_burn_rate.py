@@ -368,12 +368,33 @@ def _cause_script(tmp_path: Path, name: str, body: str) -> str:
 
 
 def test_agentlens_cause_prefers_cli(tmp_path: Path, monkeypatch) -> None:
-    """When investigate_burn answers, the clause carries the agentlensPro cause + share."""
+    """When investigate_burn answers, the clause carries the cause + share, EXPLICITLY
+    marked as an inferred suspicion rather than a measured fact (janitor#126) — the
+    counted magnitude (burn ratio / weighted tokens) lives in `trip["line"]`, this
+    clause is the guessed half and must never read at the same confidence."""
     cmd = _cause_script(tmp_path, "inv.sh", f"echo '{_INVESTIGATE_JSON}'")
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
     clause = _wbr._agentlens_cause_clause()
-    assert "agentlensPro cause: FORK_STORM" in clause
+    assert "suspected cause (agentlensPro, unverified): FORK_STORM" in clause
     assert "18% of window" in clause
+
+
+def test_render_suspected_cause_never_reads_as_a_bare_fact() -> None:
+    """janitor#126: the COUNTED magnitude (burn ratio, weighted tokens) and the
+    GUESSED cause must never share one confidence level. `_render_suspected_cause`
+    is the channel-split fix — it must always carry an explicit "suspected"/
+    "unverified" marker, and the classifier's own confidence word ("high") must be
+    scoped to the cause specifically, never asserted about the burn itself."""
+    cause = _wbr.alp.BurnCause(
+        cause="FORK_STORM", share=0.25, confidence="high",
+        workspace=None, multi_workspace=False,
+    )
+    line = _wbr._render_suspected_cause(cause)
+    assert "suspected cause" in line
+    assert "unverified" in line
+    assert "classifier confidence: high" in line
+    # The bare fact-shaped wording this replaces must be gone.
+    assert "agentlensPro cause: FORK_STORM" not in line
 
 
 def test_agentlens_cause_empty_when_disabled(monkeypatch) -> None:

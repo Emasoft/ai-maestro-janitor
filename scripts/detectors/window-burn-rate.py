@@ -86,6 +86,39 @@ def _short_slug(slug: str) -> str:
     return "-".join(parts[-2:]) if parts else slug
 
 
+def _render_suspected_cause(cause: "alp.BurnCause") -> str:
+    """Render a BurnCause as a drift-line suffix explicitly marked INFERRED, never a
+    measured fact (janitor#126).
+
+    `alp.format_cause_clause` phrases the cause as a bare statement —
+    "agentlensPro cause: X (Y%, high)" — presented at the SAME confidence as the
+    magnitude it follows (burn ratio / weighted tokens / robust-z — all COUNTED).
+    Reported case: the same main-loop spend was attributed FORK_STORM in one
+    session and PREMIUM_MODEL_FANOUT in another, both `high` confidence, both
+    checked and found wrong (no live fan-out, no recent subagents) — the label is a
+    heuristic guess, not a count, and must read that way regardless of the
+    classifier's own reported confidence word. This module builds its own
+    rendering (rather than reusing `format_cause_clause`'s text) so the
+    "suspected" framing is guaranteed independent of whatever wording
+    agentlensPro chooses to emit.
+    """
+    parts: list[str] = [cause.cause]
+    detail: list[str] = []
+    if cause.share is not None:
+        detail.append(f"{cause.share * 100:.0f}% of window")
+    if cause.confidence:
+        detail.append(f"classifier confidence: {cause.confidence}")
+    if detail:
+        parts.append(f"({', '.join(detail)})")
+    if cause.workspace:
+        tail = f" in {cause.workspace}"
+    elif cause.multi_workspace:
+        tail = " spanning several workspaces"
+    else:
+        tail = ""
+    return f" suspected cause (agentlensPro, unverified): {' '.join(parts)}{tail}."
+
+
 def _agentlens_cause_clause() -> str:
     """The preferred culprit clause from agentlensPro's `investigate_burn`, or "" when the CLI
     is absent / disabled / uninformative (TRDD-90B47EM9). Config-gated + fail-open: an empty
@@ -122,7 +155,7 @@ def _agentlens_cause_clause() -> str:
         # attribution; a tiny or unquantified finding is noise that would mis-blame its workspace.
         if cause.share is None or cause.share < min_share:
             return ""
-        return state.sanitize_for_drift_line(alp.format_cause_clause(cause))
+        return state.sanitize_for_drift_line(_render_suspected_cause(cause))
     except Exception:
         return ""
 

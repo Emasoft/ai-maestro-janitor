@@ -133,9 +133,21 @@ def _enumerate_suspicious_binaries(root: Path) -> list[Path]:
     return out
 
 
-def _score_binaries(binaries: list[Path], root: Path) -> tuple[int, list[str]]:
-    """Score the binary inventory. Each suspicious blob contributes 1
-    point; one in a suspicious parent dir adds another point."""
+def _score_binaries(binaries: list[Path], root: Path, *, corroborated: bool) -> tuple[int, list[str]]:
+    """Score the binary inventory. Each suspicious blob contributes 1 point.
+
+    The "suspicious parent dir" bonus (janitor#159) only applies when `corroborated`
+    is True — i.e. at least one OTHER dropper signal (README funnel, camouflage
+    ratio, or missing CI/tests/LICENSE) is already present. `bin/` alone is not a
+    dropper signal: it is also the layout claude-plugins-validation's
+    ship-only-binary canon MANDATES for a legitimate compiled-artifact plugin, so
+    scoring the bonus unconditionally penalised a canon-compliant, otherwise
+    maximally-legible repo (tests + CI + LICENSE + real source) purely for shipping
+    binaries where it was told to. Both known-malicious repos in the corpus study
+    (snakebite, Pipeline-Sentinel) present `bin/`-style dirs ALONGSIDE a funnel and
+    missing essentials — never `bin/` in isolation — so requiring corroboration
+    keeps the real catch while dropping the false positive.
+    """
     score = 0
     notes: list[str] = []
     for b in binaries:
@@ -146,7 +158,7 @@ def _score_binaries(binaries: list[Path], root: Path) -> tuple[int, list[str]]:
         except ValueError:
             rel_str = str(b)
         parents = {p.lower() for p in b.parts}
-        if parents & _SUSPICIOUS_PARENTS:
+        if corroborated and (parents & _SUSPICIOUS_PARENTS):
             score += 1
             notes.append(f"suspicious binary in promo-dir: {rel_str}")
         else:
@@ -324,8 +336,10 @@ def main() -> int:
             pass
 
     binaries = _enumerate_suspicious_binaries(project_root)
-    bin_score, bin_notes = _score_binaries(binaries, project_root)
 
+    # Computed BEFORE _score_binaries (janitor#159): the promo-dir bonus needs to know
+    # whether any OTHER dropper signal already corroborates the binaries. None of these
+    # three depend on the binary inventory, so reordering is safe.
     readme = _find_readme(project_root)
     readme_score = 0
     readme_notes: list[str] = []
@@ -334,6 +348,9 @@ def main() -> int:
 
     ratio_score, ratio_notes = _score_code_vs_readme_ratio(project_root, readme)
     essentials_score, essentials_notes = _score_missing_essentials(project_root)
+
+    corroborated = readme_score > 0 or ratio_score > 0 or essentials_score > 0
+    bin_score, bin_notes = _score_binaries(binaries, project_root, corroborated=corroborated)
 
     total_score = bin_score + readme_score + ratio_score + essentials_score
     state.atomic_write(last_hash_file, combined)

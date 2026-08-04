@@ -304,6 +304,50 @@ def test_pnpm_project_missing_workspace_settings_is_flagged_there(tmp_path: Path
     assert "package.json lacks a `pnpm` settings block" not in out
 
 
+def test_pnpm_json_copy_silent_when_workspace_already_covers_it(tmp_path: Path) -> None:
+    """janitor#174: package.json#pnpm carries the POLICY keys AND pnpm-workspace.yaml
+    already enforces an equal-or-stronger value for every one of them → the safeguard
+    is ACTIVE, so this must NOT read as "a safety knob is disabled". Reported live on
+    AgentlensPro: refiled twice (TRDD-JJFGDV3W, TRDD-COQE20VR) against a repo whose
+    pnpm-workspace.yaml already had minimumReleaseAge=7200, trustPolicy=no-downgrade,
+    blockExoticSubdeps=true — verified per-layer on pnpm 11.9.0 that only the
+    workspace file's values take effect."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
+                 "blockExoticSubdeps": True},
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 7200\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" not in out
+    assert "safety knob is disabled" not in out
+
+
+def test_pnpm_json_copy_still_flagged_when_workspace_is_weaker(tmp_path: Path) -> None:
+    """The corroboration check is a REAL predicate, not a blanket silence: when the
+    workspace file's value is weaker than package.json#pnpm's stale copy (or the
+    workspace is missing a key entirely), the misplaced-keys finding still fires —
+    a genuinely unprotected repo must not go quiet just because SOME file mentions
+    the keys."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
+                 "blockExoticSubdeps": True},
+    }), encoding="utf-8")
+    # Workspace exists but its age is BELOW threshold — still a real gap.
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 60\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" in out
+
+
 def test_flags_weak_npmrc(tmp_path: Path) -> None:
     """A .npmrc with weak values flags each issue."""
     (tmp_path / "package.json").write_text(json.dumps({
