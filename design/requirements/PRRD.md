@@ -1,6 +1,6 @@
 ---
-prrd-version: 1.1
-updated: 2026-06-13T15:46:17+0200
+prrd-version: 1.2
+updated: 2026-08-04T20:10:00+0200
 project: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
 mirrors: []
@@ -27,6 +27,10 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 ## 🥇 GOLDEN — set by the USER (immutable to MANAGER)
 
 - **G1.1** — Every agent that writes to GitHub (issue, issue comment, PR, PR comment, PR review, discussion, release note) MUST begin the body with a one-line self-identification of which agent/role/plugin authored it, because all AI Maestro agents share the single human-owner GitHub identity (the owner's gh CLI auth). Recommended leading line: _Posted by the Claude developing **<plugin-or-role>** (via the shared @owner gh auth)._ Commit messages SHOULD carry an `Agent: <role>` trailer.
+- **G7.1** — `CLAUDE.md` is an INDEX, not a knowledge store. It MUST contain exactly five elements and nothing else: (1) a one-paragraph project description, (2) the project URLs, (3) the dev-ops commands, (4) the janitor-generated project-map fence, (5) the janitor-generated wikimem index fence. Every line is re-read into every session's context on every turn, so prose parked here is paid for forever by every agent, whether or not it is relevant to the task at hand.
+- **G8.1** — Any line added to `CLAUDE.md` outside G7.1's five elements MUST be migrated out by the janitor's scheduled chores into the wikimem page that owns its subject — created as a new atom, or folded into an existing atom plus a new `[^N]` lesson learned. The migration is AUTOMATIC and mandatory, not an advisory nudge: a rule that depends on an agent noticing a reminder is the failure mode this replaces.
+- **G9.1** — The ONLY content exempt from G8.1 is basic dev-ops command knowledge: git, commit, branching, merging, linting, building, testing, tagging, pushing, CI, publishing, installing, deploying. Everything else — architecture, gotchas, incident history, design rationale, conventions — MUST live in a wikimem page and be reached by recall.
+- **G10.1** — Every ROOT topic of the PROJECT wikimem MUST appear in `CLAUDE.md`'s wikimem index, and the project-map fence MUST be present and regenerated when the code structure changes. An index that omits a root topic makes that topic unreachable for any agent that does not already know it exists, which defeats the purpose of moving knowledge out under G8.1.
 
 ## 🥈 SILVER — MANAGER-mutable (agents propose via COS)
 
