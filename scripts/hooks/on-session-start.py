@@ -204,23 +204,29 @@ def _maybe_cold_compact_on_session_start(
         from lib import cold_cache_compact  # noqa: E402  -- local package, not PyPI
 
         now = int(time.time())
-        if not cold_cache_compact.enabled() or cold_cache_compact.in_cooldown(
+        # The REPEAT guard (USER directive 2026-08-04) subsumes the old short cooldown: it blocks
+        # when a compaction LANDED (by any means — ours, the user's, or the harness's) or was fired
+        # and may still be landing, inside the 65-min window. Without it a session that stays idle
+        # would compact again on every relaunch/heartbeat past the 55-min trigger.
+        if not cold_cache_compact.enabled() or cold_cache_compact.recently_compacted(
             state.state_dir(), now=now
         ):
             return False
-        ctx = cold_cache_compact.context_tokens_for(transcript_path)
+        # The ONE signal (USER directive 2026-08-04): how long since the last turn. If that is past
+        # the prompt-cache TTL the cache is cold, and the first turn of this resumed session would
+        # re-read the whole context as a cache WRITE — so compact first, whatever its size.
+        min_idle = cold_cache_compact.min_idle_seconds()
+        age = cold_cache_compact.last_turn_age_for(transcript_path, now=now)
         # HARDENING (TRDD-D3PROACT): a resume can hand us a stale/rotated transcript path — if it
-        # yields no size, fall back to the project's NEWEST transcript before giving up. A silent
-        # None here used to mean "no compact" → the large cold context then paid the full 2× write
-        # on the first turn, the exact burn this hook exists to prevent. The fallback is the same
-        # reader dispatch's own paths use, so the two trigger points resolve the same context.
-        if ctx is None:
-            ctx = cold_cache_compact.context_tokens_for(
-                cold_cache_compact.newest_transcript(state.project_root())
+        # yields nothing, fall back to the project's NEWEST transcript before giving up. A silent
+        # None here means "no compact" → the cold context then pays the full 2× write on the first
+        # turn, the exact burn this hook exists to prevent. The fallback is the same reader
+        # dispatch's own paths use, so the two trigger points resolve the same session.
+        if age is None:
+            age = cold_cache_compact.last_turn_age_for(
+                cold_cache_compact.newest_transcript(state.project_root()), now=now
             )
-        if not cold_cache_compact.should_compact_on_resume(
-            ctx, min_context_tokens=cold_cache_compact.min_context_tokens()
-        ):
+        if not cold_cache_compact.should_compact_on_resume(age, min_idle_s=min_idle):
             return False
         compact_py = Path(plugin_root) / "scripts" / "compact_trigger.py"
         if not compact_py.is_file():
@@ -254,7 +260,7 @@ def _maybe_cold_compact_on_session_start(
         state.log_line(
             "session-start",
             f"cold-cache compact fired (source={source}, "
-            f"context={ctx} >= {cold_cache_compact.min_context_tokens()})",
+            f"last turn {age}s ago >= {min_idle}s TTL)",
         )
         return True
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start

@@ -1,10 +1,13 @@
 """Heartbeat rate-limit cold-cache branch (TRDD-EUWIHP0G).
 
-When an IN-SESSION rate-limit gap outlives the 1h prompt-cache TTL AND the resumed
-context is large, `_phase_rate_limit_recovery` self-fires /compact FIRST (so the
-inevitable ~600k cold cache-creation write shrinks to ~50k) instead of emitting the
-normal `[janitor-resume]` cue — the resume arrives AFTER the compaction. These tests
-pin that branch: it fires only when cold AND large, emits a NON-marker notice (never
+When an IN-SESSION rate-limit gap outlives the prompt-cache TTL,
+`_phase_rate_limit_recovery` self-fires /compact FIRST (so the inevitable ~600k cold
+cache-creation write shrinks to ~50k) instead of emitting the normal `[janitor-resume]`
+cue — the resume arrives AFTER the compaction. The context-size half of the old condition
+was REMOVED by USER directive 2026-08-04 ("no matter the value of the context"): the size
+bar was derived from CLAUDE_CODE_AUTO_COMPACT_WINDOW and sat above the harness's own
+compact point, making the branch unreachable. These tests
+pin that branch: it fires whenever the cache is cold, emits a NON-marker notice (never
 `[janitor-resume]`), clears the rate-limit flags, stamps the cooldown, and — crucially —
 FALLS THROUGH to the normal `[janitor-resume]` resume when the compact can't fire
 (headless / NO_ITERM), so a resume is never stalled.
@@ -100,6 +103,12 @@ def _patch_run(monkeypatch: pytest.MonkeyPatch, iso, stdout: str, returncode: in
 
 
 def _set_ctx(monkeypatch: pytest.MonkeyPatch, iso, value) -> None:  # noqa: ANN001
+    """Pin the context size for the PROACTIVE warm-idle phase, which still gates on it.
+
+    The COLD branch below no longer reads size at all (USER directive 2026-08-04), so this
+    helper is deliberately absent from those tests — a `_set_ctx` call there would imply a
+    dependency that does not exist and would mask a regression that re-added one.
+    """
     monkeypatch.setattr(iso.ccc, "context_tokens_for", lambda _p: value)
 
 
@@ -107,14 +116,13 @@ def _set_ctx(monkeypatch: pytest.MonkeyPatch, iso, value) -> None:  # noqa: ANN0
 # _maybe_cold_compact_on_rate_limit — the branch in isolation                  #
 # --------------------------------------------------------------------------- #
 
-def test_fires_when_cold_and_large(iso, monkeypatch: pytest.MonkeyPatch) -> None:
-    """age >= 1h AND context large AND COMPACT_FIRED → returns True, emits a NON-marker
-    notice, clears the rate-limit flags, stamps the cooldown, and spawns compact_trigger."""
+def test_fires_when_cache_expired(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """age >= TTL AND COMPACT_FIRED → returns True, emits a NON-marker notice, clears the
+    rate-limit flags, stamps the cooldown, and spawns compact_trigger."""
     d, state, ccc = iso.dispatch, iso.state, iso.ccc
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("1", encoding="utf-8")
     (sd / "rate-limited-since.ts").write_text("0", encoding="utf-8")
-    _set_ctx(monkeypatch, iso, 500_000)
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
 
     now = int(time.time())
@@ -124,7 +132,7 @@ def test_fires_when_cold_and_large(iso, monkeypatch: pytest.MonkeyPatch) -> None
     # A NON-marker notice, never the bare [janitor-resume] marker (which would start a
     # resume into a context about to be compacted).
     assert "[janitor-resume]" not in out
-    assert "prompt cache is cold" in out
+    assert "prompt cache has gone cold" in out
     assert "/compact" in out
     # Spawned compact_trigger.py with a cold-cache directive.
     assert len(calls) == 1 and calls[0][1].endswith("compact_trigger.py")
@@ -140,20 +148,29 @@ def test_no_fire_when_warm(iso, monkeypatch: pytest.MonkeyPatch) -> None:
     (the cheap age gate short-circuits before run_subprocess)."""
     d, state = iso.dispatch, iso.state
     sd = state.state_dir()
-    _set_ctx(monkeypatch, iso, 500_000)
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
     assert d._maybe_cold_compact_on_rate_limit(sd, 600, int(time.time())) is False
     assert calls == [], "warm cache must not fire /compact"
 
 
-def test_no_fire_when_small_context(iso, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cold but small context → returns False, nothing spawned."""
+def test_fires_even_when_context_is_small(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE TRIPWIRE for the USER's 2026-08-04 rule: a COLD cache fires regardless of size.
+
+    This test asserted the exact opposite until then ("cold but small → no fire"), which is
+    the clause that made the branch unreachable in practice. To prove the branch consults no
+    size at all, `context_tokens_for` is stubbed to raise: any surviving read explodes here
+    rather than passing quietly.
+    """
     d, state = iso.dispatch, iso.state
     sd = state.state_dir()
-    _set_ctx(monkeypatch, iso, 50_000)
+
+    def _boom(_p):  # noqa: ANN001, ANN202
+        raise AssertionError("the cold branch must not consult context size any more")
+
+    monkeypatch.setattr(iso.ccc, "context_tokens_for", _boom)
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
-    assert d._maybe_cold_compact_on_rate_limit(sd, 5_000, int(time.time())) is False
-    assert calls == []
+    assert d._maybe_cold_compact_on_rate_limit(sd, 5_000, int(time.time())) is True
+    assert len(calls) == 1 and calls[0][1].endswith("compact_trigger.py")
 
 
 def test_falls_through_on_no_iterm(iso, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,7 +181,6 @@ def test_falls_through_on_no_iterm(iso, monkeypatch: pytest.MonkeyPatch) -> None
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("1", encoding="utf-8")
     (sd / "rate-limited-since.ts").write_text("0", encoding="utf-8")
-    _set_ctx(monkeypatch, iso, 500_000)
     _patch_run(monkeypatch, iso, "NO_ITERM\n")  # trigger couldn't self-compact
 
     now = int(time.time())
@@ -177,7 +193,6 @@ def test_no_fire_when_disabled(iso, monkeypatch: pytest.MonkeyPatch) -> None:
     d, state = iso.dispatch, iso.state
     sd = state.state_dir()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED", "false")
-    _set_ctx(monkeypatch, iso, 500_000)
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
     assert d._maybe_cold_compact_on_rate_limit(sd, 5_000, int(time.time())) is False
     assert calls == []
@@ -186,7 +201,6 @@ def test_no_fire_when_disabled(iso, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_no_fire_when_in_cooldown(iso, monkeypatch: pytest.MonkeyPatch) -> None:
     d, state, ccc = iso.dispatch, iso.state, iso.ccc
     sd = state.state_dir()
-    _set_ctx(monkeypatch, iso, 500_000)
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
     now = int(time.time())
     ccc.mark_fired(sd, now=now)  # fresh stamp → in cooldown
@@ -205,13 +219,12 @@ def test_phase_cold_branch_replaces_resume_cue(iso, monkeypatch: pytest.MonkeyPa
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("1", encoding="utf-8")
     (sd / "rate-limited-since.ts").write_text(str(int(time.time()) - 6_000), encoding="utf-8")
-    _set_ctx(monkeypatch, iso, 500_000)
     _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
 
     out, ret = _run_capturing(d._phase_rate_limit_recovery)
     assert ret is True
     assert "[janitor-resume]" not in out, "the cold branch must NOT emit the resume marker"
-    assert "prompt cache is cold" in out
+    assert "prompt cache has gone cold" in out
 
 
 def test_phase_normal_resume_when_not_cold(iso, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,7 +234,7 @@ def test_phase_normal_resume_when_not_cold(iso, monkeypatch: pytest.MonkeyPatch)
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("1", encoding="utf-8")
     (sd / "rate-limited-since.ts").write_text(str(int(time.time()) - 30), encoding="utf-8")
-    _set_ctx(monkeypatch, iso, 500_000)  # large, but the gap is warm (30s)
+    # the gap is warm (30s) — that alone must keep the cold branch quiet
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
 
     out, ret = _run_capturing(d._phase_rate_limit_recovery)
@@ -238,7 +251,6 @@ def test_phase_normal_resume_falls_through_on_no_iterm(iso, monkeypatch: pytest.
     sd = state.state_dir()
     (sd / "rate-limited.flag").write_text("1", encoding="utf-8")
     (sd / "rate-limited-since.ts").write_text(str(int(time.time()) - 6_000), encoding="utf-8")
-    _set_ctx(monkeypatch, iso, 500_000)
     _patch_run(monkeypatch, iso, "NO_ITERM\n")
 
     out, ret = _run_capturing(d._phase_rate_limit_recovery)

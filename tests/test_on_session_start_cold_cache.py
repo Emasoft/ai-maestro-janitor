@@ -81,14 +81,17 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return hook, state, ccc, spawned, str(_ROOT)
 
 
-def _set_ctx(monkeypatch: pytest.MonkeyPatch, ccc, value) -> None:  # noqa: ANN001
-    monkeypatch.setattr(ccc, "context_tokens_for", lambda _p: value)
+def _set_age(monkeypatch: pytest.MonkeyPatch, ccc, value) -> None:  # noqa: ANN001
+    """Control the ONE input the gate reads: how long ago the last turn was (USER directive
+    2026-08-04). This replaces the old `_set_ctx`, which pinned a context SIZE — the clause that
+    made the feature dead code (bar 716_000 vs the harness's own 666_000 compact point)."""
+    monkeypatch.setattr(ccc, "last_turn_age_for", lambda _p, *, now: value)
 
 
-def test_fires_on_resume_with_large_context(harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """source=resume + context >= 270k → fires /compact (records cooldown), returns True."""
+def test_fires_on_resume_when_cache_expired(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """source=resume + last turn older than the TTL → fires /compact (records cooldown)."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)  # idle since yesterday — the USER's reported case
 
     fired = hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/session.jsonl")
 
@@ -105,29 +108,47 @@ def test_fires_on_resume_with_large_context(harness, monkeypatch: pytest.MonkeyP
     assert ccc.in_cooldown(state.state_dir(), now=stamp_ts + 1) is True
 
 
-def test_fires_on_startup_with_large_context(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fires_on_startup_when_cache_expired(harness, monkeypatch: pytest.MonkeyPatch) -> None:
     """`startup` is also eligible (a --continue may report startup on some builds); the
-    size guard is the real gate."""
+    last-turn age is the real gate."""
     hook, state, ccc, spawned, plugin_root = harness
-    # Above the default threshold, which is floor-relative (350k > the 308,644 post-compaction
-    # floor) — 300k used to qualify as "large" and no longer does, by design.
-    _set_ctx(monkeypatch, ccc, 400_000)
+    _set_age(monkeypatch, ccc, 4_000)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "startup", "/x/s.jsonl") is True
     assert len(spawned) == 1
 
 
-def test_no_fire_when_context_small(harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A small resumed context (a fresh session) → no fire, nothing spawned."""
+def test_no_fire_when_cache_still_warm(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A session relaunched minutes after its last turn → cache still warm → no fire.
+    Compacting here would spend a lossy write to save nothing."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 12_000)
+    _set_age(monkeypatch, ccc, 600)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/s.jsonl") is False
     assert spawned == []
 
 
-def test_no_fire_when_context_unknown(harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unknown context (bad/empty transcript → None) → no fire."""
+def test_fires_even_when_the_context_is_tiny(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE WIRING TRIPWIRE for the USER's rule: "no matter the value of the context".
+
+    A cold session fires REGARDLESS of size — and to prove the hook consults no size at all,
+    `context_tokens_for` is stubbed to raise: if anything in this path still reads it, this
+    test explodes instead of quietly passing.
+    """
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, None)
+
+    def _boom(_p):  # noqa: ANN001, ANN202
+        raise AssertionError("the cold path must not consult context size any more")
+
+    monkeypatch.setattr(ccc, "context_tokens_for", _boom)
+    _set_age(monkeypatch, ccc, 4_000)
+    assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/s.jsonl") is True
+    assert len(spawned) == 1
+
+
+def test_no_fire_when_last_turn_time_unknown(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No readable transcript ⇒ no last-turn time (None) → no fire. We compact on a POSITIVE
+    observation of expiry, never on absence of evidence."""
+    hook, state, ccc, spawned, plugin_root = harness
+    _set_age(monkeypatch, ccc, None)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "") is False
     assert spawned == []
 
@@ -138,7 +159,7 @@ def test_no_fire_on_non_resume_source(harness, monkeypatch: pytest.MonkeyPatch, 
     hook), a `clear`, or any other source must NOT fire — even with a large context.
     This is the belt-and-suspenders that blocks a re-fire loop."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, source, "/x/s.jsonl") is False
     assert spawned == []
 
@@ -147,7 +168,7 @@ def test_no_fire_when_disabled(harness, monkeypatch: pytest.MonkeyPatch) -> None
     """The opt-out knob disables it even for a large cold resume."""
     hook, state, ccc, spawned, plugin_root = harness
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED", "false")
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/s.jsonl") is False
     assert spawned == []
 
@@ -156,7 +177,7 @@ def test_no_fire_when_in_cooldown(harness, monkeypatch: pytest.MonkeyPatch) -> N
     """A recent cold-compact (cooldown active) suppresses a second fire before the
     first one lands — no double /compact."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)
     import time
 
     ccc.mark_fired(state.state_dir(), now=int(time.time()))  # fresh stamp → in cooldown
@@ -171,7 +192,7 @@ def test_no_iterm_does_not_burn_the_cooldown(harness, monkeypatch: pytest.Monkey
     no compaction — and that also suppressed the heartbeat trigger. Both trigger points must
     agree on what 'fired' means."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)
     monkeypatch.setattr(
         state,
         "run_subprocess",
@@ -190,7 +211,7 @@ def test_no_fire_when_compact_trigger_missing(harness, monkeypatch: pytest.Monke
     """If plugin_root has no compact_trigger.py, the helper degrades to no-op (returns
     False), never spawning a bogus process."""
     hook, state, ccc, spawned, _plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 600_000)
+    _set_age(monkeypatch, ccc, 86_400)
     empty_root = tmp_path / "empty-root"
     (empty_root / "scripts").mkdir(parents=True)
     assert hook._maybe_cold_compact_on_session_start(state, str(empty_root), "resume", "/x/s.jsonl") is False
@@ -200,17 +221,19 @@ def test_no_fire_when_compact_trigger_missing(harness, monkeypatch: pytest.Monke
 def test_falls_back_to_newest_transcript_when_passed_path_unreadable(
         harness, monkeypatch: pytest.MonkeyPatch) -> None:
     """HARDENING (TRDD-D3PROACT): a resume can hand a STALE/rotated transcript path that yields
-    no size. Before the fix that silently meant 'no compact' and the large cold context paid the
+    no reading. Before the fix that silently meant 'no compact' and the cold context paid the
     full 2x write on turn one. Now the hook falls back to the project's NEWEST transcript, finds
-    the real (large) size, and fires — so the burn this hook exists to prevent is actually caught."""
+    the real last-turn time, and fires — so the burn this hook exists to prevent is actually
+    caught. (The fallback still matters after the 2026-08-04 rule change; only the quantity it
+    recovers changed, from context size to last-turn age.)"""
     hook, state, ccc, spawned, plugin_root = harness
     newest = Path("/tmp/real-newest-session.jsonl")
     monkeypatch.setattr(ccc, "newest_transcript", lambda _p: newest)
-    # The passed (stale) path yields None; only the newest transcript has a (large) size.
+    # The passed (stale) path yields None; only the newest transcript has a readable last turn.
     monkeypatch.setattr(
-        ccc, "context_tokens_for",
-        lambda p: 600_000 if p == newest else None,
+        ccc, "last_turn_age_for",
+        lambda p, *, now: 86_400 if p == newest else None,
     )
     fired = hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/stale.jsonl")
-    assert fired is True, "the newest-transcript fallback must recover the size and fire"
+    assert fired is True, "the newest-transcript fallback must recover the last-turn age and fire"
     assert len(spawned) == 1 and spawned[0][1].endswith("compact_trigger.py")

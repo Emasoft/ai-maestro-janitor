@@ -4,12 +4,21 @@ Two PURE gates decide WHEN the janitor self-fires /compact so a resumed large
 context whose 1h prompt cache has gone cold does not drag a ~600k cache-creation
 write across the whole 5h window:
 
-  * should_compact_on_resume   — SessionStart (startup/resume): context-size only.
-  * should_compact_after_idle  — heartbeat rate-limit path: cold AND large.
+  * should_compact_on_resume   — SessionStart (startup/resume).
+  * should_compact_after_idle  — heartbeat rate-limit path.
 
-Each gate is tested as an explicit truth-table PLUS a falsification: removing
-either condition of should_compact_after_idle (idle OR size) must flip the
-verdict, and the >= boundary of should_compact_on_resume must hold exactly. The
+Both now decide on ONE thing: IS THE LAST TURN OLDER THAN THE PROMPT-CACHE TTL
+(USER directive 2026-08-04 — "simply check the last turn datetime. if it is
+older than 55 minutes, it should inject the compact command. no matter the value
+of the context"). The context-size clause these tests used to pin is GONE; the
+tests that pinned it are rewritten below rather than adapted, because they
+encoded the defect: the size bar was derived from CLAUDE_CODE_AUTO_COMPACT_WINDOW
+and so sat ABOVE the point where the harness itself auto-compacts (measured live:
+716,000 vs 666,000), making both gates unreachable — a resumed 500-600k session
+was never compacted and paid a full cold cache-write on its first turn.
+
+Each gate is tested as a truth-table PLUS the exact >= boundary, and the
+absence-of-evidence case (no readable transcript → no fire) is pinned. The
 readers/cooldown/knobs are covered against real tmp files (never mocked).
 """
 
@@ -26,65 +35,120 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 import cold_cache_compact as ccc  # noqa: E402
 
 # --------------------------------------------------------------------------- #
-# should_compact_on_resume — the SessionStart gate (context-size only)          #
+# should_compact_on_resume — the SessionStart gate (last-turn age ONLY)         #
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(
-    ("ctx", "expected"),
+    ("age", "expected"),
     [
-        (None, False),        # unknown context (bad/empty transcript) → never fire
-        (0, False),           # empty context
-        (269_999, False),     # just below the 270k threshold
-        (270_000, True),      # exactly at threshold (>=) — the boundary
-        (600_000, True),      # a real cold resume
+        (None, False),        # no readable transcript ⇒ no last-turn time → never fire
+        (0, False),           # the last turn was just now — cache is warm
+        (3_299, False),       # one second under the 55-min TTL
+        (3_300, True),        # exactly at the TTL (>=) — the boundary
+        (86_400, True),       # idle since yesterday — the USER's reported case
     ],
 )
-def test_should_compact_on_resume_truth_table(ctx, expected) -> None:
-    """Fires iff the resumed context is known AND >= the threshold."""
-    assert ccc.should_compact_on_resume(ctx, min_context_tokens=270_000) is expected
+def test_should_compact_on_resume_truth_table(age, expected) -> None:
+    """Fires iff the last turn's age is known AND >= the TTL. Size is not consulted."""
+    assert ccc.should_compact_on_resume(age, min_idle_s=3_300) is expected
 
 
 def test_should_compact_on_resume_boundary_is_inclusive() -> None:
-    """FALSIFICATION of the boundary: at exactly the threshold it MUST fire (>=, not >).
-    269_999 must NOT and 270_000 MUST — proving the comparison is inclusive."""
-    assert ccc.should_compact_on_resume(269_999, min_context_tokens=270_000) is False
-    assert ccc.should_compact_on_resume(270_000, min_context_tokens=270_000) is True
+    """FALSIFICATION of the boundary: at exactly the TTL it MUST fire (>=, not >)."""
+    assert ccc.should_compact_on_resume(3_299, min_idle_s=3_300) is False
+    assert ccc.should_compact_on_resume(3_300, min_idle_s=3_300) is True
+
+
+def test_resume_ignores_context_size_entirely() -> None:
+    """FALSIFICATION of the retired size clause (the actual bug the USER reported).
+
+    A tiny context that is COLD must fire, and a huge context that is WARM must not.
+    Under the old size-gated shape the first case was the one that silently did
+    nothing on a 500-600k session, because the size bar (716,000, derived from the
+    auto-compact window) sat above where the harness already compacts (666,000).
+    The gate takes no size argument at all now, so the only way to reintroduce the
+    defect is to change the signature — which this call would then fail to make.
+    """
+    assert ccc.should_compact_on_resume(86_400, min_idle_s=3_300) is True   # cold, size irrelevant
+    assert ccc.should_compact_on_resume(60, min_idle_s=3_300) is False      # warm, size irrelevant
 
 
 # --------------------------------------------------------------------------- #
-# should_compact_after_idle — the heartbeat rate-limit gate (cold AND large)    #
+# should_compact_after_idle — the heartbeat rate-limit gate (same one rule)     #
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(
-    ("idle", "ctx", "expected"),
+    ("idle", "expected"),
     [
-        (4_000, 300_000, True),    # cold (idle>=3600) AND large (ctx>=270k) → fire
-        (4_000, 100_000, False),   # cold but SMALL → no fire (nothing to save)
-        (600, 300_000, False),     # large but WARM (idle<3600) → no fire (wasted write)
-        (600, 100_000, False),     # warm and small → no fire
-        (4_000, None, False),      # cold but context unknown → no fire (can't judge)
-        (3_600, 270_000, True),    # both exactly at their thresholds → fire
-        (3_599, 270_000, False),   # idle one second under → no fire
+        (4_000, True),     # cold (>= TTL) → fire
+        (600, False),      # warm → no fire (a compact would waste a write)
+        (3_300, True),     # exactly at the TTL → fire
+        (3_299, False),    # one second under → no fire
     ],
 )
-def test_should_compact_after_idle_truth_table(idle, ctx, expected) -> None:
-    """Requires BOTH: the gap outlived the cache TTL AND the context is large."""
-    assert (
-        ccc.should_compact_after_idle(
-            idle, ctx, min_idle_s=3_600, min_context_tokens=270_000
+def test_should_compact_after_idle_truth_table(idle, expected) -> None:
+    """Requires exactly one thing: the gap outlived the prompt-cache TTL."""
+    assert ccc.should_compact_after_idle(idle, min_idle_s=3_300) is expected
+
+
+def test_recompact_guard_blocks_a_compaction_from_any_route(tmp_path: Path) -> None:
+    """USER directive 2026-08-04: don't compact if one already happened in the last 65 min —
+    "the user may have run the compact itself, or a janitor cron may have executed a planned
+    compact". Both routes land in `last-compact.ts` (the PostCompact hook stamps it for a manual
+    /compact, our injected one, AND the harness's native auto-compact), so checking that stamp is
+    what makes the guard cover compactions the janitor never fired.
+    """
+    sd = tmp_path / "state"
+    sd.mkdir()
+    now = 1_800_000_000
+
+    assert ccc.recently_compacted(sd, now=now) is False  # nothing stamped → free to compact
+
+    # A compaction someone ELSE performed, 10 minutes ago.
+    ccc.mark_compacted(sd, now=now - 600)
+    assert ccc.recently_compacted(sd, now=now) is True
+
+    # …still blocking at 64 min, released at 66.
+    assert ccc.recently_compacted(sd, now=now - 600 + 3_840) is True
+    assert ccc.recently_compacted(sd, now=now - 600 + 3_960) is False
+
+
+def test_recompact_guard_also_covers_a_fire_that_has_not_landed(tmp_path: Path) -> None:
+    """Our own fire counts too: between injecting /compact and the compaction landing there is
+    no `last-compact.ts` yet, and without this the next heartbeat would fire a second one."""
+    sd = tmp_path / "state"
+    sd.mkdir()
+    now = 1_800_000_000
+    ccc.mark_fired(sd, now=now - 30)  # injected half a minute ago, not landed
+    assert ccc.recently_compacted(sd, now=now) is True
+
+
+def test_the_guard_window_exceeds_the_trigger_window() -> None:
+    """THE ANTI-LOOP INVARIANT, asserted as an inequality rather than trusted.
+
+    The trigger fires when the last turn is older than 55 min; the guard blocks a repeat for 65.
+    If the guard were ever made SHORTER than the trigger, a permanently idle session would clear
+    the guard while still satisfying the trigger and compact forever on a cycle. Guard > trigger
+    is what bounds an idle stretch to a single compaction.
+    """
+    assert ccc.DEFAULT_RECOMPACT_GUARD_SECONDS > ccc.DEFAULT_MIN_IDLE_SECONDS
+
+
+def test_recompact_guard_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ccc.RECOMPACT_GUARD_ENV, raising=False)
+    assert ccc.recompact_guard_seconds() == ccc.DEFAULT_RECOMPACT_GUARD_SECONDS == 3_900
+    monkeypatch.setenv(ccc.RECOMPACT_GUARD_ENV, "600")
+    assert ccc.recompact_guard_seconds() == 600
+
+
+def test_both_cold_gates_agree_on_every_age() -> None:
+    """The two paths differ only in WHERE the age comes from, never in what makes a
+    compaction due — so for any known age they must return the same verdict. Pins the
+    unification; a future edit that re-adds a condition to one path breaks this."""
+    for age in (0, 60, 3_299, 3_300, 3_301, 86_400):
+        assert ccc.should_compact_on_resume(age, min_idle_s=3_300) is ccc.should_compact_after_idle(
+            age, min_idle_s=3_300
         )
-        is expected
-    )
-
-
-def test_should_compact_after_idle_needs_both_conditions() -> None:
-    """FALSIFICATION: neither condition alone suffices. Start from a firing case and
-    remove ONE condition at a time — each removal must flip the verdict to False."""
-    assert ccc.should_compact_after_idle(4_000, 300_000, min_idle_s=3_600, min_context_tokens=270_000) is True
-    # drop the idle condition only → False
-    assert ccc.should_compact_after_idle(600, 300_000, min_idle_s=3_600, min_context_tokens=270_000) is False
-    # drop the size condition only → False
-    assert ccc.should_compact_after_idle(4_000, 100_000, min_idle_s=3_600, min_context_tokens=270_000) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -141,9 +205,20 @@ def test_default_threshold_sits_above_the_measured_post_compaction_floor() -> No
     )
 
 
-def test_min_idle_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_min_idle_default_is_55_minutes_not_the_full_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """55 min, deliberately UNDER the 1h prompt-cache TTL (USER directive 2026-08-04).
+
+    The age we measure is the age at CHECK time, but the compact turn runs later and the
+    TTL boundary is not observable from here — waiting the full hour lets the common
+    near-boundary session go cold before we act. Firing 5 min early costs nothing (the
+    session is idle by construction). Pinned as a NUMBER because that margin is the point:
+    a silent drift back to 3600 would reintroduce the miss.
+    """
     monkeypatch.delenv(ccc.MIN_IDLE_ENV, raising=False)
-    assert ccc.min_idle_seconds() == ccc.DEFAULT_MIN_IDLE_SECONDS == 3_600
+    assert ccc.min_idle_seconds() == ccc.DEFAULT_MIN_IDLE_SECONDS == 3_300
+    assert ccc.DEFAULT_MIN_IDLE_SECONDS < 3_600  # the margin, stated as an assertion
     monkeypatch.setenv(ccc.MIN_IDLE_ENV, "7200")
     assert ccc.min_idle_seconds() == 7_200
 

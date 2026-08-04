@@ -818,21 +818,17 @@ def _maybe_cold_compact_on_rate_limit(sd: Path, age: int, now: int) -> bool:
     try:
         import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
 
-        if not cold_cache_compact.enabled() or cold_cache_compact.in_cooldown(sd, now=now):
+        # The REPEAT guard (USER directive 2026-08-04) replaces the old 10-min cooldown here: it
+        # blocks when a compaction LANDED by ANY route inside the 65-min window — ours, one the
+        # user ran by hand, or the harness's own auto-compact (all three write last-compact.ts via
+        # the PostCompact hook) — plus our own fire that may still be landing.
+        if not cold_cache_compact.enabled() or cold_cache_compact.recently_compacted(sd, now=now):
             return False
         min_idle = cold_cache_compact.min_idle_seconds()
-        # Cheap gate first: skip the transcript I/O entirely while the cache is still
-        # warm (a sub-TTL gap can't have gone cold).
-        if age < min_idle:
-            return False
-        transcript = cold_cache_compact.newest_transcript(state.project_root())
-        ctx = cold_cache_compact.context_tokens_for(transcript)
-        if not cold_cache_compact.should_compact_after_idle(
-            age,
-            ctx,
-            min_idle_s=min_idle,
-            min_context_tokens=cold_cache_compact.min_context_tokens(),
-        ):
+        # The ONE condition (USER directive 2026-08-04): the last turn is older than the TTL, so
+        # the prompt cache is cold. No transcript I/O is needed at all any more — the size clause
+        # it used to feed is gone (see `should_compact_on_resume` for why it was wrong).
+        if not cold_cache_compact.should_compact_after_idle(age, min_idle_s=min_idle):
             return False
 
         compact_py = _HERE / "compact_trigger.py"
@@ -880,14 +876,14 @@ def _maybe_cold_compact_on_rate_limit(sd: Path, age: int, now: int) -> bool:
             except FileNotFoundError:
                 pass
         print(
-            f"[janitor] rate limit cleared after {age}s, but the prompt cache is cold and the "
-            f"context is large (~{ctx} tokens). A /compact was queued and runs when this turn "
-            "ends — do NOT start work now; the session auto-resumes your task after the compaction "
-            "shrinks the context (saving the 5h window)."
+            f"[janitor] rate limit cleared after {age}s and the prompt cache has gone cold (last "
+            "turn older than the TTL). A /compact was queued and runs when this turn ends — do NOT "
+            "start work now; the session auto-resumes your task after the compaction shrinks the "
+            "context (saving the 5h window)."
         )
         state.log_line(
             "dispatch",
-            f"cold-cache compact fired on rate-limit resume (age={age}s, context={ctx})",
+            f"cold-cache compact fired on rate-limit resume (last turn {age}s ago >= {min_idle}s)",
         )
         return True
     except Exception as exc:  # noqa: BLE001 -- degrade to the normal resume path; never stall

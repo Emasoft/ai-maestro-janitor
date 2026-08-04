@@ -8,22 +8,33 @@ it sets `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS=350000` whil
 they mean nothing in the suite ever exercised the harness-relative threshold resolution
 (owner directive 2026-07-18) or a real transcript flowing into the gate.
 
-THE STALE-CRITERION INCIDENT this file guards against. TRDD-EUWIHP0G and TRDD-HI0BGQGJ both
-carried the acceptance test "relaunch a session whose context is >270k; /compact must fire".
-That number predates the directive that made the threshold harness-relative. On a machine with
-`CLAUDE_CODE_AUTO_COMPACT_WINDOW=700000` the real threshold is 716_000, so a 270k context
-correctly does NOT fire — and running the criterion as written produces a red result whose
-meaning is "the spec rotted", not "the code is broken". The two ways someone talks themselves
-out of that red are to patch working code, or to lower the threshold until the old number
-passes — which silently re-introduces the janitor/harness compaction race the directive
-removed. `test_the_retired_270k_criterion_must_not_fire` is the tripwire for the second.
+WHAT THE HARNESS-RELATIVE NUMBER STILL GOVERNS (2026-08-04). `min_context_tokens()` is
+unchanged and still resolves relative to `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — it gates the
+PROACTIVE warm-idle path, whose job really is "has the harness's own auto-compaction failed?".
+The resolution tests below are therefore still live and still correct.
 
-Everything here is real: real transcript files, real env resolution, no stubs.
+WHAT IT NO LONGER GOVERNS, and the incident that proves why. The two CACHE-EXPIRED gates
+(`should_compact_on_resume`, `should_compact_after_idle`) used to consult it too. That made
+them DEAD CODE: with the window at 700000 the bar resolved to 716_000 while the harness itself
+compacts at 666_000, so no context could reach it. The USER hit this on 2026-08-04 — several
+instances idle since the previous day, each carrying 500-600k, none compacted, every one paying
+a full cold cache-write on its first turn. Their ruling: *"simply check the last turn datetime.
+if it is older than 55 minutes, it should inject the compact command. no matter the value of the
+context."* The prompt cache expires on TIME, not on size, and the window is a per-project knob
+they change often — so coupling an unrelated bar to it made the trigger swing for no reason.
+
+The old tripwire here asserted the opposite ("a 270k context must NOT fire") and has been
+INVERTED rather than deleted, because the direction of the guard is the whole value:
+`test_the_tripwire_a_small_cold_context_MUST_fire` now catches anyone re-coupling the cold path
+to a size bar. Fix the criterion, never the code — in whichever direction the owner has ruled.
+
+Everything here is real: real transcript files, real mtimes, real env resolution, no stubs.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -145,31 +156,67 @@ def test_a_real_transcript_resolves_its_context_size(tmp_path: Path):
     assert ccc.context_tokens_for(t) == 750_000
 
 
-def test_the_gate_fires_above_and_stays_quiet_below(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """End to end on real files: above the resolved threshold fires, below it does not.
+def test_the_gate_fires_on_an_old_transcript_and_stays_quiet_on_a_fresh_one(tmp_path: Path):
+    """End to end on real files: the gate reads the last-turn time off an actual transcript's
+    mtime, fires when it is past the TTL and stays quiet when it is not.
 
     Both halves matter — an "it fires" test alone passes just as well on a gate that always
-    fires, which is how a threshold regression reaches production looking green.
+    fires, which is how a regression reaches production looking green.
+    """
+    now = 1_800_000_000
+    old = _transcript(tmp_path / "old.jsonl", 40_000)     # SMALL and stale
+    fresh = _transcript(tmp_path / "fresh.jsonl", 900_000)  # HUGE and warm
+    os.utime(old, (now - 86_400, now - 86_400))           # last turn: yesterday
+    os.utime(fresh, (now - 60, now - 60))                 # last turn: a minute ago
+
+    old_age = ccc.last_turn_age_for(old, now=now)
+    fresh_age = ccc.last_turn_age_for(fresh, now=now)
+    assert old_age == 86_400
+    assert fresh_age == 60
+
+    min_idle = ccc.min_idle_seconds()
+    assert ccc.should_compact_on_resume(old_age, min_idle_s=min_idle) is True
+    assert ccc.should_compact_on_resume(fresh_age, min_idle_s=min_idle) is False
+
+
+def test_the_tripwire_a_small_cold_context_MUST_fire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """THE TRIPWIRE, INVERTED by USER directive 2026-08-04.
+
+    It used to assert that a 270k context must NOT fire, guarding the harness-relative
+    threshold. That guard is what made the feature dead code: with
+    `CLAUDE_CODE_AUTO_COMPACT_WINDOW=700000` the bar resolved to 716_000 while the harness
+    itself compacts at 666_000, so NO context could ever reach it and a resumed 500-600k
+    session was never compacted — it paid a full cold cache-write on its first turn instead.
+
+    The USER's rule is now: *"simply check the last turn datetime. if it is older than 55
+    minutes, it should inject the compact command. no matter the value of the context."* So a
+    SMALL, COLD context must fire, and the auto-compact window — a per-project setting they
+    change often — must not influence it at all. If this test ever goes green-by-NOT-firing,
+    someone has re-coupled the cold path to a size bar and reintroduced the burn.
     """
     monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-    threshold = ccc.min_context_tokens()
-    above = ccc.context_tokens_for(_transcript(tmp_path / "hi.jsonl", threshold + 30_000))
-    below = ccc.context_tokens_for(_transcript(tmp_path / "lo.jsonl", threshold - 30_000))
+    now = 1_800_000_000
+    t = _transcript(tmp_path / "small_but_cold.jsonl", 40_000)
+    os.utime(t, (now - 4_000, now - 4_000))
 
-    assert ccc.should_compact_on_resume(above, min_context_tokens=threshold) is True
-    assert ccc.should_compact_on_resume(below, min_context_tokens=threshold) is False
+    assert ccc.context_tokens_for(t) == 40_000            # genuinely small…
+    age = ccc.last_turn_age_for(t, now=now)
+    assert ccc.should_compact_on_resume(age, min_idle_s=ccc.min_idle_seconds()) is True
+
+    # …and the window knob must not move that verdict, at any value.
+    for window in ("100000", "700000", "2000000"):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", window)
+        assert ccc.should_compact_on_resume(age, min_idle_s=ccc.min_idle_seconds()) is True
 
 
-def test_the_retired_270k_criterion_must_not_fire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """THE TRIPWIRE. A 270k context must NOT compact under the harness-relative threshold.
+def test_last_turn_age_refuses_to_invent_evidence(tmp_path: Path):
+    """Absence of evidence is not evidence of expiry: an unreadable transcript and a
+    future mtime (clock skew / a touched file) both yield None, and None never fires."""
+    now = 1_800_000_000
+    assert ccc.last_turn_age_for(None, now=now) is None
+    assert ccc.last_turn_age_for(tmp_path / "does-not-exist.jsonl", now=now) is None
 
-    270_000 is the number TRDD-EUWIHP0G and TRDD-HI0BGQGJ were written against, before the
-    threshold became harness-relative. If this test ever goes green-by-firing, someone has
-    lowered the threshold to satisfy the retired criterion and has put the janitor back in
-    competition with Claude Code's own auto-compaction. Fix the criterion, never the threshold.
-    """
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-    ctx = ccc.context_tokens_for(_transcript(tmp_path / "legacy.jsonl", 270_000))
-
-    assert ctx == 270_000
-    assert ccc.should_compact_on_resume(ctx, min_context_tokens=ccc.min_context_tokens()) is False
+    future = _transcript(tmp_path / "future.jsonl", 50_000)
+    os.utime(future, (now + 5_000, now + 5_000))
+    assert ccc.last_turn_age_for(future, now=now) is None
+    assert ccc.should_compact_on_resume(None, min_idle_s=ccc.min_idle_seconds()) is False
