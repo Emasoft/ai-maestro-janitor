@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6ce3e2f14968 digest=6da64e7a9c40 generated=2026-08-03T01:42:29+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=72de5c81a015 digest=7cce641314b8 generated=2026-08-04T18:21:26+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -376,22 +376,18 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
-`scripts/lib/cold_cache_compact.py` — Cold-cache auto-compact policy + readers (TRDD-EUWIHP0G).
+`scripts/lib/cold_cache_compact.py` — Auto-compact policy + readers — the PREVENTIVE (warm) lever only.
   · enabled() -> bool
   · min_context_tokens() -> int — The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
-  · min_idle_seconds() -> int
   · cooldown_seconds() -> int
   · min_gain_tokens() -> int
   · proactive_idle_enabled() -> bool — The preventive path is gated by BOTH the master cold-compact switch AND its own knob, so
   · clear_enabled() -> bool — Gated by its OWN knob only — NOT by `enabled()`. The cold-compact master switch governs
   · clear_min_idle_seconds() -> int
-  · clear_min_context_tokens() -> int
   · clear_cooldown_seconds() -> int
   · clear_in_cooldown(state_dir, *, now) -> bool
   · mark_clear_fired(state_dir, *, now) -> None — Best-effort; a stamp failure must never break the nudge itself.
-  · should_clear_when_long_idle(context_tokens, idle_seconds, *, user_present, active_waiting, min_idle_s, min_context_tokens) -> bool — PURE. Is this session abandoned-and-fat enough that `/clear` beats leaving it alone?
-  · should_compact_on_resume(context_tokens, *, min_context_tokens) -> bool — SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.
-  · should_compact_after_idle(idle_seconds, context_tokens, *, min_idle_s, min_context_tokens) -> bool — Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold (idle past the TTL) AND
+  · should_clear_when_long_idle(idle_seconds, *, user_present, active_waiting, min_idle_s) -> bool — PURE. Has this session done nothing but beat its heartbeat for long enough that
   · should_compact_proactively_idle(context_tokens, *, user_present, active_waiting, min_context_tokens, floor_tokens, min_gain) -> bool — PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
   · context_tokens_for(transcript_path) -> int | None — Live context occupancy for a transcript, or None when unknown. Thin, never-raising wrapper
   · newest_transcript(project_dir) -> Path | None — The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
@@ -755,7 +751,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · mirror_preservation_ok(buffer_notes, wiki_corpus, min_len) -> tuple[bool, list[str]] — Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
   · canonicalize_retired_links(text, retired_slugs, survivor_slug) -> str — Rewrite every `[[retired]]` wikilink to `[[survivor]]` — the redirect a merge MANDATES.
-  · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
+  · redirect_memory_md_links(text, retired_slugs, survivor_slug) -> str — Repoint every `](<retired>.md)` markdown link in MEMORY.md at `<survivor>.md` (janitor#182).
+  · no_dangling_memory_md_refs(memory_md_text, retired_slugs, survivor_slug) -> tuple[bool, list[str]] — The verify half of `redirect_memory_md_links` (janitor#182): no MEMORY.md link may still
+  · no_dangling_refs(live_pages, retired_slugs, survivor_slug) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
   · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
   · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
   · atom_footnote_citations(text) -> dict[str, set[str]] — `{atom_id: set of footnote ids that atom's BODY cites}` for one page.
@@ -765,7 +763,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · is_legal_split(meta, body, min_sections, oversized) -> tuple[bool, str] — Decide whether a page may be split. Per the wikimem model "one element =
   · split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, str] — When a `hub` splits, its `globs:` ownership must PARTITION across the
   · split_converged(page_sizes, max_bytes, unsplittable) -> tuple[bool, list[str]] — Every output page is within the size cap, OR explicitly flagged
-  · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages, fact_source_texts) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
+  · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages, fact_source_texts, memory_md_text) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
   · verify_split(source_text, source_meta, subpage_texts, subpage_metas, overview_text, page_sizes, max_bytes, unsplittable, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a SPLIT lost nothing before its transaction commits.
   · verify_repair(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an in-place page REPAIR lost nothing AND actually completed the page.
   · atom_desc_violations(text) -> list[str] — Every atom marker whose `desc:` is MISSING, UNQUOTED, or over the 200-char cap —
@@ -1569,7 +1567,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=418c45254aaf generated=2026-08-02T18:23:55+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=e6954b071585 generated=2026-08-04T18:21:30+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -1593,26 +1591,27 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-fleet-guardian-reachability](.claude/project/memory/janitor-fleet-guardian-reachability.md) — the status table says a project is NOT armed but I armed it myself
   - [three-pillars-rules-ownership](.claude/project/memory/three-pillars-rules-ownership.md) — which repo owns trdd-design-tasks
   - [janitor-daemon-handover-unowned-chores](.claude/project/memory/janitor-daemon-handover-unowned-chores.md) — every daemon chore stamp is frozen at the same age but no flag is set
+  - [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
+  - [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
+  - [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
+  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the 39 janitor detectors by group
+  - [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
+  - [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
 
 **Other topics**
+- [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
 - [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
 - [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
 - [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment — why did terminal/TTY detection report wrong (…
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
-- [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
-- [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the 39 janitor detectors by group
-- [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
-- [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
 - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
 - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
 - [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
-- [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
 - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
-- [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
