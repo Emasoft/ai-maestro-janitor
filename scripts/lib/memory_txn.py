@@ -55,6 +55,16 @@ _PHASE_DONE = "done"              # fully applied → only cleanup remains
 # as the floor for filesystems with unreliable mtimes. 6 h default.
 _STALE_SECONDS_DEFAULT = 21600
 
+# Issue #158: nothing discouraged a pass from BATCH-OPENING many transactions up
+# front (a real incident opened 47 USER-scope transactions in 3.5s, then went off
+# to edit each in turn) — any interruption of that pass orphans every one of them
+# at once, and while they sit open the corpus looks mid-edit to every other
+# reader. `begin -> stage -> commit` is meant to be short-lived and roughly
+# one-at-a-time; refuse to grow a scope's open (staging-phase) transaction count
+# past this cap rather than merely documenting the contract, so a runaway batch
+# fails LOUD on transaction #(cap + 1) instead of silently fanning out orphans.
+_MAX_CONCURRENT_TXNS_PER_SCOPE = 5
+
 
 class MemoryTxnError(Exception):
     """A transaction precondition failed (stale source, vanished source, lock
@@ -155,6 +165,27 @@ def _sha256_file(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """True iff `pid` names a live process on this host (issue #158's owner-liveness
+    reclaim). `os.kill(pid, 0)` sends no signal, only probes existence/permission.
+
+    Conservative on purpose: an unreadable/ambiguous signal (any OSError other than
+    "no such process") is treated as ALIVE, never as a green light to reclaim — the
+    staleness window (`_STALE_SECONDS_DEFAULT`) remains the fallback for anything
+    this probe cannot confidently call dead."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False  # definitely gone
+    except PermissionError:
+        return True  # exists, just not owned by us — still alive
+    except OSError:
+        return True  # ambiguous — do not reclaim on an uncertain signal
+    return True
+
+
 def _ensure_rel_inside(scope_root: Path, rel: str) -> None:
     """M-10 (wikimem audit 2026-07-07), defense-in-depth: reject any rel-path
     that escapes the scope root. ``Path / <absolute>`` REPLACES the base entirely
@@ -201,6 +232,10 @@ class MemoryTxn:
     # rel_path -> sha256 of the STAGED content (F5). This is what makes "did this write
     # already apply?" a fail-CLOSED question — see _write_already_applied.
     write_hashes: dict = field(default_factory=dict)
+    # The pid that called begin() (issue #158). 0 means "unknown" — a journal written
+    # before this field existed, or a caller that could not resolve one; resume then
+    # falls back to the staleness window exactly as it always did, never a NEW reclaim.
+    owner_pid: int = 0
 
     # ---- construction / persistence ------------------------------------- #
 
@@ -214,8 +249,16 @@ class MemoryTxn:
         the staging tree (so the agent edits the COPY, never the live page, until
         commit). `source_rel_paths` are paths relative to `scope_root`."""
         scope_root = Path(scope_root).resolve()
-        txn_id = uuid.uuid4().hex
         staging_root = cls._staging_root(scope_root)
+        open_count = cls._staging_phase_count(staging_root)
+        if open_count >= _MAX_CONCURRENT_TXNS_PER_SCOPE:
+            raise MemoryTxnError(
+                f"refusing to open transaction #{open_count + 1} on {scope_root}: "
+                f"{_MAX_CONCURRENT_TXNS_PER_SCOPE} already open (issue #158 — begin -> "
+                "stage -> commit is meant to be one transaction at a time; commit or "
+                "abort an open one first, or run resume_pending to reclaim any orphans)"
+            )
+        txn_id = uuid.uuid4().hex
         staging_dir = staging_root / txn_id
         staging_dir.mkdir(parents=True, exist_ok=False)
         sources: dict = {}
@@ -237,16 +280,35 @@ class MemoryTxn:
             scope_root=scope_root, txn_id=txn_id, op=op, staging_dir=staging_dir,
             journal_path=staging_root / f"{txn_id}.json", sources=sources,
             writes=[], deletes=[], phase=_PHASE_STAGING, started_at=int(time.time()),
+            owner_pid=os.getpid(),
         )
         txn._persist()
         return txn
+
+    @classmethod
+    def _staging_phase_count(cls, staging_root: Path) -> int:
+        """How many transactions under `staging_root` are currently in the STAGING
+        phase (begun, not yet committed) — the concurrency `begin()` caps (issue
+        #158). A journal that cannot be parsed is not counted as an open
+        transaction — `resume_pending` (never `begin`) is responsible for those."""
+        if not staging_root.is_dir():
+            return 0
+        count = 0
+        for jp in staging_root.glob("*.json"):
+            try:
+                data = json.loads(jp.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("phase") == _PHASE_STAGING:
+                count += 1
+        return count
 
     def _persist(self) -> None:
         data = {
             "txn_id": self.txn_id, "op": self.op, "scope_root": str(self.scope_root),
             "phase": self.phase, "started_at": self.started_at,
             "sources": self.sources, "writes": self.writes, "deletes": self.deletes,
-            "write_hashes": self.write_hashes,
+            "write_hashes": self.write_hashes, "owner_pid": self.owner_pid,
         }
         # F12: DURABLE, not merely atomic. `state.atomic_write` (tmp + os.replace) is atomic
         # with respect to other PROCESSES, which covers process death — the page cache
@@ -286,6 +348,7 @@ class MemoryTxn:
             writes=data["writes"], deletes=data["deletes"], phase=data["phase"],
             started_at=data.get("started_at", 0),
             write_hashes=data.get("write_hashes") or {},
+            owner_pid=data.get("owner_pid", 0),
         )
 
     # ---- staging -------------------------------------------------------- #
@@ -526,11 +589,15 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
       after the source re-hash passed MUST complete; the staged content is the
       verified end-state.
     - `done` → just clean (the crash was after apply, before cleanup).
-    - `staging` → discard ONLY if the JOURNAL FILE is older than `stale_seconds`
+    - `staging` → discard if the JOURNAL FILE is older than `stale_seconds`
       (mtime-based, M-9: every `_persist` bumps it and an in-flight agent may
       `touch` the journal as a keepalive — a fresh journal belongs to a
-      legitimately in-flight pass between begin and commit; never clobber it).
-      A stale one is a crashed pass that never began applying → safe to drop.
+      legitimately in-flight pass between begin and commit; never clobber it),
+      OR (issue #158) if its recorded `owner_pid` is a process that no longer
+      exists — a FRESH journal whose owner is provably dead is not "in-flight",
+      it is an orphan of a stopped pass, and does not need to wait out
+      `stale_seconds` to be reclaimed. A stale/orphaned one never began applying
+      → safe to drop.
 
     Returns one human-readable line per transaction acted on — including (M-7)
     a `FAILED <id>` line when one txn's handling raised (a poisoned journal must
@@ -573,7 +640,17 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                     fresh_ts = int(jp.stat().st_mtime)
                 except OSError:
                     fresh_ts = txn.started_at
-                if now - max(fresh_ts, txn.started_at) > stale_seconds:
+                is_stale = now - max(fresh_ts, txn.started_at) > stale_seconds
+                # Issue #158: a staging-phase txn whose OWNER PROCESS is provably dead
+                # (the pass was stopped/killed mid-run) is reclaimable the moment we
+                # notice — no live edit can still be in flight for it. Waiting out
+                # `stale_seconds` (6h default) before reclaiming is exactly the 74-orphan
+                # incident: 47 transactions began, stayed FRESH the whole time, and sat
+                # unreclaimable while `resume` reported "nothing pending". `owner_pid == 0`
+                # means an older journal (predates this field) or an unresolved pid — keep
+                # the staleness-only behavior for those, never a new reclaim path.
+                owner_dead = txn.owner_pid > 0 and not _pid_is_alive(txn.owner_pid)
+                if is_stale or owner_dead:
                     # F5(b): this branch rmtree's another pass's staging tree, so it MUST
                     # hold the scope lock — the `committing` branch above already does. The
                     # CLI's contract is cross-process (begin in one turn, agent work, commit
@@ -588,16 +665,22 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                         # ...and the lock alone is not enough, because `stage_write` does
                         # NOT hold it: the owner may have bumped the journal (or flipped it
                         # to `committing`) between our stat and our acquire. RE-READ under
-                        # the lock — that is what actually closes the TOCTOU.
+                        # the lock — that is what actually closes the TOCTOU, for EITHER
+                        # reclaim reason.
                         try:
                             fresh = MemoryTxn._load(jp)
-                            still_stale = int(jp.stat().st_mtime) <= fresh_ts
+                            unchanged = int(jp.stat().st_mtime) <= fresh_ts
                         except (json.JSONDecodeError, KeyError, OSError, MemoryTxnError):
                             continue
-                        if fresh.phase != _PHASE_STAGING or not still_stale:
+                        still_reclaimable = unchanged and (
+                            is_stale
+                            or (fresh.owner_pid > 0 and not _pid_is_alive(fresh.owner_pid))
+                        )
+                        if fresh.phase != _PHASE_STAGING or not still_reclaimable:
                             continue  # it woke up while we were acquiring — it is ALIVE
                         fresh._cleanup()
-                    acted.append(f"discarded stale {txn.txn_id}")
+                    reason = "stale" if is_stale else "owner-dead"
+                    acted.append(f"discarded {reason} {txn.txn_id}")
         except MemoryTxnConflict as exc:
             # F1: NOT a failure — a deliberate, safe refusal. `_apply` proved a source page
             # changed under us and abandoned BEFORE mutating anything, so the live tree and

@@ -118,6 +118,84 @@ def test_begin_edit_staging_commit_applies_merge(tmp_path):
     assert not (MemoryTxn._staging_root(scope) / f"{txn_id}.json").exists()
 
 
+def test_merge_refused_when_memory_md_still_points_at_the_retired_page(tmp_path):
+    """issue #182 (CLI-wiring gap): `verify_merge`'s `memory_md_text` param is
+    opt-in and `_verify_merge` never supplied it, so a merge that retired a page
+    committed clean even while the harness's SECOND index (MEMORY.md) still
+    pointed at the now-deleted file. Read the live MEMORY.md and refuse."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    a = _note("a", body="Auth uses JWT.")
+    b = _note("b", body="Tokens expire in 30s.")
+    (scope / "a.md").write_text(a, encoding="utf-8")
+    (scope / "b.md").write_text(b, encoding="utf-8")
+    (scope / "MEMORY.md").write_text(
+        "# MEMORY\n\n- [B fact](b.md) — tokens expire.\n", encoding="utf-8",
+    )
+
+    txn_id = _txn_id_from_begin(scope, "merge", "a.md", "b.md")
+    staging = _staging(scope, txn_id)
+    (staging / "a.md").unlink()
+    (staging / "b.md").unlink()
+    merged = _note("merged", body="Auth uses JWT. Tokens expire in 30s.")
+    (staging / "merged.md").write_text(merged, encoding="utf-8")
+
+    rc, err = _run_err("commit", scope, txn_id, "--op", "merge")
+    assert rc == 1
+    assert "MEMORY.md" in err, err
+    assert (scope / "a.md").exists() and (scope / "b.md").exists()  # untouched
+    assert not (scope / "merged.md").exists()
+
+
+def test_merge_commits_when_memory_md_was_already_redirected(tmp_path):
+    """The green path: MEMORY.md was repointed by a PRIOR `--op repair` pass (the
+    documented two-transaction holder sequence, merge-protocol.md), so its link
+    already names the survivor — the merge commits clean."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    a = _note("a", body="Auth uses JWT.")
+    b = _note("b", body="Tokens expire in 30s.")
+    (scope / "a.md").write_text(a, encoding="utf-8")
+    (scope / "b.md").write_text(b, encoding="utf-8")
+    (scope / "MEMORY.md").write_text(
+        "# MEMORY\n\n- [B fact](merged.md) — tokens expire.\n", encoding="utf-8",
+    )
+
+    txn_id = _txn_id_from_begin(scope, "merge", "a.md", "b.md")
+    staging = _staging(scope, txn_id)
+    (staging / "a.md").unlink()
+    (staging / "b.md").unlink()
+    merged = _note("merged", body="Auth uses JWT. Tokens expire in 30s.")
+    (staging / "merged.md").write_text(merged, encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 0
+    assert (scope / "merged.md").exists()
+
+
+def test_merge_commits_when_memory_md_is_absent(tmp_path):
+    """No MEMORY.md at all (a scope root without the harness index) must not be
+    misread as a dangling pointer — absence stays silent, matching
+    `verify_merge`'s opt-in contract."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    a = _note("a", body="Auth uses JWT.")
+    b = _note("b", body="Tokens expire in 30s.")
+    (scope / "a.md").write_text(a, encoding="utf-8")
+    (scope / "b.md").write_text(b, encoding="utf-8")
+
+    txn_id = _txn_id_from_begin(scope, "merge", "a.md", "b.md")
+    staging = _staging(scope, txn_id)
+    (staging / "a.md").unlink()
+    (staging / "b.md").unlink()
+    merged = _note("merged", body="Auth uses JWT. Tokens expire in 30s.")
+    (staging / "merged.md").write_text(merged, encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 0
+    assert (scope / "merged.md").exists()
+
+
 def test_begin_edit_staging_commit_applies_repair(tmp_path):
     """A clean repair (TRDD-87935f21): begin copies a malformed page; the agent
     backfills the missing ocd/lmd/node_type/tier and adds the Notes section IN

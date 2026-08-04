@@ -49,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import memory_bridge  # noqa: E402
 import memory_edit_verify as verify  # noqa: E402
 import memory_scopes  # noqa: E402
 import memory_txn  # noqa: E402
@@ -260,9 +261,24 @@ def _verify_merge(txn, writes, deletes):
     # (it is the page a conflict rewrites), while the retired page's superseded facts may
     # be demoted. lessons_preserved still guards every source's lessons, strictly.
     fact_sources = surviving_texts if txn.op == "conflict" else None
+
+    # janitor#182 — the SECOND index. `verify_merge`'s `memory_md_text` is opt-in
+    # (a caller that never supplies it asserts nothing about MEMORY.md), and this
+    # call site never did — so a merge that forgot the mandated MEMORY.md redirect
+    # (merge-protocol.md "THE SECOND INDEX") committed clean while leaving the
+    # harness index pointing at a page this merge just deleted. Read the LIVE file
+    # (not `writes`: under the one-write merge contract, a MEMORY.md redirect runs
+    # as its own PRIOR `--op repair` transaction, exactly like any other backlink
+    # holder — so by the time THIS txn commits, the correctly-redirected content is
+    # already on disk, or the agent forgot and this check is what catches it).
+    memory_md_path = txn.scope_root / memory_bridge.MEMORY_MD
+    memory_md_text = (
+        memory_md_path.read_text(encoding="utf-8") if memory_md_path.exists() else None
+    )
+
     ok, reasons = verify.verify_merge(
         source_texts, source_metas, result_text, result_meta, retired, others,
-        fact_source_texts=fact_sources,
+        fact_source_texts=fact_sources, memory_md_text=memory_md_text,
     )
     return ok, reasons
 

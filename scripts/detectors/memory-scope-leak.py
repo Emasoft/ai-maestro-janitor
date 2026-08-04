@@ -59,6 +59,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import ai_context_extras as acx  # noqa: E402
 import cicd_secret_leak_patterns as cicd  # noqa: E402
 import cloud_credential_patterns as cloud  # noqa: E402
 import dedupe  # noqa: E402
@@ -100,6 +101,20 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9+/_\-=]{%d,512}" % _ENTROPY_MIN_LEN)
 # A TRACKED repo path that reproduces the harness LOCAL-corpus shape
 # (`…/projects/<x>/memory/…`) — committing one leaks the per-machine store.
 _LOCAL_SHAPED_RE = re.compile(r"(?P<dir>(?:^|.+/)projects/[^/]+/memory)/")
+
+# RFC 2606 / RFC 6761 reserve these TLDs (+ mDNS's `.local`, RFC 6762) for
+# documentation, testing, and non-routable use — an address on one of them can
+# never be a real mailbox that leaked (issue #176). A page quoting
+# `alice@default.local` to document an addressing FORMAT is not a leak.
+_RESERVED_EMAIL_DOMAIN_SUFFIXES = (".local", ".test", ".example", ".invalid", ".localhost")
+
+
+def _is_reserved_documentation_email(addr: str) -> bool:
+    """True iff `addr`'s domain is a reserved documentation/loopback TLD, so the
+    match can never name a real mailbox (issue #176's `pii:email` false positives:
+    an address-format spec, all on `.local`)."""
+    domain = addr.rsplit("@", 1)[-1].lower().rstrip(".")
+    return domain.endswith(_RESERVED_EMAIL_DOMAIN_SUFFIXES)
 
 
 def _git_toplevel(cwd: Path) -> Path | None:
@@ -181,6 +196,13 @@ def _scan_page(page: Path) -> list[str]:
     detector surfaces the CLASS, not the matched secret value (never echo the
     leaked material into the heartbeat or the proposal). Returns a sorted, deduped
     list of `<class>` strings.
+
+    Fenced/inline CODE is masked before any scanner runs (issue #176): a memory
+    page routinely QUOTES a format spec, a `git clone git@host:...` example, or a
+    filename inside backticks — those are documentation, not live secrets, and
+    the leak scanners have no other way to tell "the page states this fact" from
+    "the page IS this fact". Masking preserves line/character offsets (same-length
+    spaces) so this stays a pure preprocessing step, not a rewrite of `text`.
     """
     try:
         if page.stat().st_size > _MAX_BYTES_PER_PAGE:
@@ -191,30 +213,33 @@ def _scan_page(page: Path) -> list[str]:
     if not text:
         return []
 
+    masked = acx.mask_markdown_code_blocks(text)
     labels: set[str] = set()
 
     # 1. Local-path / machine-identity (the new lib).
-    for f in ppp.scan_text(text):
+    for f in ppp.scan_text(masked):
         labels.add(f.kind)  # "local-path" | "machine-host"
 
     # 2. PII shapes (email/phone/SSN/credit-card/IBAN/passport). We use the named
     #    shapes directly (not privacy.scan_text, which also fires source-only
     #    rules like cookie/CSP that don't apply to a markdown memory page).
     for shape_name, pattern in privacy.PII_SHAPES.items():
-        for m in pattern.finditer(text):
+        for m in pattern.finditer(masked):
             if shape_name == "credit_card" and not privacy.luhn_valid(m.group(0)):
                 continue  # drop non-card 16-digit runs (dates, ids)
+            if shape_name == "email" and _is_reserved_documentation_email(m.group(0)):
+                continue  # a `.local`/`.test`/`.example`/`.invalid` address can't leak
             labels.add(f"pii:{shape_name}")
             break  # one label per shape is enough to flag the page
 
     # 3. Credential shapes (cloud + CI/CD secret leak libs).
-    for f in cloud.scan_text(text):
+    for f in cloud.scan_text(masked):
         labels.add("credential")
-    for f in cicd.scan_text(text):
+    for f in cicd.scan_text(masked):
         labels.add("credential")
 
     # 4. Unknown-format high-entropy secrets.
-    for label in _entropy_findings(text):
+    for label in _entropy_findings(masked):
         labels.add(label)
 
     return sorted(labels)

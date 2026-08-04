@@ -792,6 +792,66 @@ def test_conflict_pairs_parses_the_librarian_render_shape(tmp_path):
     assert mcp.conflict_pairs(tmp_path) == [("alpha.md", "beta.md"), ("c.md", "d.md")]
 
 
+# --------------------------------------------------------------------------- #
+# issue #162 — conflict_pairs must not attribute another scope's candidates to
+# the scope being gated. The librarian writes ONE combined proposal (one
+# `## <SCOPE> scope` block per scope) into the LOCAL root, so an unscoped read of
+# the LOCAL root previously collected USER/PROJECT bullets too.
+# --------------------------------------------------------------------------- #
+
+def _multi_scope_proposal(d: Path, sections: dict[str, list[str]]) -> Path:
+    """Write a librarian-shaped proposal with ONE `## <SCOPE> scope` block per key of
+    `sections` — the exact combined-proposal shape `_render_scope_section` produces
+    when the librarian runs multiple scopes into one file."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "memory-reorg-proposed.md"
+    lines: list[str] = []
+    for scope, conflict_lines in sections.items():
+        lines += [
+            f"## {scope} scope", "",
+            "### Aggregation candidates", "", "- (none)", "",
+            "### Conflict candidates", "",
+            *conflict_lines,
+            "", "### Page shape", "", "- (none)", "",
+        ]
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def test_conflict_pairs_is_scoped_to_its_own_heading(tmp_path):
+    """A LOCAL-scoped read must not collect the bullets sitting under `## USER scope`."""
+    _multi_scope_proposal(tmp_path, {
+        "LOCAL": ["- (none)"],
+        "USER": ["- topic `x`: acceptance-criteria-expire.md vs claude-code-billing-modes.md"],
+    })
+    assert mcp.conflict_pairs(tmp_path, scope="LOCAL") == []
+    assert mcp.conflict_pairs(tmp_path, scope="USER") == [
+        ("acceptance-criteria-expire.md", "claude-code-billing-modes.md")
+    ]
+
+
+def test_conflict_pairs_without_a_scope_scans_every_section(tmp_path):
+    """No `scope` given -> the degraded legacy scan (every section) — unchanged behavior
+    for callers that cannot name a scope."""
+    _multi_scope_proposal(tmp_path, {
+        "LOCAL": ["- topic `t`: a.md vs b.md"],
+        "USER": ["- topic `x`: c.md vs d.md"],
+    })
+    assert mcp.conflict_pairs(tmp_path) == [("a.md", "b.md"), ("c.md", "d.md")]
+
+
+def test_conflict_has_work_does_not_fire_on_another_scopes_candidates(tmp_path):
+    """THE #162 defect, reproduced exactly: a LOCAL root holding an empty LOCAL section
+    plus a non-empty USER section must NOT be stamped due for the LOCAL chore — those
+    pairs (and the #131 ledger key built from them) do not exist under the LOCAL root."""
+    _multi_scope_proposal(tmp_path, {
+        "LOCAL": ["- (none)"],
+        "USER": ["- topic `x`: a.md vs b.md"],
+    })
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
+    assert mcp.conflict_has_work(tmp_path, scope="USER") is True
+
+
 def test_a_refused_pair_does_not_redispatch(tmp_path, monkeypatch):
     """THE defect (#131/#106): the librarian re-lists a pair the agent already declined, and a
     non-empty list was read as unfinished work — a full ~170k-token dispatch to re-derive one `no`."""

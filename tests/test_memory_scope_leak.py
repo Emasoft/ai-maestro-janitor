@@ -222,6 +222,99 @@ class TestMemoryScopeLeak(unittest.TestCase):
             out = _run(Path(td) / "home", root)
             self.assertNotIn("[memory-scope-leak]", out)
 
+    # ----- issue #176: documentation is not a leak -------------------------
+
+    def test_email_inside_code_span_not_flagged(self) -> None:
+        """An address FORMAT quoted inside backticks (documenting a spec, not
+        naming a real mailbox) must not be flagged — issue #176's `pii:email`
+        false positives were all inside a code span or a fence."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "amp-format.md",
+                "The AMP addressing spec uses forms like `alice@myteam.local` "
+                "and `bob@acme.crabmail.ai` as placeholder examples.\n",
+            )
+            _git(["add", ".claude/project/memory/amp-format.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_fenced_format_placeholder_not_flagged(self) -> None:
+        """A FORMAT placeholder like `agentId@hostId`, quoted to explain why `@`
+        and `.` are in a session-name charset, must not be misread as a real
+        `user@host` ssh target just because it sits in a fenced example."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "tmux-charset.md",
+                "Session names allow `@` and `.` for shapes like:\n\n"
+                "```\nagentId@hostId\n```\n",
+            )
+            _git(["add", ".claude/project/memory/tmux-charset.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_filename_substring_in_code_span_not_flagged(self) -> None:
+        """A filename like `settings.local.json` referenced in backticks must not
+        be misread as a `.local` LAN hostname."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "config-doc.md",
+                "Per-machine overrides live in `settings.local.json`, never committed.\n",
+            )
+            _git(["add", ".claude/project/memory/config-doc.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_reserved_tld_email_not_flagged_outside_code_span(self) -> None:
+        """A `.test`/`.example`/`.invalid` address (RFC 2606 reserved for
+        documentation) is never a real mailbox — flagged as `pii:email` even in
+        PLAIN PROSE (no backticks) before the fix; must not be flagged after.
+        (`.local` is deliberately excluded from this case: `private_path_patterns`
+        treats it as a real mDNS/LAN suffix for its OWN `machine-host` shape, so an
+        address on `.local` is still caught by that unrelated, correct rule — the
+        masking test above already covers the `.local` documentation-example case.)"""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "addressing.md",
+                "The default placeholder account is alice@default.test in every "
+                "example throughout this document.\n",
+            )
+            _git(["add", ".claude/project/memory/addressing.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_real_email_outside_code_span_still_flagged(self) -> None:
+        """The masking + reserved-TLD fixes must not blind the detector to a REAL
+        leak sitting in plain prose on a public-looking TLD (regression guard)."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "contact2.md",
+                "reach the maintainer at someone.private@gmail.com if this breaks.\n",
+            )
+            _git(["add", ".claude/project/memory/contact2.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            self.assertIn("pii:email", _proposal(root))
+
     # ----- gitignore guards ----------------------------------------------
 
     def test_ignored_project_memory_flagged(self) -> None:

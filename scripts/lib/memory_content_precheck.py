@@ -467,6 +467,12 @@ _HARVEST_EXCLUDED_NAMES = frozenset({"MEMORY.md", "memory-index.md", "memory-reo
 _CONFLICT_SECTION_HEADING = "### Conflict candidates"
 _NO_CANDIDATES_SENTINEL = "- (none)"
 
+# The librarian writes ONE combined proposal (into the LOCAL root — "LOCAL is always
+# first", memory-librarian.py `_resolve_scope_dirs`), with a `## <SCOPE> scope` heading
+# per scope (memory-librarian.py `_render_scope_section`: `f"## {report.scope} scope"`).
+# Matched against a STRIPPED line, so leading/trailing whitespace never breaks it.
+_SCOPE_HEADING_RE = re.compile(r"^##\s+(?P<scope>\S+)\s+scope$")
+
 
 # A conflict bullet, as the librarian writes it: "- topic `<tag>`: <a> vs <b>" (writer/reader
 # parity with memory-librarian.py `_render_scope_section`). The two paths are the CANDIDATE, which
@@ -474,13 +480,23 @@ _NO_CANDIDATES_SENTINEL = "- (none)"
 _CONFLICT_PAIR_RE = re.compile(r"^-\s+topic\s+`[^`]*`:\s*(?P<a>\S+)\s+vs\s+(?P<b>\S+)\s*$")
 
 
-def conflict_pairs(root: Path) -> list[tuple[str, str]]:
+def conflict_pairs(root: Path, scope: str | None = None) -> list[tuple[str, str]]:
     """Every surfaced conflict candidate pair in the scope's proposal file, in order.
 
     Split out of `conflict_has_work` so the pair identity — not just the bullet count — is available
     to the refusal ledger (issue #131). A bullet that does not parse is deliberately returned as a
     `("", "")` sentinel by the caller's logic rather than dropped: an unparseable candidate is not a
     refused one, and dropping it would suppress the chore on a rendering change.
+
+    SCOPED (issue #162): the librarian writes ONE combined proposal, with a `### Conflict
+    candidates` block PER `## <SCOPE> scope` heading, into the LOCAL root. The parser used to be
+    scope-blind INSIDE the file — it opened on any `### Conflict candidates` heading regardless of
+    which `## <SCOPE> scope` section it sat under — so a LOCAL-root read collected USER-scope
+    bullets too, the LOCAL chore was stamped due for pairs that do not exist in the LOCAL root, and
+    the #131 refusal ledger (keyed on `(scope, root, [root/a, root/b])`) could never match those
+    paths — the gate could not converge. When `scope` is given, only the bullets under that scope's
+    OWN `## <SCOPE> scope` heading are collected. `scope=None` (test convenience / a caller that
+    cannot name one) keeps the old scope-agnostic scan — degraded, but no worse than before.
     """
     out: list[tuple[str, str]] = []
     try:
@@ -488,15 +504,21 @@ def conflict_pairs(root: Path) -> list[tuple[str, str]]:
     except OSError:
         return out
     in_section = False
+    in_target_scope = scope is None
     for ln in text.splitlines():
         s = ln.strip()
+        m_scope = _SCOPE_HEADING_RE.match(s)
+        if m_scope:
+            in_target_scope = scope is None or m_scope.group("scope") == scope
+            in_section = False
+            continue
         if s == _CONFLICT_SECTION_HEADING:
             in_section = True
             continue
         if in_section and s.startswith("#"):
             in_section = False
             continue
-        if in_section and s.startswith("- ") and s != _NO_CANDIDATES_SENTINEL:
+        if in_target_scope and in_section and s.startswith("- ") and s != _NO_CANDIDATES_SENTINEL:
             m = _CONFLICT_PAIR_RE.match(s)
             out.append((m.group("a"), m.group("b")) if m else ("", ""))
     return out
@@ -514,12 +536,19 @@ def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None =
 
     - file ABSENT → the skill would stop → provably idle → False.
     - only `- (none)` sentinel bullets (the librarian's empty marker) → False.
-    - ANY other `- ` bullet inside a Conflict-candidates section → True (dispatch;
-      the agent still applies its own scope/legality judgment per pair).
+    - ANY other `- ` bullet inside a Conflict-candidates section UNDER THIS SCOPE's OWN
+      `## <SCOPE> scope` heading → True (dispatch; the agent still applies its own
+      scope/legality judgment per pair).
     - file present but UNREADABLE → True (fail-open — not provably idle).
 
     Live evidence: a heartbeat conflict pass on 2026-07-08 abstained on the empty
     section at 260,931 tokens — the same no-op class as the other gates.
+
+    SCOPE ATTRIBUTION (issue #162). `conflict_pairs` is scoped by `scope` — the librarian writes
+    ONE combined proposal (one `### Conflict candidates` block per `## <SCOPE> scope` heading) into
+    the LOCAL root, so an unscoped read of a LOCAL root previously collected USER/PROJECT bullets
+    too, stamping the LOCAL chore due for pairs that do not live in the LOCAL root — and the #131
+    ledger below could never converge it (its key names paths the LOCAL root does not contain).
 
     REFUSAL FILTER (issue #131, #106). The librarian re-lists a pair every run, including one the
     agent already judged and declined — so a non-empty list is not the same thing as unfinished
@@ -533,7 +562,7 @@ def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None =
         proposal.read_text(encoding="utf-8")
     except OSError:
         return True  # present but unreadable → FAIL-OPEN (libs audit L-11)
-    for a, b in conflict_pairs(root):
+    for a, b in conflict_pairs(root, scope):
         if not a or not b:
             return True  # an unparseable bullet is NOT a refused one — fail open
         if scope is None:

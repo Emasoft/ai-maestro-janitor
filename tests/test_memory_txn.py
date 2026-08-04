@@ -291,6 +291,78 @@ def test_resume_leaves_a_fresh_staging_txn_alone(tmp_path):
     txn.abort()
 
 
+def test_begin_records_the_owner_pid(tmp_path):
+    """issue #158: begin() stamps the calling process's pid so a later resume can
+    tell a live in-flight owner from a stopped one."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md"])
+    assert txn.owner_pid == os.getpid()
+    reloaded = memory_txn.MemoryTxn._load(txn.journal_path)
+    assert reloaded.owner_pid == os.getpid()
+    txn.abort()
+
+
+def test_resume_reclaims_a_fresh_orphan_whose_owner_process_died(tmp_path):
+    """issue #158: a stopped memory-agent pass leaves FRESH (nowhere near the
+    multi-hour staleness window) staging transactions behind — the real incident
+    was 47 of them, all begun seconds apart, none stale, none reclaimable until
+    the window elapsed. The owner pid recorded at begin() lets resume reclaim as
+    soon as the owning process is provably dead, regardless of the journal's age."""
+    import subprocess
+
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])
+    txn.stage_write("c.md", "never applied — the agent was stopped")
+    proc = subprocess.Popen(["true"])
+    proc.wait()  # the pid is now free of any live process
+    txn.owner_pid = proc.pid
+    txn._persist()  # journal stays FRESH — mtime is "now"
+    acted = memory_txn.resume_pending(scope, stale_seconds=99999)
+    assert any(a == f"discarded owner-dead {txn.txn_id}" for a in acted), acted
+    assert not txn.staging_dir.exists()
+    assert (scope / "a.md").exists()  # live untouched
+    assert not (scope / "c.md").exists()
+
+
+def test_resume_leaves_a_fresh_orphan_whose_owner_is_alive(tmp_path):
+    """The other half: a fresh staging txn whose owner pid IS this (alive) test
+    process must not be reclaimed — only a provably-dead owner is a green light."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])  # owner_pid == os.getpid()
+    txn.stage_write("c.md", "still being edited")
+    acted = memory_txn.resume_pending(scope, stale_seconds=99999)
+    assert acted == []
+    assert txn.staging_dir.exists()
+    txn.abort()
+
+
+def test_begin_refuses_past_the_concurrency_cap(tmp_path):
+    """issue #158: nothing discouraged a pass from batch-opening many transactions
+    up front (47 opened in 3.5s in the reported incident) — any interruption then
+    orphans all of them at once. begin() now refuses transaction #(cap + 1)."""
+    scope = _scope(tmp_path)
+    cap = memory_txn._MAX_CONCURRENT_TXNS_PER_SCOPE
+    txns = [MemoryTxn.begin(scope, "repair", []) for _ in range(cap)]
+    with pytest.raises(MemoryTxnError, match="already open"):
+        MemoryTxn.begin(scope, "repair", [])
+    for t in txns:
+        t.abort()
+
+
+def test_committing_one_txn_frees_a_concurrency_slot(tmp_path):
+    """Closing (not just merely existing) a transaction is what frees the cap —
+    abort()'s cleanup removes its journal, so the STAGING count drops and a new
+    begin() succeeds again."""
+    scope = _scope(tmp_path)
+    cap = memory_txn._MAX_CONCURRENT_TXNS_PER_SCOPE
+    txns = [MemoryTxn.begin(scope, "repair", []) for _ in range(cap)]
+    txns[0].abort()
+    fresh = MemoryTxn.begin(scope, "repair", [])  # no longer refused
+    for t in txns[1:]:
+        t.abort()
+    fresh.abort()
+
+
 def test_resume_is_noop_without_a_staging_dir(tmp_path):
     """resume_pending on a scope that never ran a txn returns nothing, no crash."""
     scope = _scope(tmp_path)
