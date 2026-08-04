@@ -1,6 +1,6 @@
 ---
-name: janitor-claude-md-slim
-description: Migrate a bloated CLAUDE.md into PROJECT-scope wikimem pages, leaving only the slim janitor-managed contract (description, repo urls, build instructions, project map, wikimem index). Use when the project-map-drift detector nudges "CLAUDE.md breaks the slim contract", when the user asks to shrink/slim/restructure CLAUDE.md, or via `/janitor-claude-md-slim`.
+name: janitor-project-cld-md-optimizer
+description: Migrate a bloated CLAUDE.md into PROJECT-scope wikimem pages, leaving only the slim janitor-managed contract (description, repo urls, build instructions, project map, wikimem index). Use when the project-map-drift detector nudges "CLAUDE.md breaks the slim contract", when the user asks to shrink/slim/restructure/optimize CLAUDE.md, or via `/janitor-project-cld-md-optimizer`.
 ---
 
 # Janitor CLAUDE.md slim

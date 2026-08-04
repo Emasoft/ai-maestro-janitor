@@ -20,7 +20,9 @@ eht: []
 
 - **Already shipped** (TRDD-H12K9JYX, `column: complete`): the canonical form itself, the
   fence surgery, the index renderer, the slim-contract `check`, the preservation oracle
-  (`verify`), the `janitor-claude-md-slim` skill, and a **nudge** on `project-map-drift`.
+  (`verify`), the `janitor-project-cld-md-optimizer` skill (renamed from
+  `janitor-claude-md-slim` on 2026-08-04 — CPV rejects `claude` as a reserved word in a skill
+  name), and a **nudge** on `project-map-drift`.
   This repo's `CLAUDE.md` conforms today — verified `claudemd-slim: conforming and fresh`,
   1,029 narrative bytes, 0 violations.
 - **The gap**: `PRRD G8.1` requires migration to be **automatic**. What exists is an

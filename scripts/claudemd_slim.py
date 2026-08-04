@@ -8,7 +8,7 @@ Owner directive 2026-08-02: a janitor-managed CLAUDE.md carries ONLY the concise
 description, the repo URLs, the basic lint/build/test/publish instructions, the janitor
 project map, and a topic-ordered index of the PROJECT-scope wikimem pages. This CLI is
 the MECHANICAL half of that contract; the editorial half (which narrative becomes which
-wikimem page) is the `janitor-claude-md-slim` skill.
+wikimem page) is the `janitor-project-cld-md-optimizer` skill.
 
   uv run scripts/claudemd_slim.py index            # insert-or-refresh the wikimem index
   uv run scripts/claudemd_slim.py index --stdout   # print the block, touch nothing

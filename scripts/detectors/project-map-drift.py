@@ -78,7 +78,7 @@ def _slim_contract_nudge(root: Path, text: str) -> None:
         "[project-map-drift] CLAUDE.md breaks the slim contract: "
         + "; ".join(p.split(" (")[0] for p in problems[:3])
         + ". Refresh the index with `uv run scripts/claudemd_slim.py index` or migrate "
-        "narrative into wikimem pages via /janitor-claude-md-slim — at a cache-cheap "
+        "narrative into wikimem pages via /janitor-project-cld-md-optimizer — at a cache-cheap "
         "moment; the janitor never rewrites CLAUDE.md itself.",
     )
     if line is not None:

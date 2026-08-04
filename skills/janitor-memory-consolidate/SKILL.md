@@ -193,39 +193,14 @@ need a different reshape). Never silently drop or ignore the third.
 
 On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewritten to
 `[[C]]` **in the same transaction** — otherwise the corpus is left with dangling
-links and the commit-time verify will FAIL. Find the inbound links with
-`memgrep links --from` (`--from NOTE` = NOTE's *backlinks* — who points AT it):
+links and the commit-time verify will FAIL.
 
-```bash
-memgrep links --from "$A_SLUG" "$MEMDIR"   # pages linking [[A]]
-memgrep links --from "$B_SLUG" "$MEMDIR"   # pages linking [[B]]
-```
-
-Note every holder page — you will edit its *staged copy* to repoint the link to
-the survivor `C`. (Slug = the page's frontmatter `name:`, else its filename stem.)
-
-Separately, **prose** mentions of the retired names across OTHER scopes are NOT
-auto-edited — grep for them and **surface** any hits as
-`[janitor-memory] prose mentions of retired slug <A>/<B> in <scope>: <files> (review)`.
-Do not edit other scopes.
-
-**THE SECOND INDEX — `MEMORY.md` (janitor#182, mandatory).** `memgrep links` sees only the
-wikimem `[[wikilink]]` graph. The harness `MEMORY.md` at the scope root is a SEPARATE index with
-its own `- [Title](page.md) — hook` lines, and a merge that deletes the retired page leaves its
-line pointing at a file that no longer exists. A future session follows it, finds nothing, and
-reads the note as **missing** rather than **merged** — the one outcome consolidation exists to
-prevent. Check it, and stage it whenever it points at a retired slug:
-
-```bash
-grep -n "](${B_SLUG}.md)" "$MEMDIR/MEMORY.md"   # and $A_SLUG if A is the one retiring
-```
-
-If it matches, copy `MEMORY.md` into staging with the other holders and **redirect the target
-only** — `](retired.md)` → `](survivor.md)` — leaving the title and hook text byte-for-byte. This
-is a POINTER REPAIR, not curation: you are fixing a link your own deletion broke. It does not
-license editing, reordering, or pruning any other line in that file, which remains the harness's.
-`memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
-`no_dangling_memory_md_refs()` is the matching check.
+**The full procedure is in [merge-protocol.md](references/merge-protocol.md) § "Step 5"**:
+the `memgrep links --from` invocations, the holder-page staging rule, the prose-mention
+surfacing, and — mandatory since janitor#182 — the SECOND index, the harness `MEMORY.md`,
+whose pointer lines `memgrep links` cannot see and which a merge otherwise leaves pointing at
+a deleted file (making a merged note read as MISSING, the one outcome consolidation exists to
+prevent).
 
 ### 6-9. Execute the merge through the transaction core
 

@@ -295,3 +295,44 @@ writes-before-deletes via `os.replace`. On PASS it prints
   this cycle (the next heartbeat retries); do not force it.
 - A half-applied crash is **self-healing**: the next heartbeat's
   `uv run "$CLI" resume "$MEMDIR"` rolls forward or discards the interrupted txn.
+
+## Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
+
+Moved out of `SKILL.md` on 2026-08-04 to keep that body inside the 5000-token skill budget.
+Read this once you have a legal pair; steps 1-4 in the skill decide whether you do.
+
+On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewritten to
+`[[C]]` **in the same transaction** — otherwise the corpus is left with dangling
+links and the commit-time verify will FAIL. Find the inbound links with
+`memgrep links --from` (`--from NOTE` = NOTE's *backlinks* — who points AT it):
+
+```bash
+memgrep links --from "$A_SLUG" "$MEMDIR"   # pages linking [[A]]
+memgrep links --from "$B_SLUG" "$MEMDIR"   # pages linking [[B]]
+```
+
+Note every holder page — you will edit its *staged copy* to repoint the link to
+the survivor `C`. (Slug = the page's frontmatter `name:`, else its filename stem.)
+
+Separately, **prose** mentions of the retired names across OTHER scopes are NOT
+auto-edited — grep for them and **surface** any hits as
+`[janitor-memory] prose mentions of retired slug <A>/<B> in <scope>: <files> (review)`.
+Do not edit other scopes.
+
+**THE SECOND INDEX — `MEMORY.md` (janitor#182, mandatory).** `memgrep links` sees only the
+wikimem `[[wikilink]]` graph. The harness `MEMORY.md` at the scope root is a SEPARATE index with
+its own `- [Title](<page-slug>.md) — hook` lines, and a merge that deletes the retired page leaves
+its line pointing at a file that no longer exists. A future session follows it, finds nothing, and
+reads the note as **missing** rather than **merged** — the one outcome consolidation exists to
+prevent. Check it, and stage it whenever it points at a retired slug:
+
+```bash
+grep -n "](${B_SLUG}.md)" "$MEMDIR/MEMORY.md"   # and $A_SLUG if A is the one retiring
+```
+
+If it matches, copy `MEMORY.md` into staging with the other holders and **redirect the target
+only** — `](retired.md)` → `](survivor.md)` — leaving the title and hook text byte-for-byte. This
+is a POINTER REPAIR, not curation: you are fixing a link your own deletion broke. It does not
+license editing, reordering, or pruning any other line in that file, which remains the harness's.
+`memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
+`no_dangling_memory_md_refs()` is the matching check.

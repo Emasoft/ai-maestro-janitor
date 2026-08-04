@@ -9,7 +9,7 @@ turn (CLAUDE.md rides the prompt prefix of every session).
 This module is the PURE half: scan the PROJECT memory corpus, render the fenced index
 block, check the slim contract, and prove a migration lost nothing. All I/O beyond
 reading page files stays in the CLI (`scripts/claudemd_slim.py`); all EDITORIAL judgment
-(which narrative becomes which page) stays in the `janitor-claude-md-slim` skill. The
+(which narrative becomes which page) stays in the `janitor-project-cld-md-optimizer` skill. The
 split matters: the proofs must be deterministic so the skill cannot talk itself into a
 lossy migration.
 
@@ -235,7 +235,7 @@ def slim_violations(text: str) -> list[str]:
     if size > cap:
         violations.append(
             f"narrative is {size} bytes (cap {cap}) — content beyond description/urls/"
-            "build-instructions belongs in wikimem pages (/janitor-claude-md-slim)"
+            "build-instructions belongs in wikimem pages (/janitor-project-cld-md-optimizer)"
         )
     if "github.com/" not in narrative:
         violations.append("no github repo url in the narrative")
