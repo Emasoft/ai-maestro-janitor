@@ -87,12 +87,23 @@ must behave as if the refusals applied — the tool enforces the rule, it is not
 
 ## Cross-reference with TRDDs
 
-Every TRDD constrained by PRRD rules MUST cite them:
-- **frontmatter** — `relevant-rules: [3, 27, 64.134]` (bare numbers; pinned versions ok),
-- **body** — inline as `PRRD G64.134`.
+Every TRDD constrained by a rule MUST cite it in `relevant-rules:` — entries carry a **prefix
+class**, so a bare number is never ambiguous about which rule corpus it names (janitor#144: a
+bare integer alone cannot say "this card is constrained by a shipped `~/.claude/rules/` file",
+so an agent reached for the file's own slug instead — evidence a bare-number-only schema was
+under-specified, not that the field goes unused):
+- **bare number** — a PRRD rule in THIS project: `relevant-rules: [3, 27, 64.134]` (bare
+  numbers; pinned versions ok). The default, unchanged from before this class existed.
+- **`rule:<slug>`** — a shipped `~/.claude/rules/<slug>.md` (the general-purpose class in
+  "Does NOT apply to" below, project-independent): `relevant-rules: [rule:no-nested-scrollbars]`.
+  These carry no PRRD number — they are not this project's rules.
+- **body** — inline as `PRRD G64.134` or `` rule:<slug> ``.
 
-A TRDD with no `relevant-rules:` claims to be unconstrained by any project rule. That is
-possible but uncommon — verify it is genuine and not an oversight.
+A TRDD with no `relevant-rules:` is **UNKNOWN, not a claim of "unconstrained"** — a lint or
+maintenance pass MUST NOT read an empty `[]` as an assertion. Verify it is genuine and not an
+oversight before trusting either reading (measured: 43 of 44 TRDDs in one corpus carried `[]`,
+almost all oversight — reading it as a confident claim converts a mass of oversights into a
+mass of confident false claims).
 
 ## Recommended baseline golden rule G1.1 — GitHub authorship self-identification
 

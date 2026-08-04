@@ -56,8 +56,9 @@ new TRDDs use v2.
   `runtime-targets:`, `impacts:`, etc.
 - **Design-column 1→N split / N→1 group semantics** — the design pass
   can decompose a proto-TRDD into many full TRDDs (or merge several).
-- **Per-rule PRRD citations** — `relevant-rules:` in frontmatter pins
-  the PRRD rule numbers a TRDD must comply with.
+- **Per-rule citations** — `relevant-rules:` in frontmatter pins the rules a TRDD must comply
+  with, by prefix class: a bare number is this project's own PRRD rule, `rule:<slug>` is a
+  shipped `~/.claude/rules/<slug>.md`.
 - **Backtracking — `implementation-commits:`** — the SHAs that landed
   this TRDD's code, so a bug discovered later can be traced to the TRDD
   that introduced it.
@@ -131,8 +132,17 @@ Every TRDD frontmatter is **grep-first**. The invariants:
 trdd-id: K3QX9P2W                        # canonical id — 8-char UPPERCASE base36 (no separate UUID)
 title: <single line, ≤80 chars, no colons>
 column: backburner                       # kanban state (see "Column enum" below)
+review-after: null                       # YYYY-MM-DD — opt-in, never inferred; snoozes
+                                          # trdd-drift until this date (see "review-after:" below)
 created: 2026-06-02T11:53:00+0200        # ISO 8601 + local TZ
 updated: 2026-06-02T11:53:00+0200        # bump on EVERY edit
+scope: project                           # project | local | user (janitor#103); absent = project;
+                                          # the PATH is authoritative — this field is a lint target
+project-id: my-project                   # the PROJECT discriminator, stable + repo-independent;
+                                          # scope=project SHOULD carry it; scope=user|local MUST NOT
+host-id: null                            # the scope=user discriminator — which host's global board
+repo: null                               # per-card ANNOTATION: which repo of a multi-repo project
+                                          # this card touches (not a discriminator — project-id is)
 
 # ─────────── 2. OWNERSHIP
 created-by: main-session                 # WHO AUTHORED IT — set once, never changes hands
@@ -155,7 +165,10 @@ blocked-by: [TRDD-K3QX9P2W]              # runtime blockers (subset of npt while
 supersedes: []                           # TRDDs this one replaces
 superseded-by: []                        # populated when column=superseded
 pre-block-column: null                   # column to restore to when blockers clear
-relevant-rules: [3, 27, 64.134]          # PRRD rule numbers; bare = latest version, n.v = pinned
+relevant-rules: [3, 27, 64.134]          # prefix class (janitor#144): bare = PRRD rule number
+                                          # (latest version; n.v = pinned); rule:<slug> = a
+                                          # shipped ~/.claude/rules/<slug>.md — see PRRD
+                                          # prrd-design-rules.md "Cross-reference with TRDDs"
 
 # ─────────── 5. DELIVERY
 release-via: publish                     # publish | deploy | none
@@ -204,6 +217,29 @@ audit-conclusion: null                   # null while investigating | benign | i
 external-refs: []                        # e.g. ["github.com/.../issues/42", "jira:PROJ-123"]
 ---
 ```
+
+### `review-after:` — the expiring, self-releasing park (janitor#132)
+
+`review-after: YYYY-MM-DD` tells `trdd-drift` to honour a deliberately parked TRDD until that
+date, then check it normally again — the snooze expires on its own. It is **opt-in and never
+inferred**: `backburner` remains drift-eligible by default, exactly as before this field
+existed; a TRDD is only exempted when it carries the field explicitly.
+
+Two properties are deliberate and MUST survive any reimplementation:
+
+- **A snooze, not a mute.** A bare "shelved" label would silence the TRDD forever — the same
+  failure class as a temporary `/janitor-global-disarm` that went unnoticed for ~33h because
+  nothing carried its duration or reason. A DATE expires by itself, so a park a human forgets
+  re-surfaces on its own.
+- **Fails OPEN.** A malformed or unparseable date (including a nonsense calendar date, e.g.
+  `2026-02-31`) is treated as "no `review-after:`" and the TRDD goes back on the normal drift
+  path. A snooze that failed CLOSED would let a typo hide work indefinitely — strictly worse
+  than the nag it replaces.
+
+The match is **line-anchored at column 0** (`^review-after:\s*YYYY-MM-DD\s*$`), so a body
+paragraph that merely *discusses* the field (e.g. quoting it in prose) is not mistaken for a
+real park. Implementation + tests: `scripts/detectors/trdd-drift.py::review_after_epoch`,
+`tests/test_trdd_drift_review_after.py`.
 
 ### Minimal TRDD (most fields use defaults)
 
@@ -567,7 +603,7 @@ A TRDD lives in exactly one of four folders, by lifecycle state:
 | `design/proposals/` | `proposal` | Authored, awaiting approval. **NOT** authorized to execute. |
 | `design/tasks/` | `planned` (then every downstream `column:` — `todo`, `dispatch`, `dev`, `testing`, …) | Approved/authorized. In the execution pipeline. |
 | `design/refused/` | `refused` | A proposal a judge **DECLINED**. Kept as an audit record; never deleted. |
-| `design/archived/` | `completed` · `cancelled` · `superseded` | TRDDs that reached a terminal-DONE state — finished, withdrawn, or replaced. Kept; never deleted. **`failed` is NOT here** — it stays in `design/tasks/` (retryable). |
+| `design/archived/` | `completed` (only when `release-via: none`/absent) · `cancelled` · `superseded` · `published` · `live` | TRDDs that reached a terminal-DONE state — finished, withdrawn, replaced, or SHIPPED. Kept; never deleted. **`published`/`live` archive AS THEMSELVES** — rewriting `published → completed` on archive would destroy the fact that it shipped, so a `complete` TRDD carrying `release-via: publish`/`deploy` is NOT archived yet; it archives once it reaches `published`/`live`. **`failed` is NOT here** — it stays in `design/tasks/` (retryable). |
 
 `proposal`, `planned`, `refused`, `cancelled`, `completed`, and
 `superseded` are **overlay values of the v2 `column:` field**. `proposal`
@@ -578,7 +614,7 @@ owner advances the TRDD through the normal v2 flow (`todo` → `dispatch`
 **Lineage rule (which terminal folder?):** the dividing line is *did a
 judge decline it?* — **not** *was it ever approved*. Only a DECLINED
 proposal goes to `design/refused/`. Everything else that ends —
-completed, cancelled, or superseded — goes to `design/archived/`,
+completed, cancelled, superseded, published, or live — goes to `design/archived/`,
 **whether or not it was ever approved**. A proposal made obsolete by a
 newer TRDD is superseded, never refused: nobody judged it, it was
 overtaken. It is archived with `approved: false` and
@@ -654,18 +690,30 @@ Never delete a refused proposal — it is the audit trail.
 A refused proposal is terminal — re-attempting the idea means a **new**
 proposal (which may cite the refused one).
 
-### Archival protocol (complete / cancel / supersede)
+### Archival protocol (complete / cancel / supersede / ship)
+
+**`published`/`live` archive AS THEMSELVES — never rewritten to `completed`.**
+Rewriting `published → completed` on archive would destroy the fact that the TRDD
+actually shipped. So `complete` is terminal (and therefore archive-eligible) ONLY
+when `release-via: none` or absent — the internal-TRDD case. When
+`release-via: publish`, the archive-eligible terminal is `published`; when
+`release-via: deploy`, it is `live`. A `complete` TRDD carrying
+`release-via: publish`/`deploy` has landed its code but not yet shipped it, so it is
+**NOT** archived — it stays in `design/tasks/` through the `publish`/`deploy` columns
+(see "Transitioning a TRDD between columns" above) until it reaches `published`/`live`.
 
 | State | `column:` | When |
 |---|---|---|
-| **completed** | `completed` | the work is finished / shipped (its release-via terminal reached) |
+| **completed** | `completed` | `release-via: none`/absent AND requirements met + shipped |
+| **published** | `published` | `release-via: publish` AND users can install the version with this TRDD's work |
+| **live** | `live` | `release-via: deploy` AND real traffic reaches this TRDD's code |
 | **cancelled** | `cancelled` | the work is **withdrawn** — no longer wanted |
 | **superseded** | `superseded` | replaced by other TRDD(s) (record them in `superseded-by:`) |
 
 1. Edit frontmatter: `column:` → the terminal state; bump `updated:`
    (set `superseded-by:` when superseding).
 2. Append to `## Approval log`:
-   `- <ISO> — <COMPLETED|CANCELLED|SUPERSEDED> by <approver>. <one-line reason>.`
+   `- <ISO> — <COMPLETED|PUBLISHED|LIVE|CANCELLED|SUPERSEDED> by <approver>. <one-line reason>.`
 3. `git mv` the file into `design/archived/` (create the folder if absent).
 4. Commit (`docs: archive TRDD-<short> → <state>`).
 

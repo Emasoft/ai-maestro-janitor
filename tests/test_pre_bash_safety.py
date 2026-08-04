@@ -280,17 +280,26 @@ def _outbound(cmd: str):
 
 
 def test_gh_publish_carrying_an_email_is_denied() -> None:
-    """THE incident: a tool's own table output was pasted into two PUBLIC issues. It leaked
-    three of the owner's account identities AND — because GitHub reads `@gmail` in an address
-    as a username — paged a real uninvolved account three times per issue. Neither harm was
-    visible in the text being pasted."""
+    """THE incident: a tool's own table output was pasted into two PUBLIC issues, leaking
+    three of the owner's account identities.
+
+    CORRECTED (janitor#172): this docstring and the deny message it tests used to add "and
+    GitHub reads `@gmail` in an address as a username, paging a real account". That was false
+    — `gh api markdown` (GitHub's own GFM renderer) renders `user@gmail.com` as a `mailto:`
+    link, not an @mention, so nobody is paged by the address. The leak is real and denial is
+    right; only the claimed MECHANISM was wrong. The harm that stands on its own: the repo may
+    be PUBLIC and GitHub keeps edit history, so an address pasted here is PII exposed
+    permanently — reason enough without an invented mention."""
     cmd = """gh issue create --repo Emasoft/AgentlensPro --body "$(cat <<'EOF'
 *  75099fe9  someone@gmail.com   21% aged
 EOF
 )" """
     reason = _outbound(cmd)
     assert reason and "email" in reason.lower(), reason
-    assert "@gmail" in reason, "the reason must name the mention harm, not just the leak"
+    assert "pages the real GitHub account" not in reason, (
+        "the reason must not claim the email pages its domain as a mention — "
+        "gh api markdown renders it as a mailto: link, not an @mention (janitor#172)"
+    )
 
 
 def test_gh_publish_mentioning_a_stranger_is_denied() -> None:

@@ -291,8 +291,9 @@ def check_outbound_publication(command: str) -> str | None:
             f"this gh publish carries {len(emails)} email address(es) "
             f"(e.g. {emails[0][:3]}…) — the repo may be PUBLIC and GitHub keeps edit history, "
             "so redaction later does not undo it. Replace them with placeholders "
-            "(<account-A>) before publishing. NOTE an address also becomes an @mention: "
-            "`user@gmail.com` pages the real GitHub account `@gmail`."
+            "(<account-A>) before publishing. This is a PII leak, not a mention: verified "
+            "against `gh api markdown` (janitor#172), `user@gmail.com` renders as a `mailto:` "
+            "link, not an @mention — the address does not page its domain."
         )
     prose = _CODE_SPAN_RE.sub(" ", command)
     strangers = sorted({

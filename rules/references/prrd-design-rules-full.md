@@ -266,20 +266,27 @@ findprrd.py --since 2026-05-01               # rules whose version was bumped si
 
 ## Cross-reference with TRDDs
 
-Every TRDD that depends on or is constrained by PRRD rules **MUST** cite
-those rules:
+Every TRDD that depends on or is constrained by a rule **MUST** cite it. `relevant-rules:`
+entries carry a **prefix class** (janitor#144) so a bare number is never ambiguous about which
+rule corpus it names — the base rule's summary is normative; here is the full grammar:
 
-1. **Frontmatter** — `relevant-rules: [3, 27, 64.134]` (bare numbers,
-   pinned versions allowed). This lets `findtrdd.py --relevant-rule 64`
-   find every TRDD that references the rule.
-2. **Body** — inline citations as `PRRD G64.134` (or `PRRD S64.134`),
-   exactly as written by the agent. The G/S in the body may go stale on
-   promote/demote; the number does not.
+1. **Frontmatter** — `relevant-rules: [3, 27, 64.134, rule:no-nested-scrollbars]`:
+   - a **bare number** (optionally `n.v` pinned) is a rule in THIS project's own PRRD — the
+     default, unchanged from before this class existed. This lets
+     `findtrdd.py --relevant-rule 64` find every TRDD that references PRRD rule 64.
+   - `rule:<slug>` cites a shipped, project-independent `~/.claude/rules/<slug>.md` (e.g.
+     `rule:no-nested-scrollbars` for `~/.claude/rules/no-nested-scrollbars.md`). These have no
+     PRRD number to cite — the corpus evidence that motivated this class was an agent reaching
+     for the file's own slug because a bare integer could not express the constraint.
+2. **Body** — inline citations as `PRRD G64.134` (or `PRRD S64.134`) for a PRRD rule, or
+   `` rule:<slug> `` for a shipped rule, exactly as written by the agent. The G/S in the body
+   may go stale on promote/demote; the number does not.
 
-A TRDD with NO `relevant-rules:` field is a TRDD that claims to be
-unconstrained by any project rule. That's possible but uncommon —
-the design pass verifies whether this is genuinely unconstrained or an
-oversight.
+A TRDD with NO `relevant-rules:` field is **UNKNOWN, not a claim of "unconstrained"** — a lint
+or maintenance pass MUST NOT read an empty `[]` as an assertion. The design pass verifies
+whether this is genuinely unconstrained or an oversight before trusting either reading
+(measured on one corpus: 43 of 44 TRDDs carried `[]`, almost all oversight — reading it as a
+confident claim converts a mass of oversights into a mass of confident false claims).
 
 ## Mirror discipline (§0 pattern)
 
