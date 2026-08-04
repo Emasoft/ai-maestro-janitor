@@ -225,19 +225,26 @@ STATE_FILE = ROOT / "state.json"
 # overnight failure was undiagnosable; see TRDD-5539cd6e). `_decide()` mirrors
 # every decision both to stdout (manual runs + daemon stdout) AND to this file.
 LOG_FILE = ROOT / "rotator.log"
-_LOG_MAX_BYTES = 256 * 1024  # self-trim ceiling — bounds the unattended 60s-cadence log
-_LOG_KEEP_BYTES = 128 * 1024  # on overflow, retain (roughly) the most-recent this-many bytes
+_LOG_MAX_BYTES = 256 * 1024  # rotate at this size — bounds the unattended 60s-cadence log
 
 
 def _log(msg: str) -> None:
     """Append a timestamped line to the persistent rotator log.
 
-    Self-trims so the file stays bounded under the daemon's 60s cadence (read the
-    last `_LOG_KEEP_BYTES`, drop the partial leading line so the file always starts
-    on a record boundary, atomic os.replace). Best-effort by design: a log-IO error
-    must NEVER crash a rotation decision — the decision is already on stdout, so we
-    report the log failure to stderr and carry on. This is deliberate separation of
-    an observability side-channel from the critical path, NOT a fallback of the core
+    Rotates (never read-modify-writes) so the file stays bounded under the daemon's
+    60s cadence AND under a SECOND appender (janitor#177): as of the ai-maestro
+    server's own decision-log.ts, `rotator.log` has two independent writers. The
+    former approach — read the last N bytes into memory, then os.replace a tmp file
+    over LOG_FILE — silently DISCARDS anything the other writer appended in the
+    window between that read and the replace, and asymmetrically: it always eats
+    the OTHER writer's lines, because we are the one trimming. `os.replace(LOG_FILE,
+    ...".1")` is a pure rename: nothing is read, so nothing in that window can be
+    lost, and a writer holding an O_APPEND fd on the OLD inode (ours mid-write, or
+    the other process racing us) simply keeps writing into the rotated file rather
+    than into the void. Best-effort by design: a log-IO error must NEVER crash a
+    rotation decision — the decision is already on stdout, so we report the log
+    failure to stderr and carry on. This is deliberate separation of an
+    observability side-channel from the critical path, NOT a fallback of the core
     rotation logic. SECURITY: callers pass decision strings (emails + usage %s +
     fingerprints) — NEVER token values; the log shares state.json's trust boundary
     (under CLAUDE_PLUGIN_DATA, gitignored, user-only)."""
@@ -246,13 +253,11 @@ def _log(msg: str) -> None:
         with LOG_FILE.open("a", encoding="utf-8") as fh:
             fh.write("%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), msg))
         if LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
-            tail = LOG_FILE.read_bytes()[-_LOG_KEEP_BYTES:]
-            nl = tail.find(b"\n")  # discard the partial first record so we start on a boundary
-            if nl != -1:
-                tail = tail[nl + 1 :]
-            tmp = ROOT / "rotator.log.trim.tmp"
-            tmp.write_bytes(tail)
-            os.replace(tmp, LOG_FILE)
+            # Rename, not read+rewrite: any appender (including one racing us right
+            # now) that holds a fd on the CURRENT inode keeps writing into the file
+            # under its new name — worst case a few lines land in rotator.log.1,
+            # which is recoverable, never destroyed.
+            os.replace(LOG_FILE, ROOT / "rotator.log.1")
     except OSError as exc:
         print("rotator: decision-log append failed (non-fatal): %r" % (exc,), file=sys.stderr)
 
@@ -2228,7 +2233,7 @@ def _invoke_slot_capture(email: str) -> bool:
         # account BEFORE any Popen. This is the tightest gate — the literal browser-launch
         # site — so no denied domain ever spawns a capture, whatever the caller. Only ever
         # reachable if a fixture account is in the real state.json (it should not be), so the
-        # one-line skip is self-diagnosing rather than routine noise; the log self-trims.
+        # one-line skip is self-diagnosing rather than routine noise; the log self-rotates.
         _log("auto-bootstrap: refusing browser launch for implausible/fixture account %s (denied domain) — skipped" % email)
         return False
     script = Path(__file__).resolve().parent / "slot_capture_browser.py"

@@ -109,6 +109,20 @@ def test_family_role_omitted_when_members_distinct():
     assert grp.startswith("`scripts/lib/*_patterns.py` (×9) [")
 
 
+def test_coverage_note_appears_and_affects_hash():
+    """#175: an optional coverage disclaimer sits right under the heading and
+    participates in the structure hash — its own change (uncovered-file count
+    moved) is then a real refresh trigger instead of silently stale."""
+    fm = FileMap(path="x.py", role="r", symbols=[])
+    body_plain = R.render_body([fm])
+    body_noted = R.render_body([fm], coverage_note="> ⚠ test note")
+    assert "> ⚠ test note" in body_noted
+    assert "> ⚠ test note" not in body_plain
+    assert R.structure_hash([fm]) != R.structure_hash([fm], coverage_note="> ⚠ test note")
+    block = R.render_block([fm], generated_iso="2026-01-01T00:00:00+0000", digest="d", coverage_note="> ⚠ test note")
+    assert "> ⚠ test note" in block
+
+
 def test_family_role_shown_when_majority_shares():
     """When >half the family shares a role, it IS shown as the representative."""
     shared = "one security pattern lib"

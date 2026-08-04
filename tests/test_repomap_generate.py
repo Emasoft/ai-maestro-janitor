@@ -360,6 +360,84 @@ def test_concurrent_editor_never_corrupts_and_their_edit_survives():
         assert narrative in valid, f"narrative corrupted/interleaved:\n{narrative!r}"
 
 
+def _make_ts_heavy_project(root: Path) -> None:
+    """A repo where TypeScript dominates and the one Python file is peripheral
+    — the #175 repro shape: a Python-only extractor covering 18 peripheral
+    scripts and ZERO of the real (TypeScript) app."""
+    (root / "app").mkdir(parents=True)
+    for i in range(5):
+        (root / "app" / f"component{i}.tsx").write_text(f"export function Component{i}() {{ return null; }}\n")
+    (root / "scripts").mkdir()
+    (root / "scripts" / "helper.py").write_text('"""A peripheral helper script."""\n\ndef helper_fn() -> None:\n    """Do a peripheral thing."""\n')
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+
+
+def test_ts_heavy_repo_gets_an_honest_coverage_disclaimer():
+    """#175: a Python-only extractor on an overwhelmingly-TypeScript repo must
+    not present its partial map as if it were complete — the written block
+    carries an explicit disclaimer naming the gap."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_ts_heavy_project(root)
+        rc, out = _run(root)
+        assert rc == 0 and "wrote" in out, out
+        text = (root / "CLAUDE.md").read_text()
+        assert "Python-only extractor" in text
+        assert "5 other tracked source file(s)" in text
+        assert "janitor#175" in text
+
+
+def test_ordinary_python_repo_gets_no_disclaimer():
+    """A couple of incidental non-Python files next to many Python modules
+    must NOT trip the honesty check — a false positive would be noise on
+    every ordinary Python repo."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)  # alpha.py + beta.py, no other-language files
+        assert _run(root)[0] == 0
+        text = (root / "CLAUDE.md").read_text()
+        assert "Python-only extractor" not in text
+
+
+def test_excluded_tree_does_not_trip_the_disclaimer():
+    """--exclude applies to the coverage count too — an intentionally-excluded
+    tree (e.g. a vendored frontend) must not trigger the honesty note either,
+    mirroring how it already exempts that tree from the map itself."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_ts_heavy_project(root)
+        rc, out = _run(root, "--exclude", "app/*")
+        assert rc == 0, out
+        text = (root / "CLAUDE.md").read_text()
+        assert "Python-only extractor" not in text
+
+
+def test_discovery_follows_the_registry_not_a_hardcoded_extension():
+    """#175 option 1: discover_sources derives its extension set from
+    EXTRACTORS, so a newly-registered language extractor changes what gets
+    discovered with ZERO changes to discover_sources itself — no second
+    hardcoded glob to drift out of step with the registry."""
+    mod = _load_module()
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        (root / "pkg" / "widget.fake").write_text("not really parsed")
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add fake"], cwd=root, check=True)
+        before = {p.name for p in mod.discover_sources(root)}
+        assert "widget.fake" not in before, "an unregistered extension must stay invisible"
+        mod.EXTRACTORS[".fake"] = lambda p: mod.FileMap(path=str(p), role="", symbols=[])
+        try:
+            after = {p.name for p in mod.discover_sources(root)}
+            assert "widget.fake" in after, "registering the extension must be the ONLY change needed"
+        finally:
+            del mod.EXTRACTORS[".fake"]
+
+
 def test_detector_nudges_only_when_opted_in_and_stale():
     """project-map-drift: silent without the flag; silent when fresh; ONE
     deduped nudge when the digest moved — and it NEVER modifies CLAUDE.md."""

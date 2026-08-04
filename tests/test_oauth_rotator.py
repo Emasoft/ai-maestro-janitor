@@ -1299,19 +1299,57 @@ def test_log_appends_timestamped_line_creating_root(tmp_path: Path, monkeypatch:
     assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4} ", line)  # local time + GMT offset
 
 
-def test_log_self_trims_and_starts_on_record_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the log exceeds the cap, _log trims it to the recent tail AND the trimmed file
-    starts on a full record (the partial leading line is dropped), so it stays parseable."""
+def test_log_rotates_via_rename_when_over_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the log exceeds the cap, _log ROTATES it via os.replace to rotator.log.1
+    (janitor#177) instead of reading-then-rewriting in place: the active file stays
+    bounded, every line stays on disk (moved, never discarded), and a fresh rotated
+    generation always starts on a full record (a rename can never produce a partial
+    leading line — unlike the old read-N-bytes-then-splice approach)."""
     monkeypatch.setattr(rotator, "ROOT", tmp_path)
     monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
     monkeypatch.setattr(rotator, "_LOG_MAX_BYTES", 2000)
-    monkeypatch.setattr(rotator, "_LOG_KEEP_BYTES", 1000)
-    for i in range(200):                       # ~200 * ~60 bytes ≫ 2000 → forces a trim
+    for i in range(200):                       # ~200 * ~60 bytes ≫ 2000 → forces rotation(s)
         rotator._log("decision number %03d padding-padding-padding" % i)
-    data = (tmp_path / "rotator.log").read_text(encoding="utf-8")
-    assert len(data.encode()) <= rotator._LOG_MAX_BYTES                 # bounded
-    assert re.match(r"^\d{4}-\d{2}-\d{2}T", data)                       # starts on a full record
-    assert data.endswith("decision number 199 padding-padding-padding\n")  # most-recent retained
+    rotated = tmp_path / "rotator.log.1"
+    current = tmp_path / "rotator.log"
+    assert rotated.is_file(), "the cap must have been crossed at least once"
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T", rotated.read_text(encoding="utf-8"))  # full record, never partial
+    if current.is_file():
+        # The LIVE file only ever holds what was written since the last rotation —
+        # never left to grow past the cap the way a trim-in-place file could.
+        assert current.stat().st_size <= rotator._LOG_MAX_BYTES
+    all_text = "".join(p.read_text(encoding="utf-8") for p in tmp_path.glob("rotator.log*"))
+    assert "decision number 199 padding-padding-padding" in all_text  # most-recent retained
+    # Each SINGLE rotation loses nothing (that is the race-safety property under
+    # test — see test_log_rotation_never_loses_a_concurrent_appenders_line for the
+    # concurrent-writer case); across MANY successive rotations only the current
+    # plus the immediately-prior generation survive, same as any size-bounded
+    # rotating log — decision 000 is long gone by the 200th write.
+    assert "decision number 000 padding-padding-padding" not in all_text
+
+
+def test_log_rotation_never_loses_a_concurrent_appenders_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE janitor#177 bug: a read-tail-then-os.replace trim silently drops whatever a
+    SECOND writer (ai-maestro's server now appends to this same file) wrote between
+    the read and the replace — and asymmetrically, since we are the one trimming.
+    Rename-based rotation never reads the file into memory, so a writer holding an
+    O_APPEND fd on the OLD inode keeps writing into the rotated file, never the void."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    monkeypatch.setattr(rotator, "_LOG_MAX_BYTES", 10)  # rotate on the very first _log call
+    log_file = tmp_path / "rotator.log"
+    other = open(log_file, "a", encoding="utf-8")  # a second, independent O_APPEND writer
+    try:
+        other.write("aim-server/decision: BEFORE rotation\n")
+        other.flush()
+        rotator._log("decision that pushes size over the cap")
+        other.write("aim-server/decision: AFTER rotation\n")  # same fd, old (now-renamed) inode
+        other.flush()
+    finally:
+        other.close()
+    all_text = "".join(p.read_text(encoding="utf-8") for p in tmp_path.glob("rotator.log*"))
+    assert "aim-server/decision: BEFORE rotation" in all_text
+    assert "aim-server/decision: AFTER rotation" in all_text
 
 
 def test_log_never_raises_on_io_error_and_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

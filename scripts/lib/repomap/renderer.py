@@ -99,10 +99,17 @@ def _common_role(members: list[FileMap]) -> str:
     return mode if counts[mode] * 2 > len(members) else ""
 
 
-def render_body(filemaps: list[FileMap]) -> str:
+def render_body(filemaps: list[FileMap], *, coverage_note: str | None = None) -> str:
     """Deterministic map body (no fences, no timestamp). Individual files first
     (sorted by path), then a '### Convention groups' section for collapsed
-    families (sorted by pattern)."""
+    families (sorted by pattern).
+
+    `coverage_note`, when given, is an honest one-line disclaimer inserted right
+    under the heading (#175: a Python-only extractor on a mostly-TypeScript repo
+    produced a map covering 18 peripheral scripts and ZERO app files, presented
+    under a heading that looks complete — the caller computes the note from
+    what the registry could NOT parse; this function only places it so it stays
+    part of the hashed, rendered block instead of silently absent)."""
     by_path = sorted(filemaps, key=lambda f: f.path)
 
     groups: dict[_FamilyKey, list[FileMap]] = defaultdict(list)
@@ -114,6 +121,8 @@ def render_body(filemaps: list[FileMap]) -> str:
     collapsed = {k for k, members in groups.items() if len(members) >= MIN_FAMILY}
 
     lines: list[str] = ["## Project map (auto-generated — do not edit between the fences)"]
+    if coverage_note:
+        lines.append(coverage_note)
     for fm in by_path:
         key = _family_key(fm.path)
         if key in collapsed:
@@ -143,19 +152,24 @@ def render_body(filemaps: list[FileMap]) -> str:
     return "\n".join(lines)
 
 
-def structure_hash(filemaps: list[FileMap]) -> str:
+def structure_hash(filemaps: list[FileMap], *, coverage_note: str | None = None) -> str:
     """12-hex sha256 over the rendered body. Identical structure → identical
     hash (the volatile generated= stamp is excluded), so the maintainer can
-    decide 'regen needed?' by comparing this to the fence's sha= in one read."""
-    body = render_body(filemaps)
+    decide 'regen needed?' by comparing this to the fence's sha= in one read.
+
+    `coverage_note` participates in the hash like any other body content: when
+    the uncovered-file count changes enough to flip the note, that IS a
+    structural change worth a refresh (see render_body)."""
+    body = render_body(filemaps, coverage_note=coverage_note)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
 
 
-def render_block(filemaps: list[FileMap], *, generated_iso: str, digest: str) -> str:
+def render_block(filemaps: list[FileMap], *, generated_iso: str, digest: str, coverage_note: str | None = None) -> str:
     """The full fenced block ready to splice into CLAUDE.md. `digest` is the
     caller's repo-change digest (git HEAD + dirty state); `generated_iso` is
-    the wall-clock stamp (excluded from the hash)."""
-    body = render_body(filemaps)
+    the wall-clock stamp (excluded from the hash); `coverage_note` is the
+    optional #175 disclaimer (see render_body)."""
+    body = render_body(filemaps, coverage_note=coverage_note)
     sha = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
     start = f"{FENCE_START} {_SCHEMA} sha={sha} digest={digest} generated={generated_iso}"
     return f"{start}\n{body}\n{FENCE_END}\n"

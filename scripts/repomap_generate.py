@@ -55,9 +55,16 @@ mismatch pays for extraction, and a `sha=` (structure-hash) match after
 extraction still skips the write — a comment-only edit changes the digest but
 not the structure, and must not churn CLAUDE.md (AC2).
 
-File discovery is `git ls-files '*.py'` — tracked files only, so .gitignore'd
-trees (reports/, *_dev/, .venv) can never leak into the map. Outside a git
-repo it falls back to a bounded rglob with the same exclusions.
+File discovery is `git ls-files` scoped to the extractor REGISTRY's extensions
+(today just `*.py`; adding a language is one registry entry, see EXTRACTORS in
+lib/repomap/extractor.py) — tracked files only, so .gitignore'd trees
+(reports/, *_dev/, .venv) can never leak into the map. Outside a git repo it
+falls back to a bounded rglob with the same exclusions.
+
+Only a Python extractor exists today. On a repo whose tracked source is
+overwhelmingly another language, the rendered block carries an explicit
+coverage disclaimer instead of silently looking complete (janitor#175) — see
+`coverage_note()`.
 """
 
 from __future__ import annotations
@@ -251,22 +258,86 @@ def oversize_report(block: str, maps: list[FileMap], root: Path) -> str | None:
 
 
 def discover_sources(root: Path, excludes: list[str] | None = None) -> list[Path]:
-    """Tracked `*.py` files via git (gitignore-respecting); bounded rglob
-    fallback outside a repo. Sorted for determinism. `excludes` are fnmatch
-    globs against the root-relative path (e.g. `tests/*`)."""
-    listing = _git(root, "ls-files", "-z", "--", "*.py")
+    """Tracked files whose extension the extractor REGISTRY can parse, via git
+    (gitignore-respecting); bounded rglob fallback outside a repo. Sorted for
+    determinism. `excludes` are fnmatch globs against the root-relative path
+    (e.g. `tests/*`).
+
+    Extensions are derived from `EXTRACTORS` (#175) instead of a hardcoded
+    `"*.py"` pathspec — discovery follows whatever the registry can actually
+    parse, so adding a language extractor is ONE registry entry, not a second
+    hardcoded list that can drift out of step with it."""
+    exts = sorted(EXTRACTORS)
+    if not exts:
+        return []
+    listing = _git(root, "ls-files", "-z", "--", *(f"*{ext}" for ext in exts))
     if listing is not None:
         rels = [r for r in listing.split("\0") if r]
         paths = sorted((root / r) for r in rels if (root / r).is_file())
     else:
         paths = []
-        for p in sorted(root.rglob("*.py")):
+        for p in sorted(root.rglob("*")):
+            if p.suffix not in exts or not p.is_file():
+                continue
             if any(part in _EXCLUDE_DIRS for part in p.relative_to(root).parts):
                 continue
             paths.append(p)
     if excludes:
         paths = [p for p in paths if not any(fnmatch(str(p.relative_to(root)), g) for g in excludes)]
     return paths
+
+
+# Extensions that commonly hold real application source but the registry has
+# no extractor for yet (P3 adds ts/go/rust — see extractor.py's own comment).
+# Listed ONLY for the coverage-honesty check below: never extracted, never
+# rendered as symbols. #175: a Python-only extractor on an otherwise-TypeScript
+# repo produced a "Project map" covering 18 peripheral scripts and ZERO app
+# files, presented under a heading that looks complete — a map of the wrong 1%
+# presented as authoritative is worse than no map at all.
+_OTHER_SOURCE_EXTS = frozenset(
+    {
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".rb",
+        ".java", ".kt", ".swift", ".c", ".cc", ".cpp", ".cs", ".php", ".scala",
+        ".m", ".mm",
+    }
+)
+
+
+def _other_tracked_source_count(root: Path, excludes: list[str] | None) -> int:
+    """Tracked files in a common source language the registry cannot parse,
+    after the SAME excludes the map itself honors (an intentionally-excluded
+    tree must not trip the honesty check either). Git-only: a non-git root has
+    no cheap way to see the whole tree, so it returns 0 rather than guessing."""
+    listing = _git(root, "ls-files", "-z")
+    if listing is None:
+        return 0
+    excludes = excludes or []
+    count = 0
+    for rel in listing.split("\0"):
+        if not rel or Path(rel).suffix not in _OTHER_SOURCE_EXTS:
+            continue
+        if any(fnmatch(rel, g) for g in excludes):
+            continue
+        count += 1
+    return count
+
+
+def coverage_note(root: Path, maps: list[FileMap], excludes: list[str] | None = None) -> str | None:
+    """None when the map is not obviously misrepresenting the repo; else an
+    honest one-line disclaimer for the block itself — issue #175's "costs
+    nothing" fallback: silence is better than an authoritative-looking partial
+    map. Fires only when uncovered common-source files OUTNUMBER what got
+    mapped, so a few incidental `.ts` config files next to hundreds of `.py`
+    modules do not trip a warning on an ordinary Python repo."""
+    other = _other_tracked_source_count(root, excludes)
+    covered = len(maps)
+    if other == 0 or other <= covered:
+        return None
+    return (
+        f"> ⚠ Python-only extractor: this map covers {covered} file(s); {other} other "
+        "tracked source file(s) (.ts/.tsx/.go/.rs/… — no extractor yet) are NOT "
+        "represented — do not treat this as a complete project map (janitor#175)."
+    )
 
 
 def repo_digest(root: Path) -> str:
@@ -461,7 +532,9 @@ def cmd_check(root: Path) -> int:
     # Digest moved — only now pay for extraction (with the SAME persisted
     # excludes the map was generated with); a structure match still counts as
     # fresh (comment-only change), but report it distinctly.
-    sha = structure_hash(extract_all(root, load_excludes(root)))
+    excludes = load_excludes(root)
+    maps = extract_all(root, excludes)
+    sha = structure_hash(maps, coverage_note=coverage_note(root, maps, excludes))
     if header.get("sha") == sha:
         print("repomap: structure unchanged (digest moved; refresh optional)")
         return 0
@@ -504,8 +577,9 @@ def cmd_generate(root: Path, *, to_stdout: bool, excludes: list[str] | None = No
     if not maps:
         print("repomap: no supported source files found")
         return 3
+    note = coverage_note(root, maps, excludes)
     generated = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    block = render_block(maps, generated_iso=generated, digest=repo_digest(root))
+    block = render_block(maps, generated_iso=generated, digest=repo_digest(root), coverage_note=note)
     # Check the cap BEFORE --stdout returns too: a caller piping the block somewhere is
     # just as capable of committing an oversized map as the splice path is.
     oversize = oversize_report(block, maps, root)
@@ -526,7 +600,7 @@ def cmd_generate(root: Path, *, to_stdout: bool, excludes: list[str] | None = No
     try:
         text = claude_md.read_text(encoding="utf-8") if claude_md.is_file() else ""
         header = read_fence_header(text)
-        if header is not None and header.get("sha") == structure_hash(maps):
+        if header is not None and header.get("sha") == structure_hash(maps, coverage_note=note):
             print("repomap: already current (structure hash match) — no write")
             return 0
         _backup(claude_md)
