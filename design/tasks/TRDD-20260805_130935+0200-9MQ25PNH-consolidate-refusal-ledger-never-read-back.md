@@ -1,34 +1,58 @@
 ---
 trdd-id: 9MQ25PNH
 title: memory-consolidate re-dispatches already-refused candidates because its refusal ledger is written but never read back
-column: todo
+column: testing
 created: 2026-08-05T13:09:35+0200
-updated: 2026-08-05T13:09:35+0200
+updated: 2026-08-05T13:57:23+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 relevant-rules: []
 blocked-by: []
-implementation-commits: []
+implementation-commits: [da36c68d, 03b09b7a]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Not started.** The defect is MEASURED and the mechanism is VERIFIED in code; what is open is
-which of the three fixes to take. This card exists because two agent reports carried a decision
-and reports are gitignored/ephemeral — the decision had to survive them.
+**SHIPPED to `column: testing` — `da36c68d` (implementation) + `03b09b7a` (falsification record).**
+Lint clean, 101 tests pass in the module, full suite green (14416 passed; the one unrelated red was
+my own half-bumped CPV pin, fixed in `2b214c95`).
 
-**NEXT ACTION:** implement the **per-page stat comparison** described in the second 2026-08-05
-section ("CORRECTION"). Suppress iff every page whose stat differs from the stamp is covered by a
-live refusal. Three files (`memory_content_precheck`, `memory_settings`, `memory-maintenance.py`)
-plus four tests, all enumerated there.
+### What landed
+
+The dispatch stamp is now a PER-PAGE map (`{relpath: [size, mtime_ns]}` via the new `page_stats`)
+instead of one opaque digest, so the gate asks WHICH pages moved. Every moved page is checked for
+membership of a live consolidate refusal via `refusal_covered_pages`; if all are covered, suppress.
+
+### SCOPE OF THE WIN — narrower than this card originally claimed, and stated so deliberately
+
+`page_stats` keys on `(size, mtime_ns)`; a refusal keys on CONTENT. So this suppresses exactly the
+**stat-moved-but-content-identical** case — a byte-identical rewrite, a `utime`, a memgrep reindex,
+a git checkout. That is frequent (the other chores rewrite this corpus constantly), but it is NOT
+"stops re-dispatching on unrelated edits": a genuine content edit still dispatches, to a refused
+page (its refusal is void) or anywhere else (it could be half of a new merge pair, and the agent's
+manual survey is a documented discovery path this must not disable).
+
+### FALSIFIED, and the result corrected my own claim
+
+Deleting the filter fails **exactly ONE** of the 5 new tests. The other four pass with the feature
+removed — they exercise paths the filter never reaches. They are REGRESSION GUARDS (above all: a
+landed refusal must not itself re-arm the chore, the property that rules out the narrowed-digest
+design), not evidence the filter works. The test file now says this in a header comment rather than
+implying 5-test coverage — a test that passes with the feature removed is not testing the feature.
+
+**NEXT ACTION:** one observed before/after in the wild — dispatch counts over a fixed window, both
+numbers taken the same way — then `testing → complete`. That is the last open acceptance box.
 
 **Do NOT implement either earlier proposal.** Option 1 (suppress when all surfaced candidates are
 refused) is UNSOUND — it disables the agent's documented self-survey. The bare narrowed FINGERPRINT
 is also wrong — the stamp is taken before the agent records refusals, so it buys one spurious
-~279k dispatch per productive round. Both were investigated and both are written up below with the
-evidence, so neither needs re-deriving; read them before proposing a third variant.
+~279k dispatch per productive round. Both are written up below with their evidence; read them
+before proposing a third variant.
+
+*(superseded — do NOT carry forward: "**Not started.** … what is open is which of the three fixes to
+take." True when written this morning; the fix is now implemented, falsified and committed.)*
 
 ## The finding
 
@@ -207,9 +231,17 @@ one and leaves the mechanism intact.
 
 ## Acceptance
 
-- [ ] An unchanged, already-refused candidate set does NOT re-dispatch `consolidate` after an
-      unrelated byte changes elsewhere in the corpus. (Test asserts the gate, not the agent.)
-- [ ] A candidate whose CONTENT changed since its refusal DOES re-dispatch (the refusal is
-      conditioned on content, so it must expire when the content moves).
-- [ ] The chosen option is recorded here with its reasoning, not just implemented.
+- [x] An unchanged, already-refused candidate set does NOT re-dispatch `consolidate` when the
+      change is stat-only (mtime/size churn). — `da36c68d`, proven by the falsification.
+      **SCOPE CORRECTION:** a genuine CONTENT edit elsewhere still dispatches, and should —
+      it could be half of a new merge pair, and the agent's manual survey must not be disabled.
+      The win is the stat-moved-but-content-identical case (reindex, checkout, byte-identical
+      rewrite), which is frequent because the other chores rewrite this corpus constantly.
+- [x] A candidate whose CONTENT changed since its refusal DOES re-dispatch — the refusal stops
+      matching on its own `content_hash`, so no expiry bookkeeping was needed. — `da36c68d`
+- [x] The chosen option is recorded here with its reasoning — including BOTH rejected designs
+      (option 1 unsound; narrowed digest buys a spurious dispatch) so neither is re-derived.
+- [x] Falsified. Deleting the filter fails exactly ONE of the 5 new tests; the other four are
+      regression guards that pass either way, and the test file now SAYS so rather than
+      implying 5-test coverage (ATOM-DM04-VACUOUS-HARNESS). — `03b09b7a`
 - [ ] Measured before/after dispatch counts over a fixed window, both taken the same way.
