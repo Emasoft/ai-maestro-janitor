@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=72de5c81a015 digest=7cce641314b8 generated=2026-08-04T18:21:26+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bc6d927ba53a digest=18c18eae06a2 generated=2026-08-05T06:54:50+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -99,6 +99,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/detectors/gh-reply-watch.py` — gh-reply-watch — notify the main Claude when someone REPLIES to a thread this project opened.
   · main() -> int
 `scripts/detectors/github-issues-watch.py` — github-issues-watch — notify the main Claude of new issues / new comments (TRDD-2KQQAEPP).
+  · main() -> int
+`scripts/detectors/global-chore-blackout.py` — global-chore-blackout — alarm when global chores have NO owner at all (ai-maestro#111).
   · main() -> int
 `scripts/detectors/historical-cache-scan.py` — historical-cache-scan — known-malicious package version detector.
   · main() -> int
@@ -612,6 +614,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · record_spawn_attempt(now) -> None — PUBLIC: record one daemon spawn attempt into the crash-loop ring.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
 `scripts/lib/harness_backend.py` — Harness-backend SSOT (TRDD-PZLVT2RN) — the ONE place that answers "which world am I in?".
+  · unabsorbed_chores() -> tuple[str, ...] — The global chores that have NO owner while a live server suppresses the daemon.
   · is_harness_session(env) -> bool — True iff THIS process runs inside an ai-maestro harness agent.
   · backend(env) -> str — The actuation backend for THIS session: "aimaestro" (thin #J) or "standalone" (#N).
   · server_capabilities(*, now) -> frozenset[str] | None — The LIVE server's advertised capability tokens, or None when there is no fresh claim.
@@ -736,7 +739,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
   · retro_lesson_has_work(root) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
   · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
-  · conflict_pairs(root) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
+  · conflict_pairs(root, scope) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
   · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
   · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
   · content_has_work(intervention, root, *, split_max_bytes, scope, last_fingerprint, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
@@ -935,9 +938,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · insert_map_block(text, new_block, start, end) -> str — First-time insertion (the /janitor-auto-repomap-on path): append the
   · remove_map_block(text, start, end) -> str — Splice out the fenced block entirely (the /janitor-auto-repomap-off
 `scripts/lib/repomap/renderer.py` — Project-map renderer — FileMaps → the fenced CLAUDE.md block (TRDD-e247a349 §2).
-  · render_body(filemaps) -> str — Deterministic map body (no fences, no timestamp). Individual files first
-  · structure_hash(filemaps) -> str — 12-hex sha256 over the rendered body. Identical structure → identical
-  · render_block(filemaps, *, generated_iso, digest) -> str — The full fenced block ready to splice into CLAUDE.md. `digest` is the
+  · render_body(filemaps, *, coverage_note) -> str — Deterministic map body (no fences, no timestamp). Individual files first
+  · structure_hash(filemaps, *, coverage_note) -> str — 12-hex sha256 over the rendered body. Identical structure → identical
+  · render_block(filemaps, *, generated_iso, digest, coverage_note) -> str — The full fenced block ready to splice into CLAUDE.md. `digest` is the
 `scripts/lib/rotator_usage.py` — Shared READ-ONLY account-usage gather (TRDD-OY0W6LX5).
   · accounts_usage() -> list[dict] — `[{"label", "usage"}]` for every unique known account (live + slots, deduped by
 `scripts/lib/rules_installer.py` — Install plugin-shipped rule files into the active scope's .claude/rules/.
@@ -1514,7 +1517,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · save_excludes(root, globs) -> None — Persist to the TRACKED file. Never writes the legacy path back.
   · max_block_bytes() -> int
   · oversize_report(block, maps, root) -> str | None — None when the block fits; otherwise a message naming the top directories.
-  · discover_sources(root, excludes) -> list[Path] — Tracked `*.py` files via git (gitignore-respecting); bounded rglob
+  · discover_sources(root, excludes) -> list[Path] — Tracked files whose extension the extractor REGISTRY can parse, via git
+  · coverage_note(root, maps, excludes) -> str | None — None when the map is not obviously misrepresenting the repo; else an
   · repo_digest(root) -> str — Cheap repo-change digest: git HEAD + a hash of the porcelain status
   · extract_all(root, excludes) -> list[FileMap] — Extract every supported source file. Today the adapter registry holds
   · splice_with_verify(claude_md, block, attempts) -> bool — The anti-corruption write: read+signature → splice+invariant-verify →
@@ -1535,6 +1539,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · expect_key(expect) -> str — The same normalization applied to a query's expected `page#atom` (or bare `page`).
   · estimate_tokens(text) -> int — A deterministic, offline token estimate.
   · corpus_arg(corpus) -> str — The corpus path to hand memgrep — RELATIVE to the repo whenever it lives inside it.
+  · dropped_props_findings(corpus) -> list[str] — The `atom-dropped-props` finding lines for `corpus` (empty ⇒ clean). Issue #119.
   · run_recall(query, corpus, extra, top) -> str — Run `memgrep recall` and return its stdout (stderr folded in, so a failure is visible).
   · parse_results(out) -> list[str] — Ordered result ids (normalized by `result_key`), across BOTH output formats.
   · atom_body_present(out, expect, corpus) -> bool — True iff the search output already contains the expected atom's BODY.
