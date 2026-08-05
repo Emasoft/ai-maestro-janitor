@@ -479,6 +479,50 @@ jobs:
 """
         self.assertNotIn("id-token-write-unscoped", fired(wf))
 
+    def test_npm_trusted_publishing_job_does_not_fire(self):
+        """#99: `npm publish` mints its OWN registry OIDC token (npm CLI
+        trusted publishing) — no cloud IAM trust policy exists for an
+        environment: gate to narrow, so a job-scoped grant beside a bare
+        `npm publish` step must NOT fire (the exact `publish-npm` shape
+        reported: workflow-level contents: read, job-level id-token: write,
+        no environment)."""
+        wf = """
+on: push
+permissions:
+  contents: read
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/setup-node@v4
+      - run: npm publish
+"""
+        self.assertNotIn("id-token-write-unscoped", fired(wf))
+
+    def test_npm_publish_plus_cloud_auth_still_fires(self):
+        """A job that runs `npm publish` AND also authenticates to a cloud
+        provider without an environment gate is still a real unscoped-OIDC
+        risk for the cloud credential — the npm-publish exemption must not
+        hide it."""
+        wf = """
+on: push
+jobs:
+  publish-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - run: npm publish
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::1234:role/ci
+"""
+        self.assertIn("id-token-write-unscoped", fired(wf))
+
 
 # --- module-level coverage assertions -------------------------------------
 

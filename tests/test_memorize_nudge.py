@@ -207,6 +207,41 @@ def test_silent_outside_git_repo(tmp_path, home):
     assert _run(bare, home) == ""
 
 
+def test_unatomized_corpus_routes_to_atomize_not_a_blocked_write(tmp_path, home):
+    """janitor#151 item 5: every LOCAL/PROJECT note has 0 atom markers (pre-atomization
+    free prose) — add-atom/add-lesson have nothing to anchor a new entry to, so the
+    nudge must say the scope needs atomizing rather than blindly point at
+    /janitor-memory-write's normal 'update an existing page' routing, which is exactly
+    the path that is blocked."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write_note(repo, "old.md", age_s=7200, body="plain free-prose note, no atom marker")
+    for i in range(3):
+        _commit(repo, f"src/f{i}.py", f"x = {i}\n", f"feat: thing {i}")
+    out = _run(repo, home)
+    assert "[memorize-nudge]" in out
+    assert "predate atomization" in out
+    assert "Recall first" not in out
+
+
+def test_atomized_corpus_keeps_the_recall_first_routing(tmp_path, home):
+    """The counterpart: as soon as ANY note in scope has at least one atom, the
+    normal 'recall first, update an existing page' routing is still correct and
+    must not be replaced by the atomize caveat."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write_note(
+        repo, "old.md", age_s=7200,
+        body='^some-fact [keywords: x] this page already has a real atom.',
+    )
+    for i in range(3):
+        _commit(repo, f"src/f{i}.py", f"x = {i}\n", f"feat: thing {i}")
+    out = _run(repo, home)
+    assert "[memorize-nudge]" in out
+    assert "Recall first" in out
+    assert "predate atomization" not in out
+
+
 def test_dedupe_second_run_in_same_interval_silent(tmp_path, home):
     """Two runs in the same interval/session → exactly one nudge (no per-commit spam)."""
     repo = tmp_path / "repo"

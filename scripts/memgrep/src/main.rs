@@ -29,10 +29,24 @@ const MD_EXTS: &[&str] = &[
 
 /// memgrep — markdown-aware grep. Every matcher value is a regex (like grep); flags that exist in
 /// grep/rg keep their name and meaning; different flags AND-narrow, comma-lists OR-widen.
+// Build identity (janitor#164): env vars set by build.rs via `cargo:rustc-env=...`, so
+// `env!()` resolves at COMPILE time to the commit this exact binary was built from — the
+// property `Cargo.toml`'s bare `version = "0.1.0"` never had, which is how two forks with
+// 12354 vs 4806 LOC once reported the identical version string. Falls back to "unknown" for
+// both fields (baked into build.rs itself) rather than failing a git-less build.
+const MEMGREP_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("MEMGREP_BUILD_SHA"),
+    ", ",
+    env!("MEMGREP_BUILD_DATE"),
+    ")",
+);
+
 #[derive(Parser, Debug)]
 #[command(
     name = "memgrep",
-    version,
+    version = MEMGREP_VERSION,
     about = "markdown-AST-aware grep + wikimem memory toolkit",
     after_help = "Memory verbs (dispatched before grep parsing — run `memgrep <verb> --help`):\n  \
         add-atom add-lesson atom atom-page fact find find-claude-mem-ref index links lint migrate \
@@ -377,6 +391,54 @@ fn json_str(s: &str) -> String {
     o
 }
 
+// Every verb `main`'s dispatch match recognises, INCLUDING "help" (janitor#127) — the single
+// source the typo hint below checks against, so a verb added to the match and forgotten here
+// just silently never gets typo-suggested rather than panicking or drifting. "help" has its OWN
+// dispatch arm above (so it never reaches the typo-check arm itself), but it still belongs in
+// this list — otherwise a genuine typo OF "help" (`hlep`, distance 2, standard Levenshtein has
+// no transposition operation) has no "help" entry to be suggested against and is silently
+// missed, which is the exact failure mode this feature exists to close.
+const VERBS: &[&str] = &[
+    "help", "index", "reindex", "validate", "links", "lint", "fact", "recall", "find",
+    "find-claude-mem-ref", "atom", "atom-page", "overview", "add-atom", "new-page",
+    "add-lesson", "migrate", "edit",
+];
+
+/// Iterative DP Levenshtein distance — O(len(a)*len(b)), fine for verb-name-length strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (la, lb) = (a.len(), b.len());
+    if la == 0 {
+        return lb;
+    }
+    if lb == 0 {
+        return la;
+    }
+    let mut prev: Vec<usize> = (0..=lb).collect();
+    for i in 1..=la {
+        let mut curr = vec![0usize; lb + 1];
+        curr[0] = i;
+        for j in 1..=lb {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        prev = curr;
+    }
+    prev[lb]
+}
+
+/// True iff `s` is shaped like a verb name (lowercase ASCII letters + hyphens only) rather than
+/// an arbitrary search PATTERN — the guard that keeps the typo hint from firing on a legitimate
+/// grep for e.g. `TODO:`, `class Foo`, or a regex with metacharacters. Every real verb name is
+/// exactly this shape, so a false NEGATIVE here only means "no hint", never "no search" — the
+/// grep always proceeds either way.
+fn looks_like_verb_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && s.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+}
+
 fn main() -> Result<()> {
     reset_sigpipe(); // die quietly on `… | head`, never panic on a closed pipe
 
@@ -386,6 +448,18 @@ fn main() -> Result<()> {
     // first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();
     match raw.get(1).map(|s| s.as_str()) {
+        // `help` as a bare first word (janitor#127): the discovery convention every other CLI
+        // (git/cargo/npm) honors. Without this, `memgrep help` SUCCEEDS as a literal grep for the
+        // word "help" — exit 0, plausible-looking output — which reads as "no subcommands exist"
+        // rather than "wrong command". `--help` keeps working unchanged (clap handles it before
+        // this match ever runs, since it is not `raw.get(1)`-shaped the same way — clap's own
+        // flag parsing intercepts `--help` earlier in `Cli::parse()` below).
+        Some("help") => {
+            use clap::CommandFactory;
+            Cli::command().print_help()?;
+            println!();
+            return Ok(());
+        }
         Some("index") => return memory::cmd_index_cli(&raw[2..]),
         Some("reindex") => return memory::cmd_reindex_cli(&raw[2..]),
         Some("validate") => return index::cmd_validate_cli(&raw[2..]),
@@ -409,6 +483,25 @@ fn main() -> Result<()> {
         // EDIT verb (TRDD-7YHT3FNK Phase 2) — the sanctioned replace-X-with-Y primitive: locked,
         // CAS-checked, refuses on ambiguity (multiple matches) or staleness (zero matches / bad hash).
         Some("edit") => return memory::cmd_edit_cli(&raw[2..]),
+        // Not a known verb (janitor#127 item 2): if it is shaped like ONE and close enough that a
+        // typo is the likely explanation (`hlep`, `recal`, `validte` from the issue — all distance
+        // <= 2), warn to STDERR before silently falling through to a literal grep. Grep-first
+        // semantics are UNCHANGED: this never blocks the search, never touches stdout, never
+        // changes the exit code — it only tells a human/agent who typed a near-miss why a
+        // plausible-looking successful result is not the verb they meant.
+        Some(first) if looks_like_verb_identifier(first) => {
+            if let Some((closest, _)) = VERBS
+                .iter()
+                .map(|v| (*v, levenshtein(first, v)))
+                .filter(|(_, d)| *d >= 1 && *d <= 2)
+                .min_by_key(|(_, d)| *d)
+            {
+                eprintln!(
+                    "memgrep: {first:?} is not a verb (did you mean `{closest}`?) — \
+                     searching for it as a pattern; run `memgrep --help` for the verb list"
+                );
+            }
+        }
         _ => {}
     }
 

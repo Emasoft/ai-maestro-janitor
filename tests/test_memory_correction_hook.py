@@ -213,6 +213,71 @@ class TestSilentCases:
         })
         assert not _fired(res)
 
+    def test_marker_only_desc_quoting_is_silent(self):
+        """janitor#151 item 1: quoting a malformed `desc:` value on an atom MARKER
+        line is metadata repair, not a fact rewrite — 7 of 10 measured false
+        positives were exactly this shape."""
+        res = _run(_edit(
+            _MEM_PAGE,
+            old='^ofetch-genuine [keywords: ofetch typosquat desc:ofetch is a real package]',
+            new='^ofetch-genuine [keywords: ofetch typosquat desc:"ofetch is a real package"]',
+        ))
+        assert not _fired(res)
+
+    def test_marker_only_multiline_is_silent(self):
+        """The marker-only exemption covers a batch touching several marker lines,
+        not just a single-line edit."""
+        old = (
+            '^a [keywords: x desc:one]\n'
+            '^b [keywords: y desc:two]'
+        )
+        new = (
+            '^a [keywords: x desc:"one"]\n'
+            '^b [keywords: y desc:"two"]'
+        )
+        res = _run(_edit(_MEM_PAGE, old=old, new=new))
+        assert not _fired(res)
+
+    def test_marker_line_edit_that_also_touches_prose_still_fires(self):
+        """A replaced span mixing a marker line with real body prose is NOT
+        marker-only — the exemption must not swallow a genuine fact rewrite
+        just because a marker line happens to be adjacent."""
+        old = '^a [keywords: x desc:"one"]\nThe cap is 5 retries.'
+        new = '^a [keywords: x desc:"one"]\nThe cap is 3 retries.'
+        res = _run(_edit(_MEM_PAGE, old=old, new=new))
+        assert _fired(res)
+
+    def test_wikilink_only_addition_is_silent(self):
+        """janitor#151 item 1: adding a `[[wikilink]]` to satisfy the link law
+        corrects no fact."""
+        res = _run(_edit(
+            _MEM_PAGE,
+            old="See the janitor-architecture page for the daemon lifecycle.",
+            new="See the [[janitor-architecture]] page for the daemon lifecycle.",
+        ))
+        assert not _fired(res)
+
+    def test_delinking_a_dangling_footnote_reference_is_silent(self):
+        """janitor#151 item 1: removing a dangling `[^N]` reference (citation
+        cleanup) touches no fact — the count went DOWN, not up, so `_adds_lesson`
+        alone does not cover it."""
+        res = _run(_edit(
+            _MEM_PAGE,
+            old="The retry cap is documented elsewhere[^12].",
+            new="The retry cap is documented elsewhere.",
+        ))
+        assert not _fired(res)
+
+    def test_delinking_plus_a_real_fact_change_still_fires(self):
+        """De-linking a footnote AND rewriting the fact in the same span is a
+        genuine correction with no lesson recorded — must still fire."""
+        res = _run(_edit(
+            _MEM_PAGE,
+            old="The retry cap is 5[^12].",
+            new="The retry cap is 3.",
+        ))
+        assert _fired(res)
+
     def test_opt_out_disables_the_hook(self):
         """Setting the opt-out env false suppresses the advisory even on a real correction."""
         res = _run(

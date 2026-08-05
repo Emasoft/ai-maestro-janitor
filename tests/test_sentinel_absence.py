@@ -322,6 +322,86 @@ jobs:
 """
         self.assertNotIn("missing-env-protection", fired(wf))
 
+    def test_negative_attestation_only_oidc_does_not_need_an_environment(self):
+        """janitor#164: a job that mints id-token: write ONLY to sign a Sigstore
+        build-provenance attestation has no deployment trust policy for an
+        environment: gate to narrow — the same false positive
+        IdTokenWriteUnscoped had before janitor#99, on the SAME job shape
+        (the janitor's own memgrep-release.yml `release` job)."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'out/memgrep-*'
+      - run: gh release upload "$TAG" out/memgrep-*
+"""
+        self.assertNotIn("missing-env-protection", fired(wf))
+
+    def test_positive_attestation_plus_cloud_auth_still_needs_an_environment(self):
+        """A job that ALSO authenticates to a cloud provider is a real
+        unscoped-OIDC deploy risk — the attestation exemption must not hide it."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'out/memgrep-*'
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::1234:role/ci
+"""
+        self.assertIn("missing-env-protection", fired(wf))
+
+    def test_positive_npm_trusted_publishing_oidc_still_needs_an_environment(self):
+        """Unlike attestation, registry-OIDC publishing (npm trusted publishing)
+        IS a publish action — "should a human approve before this runs" is a
+        genuine, separate concern from the OIDC-SCOPE question
+        IdTokenWriteUnscoped answers (janitor#99). The attestation exemption
+        above must not spill over into exempting an actual publish step; this
+        also already trips on `has_publish` alone via `npm publish`, so this
+        pins that neither path was weakened."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - run: npm publish
+"""
+        self.assertIn("missing-env-protection", fired(wf))
+
 
 class TestOverlyBroadTriggers(unittest.TestCase):
     def test_positive_push_without_branch_filter(self):

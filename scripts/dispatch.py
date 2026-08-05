@@ -1286,8 +1286,12 @@ def _phase_iterm_automation_alarm() -> None:
             "the fleet guardian CANNOT rescue a frozen/rate-limited Claude in any iTerm "
             "pane (tmux panes are unaffected); it has been skipping them silently. Fix: "
             "System Settings → Privacy & Security → Automation → allow the janitor daemon "
-            "(its uv/python entry) to control iTerm. This alarm clears itself on the next "
-            "fleet scan once the grant lands. See TRDD-VQ4LX7ND."
+            "(its uv/python entry) to control iTerm. On some hosts (macOS 26+, an "
+            "adhoc-signed uv/python with no stable Team ID) that toggle will not persist and "
+            "reverts to off — if it does, iTerm rescue is not attainable on this host; run "
+            "agents under tmux instead, which the guardian rescues with no Automation grant "
+            "at all. This alarm clears itself on the next fleet scan once the grant lands. "
+            "See TRDD-VQ4LX7ND, GH issue #92."
         )
     except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
         state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")

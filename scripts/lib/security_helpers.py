@@ -286,6 +286,25 @@ _POPULAR_PYPI = frozenset({
     "rich", "textual", "tqdm",
 })
 
+# Genuine, independently-published packages that happen to sit within
+# `max_distance` of a `_POPULAR_NPM`/`_POPULAR_PYPI` target — edit distance
+# alone cannot tell "typosquat" from "unrelated package with a similar
+# name", and false-flagging a real package is a proposal a human must
+# manually refuse every time the lockfile is re-scanned (janitor#99: four
+# recurrences of the same four names over three weeks). Each entry here was
+# VERIFIED against the registry before being added — a real maintainer, a
+# real repo, download counts establishing it predates any typosquat
+# campaign on its near-neighbor — not merely "this looked fine once".
+# Distinct from `_POPULAR_*`: those are the ATTACK TARGETS a squat
+# impersonates; this is the set of NAMES that must never be judged a squat
+# of one, however close the edit distance.
+_KNOWN_LEGITIMATE_NEAR_POPULAR = frozenset({
+    "ofetch",  # unjs/ofetch — genuine, edit-distance-1 from "fetch"
+    "gaxios",  # googleapis/gaxios, Google's own HTTP client — near "axios"
+    "color",  # Qix-/color — a distinct, long-standing package from "colors"
+    "preact",  # preactjs/preact — a full framework, not a squat of "react"
+})
+
 
 def popular_npm_packages() -> frozenset[str]:
     return _POPULAR_NPM
@@ -299,13 +318,16 @@ def is_typosquat_candidate(
     name: str, popular: Iterable[str], *, max_distance: int = 1,
 ) -> Optional[str]:
     """If `name` is within `max_distance` edits of any popular target
-    (but NOT equal to any), return the closest target. Else None.
+    (but NOT equal to any, and not itself a verified-genuine package in
+    `_KNOWN_LEGITIMATE_NEAR_POPULAR`), return the closest target. Else None.
 
     Returns None for the empty string. Case-insensitive comparison.
     """
     if not name:
         return None
     n = name.strip().lower()
+    if n in _KNOWN_LEGITIMATE_NEAR_POPULAR:
+        return None  # verified real package, not a typosquat (janitor#99)
     best: Optional[str] = None
     best_dist = max_distance + 1
     for target in popular:

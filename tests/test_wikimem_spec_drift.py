@@ -61,6 +61,21 @@ EXEMPT: dict[str, str] = {
     "--hidden": ("generic walker knob shared with the grep half: descend into dotfiles. It changes WHICH files are visited, never what any wikimem rule means"),
 }
 
+# Dispatch-table entries that are NOT wikimem verbs — the same "clap builtin, not a wikimem
+# behaviour" reasoning as --help/--version above, one level up: a hand-dispatched match arm in
+# main.rs that exists only to REACH a clap builtin rather than to do memory-toolkit work. Kept
+# separate from VERBS (rather than adding it there) so `test_every_verb_is_named_in_the_skill`
+# does not demand a SKILL.md invocation example for something that is not an invocable behaviour.
+DISPATCH_EXEMPT_VERBS: dict[str, str] = {
+    "help": (
+        "janitor#127: a bare `memgrep help` used to succeed as a literal grep for the word "
+        "\"help\" (exit 0, plausible output) instead of showing the verb list, which every other "
+        "CLI's `help` convention does. The fix dispatches it to the SAME `Cli::command().print_help()` "
+        "--help already reaches — not a new wikimem behaviour, so it earns no spec/skill entry of "
+        "its own, exactly like --help itself above."
+    ),
+}
+
 _FLAG = re.compile(r"--[a-z][a-z0-9-]*")
 
 
@@ -142,11 +157,13 @@ def _names_flag(text: str, flag: str) -> bool:
 
 
 def test_dispatch_list_matches_the_verbs_this_test_checks() -> None:
-    """The VERBS tuple must be the dispatch table, or every other assertion here is scoped to a
-    stale list and passes by checking nothing."""
+    """The VERBS tuple (plus the explicitly-reasoned DISPATCH_EXEMPT_VERBS) must be the dispatch
+    table, or every other assertion here is scoped to a stale list and passes by checking
+    nothing."""
     dispatch = (REPO / "scripts" / "memgrep" / "src" / "main.rs").read_text(encoding="utf-8")
     in_source = set(re.findall(r'Some\("([a-z][a-z0-9-]*)"\)\s*=>', dispatch))
-    assert in_source == set(VERBS), f"main.rs's wikimem dispatch and this test's VERBS list have diverged — only in source: {sorted(in_source - set(VERBS))}; only in test: {sorted(set(VERBS) - in_source)}"
+    expected = set(VERBS) | set(DISPATCH_EXEMPT_VERBS)
+    assert in_source == expected, f"main.rs's dispatch and this test's VERBS+DISPATCH_EXEMPT_VERBS have diverged — only in source: {sorted(in_source - expected)}; only in test: {sorted(expected - in_source)}"
 
 
 def test_every_verb_is_named_in_the_spec() -> None:

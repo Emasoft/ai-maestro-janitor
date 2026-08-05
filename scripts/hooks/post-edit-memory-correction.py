@@ -27,6 +27,12 @@ When this hook fires:
   * The edit adds NO new lesson — `new_string` introduces no `[^N]` reference, no
     `[^N]:` definition, and no `## Notes and lessons learned` header that
     `old_string` lacked.
+  * The replacement is not CONFINED to an atom marker line (`^id [desc:"…" …]`,
+    metadata only) and is not COSMETIC-only (adding a `[[wikilink]]` or removing
+    a `[^N]` reference, net of which the text is unchanged) — janitor#151 item 1:
+    measured 10/10 false-positive fires in one session, all three of exactly
+    this shape (a marker-line desc: fix, a link-law wikilink, a de-linked
+    dangling footnote), because none of them can rewrite a stated fact.
 
 Write is in the matcher so the hook SEES whole-file overwrites, but the
 PostToolUse payload carries no prior file content for a Write — so "append vs
@@ -70,6 +76,22 @@ _LESSONS_HEADER_RE = re.compile(
     r"^\s*#{2,}\s+notes\s+(?:and|&)\s+lessons\s+learned\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# An atom MARKER line — `^id [keywords: … desc:"…" …]` (the same shape
+# `memory_edit_verify._ATOM_MARKER_CORE` matches; duplicated as a small local
+# constant rather than importing that module, which pulls in the whole
+# transaction/verification stack for a hook that must stay a fast, pure regex
+# over stdin — janitor#151 item 1). A line matching this is METADATA, never
+# the atom's body prose, so rewriting only marker lines (e.g. quoting a
+# malformed `desc:` value) cannot itself rewrite a stated FACT.
+_ATOM_MARKER_LINE_RE = re.compile(r"^\s*\^[A-Za-z0-9_-]+\s*\[[^\n]*\]\s*$")
+
+# A wikilink — `[[target]]` or `[[target|label]]`. Adding one (the link law)
+# changes no fact — captures target/label so `_strip_cosmetic` can put the
+# VISIBLE TEXT back (never delete it), or the prose "the janitor-architecture
+# page" vs the wikilinked "the [[janitor-architecture]] page" would compare
+# unequal for the wrong reason (the WORDS differing) instead of matching.
+_WIKILINK_RE = re.compile(r"\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]")
 
 
 def _is_truthy_env(name: str, default: bool) -> bool:
@@ -121,6 +143,48 @@ def _is_replacement(old: str, new: str) -> bool:
     return old not in new
 
 
+def _is_marker_only(old: str, new: str) -> bool:
+    """True iff EVERY non-blank line of both `old` and `new` is an atom MARKER
+    line (`^id [keywords:… desc:"…" …]`) — i.e. the edit touches only a
+    marker's own metadata (its `desc:`/`keywords:`/etc. props), never the
+    atom's body prose below it. Metadata cannot itself BE the fact the
+    correction protocol protects (janitor#151 item 1: 7 of 10 measured false
+    positives were exactly this — quoting a malformed `desc:` value)."""
+    old_lines = [ln for ln in old.splitlines() if ln.strip()]
+    new_lines = [ln for ln in new.splitlines() if ln.strip()]
+    if not old_lines or not new_lines:
+        return False
+    return all(_ATOM_MARKER_LINE_RE.match(ln) for ln in old_lines) and all(
+        _ATOM_MARKER_LINE_RE.match(ln) for ln in new_lines
+    )
+
+
+def _strip_cosmetic(text: str) -> str:
+    """`text` with every wikilink UNWRAPPED to its visible words (`[[X]]` -> `X`,
+    `[[X|Y]]` -> `Y`) and every `[^N]`-shaped token removed, then
+    whitespace-collapsed. The two token classes an edit can add or remove
+    without touching a stated fact: a `[[wikilink]]` wrapped around existing
+    prose to satisfy the link law (unwrapping restores the original words, so
+    it compares equal to the un-linked form — deleting the words instead would
+    make an unrelated edit compare equal for the wrong reason), or a `[^N]`
+    reference de-linked as citation cleanup (a dangling footnote costs no
+    fact — `_adds_lesson` already suppresses the case where a `[^N]`-shaped
+    count went UP, so by the time this runs the count can only be flat or
+    down)."""
+    out = _WIKILINK_RE.sub(lambda m: m.group(2) or m.group(1), text)
+    out = _FOOTNOTE_REF_RE.sub("", out)
+    return " ".join(out.split())
+
+
+def _is_cosmetic_only(old: str, new: str) -> bool:
+    """True iff, after neutralising wikilink/footnote-reference tokens, `old`
+    and `new` are the SAME text — the edit's only substantive change is
+    link/citation hygiene, so no fact was rewritten (janitor#151 item 1: the
+    remaining 2 of 10 measured false positives — a wikilink added to satisfy
+    the link law, and a dangling `[^12]` reference de-linked)."""
+    return _strip_cosmetic(old) == _strip_cosmetic(new)
+
+
 def _correction_nudge_needed(tool: str, tool_input: dict) -> bool:
     """Decide whether to surface the correction-protocol advisory.
 
@@ -147,11 +211,15 @@ def _correction_nudge_needed(tool: str, tool_input: dict) -> bool:
         return False
     if not pairs:
         return False
-    if not any(_is_replacement(old, new) for old, new in pairs):
-        return False           # pure appends/inserts — not a fact rewrite
     if any(_adds_lesson(old, new) for old, new in pairs):
         return False           # the batch DID add a lesson — protocol followed
-    return True
+    for old, new in pairs:
+        if not _is_replacement(old, new):
+            continue            # pure append/insert — not a fact rewrite
+        if _is_marker_only(old, new) or _is_cosmetic_only(old, new):
+            continue            # metadata, a link, or a footnote ref — no fact touched
+        return True              # a genuine prose replacement with no lesson recorded
+    return False
 
 
 def _gather_file_path(tool_input: dict) -> str:

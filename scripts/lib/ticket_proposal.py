@@ -104,6 +104,38 @@ def _new_trdd_id(project_dir: str | None = None) -> str:
     raise RuntimeError("could not mint a unique TRDD id")
 
 
+# The exact marker `retract()` writes when a finding vanished on its own — see its
+# docstring: "If the same condition reappears, the janitor proposes it again with a NEW
+# id — this one is closed." A refusal carrying this marker is the janitor's OWN
+# withdrawal, not a human verdict that the finding was wrong, so a recurrence under the
+# same key must NOT be suppressed by it. Anything ELSE found in `design/refused/` under
+# a matching key is a human's (or a prior session's) disposition and DOES suppress —
+# this is what closes janitor#99 / #131: a proven false positive re-mints a fresh TRDD
+# id on every scan today, so a refusal never suppresses the next occurrence.
+_AUTO_RETRACT_MARKER = "**WITHDRAWN BY THE JANITOR — the finding is GONE. No human declined this.**"
+
+
+def _refused_disposition(key: str, project_dir: str | None) -> str | None:
+    """The TRDD id of an existing `design/refused/` proposal whose dedupe key matches
+    `key`, PROVIDED that refusal was not the janitor's own `retract()` auto-withdrawal.
+    None when there is no such refusal (including: none exists, or the only match is an
+    auto-retract) — the caller then falls through to minting a fresh proposal as before.
+    """
+    for _scope, path in trdd_common.trdd_files("refused", project_dir):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _frontmatter(text).get("ticket-dedupe-key", "") != key:
+            continue
+        if _AUTO_RETRACT_MARKER in text:
+            continue  # the janitor's own withdrawal — a recurrence is expected, not spam
+        uid = trdd_common.extract_uid(path.name)
+        if uid:
+            return uid.upper()
+    return None
+
+
 def find_proposal(trdd_id: str, project_dir: str | None = None) -> tuple[str, Path] | None:
     """Locate a proposal TRDD by id across both scopes. Returns (scope, path)."""
     for scope, path in trdd_common.trdd_files("proposals", project_dir):
@@ -156,7 +188,10 @@ def propose(
     (the first line may well have landed during a compaction).
 
     Returns None only when there is nothing to propose: the kind is not PROJECT-domain, the finding is
-    ALREADY an open ticket (approved — the queue owns it now), or no design root can be resolved.
+    ALREADY an open ticket (approved — the queue owns it now), it was already refused under this exact
+    dedupe key and that refusal was not the janitor's own auto-retract (janitor#99 / #131 — a proven
+    false positive must be believed once, not re-proposed under a fresh id on every scan), or no design
+    root can be resolved.
     """
     spec = tickets.KIND_REGISTRY.get(kind)
     if spec is None or spec.domain != tickets.PROJECT:
@@ -180,6 +215,15 @@ def propose(
     for t in tickets.load_all():
         if t.dedupe_key == key and t.status not in tickets.TERMINAL:
             return None
+
+    refused_uid = _refused_disposition(key, project_dir)
+    if refused_uid:
+        state.log_line(
+            "ticket_proposal",
+            f"suppressed a re-proposal for dedupe key {key!r} — already disposed of as "
+            f"TRDD-{refused_uid} in design/refused/ (janitor#99 / #131 class)",
+        )
+        return None
 
     ts = int(time.time()) if now is None else int(now)
     stamp = time.strftime("%Y%m%d_%H%M%S%z", time.localtime(ts))

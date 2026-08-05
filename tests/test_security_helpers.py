@@ -209,6 +209,33 @@ def test_is_typosquat_candidate_empty_name() -> None:
     assert sh.is_typosquat_candidate("", sh.popular_npm_packages()) is None
 
 
+def test_is_typosquat_candidate_known_legitimate_names_are_not_flagged() -> None:
+    """janitor#99: ofetch/gaxios/color/preact are real, independently-published
+    packages within Levenshtein 1 of a popular target — none is a typosquat,
+    and the curated exemption must silence all four (real recurring FPs)."""
+    for name in ("ofetch", "gaxios", "color", "preact"):
+        assert sh.is_typosquat_candidate(name, sh.popular_npm_packages()) is None, name
+
+
+def test_is_typosquat_candidate_known_legitimate_case_insensitive() -> None:
+    """The exemption matches case-insensitively, like every other lookup here."""
+    assert sh.is_typosquat_candidate("Preact", sh.popular_npm_packages()) is None
+    assert sh.is_typosquat_candidate("OFETCH", sh.popular_npm_packages()) is None
+
+
+def test_is_typosquat_candidate_still_flags_real_squats_of_exempt_names() -> None:
+    """The exemption is a narrow allowlist for specific verified names — it must
+    NOT widen into blanket immunity for anything merely close to an exempt
+    name. A genuine typo of 'preact' itself (not 'preact' vs 'react') is
+    still a squat candidate against the popular list, same as any other name."""
+    # "colour" (distance 2 from "colors", distance 1 from... neither "color"
+    # nor "colors" is itself the popular target here) is unrelated noise —
+    # what matters is that the exemption is keyed on the SCANNED name, not
+    # on proximity to an exempt name, so an actual squat of a popular
+    # target (e.g. "reactt") is unaffected by preact's presence in the list.
+    assert sh.is_typosquat_candidate("reactt", sh.popular_npm_packages()) == "react"
+
+
 def test_popular_npm_packages_contains_well_known() -> None:
     """Sanity check the curated list."""
     pop = sh.popular_npm_packages()

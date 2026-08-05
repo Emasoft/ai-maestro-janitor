@@ -75,6 +75,21 @@ fn run_with_code(args: &[&str]) -> (String, i32) {
     )
 }
 
+/// Run memgrep and return (stdout, stderr, exit code) — for the janitor#127 `help`/typo-hint
+/// tests, where the SIGNAL is on stderr while stdout carries the (unaffected) grep results.
+fn run_full(args: &[&str]) -> (String, String, i32) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
 /// Run memgrep expecting a NON-zero exit (a usage/parse error). Returns nothing — only the failure
 /// is asserted.
 fn run_fail(args: &[&str]) {
@@ -127,6 +142,114 @@ fn run_fail_capture(args: &[&str]) -> String {
         "memgrep died from a signal (no exit code) on {args:?}"
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// janitor#164: `--version` must identify the BUILD, not just the crate version — two forks
+/// once both reported `0.1.0` while their sources had diverged by thousands of lines, and
+/// nothing in the CLI surface could tell them apart. `clap`'s bare `version` shorthand only
+/// ever echoes `Cargo.toml`, so this pins that main.rs's `MEMGREP_VERSION` const actually
+/// widens the string (a regression back to bare `Cargo.toml` echo would silently drop the
+/// commit stamp and this test would catch it via the missing parenthesized suffix).
+#[test]
+fn version_output_carries_a_build_stamp_beyond_the_bare_crate_version() {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .arg("--version")
+        .output()
+        .expect("failed to run memgrep --version");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let line = stdout.trim();
+    assert!(
+        line.starts_with("memgrep "),
+        "clap's version output must still start with the binary name: {line:?}"
+    );
+    // Two build.rs-supplied fields, parenthesized after the bare crate version — "unknown" is
+    // the documented fail-open fallback (a git-less build environment), so it is an accepted
+    // value here, not a special case: either way the field must be PRESENT, never silently
+    // dropped back to the bare `memgrep 0.1.0` shape this feature replaces.
+    assert!(
+        line.contains(" ("),
+        "version output must carry a parenthesized build stamp, got: {line:?}"
+    );
+    assert!(
+        line.ends_with(')'),
+        "the build stamp must be a well-formed trailing (sha, date), got: {line:?}"
+    );
+    let inside = line
+        .rsplit_once('(')
+        .expect("already asserted the '(' is present")
+        .1
+        .trim_end_matches(')');
+    let parts: Vec<&str> = inside.split(", ").collect();
+    assert_eq!(
+        parts.len(),
+        2,
+        "expected exactly (sha, date) inside the build stamp, got: {inside:?}"
+    );
+    for field in parts {
+        assert!(!field.is_empty(), "a build-stamp field must never be an empty string");
+    }
+}
+
+/// janitor#127: `memgrep help` used to SUCCEED silently as a literal grep for the word "help"
+/// (exit 0, plausible-looking output) — the discovery convention every other CLI (git/cargo/npm)
+/// honors instead reads as "this tool has no subcommands". `help` must now behave like `--help`.
+#[test]
+fn bare_help_word_shows_the_verb_list_not_a_grep_of_the_word_help() {
+    let (stdout, _stderr, code) = run_full(&["help"]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("Memory verbs"),
+        "expected the verb-list trailer in help output, got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("Usage: memgrep"),
+        "expected clap's own usage banner, got: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("CODE_OF_CONDUCT"),
+        "must NOT look like a grep match against the repo's own files, got: {stdout:?}"
+    );
+}
+
+/// janitor#127 item 2: a near-miss of a known verb warns to STDERR before falling through to a
+/// literal grep — grep-first semantics unchanged (exit 0, the search still runs), only a human
+/// reading stderr learns why a plausible-looking success was not the verb they meant. All three
+/// are the issue's own reproducer examples.
+#[test]
+fn near_miss_verb_typos_warn_on_stderr_but_still_search() {
+    for (typo, expected_suggestion) in [
+        ("hlep", "help"),
+        ("recal", "recall"),
+        ("validte", "validate"),
+    ] {
+        let (_stdout, stderr, code) = run_full(&[typo, FX]);
+        assert_eq!(code, 0, "a typo must still exit 0 — it is a search, not an error");
+        assert!(
+            stderr.contains(&format!("did you mean `{expected_suggestion}`?")),
+            "expected a `{expected_suggestion}` suggestion for {typo:?}, got stderr: {stderr:?}"
+        );
+        assert!(
+            stderr.contains("memgrep --help"),
+            "the hint must point at the verb list, got: {stderr:?}"
+        );
+    }
+}
+
+/// The other half — a real search pattern that happens to share a plausible word must NOT be
+/// second-guessed. Without this the typo hint would misfire on ordinary usage and train its
+/// reader to ignore it, same failure shape as any over-eager nag.
+#[test]
+fn ordinary_search_words_do_not_trigger_the_typo_hint() {
+    for pattern in ["security", "TODO:", "class Foo", "access.*denied"] {
+        let (_stdout, stderr, code) = run_full(&[pattern, FX]);
+        assert_eq!(code, 0);
+        assert!(
+            !stderr.contains("is not a verb"),
+            "an ordinary search for {pattern:?} must not print the typo hint, got stderr: {stderr:?}"
+        );
+    }
 }
 
 #[test]

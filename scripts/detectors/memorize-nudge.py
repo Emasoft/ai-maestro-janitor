@@ -104,6 +104,32 @@ def _note_files(scope_dir: Path) -> list[Path]:
     return memory_scopes.iter_note_files(scope_dir)
 
 
+def _fully_unatomized(scope_dirs: list[tuple[str, Path]]) -> bool:
+    """True iff LOCAL+PROJECT together have at least one memory note, and NONE of
+    them defines a single atom marker (janitor#151 item 5).
+
+    A pre-atomization page has nowhere for `add-atom`/`add-lesson` to anchor a
+    new entry, so the nudge's own "recall first, update an existing page"
+    routing steers the agent straight at the wall the issue measured: an
+    18-page PROJECT store with 0 body atoms anywhere, where the write verbs
+    (`scripts/memgrep`) have nothing to attach to and hand-authoring markdown
+    is the documented anti-pattern. Checked lazily, only once the detector has
+    already decided to fire, since it re-reads every note."""
+    saw_any_note = False
+    for label, d in scope_dirs:
+        if label == "USER":
+            continue
+        for note in _note_files(d):
+            saw_any_note = True
+            try:
+                text = note.read_text(errors="replace")
+            except OSError:
+                continue
+            if memory_scopes.page_atom_ids(text):
+                return False
+    return saw_any_note
+
+
 def _last_memory_mtime(scope_dirs: list[tuple[str, Path]]) -> tuple[int, int]:
     """(newest note mtime, note count) across LOCAL+PROJECT scopes. USER is
     excluded: it is cross-project, so a global write while working elsewhere must
@@ -349,13 +375,28 @@ def main() -> int:
     named = ", ".join(uncovered[:_MAX_NAMED_MODULES])
     if len(uncovered) > _MAX_NAMED_MODULES:
         named += f" (+{len(uncovered) - _MAX_NAMED_MODULES} more)"
+    # janitor#151 item 5: on a fully pre-atomization corpus, "recall first, update an
+    # existing page" routes straight at a wall — add-atom/add-lesson have no atom to
+    # anchor to on a page with none, and hand-authoring markdown is the documented
+    # anti-pattern. Say so plainly instead of asking for an update that cannot land.
+    if _fully_unatomized(scope_dirs):
+        routing = (
+            "This scope's pages predate atomization (0 body atoms found anywhere) — "
+            "add-atom/add-lesson have no atom to anchor to yet, so updating one of "
+            "them is blocked until an atomize pass runs (the memory-maintenance "
+            "scheduler dispatches it automatically) or you `new-page` a fresh note."
+        )
+    else:
+        routing = (
+            "Recall first (/janitor-memory-recall) so you update an existing page, "
+            "not duplicate it."
+        )
     msg = (
         f"[memorize-nudge] {n}{more} substantive commit(s) in the last 14d changed code that "
         f"NO memory note mentions: {state.sanitize_for_drift_line(named)} "
         f'(latest: "{latest}"). Capture what changed + WHY in the wiki — '
         f"/janitor-memory-write (PROJECT scope for architecture/code knowledge, "
-        f"LOCAL for machine-specific). Recall first (/janitor-memory-recall) so you "
-        f"update an existing page, not duplicate it."
+        f"LOCAL for machine-specific). {routing}"
     )
 
     # Tick-bucket dedupe keyed by interval ONLY (NOT HEAD) so rapid commits never

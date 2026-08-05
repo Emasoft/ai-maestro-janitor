@@ -253,6 +253,51 @@ def test_a_finding_that_CLEARS_withdraws_its_proposal(project: Path) -> None:
     assert "No human declined this" in text, "`refused` must not be misread as the user's judgement"
 
 
+def test_a_manually_refused_proposal_is_not_re_proposed(project: Path) -> None:
+    """janitor#99 / #131 class: a human verified a proposal was a false positive and moved it to
+    design/refused/ (NOT via the janitor's own retract()). The exact same finding recurring on the
+    next scan must NOT mint a fresh proposal under a new id — that re-derives an answer already on
+    disk and burns a full review every time, which is the recurrence measured live in #99."""
+    issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    assert len(_proposals(project)) == 1
+
+    # Simulate a human's manual disposition: move proposal -> refused, record a verification, but
+    # do NOT write the janitor's own auto-retract marker (that marker means "the condition vanished
+    # on its own", a different fact from "a human looked and said no").
+    proposal_path = _proposals(project)[0]
+    text = proposal_path.read_text(encoding="utf-8")
+    refused_dir = project / "design" / "refused"
+    refused_dir.mkdir(parents=True, exist_ok=True)
+    refused_text = text.replace("column: proposal", "column: refused") + (
+        "\n## Approval log\n\n- 2026-08-01: verified against the live repo — a ruleset IS attached; "
+        "false positive. Refused by the user.\n"
+    )
+    (refused_dir / proposal_path.name).write_text(refused_text, encoding="utf-8")
+    proposal_path.unlink()
+    assert _proposals(project) == []
+
+    again = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW + 300)
+
+    assert _proposals(project) == [], "a refused finding must not re-mint a proposal"
+    assert again.trdd == "", "no new/existing proposal id to report — the finding is suppressed"
+    assert len(list(refused_dir.glob("TRDD-*.md"))) == 1, "the human's refusal record is untouched"
+
+
+def test_an_auto_retracted_finding_CAN_be_re_proposed(project: Path) -> None:
+    """The counterpart: `clear_issue` (retract()) withdraws a finding because it VANISHED, not because
+    a human said it was wrong — its own text promises a recurrence gets a fresh proposal. The #99/#131
+    suppression above must not swallow this legitimate case."""
+    r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    uid = issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
+    assert uid == r.trdd
+    assert _proposals(project) == []
+
+    again = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW + 300)
+
+    assert len(_proposals(project)) == 1, "a vanished-then-recurring finding proposes again"
+    assert again.trdd and again.trdd != r.trdd, "under a NEW id, per retract()'s own documented contract"
+
+
 def test_clear_does_NOT_touch_an_APPROVED_finding(project: Path) -> None:
     """Once approved, the queue owns it: only the agent working the ticket may close it. A detector
     withdrawing it mid-repair would race the agent doing the repair."""

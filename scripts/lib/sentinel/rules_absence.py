@@ -23,6 +23,7 @@ from lib.sentinel.model import (
     Rule,
     Workflow,
 )
+from lib.sentinel.rules_extra import IdTokenWriteUnscoped
 
 # --- 1. missing-permissions (Sentinel medium → two-state MAJOR / MINOR) ----
 
@@ -350,6 +351,27 @@ class MissingEnvProtection(Rule):
                 self._oidc_id_token(wf.permissions(scope="job", job=job))
                 or self._oidc_id_token(wf.permissions(scope="workflow"))
             )
+            if has_oidc and isinstance(job, dict):
+                # A Sigstore attestation mints a SIGNING token, not a deployment
+                # credential — it proves provenance of an artifact already built,
+                # it does not itself publish anything, so there is no "release
+                # without human review" for an environment: gate to guard.
+                # Registry-OIDC publishing (npm trusted publishing etc.) is
+                # DELIBERATELY NOT exempted here: unlike attestation it IS a
+                # publish action, and "should a human approve before this runs"
+                # is a genuine, separate concern from the OIDC-SCOPE question
+                # IdTokenWriteUnscoped answers (janitor#99) — conflating the two
+                # was the mistake caught while fixing janitor#164's memgrep
+                # release job (an attestation-only job with no publish step at
+                # all still tripped this rule via has_oidc alone). Suppressed
+                # only when the job does NOT also perform real cloud auth, which
+                # is still a genuine risk.
+                if IdTokenWriteUnscoped._job_uses_any(
+                    job, IdTokenWriteUnscoped._ATTESTATION_USES
+                ) and not IdTokenWriteUnscoped._job_uses_any(
+                    job, IdTokenWriteUnscoped._CLOUD_AUTH_USES
+                ):
+                    has_oidc = False
 
             if has_publish or has_oidc:
                 line = wf.line_of(r"^\s+" + re.escape(str(job_id)) + r":")

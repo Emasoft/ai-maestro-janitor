@@ -1511,6 +1511,8 @@ def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
     assert "Automation" in first
     assert "CANNOT rescue" in first          # the consequence
     assert "System Settings" in first        # the remedy
+    assert "will not persist" in first       # #92 — the toggle may revert on adhoc-signed clients
+    assert "tmux instead" in first           # #92 — the honest fallback, not a guaranteed one-click fix
     assert second == ""                      # acked — not repeated
 
 

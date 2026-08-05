@@ -105,6 +105,18 @@ jobs:
     permissions:
       # The ONLY job with write scope — it uploads assets onto the tag's release.
       contents: write
+      # OIDC provenance attestation (janitor#164): a checksum proves the download
+      # matches what THIS release listed; it says nothing about who produced it,
+      # because it is generated and published by the same workflow it verifies —
+      # anything that can replace the binary can replace the manifest alongside
+      # it. attest-build-provenance is signed via Sigstore/OIDC and proves the
+      # artifact was built by THIS workflow from THIS commit, which a tampered or
+      # backdoored asset cannot forge. memgrep is a compiled binary consumed
+      # ecosystem-wide with nothing else auditing it, which is the same
+      # blast-radius argument that made undetected Rust dependency advisories
+      # matter before (ATOM-ARCH-0003).
+      id-token: write
+      attestations: write
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -124,6 +136,15 @@ jobs:
           ls -l out
           echo "SHA256SUMS:"
           cat out/SHA256SUMS
+
+      # Sign a provenance attestation for every binary asset (janitor#164) — BEFORE
+      # upload, so a verifier can `gh attestation verify` against exactly the bytes
+      # that land on the release. One attestation per binary; SHA256SUMS is a
+      # derived manifest, not a build artifact, so it is not itself attested.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        with:
+          subject-path: 'out/memgrep-*'
 
       # Attach the binaries with `gh release upload` (provided by the runner) so
       # no third-party release action is needed. The release itself is created by

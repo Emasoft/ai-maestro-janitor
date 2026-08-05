@@ -464,6 +464,19 @@ class IdTokenWriteUnscoped(Rule):
         "hashicorp/vault-action",
     )
 
+    # npm's "Trusted Publishing" feature (npm CLI >= 11.5.1) is the same shape
+    # of false positive as attestation: `npm publish` reads
+    # ACTIONS_ID_TOKEN_REQUEST_URL itself and exchanges it for a short-lived
+    # REGISTRY token, so the job needs `id-token: write` with no dedicated
+    # `uses:` action to detect. The registry side scopes the trust to the
+    # exact (owner, repo, workflow file[, environment]) tuple registered as
+    # the trusted publisher — there is no IAM wildcard trust policy for an
+    # `environment:` gate to narrow, so requiring one is a false demand, not
+    # a mitigation (#99: the reporter's `publish-npm` job is the exact case).
+    # Same guard as attestation: a job that ALSO does cloud auth is still a
+    # real unscoped-OIDC risk and must keep firing.
+    _REGISTRY_OIDC_RUN_PATTERN = re.compile(r"\bnpm\s+publish\b")
+
     @staticmethod
     def _job_uses_any(job_hash: dict, action_refs: tuple[str, ...]) -> bool:
         """True iff any step `uses:` an action whose repo ref equals (or is a
@@ -479,6 +492,21 @@ class IdTokenWriteUnscoped(Rule):
                 continue
             ref = uses.split("@", 1)[0].strip()
             if any(ref == a or ref.startswith(a + "/") for a in action_refs):
+                return True
+        return False
+
+    @classmethod
+    def _job_runs_registry_oidc_publish(cls, job_hash: dict) -> bool:
+        """True iff any step's `run:` block invokes `npm publish` — npm's own
+        OIDC trusted-publishing exchange, not a `uses:` action."""
+        steps = job_hash.get("steps")
+        if not isinstance(steps, list):
+            return False
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run")
+            if isinstance(run, str) and cls._REGISTRY_OIDC_RUN_PATTERN.search(run):
                 return True
         return False
 
@@ -510,8 +538,12 @@ class IdTokenWriteUnscoped(Rule):
                 continue
             # Attestation jobs mint a sigstore SIGNING token, not cloud creds, so
             # the environment: gate is inapplicable — suppress unless the job
-            # ALSO does cloud auth (a genuine unscoped-OIDC risk) (#30).
-            if self._job_uses_any(job_hash, self._ATTESTATION_USES) and not self._job_uses_any(
+            # ALSO does cloud auth (a genuine unscoped-OIDC risk) (#30). Same
+            # shape for npm's own OIDC trusted-publishing exchange (#99).
+            mints_non_cloud_oidc_token = self._job_uses_any(
+                job_hash, self._ATTESTATION_USES
+            ) or self._job_runs_registry_oidc_publish(job_hash)
+            if mints_non_cloud_oidc_token and not self._job_uses_any(
                 job_hash, self._CLOUD_AUTH_USES
             ):
                 continue
