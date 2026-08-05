@@ -233,6 +233,51 @@ class TestMemoryScopeLeak(unittest.TestCase):
             self.assertIn("[memory-scope-leak]", out)
             self.assertIn("high-entropy secret", _proposal(root))
 
+    def test_an_unprefixed_generic_secret_in_a_code_fence_is_still_caught(self) -> None:
+        """PR-204 review P1, verified real before fixing: prefixes-only shape gating left a
+        credential from any UNLISTED vendor invisible inside code regions — the one place tokens
+        get pasted. The generic conviction path (all 3 character classes + no ≥6-digit run, on a
+        token already over the entropy gate) catches it; the fixture token measures entropy 4.78
+        with 3 classes and no digit run."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "vendor-notes.md",
+                "the obscure vendor's CLI wants:\n"
+                "```bash\n"
+                "obscurectl login --token Zk9hQmc2VjUmV0X3Rva2VuX3hQ8wLm5vdF9hX3JlYWxfb25l\n"
+                "```\n",
+            )
+            _git(["add", ".claude/project/memory/vendor-notes.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            self.assertIn("high-entropy secret", _proposal(root))
+
+    def test_a_backticked_trdd_citation_is_not_a_generic_secret(self) -> None:
+        """The measured near-miss that killed the naive mixed-case gate: a TRDD file citation
+        (`TRDD-20260805_130129+0200-9COGK66W-…`) measures entropy 4.51 with all 3 character
+        classes — over BOTH bars — and memory pages cite TRDDs constantly. Its ≥6-digit
+        timestamp run is what separates it from a random secret, so the digit-run exclusion is
+        the load-bearing part of the generic shape."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "task-notes.md",
+                "The decision is recorded in\n"
+                "`design/tasks/TRDD-20260805_130129+0200-9COGK66W-a-package-manager-safety-knob.md`\n"
+                "and the follow-up in `TRDD-20260714_043000+0200-K3WDPR7M-ssd-write-amplification.md`.\n",
+            )
+            _git(["add", ".claude/project/memory/task-notes.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+            self.assertNotIn("high-entropy secret", _proposal(root))
+
     def test_allowlist_no_false_positive(self) -> None:
         """Generic/shared paths + documentation hosts must NOT be flagged as leaks."""
         with TemporaryDirectory() as td:

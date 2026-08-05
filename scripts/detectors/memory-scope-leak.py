@@ -120,7 +120,16 @@ _LOCAL_SHAPED_RE = re.compile(r"(?P<dir>(?:^|.+/)projects/[^/]+/memory)/")
 # of the documented false-positive shapes occur there.
 _FENCED_CODE_RE = re.compile(r"(?ms)^(?:```|~~~).*?^(?:```|~~~)[ \t]*$")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-_META_LINE_RE = re.compile(r"(?m)^[ \t]*\"?(?:keywords|desc|description)\"?[ \t]*:.*$|^\[\^\d+\]:.*$")
+# Three metadata line shapes, because the wikimem address grammar has three spellings: a
+# frontmatter-style `keywords:`/`desc:` line, a `[^N]:` lesson-address line, and the memgrep atom
+# address `anchor [keywords: …]` where the field sits MID-line inside brackets (found by probing a
+# real corpus: five 44–406-char underscore phrases in that third form sailed past the first two
+# alternatives).
+_META_LINE_RE = re.compile(
+    r"(?m)^[ \t]*\"?(?:keywords|desc|description)\"?[ \t]*:.*$"
+    r"|^\[\^\d+\]:.*$"
+    r"|^.*\[(?:keywords?|desc|description)[ \t]*:.*$"
+)
 
 # Recognisable secret-token prefixes — each is a documented, vendor-fixed literal, so this list
 # trades recall for precision ONLY inside code/metadata regions (prose keeps full recall). A
@@ -138,6 +147,30 @@ _SECRET_SHAPE_RE = re.compile(
     r"|age1|SG\."                    # age recipient / SendGrid
     r")"
 )
+
+# The GENERIC conviction path for code/metadata regions — a real credential with a prefix nobody
+# listed (the PR-204 review's P1: prefixes-only made this pass blind to unlisted vendors exactly
+# where tokens get pasted). The discriminator is MEASURED, not guessed, because the obvious gate
+# (mixed case + digits) is falsified by this corpus: a TRDD file citation measures entropy 4.51
+# with all 3 character classes — over both bars. What separates it (and every timestamped path)
+# from a random secret is a LONG DIGIT RUN: `20260805_130129+0200` carries an 8-digit run, while
+# a uniformly random base64 token of realistic length contains 6 consecutive digits with
+# probability ≈ n·(10/64)^6 ≈ 0.02% — the same insight as the librarian's date-shaped-number
+# filter, applied to tokens. So inside code/metadata a token convicts when entropy ≥ the gate AND
+# it uses all 3 character classes AND it has no ≥6-digit run.
+_LONG_DIGIT_RUN_RE = re.compile(r"\d{6}")
+
+
+def _generic_secret_shape(tok: str) -> bool:
+    """A shape-based conviction for unlisted-prefix credentials (entropy is checked by the caller)."""
+    if _LONG_DIGIT_RUN_RE.search(tok):
+        return False  # timestamps/dates/ids — the measured false-positive family
+    classes = (
+        any(c.islower() for c in tok)
+        + any(c.isupper() for c in tok)
+        + any(c.isdigit() for c in tok)
+    )
+    return classes == 3
 
 
 def _code_meta_spans(text: str) -> list[tuple[int, int]]:
@@ -227,8 +260,14 @@ def _entropy_findings(text: str) -> list[str]:
             continue
         # In code markup / wikimem metadata, entropy alone is not evidence (see the block above
         # _SECRET_SHAPE_RE): identifiers, paths and keyword phrases live there by convention and
-        # beat prose entropy. A known vendor prefix still convicts.
-        if _in_spans(m.start(), spans) and not _SECRET_SHAPE_RE.match(tok):
+        # beat prose entropy. A known vendor prefix convicts, and so does the generic
+        # 3-classes-no-digit-run shape (_generic_secret_shape) — the PR-204 review's P1 gap:
+        # prefixes alone left unlisted-vendor credentials invisible exactly where they get pasted.
+        if (
+            _in_spans(m.start(), spans)
+            and not _SECRET_SHAPE_RE.match(tok)
+            and not _generic_secret_shape(tok)
+        ):
             continue
         out.append("high-entropy secret")
     return out
