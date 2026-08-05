@@ -7,12 +7,13 @@
 Nudges Claude Code to commit when the working tree has been dirty for
 longer than the configured threshold. Frequent commits are the recovery
 net: every commit is a restore point if a later change introduces a bug.
-When the git safety guard blocks a destructive op, the right moves are:
-move files to a `_dev/` folder, `git rm` to stage a recoverable deletion,
-or a backup branch. NOT `git stash` (janitor#188): it operates on the whole
-repository, not on the files you were thinking about, so in a tree several
-agents share it silently pockets everyone else's uncommitted work — and they
-receive no signal, they simply find their edits gone.
+When the git safety guard blocks a destructive op, the right moves are
+per-file or additive ONLY: move files to a `_dev/` folder, `git rm` to
+stage a recoverable deletion, or a backup branch. Never a bare `git stash`
+(#188) — on a concurrent-agent host it silently swallows every other
+agent's uncommitted work; path-scoped `git stash push -u -- <paths>` is
+the narrow escape hatch (`-u` because without it an untracked path ERRORS
+instead of stashing).
 """
 
 from __future__ import annotations
@@ -125,14 +126,24 @@ def main() -> int:
     bucket = age // window
     age_m = age // 60
 
+    # The nudge must NEVER recommend a bare `git stash` (#188): it fires on a dirty tree —
+    # exactly when uncommitted work exists to be destroyed — and on a concurrent-agent host a
+    # whole-tree stash swallows every OTHER agent's in-flight edits silently (a swallowed edit
+    # does not error; it just is not there any more). Every recommended move below is per-file
+    # or additive, so none can touch work the reader does not own. The near-miss that proved
+    # this is recorded in the issue: an agent ran `git stash` while two others were mid-edit,
+    # and only quiet-tree TIMING, not safety, made the pop clean.
     line = dedupe.emit_once(
         seen,
         f"dirty@b{bucket}",
         f"[dirty-tree] Working tree has been dirty for ~{age_m}min ({dirty_lines} uncommitted change(s)). "
         f"Commit now — frequent commits are the recovery net. Stage specific files by name (never 'git add -A'). "
         f"If git safety blocks a destructive op: move files to a _dev/ folder, use 'git rm' to stage a recoverable "
-        f"deletion, or create a backup branch. NOT 'git stash' — it is repo-wide, so it silently pockets "
-        f"every OTHER agent's uncommitted work in this tree too, and they get no signal it happened (janitor#188).",
+        f"deletion, or create a backup branch. Never bare 'git stash' — other agents may have uncommitted work "
+        # -u is required, not decorative: without it a path-scoped stash ERRORS on an untracked
+        # file ("did not match any file(s) known to git" — verified empirically), and untracked
+        # files are exactly what a dirty-tree nudge is usually about (PR-206 review finding).
+        f"in this tree; if you must park files, 'git stash push -u -- <paths you own>'.",
     )
     if line is not None:
         print(line)

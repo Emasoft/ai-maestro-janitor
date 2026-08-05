@@ -69,7 +69,13 @@ def test_rule_carries_zero_output_contract_and_security_clauses():
     assert "⟦janitor-…⟧" in text  # the stub's defang shape
     assert "memory-maint-pending.json" in text  # F1 pending-pick sidecar
     assert "Sonnet" in text  # subconscious-agent model pin (M1)
-    assert "lean-ctx allow dispatcher-stub.py" in text  # shell-allowlist fix
+    # Shell-allowlist guidance must be TOOL-AGNOSTIC (marketplace issue ai-maestro-plugins#10):
+    # the rule is overwrite-on-difference installed into ~/.claude/rules/, so a vendor name here
+    # cannot be locally removed by a user who uninstalled that vendor's tool — the installer
+    # silently re-adds it every session start. Assert the invariant (additive allowlisting of the
+    # stub), and assert the vendor name is GONE so it cannot creep back.
+    assert "allowlist `dispatcher-stub.py` ADDITIVELY" in text  # shell-allowlist fix, tool-agnostic
+    assert "lean-ctx" not in text, "vendor tool name must not ship in an overwrite-on-difference rule"
 
 
 def test_rule_scopes_itself_to_heartbeat_fires_and_survives_disarm():

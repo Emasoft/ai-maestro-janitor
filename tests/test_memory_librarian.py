@@ -548,6 +548,50 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
         self.assertGreater(librarian._MIN_TOKEN_JACCARD, 0.050 * 2)
         self.assertLess(librarian._MIN_TOKEN_JACCARD, 0.286)
 
+    def test_a_date_near_the_shared_subject_is_not_a_numeric_contradiction(self):
+        """ai-maestro-plugins#14, reproduced on the real pair before fixing: one heartbeat note
+        said "…the arm holds for 6 fires…" while its sibling was merely DATED near the same
+        word ("on 2026-08-02 the arm…"), and the date fragments {2026, 08, 02} read as a
+        diverging claim-set against {6}. A date is when a claim was made, not a competing
+        claim. Acting on the false conflict would have meant editing a page to resolve a
+        disagreement that does not exist — a duplicate correction on an already-correct page."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "cadence_note.md").write_text(
+                _note("cadence_note", "heartbeat arm cadence and firing floor", [],
+                      body="The heartbeat arm holds its cadence for 6 fires before demoting."))
+            (memdir / "flag_note.md").write_text(
+                _note("flag_note", "heartbeat arm cadence maintenance flag", [],
+                      body="On 2026-08-02 the heartbeat arm cadence flag was retired as historical."))
+            _run(home, project)
+            proposal_path = memdir / PROPOSAL_NAME
+            if proposal_path.is_file():
+                proposal = proposal_path.read_text()
+                conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+                self.assertNotIn("cadence_note.md", conflict)
+                self.assertNotIn("flag_note.md", conflict)
+
+    def test_real_numeric_contradiction_still_fires_after_the_date_filter(self):
+        """The counter-case guarding the #14 date filter: the canonical "retries 3× vs 5×"
+        clash uses plain small integers — no year, no zero-padding, no timestamp run — and
+        must keep surfacing as a conflict."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "retries_three.md").write_text(
+                _note("retries_three", "client retry budget on the endpoint", [],
+                      body="The client retries 3 times before giving up on the endpoint."))
+            (memdir / "retries_five.md").write_text(
+                _note("retries_five", "client retry budget on the endpoint", [],
+                      body="The client retries 5 times before giving up on the endpoint."))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+            self.assertIn("retries_three.md", conflict)
+            self.assertIn("retries_five.md", conflict)
+
     def test_real_antonym_contradiction_is_a_conflict(self):
         """A GENUINE contradiction — two same-subject notes making OPPOSING claims
         (always vs never about the same subject) — IS surfaced as a conflict."""

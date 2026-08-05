@@ -346,6 +346,28 @@ def _tokens_near(seq: list[str], subj: str, window: int) -> frozenset[str]:
     return frozenset(out)
 
 
+# A CLAIM-number ("retries 3", "cap 50") as opposed to a DATE/TIMESTAMP fragment. Memory notes
+# are dated by convention — "on 2026-08-02 the arm …" tokenizes to `2026`,`08`,`02` — and treating
+# those fragments as claim-numbers manufactured a contradiction out of one note being dated near
+# the shared subject (ai-maestro-plugins#14, reproduced on the real pair: {6, 4} vs
+# {02, 2026, 08} near "arm" — the second set is a date, not a competing claim). Excluded shapes:
+# 4-digit years, zero-padded components (a genuine count is written `2`, never `02`), and ≥6-digit
+# runs (timestamps/ids). A real "retries 3× vs 5×" clash uses none of these.
+_DATE_SHAPED_NUM_RE = re.compile(r"^(?:(?:19|20)\d\d|0\d|\d{6,})$")
+
+
+def _claim_numbers(tokens: frozenset[str]) -> frozenset[str]:
+    """The CLAIM-numbers among `tokens` — digits that are not date/timestamp fragments.
+
+    Split from the proximity walk so ONE subject-anchored pass (`_tokens_near`) feeds both
+    contradiction branches. Merging janitor#106 with ai-maestro-plugins#14 the other way —
+    a separate `_numbers_near` doing its own walk — would have re-created the exact drift
+    #106 removed: two branches deciding "near the subject" independently, and only one of
+    them staying anchored.
+    """
+    return frozenset(t for t in tokens if t.isdigit() and not _DATE_SHAPED_NUM_RE.match(t))
+
+
 def _has_contradiction_signal(
     text_a: str, text_b: str, shared_subjects: frozenset[str]
 ) -> bool:
@@ -380,8 +402,7 @@ def _has_contradiction_signal(
         for x, y in _ANTONYM_PAIRS:
             if (x in near_a and y in near_b) or (y in near_a and x in near_b):
                 return True
-        nums_a = frozenset(t for t in near_a if t.isdigit())
-        nums_b = frozenset(t for t in near_b if t.isdigit())
+        nums_a, nums_b = _claim_numbers(near_a), _claim_numbers(near_b)
         if nums_a and nums_b and nums_a != nums_b:
             return True
     return False

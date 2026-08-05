@@ -684,6 +684,17 @@ def raise_issue(
         # correct: re-recommending a fix that is already scheduled would be noise.
         return Raised(code=code, domain=tickets.PROJECT, ok=True, why="already an open ticket")
     uid, command, is_new = proposed
+    if not command:
+        # A HUMAN previously REFUSED this exact finding (same dedupe key, unchanged evidence — see
+        # ticket_proposal.propose). The verdict is settled: surface NOTHING per fire, record nothing
+        # in the ledger. A per-heartbeat "still refused" line would re-litigate a closed question 288
+        # times a day, and a fresh approval request nearly caused a false-premise dispatch once
+        # already (ai-maestro-plugins#15). The finding resurfaces by itself the moment its evidence
+        # changes, and the refused TRDD in design/refused/ remains the auditable record.
+        return Raised(
+            code=code, domain=tickets.PROJECT, ok=True, trdd=uid,
+            why=f"previously refused (TRDD-{uid}) — suppressed until the evidence changes",
+        )
     if is_new:
         # Findings-ledger sink (TRDD-FENWWB4E) — same once-at-birth indexing as the
         # HARNESS branch, ref'd by the proposal TRDD id.

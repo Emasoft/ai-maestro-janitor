@@ -81,23 +81,19 @@ a floating claim. Use the pinned form when the claim is about the rule as it exi
 | **MANAGER** | **NO** — may only forward the user's intent | add/revise/delete without user approval |
 | every other agent | no | no — **propose** instead |
 
-`prrd-edit.py` enforces this table and refuses a violating edit outright (the `403`s, and the
-solo-project `--user` case, are in the FULL REFERENCE). An agent with no access to that tool
-must behave as if the refusals applied — the tool enforces the rule, it is not its source.
+`prrd-edit.py` enforces this: a non-MANAGER silver edit is refused (`403 — propose via
+COS`); a MANAGER golden edit is refused (`403 — golden rules are user-only`). Outside AI
+Maestro (a solo project with no manager session) the human user IS the manager —
+`prrd-edit.py --user` skips the check.
 
 ## Cross-reference with TRDDs
 
-Every TRDD constrained by a rule MUST cite it in `relevant-rules:` — entries carry a **prefix
-class** (janitor#144) so a bare number is never ambiguous about which rule corpus it names:
-- **bare number** — a PRRD rule in THIS project: `relevant-rules: [3, 27, 64.134]` (bare
-  numbers; pinned versions ok). The default, unchanged from before this class existed.
-- **`rule:<slug>`** — a shipped `~/.claude/rules/<slug>.md` (project-independent; see "Does
-  NOT apply to" below): `relevant-rules: [rule:no-nested-scrollbars]`. No PRRD number to cite.
-- **body** — inline as `PRRD G64.134` or `` rule:<slug> ``.
+Every TRDD constrained by PRRD rules MUST cite them:
+- **frontmatter** — `relevant-rules: [3, 27, 64.134]` (bare numbers; pinned versions ok),
+- **body** — inline as `PRRD G64.134`.
 
-A TRDD with no `relevant-rules:` is **UNKNOWN, not a claim of "unconstrained"** — a lint or
-maintenance pass MUST NOT read an empty `[]` as an assertion; verify before trusting either
-reading. Evidence + rationale: the reference.
+A TRDD with no `relevant-rules:` claims to be unconstrained by any project rule. That is
+possible but uncommon — verify it is genuine and not an oversight.
 
 ## Recommended baseline golden rule G1.1 — GitHub authorship self-identification
 
@@ -105,12 +101,12 @@ Every AI Maestro project's PRRD SHOULD carry this as its first golden rule: ever
 that writes to GitHub (issue, comment, PR, review, discussion, release note) MUST begin the
 body with a one-line self-identification of which agent/role/plugin authored it, because
 all AI Maestro agents share the single human-owner GitHub identity. Recommended line:
-`_Posted by the Claude developing **<plugin-or-role>** (via the shared gh CLI auth user name)._`
+`_Posted by the Claude developing **<plugin-or-role>** (via the shared owner gh auth)._`
 Commits SHOULD carry an `Agent: <plugin-slug>` trailer. It is GOLDEN because it is an
-anti-impersonation convention the MANAGER must not be able to weaken.
-
-**The byline carries NO `@`** — a template using `@owner` paged real accounts when copied
-out of backticks. See `~/.claude/rules/github-mentions.md`.
+anti-impersonation convention the MANAGER must not be able to weaken. The line carries NO
+`@` — a template is pasted verbatim as finished prose, where a bare handle PAGES a real
+account (it did, repeatedly — janitor#198). A template is only safe if its LITERAL form
+is harmless.
 
 ## Does NOT apply to
 
