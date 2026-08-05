@@ -135,14 +135,31 @@ minute. Without that fix this TRDD could not be released reliably.
 2. **Freeze recovery must land somewhere** — **STILL OPEN structurally; no longer dark on this
    host.** The ONE chore that structurally cannot move to a per-repo cron (a frozen session's
    own cron is what has stopped). Asked of ai-maestro on #79 item 1.
-   **Corrected 2026-08-05:** `88e6f45a` restored it here — `session-liveness` and `fleet-stop`
-   now run under the repo daemon (pid 97639) alongside the live server, because a PARTIAL claim
-   no longer displaces us. But the relief is **process-scoped, not durable**: the daemon is
-   running REPO code, while every armed session's heartbeat still runs cached 2.3.0, whose
-   `_server_owns_host` is the old `server_is_alive()` — so if this process dies, **nothing
-   respawns it** until the publish lands. Treat coverage as holding only while pid 97639 lives.
-   *(Superseded: "standalone `#N` sessions on this machine have NO freeze recovery at this
-   moment" — true when written, false since `88e6f45a`.)* Tracked as EHT TRDD-KQ9WM4TZ.
+   **Corrected 2026-08-05, then corrected AGAIN the same hour — read the second one.**
+   `88e6f45a` did restore it briefly: `session-liveness`, `fleet-stop`, `cache-prune`,
+   `rules-cleanup`, `memory-guard`, `github-config-audit` all ran under a repo daemon
+   (pid 97639) alongside the live server. **It lasted 8 minutes.** At 10:07:37 it took
+   SIGTERM, was respawned from the DATA-staged closure — which is CACHED code without the
+   fix — and that one exited `server-owns-host` immediately. Six chores dark again.
+
+   **A manually-started repo daemon is NOT a viable bridge, and this is structural, not bad
+   luck.** `global_state.daemon_needs_restart()` compares the running daemon's argv (expected:
+   `.../<plugin-cache-version>/scripts/daemon.py`) against the heartbeat's own
+   `daemon_script_path()`. A repo path never matches a cache path, so **every armed session's
+   heartbeat SIGTERMs it**, then `ensure_daemon_running()` reseats the daemon from the staged
+   cache closure — the one lacking `88e6f45a`. Lifetime is therefore bounded by the next
+   heartbeat fire, i.e. minutes. Verified in `daemon.log`: `received signal 15` →
+   `started (pid=97669)` → `stopping (server-owns-host)`, all inside 7 seconds.
+
+   **So the publish (TRDD-AWXK0RFT / CPV#189) is the real and only gate for durable coverage.**
+   The one alternative — re-staging the closure into the DATA dir from the repo — is a
+   hand-deploy of unpublished code machine-wide that bypasses every publish gate, and is an
+   OWNER decision, not an agent one. Not taken.
+
+   *(Superseded, do NOT carry forward: "standalone `#N` sessions have NO freeze recovery at this
+   moment" — true until `88e6f45a`; and "treat coverage as holding only while pid 97639 lives"
+   — that pid is already gone, and the phrasing implied a manual start is a usable stopgap. It
+   is not.)* Tracked as EHT TRDD-KQ9WM4TZ.
 3. The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
    `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.
    **STILL OPEN**; QK7M2B0X is at `column: dev`, so this is genuinely blocked, not stalled.
