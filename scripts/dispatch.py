@@ -1666,6 +1666,18 @@ def _phase_idle_clear_nudge() -> bool:
             "/janitor-handoff-and-clear",
             esc_first=False,
             respect_user_presence=True,
+            # SHORT budget, deliberately (2026-08-05). The gate now DEFERS to a busy pane instead
+            # of refusing outright, but its 120s default is sized for a caller with no other way
+            # to land the command. THIS caller has one — the coarse outer retry described just
+            # below: a refused send is not stamped, so the next heartbeat tries again. A long
+            # inner block would therefore buy nothing and cost everything, stalling a heartbeat
+            # FIRE for two minutes and delaying every other phase behind it.
+            #
+            # 9s covers the case that actually matters here: the presence probe's first rung is
+            # MACHINE-WIDE HID idle, so a user typing in an unrelated app can hold the gate shut
+            # for a moment on a session that is genuinely abandoned. One poll past the 10s
+            # presence window clears that without turning the heartbeat into a blocking call.
+            presence_wait_s=9.0,
         )
         # STAMP ONLY ON A SEND — and "a send" means the keystrokes ACTUALLY WENT OUT, i.e. a
         # `FIRED:` status. The cooldown exists so a CLEARED session does not re-clear; stamping
