@@ -25,6 +25,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _fake_secrets import b62 as fake_b62  # noqa: E402  (runtime-generated fixtures — see that module's docstring)
+from _fake_secrets import secret as fake_secret  # noqa: E402
+
 DETECTOR = (
     Path(__file__).resolve().parent.parent
     / "scripts" / "detectors" / "memory-scope-leak.py"
@@ -220,11 +223,14 @@ class TestMemoryScopeLeak(unittest.TestCase):
             root = Path(td) / "proj"
             root.mkdir()
             _init_repo(root)
+            # Runtime-generated per tests/_fake_secrets.py — a literal here, even a fake one,
+            # trips the repo's own fixture-hygiene gate AND external secret scanners.
+            tok = fake_secret("ghp_", "scope-leak-fence", 36)
             _write_project_memory(
                 root, "deploy-notes.md",
                 "run it like this:\n"
                 "```bash\n"
-                "gh auth login --with-token <<< ghp_x7Kq2mVs9pLw4Rt8nBc3fDg6hJk1zXy5AbCd\n"
+                f"gh auth login --with-token <<< {tok}\n"
                 "```\n",
             )
             _git(["add", ".claude/project/memory/deploy-notes.md"], root)
@@ -237,17 +243,19 @@ class TestMemoryScopeLeak(unittest.TestCase):
         """PR-204 review P1, verified real before fixing: prefixes-only shape gating left a
         credential from any UNLISTED vendor invisible inside code regions — the one place tokens
         get pasted. The generic conviction path (all 3 character classes + no ≥6-digit run, on a
-        token already over the entropy gate) catches it; the fixture token measures entropy 4.78
-        with 3 classes and no digit run."""
+        token already over the entropy gate) catches it; the generated fixture token measures
+        entropy 4.83 with 3 classes and no digit run (deterministic — sha256-derived b62)."""
         with TemporaryDirectory() as td:
             root = Path(td) / "proj"
             root.mkdir()
             _init_repo(root)
+            # Runtime-generated (tests/_fake_secrets.py): no vendor prefix, which is the point.
+            tok = fake_b62("scope-leak-generic-vendor", 48)
             _write_project_memory(
                 root, "vendor-notes.md",
                 "the obscure vendor's CLI wants:\n"
                 "```bash\n"
-                "obscurectl login --token Zk9hQmc2VjUmV0X3Rva2VuX3hQ8wLm5vdF9hX3JlYWxfb25l\n"
+                f"obscurectl login --token {tok}\n"
                 "```\n",
             )
             _git(["add", ".claude/project/memory/vendor-notes.md"], root)
