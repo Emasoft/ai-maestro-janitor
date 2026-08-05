@@ -26,13 +26,13 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import state  # noqa: E402  -- needs the sys.path line above
 import trdd_common  # noqa: E402  -- needs the sys.path line above
 
 # Security detectors whose last-run stamp marks "the janitor last looked at this
@@ -1169,14 +1169,32 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
         .replace("@@ROWS@@", "".join(body))
         .replace("@@KBDATA@@", _json_for_script(kb_data))
     )
-    return _write_temp(out)
+    return _write_report(out)
 
 
-def _write_temp(content: str) -> str:
-    fd, path = tempfile.mkstemp(prefix="janitor-global-status-", suffix=".html")
+def _write_report(content: str) -> str:
+    """Write the dashboard INSIDE the project, never into the system temp dir.
+
+    This file is the most sensitive artifact the janitor produces: every running session's
+    project path, git remotes, branch, pid, and kanban contents, for the whole host. It was
+    written with `tempfile.mkstemp()` — a world-readable location whose path is redirectable
+    via TMPDIR, so a hostile or merely misconfigured environment could steer the entire fleet
+    status somewhere else entirely (owner directive, 2026-08-05: agent status must not be
+    released to "a malicious controlled outlet or remote folder", which is exactly why the
+    daemon's response channel is `<project>/.janitor/daemon_responses/` and not /tmp).
+
+    Written 0600 to the project's own gitignored reports dir, which the reports-purge detector
+    already ages out — so this stays bounded without inheriting the temp dir's exposure.
+    """
+    out_dir = Path(state.project_root()) / "reports" / "fleet-status"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"janitor-global-status-{time.strftime('%Y%m%d_%H%M%S%z')}.html"
+    # Exclusive-create at 0600: never widen an existing file's mode, and never clobber a
+    # report another process is mid-write on.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(content)
-    return path
+    return str(path)
 
 
 if __name__ == "__main__":
