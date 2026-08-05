@@ -52,6 +52,34 @@ Apple Events to the RESPONSIBLE process, and a child spawned by the uv-daemon ca
 uv identity — wrapping only the osascript call would not reliably change attribution. With the
 daemon itself under BMM5U3QVKW, every osascript child it spawns is covered by the existing grant.
 
+### 2026-08-05 ~21:00 — THE GRANT WORKS; the hot-apply does NOT survive the fleet. Code fix is the only durable half.
+
+PROVEN: with the daemon under the owner's granted interpreter (pid 73578), the next heartbeat
+fire carried NO iTerm-denial alarm — first clean fire in days. The TCC theory is confirmed
+end-to-end.
+
+ALSO PROVEN, within the hour: janitor#211's ping-pong reclaimed the daemon. A session's
+`daemon_needs_restart` (argv mismatch: DATA path != that session's cache path) SIGTERM-ed 73578;
+`ensure_daemon_running` respawned a uv EPHEMERAL-SHIM daemon (builds-v0 tmp path) — the exact
+ungrantable identity this card exists to remove. The launchd entry then could not re-take the
+held singleton (July-flood shape), and launchd had already dropped it ("No such process" on
+bootout — it was gone before I parked it). Chore coverage never lapsed (heartbeat stayed fresh);
+only the IDENTITY regressed, so the iTerm alarm will return on scans by the shim daemon.
+
+STOP-RULE, learned tonight: do NOT keep hand-cycling processes against the fleet — the earlier
+churn is what tripped the crash-loop breaker into FALSELY quarantining 2.4.1 (cleared via the
+integrity writer; janitor#211 has the mechanism). Every manual win is undone within minutes by
+code that doesn't know about it.
+
+THE CODE FIX (one change-set, next session, fresh context):
+1. `spawn_daemon_detached` + the plist generator resolve the MANAGED interpreter
+   (`uv python find` on the pinned version → `~/.local/share/uv/python/.../bin/python3.12`;
+   fall back to `uv run` only when absent) — then BOTH spawn paths carry the granted identity
+   and the ping-pong's two sides finally agree.
+2. `daemon_needs_restart` recognizes the DATA-staged path as current (it IS the staged copy of
+   the newest cache) instead of reading it as stale argv.
+3. `_restart_decision` roll-forward checks the quarantine (janitor#211's exact ask).
+
 DONE THIS SESSION (hot-apply, owner-directed):
 - [x] plist ProgramArguments switched to the framework python3.12 (backup kept beside it)
 - [x] old uv-identity daemon stopped; agent bootstrapped; daemon verified under the signed python
