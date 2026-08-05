@@ -125,3 +125,21 @@ def test_real_dirty_work_alongside_a_proposal_still_nags(tmp_path: Path) -> None
 
     assert "dirty-tree" in out
     assert "1 uncommitted" in out, f"only the user's own file should be counted, got: {out!r}"
+
+
+def test_the_nudge_never_recommends_a_bare_git_stash(tmp_path: Path) -> None:
+    """#188: the nudge fires on a dirty tree — exactly when uncommitted work exists to be
+    destroyed — and on a concurrent-agent host a bare `git stash` swallows every OTHER agent's
+    in-flight edits silently (the near-miss is recorded in the issue: an agent stashed while two
+    others were mid-edit, and only quiet-tree timing made the pop clean). Every recommended move
+    must be per-file or additive; the only stash form permitted is the path-scoped
+    `git stash push -- <paths>`."""
+    project = _repo(tmp_path / "proj3")
+    (project / "real_work.py").write_text("print(1)\n", encoding="utf-8")
+
+    out = _run(project, tmp_path / "home3")
+
+    assert "dirty-tree" in out
+    assert "'git stash' to park work" not in out, "the whole-tree stash recommendation is back"
+    assert "git stash push -- " in out, "the path-scoped escape hatch must be named"
+    assert "Never bare 'git stash'" in out
