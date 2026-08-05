@@ -1,9 +1,10 @@
 ---
 trdd-id: FQXBURNR
 title: Burn-rate-aware proactive oauth rotation — rotate on projected exhaustion, learn the effective cap
-column: testing
+column: complete
 created: 2026-07-17T16:24:20+0200
-updated: 2026-08-02T18:58:27+0200
+updated: 2026-08-05T18:05:00+0200
+implementation-commits: [2f32dbc2]
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
