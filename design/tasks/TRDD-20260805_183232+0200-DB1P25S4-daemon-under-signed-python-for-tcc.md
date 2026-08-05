@@ -15,6 +15,23 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-05
 
+### CORRECTION (same evening, owner) — the granted client is UV'S MANAGED CPYTHON, and the real
+### mechanism is PATH STABILITY, not code signing
+
+The owner identified the authorized runtime exactly:
+`/Users/emanuelesabetta/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/bin/python3.12`.
+The plist now runs THAT; verified live: daemon pid 73578 under it, heartbeat fresh, launchd
+KeepAlive (note: `launchctl kickstart` restarts the CACHED definition — a plist edit needs
+`bootout` + `bootstrap` to load, and bootstrap can return transient error 5 right after a bootout;
+retry). My signed-python theory below is SUPERSEDED as mechanism: the unstickable Automation
+client was never "uv python" per se — it was the EPHEMERAL `~/.cache/uv/builds-v0/.tmpXXXX/bin/
+python` shim that `uv run --script` mints, a NEW binary path on every respawn, so no TCC grant
+could ever attach to the same client twice. The MANAGED interpreter's path never changes, which is
+why the owner's grant sticks to it (adhoc signature notwithstanding). Consequence for item 2: the
+detached session spawn must launch daemon.py via this managed-interpreter path (resolvable with
+`uv python find` against the pinned version) — not via `uv run`, which reintroduces the ephemeral
+shim identity. The framework python.org 3.12 remains a fallback candidate, not the target.
+
 OWNER (2026-08-05, verbatim intent): the Automation toggle for iTerm cannot be enabled under
 the **uv** client, but the **Python 3.12** client already has iTerm ON — so route the osascript
 work through a normal python process.
