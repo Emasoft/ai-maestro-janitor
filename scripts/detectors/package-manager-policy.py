@@ -406,7 +406,40 @@ def _project_uses_pnpm(root: Path) -> bool:
     return (root / "pnpm-lock.yaml").exists() or (root / _PNPM_SETTINGS_FILE).exists()
 
 
-def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
+def _pnpm_workspace_gaps(root: Path, threshold: int) -> list[str]:
+    """Compliance findings for the file pnpm ACTUALLY reads; empty list = fully protected.
+
+    ONE predicate, consumed by both pnpm audits below. It exists because the two used
+    independent readings of "is the repo protected", and the misplaced-keys audit firing
+    while this file is fully compliant is precisely the false alarm of
+    ai-maestro-plugins#15: the proposal's catalog title says a safety knob is DISABLED,
+    when the live file has every knob at strength and the package.json copies are
+    redundant duplicates. A shared predicate makes that disagreement impossible.
+    """
+    p = root / _PNPM_SETTINGS_FILE
+    y = _parse_yaml(_read_text(p)) if p.is_file() else {}
+    if not any(k in y for k in _PNPM_POLICY_KEYS):
+        return [
+            f"{_PNPM_SETTINGS_FILE} lacks pnpm supply-chain settings "
+            f"(add minimumReleaseAge: {threshold}, trustPolicy: 'no-downgrade', "
+            f"blockExoticSubdeps: true)"
+        ]
+    gaps: list[str] = []
+    age = _as_int(y.get("minimumReleaseAge"))
+    if age is None or age < threshold:
+        cur = age if age is not None else "unset"
+        gaps.append(f"{_PNPM_SETTINGS_FILE} minimumReleaseAge={cur} < {threshold}")
+    tp = str(y.get("trustPolicy") or "").strip().lower()
+    if tp != "no-downgrade":
+        cur_tp = tp if tp else "unset"
+        gaps.append(f"{_PNPM_SETTINGS_FILE} trustPolicy={cur_tp!r} (require 'no-downgrade')")
+    bes = y.get("blockExoticSubdeps")
+    if bes is None or not _is_truthy(bes):
+        gaps.append(f"{_PNPM_SETTINGS_FILE} blockExoticSubdeps unset/false (set true)")
+    return gaps
+
+
+def _audit_pjson_pnpm(root: Path, threshold: int, issues: list[str]) -> None:
     """Flag pnpm POLICY keys parked in `package.json#pnpm`, where pnpm ignores them.
 
     This function used to PROPOSE that location and then read the keys back from it
@@ -420,6 +453,14 @@ def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
     `patchedDependencies` genuinely live there — which is exactly why the near-miss
     survived review. Only these three POLICY keys are misplaced, so only they are
     flagged, and the remedy names the file that actually takes effect.
+
+    NOT flagged when `pnpm-workspace.yaml` is already fully compliant
+    (ai-maestro-plugins#15): the parked copies are then redundant duplicates of LIVE
+    values — a tidiness matter — while the finding feeds a proposal whose catalog
+    title asserts a DISABLED safeguard. A knob reported at its intended value by the
+    file pnpm reads is not disabled, whatever other files say. When the workspace
+    file has ANY gap, the misplaced-keys message still fires alongside the gap
+    finding, because then it is genuine context for the fix.
     """
     p = root / "package.json"
     if not p.is_file():
@@ -429,7 +470,7 @@ def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
     if not isinstance(pnpm, dict) or not pnpm:
         return
     misplaced = [k for k in _PNPM_POLICY_KEYS if k in pnpm]
-    if misplaced:
+    if misplaced and _pnpm_workspace_gaps(root, threshold):
         issues.append(
             f"package.json#pnpm sets {', '.join(misplaced)} but pnpm does NOT read "
             f"settings from package.json — move to {_PNPM_SETTINGS_FILE} (verified pnpm 11)"
@@ -447,30 +488,7 @@ def _audit_pnpm_workspace(root: Path, threshold: int, issues: list[str]) -> None
     """
     if not _project_uses_pnpm(root):
         return
-    p = root / _PNPM_SETTINGS_FILE
-    y = _parse_yaml(_read_text(p)) if p.is_file() else {}
-
-    if not any(k in y for k in _PNPM_POLICY_KEYS):
-        issues.append(
-            f"{_PNPM_SETTINGS_FILE} lacks pnpm supply-chain settings "
-            f"(add minimumReleaseAge: {threshold}, trustPolicy: 'no-downgrade', "
-            f"blockExoticSubdeps: true)"
-        )
-        return
-
-    age = _as_int(y.get("minimumReleaseAge"))
-    if age is None or age < threshold:
-        cur = age if age is not None else "unset"
-        issues.append(f"{_PNPM_SETTINGS_FILE} minimumReleaseAge={cur} < {threshold}")
-    tp = str(y.get("trustPolicy") or "").strip().lower()
-    if tp != "no-downgrade":
-        cur_tp = tp if tp else "unset"
-        issues.append(
-            f"{_PNPM_SETTINGS_FILE} trustPolicy={cur_tp!r} (require 'no-downgrade')"
-        )
-    bes = y.get("blockExoticSubdeps")
-    if bes is None or not _is_truthy(bes):
-        issues.append(f"{_PNPM_SETTINGS_FILE} blockExoticSubdeps unset/false (set true)")
+    issues.extend(_pnpm_workspace_gaps(root, threshold))
 
 
 def _audit_yarnrc(root: Path, _threshold: int, issues: list[str]) -> None:

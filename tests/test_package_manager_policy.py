@@ -293,6 +293,47 @@ def test_pnpm_block_for_non_policy_keys_is_left_alone(tmp_path: Path) -> None:
     assert "does NOT read settings from package.json" not in out
 
 
+def test_redundant_pjson_copies_of_live_workspace_settings_are_not_a_gap(tmp_path: Path) -> None:
+    """ai-maestro-plugins#15: keys parked in package.json#pnpm while pnpm-workspace.yaml already
+    carries every knob at strength are redundant DUPLICATES of live values — a tidiness matter.
+    Raising them fed a proposal whose catalog title asserts a DISABLED safeguard; a human approved
+    that false premise on the title alone. A knob reported at its intended value by the file pnpm
+    reads is not disabled, whatever other files say."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
+                 "blockExoticSubdeps": True},
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 7200\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" not in out, (
+        "redundant copies of LIVE values must not raise a supply-chain gap"
+    )
+
+
+def test_misplaced_keys_still_flagged_when_the_workspace_file_has_gaps(tmp_path: Path) -> None:
+    """The counter-case that keeps the #15 fix honest: with the workspace file WEAK, the misplaced
+    copies are genuine context for the fix (the user configured the right values in the wrong
+    file) and must keep firing alongside the workspace gap."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
+                 "blockExoticSubdeps": True},
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 60\n",  # present but far below threshold; other knobs absent
+        encoding="utf-8",
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" in out
+    assert "minimumReleaseAge=60" in out
+
+
 def test_pnpm_project_missing_workspace_settings_is_flagged_there(tmp_path: Path) -> None:
     """Absence is proposed against the file that enforces it, not package.json."""
     (tmp_path / "package.json").write_text(json.dumps({
