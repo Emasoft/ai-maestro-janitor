@@ -67,7 +67,11 @@ def test_documentation_shapes_are_not_leaks(label: str, text: str) -> None:
         # The exemption's lookbehind rejects `://`, so a URL-form ssh target is still an account
         # on a machine even though a `/` precedes the `@`.
         ("ssh:// url", "Use ssh://deploy@prod-box-01 for the tunnel."),
-        ("vendor-prefixed token", "token = ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
+        # Fragmented per tests/README.md: `test_secret_fixture_hygiene` forbids a CONTIGUOUS
+        # credential literal anywhere in tracked source, and it is right to — a fake token that
+        # matches the real format is indistinguishable from a leaked one to every scanner that
+        # ever reads this repo. Assembled at runtime, so the detector still sees the full token.
+        ("vendor-prefixed token", "token = " + "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
         ("home directory path", "It lives at /Users/emanuele/Code/secret-thing/x.md here."),
         ("aws secret access key", "AKIAIOSFODNN7EXAMPLE and wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
         # THE load-bearing counter-case for the path exemption: base64 legitimately contains `/`,
