@@ -108,8 +108,15 @@ _MEMORY_CURATOR_DIRS: frozenset[str] = frozenset(
 # reads as a noisy detector rather than a broken one. Assert the producer's format against
 # real artifacts, never against the format you expect it to have.
 _MEMORY_NOOP_RE = re.compile(
-    # 1. inline label: `**Outcome:** ABSTAINED …`  (the original form; kept for tolerance)
-    r"(?:^[\s\-\*>|]*\*\*outcome:\*\*[^\n]*?\b(?:abstain(?:ed)?|nothing\s+due)\b"
+    # 1. inline label: `**Outcome:** ABSTAINED …` OR `- Outcome: **ABSTAINED — …**`.
+    #    MEASURED CORRECTION 2026-08-05 (#121 fired again): the previous form hard-coded the
+    #    bold around the LABEL, but the curator bolds the VALUE — the live report reads
+    #    `- Outcome: **ABSTAINED — no new merge candidate found**`, which never matched. The
+    #    `**` are now optional on both sides, so all three real spellings are accepted.
+    #    Same failure mode as the 2026-07-29 correction below, one field over: the guard was
+    #    asserted against the format we expected rather than the bytes the producer writes,
+    #    and it FAILED OPEN, so the only symptom was more nagging.
+    r"(?:^[\s\-\*>|]*(?:\*\*)?outcome:?(?:\*\*)?[^\n]*?\b(?:abstain(?:ed)?|nothing\s+due)\b"
     # 2. section heading `## Outcome`, verb on the next non-empty line (the REAL form)
     r"|^#{1,4}[ \t]*outcome[ \t]*$\s*\n\s*[\s\-\*>|]*(?:abstain(?:ed)?|nothing\s+due)\b"
     # 3. H1 title carrying the word: `# CONSOLIDATE pass — LOCAL scope — abstained`
