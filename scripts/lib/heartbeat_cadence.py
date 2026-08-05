@@ -334,6 +334,27 @@ def resolve_ttl_minutes(
     probed = probe()
     if probed and probed > 0:
         return probed, {"minutes": int(probed), "probed_at": int(now), "source": "probe"}
+
+    # PROBE FAILED. A stale MEASUREMENT beats a fresh GUESS (TRDD-VXFNDHXT).
+    #
+    # The probe is a network call: measured 2.89s / 6.29s / 9.18s across three consecutive
+    # runs against its 5s bound, so it loses on latency alone, intermittently, on a
+    # correctly-configured host. Overwriting a real reading with `_env_fallback_minutes` on
+    # every such miss is what produced janitor#190: the env guess returns 60 for a
+    # non-API-key session, and `tier_to_cron`'s FAST guard fires only BELOW 30 — so the guess
+    # is precisely the value at which the guard can never trigger. A session whose true TTL
+    # was 5 then ran */15 with a cache dying between fires, paying a full cold prefix WRITE
+    # (~1.25x) per fire instead of a warm read (0.1x).
+    #
+    # Reuse regardless of age: `probe_interval` bounds how often we ASK, not how long an
+    # answer stays usable, and a reading from an hour ago is still evidence about this
+    # account. `stale-probe` keeps that distinguishable from both a live probe and a guess —
+    # provenance is what made this diagnosable at all.
+    if cached is not None:
+        prior = _as_int(cached.get("minutes", 0), 0)
+        if prior > 0 and str(cached.get("source", "")) in ("probe", "stale-probe"):
+            return prior, {"minutes": prior, "probed_at": int(now), "source": "stale-probe"}
+
     fallback = _env_fallback_minutes(env)
     return fallback, {"minutes": fallback, "probed_at": int(now), "source": "fallback"}
 
