@@ -242,26 +242,37 @@ def _fingerprint_path(intervention: str, scope: str, root) -> Path:
     return global_state.global_state_dir() / f"memory-maint-{intervention}-{scope}-{h}.corpus"
 
 
-def read_dispatch_fingerprint(intervention: str, scope: str, root) -> str | None:
-    """The corpus fingerprint recorded when `intervention` was last DISPATCHED for
+def read_dispatch_fingerprint(intervention: str, scope: str, root) -> dict | None:
+    """The per-page stat map recorded when `intervention` was last DISPATCHED for
     (scope, root), or None when absent/unreadable (callers fail OPEN on None).
 
     Paired with `read_last_run`: together they answer "has the corpus changed since the
     agent last looked at it?" — the only sound, zero-LLM idleness proof for a chore whose
     real gate is a semantic judgment (see memory_content_precheck.consolidate_has_work).
+
+    Stores a `{relpath: [size, mtime_ns]}` MAP rather than one digest (TRDD-9MQ25PNH) so the
+    gate can ask WHICH pages moved and skip those already covered by a refusal. A stamp left
+    by an older version holds a bare hex digest, which is not a JSON object: it reads as None
+    (= no stamp = fail open) exactly once, and the next dispatch rewrites it in the new shape.
     """
     try:
         val = _fingerprint_path(intervention, scope, root).read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return val or None
+    if not val:
+        return None
+    try:
+        parsed = json.loads(val)
+    except ValueError:
+        return None  # pre-TRDD-9MQ25PNH digest stamp → treat as no stamp, fail open once
+    return parsed if isinstance(parsed, dict) else None
 
 
-def mark_dispatch_fingerprint(intervention: str, scope: str, root, fingerprint: str | None) -> None:
-    """Record the corpus fingerprint at the moment `intervention` is dispatched.
+def mark_dispatch_fingerprint(intervention: str, scope: str, root, fingerprint: dict | None) -> None:
+    """Record the per-page stat map at the moment `intervention` is dispatched.
 
-    A None fingerprint (unreadable corpus) REMOVES any stale stamp rather than writing a
-    bogus one — a missing stamp fails open (dispatch), which is the safe direction.
+    A None map (unreadable corpus) REMOVES any stale stamp rather than writing a bogus one —
+    a missing stamp fails open (dispatch), which is the safe direction.
     """
     global_state.init_global_state()
     path = _fingerprint_path(intervention, scope, root)
@@ -271,7 +282,7 @@ def mark_dispatch_fingerprint(intervention: str, scope: str, root, fingerprint: 
         except OSError:
             pass
         return
-    state.atomic_write(path, fingerprint)
+    state.atomic_write(path, json.dumps(fingerprint, sort_keys=True, separators=(",", ":")))
 
 
 def _phase_offset(intervention: str, scope: str, root, interval: float) -> float:

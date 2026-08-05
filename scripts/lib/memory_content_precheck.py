@@ -187,12 +187,70 @@ def corpus_fingerprint(root: Path) -> str | None:
     return h.hexdigest()
 
 
+def page_stats(root: Path) -> dict[str, list[int]] | None:
+    """`{relpath: [size, mtime_ns]}` for every candidate page — the STAMPED form of
+    `corpus_fingerprint` (TRDD-9MQ25PNH).
+
+    Same stat-only walk and same cost as the digest; it just keeps the per-page detail
+    instead of collapsing it. That detail is what lets the gate ask *which* pages moved,
+    so a change confined to an already-judged group can be distinguished from a change
+    anywhere else — the whole point of the refusal filter below.
+
+    Returns None on ANY stat error, which callers MUST treat as fail-open (dispatch):
+    an unreadable corpus is not a provably-unchanged one.
+    """
+    out: dict[str, list[int]] = {}
+    try:
+        for p in sorted(_candidate_pages(root)):
+            st = p.stat()
+            out[str(p.relative_to(root))] = [st.st_size, st.st_mtime_ns]
+    except (OSError, ValueError):
+        return None
+    return out
+
+
+def changed_pages(current: dict[str, list[int]], last: dict[str, list[int]]) -> set[str]:
+    """Root-relative paths that were added, removed, or whose stat moved. PURE."""
+    changed = {rel for rel, st in current.items() if last.get(rel) != st}
+    changed.update(rel for rel in last if rel not in current)
+    return changed
+
+
+def refusal_covered_pages(
+    root: Path, scope: str, *, now: int | None = None
+) -> set[str]:
+    """Root-relative paths covered by a LIVE consolidate refusal (TRDD-9MQ25PNH).
+
+    A refusal is keyed on a whole candidate GROUP — the librarian's aggregation bullets are
+    groups of 2/4/6 pages, and `candidate_key` joins their sorted relpaths. So membership
+    cannot be answered by `is_refused([one_page])`: that would build a one-element key which
+    matches no group. We re-validate each stored group through `memory_refusals.refusal`
+    (which re-checks BOTH the TTL and the group's `content_hash`) and, only if the group is
+    still live, treat its members as covered.
+
+    The content_hash re-check is what makes this self-correcting: edit any page in a refused
+    group and the whole group's refusal stops matching, so none of its members count as
+    covered, the edit shows up as an uncovered change, and the chore re-arms — no expiry
+    bookkeeping of our own.
+    """
+    covered: set[str] = set()
+    for key in memory_refusals.read("consolidate", scope, root):
+        rels = key.split("|")
+        if memory_refusals.refusal(
+            "consolidate", scope, root, [root / r for r in rels], now=now
+        ):
+            covered.update(rels)
+    return covered
+
+
 def consolidate_has_work(
     root: Path,
     *,
-    last_fingerprint: str | None = None,
+    last_stats: dict[str, list[int]] | None = None,
     stamp_age_s: float | None = None,
     recheck_after_s: float = _DEFAULT_CONSOLIDATE_RECHECK_S,
+    scope: str | None = None,
+    now: int | None = None,
 ) -> bool:
     """True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
 
@@ -222,7 +280,14 @@ def consolidate_has_work(
        work: an agent that crashed before finishing, and LLM non-determinism (a merge one
        run would have seen and another missed).
 
-    A None `last_fingerprint` (no stamp yet), an unreadable corpus, or a None `stamp_age_s`
+    3. REFUSAL FILTER (TRDD-9MQ25PNH) — gate 2 above suppresses only a corpus that has not
+       moved AT ALL, which the other memory chores break constantly by writing to this same
+       corpus. So when pages HAVE moved, every moved page is checked for membership of a
+       live consolidate refusal; if all of them sit inside groups the agent already judged
+       and declined, there is still nothing new to look at → suppress. Needs `scope` to read
+       the ledger; without it the filter is simply not applied — never a suppression.
+
+    A None `last_stats` (no stamp yet), an unreadable corpus, or a None `stamp_age_s`
     all fail OPEN — dispatch.
 
     Gate 1 detail: `is_legal_merge` refuses a merge unless both pages share the SAME
@@ -241,10 +306,25 @@ def consolidate_has_work(
     truth for merge legality)."""
     # Gate 2 FIRST — it is stat-only, so it is strictly cheaper than gate 1's per-page
     # frontmatter parse, and on a settled corpus it is the one that fires.
-    if last_fingerprint and stamp_age_s is not None and stamp_age_s < recheck_after_s:
-        current = corpus_fingerprint(root)
-        if current is not None and current == last_fingerprint:
-            return False  # byte-identical corpus already examined → provably idle
+    if last_stats and stamp_age_s is not None and stamp_age_s < recheck_after_s:
+        current = page_stats(root)
+        if current is not None:
+            moved = changed_pages(current, last_stats)
+            if not moved:
+                return False  # byte-identical corpus already examined → provably idle
+            # REFUSAL FILTER (TRDD-9MQ25PNH). A change confined to groups the agent has
+            # ALREADY judged and declined is not new work. Without this, any byte anywhere
+            # re-opened a full ~279k dispatch — including the agent's own edits, since the
+            # other memory chores write to this same corpus.
+            #
+            # Compared PER PAGE rather than as one narrowed digest, deliberately: the stamp
+            # is taken at DISPATCH time (memory-maintenance.py, beside mark_ran), BEFORE the
+            # agent records its refusals. A digest over "pages not currently refused" would
+            # therefore differ from its own stamp the moment a refusal is recorded, buying
+            # one spurious dispatch after every productive round. Recording a refusal touches
+            # no file, so a per-page stat map is unchanged and this gate stays correctly shut.
+            if scope is not None and moved <= refusal_covered_pages(root, scope, now=now):
+                return False  # every moved page sits in a live, still-matching refusal
 
     by_key: Counter[tuple[object, object]] = Counter()
     for p in _candidate_pages(root):
@@ -615,7 +695,7 @@ def content_has_work(
     *,
     split_max_bytes: int,
     scope: str | None = None,
-    last_fingerprint: str | None = None,
+    last_stats: dict[str, list[int]] | None = None,
     stamp_age_s: float | None = None,
 ) -> bool:
     """True iff `intervention` has actual work on the `root` corpus.
@@ -634,8 +714,10 @@ def content_has_work(
         # STRUCTURAL gate (subject-sameness stays agent-discovered) + the UNCHANGED-CORPUS
         # gate: a byte-identical corpus was already examined, so re-spawning cannot yield a
         # different verdict. Absent stamp → fail-open (both args default to None).
+        # `scope` is forwarded so the refusal filter can read the ledger (TRDD-9MQ25PNH);
+        # when the caller has no scope the filter is skipped, never inverted.
         return consolidate_has_work(
-            root, last_fingerprint=last_fingerprint, stamp_age_s=stamp_age_s
+            root, last_stats=last_stats, stamp_age_s=stamp_age_s, scope=scope
         )
     if intervention == "repair":
         # STRUCTURAL page-shape gate (semantic residual documented on the function).

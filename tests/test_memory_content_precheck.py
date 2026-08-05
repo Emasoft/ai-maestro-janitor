@@ -671,27 +671,27 @@ def test_unchanged_corpus_is_suppressed(tmp_path: Path) -> None:
     Re-spawning it on byte-identical pages cannot produce a different answer."""
     _mergeable_pair(tmp_path)
     assert mcp.consolidate_has_work(tmp_path) is True, "no stamp → fail-open"
-    fp = mcp.corpus_fingerprint(tmp_path)
-    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=fp, stamp_age_s=60.0) is False
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.consolidate_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0) is False
 
 
 def test_a_changed_corpus_re_arms_immediately(tmp_path: Path) -> None:
     """Any edit/add/delete must dispatch again on the very next cadence — a new page could
     be the other half of a real merge."""
     _mergeable_pair(tmp_path)
-    stale = mcp.corpus_fingerprint(tmp_path)
+    stale = mcp.page_stats(tmp_path)
     _curated(tmp_path, "c.md", tier="component", type_="reference")
-    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=stale, stamp_age_s=60.0) is True
+    assert mcp.consolidate_has_work(tmp_path, last_stats=stale, stamp_age_s=60.0) is True
 
 
 def test_suppression_expires_so_nothing_is_hidden_forever(tmp_path: Path) -> None:
     """Bounds the two cases an unchanged corpus could still hide work: an agent that
     CRASHED mid-pass, and LLM non-determinism. After the recheck window we dispatch anyway."""
     _mergeable_pair(tmp_path)
-    fp = mcp.corpus_fingerprint(tmp_path)
-    fresh = mcp.consolidate_has_work(tmp_path, last_fingerprint=fp, stamp_age_s=60.0)
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.consolidate_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0)
     expired = mcp.consolidate_has_work(
-        tmp_path, last_fingerprint=fp, stamp_age_s=mcp._DEFAULT_CONSOLIDATE_RECHECK_S + 1.0
+        tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_CONSOLIDATE_RECHECK_S + 1.0
     )
     assert fresh is False and expired is True
 
@@ -699,8 +699,10 @@ def test_suppression_expires_so_nothing_is_hidden_forever(tmp_path: Path) -> Non
 def test_missing_stamp_fails_open(tmp_path: Path) -> None:
     """No fingerprint or no stamp age → dispatch. We never suppress on missing evidence."""
     _mergeable_pair(tmp_path)
-    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=None, stamp_age_s=60.0) is True
-    assert mcp.consolidate_has_work(tmp_path, last_fingerprint="deadbeef", stamp_age_s=None) is True
+    assert mcp.consolidate_has_work(tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.consolidate_has_work(
+        tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
 
 
 def test_structural_gate_still_suppresses_regardless_of_fingerprint(tmp_path: Path) -> None:
@@ -712,9 +714,9 @@ def test_structural_gate_still_suppresses_regardless_of_fingerprint(tmp_path: Pa
 
 def test_content_has_work_threads_the_stamp_through(tmp_path: Path) -> None:
     _mergeable_pair(tmp_path)
-    fp = mcp.corpus_fingerprint(tmp_path)
+    fp = mcp.page_stats(tmp_path)
     assert mcp.content_has_work(
-        "consolidate", tmp_path, split_max_bytes=_CAP, last_fingerprint=fp, stamp_age_s=60.0
+        "consolidate", tmp_path, split_max_bytes=_CAP, last_stats=fp, stamp_age_s=60.0
     ) is False
     assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is True
 
@@ -1062,3 +1064,101 @@ def test_repair_has_work_false_on_quoted_and_legacy_slug_descs(tmp_path):
         ),
     )
     assert mcp.repair_has_work(tmp_path) is False
+
+
+# ── consolidate's refusal filter (TRDD-9MQ25PNH) ──────────────────────────────────────
+# The gate stamps a PER-PAGE stat map, not one digest, so it can ask WHICH pages moved and
+# skip those already covered by a live refusal. `page_stats` keys on (size, mtime_ns) while a
+# refusal keys on CONTENT — that asymmetry is the whole mechanism, and each test below pins
+# one corner of it.
+
+
+def _consolidate_pair(d: Path) -> tuple[Path, Path]:
+    """Two pages that form a legal merge pair, so gate 1 always passes and the tests are
+    exercising gate 2 + the refusal filter rather than the structural short-circuit."""
+    return (_curated(d, "a.md", tier="component", type_="reference"),
+            _curated(d, "b.md", tier="component", type_="reference"))
+
+
+def test_mtime_churn_inside_a_refused_group_does_not_re_dispatch(tmp_path, monkeypatch):
+    """THE WIN. A byte-identical rewrite moves mtime, so the stat map changes and the old
+    whole-corpus gate re-opened a ~279k dispatch. The refusal still matches (it hashes
+    CONTENT), so the moved page is covered and there is genuinely nothing new to look at.
+
+    This matters because the corpus is rewritten constantly by things that change no
+    meaning — the other memory chores, a memgrep reindex, a git checkout.
+    """
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _consolidate_pair(tmp_path)
+    stamp = mcp.page_stats(tmp_path)
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+
+    a.write_text(a.read_text(encoding="utf-8"), encoding="utf-8")   # byte-identical
+    os.utime(a, (2_000_000_000, 2_000_000_000))                     # mtime moves
+
+    assert mcp.page_stats(tmp_path) != stamp, "precondition: the stat map really did move"
+    assert mcp.consolidate_has_work(
+        tmp_path, last_stats=stamp, stamp_age_s=60.0, scope="LOCAL"
+    ) is False
+
+
+def test_editing_a_refused_page_re_arms_because_its_refusal_stops_matching(tmp_path, monkeypatch):
+    """The refusal is conditioned on content, so a REAL edit voids it — no expiry
+    bookkeeping of our own. The edited page is then an uncovered change and we dispatch."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _consolidate_pair(tmp_path)
+    stamp = mcp.page_stats(tmp_path)
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+
+    a.write_text(a.read_text(encoding="utf-8") + "\na genuinely new fact\n", encoding="utf-8")
+
+    assert mcp.consolidate_has_work(
+        tmp_path, last_stats=stamp, stamp_age_s=60.0, scope="LOCAL"
+    ) is True
+
+
+def test_recording_a_refusal_touches_no_file_so_the_gate_stays_shut(tmp_path, monkeypatch):
+    """The regression that forced per-page stats over a narrowed digest.
+
+    The stamp is taken at DISPATCH time, BEFORE the agent records its refusals. A digest
+    computed over "pages not currently refused" would therefore differ from its own stamp the
+    moment a refusal lands, buying one spurious ~279k dispatch after every productive round.
+    A refusal is written to the ledger, not to the corpus, so the stat map is untouched.
+    """
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _consolidate_pair(tmp_path)
+    stamp = mcp.page_stats(tmp_path)
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+
+    assert mcp.page_stats(tmp_path) == stamp, "recording a refusal must not touch the corpus"
+    assert mcp.consolidate_has_work(
+        tmp_path, last_stats=stamp, stamp_age_s=60.0, scope="LOCAL"
+    ) is False
+
+
+def test_a_change_outside_every_refusal_still_re_arms(tmp_path, monkeypatch):
+    """The filter must never swallow a genuinely new page — it could be half of a real merge,
+    and the agent's own manual survey is a documented discovery path we must not disable."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _consolidate_pair(tmp_path)
+    stamp = mcp.page_stats(tmp_path)
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+
+    _curated(tmp_path, "c.md", tier="component", type_="reference")   # brand new page
+
+    assert mcp.consolidate_has_work(
+        tmp_path, last_stats=stamp, stamp_age_s=60.0, scope="LOCAL"
+    ) is True
+
+
+def test_without_a_scope_the_filter_is_skipped_never_inverted(tmp_path, monkeypatch):
+    """No scope ⇒ the ledger cannot be read ⇒ we fall back to "any movement dispatches".
+    Absent evidence must never become a suppression."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _consolidate_pair(tmp_path)
+    stamp = mcp.page_stats(tmp_path)
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+    os.utime(a, (2_000_000_000, 2_000_000_000))
+
+    assert mcp.consolidate_has_work(tmp_path, last_stats=stamp, stamp_age_s=60.0) is True

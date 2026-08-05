@@ -256,7 +256,7 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
         # fingerprint + the age of the stamp recorded at its last dispatch. A byte-identical
         # corpus was already examined by the agent, so re-spawning it (~260k tokens) cannot
         # produce a different verdict. Absent stamp → both args None → fail-open.
-        last_fp: str | None = None
+        last_fp: dict | None = None
         stamp_age: float | None = None
         if intervention == "consolidate":
             last_fp = memory_settings.read_dispatch_fingerprint(intervention, scope, root)
@@ -265,7 +265,7 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
                 stamp_age = float(now - last_run)
         if memory_content_precheck.content_has_work(
             intervention, root, split_max_bytes=split_cap, scope=scope,
-            last_fingerprint=last_fp, stamp_age_s=stamp_age,
+            last_stats=last_fp, stamp_age_s=stamp_age,
         ):
             return intervention
     return None
@@ -401,7 +401,7 @@ def _run() -> int:
             # mark_ran, so the "when" and the "what" can never disagree.
             memory_settings.mark_dispatch_fingerprint(
                 intervention, scope_label, root,
-                memory_content_precheck.corpus_fingerprint(root),
+                memory_content_precheck.page_stats(root),
             )
         _write_cursor(next_cursor)
 
