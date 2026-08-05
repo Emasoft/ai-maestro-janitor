@@ -200,30 +200,24 @@ pointer repair).
 
 ### 6-9. Execute the merge through the transaction core
 
-The full executable sequence (begin/staging commands, the holder-repair-first
-sequence, commit, retry/rollback walkthrough) lives in
-[merge-protocol § Steps 6-9 — the executable sequence](references/merge-protocol.md)
-(TRDD-82OP4EN9 token-budget move). The non-negotiables you must uphold:
+The executable sequence (begin/staging commands, commit, retry/rollback walkthrough) lives in
+[merge-protocol § Steps 6-10](references/merge-protocol.md) (TRDD-82OP4EN9 token-budget move).
+The non-negotiables you must uphold:
 
-- **First, one `--op repair` transaction per step-5 holder** (including `MEMORY.md`
-  when step 5 found a match): its single source is the holder itself; repoint
-  `[[B]]` (or `[[A]]`, if the survivor's slug is changing) → the survivor's slug,
-  or the `MEMORY.md` pointer's target, and commit. Do this for every holder
-  BEFORE touching the merge — `verify_merge`'s dangling-refs check refuses the
-  merge until no live page still links a retired slug, so holder-first is the
-  only order that can commit at all.
-- **Then `begin` with BOTH merge sources** (`merge` op); the survivor keeps A's
-  slug. Edit ONLY under `$STAGING`: overwrite A's copy with the merged page `C`,
-  `rm` B's copy. Nothing else is staged — a merge transaction is exactly ONE
-  write (`C`) and one-or-more deletes.
-- Build `C` per [merge-page-rules](references/merge-page-rules.md): every `[^N]`
-  lesson byte-identical, `ocd = min(A,B)`, `lmd = today`, one-sentence lead, no
-  duplicate lines, no link to a retired slug, all edge sections merged + deduped.
-  Body-fact preservation is YOURS — `verify_merge` does not enforce it.
-- `commit --op merge` runs `verify_merge` and applies atomically. verify FAIL
-  (exit 1) = txn auto-aborted, live tree untouched → fix `C` in a FRESH txn,
-  **retry ≤ 3**, then abandon with a `[janitor-memory] … abandoned` finding.
-  `error:`/exit 2 (lock/stale) = abstain this cycle. A half-applied crash
+- **Holders FIRST — one `--op repair` txn each** (including `MEMORY.md` when step 5 found a
+  match), before touching the merge. `verify_merge`'s dangling-refs check refuses the merge
+  while any live page still links a retired slug, so holder-first is the only order that can
+  commit at all.
+- **Then `begin` with BOTH sources** (`merge` op); the survivor keeps A's slug. Edit ONLY under
+  `$STAGING`: overwrite A's copy with the merged page `C`, `rm` B's. One write, one-or-more
+  deletes, nothing else.
+- **Build `C` per [merge-page-rules](references/merge-page-rules.md)** — every `[^N]` lesson
+  byte-identical, `ocd = min(A,B)`, `lmd = today`, no duplicate lines, no link to a retired slug,
+  edge sections merged + deduped. Body-fact preservation is YOURS; `verify_merge` does not
+  enforce it.
+- **`commit --op merge`** verifies and applies atomically. FAIL (exit 1) = txn auto-aborted, live
+  tree untouched → fix `C` in a FRESH txn, **retry <= 3**, then abandon with a `[janitor-memory]
+  … abandoned` finding. `error:`/exit 2 (lock/stale) = abstain this cycle. A half-applied crash
   self-heals via the next heartbeat's `resume`.
 
 ## Idempotency & bounds
