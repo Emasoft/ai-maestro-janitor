@@ -3,7 +3,7 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-02T16:10:00+0200
+updated: 2026-08-05T06:58:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -54,9 +54,30 @@ does NOT defeat self-match when the snapshotting command itself contains the nee
 reporting a phantom server — I had grepped `aimaestro`, and the path is `ai-maestro`. Both
 readings would have manufactured a defect out of a healthy system.
 
-**NEXT ACTION:** work EHT **TRDD-KQ9WM4TZ** (freeze recovery is dark while a server runs — the
-live gap). This card stays `testing` until that EHT is terminal AND condition 3's blocker
-TRDD-QK7M2B0X lands its shared locks. Nothing else here is forceable.
+### 2026-08-05 — what the exit actually costs, measured
+
+The soak proved the exit WORKS. Today measured what it LEAVES BEHIND, which this card never
+quantified: the daemon owns **eleven** chores, the server absorbs **five**
+(`harness_backend.SERVER_ABSORBED_TASKS`), so **six run nowhere** while a server is up —
+`memory-guard`, `cache-prune`, `rules-cleanup`, `github-config-audit`, `session-liveness`,
+`fleet-stop`. On this host all eleven stamps are 10-14 days stale, `daemon_pid()` → None.
+
+**§7.2 is not wrong** — two daemons would corrupt shared state, and the owner's ruling stands.
+The defect is that the exit was paired with a *partial* absorption contract and no alarm:
+`daemon_watchdog.emit_if_daemon_stale` returned early for EVERY chore whenever a server was
+alive, so the outage and its own alarm were disabled by the same condition. Fixed in
+`95f26646` (gate narrowed to absorbed chores; new `global-chore-blackout` detector). Filed
+upstream as **Emasoft/ai-maestro#111**.
+
+**NEXT ACTION:** unchanged in target, corrected in status — the EHT **TRDD-KQ9WM4TZ** is now
+`blocked` on the publish (TRDD-AWXK0RFT), not in `testing`: its stopgap detector ships in no
+cached plugin version, so it has never executed and could not have. This card therefore cannot
+reach `complete` until the publish unblocks, independently of condition 3's TRDD-QK7M2B0X.
+Nothing else here is forceable.
+
+**SUPERSEDED — do NOT carry forward:** *"work EHT TRDD-KQ9WM4TZ … This card stays `testing`
+until that EHT is terminal AND condition 3's blocker TRDD-QK7M2B0X lands its shared locks"* —
+accurate on 2026-08-02, but it implied the EHT was workable. It is not, until a release ships.
 
 All four parts landed, each closing a distinct way the exit gets silently undone:
 (1) loop exit on fresh liveness, ordered after kill-switch and BEFORE maintenance/pause;
