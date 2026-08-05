@@ -322,13 +322,25 @@ def _word_seq(text: str) -> list[str]:
     return _WORD_SEQ_RE.findall(text.lower())
 
 
+# A CLAIM-number ("retries 3", "cap 50") as opposed to a DATE/TIMESTAMP fragment. Memory notes
+# are dated by convention — "on 2026-08-02 the arm …" tokenizes to `2026`,`08`,`02` — and treating
+# those fragments as claim-numbers manufactured a contradiction out of one note being dated near
+# the shared subject (ai-maestro-plugins#14, reproduced on the real pair: {6, 4} vs
+# {02, 2026, 08} near "arm" — the second set is a date, not a competing claim). Excluded shapes:
+# 4-digit years, zero-padded components (a genuine count is written `2`, never `02`), and ≥6-digit
+# runs (timestamps/ids). A real "retries 3× vs 5×" clash uses none of these.
+_DATE_SHAPED_NUM_RE = re.compile(r"^(?:(?:19|20)\d\d|0\d|\d{6,})$")
+
+
 def _numbers_near(seq: list[str], subj: str, window: int) -> frozenset[str]:
-    """Bare numbers appearing within `window` tokens of any occurrence of `subj`."""
+    """CLAIM-numbers appearing within `window` tokens of any occurrence of `subj`."""
     nums: set[str] = set()
     for i, w in enumerate(seq):
         if w == subj:
             lo, hi = max(0, i - window), min(len(seq), i + window + 1)
-            nums.update(t for t in seq[lo:hi] if t.isdigit())
+            nums.update(
+                t for t in seq[lo:hi] if t.isdigit() and not _DATE_SHAPED_NUM_RE.match(t)
+            )
     return frozenset(nums)
 
 
