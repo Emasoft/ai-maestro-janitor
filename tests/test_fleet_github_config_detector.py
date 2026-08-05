@@ -211,8 +211,10 @@ def _payload(when: str) -> dict:
 
 def _stage(tmp_path: Path, monkeypatch, *, ours: object = None, theirs: object = None):
     """Write either/both findings files and point the module at them. Returns the module."""
-    gsd = tmp_path / "global-state"; gsd.mkdir(parents=True, exist_ok=True)
-    home = tmp_path / "home"; (home / ".aimaestro").mkdir(parents=True, exist_ok=True)
+    gsd = tmp_path / "global-state"
+    gsd.mkdir(parents=True, exist_ok=True)
+    home = tmp_path / "home"
+    (home / ".aimaestro").mkdir(parents=True, exist_ok=True)
     if ours is not None:
         (gsd / "github-config-findings.json").write_text(
             ours if isinstance(ours, str) else json.dumps(ours), encoding="utf-8")
