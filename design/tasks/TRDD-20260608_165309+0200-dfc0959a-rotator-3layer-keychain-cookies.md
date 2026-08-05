@@ -37,6 +37,13 @@ ATOM-YQOI-ZIB3 (`--browser chrome --browser-profile Default --share-accounts --h
 unbrowse mode that survives Cloudflare AND Google OAuth) and ATOM-K64C-5L42 (the two cross-process
 traps). See also [[renew-cdp-attach-real-chrome]].
 
+Second owner constraint, same day: **unbrowse does not support Chrome profiles.** It cannot select
+among the owner's 3 accounts — the profile flag reads one fixed slot, so switching accounts means
+manually renaming the Chrome profile folders so the wanted account occupies that slot, every time.
+This makes the folder swap part of EVERY rotation/replay procedure (a replay against the wrong
+resident profile logs the wrong account in), and it must be scripted into the loop, not remembered.
+Captured as ATOM-Z9Z6-W201 on the same wikimem page.
+
 Path to close items 1–2: study unbrowse (skill + atoms) → schedule ONE recording session with the
 owner present → the replay then makes the capture/RENEW loops machine-verifiable on demand.
 The one-time recording still needs the owner at the keyboard; everything after does not.
