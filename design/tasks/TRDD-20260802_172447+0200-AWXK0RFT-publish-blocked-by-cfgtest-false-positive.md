@@ -3,7 +3,7 @@ trdd-id: AWXK0RFT
 title: Publish is blocked by a CRITICAL false positive on cfg(test) Rust in memgrep
 column: todo
 created: 2026-08-02T17:24:47+0200
-updated: 2026-08-02T17:41:00+0200
+updated: 2026-08-05T07:50:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
