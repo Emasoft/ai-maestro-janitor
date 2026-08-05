@@ -117,6 +117,42 @@ def _is_reserved_documentation_email(addr: str) -> bool:
     return domain.endswith(_RESERVED_EMAIL_DOMAIN_SUFFIXES)
 
 
+# `owner/repo@ref` — a GIT REF SPEC, not an ssh `user@host` (janitor#209). The ssh rule sees the
+# `@` and reads `ai-maestro@governance-rules` as account+machine; what precedes it is an `owner/`
+# segment, which no ssh target has. The lookbehind rejects `://` and `:` so a genuine
+# `ssh://deploy@prod-box` or `scp -P 22:deploy@host` still convicts — only a bare `owner/repo@ref`
+# is exempt. Documentation that CITES a repo by ref is routine on a project memory page, and this
+# detector is a PRE-PUSH control, so a false positive here costs a real push.
+_GIT_REF_OWNER_RE = r"(?<![:/])[A-Za-z0-9._-]+/"
+
+
+def _is_git_ref_spec(text: str, matched: str) -> bool:
+    """True iff `matched` (an ssh-user-host hit) is really the `repo@ref` half of a git ref spec."""
+    return re.search(_GIT_REF_OWNER_RE + re.escape(matched) + r"(?::[^\s]+)?", text) is not None
+
+
+# A FILESYSTEM PATH, never a secret (janitor#209). `/` is in the base64 alphabet, so any long
+# enough path satisfies the entropy test — `skills/team-governance/references/GOVERNANCE-RULES.md`
+# scored as a pasted token. Requiring BOTH a separator and a real file extension is what keeps this
+# from becoming a hole: a base64 secret does not end in `.md`/`.py`, and a token carrying a vendor
+# prefix or the generic secret shape is convicted BEFORE this exemption is consulted.
+# The extension is checked in the SOURCE TEXT, not in the token: `_TOKEN_RE` excludes `.`, so a
+# token can never contain the `.md` that proves it is a filename — an earlier version tested the
+# token itself and was therefore unreachable dead code that silently exempted nothing.
+_PATH_EXT_AFTER_RE = re.compile(r"\.[A-Za-z0-9]{1,8}(?![A-Za-z0-9])")
+
+
+def _is_path_shaped(tok: str, text: str, end: int) -> bool:
+    """True iff the token at `text[:end]` is a repo-relative file path, not an opaque secret.
+
+    Requires BOTH halves, which is what keeps it from being a hole: at least one `/` separator in
+    the token, AND a real file extension immediately following it in the source. A pasted base64
+    credential has no `.md`/`.py` suffix, and a token bearing a vendor prefix or the generic secret
+    shape is convicted by the caller before this is consulted.
+    """
+    return "/" in tok and _PATH_EXT_AFTER_RE.match(text, end) is not None
+
+
 # Where the ENTROPY heuristic needs corroboration (ai-maestro-plugins#14: 3 of 3 entropy
 # findings in one night were structural false positives — none was a secret):
 #   - fenced code blocks and inline `code` spans: documentation cites identifiers and paths in
@@ -274,6 +310,15 @@ def _entropy_findings(text: str) -> list[str]:
             continue
         if sec.shannon_entropy(tok) < _ENTROPY_MIN_BITS:
             continue
+        # Checked BEFORE the region test but AFTER the shape tests below would have run, so a
+        # credential is never exempted: a path that also carries a vendor prefix or the generic
+        # secret shape is not path-shaped by this regex (those tokens have no `/`+extension).
+        if (
+            _is_path_shaped(tok, text, m.end())
+            and not _SECRET_SHAPE_RE.match(tok)
+            and not _generic_secret_shape(tok)
+        ):
+            continue
         # In code markup / wikimem metadata, entropy alone is not evidence (see the block above
         # _SECRET_SHAPE_RE): identifiers, paths and keyword phrases live there by convention and
         # beat prose entropy. A known vendor prefix convicts, and so does the generic
@@ -319,6 +364,8 @@ def _scan_page(page: Path) -> list[str]:
 
     # 1. Local-path / machine-identity (the new lib).
     for f in ppp.scan_text(masked):
+        if f.rule_id == "private-path.ssh-user-host" and _is_git_ref_spec(masked, f.matched_text):
+            continue  # `owner/repo@ref` is a git ref, not an account on a machine (janitor#209)
         labels.add(f.kind)  # "local-path" | "machine-host"
 
     # 2. PII shapes (email/phone/SSN/credit-card/IBAN/passport). We use the named
