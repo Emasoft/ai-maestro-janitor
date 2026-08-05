@@ -114,6 +114,20 @@ Two invariants hold the cache-expired compact path together. (1) The TRIGGER (55
 
 `/janitor-handoff-and-clear` fires TWO keystroke phases — phase A `/clear`, phase B the bootstrap that re-arms the heartbeat (`clear_trigger.plan_clear`). The load-bearing detail is that presence is checked EXACTLY ONCE, in `main()`, and each phase is then fired with `respect_user_presence=False`. That looks like a safety gate being bypassed and is the opposite: a per-phase check can pass for A and fail for B if the user appears in the settle window between them, which CLEARS the session and then REFUSES the re-arm — stranding it with no heartbeat and no memory of why. The two phases are one indivisible act, so the decision to act must be taken once, before either. GENERAL SHAPE: when a sequence is irreversible after step 1, every precondition belongs BEFORE step 1; re-evaluating it between steps converts "we declined to act" into "we half-acted". Related: the clear is a SELF-trigger because only the model can author the handoff `/clear` will destroy — see [[claude-code-esc-input-semantics]] for the injector rules and why this is never routed through fleet_inject.
 
+
+^ATOM-1KAU-ALIB [desc:"the janitor CAN compact itself — compact_trigger.py is an agent-invoked lever independent of the automatic gates, and ships in the cached plugin", keywords: can_the_janitor_compact_itself can_I_compact_my_own_context only_the_user_can_run_/compact compact_trigger.py session_too_expensive_and_I_am_waiting_for_the_user self_compaction_lever agent_invoked_compact, ocd: 2026-08-05, lmd: 2026-08-05]
+
+The janitor ships a MANUAL, agent-invoked compaction lever independent of every automatic gate on
+this page: `scripts/compact_trigger.py` (+ `scripts/lib/terminal_trigger.py`) resolves THIS
+session's own terminal pane and types `/compact` into it. It ships in the CACHED plugin, so it
+works even when the working tree is hundreds of commits ahead of the installed version and the
+daemon/detector commits are inert. Verified 2026-08-05: a dry run resolved the live iTerm session
+id, a real run returned `COMPACT_FIRED` / exit 0, and the compaction landed. So "only the USER can
+lower per-turn context" is FALSE — when context cost is the acute problem, the agent can fire it.
+This does NOT loosen the backstop-only rule: that rule governs the AUTOMATIC path (the cold-cache
+and proactive-idle gates, which stay harness-relative), and firing the manual lever while the
+harness is about to auto-compact anyway re-creates the same BUG-2 competition. [^6]
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-CMPF-LOOP, status:valid, keywords:"self_limiting_claim_was_false claimed_it_stops_without_measuring termination_claim_in_docstring", ocd:2026-07-17, lmd:2026-07-17]
@@ -147,3 +161,4 @@ Two invariants hold the cache-expired compact path together. (1) The TRIGGER (55
   exist. DO reproduce the event's FULL side-effect set, and prove the test FAILS on the pre-fix
   code (stash the fix, run, restore).
 [^5]: [id:ATOM-SLM9-5K1D, status:valid, keywords:"a_feature_never_fires_but_its_tests_are_green threshold_derived_from_an_unrelated_setting gate_sits_above_the_point_another_system_already_acts dead_code_that_looks_configured", ocd:2026-08-04, lmd:2026-08-04] DO NOT derive a feature's threshold from a setting that belongs to a DIFFERENT mechanism, BECAUSE the two move independently and the gate can silently drift past the point where that other mechanism already acts — here the cold-compact bar (716,000) sat above Claude Code's own auto-compact point (666,000), so the feature could never fire, every unit test stayed green, and the burn it existed to prevent ran for weeks unnoticed. DO gate on the quantity the feature is actually about (cache expiry is a TIME fact, so trigger on last-turn AGE), and when a threshold must exist, prove it is REACHABLE by evaluating it against the live environment rather than reading the formula.
+[^6]: [id:ATOM-FF72-T3KF, status:valid, desc:"told the user /compact was their lever alone while holding a working self-compact trigger", keywords:"waiting_for_the_user_to_compact only_the_user_can_compact I_am_blocked_on_context_cost session_too_expensive_nothing_I_can_do", ocd:2026-08-05, lmd:2026-08-05] DO NOT tell the user that `/compact` is their lever alone while a session burns context, BECAUSE `compact_trigger.py` ships in every cached version and a two-command check disproves it — I stayed blocked across several heartbeat fires reporting a cost problem whose fix I was holding. DO run `uv run --quiet scripts/compact_trigger.py` (dry-run first if unsure), and defer to the user only when the harness's own auto-compact is imminent.
