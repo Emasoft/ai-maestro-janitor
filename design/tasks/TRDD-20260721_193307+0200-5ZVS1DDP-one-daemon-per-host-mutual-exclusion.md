@@ -3,13 +3,13 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-05T06:58:00+0200
+updated: 2026-08-05T10:14:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
 eht: [KQ9WM4TZ]
-implementation-commits: [419a470, 3edcf0c]
+implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
@@ -69,6 +69,35 @@ alive, so the outage and its own alarm were disabled by the same condition. Fixe
 `95f26646` (gate narrowed to absorbed chores; new `global-chore-blackout` detector). Filed
 upstream as **Emasoft/ai-maestro#111**.
 
+### 2026-08-05 later — §7.2's exit had TWO gates and they disagreed (fixed, `88e6f45a`)
+
+**The six chores were dark for a second, self-inflicted reason, on top of the partial claim.**
+`d45a843a` moved the SPAWN gate (`global_state._server_owns_host`) to
+`server_owns_every_chore()`, but this card's own loop exit still asked
+`harness_backend.server_is_alive()`. One question, two answers: `ensure_daemon_running()`
+opened the gate and the loop killed the daemon ~4 s later — **a spawn/exit flap, once per
+heartbeat**, with the six chores still uncovered. Measured live: `started (tasks=[all 11])`
+→ `stopping (server-owns-host)` four seconds later, 0 processes left.
+
+The per-chore yield immediately below that branch (`_task_yielded_to_server`, claim-aware)
+was therefore **dead code whenever a server was alive** — the exit always fired first. Exiting
+is not the only way to avoid two owners, and it is the blunt one. Now: partial claim ⇒ stay up
+and cover exactly the unclaimed remainder; total claim ⇒ §7.2's exit applies unchanged, so the
+owner's one-daemon-per-host ruling is preserved intact.
+
+**Verified after the fix on this host:** daemon pid 97639 alive, all six ran within a minute,
+the server's five still yielded, `orphaned_chores()` → `[]`.
+
+**The test lesson, which is the transferable part:** all 47 existing tests stayed green through
+this bug. The exit was asserted for its EXISTENCE and its ORDER — never for *what guards it* —
+so the two gates could drift silently. The new
+`test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision` pins the invariant
+that was actually violated; falsified by reintroducing `server_is_alive` and confirming it fails.
+
+**Framing error worth recording:** this was escalated to the owner for four+ hours as a *decision*
+("start the daemon? it is machine-global") when it was a *defect*. The label did the damage — a
+consent question is not something you debug, so nothing looked at the exit path.
+
 **NEXT ACTION:** unchanged in target, corrected in status — the EHT **TRDD-KQ9WM4TZ** is now
 `blocked` on the publish (TRDD-AWXK0RFT), not in `testing`: its stopgap detector ships in no
 cached plugin version, so it has never executed and could not have. This card therefore cannot
@@ -103,12 +132,17 @@ minute. Without that fix this TRDD could not be released reliably.
    (server stops → daemon resumes) and that a pm2 restart cycle produces no spawn/exit flap.
    Both need the server to actually stop, which cannot be forced on a borrowed host; neither
    blocks this card, and both are covered by the STALE-liveness unit test.
-2. **Freeze recovery must land somewhere** — **STILL OPEN, and LIVE ON THIS HOST RIGHT NOW.**
-   The ONE chore that structurally cannot move to a per-repo cron (a frozen session's own cron
-   is what has stopped). Asked of ai-maestro on #79 item 1. A server IS running here (pid 95175,
-   3 days), so standalone `#N` sessions on this machine have NO freeze recovery **at this
-   moment**, silently — the soak did not fix this, it CONFIRMED the precondition for it. If
-   they decline, keep a stopgap here rather than let it go dark. Tracked as EHT TRDD-KQ9WM4TZ.
+2. **Freeze recovery must land somewhere** — **STILL OPEN structurally; no longer dark on this
+   host.** The ONE chore that structurally cannot move to a per-repo cron (a frozen session's
+   own cron is what has stopped). Asked of ai-maestro on #79 item 1.
+   **Corrected 2026-08-05:** `88e6f45a` restored it here — `session-liveness` and `fleet-stop`
+   now run under the repo daemon (pid 97639) alongside the live server, because a PARTIAL claim
+   no longer displaces us. But the relief is **process-scoped, not durable**: the daemon is
+   running REPO code, while every armed session's heartbeat still runs cached 2.3.0, whose
+   `_server_owns_host` is the old `server_is_alive()` — so if this process dies, **nothing
+   respawns it** until the publish lands. Treat coverage as holding only while pid 97639 lives.
+   *(Superseded: "standalone `#N` sessions on this machine have NO freeze recovery at this
+   moment" — true when written, false since `88e6f45a`.)* Tracked as EHT TRDD-KQ9WM4TZ.
 3. The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
    `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.
    **STILL OPEN**; QK7M2B0X is at `column: dev`, so this is genuinely blocked, not stalled.
