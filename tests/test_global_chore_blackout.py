@@ -94,8 +94,18 @@ def test_unabsorbed_chores_names_the_six_the_server_never_claimed() -> None:
 
 
 @pytest.fixture
-def _server_up_daemon_dead(monkeypatch: pytest.MonkeyPatch):
-    """The blackout condition: a server claims the chores and the daemon is not running."""
+def _server_up_daemon_dead(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The blackout condition: a server claims the chores and the daemon is not running.
+
+    CLAUDE_PROJECT_DIR is redirected to a tmp tree because `emit_if_daemon_stale` dedupes
+    through a seen-file under `state.state_dir()`, which follows CLAUDE_PROJECT_DIR rather
+    than the session-isolated HOME. Without this the test writes its dedupe stamp into the
+    REAL project's `.janitor/state/` and then passes exactly ONCE PER HOUR — every later run
+    reads back its own stamp and sees the silence it is supposed to catch. It cost a green
+    run followed by an inexplicable red one on the very next invocation.
+    """
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    state.init_state()
     monkeypatch.setattr(hb, "server_runs_chores", lambda: True)
     monkeypatch.setattr(gs, "daemon_is_alive", lambda *a, **k: False)
     monkeypatch.setattr(gs, "daemon_pid", lambda: None)
@@ -108,7 +118,6 @@ def test_watchdog_still_alarms_for_an_UNABSORBED_chore_while_a_server_runs(
     """THE bug. The old gate returned for every chore whenever a server was alive."""
     assert "session-liveness" not in hb.SERVER_ABSORBED_TASKS
     monkeypatch.setattr(gs, "read_last_run", lambda _t: int(time.time()) - 10 * 86400)
-    state.init_state()
 
     daemon_watchdog.emit_if_daemon_stale(
         task_name="session-liveness",
@@ -127,7 +136,6 @@ def test_watchdog_stays_silent_for_an_ABSORBED_chore_while_a_server_runs(
     """The suppression that IS correct: an absorbed chore goes stale by design."""
     assert "marketplace-refresh" in hb.SERVER_ABSORBED_TASKS
     monkeypatch.setattr(gs, "read_last_run", lambda _t: int(time.time()) - 10 * 86400)
-    state.init_state()
 
     daemon_watchdog.emit_if_daemon_stale(
         task_name="marketplace-refresh",

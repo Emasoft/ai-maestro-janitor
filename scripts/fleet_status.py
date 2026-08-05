@@ -485,8 +485,13 @@ def main() -> int:
     keepalive = _keepalive_status()
     integrity = _integrity_verdict()
     recovery = _recovery_rollup()
+    # An empty fleet is ambiguous — see _empty_fleet_reason. Never let it render as a count.
+    headline = (
+        f"{len(rows)} running claude instance(s) · {len(broken)} with a broken janitor"
+        if rows else _empty_fleet_reason()
+    )
     summary = (
-        f"{len(rows)} running claude instance(s) · {len(broken)} with a broken janitor · "
+        f"{headline} · "
         f"janitor v{jver} (up-to-date: {uptodate}) · daemon: "
         f"{'alive' if daemon_alive else 'DOWN'} · OS keepalive: {keepalive} · "
         f"self-integrity: {integrity} · marketplace last refresh: {_fmt_ts(mkt_ts)} · "
@@ -500,7 +505,10 @@ def main() -> int:
         return 0
 
     out_path = _render_html(rows, summary, want_ci)
-    print(f"[janitor-global-status] {len(rows)} instances, {len(broken)} broken janitors.")
+    # `headline` already carries the failed-measurement wording on the empty path — reusing it
+    # keeps the one-line stdout summary from re-asserting a count the dashboard just refused to.
+    print(f"[janitor-global-status] "
+          f"{f'{len(rows)} instances, {len(broken)} broken janitors.' if rows else headline}")
     print(f"Dashboard: {out_path}")
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
@@ -509,6 +517,38 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"(could not auto-open: {exc} — open the file above manually)")
     return 0
+
+
+def _empty_fleet_reason() -> str:
+    """Why the fleet scan came back empty — "no sessions running" is only ONE answer.
+
+    THE SELF-CHECK: this scan runs INSIDE a claude session, so a correct scan must find at
+    least the session that ran it. Finding none is therefore not a fleet state, it is a
+    broken measurement — `ps` unavailable, or a per-pid cwd probe (`lsof`) that is missing,
+    denied, or sandboxed. Reporting that as "0 running instances" answers a question we never
+    managed to ask, and reads as an all-clear (ai-maestro#111 follow-up: an earlier "0
+    instances" from this dashboard was quoted as evidence the fleet was idle while twelve
+    sessions were running).
+
+    Runs only on the empty path, so the healthy case pays nothing.
+    """
+    import fleet_scan  # noqa: PLC0415 -- lazy, matching main()'s own local import
+
+    ps_text = fleet_scan._run(["ps", "-eo", "pid=,tty=,command="])
+    procs = fleet_scan.parse_ps_claude(ps_text)
+    if not procs:
+        return (
+            "SCAN FAILED — `ps` reported no claude processes at all, yet this scan is running "
+            "inside one. The process probe is broken; this says nothing about the fleet."
+        )
+    unresolved = sum(1 for pid, _tty, _cmd in procs if not fleet_scan._cwd_of(pid))
+    if unresolved == len(procs):
+        return (
+            f"SCAN FAILED — found {len(procs)} claude process(es) but could not resolve the "
+            f"working directory of ANY of them (lsof missing, denied, or sandboxed). The fleet "
+            f"is unknown, not empty."
+        )
+    return f"no janitor-managed sessions among {len(procs)} running claude process(es)"
 
 
 _COLUMNS = [
