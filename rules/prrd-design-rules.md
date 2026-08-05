@@ -101,9 +101,12 @@ Every AI Maestro project's PRRD SHOULD carry this as its first golden rule: ever
 that writes to GitHub (issue, comment, PR, review, discussion, release note) MUST begin the
 body with a one-line self-identification of which agent/role/plugin authored it, because
 all AI Maestro agents share the single human-owner GitHub identity. Recommended line:
-`_Posted by the Claude developing **<plugin-or-role>** (via the shared @owner gh auth)._`
+`_Posted by the Claude developing **<plugin-or-role>** (via the shared owner gh auth)._`
 Commits SHOULD carry an `Agent: <plugin-slug>` trailer. It is GOLDEN because it is an
-anti-impersonation convention the MANAGER must not be able to weaken.
+anti-impersonation convention the MANAGER must not be able to weaken. The line carries NO
+`@` — a template is pasted verbatim as finished prose, where a bare handle PAGES a real
+account (it did, repeatedly — janitor#198). A template is only safe if its LITERAL form
+is harmless.
 
 ## Does NOT apply to
 
