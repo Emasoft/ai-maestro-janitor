@@ -200,6 +200,7 @@ def test_a_repo_fixed_while_the_fleet_is_still_dirty_has_its_proposal_WITHDRAWN(
 def _load_detector():
     import importlib.util
     spec = importlib.util.spec_from_file_location("fgc_under_test", _DETECTOR)
+    assert spec is not None and spec.loader is not None, f"cannot load {_DETECTOR}"
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
