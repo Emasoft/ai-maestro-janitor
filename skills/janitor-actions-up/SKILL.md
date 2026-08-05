@@ -150,8 +150,13 @@ inline — they're not part of the one-line summary the heartbeat surfaces.
   via the GitHub API) → report; retry is the user's call.
 * Rate-limit (HTTP 403 from GitHub) → suggest `gh auth login` and stop.
 * A workflow file becomes syntactically invalid after the rewrite
-  (extremely rare — actions-up's own tests catch this) → `git stash`
-  the change and report. The user can recover with `git stash pop`.
+  (extremely rare — actions-up's own tests catch this) → roll back **only
+  the workflow paths this run rewrote**:
+  `git restore --source=HEAD -- .github/workflows/<file>`, then report.
+  **Do NOT `git stash`** (janitor#188): stash is repo-wide, so in a tree
+  several agents share it pockets everyone else's uncommitted work with no
+  signal to them. If the user had their own uncommitted edits in that same
+  workflow file, copy it aside first — a scoped restore still overwrites it.
 
 ## Examples
 

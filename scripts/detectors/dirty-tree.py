@@ -9,7 +9,10 @@ longer than the configured threshold. Frequent commits are the recovery
 net: every commit is a restore point if a later change introduces a bug.
 When the git safety guard blocks a destructive op, the right moves are:
 move files to a `_dev/` folder, `git rm` to stage a recoverable deletion,
-`git stash`, or stash+branch as a backup.
+or a backup branch. NOT `git stash` (janitor#188): it operates on the whole
+repository, not on the files you were thinking about, so in a tree several
+agents share it silently pockets everyone else's uncommitted work — and they
+receive no signal, they simply find their edits gone.
 """
 
 from __future__ import annotations
@@ -128,7 +131,8 @@ def main() -> int:
         f"[dirty-tree] Working tree has been dirty for ~{age_m}min ({dirty_lines} uncommitted change(s)). "
         f"Commit now — frequent commits are the recovery net. Stage specific files by name (never 'git add -A'). "
         f"If git safety blocks a destructive op: move files to a _dev/ folder, use 'git rm' to stage a recoverable "
-        f"deletion, 'git stash' to park work, or create a backup branch.",
+        f"deletion, or create a backup branch. NOT 'git stash' — it is repo-wide, so it silently pockets "
+        f"every OTHER agent's uncommitted work in this tree too, and they get no signal it happened (janitor#188).",
     )
     if line is not None:
         print(line)
