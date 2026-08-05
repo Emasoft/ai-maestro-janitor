@@ -585,9 +585,36 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
     return board
 
 
+def _flag_value(name: str) -> str:
+    """The value of `--flag <value>` (or `--flag=<value>`) in argv, else "".
+
+    Deliberately hand-rolled to match this script's existing `"--x" in sys.argv` style
+    rather than introducing argparse for one option — argparse here would also start
+    rejecting the unknown flags callers already pass, which is a behaviour change nobody
+    asked for. Returns "" for a flag given with no following value, so a truncated
+    invocation falls back to the default path instead of consuming the next flag.
+    """
+    for i, arg in enumerate(sys.argv):
+        if arg == name:
+            nxt = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+            return "" if nxt.startswith("-") else nxt
+        if arg.startswith(f"{name}="):
+            return arg.split("=", 1)[1]
+    return ""
+
+
 def main() -> int:
     want_ci = "--ci" in sys.argv
     text_only = "--text" in sys.argv
+    # janitor#197 (ai-maestro): a headless caller must be able to render the dashboard
+    # WITHOUT a browser window landing on the user's desktop. Until now the only way was
+    # to shim the child's PATH with a no-op `open` — that worked, but it made a private
+    # arrangement out of what should be an interface, and it silently breaks the moment
+    # the open call stops being a bare PATH-resolved command name.
+    no_open = "--no-open" in sys.argv
+    # `--out <path>` removes the other half of the shim: parsing the `Dashboard: <path>`
+    # line back out of stdout to find the artifact.
+    out_override = _flag_value("--out")
     home = Path.home()
     now = int(time.time())
 
@@ -726,19 +753,37 @@ def main() -> int:
             print(f"  {r['pid']:>6} {r['diag']:<16} {r['proj']}")
         return 0
 
-    out_path = _render_html(rows, summary, want_ci)
+    out_path = _render_html(rows, summary, want_ci, out_override=out_override)
     # `headline` already carries the failed-measurement wording on the empty path — reusing it
     # keeps the one-line stdout summary from re-asserting a count the dashboard just refused to.
     print(f"[janitor-global-status] "
           f"{f'{len(rows)} instances, {len(broken)} broken janitors.' if rows else headline}")
     print(f"Dashboard: {out_path}")
+    if no_open:
+        return 0
+    _open_in_browser(out_path)
+    return 0
+
+
+def _open_in_browser(out_path: str) -> None:
+    """Launch the desktop browser on the rendered dashboard.
+
+    A named seam rather than three inline lines: it is the one side effect in this script
+    that escapes the process and lands on a human's screen, so it needs to be suppressible
+    (`--no-open`) and assertable. Tests cannot patch `subprocess.Popen` module-wide to check
+    it — the fleet scan runs `subprocess.run`, which builds a Popen internally, so a blanket
+    patch breaks the scan instead of observing the open.
+
+    Failure is a printed line, never a raise: the dashboard is already written and its path
+    already printed, so a machine with no opener (headless Linux, a stripped PATH) must still
+    get a successful run.
+    """
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
         subprocess.Popen([opener, out_path], start_new_session=True)
         print("Opened in the default browser.")
     except Exception as exc:  # noqa: BLE001
         print(f"(could not auto-open: {exc} — open the file above manually)")
-    return 0
 
 
 def _empty_fleet_reason() -> str:
@@ -1134,7 +1179,7 @@ def _json_for_script(obj) -> str:
     )
 
 
-def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
+def _render_html(rows: list[dict], summary: str, want_ci: bool, *, out_override: str = "") -> str:
     body: list[str] = []
     kb_data: list[dict] = []
     for idx, r in enumerate(rows):
@@ -1196,10 +1241,10 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
         .replace("@@ROWS@@", "".join(body))
         .replace("@@KBDATA@@", _json_for_script(kb_data))
     )
-    return _write_report(out)
+    return _write_report(out, out_override=out_override)
 
 
-def _write_report(content: str) -> str:
+def _write_report(content: str, *, out_override: str = "") -> str:
     """Write the dashboard INSIDE the project, never into the system temp dir.
 
     This file is the most sensitive artifact the janitor produces: every running session's
@@ -1213,9 +1258,19 @@ def _write_report(content: str) -> str:
     Written 0600 to the project's own gitignored reports dir, which the reports-purge detector
     already ages out — so this stays bounded without inheriting the temp dir's exposure.
     """
-    out_dir = Path(state.project_root()) / "reports" / "fleet-status"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"janitor-global-status-{time.strftime('%Y%m%d_%H%M%S%z')}.html"
+    if out_override:
+        # `--out <path>` (janitor#197). The caller names the destination, so the 0600
+        # exclusive-create below still applies — an explicit path changes WHERE this
+        # lands, never how exposed it is. Directories are created for convenience;
+        # anything else (unwritable path, existing file) surfaces as the real OSError
+        # rather than a silent fallback to the default location, because a caller that
+        # asked for a specific path must not be told "written" about a different one.
+        path = Path(out_override).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = Path(state.project_root()) / "reports" / "fleet-status"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"janitor-global-status-{time.strftime('%Y%m%d_%H%M%S%z')}.html"
     # Exclusive-create at 0600: never widen an existing file's mode, and never clobber a
     # report another process is mid-write on.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
