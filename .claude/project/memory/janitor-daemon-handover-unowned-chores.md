@@ -122,6 +122,31 @@ server bug, never a janitor guard.
   collision backstop across the 90 s handoff window. `design/ARCHITECTURE.md` rev 4
   (proposed on janitor#100) is the canonical contract doc.
 
+
+^ATOM-2VMQ-2U7X [desc:"The FIX for the all-or-nothing handover: a chore is the server's only when it is CLAIMED, and the daemon is suppressed only once EVERY chore is claimed", keywords: claim_gate alive_and_claimed server_owns_every_chore claimed_chores per-chore_capability_token daemon_suppressed_by_live_server chore_handover_incremental, ocd: 2026-08-05, lmd: 2026-08-05]
+
+Owner ruling 2026-08-05 (janitor#134, "does the server's responsibility mean ALIVE or CLAIMED?"):
+**it means BOTH**, and all chores must eventually pass to ai-maestro equivalents. This SUPERSEDES
+the 2026-07-17 binary-on-liveness rule, which was right about direction and wrong about
+granularity.
+
+Shipped as `d45a843a`:
+
+- `harness_backend.claimed_chores()` — the chores a live server has actually claimed. `family-a`
+  maps to the five family-A chores; a capability token equal to a CHORE NAME claims that chore, so
+  the server migrates one at a time with no janitor release per chore.
+- `server_owns_every_chore()` now guards daemon suppression in
+  `global_state.ensure_daemon_running` — previously `server_is_alive()`. A live server suppresses
+  the daemon ONLY once it has claimed all eleven; while even one is unclaimed the daemon keeps
+  looping and runs exactly the unclaimed remainder. That is the per-chore handover whose absence
+  made the arithmetic never balance.
+- No two-owner hazard in the gap: the daemon yields each claimed chore individually, so daemon and
+  server never execute the same chore; the cross-process locks stay as the backstop.
+
+Everything fails TOWARD COVERAGE: an empty capability list, an unrecognised token, or a stale probe
+all claim nothing, so the janitor keeps every chore. A chore run twice is wasteful and lock-guarded;
+a chore run by nobody is invisible. [^4] [^5]
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-JDHU-4A18, status:valid, keywords:"read_a_stale_chore_stamp_as_nothing_is_running janitor_stamp_only_moves_when_the_janitor_runs_it concluded_rotation_was_dead_when_the_server_was_doing_it last_switch_at_measures_switches_not_refreshes", ocd:2026-07-29, lmd:2026-07-29]
@@ -141,3 +166,5 @@ server bug, never a janitor guard.
   as designed and only the union containing a hole. DO enumerate the FULL set the withdrawn
   actor owned and subtract what the new owner claims, rather than starting from the claim.
 [^3]: [id:ATOM-6CGH-BVIR, status:valid, desc:"I raised a false alarm from three agreeing state files and retracted it after reading the log", keywords:"concluded_the_daemon_was_dead_when_it_had_stood_down almost_force_spawned_a_daemon_the_server_owned three_state_files_agreed_and_all_three_were_the_wrong_evidence the_log_had_the_answer_the_whole_time", ocd:2026-08-01, lmd:2026-08-01] DO NOT conclude the daemon died from state files alone — not from a missing `daemon.pid`, a 21 h-stale `daemon.heartbeat.ts`, and a week-old `daemon.spawn-attempt.ts` together — BECAUSE all three are ALSO produced by a correct stand-down, so their agreement adds confidence without adding information, and their combined weight is what makes the wrong conclusion feel verified. I announced "the daemon has been dead for 21.6 h with no respawn attempt in a week" and was one step from force-spawning a daemon the ai-maestro server already owned, which is exactly the two-owner collision TRDD-LU0C5KAR exists to prevent. DO open `daemon.log` and read the daemon's OWN exit reason before diagnosing its absence: `stopping (server-owns-host)`, repeating once per spawn, settles it in one line.
+[^4]: [id:ATOM-XGE0-4WI4, status:valid, desc:"the mirror hole an unabsorbed-only detector cannot see", keywords:"ownerless_chore_two_shapes claimed_with_no_live_server operator_override_yields_into_nothing detector_gate_hid_the_hole who_will_run_this", ocd:2026-08-05, lmd:2026-08-05] DO NOT detect ownerless chores by asking "which chores were never absorbed", BECAUSE that is only ONE of the two ways a chore ends up with no runner — the mirror case is a chore that IS claimed while no live server exists, reachable through the operator override, which asserts "the server runs chores" with no probe to corroborate it and makes the daemon yield all five absorbed chores to a server that is not there; my detector stayed silent through it, and its own gate returned early whenever the daemon was alive, so the hole was skipped before it was ever computed (the daemon can be alive AND yielding into nothing). DO ask, per chore, "who will run this?" — claimed with no live server, or unclaimed with no daemon — which catches both shapes by construction.
+[^5]: [id:ATOM-LXHT-XUB9, status:valid, desc:"the corpus already held this on 2026-08-01; four days later I re-derived it from scratch", keywords:"recall_before_acting rediscovered_known_defect memory_not_consulted wasted_window corpus_already_knew", ocd:2026-08-05, lmd:2026-08-05] DO NOT begin a multi-hour investigation into janitor/server chore coverage without running `memgrep recall` first, BECAUSE this exact defect was already recorded on this page on 2026-08-01 — including lesson [2], "enumerate the FULL set the withdrawn actor owned and subtract what the new owner claims" — and on 2026-08-05 I re-derived all of it from scratch across dozens of turns, measuring stamps and reading source the corpus had already summarised, on a token window the owner was actively watching burn. The knowledge was not missing; the lookup was. DO recall on the SYMPTOM ("chore not running", "daemon absent", "stamps frozen") before the first measurement, and treat a hit as the starting point rather than a confirmation to be earned.
