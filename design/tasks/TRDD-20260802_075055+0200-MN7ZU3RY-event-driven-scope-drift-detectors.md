@@ -1,9 +1,9 @@
 ---
 trdd-id: MN7ZU3RY
 title: Retire the polling scope-drift detectors in favour of ConfigChange and FileChanged hooks
-column: testing
+column: complete
 created: 2026-08-02T07:50:55+0200
-updated: 2026-08-02T20:20:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: MEDIUM

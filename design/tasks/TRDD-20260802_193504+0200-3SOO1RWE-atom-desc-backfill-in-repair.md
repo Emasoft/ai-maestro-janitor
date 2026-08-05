@@ -1,9 +1,9 @@
 ---
 trdd-id: 3SOO1RWE
 title: Repair pass backfills and validates the atom-level desc field
-column: testing
+column: complete
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T20:05:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium

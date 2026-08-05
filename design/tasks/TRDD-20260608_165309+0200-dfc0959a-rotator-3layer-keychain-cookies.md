@@ -1,10 +1,10 @@
 ---
 trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
-column: testing
+column: complete
 implementation-commits: [3316e44, a852cb8, f4cba4f, a7506d3, 9986f7e, def438f, 21da98c, 0028c1e]
 created: 2026-06-08T16:53:09+0200
-updated: 2026-08-02T06:05:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1

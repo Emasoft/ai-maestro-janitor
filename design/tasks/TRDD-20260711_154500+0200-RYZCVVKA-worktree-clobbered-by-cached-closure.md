@@ -1,10 +1,10 @@
 ---
 trdd-id: RYZCVVKA
 title: The repo working tree was overwritten with the CACHED plugin closure — writer unidentified
-column: testing
+column: complete
 implementation-commits: [fef258c, 56bf46d, 05b1a38, 84fe8da]
 created: 2026-07-11T15:45:00+0200
-updated: 2026-08-02T07:48:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1

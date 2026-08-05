@@ -1,9 +1,9 @@
 ---
 trdd-id: TL6NL7MK
 title: The janitor has no SessionEnd teardown hook — nothing runs when a session terminates
-column: testing
+column: complete
 created: 2026-08-02T07:50:55+0200
-updated: 2026-08-02T19:50:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: MEDIUM

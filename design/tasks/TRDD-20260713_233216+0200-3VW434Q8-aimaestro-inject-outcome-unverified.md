@@ -1,9 +1,9 @@
 ---
 trdd-id: 3VW434Q8
 title: The ai-maestro fleet-inject channel reports success on spawn, not on delivery — a failed inject is invisible
-column: testing
+column: complete
 created: 2026-07-13T23:32:16+0200
-updated: 2026-08-02T20:35:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project

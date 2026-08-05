@@ -1,9 +1,9 @@
 ---
 trdd-id: VQ4LX7ND
 title: Launchd guardian resolves no injection channel — PATH stripped, TCC absent
-column: testing
+column: complete
 created: 2026-07-09T18:32:14+0200
-updated: 2026-08-02T06:38:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1

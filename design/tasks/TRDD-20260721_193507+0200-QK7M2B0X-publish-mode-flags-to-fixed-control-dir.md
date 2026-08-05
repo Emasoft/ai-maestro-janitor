@@ -1,9 +1,9 @@
 ---
 trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
-column: testing
+column: complete
 created: 2026-07-21T19:35:07+0200
-updated: 2026-08-02T18:32:00+0200
+updated: 2026-08-05T17:22:57+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
