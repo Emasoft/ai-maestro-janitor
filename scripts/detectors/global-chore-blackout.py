@@ -139,10 +139,16 @@ def main() -> int:
         # absent server is fixed by correcting the claim; a chore dropped by a suppressed
         # daemon is fixed by letting the daemon run.
         if harness_backend.server_is_alive():
-            cause = ("a live ai-maestro server suppresses the janitor daemon but has not "
-                     "claimed these")
-            remedy = ("stop the ai-maestro server, or set JANITOR_AIMAESTRO_SERVER_STATE=down "
-                      "to let the daemon spawn")
+            # A live server no longer suppresses us while its claim is PARTIAL — the
+            # daemon stays up and covers exactly the unclaimed remainder (daemon.py's
+            # §7.2 exit is gated on `server_owns_every_chore`). So reaching here means
+            # the daemon that SHOULD be running these is not, which is a daemon-health
+            # problem, not a server problem. Telling the operator to stop the server
+            # would be a wrong and expensive remedy for it.
+            cause = ("these are unclaimed by the live ai-maestro server AND the janitor "
+                     "daemon that should cover them is not running")
+            remedy = ("check daemon health (kill-switch, crash-loop breaker, OS keepalive) — "
+                      "a partial server claim no longer suppresses it")
         else:
             cause = ("these are YIELDED to an ai-maestro server that is NOT running — an "
                      "operator override is asserting the server owns chores with no live "

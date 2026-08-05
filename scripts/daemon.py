@@ -2277,19 +2277,37 @@ def main() -> int:
             # ONE DAEMON PER HOST (TRDD-5ZVS1DDP, ARCHITECTURE §7.2; owner 2026-07-21:
             # "only one daemon can exist at the same time in the host ... otherwise they
             # will conflict and write at the same time in the same files, corrupting
-            # them"). A FRESH ai-maestro server-liveness file means a server owns this
-            # host, so we get out of its way ENTIRELY — not the rev-4 per-chore yield,
-            # which left us running and contending on the same state.
+            # them"). We get out of a server's way ENTIRELY — but ONLY once it has
+            # CLAIMED EVERY chore, which is the condition that makes leaving safe.
+            #
+            # It used to be `server_is_alive()`, and that was a silent 6-chore outage:
+            # the server advertises `family-a` = 5 of our 11, so a merely-ALIVE server
+            # emptied the host of `memory-guard`, `cache-prune`, `rules-cleanup`,
+            # `github-config-audit`, `session-liveness` and `fleet-stop` for 10-14 days
+            # (ai-maestro#111). Worse, after the spawn gate moved to
+            # `server_owns_every_chore()` in d45a843a the two DISAGREED, so
+            # `ensure_daemon_running()` spawned a daemon that this branch killed ~4 s
+            # later — a spawn/exit flap that burned a process per heartbeat and still
+            # left the six chores dark.
+            #
+            # Exiting is not the only way to avoid two owners, and it is the blunt one:
+            # the per-chore yield below (`_task_yielded_to_server`, claim-aware) already
+            # guarantees we never run a chore the server runs. So while the claim is
+            # PARTIAL we stay up and cover exactly the unclaimed remainder; once the
+            # claim is TOTAL there is nothing left for us to do and §7.2's exit applies
+            # unchanged. Owner ruling 2026-08-05 (janitor#134): the chores must all pass
+            # to the server — until they actually have, someone must still run them.
             #
             # Checked SECOND, right after the kill-switch: a deliberate human stop still
             # outranks it, but this must precede maintenance/pause so we never sit
-            # "idling" alongside a live server — idling still holds the singleton flock
-            # and keeps the OS keepalive armed, which is exactly the two-owner condition.
+            # "idling" alongside a server that owns everything — idling still holds the
+            # singleton flock and keeps the OS keepalive armed, which is exactly the
+            # two-owner condition.
             #
             # Detection is by FILE only. The server is "wherever the user installs
             # ai-maestro" and runs under pm2, so we can neither locate nor stop it; the
             # liveness file is the whole handshake.
-            if harness_backend.server_is_alive():
+            if harness_backend.server_owns_every_chore():
                 exit_reason = "server-owns-host"
                 break
 

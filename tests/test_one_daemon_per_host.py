@@ -25,6 +25,7 @@ under pm2), so every test here drives `~/.aimaestro/server-liveness.json` via th
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -287,6 +288,36 @@ def test_server_owns_host_exit_drops_the_OS_keepalive() -> None:
         "the keepalive teardown must cover the server-owns-host exit, not only the kill-switch"
     )
     assert 'exit_reason = "server-owns-host"' in body
+
+
+def test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision() -> None:
+    """The exit predicate and the spawn gate must be the same question, or the daemon flaps.
+
+    This is the invariant the rest of this file did not have. `_server_owns_host()` (the spawn
+    gate) was moved to `server_owns_every_chore()` in d45a843a, but daemon.py's own loop-exit
+    still asked `server_is_alive()`. Every assertion here stayed green, because the exit was
+    only ever checked for its EXISTENCE and its ORDER — never for what guards it.
+
+    The live consequence, measured 2026-08-05: `ensure_daemon_running()` correctly spawned a
+    daemon (partial claim ⇒ gate open), the loop killed it ~4 s later (server merely alive),
+    and this repeated once per heartbeat — a spawn/exit flap that burned a process per fire
+    while the six unclaimed chores stayed dark for 10-14 days. Two gates answering one question
+    differently is the bug; asserting they agree is the only thing that catches it.
+
+    Source-text assertion for the same reason the neighbours use it: the alternative is running
+    a real supervised daemon in a unit test."""
+    body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
+    exit_pred = re.search(
+        r"if harness_backend\.(\w+)\(\):\n\s+exit_reason = \"server-owns-host\"", body
+    )
+    assert exit_pred, "the server-owns-host exit must be guarded by a harness_backend predicate"
+    gate = (ROOT / "scripts" / "lib" / "global_state.py").read_text(encoding="utf-8")
+    spawn_pred = re.search(r"return harness_backend\.(\w+)\(\)", gate)
+    assert spawn_pred, "the spawn gate must delegate to a harness_backend predicate"
+    assert exit_pred.group(1) == spawn_pred.group(1) == "server_owns_every_chore", (
+        f"exit is gated on {exit_pred.group(1)}() but spawn on {spawn_pred.group(1)}() — "
+        "they must be the same decision, else the daemon spawn/exit-flaps"
+    )
 
 
 def test_the_server_check_is_ordered_after_the_kill_switch_and_nothing_idles_after_it() -> None:
