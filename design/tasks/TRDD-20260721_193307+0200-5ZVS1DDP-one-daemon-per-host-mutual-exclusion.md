@@ -3,7 +3,7 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-05T18:20:00+0200
+updated: 2026-08-05T18:15:56+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -12,7 +12,30 @@ eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-05
+
+### 2026-08-05 evening — item 2's "SILENT SAFETY GAP … live right now" is SUPERSEDED: closed and verified durable
+
+The gap's own ledger said "the publish is the real and only gate for durable coverage" — and the
+publish happened (v2.4.0 + v2.4.1 shipped today, `88e6f45a` in both). The rest of the chain was
+then walked BY HAND and verified at each link, because the chore that pulls releases was itself
+one of the dark chores (the ai-maestro#102 circularity, made concrete):
+
+1. cache was still 2.3.0 → pulled 2.4.1 via `claude plugin update` (the sanctioned path — this is
+   a PUBLISHED release, not the hand-deploy of unpublished code this card refused on 2026-08-05);
+2. daemon spawned through the 2.4.1 cache: pid 46125, alive, and it did NOT exit
+   `server-owns-host` with the server up — the fix behaving;
+3. all of `memory-guard`/`cache-prune`/`rules-cleanup`/`session-liveness`/`fleet-stop` stamped
+   within ~45 s (`github-config-audit` on its own longer cadence);
+4. the DATA-staged closure now carries `server_owns_every_chore` (re-staged from 2.4.1), so a
+   SIGTERM + respawn re-seats the FIXED code — the 8-minute-lifetime failure mode is gone.
+
+Item 2 is DONE. Still open: item 3 only (move the four movable chores to per-repo crons; its
+stated blocker QK7M2B0X is now `complete`/released, so it is unblocked work, not a block).
+EHT KQ9WM4TZ and blocked AWXK0RFT likely have dead premises now (the publish they wait on
+shipped) — each needs its own STATE read before closing.
+
+### The 2026-07-21 head (kept; its "live right now" warning is superseded above)
 
 **STILL `testing`, and that is CORRECT. Shipped v0.59.0 (`419a470`); the real-server soak is
 DONE (observed live 2026-08-02, evidence below) — but the soak was only ONE of this card's
