@@ -134,6 +134,57 @@ def test_a_janitor_withdrawn_card_never_suppresses(project: Path) -> None:
     assert command.endswith(f"TRDD-{new_uid}")
 
 
+def test_a_later_refusal_of_the_same_evidence_suppresses_even_behind_an_earlier_one(project: Path) -> None:
+    """PR-203 review finding, verified real before fixing: one key can carry SEVERAL refused
+    cards (refuse → evidence changes → re-propose → refuse again). The scan must consult ALL of
+    them — exiting on the first same-key card with differing evidence re-authored a proposal
+    whose exact evidence a LATER card had already refused. The earlier card is arranged to sort
+    FIRST (sorted glob order) so the old early-exit path is the one exercised."""
+    first = _propose(project, evidence=["package.json", ".npmrc"])
+    assert first is not None
+    uid_a = first[0]
+    dest_a = _refuse_by_hand(project, uid_a)
+    # Force the differing-evidence card to iterate FIRST: prefix sorts before 'TRDD-2026…'.
+    dest_a.rename(dest_a.parent / ("TRDD-00000000_000000+0000-" + dest_a.name.split("-", 2)[2]))
+
+    second = _propose(project, evidence=["pnpm-workspace.yaml"], now=NOW + 600)
+    assert second is not None and second[2] is True
+    uid_b = second[0]
+    _refuse_by_hand(project, uid_b)
+
+    again = _propose(project, evidence=["pnpm-workspace.yaml"], now=NOW + 1200)
+    assert again is not None
+    r_uid, command, is_new = again
+    assert command == "", "evidence refused by the LATER card must suppress despite the earlier card"
+    assert is_new is False and r_uid == uid_b
+    assert _proposal_files(project) == []
+
+
+def test_a_refusal_quoting_the_withdrawal_language_is_not_misread_as_withdrawn(project: Path) -> None:
+    """PR-203 review finding, verified real before fixing: the withdrawn-card check matched the
+    marker as a bare substring anywhere in the body, so a human refusal whose verdict QUOTES the
+    withdrawal language ("unlike a card marked WITHDRAWN BY THE JANITOR, this one…") was
+    misclassified as withdrawn, skipped, and its finding re-proposed. The marker only counts as
+    the line-anchored bold line retract() actually writes."""
+    first = _propose(project)
+    assert first is not None
+    uid = first[0]
+    dest = _refuse_by_hand(project, uid)
+    text = dest.read_text(encoding="utf-8")
+    text += (
+        "\n\nLineage note: unlike a card marked WITHDRAWN BY THE JANITOR, this refusal is a"
+        " human verdict — the premise was measured false, not cleared.\n"
+    )
+    dest.write_text(text, encoding="utf-8")
+
+    again = _propose(project, now=NOW + 600)
+    assert again is not None
+    r_uid, command, is_new = again
+    assert command == "", "a quoting refusal must still suppress"
+    assert is_new is False and r_uid == uid
+    assert _proposal_files(project) == []
+
+
 def test_evidence_comparison_is_order_insensitive(project: Path) -> None:
     """Mirrors tickets.evidence_fingerprint(): a detector may emit the same facts in a different
     order, and order alone must not defeat the suppression (it would re-litigate the refusal

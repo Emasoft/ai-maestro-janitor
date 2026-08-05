@@ -46,8 +46,12 @@ _ID_RE = re.compile(r"^(?:TRDD-)?([A-Z0-9]{8})$", re.IGNORECASE)
 # explicitly promises "if the same condition reappears, the janitor proposes it again", while a
 # human refusal is a settled verdict that must NOT be re-litigated every heartbeat
 # (ai-maestro-plugins#15). One constant, used by both the writer and the scanner, so the
-# discriminator cannot drift out from under the check that depends on it.
+# discriminator cannot drift out from under the check that depends on it. The scanner matches
+# the LINE SHAPE retract() writes (bold, line-start, followed by the em-dash), never a bare
+# substring: a human refusal quoting the withdrawal language in its verdict prose must not be
+# misclassified as withdrawn (PR-203 review finding, verified).
 _WITHDRAWN_MARKER = "WITHDRAWN BY THE JANITOR"
+_WITHDRAWN_LINE_RE = re.compile(r"(?m)^\*\*" + re.escape(_WITHDRAWN_MARKER) + r" — ")
 
 # A YAML PLAIN (unquoted) scalar cannot contain `": "` — it reads as a nested mapping and the WHOLE
 # frontmatter block fails to load, so every field reports MISSING even though it is plainly there
@@ -233,27 +237,37 @@ def propose(
             return None
 
     # Refused before? Only a HUMAN refusal counts — a janitor-withdrawn card (the finding had
-    # cleared) carries _WITHDRAWN_MARKER and explicitly promises re-proposal when the condition
-    # reappears, so it must never suppress. The comparison is order-insensitive over the canonical
-    # evidence, mirroring tickets.evidence_fingerprint(): a refusal is a claim about the INPUTS
-    # examined, not about the dedupe key forever. Unreadable cards are skipped (fail toward
-    # re-proposing: one redundant adjudication is recoverable, a silently-suppressed real finding
-    # is not).
-    prior_refusal: tuple[str, str] | None = None  # (uid, refused-on date) when evidence CHANGED
+    # cleared) explicitly promises re-proposal when the condition reappears, so it must never
+    # suppress. The comparison is order-insensitive over the canonical evidence, mirroring
+    # tickets.evidence_fingerprint(): a refusal is a claim about the INPUTS examined, not about
+    # the dedupe key forever. Unreadable cards are skipped (fail toward re-proposing: one
+    # redundant adjudication is recoverable, a silently-suppressed real finding is not).
+    #
+    # Two review findings shaped this loop (greptile on PR 203, both verified real first):
+    #   * ALL same-key cards are scanned before concluding "evidence changed" — a key can
+    #     legitimately have several refused cards (refuse → evidence changes → re-propose →
+    #     refuse again), and exiting on the first differing card would re-author a proposal
+    #     whose exact evidence a LATER card already refused.
+    #   * The withdrawal marker is matched only as the bold line retract() actually writes
+    #     (line-anchored), never as a substring anywhere in the body — a human refusal that
+    #     QUOTES the withdrawal language in its verdict prose must not be misread as withdrawn
+    #     and skipped. A spoof through this narrower gate still only causes a re-proposal,
+    #     which is the fail-open direction this whole scan deliberately fails toward.
+    prior_refusal: tuple[str, str] | None = None  # most recent (uid, refused-on) with CHANGED evidence
     for _scope, path in trdd_common.trdd_files("refused", project_dir):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         fm = _frontmatter(text)
-        if fm.get("ticket-dedupe-key", "") != key or _WITHDRAWN_MARKER in text:
+        if fm.get("ticket-dedupe-key", "") != key or _WITHDRAWN_LINE_RE.search(text):
             continue
         refused_uid = trdd_common.extract_uid(path.name) or ""
         refused_on = (fm.get("updated", "") or fm.get("created", ""))[:10]
         if sorted(_flow_list(fm.get("ticket-evidence", ""))) == sorted(ev_yaml):
             return (refused_uid, "", False) if refused_uid else None
-        prior_refusal = (refused_uid, refused_on)
-        break
+        if prior_refusal is None or refused_on > prior_refusal[1]:
+            prior_refusal = (refused_uid, refused_on)
 
     ts = int(time.time()) if now is None else int(now)
     stamp = time.strftime("%Y%m%d_%H%M%S%z", time.localtime(ts))
