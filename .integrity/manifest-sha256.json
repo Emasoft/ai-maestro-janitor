@@ -1,15 +1,15 @@
 {
   "files": {
     "CLAUDE.md": "0d4e9c4a5c80717626e5e739d08caa685ea1bef57b073f305adfceb6ba658c11",
-    "README.md": "6b1aec32881fa199e9bbdf4f241a91afca5de1f10432d55c4dc92038e252fd74",
+    "README.md": "eb697ad08988f37ccdc0bee5927638513735e60383f0850e40fa8a8bc777caab",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
     "rules/commit-discipline.md": "adfd26803b847232122ecd065f6994590106d2d46e4e1867739106267c828eb2",
     "rules/janitor-footprint.md": "1b75efd40986a278b23ef32d36bdb948f4aa3903b326b546fa0abcfd421dc1ac",
-    "rules/janitor-heartbeat-protocol.md": "c4889edc4dcd2c3d438b89df3997eae26c74062bbf288a9b85dd744e813bb264",
+    "rules/janitor-heartbeat-protocol.md": "78a00c5f5558a046486cfe84377771f33f95e7f2f5d5a1097d0cd95c026ef31b",
     "rules/markdown-memory-recall.md": "c60566b8de4fb23f86d776937f7db1324581882dfd82cae61fe122ff86e522eb",
-    "rules/prrd-design-rules.md": "c8fb26a5d0584ca60580a374c70e8aea5f11a9cfe804499d3cce6ad406a8fcc1",
+    "rules/prrd-design-rules.md": "76d2a5f49d06aa0a30ca4c8ee754512dce255158311db86f93775023ea081b6d",
     "rules/references/markdown-memory-recall-full.md": "67641ab190df6b227392ca4abfed768f40a06c05c9f99c9a6b4b343616a56de0",
     "rules/references/prrd-design-rules-full.md": "123be2d635c3bb024fb922845824f70d66343ccc1baa3b4a5aec4684b1a52aad",
     "rules/references/trdd-design-tasks-full.md": "0d8e548daa131065ff7b47f0ae689f9dd21c84b6bd92bff3bbb825ac427dfbc7",
