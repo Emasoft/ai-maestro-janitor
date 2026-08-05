@@ -27,7 +27,7 @@ The script REFUSES to fall back to `claude` in that case rather than appear to s
 
 > **IRON RULE — talk to ai-maestro through its SCRIPTS, never its HTTP API.** Every
 > interaction goes through the frozen CLI (`aimaestro-*.sh`, `amp-*.sh`, `aid-*.sh`). An agent
-> MUST NOT call `/api/*` or `:23000` directly — not with `curl`, not from a hook, a script, or
+> MUST NOT call `/api/*` or `:23000` directly — not with any HTTP client, not from a hook, a script, or
 > a skill. The scripts are the supported, versioned surface; the HTTP routes are internal and
 > change without notice.
 >

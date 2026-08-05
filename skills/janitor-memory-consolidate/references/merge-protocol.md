@@ -248,9 +248,10 @@ only the invariants.
 janitor#145: the CLI enforces exactly ONE surviving write per merge, with no
 exemption for a backlink holder — `commit --op merge` refuses outright
 (`merge expects exactly ONE surviving page, found N write(s)`) the instant a
-second write rides along. So each step-5 holder (including `MEMORY.md`, when it
-points at a retired slug) is repointed in its OWN `--op repair` transaction,
-committed, and done BEFORE the merge even begins:
+second write rides along. So each step-5 holder is repointed in its OWN
+`--op repair` transaction, committed, and done BEFORE the merge even begins.
+(A step-5 holder here counts the harness index file `MEMORY.md` too, whenever
+it still points at a retired slug.)
 
 ```bash
 for holder in <holder-rel-paths...>; do
