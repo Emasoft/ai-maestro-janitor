@@ -32,6 +32,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import hibernation  # noqa: E402  -- needs the sys.path line above
 import state  # noqa: E402  -- needs the sys.path line above
 import trdd_common  # noqa: E402  -- needs the sys.path line above
 
@@ -111,17 +112,30 @@ _RUN_STATE = {
 }
 
 
-def _run_state(inst: Any, *, server_up: bool) -> str:
+def _run_state(inst: Any, *, server_up: bool, agent_state: str = "") -> str:
     """One honest phrase for what this session is doing right now.
 
     The ai-maestro clause is the owner's distinction and it matters for recovery: when the
     server is down its agents are STOPPED — they resume automatically when it comes back —
-    which is NOT the same as HIBERNATED, a deliberate state that does not auto-resume. We
-    never claim `hibernated` here: nothing in the fleet scan can prove it, and guessing it
-    would tell a human that a recoverable session is a parked one.
+    which is NOT the same as HIBERNATED, a deliberate state that does not auto-resume.
+
+    `agent_state` comes from the server's own answer (janitor#194), delivered as a file into
+    this project's `.janitor/daemon_responses/`. Before it existed the janitor reported
+    NEITHER state, because nothing it can observe distinguishes them — the registry reads
+    `offline` for hibernated, crashed and never-woken alike. Empty string = no live answer,
+    and that is NOT permission to guess: it falls through to what we can actually observe.
+
+    `hibernated` and `never_woken` are HEALTHY. A guardian that reports a deliberate sleep as
+    an outage manufactures alarms nobody can act on.
     """
     if inst.diagnosis == "unarmed":
         return "disarmed · user opt-out"
+    if agent_state == "hibernated":
+        return "hibernated · deliberate (no auto-resume)"
+    if agent_state == "never_woken":
+        return "never woken · healthy"
+    if agent_state == "crashed":
+        return "CRASHED · server says the session died"
     if "aimaestro_session" in (inst.terminal or {}) and not server_up:
         return "STOPPED · server down (auto-resumes)"
     if inst.active:
@@ -630,11 +644,20 @@ def main() -> int:
     }
 
     rows = []
+    fleet_counts = ""  # filled from the first live hibernation answer any project carries
     for root, group in _group_by_root(fleet):
         # The representative is the one carrying live work — a mid-turn process describes the
         # project's real state better than a sibling that is idle or on its way out.
         i = next((x for x in group if x.active), group[0])
         g = _git(root)
+        # THIS project's own hibernation answer only (janitor#194). Never another project's
+        # file and never the install tree's roster on this project's behalf: the server draws
+        # that boundary deliberately — an agent workdir gets its own record plus fleet counts,
+        # so compromising one agent does not yield every agent's id and tmux session name.
+        hib = hibernation.read(root)
+        hib_state = hib.state() if hib else ""
+        if hib and hib.counts and not fleet_counts:
+            fleet_counts = hib.counts_label()  # fleet-wide, and identical in every answer
         t = _newest_transcript(home, root)
         armed = "yes" if os.path.isfile(os.path.join(root, ".janitor", "state", "heartbeat-armed-at.ts")) else "no"
         # M-11: the SSOT slug (dash EVERY non-alphanumeric, never realpath) —
@@ -659,7 +682,7 @@ def main() -> int:
             "origin": g["origin"], "forked_from": g["forked_from"], "yours": g["yours"],
             "remotes": g["remotes"], "subrepos": g["subrepos"], "subrepos_tip": g["subrepos_tip"],
             "armed": armed, "active": "yes" if i.active else "no",
-            "run_state": _run_state(i, server_up=server_up),
+            "run_state": _run_state(i, server_up=server_up, agent_state=hib_state),
             "cron": "alive (busy)" if i.active else cron_state.get(i.diagnosis, "—"),
             "diag": i.diagnosis, "wait": "ending turn" if i.active else waiting_for.get(i.diagnosis, "—"),
             "started": started, "total": etime,
@@ -685,8 +708,12 @@ def main() -> int:
         f"{len(rows)} running claude instance(s) · {len(broken)} with a broken janitor"
         if rows else _empty_fleet_reason()
     )
+    # Only shown when a live answer exists. Absent/stale means "no live answer" — NEVER "the
+    # fleet is fine" and never "the fleet is broken" — so the clause simply is not rendered
+    # rather than printing zeros that would read as an all-clear.
+    agents_clause = f"agents: {fleet_counts} · " if fleet_counts else ""
     summary = (
-        f"{headline} · "
+        f"{headline} · {agents_clause}"
         f"janitor v{jver} (up-to-date: {uptodate}) · daemon: "
         f"{'alive' if daemon_alive else 'DOWN'} · OS keepalive: {keepalive} · "
         f"self-integrity: {integrity} · marketplace last refresh: {_fmt_ts(mkt_ts)} · "
