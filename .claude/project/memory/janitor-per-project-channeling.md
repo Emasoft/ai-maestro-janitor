@@ -19,7 +19,7 @@ breaks the division of responsibilities; data exfiltration into projects with we
 `/janitor-github-config-fix --all`) may be machine-wide. [^1]
 
 **Routing consequence:** findings about a project with NO live session go to the HUMAN via
-the daemon's notification channel ([[TRDD-4649ZLE0]] design) — never through another
+the daemon's notification channel (TRDD-4649ZLE0 design) — never through another
 project's session. The daemon may GATHER fleet-wide (single-writer, issue #7); it may never
 BROADCAST fleet-wide into agent contexts.
 
@@ -30,7 +30,7 @@ was communicated to ai-maestro (janitor#100) as binding on the server's daemon-f
 
 ## Applies to
 
-- [[TRDD-4649ZLE0]] — human-notification channel (per-project escalation rule)
+- TRDD-4649ZLE0 — human-notification channel (per-project escalation rule)
 - `scripts/detectors/fleet-github-config.py`, `scripts/lib/github_config_audit.py`
 
 See also [[janitor-daemon-bulk-lane]] — the other v0.50.0-era daemon invariant (bulk-lane

@@ -505,7 +505,7 @@ cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param e
   per-pane file = away) with a 5-MIN window; no pane id (Apple Terminal/xterm) falls back to global.
   Inside ai-maestro the signal must come from the SERVER (`aimaestro-session.sh state`/user-idle, or
   `queue`/`--require-idle`), NOT the local breadcrumb — tracked on ai-maestro#73, wired under
-  [[trdd-pzlvt2rn]] `#J`.
+  TRDD-PZLVT2RN `#J`.
 
 [^11]: [id:ATOM-MG22-0003, status:valid, keywords:"marketplace_lock_path_moved last_run_stamps_not_in_data_dir control_state_vs_private_state DATA_dir_principle_exception", ocd:2026-07-22, lmd:2026-07-22, trdd:QK7M2B0X, commits:"78879d4"]
   DO NOT read this page's older claim that the marketplace lock and the per-task

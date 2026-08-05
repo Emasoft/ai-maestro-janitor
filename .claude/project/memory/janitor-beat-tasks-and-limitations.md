@@ -102,7 +102,7 @@ Consequence + the fix: a behind user-scope plugin used to lag up to the daemon's
 `user-plugins-update` sweep (the janitor's own 0.39→0.41 sat for hours — the symptom that
 motivated this). The single writer can't be given up, so the detector **SIGNALS** and the
 daemon **WRITES**:
-- **[[TRDD-Y9KM5RCJ]]** — the `version-update` detector raises `request_version_update()`;
+- **TRDD-Y9KM5RCJ** — the `version-update` detector raises `request_version_update()`;
   the daemon consumes it each loop → janitor self-update in ~5-6 min, not 6 h.
 - **TRDD-YMTUPQER** — the `plugin-updates` detector enqueues `request_plugin_update(id,
   "user", …)` for every behind user-scope plugin; the daemon consumes → update in ~5-6 min,
