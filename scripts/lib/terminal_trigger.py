@@ -1185,10 +1185,43 @@ def _try_linux_gui_send(
     return f"FIRED:{channel}"
 
 
+# How often to re-ask the presence gate while deferring, and how long to keep deferring before
+# admitting defeat. The janitor's primary guarantee is that an agent never STOPS, so a late send
+# always beats a refused one — and `user_is_present` only looks back 10 s, so a user who pauses
+# to read for one poll interval already clears it.
+#
+# 120 s matches the bound `clear_trigger.main()` arrived at independently (2026-08-02 review):
+# the library's own injector default is 3600 s, sized for a DETACHED child, but these calls block
+# a FOREGROUND turn, and the presence probe's first rung is machine-wide HID idle — so typing in
+# any other app can hold the gate shut while the session merely looks hung. Two minutes is long
+# enough to outlast a real pause and short enough that a give-up is still an answer.
+_PRESENCE_POLL_S = 3.0
+_PRESENCE_WAIT_DEFAULT_S = 120.0
+
+
+def _presence_wait_budget_s(env: Mapping[str, str]) -> float:
+    """Seconds to keep deferring to a busy pane before returning USER_PRESENT.
+
+    0 restores the old abort-on-first-refusal behaviour, for a caller that genuinely cannot
+    block. Anything unparseable falls back to the default rather than raising: a malformed knob
+    must not be able to turn deferral back into the stranding bug it fixed.
+    """
+    raw = env.get("CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S", "").strip()
+    if not raw:
+        return _PRESENCE_WAIT_DEFAULT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return _PRESENCE_WAIT_DEFAULT_S
+    return value if value >= 0 else _PRESENCE_WAIT_DEFAULT_S
+
+
 def send_self_command(
     commands: str | Sequence[str], *, delay_s: float = 2.0, esc_first: bool = True,
     dry_run: bool = False, env: Mapping[str, str] | None = None,
     respect_user_presence: bool = True,
+    presence_wait_s: float | None = None,
+    sleeper=time.sleep,
     abort_unless_any: Sequence[str] | None = None,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
@@ -1220,13 +1253,25 @@ def send_self_command(
     `[janitor-reload]` marker fired `/reload-plugins` into the user's pane while they
     were writing and truncated their message. The *fleet* injector has always refused to
     type into a pane whose user is active (`fleet_stop.is_injectable`); the *self*-trigger
-    never checked, and that asymmetry was the bug. So: **inject only when the user is
-    away, or when the user explicitly asked** (a fresh `user_intent` token, stamped from
-    their raw keystrokes by the UserPromptSubmit hook — which an agent cannot forge).
+    never checked, and that asymmetry was the bug. So: **send only when the user is away
+    from this pane, or when they explicitly asked** (a fresh `user_intent` token, stamped
+    from their raw keystrokes by the UserPromptSubmit hook — which an agent cannot forge).
+
+    It **WAITS for that moment; it does not give up on it.** A busy pane defers the send by
+    `presence_wait_s` (default `_PRESENCE_WAIT_DEFAULT_S`, or the
+    `CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S` knob), re-asking the gate every
+    `_PRESENCE_POLL_S`; `USER_PRESENT` comes back only once that whole budget elapses with
+    the pane never going quiet. The distinction is the entire point: the janitor's primary
+    guarantee is CONTINUITY — an agent that stops is a janitor failure — so a send that
+    lands late is a success and a send refused outright is not. Returning `USER_PRESENT`
+    eagerly (the pre-2026-08-05 behaviour) handed the human a "type these two commands
+    yourself" instruction, which is the automation abdicating to the person it exists to
+    relieve, and needlessly: the presence window is only 10 s wide.
 
     The gate lives HERE, at the single chokepoint every self-trigger funnels through, so
     no caller can forget it. `respect_user_presence=False` exists for a caller that has
-    already established consent by other means; it is not a convenience.
+    already established consent by other means; it is not a convenience. `presence_wait_s=0`
+    restores the old fail-fast shape for a caller that truly cannot block.
     """
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     e: Mapping[str, str] = os.environ if env is None else env
@@ -1236,9 +1281,28 @@ def send_self_command(
         # Forward the resolved env so the PER-PANE presence gate (TRDD, 2026-07-16) reads the same
         # pane id this send targets — otherwise the reader would fall back to os.environ and the
         # gate could disagree with the channel it is gating.
+        #
+        # DEFER, NEVER ABORT (owner report 2026-08-05). This used to `return USER_PRESENT` on the
+        # first refusal, which stranded the whole continuity chain: the human was told to type
+        # `/clear` + `/janitor-arm` themselves, i.e. the automation gave the work back to the person
+        # it exists to relieve. That is a continuity-rule violation, and it was pure self-injury —
+        # `user_is_present` uses a TEN-SECOND window, so the gate that refused would have opened on
+        # its own a few seconds later. Waiting is what the pane-level machinery below already does
+        # (`inject_until_sent` -> `wait_until_pane_free`); this gate simply never reached it.
+        #
+        # So: poll the SAME predicate until it clears, then fall through and send. USER_PRESENT is
+        # now returned only after `giveup_s` of a genuinely continuously-busy pane — a real answer
+        # ("you never stopped typing"), not a refusal to try. `injection_allowed` consumes an intent
+        # token ONLY when it returns True, so polling it cannot burn the user's explicit request.
         allowed, _ = user_intent.injection_allowed(cmds, env=e)
         if not allowed:
-            return USER_PRESENT
+            budget = _presence_wait_budget_s(e) if presence_wait_s is None else presence_wait_s
+            deadline = time.monotonic() + budget
+            while not allowed and time.monotonic() < deadline:
+                sleeper(_PRESENCE_POLL_S)
+                allowed, _ = user_intent.injection_allowed(cmds, env=e)
+            if not allowed:
+                return USER_PRESENT
     # Inside an ai-maestro agent the server API is the authoritative way to reach
     # the agent's own terminal. Best-effort — any failure (server down, no match,
     # unconfirmed POST) falls through to the local terminal send below; ai-maestro

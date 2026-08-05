@@ -65,6 +65,7 @@ def _run(
     project: Path,
     iterm: str | None,
     home: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
@@ -78,6 +79,9 @@ def _run(
         env["HOME"] = str(home)
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
+    # Applied LAST so a test can pin a knob the defaults above also set.
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args],
         capture_output=True,
@@ -267,14 +271,21 @@ def test_no_iterm_reports_and_still_records_directive(tmp_path: Path) -> None:
 
 
 def test_a_present_user_is_never_typed_at_but_the_directive_IS_recorded(tmp_path: Path) -> None:
-    """The presence gate, from the caller's side.
+    """The presence gate, from the caller's side, with a ZERO deferral budget.
 
     Typing `/compact` into a pane the user is actively using DESTROYS what they were typing — it
-    happened to this user, mid-sentence, and it is why the gate exists. So when they are at the
-    keyboard the trigger refuses to send, whatever the terminal supports.
+    happened to this user, mid-sentence, and it is why the gate exists. So while they are at the
+    keyboard the trigger does not send, whatever the terminal supports.
 
-    But it still WRITES THE DIRECTIVE: refusing to inject is not refusing to remember. When the user
-    runs `/compact` themselves, the session must still know where to resume.
+    But it still WRITES THE DIRECTIVE: not injecting is not the same as not remembering. When the
+    user runs `/compact` themselves, the session must still know where to resume.
+
+    `PRESENCE_WAIT_S=0` pins the give-up so this stays a test of the CALLER's handling of
+    USER_PRESENT. Since 2026-08-05 the gate DEFERS by default (it polls until the pane goes quiet,
+    because an agent that stops is a janitor failure), and this fixture's breadcrumb is a static
+    timestamp — so with the default budget the 10 s presence window would simply age out mid-wait
+    and the send would proceed, testing the clock rather than the contract. The deferral itself is
+    covered two-sidedly in tests/test_terminal_trigger_presence_defers.py.
     """
     p = tmp_path / "proj"
     p.mkdir()
@@ -284,6 +295,7 @@ def test_a_present_user_is_never_typed_at_but_the_directive_IS_recorded(tmp_path
         project=p,
         iterm=pane,
         home=_home(tmp_path, present=True, pane_id=pane),
+        extra_env={"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": "0"},
     )
     assert proc.returncode == 0
     assert "USER_PRESENT" in proc.stdout
