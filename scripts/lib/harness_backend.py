@@ -64,6 +64,47 @@ SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
     "oauth-rotator-tick",
 })
 
+# EVERY chore the machine-global daemon owns, with the env var + default cadence
+# daemon.py resolves each from. The roster lives HERE, beside SERVER_ABSORBED_TASKS,
+# because the two are only meaningful together: an absorption boundary says nothing
+# without the full set it partitions.
+#
+# WHY this exists (ai-maestro#111, 2026-08-05): a live server does not make the daemon
+# YIELD five chores — `global_state.ensure_daemon_running` refuses to spawn the daemon
+# AT ALL, and the daemon owns eleven. The six below SERVER_ABSORBED_TASKS therefore have
+# NO owner for as long as a server is up. Measured on the owner's host: all eleven stamps
+# 10-14 days stale, and not one alarm, because the only staleness watchdog suppressed
+# itself whenever a server was alive. Keeping the roster next to the boundary is what lets
+# `unabsorbed_chores()` name the gap instead of it being invisible.
+#
+# tests/test_harness_backend.py asserts this table matches daemon.py's Task registry
+# name-for-name and default-for-default, so this copy cannot drift from the daemon it
+# describes.
+GLOBAL_CHORES: dict[str, tuple[str, int]] = {
+    "marketplace-refresh": ("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 3600),
+    "user-plugins-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", 3600),
+    "version-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600),
+    "oauth-rotator-supervisor": ("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", 600),
+    "oauth-rotator-tick": ("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_TICK_INTERVAL", 60),
+    "memory-guard": ("CLAUDE_PLUGIN_OPTION_DAEMON_MEMORY_GUARD_INTERVAL", 120),
+    "cache-prune": ("CLAUDE_PLUGIN_OPTION_DAEMON_CACHE_PRUNE_INTERVAL", 21600),
+    "rules-cleanup": ("CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600),
+    "github-config-audit": ("CLAUDE_PLUGIN_OPTION_DAEMON_GITHUB_CONFIG_AUDIT_INTERVAL", 21600),
+    "session-liveness": ("CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL", 120),
+    "fleet-stop": ("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_STOP_INTERVAL", 60),
+}
+
+
+def unabsorbed_chores() -> tuple[str, ...]:
+    """The global chores that have NO owner while a live server suppresses the daemon.
+
+    Registry order (which is daemon.py's Task order), so a report reads the same way
+    the daemon runs them. This is the set `global-chore-blackout` alarms on: the server
+    never claimed them, and the daemon it displaced is the only thing that ran them.
+    """
+    return tuple(n for n in GLOBAL_CHORES if n not in SERVER_ABSORBED_TASKS)
+
+
 # Staleness window the probe contract mandates: the server rewrites the file every 30 s;
 # consumers treat `now - ts > 90` (or file absent) as "no live capability claim".
 LIVENESS_STALE_AFTER_S = 90

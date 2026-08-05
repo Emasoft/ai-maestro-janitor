@@ -58,27 +58,40 @@ def emit_if_daemon_stale(
       subject:           human phrase for what has not happened, e.g.
                          "global marketplaces last refreshed".
     """
+    # The CHORE's canonical name — derived from `last_run_filename`, NOT `task_name`: the
+    # filename is the parameter that actually names the stamp, so a caller whose drift tag
+    # differs from its stamp stem still reads (and judges) its OWN chore instead of silently
+    # reading a different one. Both the absorption test and the stamp read key off this, so
+    # they can never disagree about which chore is under discussion.
+    chore = (
+        last_run_filename[: -len(".last-run.ts")]
+        if last_run_filename.endswith(".last-run.ts")
+        else last_run_filename
+    )
+
     # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server RUNS, the daemon
     # deliberately YIELDS the absorbed chores — so their completion stamps go stale
     # BY DESIGN. Alarming on that would train users to ignore this watchdog. BINARY
     # since TRDD-LU0C5KAR (owner directive 2026-07-17): the same liveness switch the
     # daemon's own gate uses; a probe failure changes nothing about the alarm path.
+    #
+    # `chore in SERVER_ABSORBED_TASKS` is LOAD-BEARING and was missing (ai-maestro#111,
+    # 2026-08-05). Without it this returned for EVERY chore whenever a server was alive —
+    # but "yields by design" is only true of the five the server actually claims. A live
+    # server makes `ensure_daemon_running` refuse to spawn the daemon AT ALL, and the daemon
+    # owns eleven chores; the other six then run NOWHERE while this gate suppressed the only
+    # alarm that could have said so. Measured cost: eleven chores dark for 10-14 days in
+    # total silence. Never widen this back to an unconditional return.
     try:
         import harness_backend  # noqa: PLC0415 -- lazy sibling; keep the hot path import-light
 
-        if harness_backend.server_runs_chores():
+        if harness_backend.server_runs_chores() and chore in harness_backend.SERVER_ABSORBED_TASKS:
             return
     except Exception:
         pass
 
-    # Dual-read across all three control-plane eras (TRDD-QK7M2B0X phase B step 2). Keyed off
-    # `last_run_filename`, NOT `task_name`: the filename is the parameter that actually names
-    # the stamp, so a future caller whose drift tag differs from its stamp stem still reads its
-    # own file instead of silently reading a different chore's — which would alarm on the wrong
-    # daemon task, the one failure mode this watchdog must never have.
-    last_run = gs.read_last_run(last_run_filename[: -len(".last-run.ts")]
-                               if last_run_filename.endswith(".last-run.ts")
-                               else last_run_filename)
+    # Dual-read across all three control-plane eras (TRDD-QK7M2B0X phase B step 2).
+    last_run = gs.read_last_run(chore)
     if last_run <= 0:
         # Never completed once — daemon just started or task has not finished
         # yet. The stamp is written unconditionally in Task.run's finally, so a

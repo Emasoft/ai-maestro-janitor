@@ -84,6 +84,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # the git work is negligible. SURFACE-ONLY (report + drift line; mutates no
     # TRDD); per-(TRDD,verdict) seen-file dedupe avoids re-nagging.
     ("trdd-state-reconciliation", 86400, "CLAUDE_PLUGIN_OPTION_TRDD_RECONCILIATION_INTERVAL"),
+    # global-chore-blackout: alarm when a live ai-maestro server suppresses the janitor
+    # daemon but has not absorbed the chores it displaced (ai-maestro#111). HOURLY — the
+    # condition changes on the scale of days and the check is a few file stats, so a
+    # tighter cadence buys nothing; the detector itself dedupes to one line per day.
+    ("global-chore-blackout", 3600, "CLAUDE_PLUGIN_OPTION_GLOBAL_CHORE_BLACKOUT_INTERVAL"),
     ("task-pr-mismatch", 1800, "CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL"),
     ("stale-task", 1800, "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree", 300, "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),
