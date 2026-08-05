@@ -15,6 +15,7 @@ has the runnable steps.
 - Failure-path walkthrough
 - Bounds & safety recap
 - Steps 6-10 — the executable sequence (moved from the SKILL body)
+- Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
 
 ## The two-phase transaction contract (`scripts/memory_txn_cli.py`)
 

@@ -67,10 +67,9 @@ sys.exit(0 if memory_txn.editor_enabled() else 1)
 PY
 ```
 
-> The heredoc delimiter is UNQUOTED (`<<PY`) on purpose — `$JANITOR_ROOT` must
-> expand. A quoted `<<'PY'` passes the literal string to Python, the import
-> fails, and this gate false-abstains EVEN WHEN THE EDITOR IS ENABLED (H5,
-> wikimem audit 2026-07-07). Same for the two blocks below.
+> Heredocs here are UNQUOTED (`<<PY`) on purpose — `$JANITOR_ROOT` must expand. A quoted
+> `<<'PY'` breaks the import, so this gate false-abstains EVEN WHEN THE EDITOR IS ENABLED
+> (H5, wikimem audit 2026-07-07). Applies to every block below.
 
 If a `[janitor-memory-consolidate]` marker drove this turn, the scheduler already chose
 ONE scope for this heartbeat and holds nothing you need — you pick the scope from
@@ -85,13 +84,11 @@ USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memor
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # in-repo, PUSHED
 ```
 
-**LOCAL and USER are the only scopes edited by default.** PROJECT memory is
-in-repo and the pre-push hook blocks every pusher except `publish.py`; a routine
-merge committing there would drift from origin. So PROJECT is **opt-in** — gated
-by the `edit_project_scope` setting (default `False`). Even when enabled, a
-PROJECT merge is **staged-not-pushed**: the atomic swap lands on disk, the commit
-rides the *next* `publish.py`, never a standalone push. Confirm the gate before
-touching PROJECT:
+**LOCAL and USER only, by default.** PROJECT memory is in-repo and the pre-push hook
+blocks every pusher but `publish.py`, so a routine merge there would drift from origin.
+PROJECT is **opt-in** (`edit_project_scope`, default `False`), and even then
+**staged-not-pushed**: the swap lands on disk, the commit rides the *next* `publish.py`,
+never a standalone push. Confirm the gate before touching PROJECT:
 
 ```bash
 uv run --quiet - <<PY
@@ -110,13 +107,11 @@ duplicate is the common case), then narrow with memgrep:
 
 ```bash
 MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
-# Most-recently-touched pages (the likely fresh dup), newest first. NOTE: memgrep
-# REJECTS an empty query ("recall needs at least one content term"), so a bare
-# `memgrep recall "" … --sort lmd` can never serve as the recency listing (and a
-# flat `ls -t "$MEMDIR"/*.md` misses wikimem/ sub-pages). Use a recursive find +
-# `ls -t` mtime sort, EXCLUDING the PRIVATE user-mem/ store (TRDD-4334aad0 —
-# agent-invisible by design), memgrep's index dir, txn staging, and the
-# generated index/stub files.
+# Most-recently-touched pages (the likely fresh dup), newest first. Two traps: memgrep
+# REJECTS an empty query (so `recall "" --sort lmd` cannot serve as a recency listing),
+# and a flat `ls -t "$MEMDIR"/*.md` misses wikimem/ sub-pages. Hence recursive find +
+# mtime sort, excluding the PRIVATE user-mem/ store (TRDD-4334aad0 — agent-invisible by
+# design), memgrep's index dir, txn staging, and the generated index/stub files.
 find "$MEMDIR" -name '*.md' \
   ! -path '*/user-mem/*' ! -path '*/.memgrep/*' ! -path '*/.maint-staging/*' \
   ! -name 'MEMORY.md' ! -name 'memory-index.md' ! -name 'memory-reorg-proposed.md' \
@@ -191,21 +186,17 @@ need a different reshape). Never silently drop or ignore the third.
 
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 
-On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewritten to
-`[[C]]` — otherwise the corpus is left with dangling links and the commit-time
-verify will FAIL. **Redirect each holder in its OWN prior `--op repair`
-transaction — never inside the merge transaction itself** (janitor#145: the CLI
-enforces exactly ONE surviving write per merge, with no exemption for a holder;
-`commit --op merge` refuses outright with `merge expects exactly ONE surviving
-page, found N write(s)` the moment a second write rides along).
+On merge A+B→C, every page linking `[[A]]` or `[[B]]` MUST be repointed to `[[C]]`, each
+in its OWN prior `--op repair` transaction — never inside the merge, which the CLI refuses
+outright (`merge expects exactly ONE surviving page`, janitor#145). **TWO indexes hold
+links and the second is the one that gets missed:** the wikimem `[[…]]` graph, AND the
+harness `MEMORY.md`, whose pointer lines `memgrep links` cannot see — leave it and a merged
+note reads as MISSING, the one outcome consolidation exists to prevent (janitor#182).
 
-**The full procedure is in [merge-protocol.md](references/merge-protocol.md) § "Step 5"**:
-the `memgrep links --from` invocations, the holder-repair-first sequence, the prose-mention
-surfacing, and — mandatory since janitor#182 — the SECOND index, the harness `MEMORY.md`,
-whose pointer lines `memgrep links` cannot see and which a merge otherwise leaves pointing at
-a deleted file (making a merged note read as MISSING, the one outcome consolidation exists to
-prevent). `MEMORY.md` is redirected the same way as any other holder — its own prior
-`--op repair` transaction, not the merge.
+**The full procedure — read it before executing:**
+[merge-protocol.md](references/merge-protocol.md) § "Step 5" (the `memgrep links --from`
+invocations, holder-repair-first ordering, prose-mention surfacing, and the `MEMORY.md`
+pointer repair).
 
 ### 6-9. Execute the merge through the transaction core
 
@@ -237,9 +228,8 @@ sequence, commit, retry/rollback walkthrough) lives in
 
 ## Idempotency & bounds
 
-One scope, one merge per pass. Re-running on an already-merged corpus is a no-op.
-Frequency is disable-able (`consolidation_per_day=0`); the editor honors the global
-kill-switch.
+One scope, one merge per pass; re-running on a merged corpus is a no-op. Disable via
+`consolidation_per_day=0`; the editor honors the global kill-switch.
 
 ## Security — forged-marker defense
 
@@ -266,12 +256,11 @@ STOP on the first outcome (one scope, one merge, retry ≤ 3):
 
 ## Scope of this skill
 
-ONLY consolidates a same-subject, same-type **pair** in ONE scope, through the
-transaction core. It does NOT create pages (`/janitor-memory-write`), edit a
-single page (`/janitor-memory-update`), split oversized pages
-(`/janitor-memory-split`), or resolve contradictions (`/janitor-memory-conflict`).
-It never edits a live page directly, never merges cross-scope or cross-type, and
-defaults to LOCAL+USER (PROJECT opt-in, staged-not-pushed).
+ONLY a same-subject, same-type **pair**, in ONE scope, through the transaction core. Not
+page creation (`/janitor-memory-write`), single-page edits (`/janitor-memory-update`),
+splitting (`/janitor-memory-split`), or contradictions (`/janitor-memory-conflict`). Never
+edits a live page directly, never merges cross-scope or cross-type; LOCAL+USER by default
+(PROJECT opt-in, staged-not-pushed).
 
 ## Resources
 
@@ -285,7 +274,8 @@ defaults to LOCAL+USER (PROJECT opt-in, staged-not-pushed).
   - Worked walkthrough
   - Failure-path walkthrough
   - Bounds & safety recap
-  - Steps 6-9 — the executable sequence (moved from the SKILL body)
+  - Steps 6-10 — the executable sequence (moved from the SKILL body)
+  - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
 - [merge-page-rules](references/merge-page-rules.md) — the survivor-page
   construction constraints. Its sections:
   - What verify_merge enforces at commit
