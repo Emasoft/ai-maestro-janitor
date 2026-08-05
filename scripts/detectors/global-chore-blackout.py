@@ -76,10 +76,18 @@ def _cadence_of(chore: str) -> int:
 
 
 def _blackout(now: int) -> list[tuple[str, int]]:
-    """The unabsorbed chores that are provably not running, as `(chore, age_s)`.
+    """The chores NOTHING will run, and whose stamps prove it, as `(chore, age_s)`.
 
     Empty when the host is healthy OR when the evidence does not support a judgement —
     the two are deliberately indistinguishable here, because both mean "say nothing".
+
+    The candidate set is `harness_backend.orphaned_chores`, not `unabsorbed_chores`. The
+    first version asked only "which chores did the server never absorb?", which misses the
+    mirror-image hole: a chore that IS claimed while no live server exists — reachable via
+    the operator override, which asserts the server runs chores with no probe to corroborate
+    it, and would then yield all five absorbed chores into nothing. A detector for
+    ownerless chores that only looks at one of the two ways a chore becomes ownerless is
+    the same class of gap it exists to report.
     """
     stamps = {c: gs.read_last_run(c) for c in harness_backend.GLOBAL_CHORES}
     # "Has the daemon ever run here?" — ANY chore with a stamp proves it has. Without this,
@@ -88,7 +96,7 @@ def _blackout(now: int) -> list[tuple[str, int]]:
         return []
 
     stale: list[tuple[str, int]] = []
-    for chore in harness_backend.unabsorbed_chores():
+    for chore in sorted(harness_backend.orphaned_chores(daemon_alive=gs.daemon_is_alive())):
         last = stamps.get(chore, 0)
         # A never-stamped chore on a host where the daemon HAS run is the strongest form of
         # this finding, not a reason to skip: it means the chore has not completed once in
@@ -105,10 +113,17 @@ def main() -> int:
     # Fail-soft (PRRD S6.1): this detector must never be the reason a heartbeat dies. A
     # blackout report is worth having; it is not worth taking the other detectors down for.
     try:
-        if not harness_backend.server_runs_chores():
-            return 0  # no server claiming the chores ⇒ the daemon is allowed to run them
-        if gs.daemon_is_alive():
-            return 0  # a live daemon owns the unabsorbed six itself ⇒ nothing is unowned
+        # A HANDOVER must be in play. With nothing claimed there is no handover to fall
+        # through, and a merely-absent daemon is `daemon_watchdog`'s business — reporting it
+        # here too would double-alarm on every transient respawn gap.
+        #
+        # NOTE the gate that is deliberately NOT here: an earlier version returned early when
+        # the daemon was alive, on the reasoning that a live daemon owns whatever the server
+        # did not. That is false in the override case — the daemon can be alive and still be
+        # yielding chores to a server that does not exist — so the very hole this detector
+        # was extended to catch would have been skipped before it was ever computed.
+        if not harness_backend.claimed_chores():
+            return 0
 
         now = int(time.time())
         stale = _blackout(now)
@@ -120,13 +135,24 @@ def main() -> int:
         if extra > 0:
             named += f", +{extra} more"
         worst_h = stale[0][1] // 3600
+        # Name the SHAPE, because the two have opposite remedies: a chore yielded to an
+        # absent server is fixed by correcting the claim; a chore dropped by a suppressed
+        # daemon is fixed by letting the daemon run.
+        if harness_backend.server_is_alive():
+            cause = ("a live ai-maestro server suppresses the janitor daemon but has not "
+                     "claimed these")
+            remedy = ("stop the ai-maestro server, or set JANITOR_AIMAESTRO_SERVER_STATE=down "
+                      "to let the daemon spawn")
+        else:
+            cause = ("these are YIELDED to an ai-maestro server that is NOT running — an "
+                     "operator override is asserting the server owns chores with no live "
+                     "server behind it")
+            remedy = ("unset JANITOR_AIMAESTRO_SERVER_CHORES / "
+                      "JANITOR_AIMAESTRO_SERVER_STATE so the daemon takes them back")
         msg = (
-            f"[{_NAME}] {len(stale)} machine-global chore(s) have NO owner: a live ai-maestro "
-            f"server suppresses the janitor daemon, but does not absorb these — {named}. "
-            f"Nothing will run them and nothing will self-heal while the server is up "
-            f"(worst: {worst_h}h). Tracked as Emasoft/ai-maestro#111; the janitor cannot close "
-            f"this from its side. To restore them now: stop the ai-maestro server, or set "
-            f"JANITOR_AIMAESTRO_SERVER_STATE=down to let the daemon spawn."
+            f"[{_NAME}] {len(stale)} machine-global chore(s) have NO owner: {cause} — "
+            f"{named}. Nothing will run them and nothing will self-heal (worst: {worst_h}h). "
+            f"Tracked as Emasoft/ai-maestro#111. To restore them now: {remedy}."
         )
         if "session-liveness" in {c for c, _ in stale}:
             msg += (

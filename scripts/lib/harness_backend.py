@@ -167,6 +167,36 @@ def claimed_chores(*, now: Optional[float] = None) -> frozenset[str]:
     return frozenset(claimed)
 
 
+def orphaned_chores(*, daemon_alive: bool, now: Optional[float] = None) -> frozenset[str]:
+    """The chores NOTHING will run right now, and why they slip through.
+
+    THE RIGHT QUESTION. The first version of the blackout detector asked "which UNABSORBED
+    chores are stale?", which catches only one of the two ways a chore ends up ownerless:
+
+      * **yielded into a hole** — the chore IS claimed, but no live server is there to run
+        it. Reachable through the explicit operator override, which asserts "the server
+        runs chores" with no probe to corroborate it: the daemon then yields all five
+        absorbed chores to a server that does not exist.
+      * **dropped by an absent daemon** — the chore is NOT claimed, so it belongs to the
+        daemon, and the daemon is not running. This is the ai-maestro#111 shape.
+
+    Both are the same defect wearing different clothes: a handover with no receiver. Asking
+    per chore "who will run this?" catches both by construction, and cannot be fooled by a
+    future arrangement neither case anticipated.
+
+    `daemon_alive` is INJECTED rather than probed here: `global_state` imports this module,
+    so reading daemon liveness from inside it would invert that dependency, and the caller
+    already knows the answer.
+    """
+    claimed = claimed_chores(now=now)
+    live = server_is_alive(now=now)
+    orphans = {
+        chore for chore in GLOBAL_CHORES
+        if (chore in claimed and not live) or (chore not in claimed and not daemon_alive)
+    }
+    return frozenset(orphans)
+
+
 def server_owns_every_chore(*, now: Optional[float] = None) -> bool:
     """True iff a live server has claimed EVERY chore the daemon owns.
 

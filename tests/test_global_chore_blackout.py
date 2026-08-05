@@ -22,6 +22,7 @@ Three properties are pinned here, because each one alone was insufficient:
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
 import time
@@ -93,6 +94,71 @@ def test_unabsorbed_chores_names_the_six_the_server_never_claimed() -> None:
     }
 
 
+def _publish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tokens: list[str],
+             *, age_s: float = 0.0) -> None:
+    """Publish a server-liveness probe advertising `tokens`, `age_s` seconds old."""
+    f = tmp_path / "liveness.json"
+    f.write_text(
+        json.dumps({"ts": time.time() - age_s, "pid": 1, "capabilities": tokens}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+
+
+def test_a_claimed_chore_with_NO_live_server_is_orphaned_even_when_the_daemon_is_alive(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hole a live daemon HIDES, and the reason the detector's old early-return was wrong.
+
+    The operator override asserts "the server runs chores" with no probe to corroborate it,
+    so the daemon dutifully yields all five absorbed chores — to a server that is not there.
+    The daemon being alive is irrelevant: it is alive and NOT running them."""
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, "/nonexistent-liveness.json")
+    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "up")
+
+    assert hb.server_is_alive() is False
+    assert hb.claimed_chores() == hb.SERVER_ABSORBED_TASKS
+    assert hb.orphaned_chores(daemon_alive=True) == hb.SERVER_ABSORBED_TASKS
+
+
+def test_an_unclaimed_chore_with_no_daemon_is_orphaned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The ai-maestro#111 shape: the server claims five, the daemon is gone, six fall through."""
+    _publish(monkeypatch, tmp_path, ["family-a"])
+    orphans = hb.orphaned_chores(daemon_alive=False)
+    assert orphans == frozenset(hb.unabsorbed_chores())
+    assert "session-liveness" in orphans
+
+
+def test_nothing_is_orphaned_when_a_live_server_claims_everything(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The target state the owner named — every chore passed to an ai-maestro equivalent.
+    The daemon may be absent; that is the POINT of a complete handover."""
+    _publish(monkeypatch, tmp_path, sorted(hb.GLOBAL_CHORES))
+    assert hb.orphaned_chores(daemon_alive=False) == frozenset()
+
+
+def test_nothing_is_orphaned_when_the_daemon_runs_and_nothing_is_claimed(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary standalone host: no server, a live daemon, every chore covered."""
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, "/nonexistent-liveness.json")
+    assert hb.orphaned_chores(daemon_alive=True) == frozenset()
+
+
+def test_a_stale_probe_orphans_the_chores_it_used_to_claim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A server that died is not a server. Its claim expires with its probe, so the chores
+    revert to the daemon — and are orphaned only if the daemon is gone too."""
+    _publish(monkeypatch, tmp_path, ["family-a"], age_s=hb.LIVENESS_STALE_AFTER_S + 5)
+    assert hb.claimed_chores() == frozenset()
+    assert hb.orphaned_chores(daemon_alive=True) == frozenset()
+    assert hb.orphaned_chores(daemon_alive=False) == frozenset(hb.GLOBAL_CHORES)
+
+
 @pytest.fixture
 def _server_up_daemon_dead(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The blackout condition: a server claims the chores and the daemon is not running.
@@ -154,21 +220,48 @@ def test_watchdog_stays_silent_for_an_ABSORBED_chore_while_a_server_runs(
     assert capsys.readouterr().out == ""
 
 
-def test_detector_reports_only_the_unabsorbed_chores_that_are_stale(
-    monkeypatch: pytest.MonkeyPatch
+def test_detector_reports_the_stale_chores_NOBODY_will_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Stale unabsorbed chores are reported; absorbed and fresh ones are not."""
+    """A CLAIMED chore is the server's, however stale its stamp; an UNCLAIMED one with no
+    daemon is nobody's and is reported, worst first.
+
+    Rewritten 2026-08-05: this used to assert "absorbed chores are never reported", which is
+    not the same statement and is false. Absorbed describes what the server takes IN
+    PRINCIPLE; a chore is only safe when something is actually running it. The two were
+    conflated once already and six chores fell through the gap."""
     mod = _load_detector()
     now = int(time.time())
+    _publish(monkeypatch, tmp_path, ["family-a"])       # a live server owns the absorbed 5
+    monkeypatch.setattr(mod.gs, "daemon_is_alive", lambda *a, **k: False)
+
     stamps = {c: now for c in hb.GLOBAL_CHORES}
-    stamps["marketplace-refresh"] = now - 10 * 86400   # absorbed + stale ⇒ not our finding
-    stamps["session-liveness"] = now - 10 * 86400      # unabsorbed + stale ⇒ reported
-    stamps["fleet-stop"] = now - 5 * 86400             # unabsorbed + stale ⇒ reported
+    stamps["marketplace-refresh"] = now - 10 * 86400   # claimed + stale ⇒ the server's problem
+    stamps["session-liveness"] = now - 10 * 86400      # unclaimed + no daemon ⇒ reported
+    stamps["fleet-stop"] = now - 5 * 86400             # unclaimed + no daemon ⇒ reported
     monkeypatch.setattr(mod.gs, "read_last_run", lambda t: stamps.get(t, 0))
 
     found = mod._blackout(now)
     assert [chore for chore, _age in found] == ["session-liveness", "fleet-stop"], \
-        "must report unabsorbed staleness only, worst first"
+        "must report only what nothing will run, worst first"
+
+
+def test_detector_reports_a_CLAIMED_chore_when_the_server_claiming_it_is_gone(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror case the old assertion would have forbidden outright: an absorbed chore
+    yielded on an operator override, with no live server to receive it."""
+    mod = _load_detector()
+    now = int(time.time())
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, "/nonexistent-liveness.json")
+    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "up")
+    monkeypatch.setattr(mod.gs, "daemon_is_alive", lambda *a, **k: True)
+
+    stamps = {c: now for c in hb.GLOBAL_CHORES}
+    stamps["marketplace-refresh"] = now - 10 * 86400
+    monkeypatch.setattr(mod.gs, "read_last_run", lambda t: stamps.get(t, 0))
+
+    assert [chore for chore, _age in mod._blackout(now)] == ["marketplace-refresh"]
 
 
 def test_detector_is_silent_when_every_chore_is_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
