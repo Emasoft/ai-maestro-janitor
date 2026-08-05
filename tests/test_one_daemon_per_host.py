@@ -64,12 +64,29 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
         cached.cache_clear()
 
 
-def _write_liveness(path: Path, *, age_s: int = 0) -> None:
-    """Write a server-liveness file `age_s` seconds old (0 = fresh)."""
+def _write_liveness(path: Path, *, age_s: int = 0, capabilities: list[str] | None = None) -> None:
+    """Write a server-liveness file `age_s` seconds old (0 = fresh).
+
+    `capabilities` defaults to CLAIMING NOTHING, which is the honest default: a server that
+    publishes an empty token list is saying "I have absorbed nothing that is currently live"
+    (janitor#134). Under the 2026-08-05 owner ruling that means the daemon keeps every chore,
+    so tests about the one-daemon-per-host EXIT must claim everything explicitly — see
+    `_claim_everything`.
+    """
     path.write_text(
-        json.dumps({"ts": int(time.time()) - age_s, "pid": 4242, "capabilities": []}),
+        json.dumps({
+            "ts": int(time.time()) - age_s,
+            "pid": 4242,
+            "capabilities": capabilities if capabilities is not None else [],
+        }),
         encoding="utf-8",
     )
+
+
+def _claim_everything(path: Path, *, age_s: int = 0) -> None:
+    """A server claiming EVERY chore by per-chore name — the only state that displaces the
+    daemon entirely now that suppression requires `server_owns_every_chore()`."""
+    _write_liveness(path, age_s=age_s, capabilities=sorted(harness_backend.GLOBAL_CHORES))
 
 
 # --------------------------------------------------------------------------- #
@@ -77,10 +94,15 @@ def _write_liveness(path: Path, *, age_s: int = 0) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_fresh_liveness_file_means_the_server_owns_the_host(iso: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_fresh_liveness_file_means_the_server_is_RUNNING(iso: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """The whole handshake is one file. No process name, no install path — the server is
     "wherever the user installs ai-maestro" and pm2-supervised, so a file is the only
-    identity either side gets."""
+    identity either side gets.
+
+    Renamed 2026-08-05: it used to say "owns the host", which is no longer what liveness
+    proves. Running is necessary but not sufficient — ownership of a chore additionally
+    requires the server to have CLAIMED it (janitor#134). Leaving the old name would have
+    kept asserting the very conflation that caused ai-maestro#111."""
     live = iso["tmp"] / "server-liveness.json"
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
 
@@ -116,13 +138,88 @@ def test_sessions_REFUSE_to_spawn_the_daemon_while_a_server_is_live(iso: dict, m
     Every heartbeat fire calls `ensure_daemon_running()`. Without this guard the daemon
     that just exited for "server-owns-host" is respawned within one heartbeat by any of
     the (potentially many) armed sessions, and the two-owner condition returns in seconds
-    — the exit would be theatre."""
+    — the exit would be theatre.
+
+    2026-08-05: the veto now requires the server to have CLAIMED EVERY chore, not merely to
+    be alive (owner ruling on janitor#134 — "it means both"). Liveness alone displaced a
+    daemon that owned 11 chores in favour of a server that had taken 5, and the other 6 ran
+    nowhere for 10-14 days (ai-maestro#111). So this test claims everything explicitly; the
+    partial-claim case is its own test below."""
     live = iso["tmp"] / "server-liveness.json"
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
-    _write_liveness(live)
+    _claim_everything(live)
 
-    assert gs.ensure_daemon_running() is False, "a live server must veto the spawn"
+    assert gs.ensure_daemon_running() is False, "a server owning every chore must veto the spawn"
     assert gs.daemon_pid() is None, "nothing may have been spawned"
+
+
+def test_a_server_that_claims_only_SOME_chores_does_NOT_veto_the_spawn(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE ai-maestro#111 regression: partial absorption must never buy total suppression.
+
+    The measured shape — the server publishes `family-a` (5 chores) while the daemon owns 11
+    — must leave the daemon free to run the other 6. Suppressing it here is what made six
+    machine-global chores ownerless and unreported for 10-14 days on the owner's host."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live, capabilities=["family-a"])
+
+    assert harness_backend.server_is_alive() is True, "the server IS up — that is the point"
+    assert harness_backend.server_owns_every_chore() is False
+    assert gs._server_owns_host() is False, "a partial claim must not displace the daemon"
+
+
+def test_a_live_server_claiming_NOTHING_changes_nothing(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The acceptance criterion ai-maestro asked for on janitor#134, verbatim: "a server
+    that claims nothing changes nothing"."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live, capabilities=[])
+
+    assert harness_backend.claimed_chores() == frozenset()
+    assert gs._server_owns_host() is False
+
+
+def test_an_unrecognised_capability_token_claims_nothing(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail TOWARD coverage. A future token this janitor does not know must not be read as
+    a claim on anything — a chore run twice is wasteful and lock-guarded; a chore run by
+    nobody is invisible."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live, capabilities=["family-z", "some-future-thing"])
+
+    assert harness_backend.claimed_chores() == frozenset()
+
+
+def test_per_chore_tokens_are_honoured_so_the_server_can_migrate_one_at_a_time(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The granularity asked for on janitor#134: a token equal to a chore NAME claims that
+    chore, so ai-maestro can take chores over incrementally without a janitor release."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live, capabilities=["session-liveness", "memory-guard"])
+
+    assert harness_backend.claimed_chores() == frozenset({"session-liveness", "memory-guard"})
+    assert harness_backend.server_owns_every_chore() is False
+
+
+def test_a_stale_liveness_file_claims_nothing_even_if_it_lists_every_chore(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staleness beats content. A server that died holding a full claim must not keep the
+    daemon suppressed from beyond the grave."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _claim_everything(live, age_s=harness_backend.LIVENESS_STALE_AFTER_S + 30)
+
+    assert harness_backend.claimed_chores() == frozenset()
+    assert gs._server_owns_host() is False
 
 
 def test_the_refusal_does_NOT_count_toward_the_crash_loop_breaker(iso: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,7 +231,7 @@ def test_the_refusal_does_NOT_count_toward_the_crash_loop_breaker(iso: dict, mon
     needs one, for a reason nothing on screen explains."""
     live = iso["tmp"] / "server-liveness.json"
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
-    _write_liveness(live)
+    _claim_everything(live)  # only a FULL claim refuses the spawn — that is the path under test
 
     before = gs.recent_spawn_count()
     for _ in range(12):
@@ -150,7 +247,11 @@ def test_the_daemon_becomes_spawnable_again_the_moment_liveness_goes_stale(iso: 
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED", "false")  # stop at the enable gate, don't fork
 
-    _write_liveness(live)
+    # A FULL claim, so the veto under test is genuinely the server's. With a partial claim
+    # this would still return False — via the DAEMON_ENABLED knob set above — and the test
+    # would pass while proving nothing about the server guard.
+    _claim_everything(live)
+    assert gs._server_owns_host() is True, "precondition: the server currently owns the host"
     assert gs.ensure_daemon_running() is False  # vetoed by the server
 
     live.unlink()

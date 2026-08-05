@@ -133,8 +133,15 @@ def test_watchdog_still_alarms_for_an_UNABSORBED_chore_while_a_server_runs(
 def test_watchdog_stays_silent_for_an_ABSORBED_chore_while_a_server_runs(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _server_up_daemon_dead
 ) -> None:
-    """The suppression that IS correct: an absorbed chore goes stale by design."""
+    """The suppression that IS correct: a CLAIMED chore goes stale by design.
+
+    Updated 2026-08-05 for the owner ruling on janitor#134 ("alive or claimed?" → "both").
+    Membership in SERVER_ABSORBED_TASKS is no longer sufficient — the server must have
+    published a claim — so the test now states the claim explicitly. That is the whole
+    point of the change: "the server absorbs this in principle" and "the server is running
+    this right now" were the same condition, and six chores fell through the gap."""
     assert "marketplace-refresh" in hb.SERVER_ABSORBED_TASKS
+    monkeypatch.setattr(hb, "claimed_chores", lambda **_kw: frozenset({"marketplace-refresh"}))
     monkeypatch.setattr(gs, "read_last_run", lambda _t: int(time.time()) - 10 * 86400)
 
     daemon_watchdog.emit_if_daemon_stale(

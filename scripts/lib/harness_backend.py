@@ -105,6 +105,83 @@ def unabsorbed_chores() -> tuple[str, ...]:
     return tuple(n for n in GLOBAL_CHORES if n not in SERVER_ABSORBED_TASKS)
 
 
+# A COARSE capability token maps to the chore set it stands for. The server publishes
+# `family-a` today, meaning the five family-A chores. A token equal to a CHORE NAME is a
+# per-chore claim and is honoured directly, so ai-maestro can migrate chore-by-chore
+# without needing a janitor release to recognise each one (asked for on janitor#134).
+_CAPABILITY_CHORE_SETS: dict[str, frozenset[str]] = {
+    "family-a": SERVER_ABSORBED_TASKS,
+}
+
+
+def _explicit_chore_override() -> bool:
+    """True iff a human has set one of the chore/state knobs to a recognised value.
+
+    Distinguishes "an operator asserted this by hand" from "we inferred it from a probe" —
+    the only reason the override branch in `claimed_chores` is allowed to claim anything
+    without a capability list to read.
+    """
+    for env_name in (SERVER_CHORES_ENV, SERVER_STATE_ENV):
+        value = os.environ.get(env_name, "").strip().lower()
+        if value in _TRUE or value in _FALSE:
+            return True
+    return False
+
+
+def claimed_chores(*, now: Optional[float] = None) -> frozenset[str]:
+    """The chores a live ai-maestro server has actually CLAIMED — not merely "is alive".
+
+    OWNER RULING 2026-08-05, answering janitor#134 ("does the server's responsibility mean
+    ALIVE or CLAIMED?"): **it means BOTH.** A chore belongs to the server only while the
+    server is running AND has claimed it. The target state is that every chore in
+    GLOBAL_CHORES is passed to an ai-maestro equivalent; until one is claimed, the daemon
+    keeps it. That makes the handover incremental instead of a cliff.
+
+    FAILS TOWARD COVERAGE, always. No fresh probe, an empty token list, or a token this
+    version does not recognise ⇒ the EMPTY set ⇒ the janitor keeps every chore. The
+    opposite default is precisely what produced the 10-14 day blackout (ai-maestro#111):
+    six chores the server had never claimed were yielded anyway, because the only question
+    asked was "is a server alive?", and then ran nowhere. **A chore run twice is wasteful
+    and guarded by cross-process file locks; a chore run by nobody is invisible.** When in
+    doubt, keep it.
+    """
+    caps = server_capabilities(now=now)
+    if not caps:
+        # No probe, or a probe claiming nothing. ONE exception: an operator who has
+        # EXPLICITLY forced the chores knob (or the state knob) "up" is asserting by hand
+        # that the server owns the absorbed set — there is no capability list to read in
+        # that path, and silently degrading the knob to a no-op would break an operator
+        # tool rather than fix anything. It is honoured as a claim on the LEGACY absorbed
+        # set only, and it can recreate the ai-maestro#111 blackout for the other six
+        # chores — which is acceptable only because it takes a deliberate human action,
+        # unlike the default that caused it.
+        if _explicit_chore_override() and server_runs_chores():
+            return SERVER_ABSORBED_TASKS
+        return frozenset()
+    claimed: set[str] = set()
+    for token in caps:
+        if token in GLOBAL_CHORES:  # a per-chore claim: exact, preferred
+            claimed.add(token)
+        else:  # a coarse token, or one we do not know — unknown claims nothing
+            claimed |= _CAPABILITY_CHORE_SETS.get(token, frozenset())
+    return frozenset(claimed)
+
+
+def server_owns_every_chore(*, now: Optional[float] = None) -> bool:
+    """True iff a live server has claimed EVERY chore the daemon owns.
+
+    THE condition under which the standalone daemon is genuinely redundant, and therefore
+    the only one that may suppress it. While even one chore is unclaimed, suppressing the
+    daemon leaves that chore with no runner at all — the composition failure behind
+    ai-maestro#111, where a total suppression was paired with a partial absorption.
+
+    There is no two-owner hazard in the gap: the daemon yields each CLAIMED chore
+    individually (`claimed_chores`), so a running daemon and a running server never
+    execute the same chore, and the cross-process locks remain the backstop.
+    """
+    return server_is_alive(now=now) and claimed_chores(now=now) >= frozenset(GLOBAL_CHORES)
+
+
 # Staleness window the probe contract mandates: the server rewrites the file every 30 s;
 # consumers treat `now - ts > 90` (or file absent) as "no live capability claim".
 LIVENESS_STALE_AFTER_S = 90

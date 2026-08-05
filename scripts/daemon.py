@@ -1818,35 +1818,28 @@ def _build_tasks() -> list[Task]:
     ]
 
 
-# Machine-wide ONCE-ONLY chores the ai-maestro SERVER absorbs while it RUNS
-# (TRDD-PZLVT2RN Phase B2; BINARY since TRDD-LU0C5KAR — owner directive 2026-07-17:
-# "if the ai-maestro server is running, those chores are its responsibility. so the
-# janitor daemon must switch off those chores. any other event is a bug"). Server
-# alive ⇒ every task in this set yields; server gone ⇒ they all run. Everything NOT
-# in the set keeps running regardless: the population-split ops (session-liveness,
-# fleet-stop — each side actuates only its own population, enforced per-instance via
-# the `server_owned` diagnosis) and the janitor-only Family-B chores (memory-guard,
-# cache-prune, rules-cleanup, github-config-audit). The set is the SSOT in
-# harness_backend.
+# Which chores the ai-maestro SERVER owns while it RUNS — the roster and the claim logic
+# are the SSOT in harness_backend (GLOBAL_CHORES / claimed_chores).
 #
-# PORT NOTE (ordering — read main() alongside this): a REAL fresh server-liveness file
-# triggers the ONE-DAEMON-PER-HOST binary EXIT in main() (the `server_is_alive()` break,
-# TRDD-5ZVS1DDP) BEFORE this per-chore yield is ever evaluated — so with a genuine live
-# server the daemon STOPS ENTIRELY and even the Family-B chores pause (the "keeps running
-# regardless" clause above holds only when the daemon is still looping). This absorbed-set
-# yield therefore governs the SECONDARY cases only: the env-override path
-# (`server_runs_chores()` forced True via JANITOR_AIMAESTRO_SERVER_CHORES without a
-# live-file exit) and the maintenance keepalive. In normal operation without that override,
-# `server_runs_chores() == server_is_alive()`, so the break at line 2150 wins and this
-# yield yields nothing.
-_SERVER_ABSORBED_TASK_NAMES = harness_backend.SERVER_ABSORBED_TASKS
-
-
+# OWNER RULING 2026-08-05 (janitor#134 — "does the server's responsibility mean ALIVE or
+# CLAIMED?" → "it means both"): a chore is the server's only when the server is running AND
+# has claimed it, and the target state is that ALL chores are passed to ai-maestro
+# equivalents. This SUPERSEDES the 2026-07-17 binary rule ("if the server is running, those
+# chores are its responsibility"), which was correct about direction and wrong about
+# granularity: paired with the one-daemon-per-host exit it meant a server claiming 5 of 11
+# chores silenced all 11, and the other 6 ran nowhere for 10-14 days (ai-maestro#111).
+#
+# ORDERING (read main() alongside this): the ONE-DAEMON-PER-HOST exit in main() now fires
+# only when the server has claimed EVERY chore (`server_owns_every_chore`), so while any
+# chore is unclaimed the daemon keeps looping and this per-chore yield is what decides each
+# one. No chore is ever run by both: the daemon yields exactly what the server claims.
 def _task_yielded_to_server(task_name: str, server_runs_chores: bool) -> bool:
-    """PURE: must the daemon yield `task_name` to the active ai-maestro server?
-    Binary (TRDD-LU0C5KAR): an absorbed chore yields IFF the server is alive —
-    responsibility follows process liveness, never per-chore capability."""
-    return server_runs_chores and task_name in _SERVER_ABSORBED_TASK_NAMES
+    """PURE: must the daemon yield `task_name` to the active ai-maestro server?"""
+    # CLAIMED, not merely alive (owner ruling 2026-08-05, janitor#134: "it means both").
+    # `claimed_chores()` fails toward coverage — an unrecognised or absent claim keeps the
+    # chore here — so a server that claims nothing changes nothing, and the janitor can
+    # never again yield a chore to a server that has not taken it (ai-maestro#111).
+    return server_runs_chores and task_name in harness_backend.claimed_chores()
 
 
 def _yielded_task_names(tasks: list[Task], server_runs_chores: bool) -> set[str]:

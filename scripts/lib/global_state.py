@@ -2089,7 +2089,13 @@ def _server_owns_host() -> bool:
     try:
         import harness_backend  # noqa: PLC0415  -- see docstring
 
-        return harness_backend.server_is_alive()
+        # EVERY chore claimed, not merely "a server is alive" (owner ruling 2026-08-05,
+        # janitor#134). Suppressing the daemon while even one chore is unclaimed leaves
+        # that chore with no runner at all: the server absorbed 5 of 11 and the daemon was
+        # refused entirely, so 6 ran nowhere for 10-14 days (ai-maestro#111). The daemon
+        # yields each CLAIMED chore individually, so covering the gap creates no second
+        # owner for anything the server actually runs.
+        return harness_backend.server_owns_every_chore()
     except Exception:
         return False
 

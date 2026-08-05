@@ -85,7 +85,7 @@ def emit_if_daemon_stale(
     try:
         import harness_backend  # noqa: PLC0415 -- lazy sibling; keep the hot path import-light
 
-        if harness_backend.server_runs_chores() and chore in harness_backend.SERVER_ABSORBED_TASKS:
+        if harness_backend.server_runs_chores() and chore in harness_backend.claimed_chores():
             return
     except Exception:
         pass

@@ -1,7 +1,9 @@
 ---
 trdd-id: AWXK0RFT
 title: Publish is blocked by a CRITICAL false positive on cfg(test) Rust in memgrep
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by-external: [Emasoft/claude-plugins-validation#189]
 created: 2026-08-02T17:24:47+0200
 updated: 2026-08-05T07:50:00+0200
 current-owner: claude-ai-maestro-janitor
@@ -14,6 +16,22 @@ implementation-commits: []
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-05 — USER DECISION: WAIT for CPV. Parked, not abandoned.
+
+Owner, verbatim: **"wait for CPV to fix. its almost done."** So this card is parked pending an
+external event, and nothing here is to be forced in the meantime. The two forbidden shortcuts in
+the N block below remain forbidden while we wait — a wait is not a licence to relax the gate.
+
+**On the column, stated plainly because it bends a rule.** `column: blocked` with
+`blocked-by: []` — the kanban rule says `blocked` applies when `blocked-by:` is non-empty, but
+that field takes TRDD ids and the blocker here is another project's issue, which has no card on
+this board. The alternative was leaving it in `todo`, which asserts "ready to pull" about work
+that provably cannot start — an untrue column is worse than an unstarted card. So the external
+blocker is recorded in a `blocked-by-external:` field instead, greppable and honest.
+**This is an open-schema extension, not an established field** — if the schema should name
+external blockers properly, that is a rule question for the USER, not something to settle here.
+Restore to `pre-block-column: todo` when CPV ships.
 
 ### 2026-08-05 — the blocker MOVED: it is now a HANG, not a finding
 
