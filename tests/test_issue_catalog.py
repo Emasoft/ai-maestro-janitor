@@ -279,7 +279,15 @@ def test_a_manually_refused_proposal_is_not_re_proposed(project: Path) -> None:
     again = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW + 300)
 
     assert _proposals(project) == [], "a refused finding must not re-mint a proposal"
-    assert again.trdd == "", "no new/existing proposal id to report — the finding is suppressed"
+    # The suppression is REPORTED, not merely silent (merged from #203): `trdd` names the refused
+    # card that settled it, and the EMPTY COMMAND is what marks the outcome as suppressed — a real
+    # proposal always carries an approve command. This assertion used to demand `trdd == ""`, which
+    # suppressed just as correctly but threw away the one fact that makes the suppression auditable
+    # from the caller: WHICH prior refusal is doing the suppressing.
+    assert again.trdd and again.trdd in proposal_path.name, (
+        "the suppressed outcome must cite the refused card, so a reader can find the verdict"
+    )
+    assert not again.line, "a settled verdict surfaces NOTHING per fire — no re-litigation"
     assert len(list(refused_dir.glob("TRDD-*.md"))) == 1, "the human's refusal record is untouched"
 
 
