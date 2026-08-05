@@ -20,6 +20,7 @@ opt-in via ``--ci`` so the default stays fast.
 
 from __future__ import annotations
 
+import functools
 import html
 import json
 import os
@@ -28,6 +29,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
@@ -85,23 +87,205 @@ def _ps_times(pids: list[int]) -> dict[int, tuple[str, str]]:
     return out
 
 
+def _tilde(path: str) -> str:
+    """`path` with $HOME collapsed to `~`.
+
+    The dashboard is a shareable artifact; an absolute home path carries the account name.
+    The relative form is also what a human actually navigates by, which is why it is its own
+    column rather than only a tooltip on the basename.
+    """
+    home = str(Path.home())
+    return "~" + path[len(home):] if path.startswith(home) else path
+
+
+# What a session IS doing. Deliberately contains no cell that reads as "inactive": every
+# janitor deactivation route except `/janitor-disarm` was removed, so an idle-looking janitor
+# is either armed-and-between-fires, deliberately disarmed, or BROKEN — and collapsing those
+# into "no" hid the third (owner directive, 2026-08-05).
+_RUN_STATE = {
+    "healthy": "idle · heartbeat alive",
+    "frozen": "FROZEN · needs recovery",
+    "cron_dead": "STOPPED · cron dead",
+    "version_mismatch": "idle · stale version",
+    "dead": "gone",
+}
+
+
+def _run_state(inst: Any, *, server_up: bool) -> str:
+    """One honest phrase for what this session is doing right now.
+
+    The ai-maestro clause is the owner's distinction and it matters for recovery: when the
+    server is down its agents are STOPPED — they resume automatically when it comes back —
+    which is NOT the same as HIBERNATED, a deliberate state that does not auto-resume. We
+    never claim `hibernated` here: nothing in the fleet scan can prove it, and guessing it
+    would tell a human that a recoverable session is a parked one.
+    """
+    if inst.diagnosis == "unarmed":
+        return "disarmed · user opt-out"
+    if "aimaestro_session" in (inst.terminal or {}) and not server_up:
+        return "STOPPED · server down (auto-resumes)"
+    if inst.active:
+        return "working"
+    return _RUN_STATE.get(inst.diagnosis) or str(inst.diagnosis)
+
+
+@functools.lru_cache(maxsize=1)
+def _gh_user() -> str:
+    """The gh CLI's active username, read OFFLINE from `~/.config/gh/hosts.yml`.
+
+    Cached for the process: it cannot change mid-render, and this is consulted once per
+    project row. Empty string when it cannot be resolved — callers must treat that as
+    "unknown", never as "you own nothing".
+    """
+    try:
+        import env_detect  # noqa: PLC0415 -- lazy sibling, same pattern as fleet_scan
+
+        hosts = Path.home() / ".config" / "gh" / "hosts.yml"
+        return env_detect.parse_active_gh_user(hosts.read_text()) if hosts.is_file() else ""
+    except Exception:  # noqa: BLE001 -- a probe must never break the dashboard
+        return ""
+
+
+def _group_by_root(fleet: list[Any]) -> list[tuple[str, list[Any]]]:
+    """`(project_root, instances)` — ONE ENTRY PER JANITOR, not per process.
+
+    Janitor state is per-PROJECT (`<root>/.janitor`), so every claude process sharing a root
+    shares one heartbeat, one cron, one diagnosis. Rendering them as separate rows repeats
+    every janitor column verbatim and reads as a duplicated instance (owner report,
+    2026-08-05: "the ai-maestro claude instance is reported twice"). It happens whenever a
+    session is restarting — the outgoing process still dying as its replacement starts — or
+    when two sessions genuinely share a folder. Scan order is preserved so the caller's sort
+    survives, and no instance is dropped: the caller merges their pids into the row.
+    """
+    grouped: dict[str, list[Any]] = {}
+    for inst in fleet:
+        grouped.setdefault(inst.project_root or "—", []).append(inst)
+    return list(grouped.items())
+
+
+def _repo_slug(url: str) -> str:
+    """`owner/name` from a git remote URL (https / ssh / scp form), or `—`."""
+    if not url:
+        return "—"
+    r = url.removesuffix(".git")
+    if "github.com" in r:
+        return r.split("github.com")[-1].lstrip(":/")
+    if "/" in r:
+        return "/".join(r.rstrip("/").split("/")[-2:])
+    return "—"
+
+
+def _remotes(path: str) -> dict[str, str]:
+    """`{remote_name: owner/name}` for one repo, first URL per remote wins.
+
+    ALL remotes, not just `origin`, because which remote is which cannot be assumed. On
+    this host `~/ai-maestro` has `origin` → the UPSTREAM (`23blocks-OS/ai-maestro`) and
+    `fork` → the owner's own repo — the exact inversion of the usual convention. A table
+    that prints only `origin` therefore names a repository the owner does NOT own, right
+    next to the issue-filing workflow, and PRRD G11.2 forbids writing to a repo the gh
+    auth user does not own without per-case MANAGER authorization. Showing every remote is
+    what makes that judgement possible at a glance.
+    """
+    out: dict[str, str] = {}
+    for ln in (_run(["git", "-C", path, "remote", "-v"]) or "").splitlines():
+        parts = ln.split()
+        if len(parts) >= 2 and parts[0] not in out:
+            out[parts[0]] = _repo_slug(parts[1])
+    return out
+
+
+# Directory names never worth descending into when hunting for nested repos.
+_REPO_SCAN_SKIP = {
+    "node_modules", ".venv", "venv", "target", "dist", "build", ".git",
+    "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", "vendor",
+}
+
+
+def _nested_repos(root: str, *, max_depth: int = 3, limit: int = 8) -> list[tuple[str, str]]:
+    """`(path relative to root, origin slug)` for every git repo UNDER `root`.
+
+    A project is not always one repo. `~/ai-maestro` carries `plugins/amp-messaging` and a
+    vendored checkout; `~/Code/EMASOFT-ASSISTANT-MANAGER` has NO repo at its root at all —
+    its only repo is one level down, so the dashboard showed `—` for branch and repo and
+    the project read as "not under version control". Bounded walk (depth, skip-list, count)
+    because this runs per instance on every render.
+    """
+    found: list[tuple[str, str]] = []
+    root_abs = os.path.abspath(root)
+    for dirpath, dirnames, _files in os.walk(root_abs):
+        depth = dirpath[len(root_abs):].count(os.sep)
+        if depth >= max_depth:
+            dirnames[:] = []
+            continue
+        dirnames[:] = [d for d in dirnames if d not in _REPO_SCAN_SKIP and not d.endswith("_dev")]
+        # `exists`, NOT `isdir`: a SUBMODULE and a linked WORKTREE both carry `.git` as a
+        # FILE holding a `gitdir:` pointer, not a directory. `isdir` silently skipped every
+        # one of them — which is why `~/ai-maestro` reported "no nested repositories" while
+        # holding `plugins/amp-messaging` as a submodule.
+        if dirpath != root_abs and os.path.exists(os.path.join(dirpath, ".git")):
+            rel = os.path.relpath(dirpath, root_abs)
+            found.append((rel, _remotes(dirpath).get("origin", "—")))
+            dirnames[:] = []  # do not descend INTO a repo looking for more
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def _git(root: str) -> dict[str, str]:
-    if not os.path.isdir(os.path.join(root, ".git")) and not _run(
-        ["git", "-C", root, "rev-parse", "--show-toplevel"]
-    ):
-        return {"branch": "—", "repo": "—", "uncommitted": "—"}
-    branch = _run(["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"]) or "—"
-    remote = _run(["git", "-C", root, "remote", "get-url", "origin"])
-    repo = "—"
-    if remote:
-        r = remote.removesuffix(".git")
-        if "github.com" in r:
-            repo = r.split("github.com")[-1].lstrip(":/")
-        elif "/" in r:
-            repo = "/".join(r.rstrip("/").split("/")[-2:])
-    porcelain = _run(["git", "-C", root, "status", "--porcelain"])
+    """Version-control facts for one project row.
+
+    `origin` and `forked_from` are separate columns because conflating them is how an
+    agent files an issue against someone else's repository (see `_remotes`). `forked_from`
+    is resolved OFFLINE from a remote conventionally named `upstream`/`parent` — a
+    `gh repo view --json parent` call per row would put the network on the render path.
+    """
+    top = _run(["git", "-C", root, "rev-parse", "--show-toplevel"])
+    nested = _nested_repos(root)
+    # A project whose root is not itself a repo still has version control if a subfolder
+    # is one — adopt the first as primary rather than reporting the whole project as "—".
+    primary = top or (os.path.join(root, nested[0][0]) if nested else "")
+    if not primary:
+        return {
+            "branch": "—", "origin": "—", "forked_from": "—", "yours": "—",
+            "uncommitted": "—", "remotes": "",
+            "subrepos": "—", "subrepos_tip": "no git repository here",
+        }
+    remotes = _remotes(primary)
+    branch = _run(["git", "-C", primary, "rev-parse", "--abbrev-ref", "HEAD"]) or "—"
+    porcelain = _run(["git", "-C", primary, "status", "--porcelain"])
     uncommitted = str(len([x for x in porcelain.splitlines() if x.strip()]))
-    return {"branch": branch, "repo": repo, "uncommitted": uncommitted}
+    origin = remotes.get("origin", "—")
+    forked_from = next(
+        (slug for name, slug in remotes.items() if name in ("upstream", "parent")), "—"
+    )
+    # WHICH REPO MAY THIS AGENT WRITE TO. PRRD G11.2 permits issues/comments only on repos
+    # owned by the gh auth user, and `origin` does not answer that: on `~/ai-maestro`,
+    # `origin` is the upstream and the owned fork sits on a remote named `fork`. Reading the
+    # answer off the remote NAMES is guesswork; comparing OWNERS to the authenticated user
+    # is not. Resolved offline from ~/.config/gh/hosts.yml — no network on the render path.
+    me = _gh_user().lower()
+    yours = next(
+        (s for s in remotes.values() if me and s != "—" and s.split("/")[0].lower() == me), "—"
+    )
+    others = [f"{n} → {s}" for n, s in remotes.items() if n != "origin"]
+    sub_label = "—" if not nested else f"+{len(nested)}"
+    sub_tip = (
+        "no nested repositories"
+        if not nested
+        else "; ".join(f"{rel} → {slug}" for rel, slug in nested)
+    )
+    if not top and nested:
+        sub_label = f"+{len(nested)} (root not a repo)"
+    return {
+        "branch": branch,
+        "origin": origin,
+        "forked_from": forked_from,
+        "yours": yours,
+        "uncommitted": uncommitted,
+        "remotes": "; ".join(others),
+        "subrepos": sub_label,
+        "subrepos_tip": sub_tip,
+    }
 
 
 def _count_md(d: Path) -> int:
@@ -399,6 +583,7 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     import fleet_scan  # noqa: E402  -- local lib module
     import global_state as gs  # noqa: E402  -- local lib module
+    import harness_backend  # noqa: E402  -- local lib module
     import memory_scopes  # noqa: E402  -- local lib module
 
     global_mem = memory_scopes.resolve_user_dir()
@@ -428,6 +613,9 @@ def main() -> int:
             uptodate = "yes" if gh_latest.lstrip("v") == jver else f"NO (latest {gh_latest})"
 
     fleet = fleet_scan.gather_fleet(now=now)
+    # Whether the ai-maestro server is up decides how an AGENT session reads: with the
+    # server down its agents are stopped-and-auto-resumable, not merely idle (see _run_state).
+    server_up = harness_backend.server_is_alive()
     fleet.sort(key=lambda i: (i.diagnosis in ("healthy", "unarmed"),
                               not i.active, i.project_root or ""))
     times = _ps_times([i.pid for i in fleet])
@@ -442,8 +630,10 @@ def main() -> int:
     }
 
     rows = []
-    for i in fleet:
-        root = i.project_root or "—"
+    for root, group in _group_by_root(fleet):
+        # The representative is the one carrying live work — a mid-turn process describes the
+        # project's real state better than a sibling that is idle or on its way out.
+        i = next((x for x in group if x.active), group[0])
         g = _git(root)
         t = _newest_transcript(home, root)
         armed = "yes" if os.path.isfile(os.path.join(root, ".janitor", "state", "heartbeat-armed-at.ts")) else "no"
@@ -455,16 +645,21 @@ def main() -> int:
         started, etime = times.get(i.pid, ("—", "—"))
         ci = "—"
         ghsec = "—"
-        if want_ci and g["repo"] != "—":
-            ci = _run(["gh", "run", "list", "--repo", g["repo"], "-L", "1",
+        if want_ci and g["origin"] != "—":
+            ci = _run(["gh", "run", "list", "--repo", g["origin"], "-L", "1",
                        "--json", "conclusion", "-q", ".[0].conclusion"], timeout=12) or "—"
-            n = _run(["gh", "api", f"repos/{g['repo']}/code-scanning/alerts",
+            n = _run(["gh", "api", f"repos/{g['origin']}/code-scanning/alerts",
                       "--jq", "length"], timeout=12)
             ghsec = ("0 open" if n == "0" else f"{n} open") if n.isdigit() else "—"
+        pids = ", ".join(str(x.pid) for x in sorted(group, key=lambda x: x.pid))
         rows.append({
-            "pid": str(i.pid), "proj": os.path.basename(root), "root": root,
-            "model": _model_from_transcript(t), "branch": g["branch"], "repo": g["repo"],
+            "pid": pids, "proj": os.path.basename(root), "root": root,
+            "folder": _tilde(root),
+            "model": _model_from_transcript(t), "branch": g["branch"],
+            "origin": g["origin"], "forked_from": g["forked_from"], "yours": g["yours"],
+            "remotes": g["remotes"], "subrepos": g["subrepos"], "subrepos_tip": g["subrepos_tip"],
             "armed": armed, "active": "yes" if i.active else "no",
+            "run_state": _run_state(i, server_up=server_up),
             "cron": "alive (busy)" if i.active else cron_state.get(i.diagnosis, "—"),
             "diag": i.diagnosis, "wait": "ending turn" if i.active else waiting_for.get(i.diagnosis, "—"),
             "started": started, "total": etime,
@@ -553,8 +748,11 @@ def _empty_fleet_reason() -> str:
 
 _COLUMNS = [
     ("flags", "⚑ status"), ("board", "kanban"), ("pid", "pid"), ("proj", "project"),
-    ("model", "model"), ("branch", "branch"), ("repo", "github repo"),
-    ("armed", "armed"), ("active", "active"), ("cron", "cron"), ("wait", "waiting for"),
+    ("folder", "folder"),
+    ("model", "model"), ("branch", "branch"),
+    ("origin", "origin"), ("forked_from", "forked from"), ("yours", "yours"),
+    ("subrepos", "sub-repos"),
+    ("armed", "armed"), ("run_state", "session"), ("cron", "cron"), ("wait", "waiting for"),
     ("dispatch", "dispatch"), ("started", "started"), ("total", "uptime"),
     ("uncommitted", "uncommit"), ("ci", "CI"), ("ghsec", "gh sec"),
     ("locsec", "loc sec scan"), ("prrd", "PRRD"), ("proj_mem", "wiki·proj"),
@@ -576,22 +774,42 @@ _DIAG_TIP = {
 _CI_BAD = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
 # Columns whose values can be long (log lines, messages) — these cells WRAP onto
 # multiple lines (white-space:normal + max-width) instead of forcing a wide table.
-_WRAP_COLS = {"last_job", "last_err", "wait", "repo", "model"}
+_WRAP_COLS = {"last_job", "last_err", "wait", "origin", "forked_from", "folder", "model",
+              "run_state"}
 
 # Per-column header tooltips (hover any column title to see what it means).
 _COL_TIPS = {
     "flags": "At-a-glance attention flags — hover each icon. The first is the janitor diagnosis.",
     "board": "Open this project's TRDD kanban board (count = total TRDDs).",
-    "pid": "OS process id of the running claude instance.",
+    "pid": "OS process id(s). ONE ROW PER JANITOR: janitor state is per-PROJECT, so sessions "
+    "sharing a folder share one heartbeat and are merged here — every pid is still listed.",
     "proj": "Project folder (basename); the janitor maps each claude process to its .janitor project by cwd.",
+    "folder": "Project path relative to your home dir (~). Shown instead of the absolute path "
+    "so the dashboard can be shared without leaking the account name.",
     "model": "Model id from the session's newest transcript (best-effort tail-read).",
-    "branch": "Current git branch of the project.",
-    "repo": "GitHub repo (owner/name) from the origin remote.",
+    "branch": "Current git branch of the project (of the root repo, or the first nested repo "
+    "when the project root is not itself a repository).",
+    "origin": "The `origin` remote (owner/name) — where git pushes by default. NOT necessarily "
+    "the repo you own: on some checkouts `origin` is the UPSTREAM and the fork is another "
+    "remote. Hover the cell for every remote. Post issues only to a repo the gh auth user owns.",
+    "forked_from": "The upstream this repo was forked from, read offline from a remote named "
+    "`upstream`/`parent`. `—` means no such remote — not proof the repo is not a fork.",
+    "yours": "The remote whose OWNER matches the gh CLI's authenticated user — i.e. the repo "
+    "you may open issues and comments on (PRRD G11.2). Computed by comparing owners, not by "
+    "trusting remote names. When this differs from `origin`, `origin` belongs to someone else: "
+    "post here, not there. `—` = no remote is owned by the gh auth user (or gh is not logged in).",
+    "subrepos": "Nested git repositories inside the project (sub-projects). Hover for their "
+    "paths and origins. '(root not a repo)' means the project root has no .git of its own and "
+    "the branch/origin columns describe the first nested repo instead.",
     "armed": "ADVISORY ONLY — presence of the last /janitor-arm stamp (heartbeat-armed-at.ts). "
     "Can be stale in EITHER direction (a live cron never re-stamps; a stamp can outlive a dead "
     "cron or a restart — janitor#77 item 2), so it is never used to compute the diagnosis. "
     "Trust the 'diag'/'cron' columns (derived from the live transcript) for current liveness.",
-    "active": "Is the session actively working? (transcript advanced in the last 5 min)",
+    "run_state": "What this session is DOING. Never says 'inactive': every janitor "
+    "deactivation route except /janitor-disarm was removed, so a quiet janitor is either "
+    "armed-and-between-fires, deliberately disarmed, or BROKEN — and one 'no' hid the third. "
+    "'STOPPED · server down' marks an ai-maestro agent whose server is not running: those "
+    "resume AUTOMATICALLY when it returns, unlike a hibernated agent, which does not.",
     "cron": "Heartbeat liveness, derived from the transcript: alive / DEAD / alive (busy).",
     "wait": "What the session is waiting on (rate-limit, dead cron, ending a turn, …).",
     "dispatch": "Age of the last dispatch.log entry — INFORMATIONAL ONLY (liveness uses the transcript).",
@@ -646,6 +864,13 @@ def _flags(r: dict) -> str:
     # flag there is redundant, never wrong — no need to special-case those too.
     if r["armed"] == "no" and diag not in ("healthy", "unarmed"):
         spans.append(_flag_span("⚠️", "janitor NOT armed in this project — needs /janitor-arm"))
+    # PRRD G11.2 safety flag: `origin` points at a repo the gh auth user does NOT own, while
+    # another remote does. Filing an issue "on origin" here writes into someone else's
+    # repository under the owner's shared identity — visible immediately and un-sendable.
+    if r.get("yours", "—") != "—" and r.get("origin") != r["yours"]:
+        spans.append(_flag_span(
+            "🔀", "origin (" + str(r.get("origin")) + ") is NOT yours — you own "
+            + str(r["yours"]) + ". Post issues/comments there (PRRD G11.2)."))
     if r["ci"] in _CI_BAD:
         spans.append(_flag_span("❌", "latest CI run failed (" + r["ci"] + ")"))
     if r["prrd"] == "none":
@@ -906,10 +1131,21 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
                     tds.append('<td class="muted" title="No TRDDs in design/ for this project">—</td>')
             else:
                 val = str(r.get(k, "—"))
-                tip = html.escape(_COL_TIPS.get(k, lbl) + "  —  " + val)
+                # Per-cell detail no column tooltip can carry, because its length varies per
+                # row: every remote behind the `origin` cell (the fork-vs-upstream question
+                # that decides where an issue may be filed), and every nested repo behind the
+                # `sub-repos` count.
+                extra = ""
+                if k == "origin" and r.get("remotes"):
+                    extra = "  —  other remotes: " + str(r["remotes"])
+                elif k == "subrepos":
+                    extra = "  —  " + str(r.get("subrepos_tip", ""))
+                tip = html.escape(_COL_TIPS.get(k, lbl) + "  —  " + val + extra)
                 disp = html.escape(val)
                 if k == "cron" and val.startswith("DEAD"):
                     disp = "<b>" + disp + "</b>"  # bold-red the dead-heartbeat cells
+                if k == "run_state" and (val.startswith("STOPPED") or val.startswith("FROZEN")):
+                    disp = "<b>" + disp + "</b>"
                 cls_attr = ' class="wrap"' if k in _WRAP_COLS else ""
                 tds.append("<td" + cls_attr + ' title="' + tip + '">' + disp + "</td>")
         body.append('<tr class="' + cls + '">' + "".join(tds) + "</tr>")
