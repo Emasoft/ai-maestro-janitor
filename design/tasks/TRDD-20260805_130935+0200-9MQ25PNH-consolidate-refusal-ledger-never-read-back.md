@@ -19,13 +19,16 @@ implementation-commits: []
 which of the three fixes to take. This card exists because two agent reports carried a decision
 and reports are gitignored/ephemeral — the decision had to survive them.
 
-**NEXT ACTION:** implement the **refusal-aware fingerprint** (option 3, made precise in the
-2026-08-05 section below — option 1 alone was investigated and is UNSOUND). Concretely:
-`corpus_fingerprint(root)` gains a way to exclude pages covered by a live refusal, and
-`consolidate_has_work` compares that narrowed fingerprint. Then the two acceptance tests.
+**NEXT ACTION:** implement the **per-page stat comparison** described in the second 2026-08-05
+section ("CORRECTION"). Suppress iff every page whose stat differs from the stamp is covered by a
+live refusal. Three files (`memory_content_precheck`, `memory_settings`, `memory-maintenance.py`)
+plus four tests, all enumerated there.
 
-The design is settled and grounded in the live ledger + proposal file; what remains is the edit
-and its tests. Do NOT re-derive the candidate model — it is written down below with the evidence.
+**Do NOT implement either earlier proposal.** Option 1 (suppress when all surfaced candidates are
+refused) is UNSOUND — it disables the agent's documented self-survey. The bare narrowed FINGERPRINT
+is also wrong — the stamp is taken before the agent records refusals, so it buys one spurious
+~279k dispatch per productive round. Both were investigated and both are written up below with the
+evidence, so neither needs re-deriving; read them before proposing a third variant.
 
 ## The finding
 
@@ -128,6 +131,55 @@ Why this is sound where option 1 alone is not:
 N: do NOT implement plain option 1 (suppress when all surfaced candidates are refused). It would
 silently disable the agent's self-survey, which is a real discovery path, and the failure would be
 invisible — a missed merge looks exactly like no merge.
+
+## 2026-08-05, later still — CORRECTION to the section above: a bare narrowed FINGERPRINT still misfires
+
+*(Supersedes the exact mechanism proposed above — "fingerprint only pages not covered by a live
+refusal". The DIRECTION is right and the reasoning for it stands; the SHAPE is wrong. Correcting
+it here rather than leaving a defect in a design I committed an hour ago in `f299998f`.)*
+
+**The stamp happens BEFORE the agent runs.** Verified at
+`scripts/detectors/memory-maintenance.py:396-405`: `mark_dispatch_fingerprint` sits directly beside
+`mark_ran`, at DISPATCH time — the comment even says *"Record WHAT the agent is about to look at"*.
+The agent then runs and records its refusals afterwards.
+
+So with a refusal-narrowed fingerprint:
+
+| time | event | narrowed fingerprint |
+|---|---|---|
+| T | dispatch; stamp taken | `F_T` = hash(pages not refused **as of T**) |
+| T+ | agent judges group G, records refusals for it | — |
+| T+1 | gate re-evaluates | `F_T+1` = hash(pages not refused as of T+1) — **G is now excluded, so `F_T+1` ≠ `F_T`** |
+
+⇒ **every productive refusal round buys exactly one spurious ~279k re-dispatch.** Strictly better
+than today (which re-opens on *any* corpus byte), but it is a known defect and must not ship
+unnamed.
+
+### The correct shape: compare PER-PAGE STATS, not one opaque hash
+
+Stamp a map instead of a digest, and make the suppression rule:
+
+> Suppress iff **every page whose stat differs from the stamp** (changed, added, or removed) is
+> covered by a live refusal.
+
+Same stat walk, same cost; it just keeps the per-page detail instead of collapsing it. Behaviour:
+
+| case | outcome | why |
+|---|---|---|
+| nothing changed | suppress ✓ | empty diff |
+| a non-refused page changed | dispatch ✓ | it is in the diff and uncovered |
+| a refused page's bytes changed | dispatch ✓ | its refusal invalidates on `content_hash`, so it is no longer covered |
+| a new refusal recorded, no file touched | **suppress ✓** | the stat map is identical — this is the case a narrowed hash gets wrong |
+
+**Touches three files:** `memory_content_precheck` (add `page_stats(root)`; rewrite the gate's
+comparison), `memory_settings` (the stamp becomes a map, not a string — a stored-schema change,
+so handle an OLD string-valued stamp as "no stamp" and fail open once), and
+`memory-maintenance.py` (stamp the map). Plus the acceptance tests, now four:
+
+- unchanged corpus ⇒ suppress
+- unrelated non-refused page edited ⇒ dispatch
+- refused page's own bytes edited ⇒ dispatch (refusal invalidates)
+- **new refusal recorded with no file change ⇒ suppress** (the regression this correction exists for)
 
 ## Options (pick one)
 
