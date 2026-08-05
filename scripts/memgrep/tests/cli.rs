@@ -1801,6 +1801,7 @@ fn write_scoped(d: &TempDir, rel: &str, name: &str, body: &str) -> String {
 
 const PROJECT_REL: &str = "repo/.claude/project/memory";
 const LOCAL_REL: &str = ".claude/projects/-Users-x-repo/memory";
+const USER_REL: &str = ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory";
 
 #[test]
 fn a_downward_link_to_LOCAL_is_flagged_as_a_PRIVACY_violation() {
@@ -1866,6 +1867,96 @@ fn the_LINK_LAW_still_applies_WITHIN_a_layer() {
     assert!(
         o.contains("one-sided link"),
         "a one-sided link between two PROJECT pages is still a violation:\n{o}"
+    );
+}
+
+#[test]
+fn a_reciprocal_pair_is_not_split_by_a_duplicate_name_in_another_scope() {
+    // janitor#151 / #192, reproduced at the CLI level. Root cause: a `[[wikilink]]` resolved by
+    // name across ALL roots with no preference for the source page's own scope, so a name that
+    // exists as a "twin" in two scopes made a genuinely reciprocal pair resolve into DIFFERENT
+    // targets depending on which page linked which — 4/4 false `link-one-sided` findings on the
+    // real corpus (LOCAL `feedback_github_comment_self_identification` <-> LOCAL
+    // `feedback_peer_agent_consensus`, split by an unrelated PROJECT page of the same name).
+    let d = TempDir::new("scope-dup-name-same-scope-pair");
+    // The genuinely reciprocal pair — both pages live in LOCAL.
+    let local_hub = write_scoped(&d, LOCAL_REL, "hub-page", "see [[dup-name]] for the rule.");
+    write_scoped(&d, LOCAL_REL, "dup-name", "see [[hub-page]] for context.");
+    // An unrelated PROJECT page that happens to share the LOCAL page's name — the "twin" that used
+    // to steal the resolution. It does NOT link back to hub-page; if the bug is present, hub-page's
+    // link resolves HERE instead of to its own LOCAL twin, and the real LOCAL pair reports as
+    // one-sided even though it plainly links back.
+    let proj_dup = write_scoped(&d, PROJECT_REL, "dup-name", "an unrelated PROJECT page.");
+    let o = run_any(&["lint", &local_hub, &proj_dup]);
+    assert!(
+        !o.contains("one-sided link"),
+        "the LOCAL pair links back to each other; a same-named PROJECT page must not split it:\n{o}"
+    );
+}
+
+#[test]
+fn a_duplicate_name_elsewhere_does_not_mask_a_genuinely_one_sided_link() {
+    // The other half of the fix's correctness: preferring the same-scope candidate must not swallow
+    // a REAL one-sided link just because a same-named decoy exists in another scope — the finding
+    // has to survive on its own merits once resolution is unambiguous.
+    let d = TempDir::new("scope-dup-name-real-one-sided");
+    let local_hub = write_scoped(&d, LOCAL_REL, "hub-page-2", "see [[dup-name-2]] for the rule.");
+    // dup-name-2 in LOCAL does NOT link back — genuinely one-sided within LOCAL.
+    write_scoped(&d, LOCAL_REL, "dup-name-2", "no link back.");
+    let proj_dup = write_scoped(&d, PROJECT_REL, "dup-name-2", "an unrelated PROJECT page.");
+    let o = run_any(&["lint", &local_hub, &proj_dup]);
+    assert!(
+        o.contains("one-sided link"),
+        "a genuinely one-sided LOCAL link must still be reported even with a same-named PROJECT \
+         decoy present:\n{o}"
+    );
+}
+
+#[test]
+fn a_duplicate_name_referenced_from_USER_resolves_to_the_USER_twin_not_a_LOCAL_namesake() {
+    // The DOWNWARD-resolution shape the one-way scope law forbids (LOCAL -> PROJECT -> USER, never
+    // downward): before the fix, a USER page's `[[dup-name]]` could silently resolve into a
+    // same-named LOCAL page — dangling for every other contributor, since LOCAL is machine-private.
+    // Same-scope preference must keep the USER page's link inside USER whenever a USER-scope
+    // candidate exists, never crossing DOWN to the LOCAL namesake.
+    let d = TempDir::new("scope-user-vs-local-dup");
+    // Decoy: a namesake in LOCAL that must NOT win. Written first so, under the OLD bug (whichever
+    // candidate is processed LAST in the cross-root alphabetical merge wins), the failure mode is
+    // exercised rather than accidentally dodged by path ordering.
+    let local_dup = write_scoped(
+        &d,
+        LOCAL_REL,
+        "dup-name-3",
+        "the LOCAL decoy — must not be the resolution target.",
+    );
+    // The correct, same-scope pair: hub links to dup-name-3; dup-name-3 links back — reciprocal
+    // entirely within USER.
+    let user_hub = write_scoped(&d, USER_REL, "hub-page-3", "see [[dup-name-3]] for the rule.");
+    write_scoped(&d, USER_REL, "dup-name-3", "see [[hub-page-3]] for context.");
+    let o = run_any(&["lint", &local_dup, &user_hub]);
+    assert!(
+        !o.contains("downward cross-scope link"),
+        "must resolve to the USER twin, not spuriously cross down into the LOCAL decoy:\n{o}"
+    );
+    assert!(
+        !o.contains("one-sided link"),
+        "the USER-scope pair is reciprocal once resolution stays within USER:\n{o}"
+    );
+}
+
+#[test]
+fn the_lint_summary_names_which_scopes_were_covered() {
+    // janitor#151 item 6: `memgrep lint: N finding(s), M at or above ERROR` alone reads as
+    // machine-wide regardless of whether one scope, three, or an arbitrary corpus was linted. The
+    // summary must name the covered scopes so the count is never ambiguous about what it counts.
+    let d = TempDir::new("scope-summary-label");
+    let local = write_scoped(&d, LOCAL_REL, "summary-local", "just a LOCAL page, no links.");
+    let proj = write_scoped(&d, PROJECT_REL, "summary-proj-a", "see [[summary-proj-b]].");
+    write_scoped(&d, PROJECT_REL, "summary-proj-b", "no link back — the one WARN this test needs.");
+    let (_out, err, _code) = run_full(&["lint", &local, &proj]);
+    assert!(
+        err.contains("2 scope(s): LOCAL/PROJECT"),
+        "the summary must name the scopes actually covered:\n{err}"
     );
 }
 

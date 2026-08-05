@@ -923,10 +923,29 @@ fn render_atom_notes(path: &Path, atom_body: &str, full_notes: bool) -> String {
 }
 
 /// Resolve a raw link URL to a target file in the corpus. Returns (target, external).
+///
+/// `home_root` is the index into the caller's own roots (see `build_graph`) that OWNS `from` — the
+/// SOURCE page — or `None` when `from` sits under none of them. `per_root` holds one name→path map
+/// PER root (same key derivations as `global`: stem, `_`→`-` normalized stem, frontmatter `name:`
+/// slug, TRDD-id8 alias); `global` is the cross-root fallback.
+///
+/// janitor#151 / #192: a bare `[[name]]` wikilink MUST prefer a candidate in the SOURCE page's own
+/// root before falling back to another root. The old code resolved through one flat, root-oblivious
+/// map, so a name that existed in two roots (a page with a same-named "twin" in another scope)
+/// resolved to WHICHEVER note `build_graph` happened to process last — silently splitting a
+/// genuinely reciprocal `[[...]]` pair across scopes (the reported symptom: `lint` claimed a real
+/// backlink "does not link back", because the two edges of one pair canonicalized to different
+/// targets). It also permitted a DOWNWARD resolution (e.g. a USER page's link silently landing on a
+/// same-named LOCAL page) — the exact dangling-for-every-other-contributor shape the one-way scope
+/// law (LOCAL → PROJECT → USER) forbids. Preferring the source's own root fixes both: the pair
+/// resolves within itself whenever a same-scope candidate exists, and only a name with NO candidate
+/// in the source's own root ever falls through to another scope.
 fn resolve(
     url: &str,
     from: &Path,
-    stem_map: &BTreeMap<String, PathBuf>,
+    home_root: Option<usize>,
+    per_root: &[BTreeMap<String, PathBuf>],
+    global: &BTreeMap<String, PathBuf>,
 ) -> (Option<PathBuf>, bool) {
     let url = url.split('#').next().unwrap_or(url).trim(); // drop in-page anchor
     if url.is_empty() {
@@ -943,9 +962,14 @@ fn resolve(
         let target = joined.canonicalize().ok();
         return (target, false);
     }
-    // bare name ⟹ wikilink: resolve by file stem
+    // bare name ⟹ wikilink: resolve by file stem, same-scope first (see the doc comment above).
     let key = url.trim_end_matches(".md").to_ascii_lowercase();
-    (stem_map.get(&key).cloned(), false)
+    if let Some(idx) = home_root
+        && let Some(p) = per_root.get(idx).and_then(|m| m.get(&key))
+    {
+        return (Some(p.clone()), false);
+    }
+    (global.get(&key).cloned(), false)
 }
 
 struct Edge {
@@ -965,47 +989,94 @@ struct Graph {
 fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
     let files = collect_md(paths, hidden);
     let notes: Vec<Note> = files.iter().filter_map(|p| read_note(p)).collect();
-    let mut stem_map = BTreeMap::new();
+
+    // The caller's own roots — e.g. `<LOCAL> <PROJECT> <USER>` — canonicalized ONCE, in the given
+    // order. Mirrors `collect_md`'s own empty-paths fallback (`["."]`) so root determination and
+    // file collection always agree on what "the roots" are. This order doubles as the deterministic
+    // fallback priority when a name has no same-root candidate (see `resolve`): the recall protocol
+    // always passes roots most-specific-first, so "earlier in this list" already means "more
+    // specific" — no extra ranking needed.
+    let default_root = [PathBuf::from(".")];
+    let root_args: &[PathBuf] = if paths.is_empty() { &default_root } else { paths };
+    let roots: Vec<PathBuf> = root_args
+        .iter()
+        .filter_map(|p| p.canonicalize().ok())
+        .collect();
+
+    // Which root (by index into `roots`) OWNS a canonical note path — the LONGEST matching root
+    // prefix, so a nested-root invocation resolves to the more specific root rather than whichever
+    // was listed first. A path under none of the roots (a loose explicitly-named file, or a root
+    // that failed to canonicalize) yields `None`, and `resolve` degrades to the old root-oblivious
+    // fallback for it — never a hard failure.
+    let root_of = |canon: &Path| -> Option<usize> {
+        roots
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| canon.starts_with(r.as_path()))
+            .max_by_key(|(_, r)| r.as_os_str().len())
+            .map(|(i, _)| i)
+    };
+
     // A TRDD's canonical short reference is `TRDD-<id8>` (the 8-hex segment of its filename
     // `TRDD-<ts>-<id8>-<slug>.md`). Register that as an alias next to the full file stem so a
     // `[[TRDD-<id8>]]` wikilink resolves to the file — otherwise it misses (the stem is the long
     // form) and every TRDD cross-reference shows up as a broken link.
     let trdd_re = trdd_id8_re();
+    let mut global_map: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut per_root_maps: Vec<BTreeMap<String, PathBuf>> = vec![BTreeMap::new(); roots.len()];
+    // note path -> its home root index, computed once so the edge-resolution loop below doesn't
+    // re-canonicalize the same source path once per link.
+    let mut home_of: BTreeMap<PathBuf, Option<usize>> = BTreeMap::new();
+
     for n in &notes {
+        let canon = n.path.canonicalize().unwrap_or_else(|_| n.path.clone());
+        let ridx = root_of(&canon);
+        home_of.insert(n.path.clone(), ridx);
+
+        let mut keys: Vec<String> = Vec::new();
         if let Some(stem) = n.path.file_stem().and_then(|s| s.to_str()) {
             let stem_l = stem.to_ascii_lowercase();
-            stem_map.insert(stem_l.clone(), n.path.clone());
             // issue #49: also register the `_`→`-` normalized stem as a FALLBACK, so a hyphenated
             // `[[name-slug]]` resolves to an underscore-named file that carries no frontmatter
             // `name:`. Don't clobber a real stem.
             let norm = stem_l.replace('_', "-");
+            keys.push(stem_l.clone());
             if norm != stem_l {
-                stem_map.entry(norm).or_insert_with(|| n.path.clone());
+                keys.push(norm);
             }
         }
         // issue #49: register the frontmatter `name:`/`topic:` slug — the canonical `[[name]]`
         // wikilink target. The protocol links by the `name:` slug (often hyphenated) while the
         // harness names files with underscores, so without this every `[[hyphen-slug]]` falsely
-        // reported BROKEN (59/94 on a real corpus). FALLBACK (don't clobber a real stem); mirrors
-        // index.rs `topic_of` so the link graph keys on the same identity as the SQLite index.
+        // reported BROKEN (59/94 on a real corpus). Mirrors index.rs `topic_of` so the link graph
+        // keys on the same identity as the SQLite index.
         if let Some(slug) = &n.name {
-            stem_map
-                .entry(slug.clone())
-                .or_insert_with(|| n.path.clone());
+            keys.push(slug.clone());
         }
         if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
             && let Some(c) = trdd_re.captures(name)
         {
-            let alias = format!("trdd-{}", c[1].to_ascii_lowercase());
-            // Don't clobber a note literally stemmed that way; the alias is a fallback.
-            stem_map.entry(alias).or_insert_with(|| n.path.clone());
+            keys.push(format!("trdd-{}", c[1].to_ascii_lowercase()));
+        }
+        for key in keys {
+            // First-wins (`or_insert`) is a DETERMINISTIC, lexicographic tie-break — `notes` is
+            // already sorted by full path (`collect_md` sorts before `build_graph` ever sees it),
+            // so this can never be "whichever file happened to be walked/processed last": the root
+            // cause of janitor#151/#192 was an unconditional `insert()` for the plain stem, so the
+            // LAST note in the cross-root-merged alphabetical order silently won, with no
+            // relationship to which scope the referring page lived in.
+            global_map.entry(key.clone()).or_insert_with(|| n.path.clone());
+            if let Some(i) = ridx {
+                per_root_maps[i].entry(key).or_insert_with(|| n.path.clone());
+            }
         }
     }
     let mut edges = Vec::new();
     let mut backlinks: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
     for n in &notes {
+        let home = home_of.get(&n.path).copied().flatten();
         for l in &n.links {
-            let (target, external) = resolve(&l.url, &n.path, &stem_map);
+            let (target, external) = resolve(&l.url, &n.path, home, &per_root_maps, &global_map);
             if let Some(t) = &target
                 && let Ok(tc) = t.canonicalize()
             {
@@ -3670,9 +3741,10 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
         // "nothing to see" — the findings are on stdout and the reader is told they are there.
         if !violations.is_empty() {
             eprintln!(
-                "memgrep lint: {} finding(s), none at or above {}",
+                "memgrep lint: {} finding(s), none at or above {} ({})",
                 violations.len(),
-                a.min_severity.label()
+                a.min_severity.label(),
+                scope_summary_label(&a.paths)
             );
         }
         Ok(())
@@ -3680,10 +3752,11 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
         // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The
         // count goes to stderr so it never pollutes the machine-parseable stdout violation list.
         eprintln!(
-            "memgrep lint: {} finding(s), {} at or above {}",
+            "memgrep lint: {} finding(s), {} at or above {} ({})",
             violations.len(),
             gating.len(),
-            a.min_severity.label()
+            a.min_severity.label(),
+            scope_summary_label(&a.paths)
         );
         std::process::exit(1);
     }
@@ -3767,6 +3840,34 @@ fn scope_layer(path: &Path) -> Option<ScopeLayer> {
         return Some(SCOPE_PROJECT);
     }
     None
+}
+
+/// The `(...)` clause `cmd_lint_cli`'s summary line appends so a bare finding count is never
+/// ambiguous about WHAT was linted (janitor#151 item 6: `memgrep lint: 212 finding(s), 13 at or
+/// above ERROR` reads as machine-wide when it may cover one scope, three, or an arbitrary corpus).
+/// Canonicalizes each root before classifying — `scope_layer` matches on an absolute-path substring
+/// (`/.claude/project/memory`), so a RELATIVE root (`memgrep lint .claude/project/memory`, a real
+/// invocation shape) would otherwise silently fail to classify.
+fn scope_summary_label(paths: &[PathBuf]) -> String {
+    // No positional args ⟹ the CLI defaults to the current dir (the same fallback `collect_md`
+    // applies) — count it as the one path linted rather than reporting "0 path(s)".
+    let default_path = [PathBuf::from(".")];
+    let paths = if paths.is_empty() { &default_path[..] } else { paths };
+    let mut names: Vec<&'static str> = paths
+        .iter()
+        .filter_map(|p| p.canonicalize().ok())
+        .filter_map(|p| scope_layer(&p))
+        .map(|s| s.name)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    if names.is_empty() {
+        // None of the given roots matched a known scope shape (a test fixture, an ad-hoc corpus) —
+        // name the path count instead of guessing a scope.
+        format!("{} path(s)", paths.len())
+    } else {
+        format!("{} scope(s): {}", names.len(), names.join("/"))
+    }
 }
 
 /// WHY a downward edge is forbidden. The two reasons are different and must not be conflated — one
@@ -6801,6 +6902,77 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             broken.is_empty(),
             "[[feedback-opus-for-security]] must resolve by the name: slug, not report BROKEN; got: {broken:?}"
         );
+    }
+
+    #[test]
+    fn wikilink_prefers_the_same_root_twin_over_a_duplicate_name_elsewhere() {
+        // janitor#151 / #192: a name that exists in TWO roots (a page with a same-named "twin" in
+        // another scope) must resolve to the twin in the SOURCE page's OWN root — never to
+        // whichever candidate `build_graph` happens to process last. Two separate root dirs stand
+        // in for two memory scopes (e.g. LOCAL and PROJECT); `root_b` is deliberately named to sort
+        // ALPHABETICALLY AFTER `root_a`, so the old unconditional-`insert()` bug (last note in the
+        // cross-root-merged path order silently wins) would have picked the WRONG twin here.
+        let base = std::env::temp_dir().join(format!("memgrep_i151_pref_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root_a = base.join("aaa_root");
+        let root_b = base.join("zzz_root");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        // hub lives in root_a and links to a bare name that ALSO exists in root_b.
+        std::fs::write(root_a.join("hub.md"), "see [[dup]]\n").unwrap();
+        std::fs::write(root_a.join("dup.md"), "the SAME-ROOT twin — this must win.\n").unwrap();
+        std::fs::write(root_b.join("dup.md"), "the OTHER-ROOT decoy — must NOT be picked.\n").unwrap();
+        let g = build_graph(&[root_a.clone(), root_b.clone()], false);
+        let edge = g
+            .edges
+            .iter()
+            .find(|e| e.from == root_a.join("hub.md"))
+            .expect("hub.md's [[dup]] link must appear as an edge");
+        let target = edge
+            .target
+            .as_ref()
+            .expect("[[dup]] must resolve, not report BROKEN")
+            .canonicalize()
+            .expect("resolved target must exist on disk");
+        let expected = root_a.join("dup.md").canonicalize().unwrap();
+        let wrong = root_b.join("dup.md").canonicalize().unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(
+            target, expected,
+            "[[dup]] referenced from a root_a page must resolve to root_a's own dup.md, \
+             not silently cross into root_b (got: {target:?}, forbidden: {wrong:?})"
+        );
+    }
+
+    #[test]
+    fn wikilink_falls_back_to_another_root_when_the_name_has_no_same_root_candidate() {
+        // The complement of the test above: same-root preference must not break the case where a
+        // name genuinely exists in ONLY one root — that link still has to resolve, or the fix would
+        // have traded a wrong-target bug for a newly-broken one.
+        let base =
+            std::env::temp_dir().join(format!("memgrep_i151_fallback_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root_a = base.join("root_a");
+        let root_b = base.join("root_b");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        std::fs::write(root_a.join("hub.md"), "see [[only-in-b]]\n").unwrap();
+        std::fs::write(root_b.join("only-in-b.md"), "unique to root_b.\n").unwrap();
+        let g = build_graph(&[root_a.clone(), root_b.clone()], false);
+        let edge = g
+            .edges
+            .iter()
+            .find(|e| e.from == root_a.join("hub.md"))
+            .expect("hub.md's [[only-in-b]] link must appear as an edge");
+        let target = edge
+            .target
+            .as_ref()
+            .expect("[[only-in-b]] must still resolve via cross-root fallback, not report BROKEN")
+            .canonicalize()
+            .expect("resolved target must exist on disk");
+        let expected = root_b.join("only-in-b.md").canonicalize().unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(target, expected);
     }
 
     #[test]

@@ -192,29 +192,39 @@ need a different reshape). Never silently drop or ignore the third.
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 
 On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewritten to
-`[[C]]` **in the same transaction** — otherwise the corpus is left with dangling
-links and the commit-time verify will FAIL.
+`[[C]]` — otherwise the corpus is left with dangling links and the commit-time
+verify will FAIL. **Redirect each holder in its OWN prior `--op repair`
+transaction — never inside the merge transaction itself** (janitor#145: the CLI
+enforces exactly ONE surviving write per merge, with no exemption for a holder;
+`commit --op merge` refuses outright with `merge expects exactly ONE surviving
+page, found N write(s)` the moment a second write rides along).
 
 **The full procedure is in [merge-protocol.md](references/merge-protocol.md) § "Step 5"**:
-the `memgrep links --from` invocations, the holder-page staging rule, the prose-mention
+the `memgrep links --from` invocations, the holder-repair-first sequence, the prose-mention
 surfacing, and — mandatory since janitor#182 — the SECOND index, the harness `MEMORY.md`,
 whose pointer lines `memgrep links` cannot see and which a merge otherwise leaves pointing at
 a deleted file (making a merged note read as MISSING, the one outcome consolidation exists to
-prevent).
+prevent). `MEMORY.md` is redirected the same way as any other holder — its own prior
+`--op repair` transaction, not the merge.
 
 ### 6-9. Execute the merge through the transaction core
 
-The full executable sequence (begin/staging commands, holder-copy loop, commit,
-retry/rollback walkthrough) lives in
+The full executable sequence (begin/staging commands, the holder-repair-first
+sequence, commit, retry/rollback walkthrough) lives in
 [merge-protocol § Steps 6-9 — the executable sequence](references/merge-protocol.md)
 (TRDD-82OP4EN9 token-budget move). The non-negotiables you must uphold:
 
-- `begin` with BOTH sources (`merge` op); the survivor keeps A's slug; copy every
-  step-5 backlink holder into staging too (`mkdir -p` its parent first — a nested
-  `wikimem/` holder has no staged parent, L6).
-- Edit ONLY under `$STAGING`: overwrite A's copy with the merged page `C`, `rm`
-  B's copy, repoint `[[B]]` → the survivor's slug in every holder copy, and — when step 5 found a
-  match — repoint the `MEMORY.md` pointer the same way (target only).
+- **First, one `--op repair` transaction per step-5 holder** (including `MEMORY.md`
+  when step 5 found a match): its single source is the holder itself; repoint
+  `[[B]]` (or `[[A]]`, if the survivor's slug is changing) → the survivor's slug,
+  or the `MEMORY.md` pointer's target, and commit. Do this for every holder
+  BEFORE touching the merge — `verify_merge`'s dangling-refs check refuses the
+  merge until no live page still links a retired slug, so holder-first is the
+  only order that can commit at all.
+- **Then `begin` with BOTH merge sources** (`merge` op); the survivor keeps A's
+  slug. Edit ONLY under `$STAGING`: overwrite A's copy with the merged page `C`,
+  `rm` B's copy. Nothing else is staged — a merge transaction is exactly ONE
+  write (`C`) and one-or-more deletes.
 - Build `C` per [merge-page-rules](references/merge-page-rules.md): every `[^N]`
   lesson byte-identical, `ocd = min(A,B)`, `lmd = today`, one-sentence lead, no
   duplicate lines, no link to a retired slug, all edge sections merged + deduped.
