@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bc6d927ba53a digest=18c18eae06a2 generated=2026-08-05T06:54:50+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a93ab1fb55a4 digest=d81fd9ca1211 generated=2026-08-05T13:08:19+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -615,6 +615,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
 `scripts/lib/harness_backend.py` — Harness-backend SSOT (TRDD-PZLVT2RN) — the ONE place that answers "which world am I in?".
   · unabsorbed_chores() -> tuple[str, ...] — The global chores that have NO owner while a live server suppresses the daemon.
+  · claimed_chores(*, now) -> frozenset[str] — The chores a live ai-maestro server has actually CLAIMED — not merely "is alive".
+  · orphaned_chores(*, daemon_alive, now) -> frozenset[str] — The chores NOTHING will run right now, and why they slip through.
+  · server_owns_every_chore(*, now) -> bool — True iff a live server has claimed EVERY chore the daemon owns.
   · is_harness_session(env) -> bool — True iff THIS process runs inside an ai-maestro harness agent.
   · backend(env) -> str — The actuation backend for THIS session: "aimaestro" (thin #J) or "standalone" (#N).
   · server_capabilities(*, now) -> frozenset[str] | None — The LIVE server's advertised capability tokens, or None when there is no fresh claim.
@@ -650,6 +653,13 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · resolve_ttl_minutes(*, now, regime_config, cached, probe_interval, probe, env) -> tuple[int, dict | None] — Resolve the authoritative cache-TTL (minutes) for the SLOW ceiling.
   · state_to_dict(state) -> dict — Serialize CadenceState for ``cadence-state.json``.
   · state_from_dict(data) -> CadenceState | None — Parse CadenceState from disk. None on absent/malformed input (treated as
+`scripts/lib/hibernation.py` — Consume the ai-maestro server's hibernation answer (janitor#194).
+  · Hibernation — One live answer. `agent` is this workdir's OWN record (agent workdirs); `roster` is
+  · Hibernation.state(self) -> str — This workdir's agent state, or "" when the answer carries no per-agent record.
+  · Hibernation.is_healthy(self) -> Optional[bool] — True/False for a known state, or None when there is no per-agent record to judge.
+  · Hibernation.counts_label(self) -> str — A compact `6 hibernated · 3 crashed` summary, empty when nothing is noteworthy.
+  · path_for(project_root) -> Path — Where the server delivers this project's answer.
+  · read(project_root, *, now) -> Optional[Hibernation] — This project's live hibernation answer, or None when there is NO LIVE ANSWER.
 `scripts/lib/ioc_taxonomy.py` — IOC taxonomy primitives — distilled from the deep-forensics-ioc audit
   · IOCTaxonomyError — Raised when an IOC bundle cannot be parsed.
   · IOCRecord — Per-threat IOC bundle — the four-quadrant breakdown distilled from
