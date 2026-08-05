@@ -1,25 +1,41 @@
 ---
 trdd-id: OR527LNW
 title: PRRD G1.1's recommended byline contains a bare GitHub mention that pages a real org
-column: proposal
+column: complete
 created: 2026-08-02T14:12:34+0200
-updated: 2026-08-02T14:12:34+0200
+updated: 2026-08-05T06:14:05+0200
 current-owner: claude-ai-maestro-janitor
 task-type: security
 scope: project
 severity: medium
-approved: false
-relevant-rules: [1.1]
+approved: true
+approved-by: user
+approved-at: 2026-08-05T06:14:05+0200
+implementation-commits: [93b6671e]
+relevant-rules: [1.2, 11.1]
 external-refs: [https://github.com/Emasoft/ai-maestro-janitor/issues/171]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
 
-**This is a PROPOSAL, not a task. It is filed instead of an edit because G1.1 is a GOLDEN
-rule — user-only. Not even the MANAGER may change it; every other agent proposes and waits.**
-I could have edited the line in seconds; the whole point of the golden tier is that I do not.
+**RESOLVED 2026-08-05. The USER decided in-session and authorized the edit; it landed in
+`93b6671e`.** Nothing below needs doing — the rest of this card is kept as the record of why
+the change was proposed rather than made, and it is worth reading for the template insight.
 
-**NEEDS: the USER's decision.** Nothing here is actionable by an agent.
+**What the USER chose**, which is neither of the two options this card offered: the token is
+replaced with **"the gh CLI auth user name"** — no `@`, and no role-word that could later
+become a real account either. `G1.1 → G1.2` exactly as predicted below.
+
+**Plus a NEW golden rule the USER added at the same time — `G11.1`**: an agent may open issues
+and comment ONLY on repositories owned by the current `gh` CLI auth account; writing anywhere
+else needs explicit, per-case MANAGER authorization, permitted in exactly two situations (a
+VERIFIED blocking bug, or an authorized ai-maestro USER collaborating on a MAESTRO-USER-owned
+project). That generalizes this card's finding from *how a post is signed* to *where a post may
+be made at all* — the deeper version of the same risk, since both stem from every agent sharing
+one human GitHub identity.
+
+The shipped `rules/prrd-design-rules.md` baseline was aligned to the same wording in the
+follow-up commit, so the canonical rule and the rule the janitor installs cannot drift.
 
 ## The defect
 
