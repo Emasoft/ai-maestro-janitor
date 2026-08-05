@@ -586,6 +586,65 @@ def _parse_links_directed(stdout: str, memdir: Path) -> set[tuple[str, str]]:
     return pairs
 
 
+_ORPHAN_STUB = """# Memory reorg proposal — MOVED
+
+This file is an ORPHAN from an older ai-maestro-janitor, which wrote one proposal into EVERY
+memory scope root. The librarian now writes a SINGLE proposal, into the LOCAL scope root:
+
+    {live}
+
+**Nothing updates this copy**, so whatever it used to contain described the corpus as it was on
+the day that older version last ran — findings long since fixed still read as current. That is
+worse than an empty file: a reader cannot tell a resolved finding from a live one, and the
+resolved ones vastly outnumber the live ones over time.
+
+Measured when this was found (janitor#195): the orphaned USER-scope copy still listed 22
+one-sided-link findings, of which a fresh run of the same code produced **zero** — every one had
+been reciprocated in the 22 days since it was written.
+
+Its content has been replaced by this notice rather than deleted, so nothing is lost: the
+proposal is a GENERATED artifact (regenerated on the next librarian run), never a memory note.
+Read the live file above.
+"""
+
+
+def _redirect_orphaned_proposals(
+    scopes: list[tuple[str, Path]], local_memdir: Path
+) -> list[Path]:
+    """Replace a stale proposal left in a NON-local scope root with a redirect notice.
+
+    An older version wrote one proposal per scope root; the current one writes a single file
+    into LOCAL. The other copies were never removed and nothing refreshes them, so they sit
+    there indefinitely presenting resolved findings as current — which is how janitor#195 came
+    to report 22 link findings that a fresh run of the same code does not produce.
+
+    A stale generated artifact is worse than a missing one: it is indistinguishable from a live
+    report, so it spends a reader's attention on work already done and, worse, trains them to
+    discount the whole file — including the findings that ARE real.
+
+    Content is REPLACED, never deleted. The proposal is generated (the next run recreates the
+    live one) and is explicitly not a memory note, but it sits inside a memory STORE, and
+    nothing in a memory store gets removed by a routine sweep.
+    """
+    redirected: list[Path] = []
+    for _scope, memdir in scopes:
+        if memdir == local_memdir:
+            continue
+        path = memdir / PROPOSAL_NAME
+        if not path.is_file():
+            continue
+        stub = _ORPHAN_STUB.format(live=local_memdir / PROPOSAL_NAME)
+        try:
+            if path.read_text(encoding="utf-8", errors="replace") == stub:
+                continue  # already redirected — no churn on a stable corpus
+            state.atomic_write(path, stub)
+            redirected.append(path)
+            state.log_line("memory-librarian", f"redirected orphaned proposal: {path}")
+        except OSError as exc:
+            state.log_line("memory-librarian", f"could not redirect {path}: {exc}")
+    return redirected
+
+
 def _collect_one_sided_findings(directed: set[tuple[str, str]]) -> list[str]:
     """The LINK LAW audit: every wikimem link must be bidirectional.
 
@@ -1639,6 +1698,7 @@ def _run() -> int:
     if not scopes:
         return 0
     local_memdir = scopes[0][1]  # LOCAL is always first (or the only scope)
+    _redirect_orphaned_proposals(scopes, local_memdir)
 
     binary = _find_memgrep()
     if binary is None:
