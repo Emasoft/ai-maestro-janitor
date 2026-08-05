@@ -4,7 +4,7 @@ title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-pla
 column: testing
 implementation-commits: [3316e44, a852cb8, f4cba4f, a7506d3, 9986f7e, def438f, 21da98c, 0028c1e]
 created: 2026-06-08T16:53:09+0200
-updated: 2026-08-05T18:15:56+0200
+updated: 2026-08-05T18:32:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -38,11 +38,15 @@ unbrowse mode that survives Cloudflare AND Google OAuth) and ATOM-K64C-5L42 (the
 traps). See also [[renew-cdp-attach-real-chrome]].
 
 Second owner constraint, same day: **unbrowse does not support Chrome profiles.** It cannot select
-among the owner's 3 accounts — the profile flag reads one fixed slot, so switching accounts means
-manually renaming the Chrome profile folders so the wanted account occupies that slot, every time.
-This makes the folder swap part of EVERY rotation/replay procedure (a replay against the wrong
-resident profile logs the wrong account in), and it must be scripted into the loop, not remembered.
-Captured as ATOM-Z9Z6-W201 on the same wikimem page.
+among the owner's 3 accounts — switching means swapping the per-SITE clone folders under
+**`/Users/emanuelesabetta/.unbrowse/profiles/`** (verified on disk: `claude.ai/`, `krea.ai/`,
+parked variants like `krea.ai.bak-krill`) so the wanted account's clone carries the site's
+canonical name, every time. **Never Chrome's own profile dirs** — unbrowse doesn't read them for
+switching, and renaming them would risk the owner's live browser data for zero effect (my first
+capture said "Chrome profile folders"; corrected the same evening, superseded per protocol).
+The swap is part of EVERY rotation/replay procedure (a replay against the wrong resident clone
+logs the wrong account in) and must be scripted into the loop, not remembered.
+Captured as ATOM-Z9Z6-W201 + lesson ATOM-EQ5K-M6IR on the same wikimem page.
 
 Path to close items 1–2: study unbrowse (skill + atoms) → schedule ONE recording session with the
 owner present → the replay then makes the capture/RENEW loops machine-verifiable on demand.
