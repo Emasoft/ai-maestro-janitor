@@ -15,9 +15,53 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Not started — AWAITING A USER DECISION. The owner asked for a release ("push via a
-release", 2026-08-02) and `publish.py` REFUSES. The blocker is a false positive, and I
-declined to clear it unilaterally.**
+### 2026-08-05 — the blocker MOVED: it is now a HANG, not a finding
+
+Attempted the release (`publish.py --patch --dry-run`). Everything the janitor owns is green:
+**ruff + mypy clean, 14349 tests passed / 1 skipped in 498s.** It dies in ONE place:
+
+```
+[cpv-phase] validate_manifest / validate_structure / check_tracked_gitignored_files
+[cpv-phase] validate_layout_c_consistency        all DONE 0.0s
+[cpv-phase] skillaudit_native                    DONE 66.0s
+[cpv-phase] security_execclass_gate              Command timed out after 900s
+```
+
+So the gate no longer REPORTS the cfg(test) false positive this card was named for — it never
+gets that far. `_CPV_PIN` is `v5.1.0`, and **v5.1.1 (published 2026-08-04) does not fix it**:
+its changelog carries one entry, a CI-canon fix. Bisection stands: **v4.2.0 143.6s ✓,
+v4.3.0 49.9s ✓, v5.0.0 / v5.1.0 / v5.1.1 never complete.** Reproduction + per-phase timing
+posted to Emasoft/claude-plugins-validation#189.
+
+**BOTH doors are shut, which is why this still needs the USER:**
+- **Forward (v5.1.x)** — the gate hangs. Nothing to fix on our side; upstream bug.
+- **Backward (v4.3.0)** — the gate completes, but leaves 1 MINOR + 4 NITs, and under
+  `--strict` MINOR(3) and NIT(4) both BLOCK (`publish.py:1323`). They are CPV false positives.
+
+**N — the two things NOT to do**, both of which would "work":
+1. Suppress the findings or relax `--strict`. **PRRD S5.1** forbids it: a CPV finding is
+   cleared by devitalizing or REMOVING the offending code, never by exempting a rule.
+2. Rewrite `write_gate.rs`'s concurrency test so the scanner stops reading it as SHELL_EXEC.
+   That is load-bearing test code; devitalizing it to dodge a scanner FP breaks the thing the
+   test exists to prove. Refusing to devitalize load-bearing code is the same principle CPV's
+   own devitalizer applies.
+
+**What unblocks this:** CPV ships the pool fix, or a `v4.3.1` backport onto the last version
+whose gate terminates. Asked for exactly that on #189. Alternatively the USER may direct a
+different course — that decision is theirs, not mine.
+
+### ⚠️ THE COST IS NOW MEASURED — 193+ commits, not 79
+
+HEAD is **193+ commits** ahead of the `v2.3.0` tag. Verified 2026-08-05 that NO cached version
+(all 19, `0.41.0` → `2.3.0`) contains `peer-freeze-recovery.py` or `global-chore-blackout.py`,
+so both ship in nothing and have never executed. This card therefore also gates TRDD-KQ9WM4TZ,
+which is now `column: blocked, blocked-by: [AWXK0RFT]` for exactly this reason.
+
+---
+
+**SUPERSEDED — do NOT carry forward:** *"Not started — AWAITING A USER DECISION … The blocker
+is a false positive"*. The awaiting-a-decision part is still true; the BLOCKER is not — since
+CPV v5.0.0 the gate hangs before it can emit any finding at all. Original text below.
 
 ### ⚠️ IMPACT IS NOT "79 UNPUSHED COMMITS" — EVERY FIX SHIPPED TODAY IS INERT
 
