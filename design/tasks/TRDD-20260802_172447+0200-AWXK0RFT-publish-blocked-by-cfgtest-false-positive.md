@@ -1,11 +1,11 @@
 ---
 trdd-id: AWXK0RFT
 title: Publish is blocked by a CRITICAL false positive on cfg(test) Rust in memgrep
-column: blocked
+column: complete
 pre-block-column: todo
 blocked-by-external: [Emasoft/claude-plugins-validation#189]
 created: 2026-08-02T17:24:47+0200
-updated: 2026-08-05T07:50:00+0200
+updated: 2026-08-05T18:26:46+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -16,6 +16,16 @@ implementation-commits: []
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-05 evening — RESOLVED exactly as the owner said it would be. CLOSING.
+
+"wait for CPV to fix. its almost done." — it was. CPV v5.1.4 shipped the #189 fix; verified
+first-hand (the cfg(test) gate that never terminated on v5.1.2 completed in 50.9 s), pinned
+across the three SSOT sites (ff3118fc), and the publish then succeeded TWICE the same day:
+v2.4.0 and v2.4.1 are Latest on GitHub. The wait resolved the block with neither forbidden
+shortcut touched. Nothing remains in this card's scope.
+
+### The parked entry (kept; superseded above)
 
 ### 2026-08-05 — USER DECISION: WAIT for CPV. Parked, not abandoned.
 

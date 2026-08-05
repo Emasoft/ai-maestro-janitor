@@ -1,21 +1,38 @@
 ---
 trdd-id: KQ9WM4TZ
 title: Standalone sessions have no freeze recovery while an ai-maestro server runs
-column: blocked
+column: testing
 pre-block-column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-05T06:58:00+0200
+updated: 2026-08-05T18:26:46+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 parent-trdd: 5ZVS1DDP
-blocked-by: [AWXK0RFT]
+blocked-by: []
 relevant-rules: []
 implementation-commits: []
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-05 evening — UNBLOCKED: the publish landed and the stopgap has now RUN. `blocked → testing`.
+
+Every fact the block rested on flipped today, each re-verified rather than assumed:
+- v2.4.0 + v2.4.1 published; the cache holds 2.4.1, which SHIPS
+  `scripts/detectors/peer-freeze-recovery.py` (checked in the cache dir, not inferred).
+- `last-run-peer-freeze-recovery.ts` EXISTS — the exact stamp whose absence this card used as
+  proof the roster never reached it. The auto-rolling stub is resolving 2.4.1.
+- Independently, the daemon now stays up beside a live server covering the unclaimed chores
+  including `session-liveness` (88e6f45a, verified live — see TRDD-5ZVS1DDP), so freeze recovery
+  has BOTH a per-session and a daemon path where it briefly had neither.
+
+REMAINS before `complete` (why this is `testing`, not closed): observe the detector actually
+RECOVER something, or at minimum fire its gated beat cleanly across a few 300 s windows
+(`.janitor/logs/peer-freeze-recovery.log` is still absent — stamp proves reached, not exercised).
+
+### The blocked entry (kept; superseded above)
 
 ### 🚫 2026-08-05 — BLOCKED, and the old NEXT ACTION was UNACHIEVABLE
 
