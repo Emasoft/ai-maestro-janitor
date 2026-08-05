@@ -101,6 +101,61 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9+/_\-=]{%d,512}" % _ENTROPY_MIN_LEN)
 # (`…/projects/<x>/memory/…`) — committing one leaks the per-machine store.
 _LOCAL_SHAPED_RE = re.compile(r"(?P<dir>(?:^|.+/)projects/[^/]+/memory)/")
 
+# Where the ENTROPY heuristic needs corroboration (ai-maestro-plugins#14: 3 of 3 entropy
+# findings in one night were structural false positives — none was a secret):
+#   - fenced code blocks and inline `code` spans: documentation cites identifiers and paths in
+#     code markup BY CONVENTION, and `statuslineCostUsd`-style camelCase or a `reports/...` path
+#     is base64-alphabet text with prose-beating entropy. The better a page documents code, the
+#     more reliably raw entropy flags it.
+#   - `keywords:`/`desc:` metadata lines and `[^N]: [...]` lesson-address lines: the wikimem
+#     format REQUIRES `underscore_joined_phrases` keyword lists — long, mixed-case, no spaces,
+#     indistinguishable from a token by entropy. The page author cannot avoid them.
+#
+# These regions are NOT blanked — that was the first draft, and its own counter-case test caught
+# the blind spot: the cloud/CI-CD credential libs carry ZERO pasted-token shape rules (they are
+# workflow-misconfiguration scanners), so this entropy pass is the detector's ONLY catcher for a
+# real token pasted into a note, and a code fence (a command example) is the single most common
+# place one lands. Inside code/metadata regions a candidate must therefore ALSO match a known
+# secret shape (the issue's suggestion 2); in prose, entropy alone still suffices, because none
+# of the documented false-positive shapes occur there.
+_FENCED_CODE_RE = re.compile(r"(?ms)^(?:```|~~~).*?^(?:```|~~~)[ \t]*$")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_META_LINE_RE = re.compile(r"(?m)^[ \t]*\"?(?:keywords|desc|description)\"?[ \t]*:.*$|^\[\^\d+\]:.*$")
+
+# Recognisable secret-token prefixes — each is a documented, vendor-fixed literal, so this list
+# trades recall for precision ONLY inside code/metadata regions (prose keeps full recall). A
+# camelCase identifier, a repo path, or an underscore_joined keyword phrase can never start with
+# one of these.
+_SECRET_SHAPE_RE = re.compile(
+    r"^(?:"
+    r"sk[-_]|pk_live_|rk_live_"      # OpenAI / Stripe key families
+    r"|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_"  # GitHub token families
+    r"|glpat-|npm_|nvapi-|dop_v1_|pypi-|shpat_|shpss_|hf_"  # GitLab/npm/NVIDIA/DO/PyPI/Shopify/HF
+    r"|xox[abops]-"                  # Slack
+    r"|AIza|ya29\."                  # Google API / OAuth
+    r"|AKIA|ASIA"                    # AWS access key ids
+    r"|eyJ"                          # a JWT (base64 of '{"')
+    r"|age1|SG\."                    # age recipient / SendGrid
+    r")"
+)
+
+
+def _code_meta_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of code markup + wikimem metadata lines (merged, sorted)."""
+    spans = [m.span() for rx in (_FENCED_CODE_RE, _INLINE_CODE_RE, _META_LINE_RE) for m in rx.finditer(text)]
+    spans.sort()
+    merged: list[tuple[int, int]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _in_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
+    return any(s <= pos < e for s, e in spans)
+
 
 def _git_toplevel(cwd: Path) -> Path | None:
     """Resolve the repo's top-level dir, or None when `cwd` is not a git repo.
@@ -160,6 +215,7 @@ def _entropy_findings(text: str) -> list[str]:
     """
     out: list[str] = []
     seen_tokens: set[str] = set()
+    spans = _code_meta_spans(text)
     for m in _TOKEN_RE.finditer(text):
         tok = m.group(0)
         if tok in seen_tokens:
@@ -168,6 +224,11 @@ def _entropy_findings(text: str) -> list[str]:
         if not sec.looks_like_base64(tok, min_len=_ENTROPY_MIN_LEN):
             continue
         if sec.shannon_entropy(tok) < _ENTROPY_MIN_BITS:
+            continue
+        # In code markup / wikimem metadata, entropy alone is not evidence (see the block above
+        # _SECRET_SHAPE_RE): identifiers, paths and keyword phrases live there by convention and
+        # beat prose entropy. A known vendor prefix still convicts.
+        if _in_spans(m.start(), spans) and not _SECRET_SHAPE_RE.match(tok):
             continue
         out.append("high-entropy secret")
     return out
@@ -213,7 +274,10 @@ def _scan_page(page: Path) -> list[str]:
     for f in cicd.scan_text(text):
         labels.add("credential")
 
-    # 4. Unknown-format high-entropy secrets.
+    # 4. Unknown-format high-entropy secrets. Region-aware (ai-maestro-plugins#14):
+    #    in prose, entropy alone convicts; in code markup / wikimem metadata a
+    #    known secret shape is also required, because entropy is a guesser, not a
+    #    recogniser, and identifiers/keywords live there by convention.
     for label in _entropy_findings(text):
         labels.add(label)
 

@@ -186,6 +186,53 @@ class TestMemoryScopeLeak(unittest.TestCase):
             self.assertIn("token.md", prop)
             self.assertIn("high-entropy secret", prop)
 
+    def test_a_backticked_report_path_does_not_trip_the_entropy_scan(self) -> None:
+        """ai-maestro-plugins#14, with the trigger MEASURED rather than described: the strings
+        that actually tripped the entropy gate on a real corpus were timestamped report paths —
+        `reports/<component>/20260721_100514+0200-<slug>` is base64-alphabet (the `+0200` offset
+        even contributes a `+`), 60+ chars, mixed-class, entropy above the 4.5 gate. Citing a
+        report path in backticks is a documentation convention every page of that corpus follows;
+        a page must be able to cite its evidence without being flagged as leaking a secret."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "burn-doctrine.md",
+                "Windows are metered by COST, not raw tokens. Evidence:\n"
+                "`reports/burn-investigation/20260721_100514+0200-3-account-exhaustion-culprit.md`.\n"
+                "The follow-up measurement lives at\n"
+                "`reports/cumulative-delta-audit/20260805_043236+0200-differencing-sites.md`.\n",
+            )
+            _git(["add", ".claude/project/memory/burn-doctrine.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+            self.assertNotIn("high-entropy secret", _proposal(root))
+
+    def test_a_real_token_inside_a_code_fence_is_still_caught(self) -> None:
+        """The counter-case that keeps the #14 fix honest. A code fence (a command example) is
+        the single most common place a real token gets pasted, and the entropy pass is this
+        detector's ONLY pasted-token catcher (the cloud/CI-CD libs carry zero token-shape
+        rules — verified by probing them, which is what killed the first draft of this fix).
+        So code regions are shape-GATED, not blanked: a known vendor prefix still convicts."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "deploy-notes.md",
+                "run it like this:\n"
+                "```bash\n"
+                "gh auth login --with-token <<< ghp_x7Kq2mVs9pLw4Rt8nBc3fDg6hJk1zXy5AbCd\n"
+                "```\n",
+            )
+            _git(["add", ".claude/project/memory/deploy-notes.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            self.assertIn("high-entropy secret", _proposal(root))
+
     def test_allowlist_no_false_positive(self) -> None:
         """Generic/shared paths + documentation hosts must NOT be flagged as leaks."""
         with TemporaryDirectory() as td:
