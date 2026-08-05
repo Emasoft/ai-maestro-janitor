@@ -1110,6 +1110,8 @@
       "Command injection (skills/janitor-github-workflow-create/references/workflow-set-generation.md):21",
       "Explicit exfiltration (skills/janitor-credential-window-audit/references/ci-runner-checks.md):71"
     ],
-    "_intentional_validator_false_positives_upstream_issue": "https://github.com/Emasoft/claude-plugins-validation/issues/40"
+    "_intentional_validator_false_positives_upstream_issue": "https://github.com/Emasoft/claude-plugins-validation/issues/40",
+    "canon": "none",
+    "_canon_exception_reason": "RC-SHIP-BINARY-ONLY-STRICT does not fit this plugin's shape. The canon assumes the plugin SHIPS a compiled artifact and wants source excluded from it; this plugin ships NO binary at all (there is no bin/). memgrep is a bundled Rust crate the USER compiles with 'cargo install --path scripts/memgrep', which the janitor then invokes from PATH. Complying would mean STARTING to ship binaries: a separate source repo, build CI, and multi-platform artifacts (macOS arm64/x86, Linux) plus a fetch mechanism - a distribution project, not a file move. DECLARED rather than suppressed, so the exception stays visible and auditable; revisit if this plugin ever grows a binary distribution."
   }
 }
