@@ -1071,6 +1071,15 @@ def test_repair_has_work_false_on_quoted_and_legacy_slug_descs(tmp_path):
 # skip those already covered by a live refusal. `page_stats` keys on (size, mtime_ns) while a
 # refusal keys on CONTENT — that asymmetry is the whole mechanism, and each test below pins
 # one corner of it.
+#
+# FALSIFIED 2026-08-05, and the result is worth stating so nobody over-reads this block:
+# deleting the filter fails EXACTLY ONE of these — `test_mtime_churn_inside_a_refused_group`.
+# The other four pass with or without it, because they exercise paths the filter never
+# reaches (two must dispatch either way; the recording-a-refusal case is suppressed by the
+# EMPTY-DIFF branch, not by the filter). They are REGRESSION GUARDS on the surrounding
+# contract — most importantly that a landed refusal must not itself re-arm the chore, which
+# is what rules out the narrowed-digest design — not evidence that the filter works.
+# A test that still passes with the feature removed is not testing the feature.
 
 
 def _consolidate_pair(d: Path) -> tuple[Path, Path]:
