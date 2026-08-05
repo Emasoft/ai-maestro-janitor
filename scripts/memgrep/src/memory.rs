@@ -3737,16 +3737,22 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     }
     let gating: Vec<&Violation> = violations.iter().filter(|(s, ..)| *s >= a.min_severity).collect();
     if gating.is_empty() {
-        // A count still goes to stderr when non-gating findings exist, so "exit 0" never reads as
-        // "nothing to see" — the findings are on stdout and the reader is told they are there.
-        if !violations.is_empty() {
-            eprintln!(
-                "memgrep lint: {} finding(s), none at or above {} ({})",
-                violations.len(),
-                a.min_severity.label(),
-                scope_summary_label(&a.paths)
-            );
-        }
+        // A count ALWAYS goes to stderr — including the zero case (janitor#191). This used to be
+        // gated on `!violations.is_empty()`, so a clean corpus produced NO output at all and exit
+        // 0. That is indistinguishable from "the linter did not look": same empty stdout, same
+        // empty stderr, same exit code as a run that scanned nothing. Measured cost: a clean LOCAL
+        // scope was read as a skipped root, which produced a bug report, then a wrong severity
+        // claim, then a retraction — all because silence carries no evidence of coverage.
+        //
+        // A checker that is silent on success and silent on "I scanned nothing" cannot be trusted
+        // by a human OR by the heartbeat that consumes it, so the summary is unconditional and
+        // names the scopes it actually covered.
+        eprintln!(
+            "memgrep lint: {} finding(s), none at or above {} ({})",
+            violations.len(),
+            a.min_severity.label(),
+            scope_summary_label(&a.paths)
+        );
         Ok(())
     } else {
         // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The

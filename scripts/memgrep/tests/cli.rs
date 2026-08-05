@@ -2964,3 +2964,38 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
     let found = run(&["find", "+max_retries", d.as_str(), "--only-notes"]);
     assert!(found.contains(&lesson_id), "lesson findable by keyword: {found}");
 }
+
+/// A CLEAN corpus must still report `0 finding(s)` — silence is not a verdict (janitor#191).
+///
+/// This used to print nothing at all: empty stdout, empty stderr, exit 0 — byte-identical to a run
+/// that scanned nothing. That ambiguity cost a real investigation: a clean scope was read as a
+/// skipped root, which produced a bug report, a wrong severity claim, and a retraction. A checker
+/// that is silent on success AND silent on "I did not look" cannot be trusted by a human or by the
+/// heartbeat that consumes it.
+#[test]
+fn lint_reports_zero_findings_on_a_clean_corpus_instead_of_staying_silent() {
+    let d = TempDir::new("lint-clean");
+    d.write(
+        "clean.md",
+        "---\nname: clean\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"a page with no defects\"\n---\nBody prose with no findings.\n\n## Notes and lessons learned\n",
+    );
+    // The summary is on STDERR (stdout stays the machine-parseable violation list), so this must
+    // use run_full — asserting on stdout alone would pass vacuously against the old silent build.
+    let (out, err, code) = run_full(&["lint", d.as_str()]);
+    assert_eq!(code, 0, "a clean corpus must exit 0:\nstdout={out}\nstderr={err}");
+    assert!(
+        out.is_empty(),
+        "stdout must stay the violation list — a clean run emits no violation lines:\n{out}"
+    );
+    assert!(
+        err.contains("0 finding(s)"),
+        "a clean corpus must SAY it found zero, not stay silent:\nstderr={err}"
+    );
+    // Either spelling is correct coverage: a recognised memory root reports `scope(s)`, an
+    // arbitrary directory (as here) reports `path(s)`. What matters is that the summary states
+    // WHAT it covered, so "clean" is distinguishable from "did not look".
+    assert!(
+        err.contains("scope(s)") || err.contains("path(s)"),
+        "the summary must name what it actually scanned:\nstderr={err}"
+    );
+}
