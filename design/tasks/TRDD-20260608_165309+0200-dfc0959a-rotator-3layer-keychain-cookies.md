@@ -4,7 +4,7 @@ title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-pla
 column: testing
 implementation-commits: [3316e44, a852cb8, f4cba4f, a7506d3, 9986f7e, def438f, 21da98c, 0028c1e]
 created: 2026-06-08T16:53:09+0200
-updated: 2026-08-05T18:20:00+0200
+updated: 2026-08-05T18:15:56+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -24,7 +24,22 @@ external-refs: []
 
 # TRDD-dfc0959a — Rotator 3-layer cascade + keychain-encrypted cookies + consistency fixes
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-05
+
+### 2026-08-05 — OWNER RULING: the "genuine interactive reauth" gate CAN be automated after all
+
+The premise that held items 1–2 ("needs a real human login; the login half must never be
+automated") is SUPERSEDED by the owner, verbatim intent: *record the owner performing the login
+ONCE with the `unbrowse` skill, then replay that recording every time — the login is a mechanical
+operation once captured.* Constraint the owner flagged as the load-bearing one: **use the REAL
+Chrome, never Chrome for Testing.** The wikimem already carries the working recipe:
+ATOM-YQOI-ZIB3 (`--browser chrome --browser-profile Default --share-accounts --headed` — the only
+unbrowse mode that survives Cloudflare AND Google OAuth) and ATOM-K64C-5L42 (the two cross-process
+traps). See also [[renew-cdp-attach-real-chrome]].
+
+Path to close items 1–2: study unbrowse (skill + atoms) → schedule ONE recording session with the
+owner present → the replay then makes the capture/RENEW loops machine-verifiable on demand.
+The one-time recording still needs the owner at the keyboard; everything after does not.
 
 ### 2026-08-02 — STATE REFRESH (`dev → testing`). Four claims below are SUPERSEDED — do NOT act on them.
 
