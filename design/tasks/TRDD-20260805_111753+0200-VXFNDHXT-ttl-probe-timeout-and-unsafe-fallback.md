@@ -129,16 +129,19 @@ and the MANAGER's report says the same from the other side.
 
 ### Acceptance
 
-- [ ] A probe timeout does not overwrite a previously successful probe value.
-- [ ] `source:` distinguishes `probe` / `stale-probe` / `fallback`.
+- [x] A probe timeout does not overwrite a previously successful probe value. — `869a0144`
+- [x] `source:` distinguishes `probe` / `stale-probe` / `fallback`. — `869a0144`
 - [ ] With no probe ever successful, an unknown TTL resolves to the SHORT regime, not 60.
-- [ ] Unit tests cover: timeout-with-cache, timeout-without-cache, first-ever-run, and that a
-      `stale-probe` value still drives `tier_to_cron` correctly.
+      **(part 2 — open, gated on the break-even prior in the STATE block, not on effort)**
+- [x] Unit tests cover: timeout-with-cache, timeout-without-cache, first-ever-run, and that a
+      `stale-probe` value still drives `tier_to_cron` correctly. — `tests/test_ttl_stale_probe.py`
 - [ ] A measured before/after on a host where the probe genuinely fails — both numbers taken the
       same way (a delta needs two identical measurements).
 
-**NEXT ACTION:** decide part 3's shape (out-of-band retry vs conditional bound), since parts 1-2
-are settled. Then implement with tests, and reply on janitor#190 with the result.
+*(superseded — do NOT carry forward: "decide part 3's shape … since parts 1-2 are settled. Then
+implement with tests, and reply on janitor#190 with the result." Wrong on two counts now: part 1
+is implemented rather than pending, and part 2 is NOT settled — see the STATE block, which
+supersedes this line. The janitor#190 reply is posted.)*
 
 ## Context
 
