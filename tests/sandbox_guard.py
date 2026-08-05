@@ -351,8 +351,20 @@ def _harden_child_env(argv: list[str], child_env: dict) -> dict:
     return hardened
 
 
+# The repo that CONTAINS the running suite — protected from git mutation REGARDLESS of where
+# it lives. `is_tmp_path` alone cannot protect it: when the whole repo is checked out under a
+# tmp tree (the standard cross-project flow clones contributions to /tmp), "the real repo" and
+# "a throwaway fixture repo" are indistinguishable by path prefix, and the guard classified
+# real history as mutable — which is precisely the incident class this module exists for
+# (TRDD-RYZCVVKA overwrote committed work in THIS repo). Found because the suite's own
+# test_git_may_not_mutate_the_real_repo FAILED from a /tmp clone: the test was right and the
+# heuristic was leaky. Resolved (symlinks followed) so the /tmp vs /private/tmp macOS alias
+# cannot split the comparison.
+_SUITE_REPO = str(Path(__file__).resolve().parent.parent)
+
+
 def _classify_git(argv: list[str], cwd: str, env: dict) -> Verdict:
-    """READ anywhere; MUTATE only inside a tmp repo.
+    """READ anywhere; MUTATE only inside a tmp repo — and NEVER the suite's own repo.
 
     `-C <dir>` retargets git independently of the cwd, so it must be honoured — otherwise
     `git -C <real repo> commit` reads as a harmless tmp operation.
@@ -369,7 +381,9 @@ def _classify_git(argv: list[str], cwd: str, env: dict) -> Verdict:
     verb = argv[i] if i < len(argv) else ""
     if verb in _GIT_READONLY_VERBS:
         return _ALLOW
-    if is_tmp_path(target):
+    if _under(os.path.realpath(target), _SUITE_REPO):
+        pass  # the suite's own repo: fall through to the DENY below, tmp-resident or not
+    elif is_tmp_path(target):
         return _ALLOW  # a throwaway repo the test built for itself
     return Verdict(
         False,
@@ -452,7 +466,14 @@ def _classify_shell(argv: list[str], cwd: str, env: dict) -> Verdict:
         idx = rest.index("-c")
         return _classify_shell_string(rest[idx + 1] if idx + 1 < len(rest) else "", cwd, env)
     scripts = [t for t in rest if not t.startswith("-")]
-    if scripts and is_tmp_path(os.path.join(cwd, scripts[0])):
+    # Same _SUITE_REPO carve-out as _classify_git, for the same reason: when the repo itself is
+    # checked out under a tmp tree, its REAL scripts (keepalive_install.sh — the incident script)
+    # satisfy is_tmp_path and would be classified as harmless test fixtures.
+    if (
+        scripts
+        and is_tmp_path(os.path.join(cwd, scripts[0]))
+        and not _under(os.path.realpath(os.path.join(cwd, scripts[0])), _SUITE_REPO)
+    ):
         return _ALLOW  # a script the test itself wrote into tmp
     return Verdict(
         False,

@@ -51,4 +51,10 @@ dev = [
     "pytest",
     "ruff",
     "mypy",
+    # scripts/lib/sentinel/model.py imports yaml. At RUNTIME the detectors carry it via their
+    # PEP-723 script headers (`dependencies = ["pyyaml"]`), but pytest collects the suite in the
+    # PROJECT venv, where those headers do not apply — so from a clean clone the publish gate's
+    # own test step died on collection (ModuleNotFoundError: yaml) and the pipeline could only
+    # run on a machine where pyyaml happened to be installed already.
+    "pyyaml",
 ]
