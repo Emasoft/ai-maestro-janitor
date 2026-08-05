@@ -88,22 +88,16 @@ must behave as if the refusals applied — the tool enforces the rule, it is not
 ## Cross-reference with TRDDs
 
 Every TRDD constrained by a rule MUST cite it in `relevant-rules:` — entries carry a **prefix
-class**, so a bare number is never ambiguous about which rule corpus it names (janitor#144: a
-bare integer alone cannot say "this card is constrained by a shipped `~/.claude/rules/` file",
-so an agent reached for the file's own slug instead — evidence a bare-number-only schema was
-under-specified, not that the field goes unused):
+class** (janitor#144) so a bare number is never ambiguous about which rule corpus it names:
 - **bare number** — a PRRD rule in THIS project: `relevant-rules: [3, 27, 64.134]` (bare
   numbers; pinned versions ok). The default, unchanged from before this class existed.
-- **`rule:<slug>`** — a shipped `~/.claude/rules/<slug>.md` (the general-purpose class in
-  "Does NOT apply to" below, project-independent): `relevant-rules: [rule:no-nested-scrollbars]`.
-  These carry no PRRD number — they are not this project's rules.
+- **`rule:<slug>`** — a shipped `~/.claude/rules/<slug>.md` (project-independent; see "Does
+  NOT apply to" below): `relevant-rules: [rule:no-nested-scrollbars]`. No PRRD number to cite.
 - **body** — inline as `PRRD G64.134` or `` rule:<slug> ``.
 
 A TRDD with no `relevant-rules:` is **UNKNOWN, not a claim of "unconstrained"** — a lint or
-maintenance pass MUST NOT read an empty `[]` as an assertion. Verify it is genuine and not an
-oversight before trusting either reading (measured: 43 of 44 TRDDs in one corpus carried `[]`,
-almost all oversight — reading it as a confident claim converts a mass of oversights into a
-mass of confident false claims).
+maintenance pass MUST NOT read an empty `[]` as an assertion; verify before trusting either
+reading. Evidence + rationale: the reference.
 
 ## Recommended baseline golden rule G1.1 — GitHub authorship self-identification
 
@@ -115,9 +109,8 @@ all AI Maestro agents share the single human-owner GitHub identity. Recommended 
 Commits SHOULD carry an `Agent: <plugin-slug>` trailer. It is GOLDEN because it is an
 anti-impersonation convention the MANAGER must not be able to weaken.
 
-**The byline carries NO `@`**: it read `@owner` — a real org — and every agent copying it paged
-strangers. Backticks do not protect a TEMPLATE; it is copied OUT of them. See
-`~/.claude/rules/github-mentions.md`.
+**The byline carries NO `@`** — a template using `@owner` paged real accounts when copied
+out of backticks. See `~/.claude/rules/github-mentions.md`.
 
 ## Does NOT apply to
 

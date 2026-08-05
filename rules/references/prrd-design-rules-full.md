@@ -277,7 +277,9 @@ rule corpus it names — the base rule's summary is normative; here is the full 
    - `rule:<slug>` cites a shipped, project-independent `~/.claude/rules/<slug>.md` (e.g.
      `rule:no-nested-scrollbars` for `~/.claude/rules/no-nested-scrollbars.md`). These have no
      PRRD number to cite — the corpus evidence that motivated this class was an agent reaching
-     for the file's own slug because a bare integer could not express the constraint.
+     for the file's own slug because a bare integer alone could not say "this card is
+     constrained by a shipped `~/.claude/rules/` file". That is evidence a bare-number-only
+     schema was under-specified — not that the field goes unused.
 2. **Body** — inline citations as `PRRD G64.134` (or `PRRD S64.134`) for a PRRD rule, or
    `` rule:<slug> `` for a shipped rule, exactly as written by the agent. The G/S in the body
    may go stale on promote/demote; the number does not.

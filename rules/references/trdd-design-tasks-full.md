@@ -896,3 +896,60 @@ The `-iname` form is also load-bearing INDEFINITELY, not as a migration aid: leg
 UUID ids remain permanently valid because they are cited in immutable commit subjects, so
 renaming them would destroy the provenance the citation exists to provide. Measured on one live
 board: 76% of cards still carried the legacy form.
+
+## Scope routing — the LOCAL/PROJECT/USER model, and why
+
+Relocated from the base rule (2026-08-05) for the corpus floor cap. The base rule keeps the
+normative table (root paths, git status) and the decision procedure; this is the WHY behind
+two of its choices.
+
+**The `<slug>` in the LOCAL root is the SAME slug LOCAL *memory* uses** — both local corpora
+(design tasks and memory notes) sit under one local-scope root, keyed by the same
+absolute-path-to-slug derivation.
+
+**The `user` root sits ALONGSIDE the janitor's USER *memory* root** — same fixed plugin-DATA
+dir, a sibling `design/` next to `memory/` — ONE store per host, mirroring the memory system's
+own LOCAL/PROJECT/USER taxonomy 1:1 (janitor#103).
+
+**Why `UNSURE → LOCAL`, not PROJECT:** a leaked machine-private TRDD is already pushed — the
+damage is done the moment it's committed. Promoting a LOCAL TRDD to PROJECT later is a
+deliberate, cheap act (copy + commit); the reverse (a private TRDD already in git history) is
+not undoable by a `git rm`. That asymmetry is why the default leans LOCAL.
+
+## The janitor#139 carve-out — deleting a false pipeline-state line from a terminal TRDD
+
+Relocated from the base rule (2026-08-05) for the corpus floor cap. The base rule keeps the
+normative clause (what MAY be removed, and how narrowly); this is the worked example + why the
+carve-out is scoped so tightly.
+
+The v1→v2 migration (see "Migration from v1" above) could leave a terminal TRDD with a body
+line that duplicates the pipeline state in prose — e.g. `column: complete` in frontmatter
+alongside a body line reading `**Status:** Not started`. That body line is v1→v2 residue, not
+part of the historical record the "terminal columns are frozen" rule protects: it is a FALSE
+claim about the TRDD's own state, verifiably contradicted by the machine-readable `column:`
+field sitting right next to it. Deleting it removes a false claim ABOUT history; it does not
+rewrite history (janitor#139 ASK 2).
+
+**The carve-out is narrow on purpose.** It authorizes deleting ONLY a line that is
+MACHINE-VERIFIABLY contradicted by `column:` — never a line that merely disagrees in wording,
+adds context, or cannot be mechanically proven false. A dated "Implemented" note that
+semantically agrees with a terminal `column:` stays untouched even if its wording is loose;
+only a line a script could flag as a contradiction qualifies.
+
+## Cross-project scope discriminators — rationale
+
+Relocated from the base rule (2026-08-05) for the corpus floor cap. The base rule keeps the
+field definitions and the SHOULD/MUST NOT rules; this is the WHY.
+
+These three fields are **additive and backward-compatible** (janitor#103): their absence is
+today's exact behavior, and they are lint targets enforced incrementally on next-touch — never
+a mass rewrite of the existing corpus.
+
+`host-id:` may be implicit from the host-only store itself (a `scope: user` TRDD already lives
+under exactly one host's plugin-DATA dir) — the field exists to make that fact greppable when a
+`user`-scope TRDD is ever copied or compared across machines, where the implicit host identity
+would otherwise be lost.
+
+This mirrors the memory system's LOCAL/PROJECT/USER taxonomy: a kanban is a QUERY over the
+TRDD corpus filtered on these fields (`local`+`created-by`, `project`+`project-id`,
+`user`+`host-id`), never a second store.
