@@ -1,21 +1,65 @@
 ---
 trdd-id: VXFNDHXT
 title: The cache-TTL probe times out intermittently and its fallback fabricates the one value that disables the guard
-column: todo
+column: dev
 created: 2026-08-05T11:17:53+0200
-updated: 2026-08-05T11:17:53+0200
+updated: 2026-08-05T11:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 relevant-rules: []
 blocked-by: []
-implementation-commits: []
+implementation-commits: [869a0144]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Not started. Root cause is MEASURED (below); the fix is a design decision, not a one-liner.**
+**PART 1 SHIPPED (`869a0144`). Parts 2 and 3 remain open, and part 2's answer depends on a
+prior I have not measured — see the break-even below before implementing it.**
+
+### 2026-08-05 — part 1 landed: a stale measurement now outranks a fresh guess
+
+`resolve_ttl_minutes` no longer overwrites a cached reading with `_env_fallback_minutes` when
+the probe fails. It reuses the last `probe`-sourced value, marked `source: "stale-probe"`,
+regardless of age (`probe_interval` bounds how often we ASK, not how long an answer stays
+valid). A prior `fallback` is deliberately NOT reused — reusing a guess would launder it into
+something indistinguishable from a measurement.
+
+`tests/test_ttl_stale_probe.py`, 10 tests. **Falsified:** reverting the branch fails 4 of them,
+including `test_the_reused_measurement_drives_the_FAST_tier_the_guess_would_have_disabled`.
+
+**This alone removes most of the harm**, because the intermittent-timeout case — the common one,
+and the one measured on this host — now keeps its measurement instead of being overwritten every
+few fires.
+
+### CORRECTION to this card's own reasoning — I argued part 2 down using the wrong metric
+
+The body below says flipping the fallback to the short regime would be "the wrong shape on its
+own". The cost argument I used was a RATIO comparison, and a default does not pay a ratio:
+
+| truth | run `*/5` | run `*/15` | run `*/30` |
+|---|---|---|---|
+| TTL=60 | 1.20P/hr (6.0x optimal) | 0.40P/hr | **0.20P/hr optimal** |
+| TTL=5 | **1.20P/hr optimal** | 5.00P/hr (4.2x) | 2.50P/hr (2.1x) |
+
+In ratio terms failing fast looks worse (6.0x vs 4.2x). In ABSOLUTE terms — what the machine
+actually pays — **wrong-toward-fast costs 1.20P/hr and wrong-toward-slow costs 5.00P/hr**. The
+reporter's asymmetry was right and my objection was not.
+
+**What is still genuinely open in part 2**, and why it is not just "flip the constant": with part
+1 in place, the env fallback is reached ONLY on a machine where a probe has NEVER succeeded. For
+those, expected cost is `default-60: (1-p)(0.20) + p(5.00)` vs `default-5: 1.20`, break-even at
+**p ≈ 0.208**. So defaulting short wins iff more than ~21% of never-probed machines are on a
+short TTL (API-key sessions are already detected by env; the residual is subscription
+over-plan-credits). I have not measured that share, and asserting it would be the same
+unmeasured-value-wearing-the-shape-of-a-measurement error this card is about.
+
+**NEXT ACTION:** measure (or ask the fleet for) the share of never-probed machines running a
+short TTL, then settle part 2 on evidence. Part 3 (timeout budget) is independent and unstarted.
+
+*(superseded: "Not started. Root cause is MEASURED (below); the fix is a design decision, not a
+one-liner." — accurate when written, before part 1 landed.)*
 
 Two defects, discovered together on 2026-08-05 while answering janitor#190. They compound: the
 first makes the fallback fire often, the second makes the fallback harmful.
