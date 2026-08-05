@@ -1,12 +1,12 @@
 {
   "default": true,
+  "MD001": false,
   "MD007": false,
+  "MD012": false,
   "MD013": false,
   "MD022": false,
   "MD024": false,
-  "MD025": {
-    "front_matter_title": ""
-  },
+  "MD025": { "front_matter_title": "" },
   "MD026": false,
   "MD029": false,
   "MD031": false,
@@ -29,8 +29,5 @@
   "MD057": false,
   "MD058": false,
   "MD059": false,
-  "MD060": false,
-  "MD001": false,
-  "MD009": false,
-  "MD012": false
+  "MD060": false
 }

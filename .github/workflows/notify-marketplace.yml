@@ -14,8 +14,15 @@ on:
   push:
     branches: [main]
     paths:
+      # Kept equal to the CPV canonical trigger set. `commands/**` and
+      # `agents/**` were MISSING here while this repo ships 3 commands and 3
+      # agents, so editing either never notified the marketplace and the
+      # catalog silently served a stale component set until an unrelated
+      # plugin.json/hooks/skills/scripts change happened to fire the workflow.
       - '.claude-plugin/plugin.json'
       - 'hooks/**'
+      - 'commands/**'
+      - 'agents/**'
       - 'skills/**'
       - 'scripts/**'
 
@@ -30,8 +37,27 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 10  # bound the job — gh-actions rule (task #243)
+    # CPV canon: NO-OP when MARKETPLACE_PAT is not configured. `secrets` is
+    # readable from a job-level env: mapping, so expose its presence as a
+    # boolean and gate every step that needs it. Without this the dispatch
+    # step fails with a gh 404/auth error and paints a RED associated
+    # workflow on an otherwise-good release — a red that means "the secret
+    # is absent", which is indistinguishable at a glance from "the notify
+    # chain is broken". Gated, the job prints a notice and ends GREEN.
+    env:
+      HAS_MARKETPLACE_PAT: ${{ secrets.MARKETPLACE_PAT != '' }}
     steps:
+      - name: Check marketplace secret
+        # Always runs; the gated steps below skip when the PAT is absent.
+        run: |
+          if [ "$HAS_MARKETPLACE_PAT" = "true" ]; then
+            echo "MARKETPLACE_PAT is configured — proceeding with marketplace notification."
+          else
+            echo "::notice::MARKETPLACE_PAT secret is not set — skipping marketplace notification (no-op)."
+          fi
+
       - name: Checkout plugin
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           # Only reads plugin.json; the marketplace dispatch step uses
@@ -41,6 +67,7 @@ jobs:
 
       - name: Extract plugin name and version
         id: plugin
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         run: |
           set -euo pipefail
           NAME=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['name'])")
@@ -52,7 +79,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch plugin-updated to marketplace
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697  # v4.0.1
+        if: env.HAS_MARKETPLACE_PAT == 'true'
+        # Canon's defensive "second-latest" pin: v4.0.0, NOT the bleeding-edge
+        # v4.0.1 this repo carried. v4.0.1's SHA was the user-visible symptom of
+        # the 2026-05-26 GitHub Actions codeload auth outage, so CPV canon stays
+        # one tag behind on the dispatch action as a hedge. Adopted from canon —
+        # this repo had no recorded reason to be ahead of it.
+        uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f  # v4.0.0
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}
@@ -67,6 +100,7 @@ jobs:
             }
 
       - name: Job summary
+        if: env.HAS_MARKETPLACE_PAT == 'true'
         # Step-output values come from plugin.json (in-repo content) so
         # they're not attacker-controllable in the strict sense — but
         # zizmor's template-injection audit flags ${{ ... }} expansion

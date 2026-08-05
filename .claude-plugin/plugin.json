@@ -1112,6 +1112,23 @@
     ],
     "_intentional_validator_false_positives_upstream_issue": "https://github.com/Emasoft/claude-plugins-validation/issues/40",
     "canon": "none",
-    "_canon_exception_reason": "RC-SHIP-BINARY-ONLY-STRICT does not fit this plugin's shape. The canon assumes the plugin SHIPS a compiled artifact and wants source excluded from it; this plugin ships NO binary at all (there is no bin/). memgrep is a bundled Rust crate the USER compiles with 'cargo install --path scripts/memgrep', which the janitor then invokes from PATH. Complying would mean STARTING to ship binaries: a separate source repo, build CI, and multi-platform artifacts (macOS arm64/x86, Linux) plus a fetch mechanism - a distribution project, not a file move. DECLARED rather than suppressed, so the exception stays visible and auditable; revisit if this plugin ever grows a binary distribution."
+    "_canon_exception_reason": "RC-SHIP-BINARY-ONLY-STRICT does not fit this plugin's shape. The canon assumes the plugin SHIPS a compiled artifact and wants source excluded from it; this plugin ships NO binary at all (there is no bin/). memgrep is a bundled Rust crate the USER compiles with 'cargo install --path scripts/memgrep', which the janitor then invokes from PATH. Complying would mean STARTING to ship binaries: a separate source repo, build CI, and multi-platform artifacts (macOS arm64/x86, Linux) plus a fetch mechanism - a distribution project, not a file move. DECLARED rather than suppressed, so the exception stays visible and auditable; revisit if this plugin ever grows a binary distribution.",
+    "pipeline": {
+      "_intentional_divergence_why": "Each file below is deliberately customized away from the CPV canonical template, so `--force-templates` would REGRESS it (the CPV #144/#145 incident). Declaring them keeps RC-PIPELINE-DRIFT-001 VISIBLE and auditable (CPV still emits an INFO note carrying the full diff) while dropping only the upgrade NUDGE. This is CPV's documented mechanism and is NOT a suppressor: it silences no other finding and cannot un-block a --strict run. Re-review each entry whenever CPV canon moves; remove an entry to re-enable the upgrade nudge for that file.",
+      "intentional_divergence": [
+        "scripts/publish.py",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/notify-marketplace.yml",
+        ".markdownlint.json"
+      ],
+      "_intentional_divergence_reasons": {
+        "scripts/publish.py": "Derives the CPV validator pin from `.cpv-version` via _read_cpv_pin()/_CPV_SPEC instead of hard-coding the tag as canon does. tests/test_cpv_pin_ssot.py::test_no_source_file_hardcodes_the_pin scans the whole tracked tree and FAILS on a re-forked literal, so force-templating publish.py would both re-fork the pin and break the test suite that publish.py itself gates on. Also carries the janitor integrity-manifest gate.",
+        ".github/workflows/ci.yml": "Carries (a) the literal CPV pin plus a retry-on-hang wrapper (CPV remote validation has hung on a flaky remote; exit 124 retries, a real 1-4 severity exit fails fast), (b) the `memgrep build+stage smoke` job that exercises the release build+stage path on every push - the recurrence guard for the v0.7.0 incident AND the CI-smoke mitigation that clears CPV's own untested-until-release advisory, and (c) strict per-hook and per-detector smoke (exit 0 AND no Traceback), the v0.7.1 lesson. Canon's ci.yml has none of these.",
+        ".github/workflows/release.yml": "Already recognized BY DESIGN for this plugin's detected `binary-release` pipeline profile. Beyond that it carries hand-written CPV exit-code handling that distinguishes a real verdict (exits 1-4) from an infra 'FAILED TO RUN', plus the pre-warm/timeout strategy sized for CPV's REPO-LINT of the vendored Rust crate (measured 13m21s), plus the literal CPV pin the SSOT test pins to `.cpv-version`.",
+        ".github/workflows/notify-marketplace.yml": "Sends `version` in the repository-dispatch client-payload, which the marketplace receiver CONSUMES (Emasoft/ai-maestro-plugins .github/workflows/update-plugin-version.yml reads client_payload.version). Canon's template omits that field, so force-templating would silently break the marketplace auto-update chain. The canon hardening this file was genuinely missing (the MARKETPLACE_PAT no-op gate, the commands/agents path filters, canon's pinned dispatch action) has been adopted.",
+        ".markdownlint.json": "Canon's rule set PLUS MD001 and MD012 disabled. Both are load-bearing, measured against the tracked tree: MD012 (multiple consecutive blank lines) has 82 violations - git-cliff generates the CHANGELOG with multi-blank runs (commit 4188aef3) - and MD001 (heading increment) has 2. MD009 was ALSO disabled here with 0 measured violations, so it has been removed and canon's stricter default restored."
+      }
+    }
   }
 }
