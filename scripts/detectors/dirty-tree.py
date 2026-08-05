@@ -11,8 +11,9 @@ When the git safety guard blocks a destructive op, the right moves are
 per-file or additive ONLY: move files to a `_dev/` folder, `git rm` to
 stage a recoverable deletion, or a backup branch. Never a bare `git stash`
 (#188) — on a concurrent-agent host it silently swallows every other
-agent's uncommitted work; path-scoped `git stash push -- <paths>` is the
-narrow escape hatch.
+agent's uncommitted work; path-scoped `git stash push -u -- <paths>` is
+the narrow escape hatch (`-u` because without it an untracked path ERRORS
+instead of stashing).
 """
 
 from __future__ import annotations
@@ -139,7 +140,10 @@ def main() -> int:
         f"Commit now — frequent commits are the recovery net. Stage specific files by name (never 'git add -A'). "
         f"If git safety blocks a destructive op: move files to a _dev/ folder, use 'git rm' to stage a recoverable "
         f"deletion, or create a backup branch. Never bare 'git stash' — other agents may have uncommitted work "
-        f"in this tree; if you must park files, 'git stash push -- <paths you own>'.",
+        # -u is required, not decorative: without it a path-scoped stash ERRORS on an untracked
+        # file ("did not match any file(s) known to git" — verified empirically), and untracked
+        # files are exactly what a dirty-tree nudge is usually about (PR-206 review finding).
+        f"in this tree; if you must park files, 'git stash push -u -- <paths you own>'.",
     )
     if line is not None:
         print(line)

@@ -141,5 +141,7 @@ def test_the_nudge_never_recommends_a_bare_git_stash(tmp_path: Path) -> None:
 
     assert "dirty-tree" in out
     assert "'git stash' to park work" not in out, "the whole-tree stash recommendation is back"
-    assert "git stash push -- " in out, "the path-scoped escape hatch must be named"
+    # -u is load-bearing (PR-206 review): without it, a path-scoped stash ERRORS on an untracked
+    # file — and untracked files are what a dirty-tree nudge is usually about.
+    assert "git stash push -u -- " in out, "the path-scoped escape hatch must include -u"
     assert "Never bare 'git stash'" in out
