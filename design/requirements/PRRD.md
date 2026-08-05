@@ -1,6 +1,6 @@
 ---
-prrd-version: 1.2
-updated: 2026-08-04T20:10:00+0200
+prrd-version: 1.3
+updated: 2026-08-05T06:14:05+0200
 project: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
 mirrors: []
@@ -26,11 +26,12 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 
 ## 🥇 GOLDEN — set by the USER (immutable to MANAGER)
 
-- **G1.1** — Every agent that writes to GitHub (issue, issue comment, PR, PR comment, PR review, discussion, release note) MUST begin the body with a one-line self-identification of which agent/role/plugin authored it, because all AI Maestro agents share the single human-owner GitHub identity (the owner's gh CLI auth). Recommended leading line: _Posted by the Claude developing **<plugin-or-role>** (via the shared @owner gh auth)._ Commit messages SHOULD carry an `Agent: <role>` trailer.
+- **G1.2** — Every agent that writes to GitHub (issue, issue comment, PR, PR comment, PR review, discussion, release note) MUST begin the body with a one-line self-identification of which agent/role/plugin authored it, because all AI Maestro agents share the single human-owner GitHub identity (the owner's gh CLI auth). Recommended leading line: _Posted by the Claude developing **<plugin-or-role>** (via the shared gh CLI auth user name)._ Commit messages SHOULD carry an `Agent: <role>` trailer. The self-identification line MUST NOT contain a bare `@name`: GitHub linkifies one outside a code span, so a template every agent copies verbatim would page whatever real account holds that name on every post.
 - **G7.1** — `CLAUDE.md` is an INDEX, not a knowledge store. It MUST contain exactly five elements and nothing else: (1) a one-paragraph project description, (2) the project URLs, (3) the dev-ops commands, (4) the janitor-generated project-map fence, (5) the janitor-generated wikimem index fence. Every line is re-read into every session's context on every turn, so prose parked here is paid for forever by every agent, whether or not it is relevant to the task at hand.
 - **G8.1** — Any line added to `CLAUDE.md` outside G7.1's five elements MUST be migrated out by the janitor's scheduled chores into the wikimem page that owns its subject — created as a new atom, or folded into an existing atom plus a new `[^N]` lesson learned. The migration is AUTOMATIC and mandatory, not an advisory nudge: a rule that depends on an agent noticing a reminder is the failure mode this replaces.
 - **G9.1** — The ONLY content exempt from G8.1 is basic dev-ops command knowledge: git, commit, branching, merging, linting, building, testing, tagging, pushing, CI, publishing, installing, deploying. Everything else — architecture, gotchas, incident history, design rationale, conventions — MUST live in a wikimem page and be reached by recall.
 - **G10.1** — Every ROOT topic of the PROJECT wikimem MUST appear in `CLAUDE.md`'s wikimem index, and the project-map fence MUST be present and regenerated when the code structure changes. An index that omits a root topic makes that topic unreachable for any agent that does not already know it exists, which defeats the purpose of moving knowledge out under G8.1.
+- **G11.1** — An agent MAY open issues and post comments ONLY on GitHub repositories owned by the account currently authenticated in the `gh` CLI. Writing to any repository NOT owned by that account requires EXPLICIT authorization from the MANAGER, granted per case, never standing. The MANAGER may grant it in exactly two situations: (a) it is absolutely needed to fix a VERIFIED bug that is blocking the development of a project — verified meaning reproduced, not suspected; or (b) the current `gh` CLI auth user is an ai-maestro USER whom the MANAGER authorized to collaborate on a project owned by the MAESTRO USER, and the work requires writing or commenting on a MAESTRO-USER-owned repository. Rationale: every agent on this host writes through ONE shared human identity, so a post on a repository the human does not own is published in their name to a third party, is visible immediately, and cannot be unpublished — deletion does not undo notification, and GitHub retains edit history. The blast radius of a wrong call therefore lands on the human, not the agent, which is why the default is refuse-and-ask rather than judge-for-yourself.
 
 ## 🥈 SILVER — MANAGER-mutable (agents propose via COS)
 
