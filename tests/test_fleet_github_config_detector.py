@@ -183,3 +183,86 @@ def test_a_repo_fixed_while_the_fleet_is_still_dirty_has_its_proposal_WITHDRAWN(
     _run(tmp_path, [{"slug": "o/other", "code": "UNPROTECTED", "detail": "d"}])
 
     assert _proposals(tmp_path) == []
+
+
+# ── the server's findings file (janitor#197 ask 2) ────────────────────────────────────
+# ai-maestro absorbs `github-config-audit` and publishes a wire-identical payload — but to
+# `~/.aimaestro/`, because a standing owner directive on that project limits its writes to
+# `~/.aimaestro` and `~/agents`. It cannot reach into our state dir, so the consumer reaches
+# across. Selection is by `generated_at`, NOT by a server-liveness probe.
+#
+# These call `_read_findings()` DIRECTLY rather than driving the detector as a subprocess.
+# A subprocess test here would be vacuous: the tmp project has no resolvable repo slug, so the
+# detector exits 0 silently down every path and `returncode == 0` would assert nothing about
+# which file was read. The new logic lives in `_read_findings`, so that is what gets tested.
+
+
+def _load_detector():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fgc_under_test", _DETECTOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _payload(when: str) -> dict:
+    return {"generated_at": when, "repos_scanned": 14, "findings": []}
+
+
+def _stage(tmp_path: Path, monkeypatch, *, ours: object = None, theirs: object = None):
+    """Write either/both findings files and point the module at them. Returns the module."""
+    gsd = tmp_path / "global-state"; gsd.mkdir(parents=True, exist_ok=True)
+    home = tmp_path / "home"; (home / ".aimaestro").mkdir(parents=True, exist_ok=True)
+    if ours is not None:
+        (gsd / "github-config-findings.json").write_text(
+            ours if isinstance(ours, str) else json.dumps(ours), encoding="utf-8")
+    if theirs is not None:
+        (home / ".aimaestro" / "github-config-findings.json").write_text(
+            theirs if isinstance(theirs, str) else json.dumps(theirs), encoding="utf-8")
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("HOME", str(home))
+    mod = _load_detector()
+    monkeypatch.setattr(mod.gs, "global_state_dir", lambda: gsd)
+    return mod
+
+
+def test_the_servers_file_is_read_when_we_have_none(tmp_path, monkeypatch) -> None:
+    """The handover case: the server took the chore, so our daemon never wrote a file. Before
+    janitor#197 this read only our path and went silent — the audit ran and nobody heard it."""
+    mod = _stage(tmp_path, monkeypatch, ours=None, theirs=_payload("2026-08-05T12:00:00Z"))
+    got = mod._read_findings()
+    assert got is not None and got["generated_at"] == "2026-08-05T12:00:00Z"
+
+
+def test_neither_side_present_returns_none(tmp_path, monkeypatch) -> None:
+    """Absence is not a finding."""
+    mod = _stage(tmp_path, monkeypatch)
+    assert mod._read_findings() is None
+
+
+def test_a_malformed_file_loses_and_never_suppresses_the_other(tmp_path, monkeypatch) -> None:
+    """A corrupt payload must LOSE, not win — otherwise one bad writer silences the fleet audit."""
+    mod = _stage(tmp_path, monkeypatch, ours="{ not json",
+                 theirs=_payload("2026-08-05T12:00:00Z"))
+    got = mod._read_findings()
+    assert got is not None and got["generated_at"] == "2026-08-05T12:00:00Z"
+
+
+def test_the_newer_side_wins_in_BOTH_directions(tmp_path, monkeypatch) -> None:
+    """The invariant that keeps handover honest. A server that STOPS running the chore must stop
+    winning the moment our daemon's next beat lands — choosing on liveness instead would let a
+    live-but-idle server's stale audit mask a fresher local one, the same bug class as gating the
+    daemon's exit on server_is_alive() rather than on the chore claim (#134)."""
+    mod = _stage(tmp_path, monkeypatch, ours=_payload("2026-08-05T23:00:00Z"),
+                 theirs=_payload("2026-08-05T01:00:00Z"))
+    assert mod._read_findings()["generated_at"] == "2026-08-05T23:00:00Z", "ours newer -> ours"
+
+    mod2 = _stage(tmp_path / "b", monkeypatch, ours=_payload("2026-08-05T01:00:00Z"),
+                  theirs=_payload("2026-08-05T23:00:00Z"))
+    assert mod2._read_findings()["generated_at"] == "2026-08-05T23:00:00Z", "theirs newer -> theirs"
+
+
+def test_a_non_object_payload_is_rejected_not_returned(tmp_path, monkeypatch) -> None:
+    """Valid JSON that is not an object (a bare list) must not reach the summarizer."""
+    mod = _stage(tmp_path, monkeypatch, ours="[1, 2, 3]")
+    assert mod._read_findings() is None

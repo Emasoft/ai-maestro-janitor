@@ -100,16 +100,58 @@ def _propose_for_this_repo(payload: object) -> None:
         state.log_line(_NAME, f"could not raise GHCFG-001: {r.why}")
 
 
+#: Where ai-maestro publishes its own copy when it has absorbed `github-config-audit`
+#: (janitor#197). It cannot write into our state dir — that project has a standing owner
+#: directive that its only writes are `~/.aimaestro` and `~/agents` — so the consumer has to
+#: reach across instead. Wire-identical payload: same FINDING_CODES, same shape, same
+#: tri-state silence rules, and the population is parsed from OUR marketplace catalog rather
+#: than their constants (theirs covered 10 of 14 repos, so a partial audit could have stamped
+#: the chore done while four repos went unaudited).
+def _server_findings_path() -> Path:
+    """Resolved at CALL time, not import time, so `$HOME` redirection actually takes effect —
+    a module-level `Path.home()` would bake in the real home before a test could move it, and
+    the suite runs this detector as a subprocess precisely to keep the real machine untouched."""
+    return Path.home() / ".aimaestro" / gca.FINDINGS_FILENAME
+
+
+def _load(path: Path) -> dict | None:
+    """Parse one findings file, or None when absent/unreadable/not an object."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_findings() -> dict | None:
+    """The freshest fleet-audit payload: ours, or the server's when it owns the chore.
+
+    Ordering is by `generated_at`, NOT by a liveness check on the server. Whoever ran the
+    audit most recently is the one with something to say, and that keeps the read honest in
+    both handover directions — a server that just took the chore over has the newer file, and
+    a server that has stopped running it stops winning by default the moment our daemon's next
+    beat lands. Deciding on liveness instead would let a live-but-idle server's stale audit
+    permanently mask a fresher local one, which is the same class of bug as gating the daemon's
+    exit on `server_is_alive()` rather than on the chore claim (#134).
+
+    A malformed or missing file on either side simply loses; it never suppresses the other.
+    """
+    candidates = [p for p in (_load(gs.global_state_dir() / gca.FINDINGS_FILENAME),
+                              _load(_server_findings_path())) if p is not None]
+    if not candidates:
+        return None
+    # `generated_at` is ISO-8601 UTC from both writers, so lexical order is chronological.
+    return max(candidates, key=lambda p: str(p.get("generated_at", "")))
+
+
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FLEET_GITHUB_CONFIG_ENABLED", True):
         return 0
     state.init_state()
 
-    findings_file = gs.global_state_dir() / gca.FINDINGS_FILENAME
-    try:
-        payload = json.loads(findings_file.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, ValueError):
-        # No audit written yet (daemon hasn't run its 6h beat), or unreadable → silent.
+    payload = _read_findings()
+    if payload is None:
+        # No audit written yet (neither the daemon's 6h beat nor a server), or unreadable → silent.
         return 0
 
     # PER-PROJECT CHANNELING: everything below is scoped to THIS repo's slug. No slug ⇒
