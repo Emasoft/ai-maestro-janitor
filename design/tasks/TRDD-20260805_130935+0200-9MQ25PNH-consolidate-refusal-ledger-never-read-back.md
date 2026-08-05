@@ -19,9 +19,13 @@ implementation-commits: []
 which of the three fixes to take. This card exists because two agent reports carried a decision
 and reports are gitignored/ephemeral — the decision had to survive them.
 
-**NEXT ACTION:** pick a fix (§ Options) and implement with a test that asserts an unchanged,
-already-refused candidate set does NOT re-dispatch after an unrelated byte changes elsewhere in
-the corpus.
+**NEXT ACTION:** implement the **refusal-aware fingerprint** (option 3, made precise in the
+2026-08-05 section below — option 1 alone was investigated and is UNSOUND). Concretely:
+`corpus_fingerprint(root)` gains a way to exclude pages covered by a live refusal, and
+`consolidate_has_work` compares that narrowed fingerprint. Then the two acceptance tests.
+
+The design is settled and grounded in the live ledger + proposal file; what remains is the edit
+and its tests. Do NOT re-derive the candidate model — it is written down below with the evidence.
 
 ## The finding
 
@@ -79,6 +83,51 @@ refused?"* — and only the first is being asked.
 
 This is also self-aggravating: the memory chores WRITE to the corpus, so a productive `conflict`
 or `atomize` run changes the fingerprint and thereby re-opens `consolidate`.
+
+## 2026-08-05, later — OPTION 1 AS WRITTEN IS UNSOUND. Take option 3, in the specific form below.
+
+Grounded in the real ledger and the real proposal file, not in the card's original guess.
+
+**What the candidates actually are.** Consolidate refusals are NOT keyed on this gate's
+`(tier, type)` structural pairs. They are keyed on the **librarian's aggregation candidates** —
+whole groups. Verified from the live ledger:
+
+```
+USER   a-regression-test-must-be-verified-to-fail.md|debugging-methodology-verify-before-concluding.md|…  (6 pages)
+USER   macos-keychain-access-inheritance.md|macos-keychain-locking.md                                     (2 pages)
+LOCAL  feedback_oauth_rotator_design_directives.md|reference_oauth_renew_browser_transport_solution.md|…  (4 pages)
+```
+
+Those keys are byte-for-byte the page lists in the `### Aggregation candidates` bullets
+(`- topic \`oauth+renew+rotator\` (4 notes): a.md, b.md, …`) under each `## <SCOPE> scope` heading.
+So a `conflict_has_work`-style filter is directly implementable: the parser constants
+(`_SCOPE_HEADING_RE`, `_NO_CANDIDATES_SENTINEL`) already exist; it needs an
+`### Aggregation candidates` heading constant, a bullet regex, and an
+`aggregation_candidates(root, scope)` mirroring `conflict_pairs`.
+
+**But the conflict pattern must NOT be copied wholesale, and this is the trap.** `conflict_has_work`
+treats an ABSENT/empty proposal as *idle* — legitimate, because the conflict skill's own
+precondition says "Empty/absent → stop". **Consolidate does not stop there.** Its report shows a
+second discovery path: *"Also manually surveyed the most-recently-touched pages in the scope"*. So
+for consolidate, "every librarian candidate is refused" does **not** imply idle — a corpus change
+elsewhere could have created a candidate the librarian has not yet surfaced.
+
+**Therefore the sound gate is a REFUSAL-AWARE FINGERPRINT** (option 3, made precise):
+
+> Compute the corpus fingerprint over only those pages **not covered by a live refusal**. Suppress
+> when that narrowed fingerprint is unchanged since the last dispatch.
+
+Why this is sound where option 1 alone is not:
+- A page under a live refusal has already been judged, so excluding it from the fingerprint stops an
+  unrelated edit elsewhere from re-opening a settled group.
+- If a refused page's own bytes change, `memory_refusals` invalidates that refusal on its
+  `content_hash`, the page re-enters the fingerprint, and the chore re-arms — automatically.
+- Any genuinely new or edited page is outside every refusal, so it still moves the fingerprint and
+  still re-arms — which preserves the manual-survey path the report documents.
+
+N: do NOT implement plain option 1 (suppress when all surfaced candidates are refused). It would
+silently disable the agent's self-survey, which is a real discovery path, and the failure would be
+invisible — a missed merge looks exactly like no merge.
 
 ## Options (pick one)
 
