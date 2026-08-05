@@ -1,0 +1,105 @@
+---
+trdd-id: VXFNDHXT
+title: The cache-TTL probe times out intermittently and its fallback fabricates the one value that disables the guard
+column: todo
+created: 2026-08-05T11:17:53+0200
+updated: 2026-08-05T11:17:53+0200
+current-owner: claude-ai-maestro-janitor
+task-type: bugfix
+scope: project
+severity: high
+relevant-rules: []
+blocked-by: []
+implementation-commits: []
+---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+**Not started. Root cause is MEASURED (below); the fix is a design decision, not a one-liner.**
+
+Two defects, discovered together on 2026-08-05 while answering janitor#190. They compound: the
+first makes the fallback fire often, the second makes the fallback harmful.
+
+### Defect 1 — the 5s probe timeout loses a race it cannot win reliably
+
+`heartbeat_cadence.probe_account_status(command, *, timeout=5.0)` runs
+`agentlenspro get_account_status`, which makes a network call. Measured on this host, three
+consecutive runs:
+
+```
+run 1: 9.18s     run 2: 6.29s     run 3: 2.89s        probe timeout = 5.00s
+```
+
+Decisive A/B through the janitor's own function:
+
+```
+timeout= 5.0s -> None   (hit the bound at 5.01s)
+timeout=30.0s -> 60     (succeeded in 1.06s)
+```
+
+So the binary is present (`/opt/homebrew/bin/agentlenspro`), the command is correct, the JSON is
+well-formed and carries `cacheTtl.minutes` — and the probe still fails a large fraction of the
+time, purely on latency variance. Every failure is silent by design (fail-open) and lands as
+`{"minutes": 60, "probed_at": …, "source": "fallback"}`.
+
+**The 5s is not arbitrary and must not simply be raised.** Its docstring gives the reason: the
+probe sits on the heartbeat path, so a hung agentlensPro must not block every fire. Raising the
+bound trades one cost for another.
+
+### Defect 2 — the fallback fabricates exactly the value that disables the guard
+
+`_env_fallback_minutes` returns 60 for a non-API-key session. `tier_to_cron` collapses every
+tier to `*/5` only when `ttl_minutes < _SLOW_TTL_MIN` (30). **So the fallback is, precisely, a
+value at which the FAST-TTL guard can never trigger.** When the probe fails on a machine whose
+real TTL is 5 (subscription over plan credits — the case `_env_fallback_minutes`'s own docstring
+admits it cannot see), the session runs `*/15` or `*/30` with a cache that dies between fires:
+every fire pays a full cold prefix WRITE (~1.25x) instead of a warm read (0.1x). The MANAGER
+measured ~530k on a single such fire on a 21 MB transcript (janitor#190).
+
+**On THIS host the bug is invisible**, because the true TTL is also 60 — the fabricated value
+coincides with the measured one. That coincidence is why it survived: the state file looked
+correct.
+
+### The fix is NOT "flip the fallback to 5"
+
+That was the ask on janitor#190 and it is the wrong shape on its own: it would put every
+probe-less session on `*/5` — 12 fires/hour fleet-wide — to protect the minority whose TTL is
+actually short. Being wrong toward warm is cheaper per fire but not free, and it would be wrong
+on most machines.
+
+**Preferred design — never let a fabricated value overwrite a measured one.** Three parts:
+
+1. **On probe FAILURE, reuse the last PROBE-sourced value even when stale**, marked
+   `source: "stale-probe"`, instead of substituting the env guess. A measurement from 40 minutes
+   ago is strictly better evidence than a guess that ignores the account entirely.
+2. **Only fall back to the env guess when NO probe has ever succeeded** on this machine — and in
+   that genuinely-unknown case, fail toward the SAFE tier (short/`*/5`), per the cost asymmetry
+   (wrong-toward-warm costs cheap extra fires; wrong-toward-cold costs a full prefix write each
+   fire, and scales with transcript size).
+3. **Separate TIMEOUT from FAILURE in the timeout budget.** Keep the fire-path bound small, but
+   let a timed-out probe retry out-of-band (or raise the bound only when a cached probe value
+   already exists to fall back on, so a slow probe cannot block a fire that has no answer yet).
+
+Keep `source:` on the value whatever else changes — it is the field that made this diagnosable,
+and the MANAGER's report says the same from the other side.
+
+### Acceptance
+
+- [ ] A probe timeout does not overwrite a previously successful probe value.
+- [ ] `source:` distinguishes `probe` / `stale-probe` / `fallback`.
+- [ ] With no probe ever successful, an unknown TTL resolves to the SHORT regime, not 60.
+- [ ] Unit tests cover: timeout-with-cache, timeout-without-cache, first-ever-run, and that a
+      `stale-probe` value still drives `tier_to_cron` correctly.
+- [ ] A measured before/after on a host where the probe genuinely fails — both numbers taken the
+      same way (a delta needs two identical measurements).
+
+**NEXT ACTION:** decide part 3's shape (out-of-band retry vs conditional bound), since parts 1-2
+are settled. Then implement with tests, and reply on janitor#190 with the result.
+
+## Context
+
+Raised by the MANAGER on janitor#190 after measuring a ~530k cache-miss write on an idle session.
+Their first ask (make the TTL a first-class term in the tier decision) was already implemented and
+they withdrew it; their corrected ask is parts 2-3 above. Their framing is worth preserving:
+`source: "fallback"` is *"an unmeasured value wearing the shape of a measurement"* — the same
+pattern as a rule citing an enforcer that does not exist, or a version string that never changes.
