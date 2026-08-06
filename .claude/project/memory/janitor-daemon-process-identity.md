@@ -79,7 +79,37 @@ pressure drops sharply, but the breaker's exit-cause blindness is untouched. Do 
   what the guardian could not reach while the grant did not stick.
 - [[janitor-fleet-control-plane]] — where the quarantine + daemon state live.
 
+
+^ATOM-C0XG-WBGJ [desc:"the global daemon logs to global-state/daemon.log (JANITOR_LOG_DIR), never a project tree, and its [s:] tag is its SPAWNER's session id — not a session-shim marker", keywords: grep_found_zero_lines_in_daemon.log where_does_the_global_daemon_write_its_log is_this_line_the_daemon_or_a_per-session_shim s:_tag_in_janitor_logs JANITOR_LOG_DIR project_.janitor/logs/daemon.log_is_not_the_daemon chore-coordination_lines_missing, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
+
+**The global daemon does not log into any project tree.** `daemon.py:2169` runs
+`os.environ.setdefault("JANITOR_LOG_DIR", str(gs.global_state_dir()))`, and `state.log_dir()`
+(`state.py:166`) returns that override when set, so the daemon's log is
+`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log`.
+A project's `<repo>/.janitor/logs/daemon.log` is written by the **per-session detector shims**
+(`detectors/version-update.py`, `detectors/user-plugins-update.py`, …), never by the daemon.
+
+So `grep -c chore-coordination <repo>/.janitor/logs/daemon.log` → 0 is **not** evidence the
+daemon never yielded. Measured 2026-08-06: that grep returned 0 while the real log held 9 such
+lines, including a live yield of all five server-claimed chores. `lsof -p <daemon-pid>` cannot
+settle it either — `log_line` opens, appends and closes per line, so no handle is ever held. [^3]
+
+
+^ATOM-KNJC-DMC1 [desc:"the [s:8hex] tag on a janitor log line is its writer's SPAWNING session, not a session-shim marker — the detached daemon inherits CLAUDE_CODE_SESSION_ID", keywords: what_does_the_s:_prefix_in_a_janitor_log_line_mean is_an_s-tagged_line_a_session_shim how_to_tell_daemon_lines_from_shim_lines CLAUDE_CODE_SESSION_ID_inherited_by_the_daemon session_id_in_daemon.log, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
+
+**`[s:<8hex>]` identifies the writer's SPAWNER, not a session shim.** `state.log_line` prefixes
+it whenever `CLAUDE_CODE_SESSION_ID` is set, and a detached daemon INHERITS that variable from
+whichever session spawned it — so the daemon's own lines carry a session tag exactly like a
+shim's. The tag can never, on its own, tell the two apart.
+
+To attribute a line, use the FILE PATH (see the sibling atom on where the daemon logs), or
+compare its tag against the daemon log's own tag set. Measured 2026-08-06: daemon pid 30605 was
+spawned by session `c9ae7481` and every one of its lines is tagged `[s:c9ae7481]`; a
+`task 'version-update'` line tagged `[s:643908a6]` sat in the *project* log, and that id appears
+**zero** times in the daemon's log — a shim, conclusively.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-KK8S-MZ1D, status:valid, desc:"a breaker that counts attempts cannot testify to a cause", keywords:"quarantine_entry_says_crash-loop is_this_version_really_bad breaker_tripped_so_the_version_must_be_broken", ocd:2026-08-06, lmd:2026-08-06] DO NOT treat a `crash-loop` quarantine entry as evidence that a version crashed, BECAUSE the breaker counts spawn ATTEMPTS and never reads the exit cause, so orderly SIGTERM churn from an unrelated eviction loop manufactures the identical record. DO read the daemon log for an actual traceback or a non-zero exit BEFORE accepting the verdict or rolling back.
 [^2]: [id:ATOM-G885-IWX6, status:valid, desc:"the --system flag is what makes the resolution cwd-independent", keywords:"uv_python_find_returns_the_wrong_interpreter resolved_the_venv_python_instead_of_the_managed_one grant_still_not_sticking_after_the_fix", ocd:2026-08-06, lmd:2026-08-06] DO NOT resolve the daemon's interpreter with a bare `uv python find`, BECAUSE run from inside a project it answers that project's `.venv/bin/python3` — a cwd-DEPENDENT identity that no TCC grant can follow. DO pass `--system --managed-python <pin>` so the answer is the fixed managed-install path regardless of where the resolver happens to run.
+[^3]: [id:ATOM-YPP0-PALA, status:valid, desc:"a log's silence is only evidence once you have proved the writer writes THERE", keywords:"grep_returned_zero_so_the_code_never_ran absence_of_log_lines_as_evidence I_concluded_a_contradiction_from_an_empty_grep wrong_log_file log_path_overridden_by_env proving_where_a_process_logs", ocd:2026-08-06, lmd:2026-08-06] DO NOT conclude anything from a log's SILENCE until you have proved that writer writes to that file, BECAUSE a log path can be redirected by an env override (`JANITOR_LOG_DIR`) or a differing cwd, so grepping the conventional path yields a confident, wholly fictional zero — here it manufactured a "CONFIRMED CONTRADICTION" between `claimed_chores()` and the daemon, blocked TRDD-6CRC9SQQ's item 1 as unbuildable, and leaked a false "Verified (do not re-verify)" line into TRDD-50V256RH. DO read the path RESOLVER in the writer's own code (`log_dir()` and its override) before treating absence as data — it is cheaper than any runtime probe, and `lsof` cannot answer it at all because `log_line` opens/appends/closes per line.
