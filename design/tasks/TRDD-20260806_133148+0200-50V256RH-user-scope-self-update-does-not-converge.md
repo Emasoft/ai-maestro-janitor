@@ -116,16 +116,23 @@ has.** Weigh their gating decisions with that in mind.
 3. Is the live-skill staleness a harness LIMITATION or a bug worth filing upstream? Not
    determined — and filing is outward-facing, so it is the owner's call.
 
-### NEXT ACTION (one step, runnable)
+### NEXT ACTION (one step, runnable) — an OWNER decision, not a code step
 
-Answer OPEN QUESTION 2 — it is the cheapest and it decides the card's whole shape: grep the
-owner's stale session transcript for a `[janitor-reload]` marker after `2026-08-06T06:25` local.
+The diagnosis is done and the janitor's own chain is proven correct, so there is nothing to fix
+in it. What remains is a choice the owner has to make, because every option is either
+outward-facing or changes destructive-lever defaults:
 
-- **Marker present** ⇒ signalling worked; the defect is in CONSUMPTION (the session saw it and
-  stayed on 2.3.0). Investigate what consuming it is supposed to DO and why it didn't.
-- **Marker absent** ⇒ the 06:25 stamp never reached a session; investigate the stamp→marker path.
+1. **Accept `/clear` as the convergence mechanism** — then TRDD-PXP08ZQC's daemon wiring and
+   TRDD-5C42VCUX's idle clear stop being cost optimisations and become the fix for THIS card
+   too, which strengthens the case for enabling them.
+2. **File the live-skill staleness upstream** (harness limitation vs bug is undetermined).
+   Outward-facing ⇒ owner's call.
+3. **Warn instead of converge** — a detector that says "this session's SKILLS are N versions
+   behind the cache; only a new session will pick them up". Cheap, honest, no destructive
+   default changed. This is the one I would implement first if asked.
 
-Then question 1 (`pmset -g log` for a sleep window) to confirm the daemon gap is benign.
+Do NOT start by writing convergence code: the convergence already works everywhere the janitor
+controls.
 
 ### SUPERSEDED — do NOT carry forward
 
