@@ -90,16 +90,37 @@ path.
 - The transition-flag inference built on the zero-line count (`daemon.py:2281`) — sound reasoning,
   worthless input.
 
-### NEXT ACTION (one step, runnable)
+### ✔ ITEM 1 SHIPPED — `claimed-chore-stale` (`1e803e47`)
 
-Build the item-1 janitor-side watchdog: for each name in `harness_backend.claimed_chores()`,
-compare `global_state.read_last_run(<chore>)` against 3x that chore's cadence and raise a LOUD
-finding when a CLAIMED chore's completion stamp is stale. The set is non-empty on this host today
-(all five), so the guard is testable the moment it exists — freeze a stamp and watch it fire.
+`scripts/detectors/claimed-chore-stale.py` + the pure `scripts/lib/claimed_chore_watch.py`,
+hourly in the dispatch roster, the MIRROR of `global-chore-blackout`. 14 unit tests; full suite
+14605 passed.
 
-Two things to settle while writing it, both recorded in Acceptance below: whether the janitor may
-UN-YIELD a demonstrably dead claim (needs hysteresis so a server restart cannot flap ownership),
-and the replay argument against janitor#221's recorded timestamps.
+- **Evidence channel CONFIRMED FIRST.** All five claimed chores had fresh
+  `~/.claude/janitor-control/<chore>.last-run.ts` stamps before a line was written, so this is
+  not another guard watching an empty set.
+- **Verified both ways**: silent on the healthy host; fires on a stamp frozen 4 days back
+  (96h against an 11m bound) — janitor#221's exact shape.
+- **Bound**: `max(3 x cadence, cadence + 600s)`. The floor matters — 3x alone gives
+  `oauth-rotator-tick` a 180s window, inside normal jitter, which is the issue-#9 false-positive
+  `daemon_watchdog` already paid for.
+- **Unknown chore ⇒ SKIPPED, never guessed** (per-chore capability claims can name chores this
+  version has never heard of).
+- **`no-evidence` is itself a finding**: a claimed chore with no stamp means the watchdog is
+  blind to it, and silence about that is how a guard becomes decorative.
+- **SURFACE-ONLY** — no un-yield. That decision is still open (below).
+
+### NEXT ACTION (one step) — the un-yield decision, then item 2
+
+Record the un-yield decision in Acceptance: may the janitor RESUME a chore whose claim has
+demonstrably gone dead? It needs hysteresis or a server restart flaps ownership. Note the
+binary-coordination rule (TRDD-LU0C5KAR) removed exactly this class of janitor-side fallback
+once already — so "no, alarm only" is a defensible answer and may be the right one; what is not
+acceptable is leaving it unrecorded.
+
+Then the replay argument: with `claimed-chore-stale` in place, would janitor#221 have alarmed?
+Its recorded timestamps are the input; `oauth-rotator-tick`'s bound is 11m against a 3.7-day
+wedge, so the argument looks trivial — write it down rather than assume it.
 
 ### Item 2 is OUTWARD-FACING and cannot be closed here
 
@@ -147,8 +168,12 @@ claimed-but-wedged chore is strictly worse than an unclaimed one, because the fa
 ## Acceptance
 
 - [ ] the chore⇄token⇄stamp⇄bound table exists in ARCHITECTURE.md and is agreed on the
-      #126/#111 threads
-- [ ] watchdog fires on claimed-but-stale within 3x cadence (test: freeze a stamp)
+      #126/#111 threads — OUTWARD-FACING, owner's call to initiate
+- [x] watchdog fires on claimed-but-stale within 3x cadence (test: freeze a stamp) —
+      `claimed-chore-stale` (`1e803e47`); verified silent on the healthy host and firing on a
+      stamp frozen 4 days back. Bound is `max(3 x cadence, cadence + 600s)`; the floor is
+      documented in `claimed_chore_watch.DEFAULT_MIN_GRACE_S` and is not a widening of the 3x
+      headline, it is what makes 3x usable at a 60s cadence
 - [ ] un-yield-on-dead-claim decision recorded (yes with hysteresis, or no with why)
 - [ ] replay check: with this in place, the #221 wedge would have alarmed on our side
       — argued in the card, ideally demonstrated with the recorded timestamps
