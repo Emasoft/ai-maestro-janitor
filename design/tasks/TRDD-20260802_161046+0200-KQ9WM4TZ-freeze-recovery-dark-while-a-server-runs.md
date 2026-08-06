@@ -1,10 +1,10 @@
 ---
 trdd-id: KQ9WM4TZ
 title: Standalone sessions have no freeze recovery while an ai-maestro server runs
-column: testing
+column: ai_review
 pre-block-column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-06T07:43:00+0200
+updated: 2026-08-06T08:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -12,10 +12,22 @@ severity: high
 parent-trdd: 5ZVS1DDP
 blocked-by: []
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [ac419694]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-06 08:25 — decision taken: breadcrumb SHIPPED, evidence accepted, `testing → ai_review`
+
+The NEXT ACTION below offered accept-as-is vs add-a-quiet-gate-trace; both are now done.
+`record_outcome` in the detector (commit `ac419694`) writes `<epoch> <outcome>` to
+`global-state/peer-recovery.outcome` on EVERY beat — quiet gates included — deduped to one
+small write per hour machine-wide (change-or-stale-only rewrite, the ZNN0UK5K sensitivity),
+flipping instantly when a dark window opens. 11/11 detector tests pass. Testing evidence =
+the one proven gate-clean dark-window beat (stamp 2026-08-05 18:33:45, below) + the gate-order
+code review + the new trace for any future window. Review focus for `ai_review`: the dedupe
+window (1h) vs the 600 s beat pacing, and whether `no-peers` after a stamped beat deserves
+its own log line.
 
 ### 2026-08-06 morning — the observation LANDED, one gate-clean dark-window beat PROVEN; plus an observability caveat the criterion missed
 
