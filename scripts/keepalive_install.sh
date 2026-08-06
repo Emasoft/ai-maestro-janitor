@@ -53,18 +53,34 @@ detect_platform() {
 #
 # resolve_interpreter prints the interpreter argv tokens (space-separated, on ONE
 # line) of the FIRST runnable interpreter found, by ABSOLUTE path (so no PATH is
-# needed at launch). Order: `uv run --script` (brings any PEP-723 deps; the daemon
-# declares none, so this is belt-and-suspenders) → `python3` → a discovered
-# `python3.13/.12/.11/.10`. CPV-persistence-clean: this resolves only the
-# INTERPRETER; the launched SCRIPT stays the fixed verbatim entry path baked below —
-# never a dynamically chosen/loaded script. Prints NOTHING (empty) when no
-# interpreter is found, so the caller fails LOUD and still writes a shebang-fallback
-# config (fail-OPEN: a missing-interpreter host is no worse off than before D-α).
+# needed at launch). Order (TRDD-DB1P25S4): uv's MANAGED CPython → a discovered
+# `python3`/`python3.x` → `uv run --script` as the LAST resort. The managed
+# interpreter comes first because macOS TCC persists an Automation grant only
+# against a STABLE client identity: `uv run --script` execs an EPHEMERAL
+# ~/.cache/uv/builds-v0/.tmpXXXX/bin/python shim — a NEW binary path on every
+# respawn — so no grant can ever attach to the daemon twice and its osascript fleet
+# scans trip the iTerm-denial alarm forever (GH#92 / TRDD-VQ4LX7ND). The managed
+# path (~/.local/share/uv/python/cpython-<pin>.../bin/python3.12) never moves, which
+# is why the user's existing grant sticks to it. `--system` is LOAD-BEARING on the
+# find: without it a project's .venv/bin/python3 wins when cwd is inside a repo — a
+# cwd-dependent identity. The daemon's import closure is stdlib-only BY DESIGN, so a
+# plain interpreter runs it unchanged; `uv run` (PEP-723 deps) is kept only so a
+# host with uv but NO stable python still starts the daemon at all.
+# CPV-persistence-clean: this resolves only the INTERPRETER; the launched SCRIPT
+# stays the fixed verbatim entry path baked below — never a dynamically
+# chosen/loaded script. Prints NOTHING (empty) when no interpreter is found, so the
+# caller fails LOUD and still writes a shebang-fallback config (fail-OPEN: a
+# missing-interpreter host is no worse off than before D-α).
+MANAGED_PYTHON_PIN="3.12" # keep in step with global_state._MANAGED_PYTHON_PIN
 resolve_interpreter() {
-  local p
+  local uv_bin="" p mp
   if p="$(command -v uv 2>/dev/null)" && [ -n "$p" ]; then
-    printf '%s run --script' "$p"
-    return 0
+    uv_bin="$p"
+    if mp="$("$uv_bin" python find --system --managed-python "$MANAGED_PYTHON_PIN" 2>/dev/null)" &&
+      [ -n "$mp" ] && [ -x "$mp" ]; then
+      printf '%s' "$mp"
+      return 0
+    fi
   fi
   local c
   for c in python3 python3.13 python3.12 python3.11 python3.10 python; do
@@ -73,6 +89,10 @@ resolve_interpreter() {
       return 0
     fi
   done
+  if [ -n "$uv_bin" ]; then
+    printf '%s run --script' "$uv_bin"
+    return 0
+  fi
   return 1
 }
 

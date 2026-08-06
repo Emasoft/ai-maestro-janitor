@@ -910,6 +910,177 @@ def test_daemon_needs_restart_unparseable_path_fails_safe_true(state_dir: Path) 
     assert gs._restart_decision("python /opt/custom/install/daemon.py", _daemon_bare("0.31.0"), set()) is True
 
 
+# ---- TRDD-DB1P25S4 / janitor#211: own-stable-daemon guards + deciding-version ----
+# quarantine. The keepalive entry and the DATA-staged daemon.py run from FIXED,
+# version-less paths, so the unparseable-version fail-safe above used to SIGTERM
+# them on EVERY fire (ticket T-RVZX688P's eviction loop); and neither roll
+# direction may reseat the daemon on a QUARANTINED deciding version (the #211
+# ping-pong that falsely tripped the crash-loop breaker).
+
+_KEEPALIVE_CMDLINE = (
+    "/u/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12 "
+    "/u/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins"
+    "/scripts/daemon_keepalive_entry.py --keepalive"
+)
+_DATA_DAEMON_CMDLINE = (
+    "python3.12 /u/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins"
+    "/scripts/daemon.py"
+)
+
+
+def test_keepalive_launched_daemon_is_never_evicted(state_dir: Path) -> None:
+    """A keepalive-launched daemon (version-less FIXED DATA argv) is never evicted — in any
+    roll direction, quarantined or not (the pure-core guard the agentlens report §7 asked for)."""
+    gs = _gs()
+    assert gs._restart_decision(_KEEPALIVE_CMDLINE, _daemon_bare("2.4.1"), set()) is False
+    assert gs._restart_decision(_KEEPALIVE_CMDLINE, _daemon_bare("2.4.1"), {"2.4.1"}) is False
+    assert gs._restart_decision(_KEEPALIVE_CMDLINE, _daemon_bare("2.3.0"), set()) is False
+
+
+def test_data_staged_daemon_is_never_evicted(state_dir: Path) -> None:
+    """The DATA-staged daemon.py (direct-interpreter plist / hand-spawn shape) is the same
+    class as the keepalive entry: version-less BUT re-staged from the live cache by
+    construction — the argv-mismatch SIGTERM on this shape is what undid the TCC hot fix."""
+    gs = _gs()
+    assert gs._restart_decision(_DATA_DAEMON_CMDLINE, _daemon_bare("2.4.1"), set()) is False
+    assert gs._restart_decision(_DATA_DAEMON_CMDLINE, _daemon_bare("2.3.0"), {"2.4.1"}) is False
+
+
+def test_roll_forward_into_quarantined_version_is_refused(state_dir: Path) -> None:
+    """janitor#211 forward half: a NEWER-but-QUARANTINED deciding cache must not SIGTERM a
+    healthy older daemon to reseat itself; with a clean decider roll-forward is unchanged."""
+    gs = _gs()
+    assert gs._restart_decision(_daemon_path("2.3.0"), _daemon_bare("2.4.1"), {"2.4.1"}) is False
+    assert gs._restart_decision(_daemon_path("2.3.0"), _daemon_bare("2.4.1"), set()) is True
+
+
+def test_roll_down_onto_quarantined_decider_is_refused(state_dir: Path) -> None:
+    """janitor#211 symmetry: rolling DOWN is legitimate only onto a known-good version — when
+    the deciding older version is itself quarantined, let the running daemon stand."""
+    gs = _gs()
+    assert (
+        gs._restart_decision(_daemon_path("2.4.1"), _daemon_bare("2.3.0"), {"2.4.1", "2.3.0"})
+        is False
+    )
+
+
+# ---- managed-interpreter resolution for the daemon spawn (TRDD-DB1P25S4) ----
+# TCC persists an Automation grant only against a STABLE binary identity; `uv run
+# --script` mints an ephemeral per-spawn python shim, so the spawn must prefer uv's
+# MANAGED CPython and fall back to the shim only when none resolves.
+
+
+def test_managed_python_path_returns_validated_path(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`uv python find --system --managed-python <pin>` success → its stdout path, provided
+    it is a real executable. `--system` is LOAD-BEARING (without it a project's .venv wins,
+    a cwd-dependent identity); both flags must be on the argv."""
+    gs = _gs()
+    fake_py = tmp_path / "python3.12"
+    fake_py.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_py.chmod(0o755)
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{fake_py}\n", stderr="")
+
+    monkeypatch.setattr(gs.subprocess, "run", fake_run)
+    assert gs._managed_python_path() == str(fake_py)
+    assert seen and "--system" in seen[0] and "--managed-python" in seen[0]
+
+
+def test_managed_python_path_none_on_failure(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No uv, a failing find, or a non-executable result → None (callers fall back)."""
+    gs = _gs()
+
+    def raising_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        raise FileNotFoundError("no uv")
+
+    monkeypatch.setattr(gs.subprocess, "run", raising_run)
+    assert gs._managed_python_path() is None
+
+    def failing_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no interpreter found")
+
+    monkeypatch.setattr(gs.subprocess, "run", failing_run)
+    assert gs._managed_python_path() is None
+
+    ghost = tmp_path / "not-there" / "python3.12"
+
+    def ghost_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{ghost}\n", stderr="")
+
+    monkeypatch.setattr(gs.subprocess, "run", ghost_run)
+    assert gs._managed_python_path() is None
+
+
+class _FakeProc:
+    pid = 4242
+
+
+def test_spawn_prefers_managed_interpreter(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """spawn_daemon_detached launches daemon.py under the MANAGED interpreter when one
+    resolves — the daemon (and its osascript children, which inherit sys.executable) then
+    carry the TCC-granted stable identity instead of the ungrantable uv shim."""
+    gs = _gs()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
+
+    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    assert gs.spawn_daemon_detached() == 4242
+    assert calls[0][0] == "/stable/python3.12"
+    assert calls[0][1].endswith("daemon.py")
+
+
+def test_spawn_falls_back_to_uv_run_without_managed(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No managed interpreter → `uv run --script` remains the launcher (a running daemon
+    beats none, even under the ephemeral identity)."""
+    gs = _gs()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(gs, "_managed_python_path", lambda: None)
+
+    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    assert gs.spawn_daemon_detached() == 4242
+    assert calls[0][:4] == ["uv", "run", "--script", "--quiet"]
+
+
+def test_spawn_skips_failing_launcher(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A launcher that cannot exec (OSError) is skipped, not fatal — the next candidate
+    in the managed → uv-run → sys.executable ladder is tried."""
+    gs = _gs()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
+
+    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(list(cmd))
+        if len(calls) == 1:
+            raise FileNotFoundError("interpreter vanished")
+        return _FakeProc()
+
+    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    assert gs.spawn_daemon_detached() == 4242
+    assert calls[0][0] == "/stable/python3.12"
+    assert calls[1][:4] == ["uv", "run", "--script", "--quiet"]
+
+
 def test_daemon_needs_restart_no_daemon_returns_false(state_dir: Path) -> None:
     """No daemon pid on disk → daemon_needs_restart is False (nothing to restart)."""
     gs = _gs()

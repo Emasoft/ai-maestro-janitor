@@ -1513,6 +1513,52 @@ def daemon_script_path() -> Path:
     return Path(__file__).resolve().parent.parent / "daemon.py"
 
 
+# TRDD-DB1P25S4: the python version the janitor pins everywhere (uv venv, CI, the
+# owner's granted interpreter). `_managed_python_path` resolves uv's MANAGED CPython
+# for this pin — the FIXED-path interpreter a macOS TCC Automation grant can stick to.
+_MANAGED_PYTHON_PIN = "3.12"
+
+
+def _managed_python_path() -> Optional[str]:
+    """Absolute path of uv's MANAGED CPython for the pinned version, or None.
+
+    WHY (TRDD-DB1P25S4 / GH#92): macOS TCC persists an Automation grant against a
+    STABLE client identity. `uv run --script` mints an EPHEMERAL
+    `~/.cache/uv/builds-v0/.tmpXXXX/bin/python` shim — a NEW binary path on every
+    respawn — so no grant can ever attach to the same client twice, and the daemon's
+    osascript fleet scans trip the iTerm-denial alarm forever. uv's MANAGED
+    interpreter (`~/.local/share/uv/python/cpython-<pin>.../bin/python3.12`) never
+    moves, which is why the owner's grant sticks to it. Both daemon spawn paths (this
+    session-side one and the launchd plist baked by
+    keepalive_install.sh::resolve_interpreter) must therefore prefer it.
+
+    `--system` is LOAD-BEARING: without it, `uv python find` run from inside a
+    project returns that project's `.venv/bin/python3` (measured), a cwd-dependent
+    identity that defeats the whole point. `--managed-python` restricts the search
+    to uv-managed installs; when none matches the pin the command exits non-zero and
+    we return None (find never downloads anything).
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["uv", "python", "find", "--system", "--managed-python", _MANAGED_PYTHON_PIN],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    path = out.splitlines()[-1].strip()
+    if path and os.path.isfile(path) and os.access(path, os.X_OK):
+        return path
+    return None
+
+
 def spawn_daemon_detached() -> Optional[int]:
     """Spawn the daemon as a fully-detached child. Return child PID or None.
 
@@ -1525,6 +1571,14 @@ def spawn_daemon_detached() -> Optional[int]:
     Race-safe: if multiple sessions call this at once, every spawned child
     races for the singleton flock; only one wins and continues the loop,
     the rest exit immediately on flock failure.
+
+    Interpreter choice (TRDD-DB1P25S4): prefer uv's MANAGED CPython so the daemon —
+    and every osascript child it spawns, since its children inherit
+    `sys.executable` — carries the STABLE binary identity the user's TCC Automation
+    grant is attached to. `uv run --script` is only the fallback: it mints an
+    ephemeral, ungrantable python shim per spawn (see `_managed_python_path`). The
+    daemon's import closure is stdlib-only BY DESIGN (keepalive staging), so plain
+    python runs it unchanged; uv was ever only a launcher convenience.
     """
     init_global_state()
     state.atomic_write(_spawn_marker_path(), str(int(time.time())))
@@ -1533,30 +1587,19 @@ def spawn_daemon_detached() -> Optional[int]:
     if not script.is_file():
         state.log_line("daemon", f"daemon script missing at {script} — cannot spawn")
         return None
-    try:
-        # Use sys.executable + script path explicitly so we don't depend on
-        # an `uv` shebang being honored under every parent (cron, subshells,
-        # etc.). The daemon script itself is PEP 723 — but invoking it via
-        # `uv run --script` directly works on every host that has uv.
-        # We prefer `uv run` because it brings the PEP 723 deps; if uv is
-        # missing we fall back to plain python (and the daemon will detect
-        # any import errors and exit gracefully).
-        cmd_uv = ["uv", "run", "--script", "--quiet", str(script)]
-        proc = subprocess.Popen(  # noqa: S603 - explicit args, no shell
-            cmd_uv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
-        return proc.pid
-    except FileNotFoundError:
-        # uv missing → try plain python (the daemon's PEP 723 deps will be
-        # missing, but the daemon detects and logs that itself).
+    candidates: list[list[str]] = []
+    managed = _managed_python_path()
+    if managed:
+        candidates.append([managed, str(script)])
+    # `uv run --script` still resolves the PEP 723 header on hosts without a managed
+    # 3.12; plain `sys.executable` is the last resort (the daemon detects and logs
+    # missing deps itself — its closure declares none).
+    candidates.append(["uv", "run", "--script", "--quiet", str(script)])
+    candidates.append([sys.executable, str(script)])
+    for cmd in candidates:
         try:
-            proc = subprocess.Popen(  # noqa: S603
-                [sys.executable, str(script)],
+            proc = subprocess.Popen(  # noqa: S603 - explicit args, no shell
+                cmd,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1564,12 +1607,9 @@ def spawn_daemon_detached() -> Optional[int]:
                 close_fds=True,
             )
             return proc.pid
-        except OSError as exc:
-            state.log_line("daemon", f"fallback spawn failed: {exc}")
-            return None
-    except OSError as exc:
-        state.log_line("daemon", f"spawn failed: {exc}")
-        return None
+        except OSError as exc:  # FileNotFoundError included — try the next launcher
+            state.log_line("daemon", f"spawn via {cmd[0]} failed: {exc}")
+    return None
 
 
 # ---------- reload GENERATION (Claude /reload-plugins after plugin auto-update) --
@@ -1716,6 +1756,28 @@ def _cache_version_from_path(text: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+# TRDD-DB1P25S4: the DATA-staged daemon.py — the verbatim copy `launchd_keepalive.restage`
+# keeps mirrored from the NEWEST cache at the FIXED persistent DATA path. Its argv carries
+# no `/ai-maestro-janitor/<semver>/` cache segment BY DESIGN, so the version extractor
+# below reads it as "unparseable → fail-safe restart" and a heartbeat would SIGTERM it on
+# EVERY fire (the keepalive relaunches it; the next fire kills it again — the exact
+# eviction loop of janitor#211 / ticket T-RVZX688P).
+_DATA_STAGED_DAEMON_MARKER = (
+    "/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon.py"
+)
+
+
+def _is_own_stable_daemon(cmdline: str) -> bool:
+    """True iff `cmdline` is a janitor daemon launched from a STABLE, version-less
+    path the janitor itself owns — the L0 keepalive entry or the DATA-staged
+    daemon.py. Such a daemon is by construction CURRENT (the keepalive machinery
+    re-stages it from the freshest cache on every respawn), so the cache-version
+    recency gate must never read its version-less argv as "stale"."""
+    if "daemon_keepalive_entry.py" in cmdline:
+        return True
+    return _DATA_STAGED_DAEMON_MARKER in cmdline
+
+
 def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> bool:
     """PURE core of daemon_needs_restart's version-RECENCY gate (B-2 / CC 2.1.200).
 
@@ -1725,19 +1787,40 @@ def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> boo
     out as a pure function so the directionality logic is unit-testable without a
     live process. The WHY of each branch:
 
+      * keepalive / DATA-staged     → False: a daemon launched from the janitor's own
+                                    FIXED version-less path (L0 entry, DATA-staged
+                                    daemon.py) is re-staged from the live cache by
+                                    construction. Without this guard the unparseable-
+                                    version fail-safe below evicts it on EVERY fire —
+                                    the self-sustaining kill loop that tripped the
+                                    crash-loop breaker and falsely quarantined 2.4.1
+                                    (TRDD-DB1P25S4, ticket T-RVZX688P). Guarded HERE,
+                                    in the pure core, so every caller is safe — the
+                                    caller-side guard alone left this hole open to any
+                                    other path into this function.
       * exact path match          → False: the daemon already runs the current
                                     cache's daemon.py; nothing to roll.
-      * current cache is NEWER     → True:  normal roll-forward — a plugin update
-                                    landed while the old daemon still ran old code.
+      * current cache is NEWER     → roll forward ONLY iff the DECIDING (current)
+                                    version is not itself QUARANTINED (janitor#211):
+                                    a quarantined newer cache must never SIGTERM a
+                                    healthy older daemon to reseat itself — that is
+                                    the forward half of the version ping-pong (the
+                                    roll-down half below correctly rolled back, the
+                                    two alternated forever). When every version is
+                                    quarantined the answer is "let the running daemon
+                                    stand": returning False here never starves — a
+                                    daemon is running by definition in this gate.
       * current cache is OLDER     → restart ONLY iff the running (newer) daemon's
-                                    version is QUARANTINED. This is the one CC
-                                    2.1.200 fix: a mere path DIFFERENCE must not let
-                                    an OLDER reinstalled/downgraded cache SIGTERM a
-                                    NEWER running daemon and respawn itself from the
-                                    older cache ("older build seizes the daemon").
+                                    version is QUARANTINED and the deciding version
+                                    is NOT. This is the one CC 2.1.200 fix: a mere
+                                    path DIFFERENCE must not let an OLDER
+                                    reinstalled/downgraded cache SIGTERM a NEWER
+                                    running daemon ("older build seizes the daemon").
                                     The single legitimate downgrade is C3
                                     auto-rollback DOWN to a known-good older version
-                                    after the newer one was proven bad (quarantined).
+                                    after the newer one was proven bad (quarantined) —
+                                    and a quarantined DECIDER is not known-good, so it
+                                    may not perform even that (janitor#211 symmetry).
       * same version, other path   → False: same code, don't thrash the daemon.
       * either version unparseable → True:  fail-safe to the pre-B-2 "roll on any
                                     diff" so a genuinely-relocated/reinstalled path
@@ -1745,6 +1828,8 @@ def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> boo
                                     real reinstall, not a downgrade, so restarting is
                                     the safe default when recency can't be proven.
     """
+    if _is_own_stable_daemon(cmdline):
+        return False
     if expected in cmdline:
         return False
     import version_update_lib as _vul  # lazy: keeps global_state's top-level import
@@ -1760,11 +1845,13 @@ def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> boo
     if running_t == (-1,) or current_t == (-1,):
         return True  # non-semver segment → fail-safe restart (same as above)
     if current_t > running_t:
-        return True  # roll-forward — this heartbeat's cache is newer than the daemon
+        # Roll-forward — but never INTO a quarantined version (janitor#211).
+        return current_ver not in quarantined
     if current_t < running_t:
         # Older heartbeat vs a newer running daemon: never downgrade UNLESS the newer
-        # running version is quarantined (proven-bad → legitimate C3 rollback DOWN).
-        return running_ver in quarantined
+        # running version is quarantined (proven-bad → legitimate C3 rollback DOWN) AND
+        # the deciding older version is itself clean (janitor#211 symmetry).
+        return running_ver in quarantined and current_ver not in quarantined
     return False  # same version, path differs only in location → no code change
 
 
@@ -1801,14 +1888,16 @@ def daemon_needs_restart() -> bool:
     if not cmdline:
         return False
     # The OS-keepalive (L0) daemon runs the STABLE entry `daemon_keepalive_entry.py` from
-    # the FIXED DATA path (TRDD-71ABD7V7); its argv is that entry, never a cache
-    # `daemon.py`. The cache-path comparison below would therefore ALWAYS judge it "stale"
-    # and SIGTERM it — and launchd would immediately respawn it, so the next heartbeat
-    # SIGTERMs it again: an endless restart loop. It is NOT stale by that measure: launchd
-    # owns its lifecycle and it re-stages its own DATA copy toward the freshest cache on
-    # respawn (launchd_keepalive.restage / staged_is_current). Session-side restart must
-    # leave it alone.
-    if "daemon_keepalive_entry.py" in cmdline:
+    # the FIXED DATA path (TRDD-71ABD7V7); the DATA-staged `daemon.py` beside it is the
+    # same class (TRDD-DB1P25S4). Neither argv carries a cache version, so the cache-path
+    # comparison below would ALWAYS judge them "stale" and SIGTERM them — and launchd would
+    # immediately respawn, so the next heartbeat SIGTERMs again: an endless restart loop.
+    # They are NOT stale by that measure: the keepalive machinery re-stages the DATA copy
+    # toward the freshest cache on respawn (launchd_keepalive.restage / staged_is_current).
+    # Session-side restart must leave them alone. _restart_decision carries the same guard
+    # in its pure core, but this early exit ALSO covers the quarantine-read-failure
+    # fallback below, which bypasses _restart_decision entirely.
+    if _is_own_stable_daemon(cmdline):
         return False
     expected = str(daemon_script_path().resolve())
     try:

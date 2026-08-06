@@ -23,6 +23,7 @@ import os
 import plistlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -352,6 +353,120 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         assert toks[-1] == "--keepalive"
         assert toks.index(expected_entry) == len(toks) - 2
         assert "$HOME" not in text
+
+
+# ── Interpreter resolution both ways (TRDD-DB1P25S4) ─────────────────────────
+# TCC persists an Automation grant only against a STABLE binary identity, so the
+# baked interpreter must be uv's MANAGED CPython when one resolves; the `uv run`
+# shim (an ephemeral per-spawn binary no grant can stick to) is the LAST resort.
+# Hermetic: a curated PATH (no python*) + a scripted fake `uv` control the outcome.
+
+
+def _fakebin(tmp_path: Path, uv_body: str) -> Path:
+    """A curated PATH dir holding ONLY the tools the installer needs plus a scripted
+    fake `uv` — and crucially NO python*, so interpreter resolution is fully
+    test-controlled instead of depending on the host."""
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    for tool in ("uname", "mkdir", "cat", "awk", "mv", "rm"):
+        real = shutil.which(tool)
+        assert real is not None, f"host is missing {tool}"
+        (fakebin / tool).symlink_to(real)
+    uv = fakebin / "uv"
+    uv.write_text(uv_body, encoding="utf-8")
+    uv.chmod(0o755)
+    return fakebin
+
+
+def _run_installer_with_path(fake_home: Path, fakebin: Path) -> None:
+    bash = shutil.which("bash")
+    assert bash is not None
+    env = {
+        **os.environ,
+        "HOME": str(fake_home),
+        "PATH": str(fakebin),
+        "KEEPALIVE_SKIP_ACTIVATION": "1",
+    }
+    env.pop("XDG_CONFIG_HOME", None)
+    proc = subprocess.run(
+        [bash, str(INSTALLER), "install"],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def _baked_interpreter_tokens(fake_home: Path, plat: str) -> list[str]:
+    """The interpreter argv the WRITTEN runtime config carries BEFORE the entry token."""
+    entry = str(
+        fake_home
+        / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon_keepalive_entry.py"
+    )
+    if plat == "macos":
+        cfg = fake_home / "Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist"
+        toks = list(plistlib.loads(cfg.read_bytes())["ProgramArguments"])
+    else:
+        cfg = fake_home / ".config/systemd/user/com.ai-maestro-janitor.daemon.service"
+        text = cfg.read_text(encoding="utf-8")
+        line = next(ln for ln in text.splitlines() if ln.startswith("ExecStart="))
+        toks = shlex.split(line[len("ExecStart=") :])
+    assert entry in toks, f"entry missing from baked config: {toks!r}"
+    return toks[: toks.index(entry)]
+
+
+@pytest.mark.real_subprocess("bash")
+def test_config_bakes_managed_python_first(tmp_path: Path) -> None:
+    """Rendering, way 1: `uv python find --system --managed-python <pin>` resolves → THAT
+    absolute path (the stable, TCC-grantable identity) is the whole baked interpreter —
+    never the `uv run` shim. The find must carry both flags: `--system` is load-bearing
+    (without it a project's .venv wins), `--managed-python` pins the stable install."""
+    plat = launchd_keepalive.current_platform()
+    if plat == "other":
+        pytest.skip(f"no OS keepalive on {sys.platform}")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    managed = tmp_path / "managed" / "python3.12"
+    managed.parent.mkdir()
+    managed.write_text("#!/bin/sh\n", encoding="utf-8")
+    managed.chmod(0o755)
+    arglog = tmp_path / "uv-args.log"
+    uv_body = (
+        "#!/bin/bash\n"
+        f"echo \"$@\" >> '{arglog}'\n"
+        'if [ "$1" = python ] && [ "$2" = find ]; then\n'
+        f"  echo '{managed}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n"
+    )
+    fakebin = _fakebin(tmp_path, uv_body)
+    _run_installer_with_path(fake_home, fakebin)
+    assert _baked_interpreter_tokens(fake_home, plat) == [str(managed)]
+    logged = arglog.read_text(encoding="utf-8")
+    assert "--system" in logged and "--managed-python" in logged
+
+
+@pytest.mark.real_subprocess("bash")
+def test_config_falls_back_to_uv_run_without_any_stable_python(tmp_path: Path) -> None:
+    """Rendering, way 2: no managed CPython and no python3 anywhere on PATH → the
+    `uv run --script` shim is baked as the LAST resort (an ungrantable identity, but a
+    running daemon beats none)."""
+    plat = launchd_keepalive.current_platform()
+    if plat == "other":
+        pytest.skip(f"no OS keepalive on {sys.platform}")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    uv_body = (
+        "#!/bin/bash\n"
+        'if [ "$1" = python ] && [ "$2" = find ]; then\n'
+        "  exit 1\n"  # no managed python on this host
+        "fi\n"
+        "exit 1\n"
+    )
+    fakebin = _fakebin(tmp_path, uv_body)
+    _run_installer_with_path(fake_home, fakebin)
+    assert _baked_interpreter_tokens(fake_home, plat) == [
+        str(fakebin / "uv"), "run", "--script",
+    ]
 
 
 # ── Currency: cache resolution + restage/activate split + self-heal predicate ─
