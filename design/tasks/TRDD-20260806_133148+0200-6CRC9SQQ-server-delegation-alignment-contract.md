@@ -3,7 +3,7 @@ trdd-id: 6CRC9SQQ
 title: Janitor-server delegation has no alignment contract — a server-claimed chore can wedge for days and neither side notices
 column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T19:45:00+0200
+updated: 2026-08-06T23:00:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -16,98 +16,96 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
 
-**Started. A CONFIRMED CONTRADICTION was found before any code was written — and it invalidates
-the premise of this card's item 1.** No fix yet, deliberately: the cause is not established and
-I will not invent one (I already had to withdraw one guessed root cause today, on TRDD-50V256RH).
+**Log provenance RESOLVED — and the "contradiction" I recorded here is DISPROVED. There is no
+contradiction: the daemon yields exactly as `claimed_chores()` says.** The whole thing was one
+mistake — I grepped the wrong file. Item 1 is UNBLOCKED and its premise holds.
 
-### The contradiction
+### ✔ WHICH LOG THE GLOBAL DAEMON WRITES (verified from the resolver, then from the file)
 
-Out-of-process, everything says the daemon SHOULD be yielding five chores right now:
+The global daemon does **not** log into any project's `.janitor/logs/`. `daemon.py:2169` runs
+`os.environ.setdefault("JANITOR_LOG_DIR", str(gs.global_state_dir()))`, and `state.log_dir()`
+(`state.py:166`) returns that override when present. So the daemon's log is:
 
 ```
-server_runs_chores()  -> True          (server pid 19594, up since Aug 6 13:21)
-claimed_chores()      -> ['marketplace-refresh','oauth-rotator-supervisor',
-                          'oauth-rotator-tick','user-plugins-update','version-update']
-_task_yielded_to_server(name, True) = True for all five
+~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log
 ```
 
-In-process, the daemon says it has **never yielded anything**:
+Live, 9 979 lines, last written 22:51 today. It carries **9 `chore-coordination` lines**:
 
-- `grep -c "chore-coordination" .janitor/logs/daemon.log` → **0**. Not one line of EITHER kind
-  (yield or resume), in a log spanning 2026-07-21 → now, i.e. the daemon's whole lifetime.
-- The log is transition-only (`if bool(yielded) != chores_yielded_last_loop`) and the flag
-  **initializes to `False`** (`daemon.py:2281`) — so zero transitions means `yielded` has been
-  EMPTY on every loop, not "always yielding silently". This inference was checked, not assumed.
-- The daemon **ran** `version-update` at 16:35:59 — three hours AFTER the server came up.
+```
+2026-08-05T20:43:07 [s:c9ae7481] yielding to active ai-maestro server: [all five]
+2026-08-06T06:23:39 [s:c9ae7481] server no longer confirmed active — resuming singleton chores
+2026-08-06T06:25:57 [s:c9ae7481] yielding to active ai-maestro server: [all five]
+```
 
-### Hypotheses ELIMINATED (do not re-test these)
+And since that 20:43 yield: **zero** `task '<any of the five>' starting` lines, while the chores
+the daemon still owns (`fleet-stop`, `memory-guard`, `session-liveness`) run every minute. The
+yield is real and it is honoured.
+
+### ✔ `[s:...]` DOES NOT DISTINGUISH DAEMON FROM SHIM (the other wrong idea, retired)
+
+`log_line` emits `[s:<id>]` whenever `CLAUDE_CODE_SESSION_ID` is set — and the detached daemon
+INHERITS it from whichever session spawned it. `ps eww -p 30605` shows
+`CLAUDE_CODE_SESSION_ID=c9ae7481…`, which is exactly the tag on its own lines. The tag means
+"who spawned me", not "I am a session shim".
+
+The 16:35:59 `version-update` line was therefore **not** the daemon: it lives in the *project*
+log, tagged `[s:643908a6]` — a session id that appears **zero** times in the real daemon log. It
+is the per-session shim `detectors/version-update.py`. Consistent with the daemon yielding.
+
+### What this costs and what it buys
+
+Everything under "the contradiction" was an artifact of one wrong path. `claimed_chores()` and
+the daemon AGREE; the daemon never ran a yielded chore; no premise of this card is invalidated.
+
+**Item 1 is UNBLOCKED and now well-motivated**: five chores are handed to the server *right now*
+and nothing on our side verifies the server runs them — a watchdog would watch a NON-empty set,
+which was the exact thing in doubt.
+
+### Hypotheses eliminated (kept — all still true, none of them was the answer)
 
 | hypothesis | result |
 |---|---|
 | version skew — daemon runs older code | **No.** Daemon runs `2.4.1/scripts/daemon.py` (pid 30605, up since Aug 5 20:43) |
-| my probe measured different code than the daemon | **No.** `diff` of cache vs repo `harness_backend.py` → IDENTICAL, and both compute the same five chores |
-| stale in-memory module (imported before an update) | **No.** `harness_backend.py` mtime 19:06 predates the daemon's 20:43 start; only 2 `.py` files changed after, both venv internals |
-| memoized claim/liveness result | **No.** `server_runs_chores()` documents "No memo"; `server_capabilities()` re-reads the probe file per call |
-| env override in the daemon's inherited environment | **No.** `ps eww -p 30605` shows no `JANITOR_AIMAESTRO_*` override; my shell has none either |
+| my probe measured different code than the daemon | **No.** `diff` of cache vs repo `harness_backend.py` → IDENTICAL, same five chores |
+| stale in-memory module (imported before an update) | **No.** `harness_backend.py` mtime 19:06 predates the daemon's 20:43 start |
+| memoized claim/liveness result | **No.** `server_runs_chores()` documents "No memo"; `server_capabilities()` re-reads per call |
+| env override in the daemon's environment | **No.** `ps eww -p 30605` shows no `JANITOR_AIMAESTRO_*` override |
+| daemon HOME / `_liveness_path()` divergence | **No.** `HOME=/Users/emanuelesabetta`, identical to the shell's |
+| chore-name vs task-name mismatch | **No.** The daemon's own `_build_tasks()` + `_yielded_task_names()` return all five names exactly |
 
-### ⚠ THE "ZERO YIELD LINES" EVIDENCE IS NOT SAFE TO USE YET (added later same day)
+**Dead end — do not repeat:** `lsof -p <daemon-pid>` shows no log file held open, because
+`state.log_line` opens/appends/closes per line. The method that worked was cheaper than any
+runtime probe: **read the path RESOLVER** (`log_dir()` + its env override), not the conventional
+path.
 
-The contradiction above leans on *"zero `chore-coordination` lines in `daemon.log`"*. **I never
-established that the GLOBAL daemon writes to the log I grepped.** What is now known:
+### SUPERSEDED — do NOT carry forward
 
-- The daemon's env has `PWD=/Users/emanuelesabetta/Code/AgentlensPro` and no `CLAUDE_PROJECT_DIR`,
-  while `state.log_line` writes to the PROJECT's `.janitor/logs/` — so its log could be elsewhere.
-- `~/Code/AgentlensPro/.janitor/logs/daemon.log` is **104 bytes, last written Jul 16** — not it.
-- The only other `daemon.log` on the machine is `~/ai-maestro/.janitor/logs/daemon.log`,
-  **127 bytes, Aug 5 18:33** — also not it.
-- The janitor project's own `daemon.log` DOES carry `task 'version-update' starting/done` at
-  16:35:59 — but tagged `[s:643908a6]`, a SESSION id. Per-session detector shims exist for exactly
-  these chores (`detectors/version-update.py`, `detectors/user-plugins-update.py`, the latter
-  documented as "Per-session shim — owned by the global daemon"). **So that line may be a
-  per-session shim, not the global daemon's task loop at all** — in which case "the daemon ran a
-  yielded chore" is unfounded and there may be no contradiction.
+- *"the yield has never handed over anything on this host"* — false; it has yielded five chores
+  since Aug 5 20:43.
+- *"zero `chore-coordination` lines in the daemon's whole lifetime"* — false; wrong file. The
+  project-scoped `.janitor/logs/daemon.log` is written by per-session shims, not the daemon.
+- *"the daemon ran `version-update` three hours after the server came up"* — false; that was the
+  per-session shim `[s:643908a6]`.
+- The transition-flag inference built on the zero-line count (`daemon.py:2281`) — sound reasoning,
+  worthless input.
 
-**RESOLVE THIS FIRST.** Establish which file the global daemon (pid 30605) actually writes, and
-whether `[s:...]`-tagged lines come from the daemon or from session shims. Until then, treat the
-contradiction as UNCONFIRMED and do not build on it.
+### NEXT ACTION (one step, runnable)
 
-**Dead end already tried — do not repeat:** `lsof -p <daemon-pid>` shows NO log file held open.
-`state.log_line` opens, appends and closes per line, so an instantaneous handle probe can never
-catch it. Use a positive method instead: write a uniquely-identifiable line via the daemon's own
-code path, or instrument `state.log_line`/`state.project_root()` to report its resolved target.
+Build the item-1 janitor-side watchdog: for each name in `harness_backend.claimed_chores()`,
+compare `global_state.read_last_run(<chore>)` against 3x that chore's cadence and raise a LOUD
+finding when a CLAIMED chore's completion stamp is stale. The set is non-empty on this host today
+(all five), so the guard is testable the moment it exists — freeze a stamp and watch it fire.
 
-### Hypotheses eliminated since (do not re-test)
-
-- **daemon HOME / `_liveness_path()` divergence** — ELIMINATED. `ps eww` shows
-  `HOME=/Users/emanuelesabetta`, identical to the shell's, so it reads the same probe file.
-- **chore-name vs task-name mismatch** — ELIMINATED. Running the daemon's OWN
-  `_build_tasks()` + `_yielded_task_names()` from the 2.4.1 cache returns all five names exactly:
-  `['marketplace-refresh','oauth-rotator-supervisor','oauth-rotator-tick','user-plugins-update','version-update']`.
-
-### STRONGEST UNTESTED HYPOTHESIS (start here)
-
-**The daemon's in-process `_liveness_path()` may not resolve to the file I read.** Everything
-above is out-of-process reconstruction; I never observed the daemon's OWN evaluation. If its
-`HOME`/cwd differs from my shell's, `server_capabilities()` returns `None` in-process ⇒ no claim
-⇒ no yield ⇒ every observation above is consistent with no bug at all. Check the daemon's `HOME`
-in `ps eww` output and compare against `_liveness_path()`'s resolution.
-
-Second: whether the loop reaches `daemon.py:2346` on every iteration, and whether `tasks` there
-contains those names.
-
-### WHY THIS BLOCKS ITEM 1
-
-Item 1 proposes a watchdog on "every chore the yield hands to the server". **On this host the
-yield has never handed over anything**, so that watchdog would watch an empty set and report
-healthy forever — a guard that cannot fire, which this project has now shipped twice
-(`cold_cache_compact`, and nearly a third time in TRDD-PXP08ZQC). Establish whether the yield
-path is exercised at all BEFORE building anything that assumes it is.
+Two things to settle while writing it, both recorded in Acceptance below: whether the janitor may
+UN-YIELD a demonstrably dead claim (needs hysteresis so a server restart cannot flap ownership),
+and the replay argument against janitor#221's recorded timestamps.
 
 ### Item 2 is OUTWARD-FACING and cannot be closed here
 
 The chore⇄token⇄stamp⇄bound table must be *agreed on the #126/#111 threads* — cross-repo
-negotiation, owner's call to initiate. The janitor-side half is buildable alone, but only after
-the contradiction above is resolved.
+negotiation, owner's call to initiate. The janitor-side half (item 1) is buildable alone and is
+no longer blocked.
 
 ## WHY (three incidents, one shape)
 

@@ -149,7 +149,29 @@ controls.
   TRUE — but it did NOT imply what I concluded from it.
 - The timeline table above: cache dir mtimes, `reload_generation()`, and the daemon log's own
   task lines. Measurements, not inference.
-- ZERO `yielding to active ai-maestro server` lines in `daemon.log` or `daemon.log.1`.
+### ✘ CORRECTED 2026-08-06T23:00 — one "verified" item here was WRONG (wrong log file)
+
+This card claimed, under *Verified (do not re-verify)*: **"ZERO `yielding to active ai-maestro
+server` lines in `daemon.log` or `daemon.log.1`"**, and used it to argue the daemon did not stand
+down. **False.** The global daemon does not log into a project tree at all — `daemon.py:2169` sets
+`JANITOR_LOG_DIR` to `global_state_dir()`, so its log is
+`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log`. That file
+carries **9** `chore-coordination` lines, including a yield of all five chores at
+**2026-08-06 06:25:57**. Full evidence on TRDD-6CRC9SQQ.
+
+Two consequences for THIS card:
+
+- **The 16:35 `version-update` was NOT the daemon.** It is tagged `[s:643908a6]` in the *project*
+  log — a session id absent from the real daemon log — i.e. the per-session shim
+  `detectors/version-update.py`. The line "which side performed the 16:35 no-op is not
+  established" is now answered: the session shim did.
+- **Open question 2 dissolves.** `claimed_chores()` and the daemon do NOT disagree; the daemon
+  yielded and never ran a yielded chore. Nothing to chase.
+
+**None of this touches the ROOT CAUSE.** That was established from skill LOAD MARKERS, which are
+independent of any log: `/reload-plugins` does not re-point already-loaded skills. It stands.
+
+### Verified (corrected — this list previously carried the wrong-file claim above)
 
 ## WHY (measured today)
 
