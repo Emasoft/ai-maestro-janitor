@@ -1,10 +1,10 @@
 ---
 trdd-id: KQ9WM4TZ
 title: Standalone sessions have no freeze recovery while an ai-maestro server runs
-column: ai_review
+column: human_review
 pre-block-column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-06T08:25:00+0200
+updated: 2026-08-06T08:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -16,6 +16,23 @@ implementation-commits: [ac419694]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-06 08:40 — ai_review PASSED → `human_review` (the user's queue; awaiting their verdict)
+
+Reviewed against the recorded focus, adversarially, on fresh read of the shipped code:
+- **1h dedupe vs 600s pacing — correct as designed.** Steady healthy state: every session
+  records `daemon-owns-it`, dedupe holds, ~1 write/hour machine-wide. Dark window: outcomes
+  genuinely alternate across sessions (`paced` ↔ `no-peers`/`ran`/`lock-held`), each flip
+  rewrites — MORE granularity exactly when it matters, bounded by heartbeat cadence.
+- **`no-peers` log line — rejected.** The breadcrumb already records `no-peers` with its
+  epoch in the ONE machine-wide place an investigator will look; a per-project log line
+  would duplicate the fact into whichever project happened to win the flock.
+- **Cross-session read-then-write race — safe by construction.** `atomic_write` per writer,
+  last-writer-wins on a single short line; worst case is one redundant write. Clock skew
+  (now < prev_ts) degrades to dedupe-holds, never a crash (int/ValueError caught).
+
+USER: to close this card, bless the breadcrumb design (or ask for changes) — everything
+else on it is done and committed (`ac419694`).
 
 ### 2026-08-06 08:25 — decision taken: breadcrumb SHIPPED, evidence accepted, `testing → ai_review`
 
