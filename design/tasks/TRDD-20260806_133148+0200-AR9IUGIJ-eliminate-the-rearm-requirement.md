@@ -1,9 +1,9 @@
 ---
 trdd-id: AR9IUGIJ
 title: Eliminate the re-arm requirement — no session should need /janitor-arm on every start, update, or tier change
-column: todo
+column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T13:31:48+0200
+updated: 2026-08-06T18:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 scope: project
@@ -13,6 +13,62 @@ implementation-commits: []
 ---
 
 # Eliminate the re-arm requirement (owner failure report 2026-08-06, item 6)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+
+**Spike DECIDED. Verdict: A + C. B was already shipped — and cannot do what the card asks of it.**
+
+### THE LOAD-BEARING FINDING — B fixes RELIABILITY, not COST
+
+Option B is **already live, end-to-end**, verified by running it 2026-08-06:
+
+```
+cron_dead  ->  action='rearm'  ->  command='/janitor-arm'
+```
+
+(`session_liveness.recovery_for_diagnosis` → `fleet_inject.action_to_command`, typed by the
+daemon's `task_session_liveness` beat every 120 s, at every attempt count.)
+
+**But B can never deliver acceptance box 2 as written ("re-armed with ZERO model-turn arm
+cost").** Arming requires `CronCreate`, which is a **MODEL tool** — no daemon, hook or shell can
+call it. This codebase already knows the shape: `clear_trigger.py`'s docstring records that "a
+SessionStart hook is a SHELL script and CANNOT call CronCreate (a MODEL tool)", which is exactly
+why the post-`/clear` bootstrap TYPES `/janitor-arm` instead of arming directly. B converts a
+**missed** arm into a **performed** arm. The turn is paid either way.
+
+So the card conflated two goals. Separated:
+- **reliability** (a dark session self-heals) — **DONE**, shipped, verified above;
+- **cost** (an arm stops costing ~6 quiet fires) — only A eliminates it; only C reduces it.
+
+### The three options, costed
+
+| | verdict | cost / evidence |
+|---|---|---|
+| **A** upstream durable crons | **PURSUE — the only true elimination** | `durable:true` is accepted-but-inert; the CronCreate tool's own docs say "Has no effect — durable persistence is not available… every scheduled job is session-only by platform design". Zero ongoing cost once landed. Timeline not ours. **Outward-facing → needs owner sign-off before filing.** |
+| **B** external trigger | **ALREADY SHIPPED — close it out, do not build** | Verified live (above). Cost unchanged: still one model turn per arm, because CronCreate is model-only. |
+| **C** cost-floor the arm | **PURSUE — the only cost lever we own** | Partly shipped: `should_emit_renew`'s dwell + `commit_tier`'s `demote_fires` are two independent hysteresis layers already. Remaining: tune `dwell_s`, and cut the arm's own round-trips. |
+
+### Measured on THIS session today (first-hand, not modelled)
+
+Two arms in one session: `*/5` at start, then a `*/15` **demotion** renew — which fired right
+after a background agent finished, i.e. the exact flap TRDD-CI6ZTNB9 names. The arm executes as
+**3 round-trips**, not 4, when `sweep=no` and the delete+create are batched into one response
+(prepare → delete+create → record). That is already below the skill's documented 4-call contract.
+
+### NEXT ACTION (one step, runnable) — needs an owner decision first
+
+Two proposals, both awaiting sign-off:
+1. **A:** file the durable-cron ask upstream. **Not filed** — outward-facing publication is not
+   something to do unprompted.
+2. **C:** raise `should_emit_renew`'s `dwell_s` so a demotion cannot pay for a re-arm more than
+   once per N minutes. Needs a value chosen against real flap data, not a guess.
+
+### SUPERSEDED — do NOT carry forward
+
+- Acceptance box 2's "ZERO model-turn arm cost in the common case" via option B. Structurally
+  impossible: `CronCreate` is a model tool. Rewritten below.
+- "option B may be mostly wiring + defaults, not new machinery" — it is not *mostly* wiring, it is
+  **already wired**; the work there is zero.
 
 ## WHY
 
@@ -40,10 +96,15 @@ the requirement still stands and the owner wants it GONE.
 
 ## Acceptance
 
-- [ ] one option chosen with measured/argued costs for all three
-- [ ] after implementation: a killed cron (restart or /clear) is re-armed with ZERO
-      model-turn arm cost in the common case, or the upstream ask is filed + linked
-- [ ] renew churn from tier flapping measurably reduced (ties into TRDD-CI6ZTNB9)
+- [x] one option chosen with measured/argued costs for all three — **A + C**; B verified
+      already-shipped (see STATE)
+- [x] a killed cron (restart or /clear) is re-armed without a MISSED arm — **already true**:
+      `cron_dead → rearm → /janitor-arm`, typed by the daemon's 120 s beat, verified live
+- [ ] ~~ZERO model-turn arm cost via B~~ — **structurally impossible, box withdrawn**:
+      `CronCreate` is a MODEL tool, so no external process can arm. Replaced by:
+      **the upstream durable-cron ask is filed + linked** (owner sign-off needed — outward-facing)
+- [ ] renew churn from tier flapping measurably reduced (ties into TRDD-CI6ZTNB9) — needs a
+      `dwell_s` value chosen against real flap data
 
 ## Pointers
 
