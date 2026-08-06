@@ -71,6 +71,11 @@ established that the GLOBAL daemon writes to the log I grepped.** What is now kn
 whether `[s:...]`-tagged lines come from the daemon or from session shims. Until then, treat the
 contradiction as UNCONFIRMED and do not build on it.
 
+**Dead end already tried — do not repeat:** `lsof -p <daemon-pid>` shows NO log file held open.
+`state.log_line` opens, appends and closes per line, so an instantaneous handle probe can never
+catch it. Use a positive method instead: write a uniquely-identifiable line via the daemon's own
+code path, or instrument `state.log_line`/`state.project_root()` to report its resolved target.
+
 ### Hypotheses eliminated since (do not re-test)
 
 - **daemon HOME / `_liveness_path()` divergence** — ELIMINATED. `ps eww` shows
