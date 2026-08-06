@@ -1633,7 +1633,9 @@ def _phase_idle_clear_nudge() -> bool:
         # Lazy, mirroring the sibling compact phase: only the idle path pays these imports,
         # and the heartbeat's hot path stays import-light.
         import cold_cache_compact  # noqa: PLC0415
+        import external_clear  # noqa: PLC0415 - terminal_from_record (the shape adapter)
         import fleet_scan  # noqa: PLC0415
+        import session_liveness  # noqa: PLC0415 - capture_terminal_identity (env -> fleet shape)
         import terminal_trigger  # noqa: PLC0415
         import user_intent  # noqa: PLC0415
 
@@ -1674,49 +1676,54 @@ def _phase_idle_clear_nudge() -> bool:
         # machinery is already solved in `terminal_trigger` (it waits for an 8s quiet
         # window, re-reads the field, and keeps trying until the command is really SENT),
         # so this is a call, not a mechanism to invent.
-        sent = terminal_trigger.send_self_command(
+        # THE RATIFIED INJECTOR, not the retired one-shot (TRDD-5C42VCUX). This phase used to
+        # call `send_self_command(respect_user_presence=True)` — the exact API
+        # `terminal_trigger.send_verified`'s own docstring says to NEVER use. On iTerm that call
+        # does not merely degrade, it CANNOT WORK: it returns the `USE_ITERM_PATH` sentinel,
+        # which means "caller, run your own osascript". Every sibling trigger script
+        # (compact_trigger, clear_trigger, reload_trigger, resume_trigger, reload_skills_trigger)
+        # has that branch; THIS caller never did, so `sent.startswith("FIRED:")` was False on
+        # EVERY fire and the lever was structurally dead on the owner's own terminal.
+        #
+        # MEASURED 2026-08-06 on this host: `send_self_command(...)` -> `'USE_ITERM_PATH'`,
+        # `.startswith('FIRED:')` -> False. The 2026-08-04 fix that introduced this test cured
+        # the FALSE-POSITIVE half (it used to stamp a 2h cooldown and claim success while typing
+        # nothing) but not the blindness — so the phase went from lying about success to
+        # correctly reporting that it does nothing, forever.
+        #
+        # `send_verified` has no sentinel to forget: it builds steps for whatever channel it is
+        # given, types, RE-READS the pane, and only then submits. Verified on this iTerm session:
+        # channel_is_readable / build_type_only_steps / build_submit_steps / read_pane_text all
+        # succeed. Presence is already a HARD veto above (`present or active -> return False`),
+        # so dropping the retired presence-cancel reintroduces nothing.
+        terminal = external_clear.terminal_from_record(
+            session_liveness.capture_terminal_identity(os.environ)
+        )
+        ok, why = terminal_trigger.send_verified(
+            terminal,
             "/janitor-handoff-and-clear",
             esc_first=False,
-            respect_user_presence=True,
-            # SHORT budget, deliberately (2026-08-05). The gate now DEFERS to a busy pane instead
-            # of refusing outright, but its 120s default is sized for a caller with no other way
-            # to land the command. THIS caller has one — the coarse outer retry described just
-            # below: a refused send is not stamped, so the next heartbeat tries again. A long
-            # inner block would therefore buy nothing and cost everything, stalling a heartbeat
-            # FIRE for two minutes and delaying every other phase behind it.
-            #
-            # 9s covers the case that actually matters here: the presence probe's first rung is
-            # MACHINE-WIDE HID idle, so a user typing in an unrelated app can hold the gate shut
-            # for a moment on a session that is genuinely abandoned. One poll past the 10s
-            # presence window clears that without turning the heartbeat into a blocking call.
-            presence_wait_s=9.0,
+            # BOUNDED, and deliberately LARGER than the 9s the retired call passed — those are
+            # different knobs: 9s was how long to wait for PRESENCE to clear, this is the whole
+            # send budget, and the verified path adds type -> read-back -> submit round-trips on
+            # top of the ratified 8s quiet window (a budget under ~10s could never succeed).
+            # Still short, for the reason the old comment gave and which still holds: this
+            # caller's real retry is the NEXT heartbeat, so a long inner block buys nothing and
+            # stalls every other phase behind it.
+            giveup_s=30.0,
         )
-        # STAMP ONLY ON A SEND — and "a send" means the keystrokes ACTUALLY WENT OUT, i.e. a
-        # `FIRED:` status. The cooldown exists so a CLEARED session does not re-clear; stamping
-        # it after a REFUSED send would instead mean "the user happened to be typing at 03:00,
-        # so skip the clear for two hours" — the veto silently becoming a mute. Not stamping
-        # makes the next heartbeat retry, which is the coarse outer retry; the 8s inner retry is
-        # `terminal_trigger.inject_until_sent`'s three rules and is NOT what this call reaches
-        # today (see the phase docstring).
-        #
-        # `send_self_command` has FIVE outcomes, and only ONE of them typed anything:
-        # `FIRED:<channel>` (sent), `USER_PRESENT` (refused), `USE_ITERM_PATH` (iTerm/unknown —
-        # the caller is expected to run its own osascript path), `NO_AUTO_TERMINAL:<kind>`
-        # (delegated kind with no reachable target) and `DRY_RUN:…`. Testing only for
-        # USER_PRESENT counted the three NON-sends as sends, so on iTerm — the owner's own
-        # terminal — this phase stamped a 2h cooldown and printed "firing
-        # /janitor-handoff-and-clear" while NOTHING was typed into the pane: the feature was
-        # silently dead AND claimed to have worked. Every sibling trigger script
-        # (compact_trigger, clear_trigger, reload_trigger, resume_trigger,
-        # reload_skills_trigger) checks `!= USE_ITERM_PATH` before believing the send; this one
-        # did not. Positive test on FIRED:, so a future added status can never again default to
-        # "assume it worked".
-        if not sent.startswith("FIRED:"):
-            # No cooldown stamp: the next heartbeat must retry rather than mute the lever for
-            # two hours over a send that never happened. Logged (not printed) so an abandoned
-            # session does not emit a line every 5 minutes that nobody is there to read.
+        # STAMP ONLY ON A SEND — and "a send" means the keystrokes ACTUALLY WENT OUT. The
+        # cooldown exists so a CLEARED session does not re-clear; stamping after a REFUSED send
+        # would instead mean "the user happened to be typing at 03:00, so skip the clear for two
+        # hours" — the veto silently becoming a mute. Not stamping makes the next heartbeat
+        # retry, which is the coarse outer retry. `send_verified` returns a BOOLEAN, so there is
+        # no longer a set of string statuses a future change could add one to and have it default
+        # to "assume it worked" — the failure that made this phase dead is now unrepresentable.
+        if not ok:
+            # Logged (not printed) so an abandoned session does not emit a line every 5 minutes
+            # that nobody is there to read.
             state.log_line(
-                "dispatch", f"idle-clear: not injected ({sent}) — not stamping, will retry"
+                "dispatch", f"idle-clear: not injected ({why}) — not stamping, will retry"
             )
             return False
         cold_cache_compact.mark_clear_fired(sd, now=now)
