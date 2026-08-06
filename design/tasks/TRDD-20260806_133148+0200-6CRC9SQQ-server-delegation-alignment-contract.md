@@ -1,9 +1,9 @@
 ---
 trdd-id: 6CRC9SQQ
 title: Janitor-server delegation has no alignment contract — a server-claimed chore can wedge for days and neither side notices
-column: todo
+column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T13:31:48+0200
+updated: 2026-08-06T19:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -13,6 +13,67 @@ implementation-commits: []
 ---
 
 # Janitor-server chore-delegation alignment contract (owner failure report 2026-08-06, item 7)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+
+**Started. A CONFIRMED CONTRADICTION was found before any code was written — and it invalidates
+the premise of this card's item 1.** No fix yet, deliberately: the cause is not established and
+I will not invent one (I already had to withdraw one guessed root cause today, on TRDD-50V256RH).
+
+### The contradiction
+
+Out-of-process, everything says the daemon SHOULD be yielding five chores right now:
+
+```
+server_runs_chores()  -> True          (server pid 19594, up since Aug 6 13:21)
+claimed_chores()      -> ['marketplace-refresh','oauth-rotator-supervisor',
+                          'oauth-rotator-tick','user-plugins-update','version-update']
+_task_yielded_to_server(name, True) = True for all five
+```
+
+In-process, the daemon says it has **never yielded anything**:
+
+- `grep -c "chore-coordination" .janitor/logs/daemon.log` → **0**. Not one line of EITHER kind
+  (yield or resume), in a log spanning 2026-07-21 → now, i.e. the daemon's whole lifetime.
+- The log is transition-only (`if bool(yielded) != chores_yielded_last_loop`) and the flag
+  **initializes to `False`** (`daemon.py:2281`) — so zero transitions means `yielded` has been
+  EMPTY on every loop, not "always yielding silently". This inference was checked, not assumed.
+- The daemon **ran** `version-update` at 16:35:59 — three hours AFTER the server came up.
+
+### Hypotheses ELIMINATED (do not re-test these)
+
+| hypothesis | result |
+|---|---|
+| version skew — daemon runs older code | **No.** Daemon runs `2.4.1/scripts/daemon.py` (pid 30605, up since Aug 5 20:43) |
+| my probe measured different code than the daemon | **No.** `diff` of cache vs repo `harness_backend.py` → IDENTICAL, and both compute the same five chores |
+| stale in-memory module (imported before an update) | **No.** `harness_backend.py` mtime 19:06 predates the daemon's 20:43 start; only 2 `.py` files changed after, both venv internals |
+| memoized claim/liveness result | **No.** `server_runs_chores()` documents "No memo"; `server_capabilities()` re-reads the probe file per call |
+| env override in the daemon's inherited environment | **No.** `ps eww -p 30605` shows no `JANITOR_AIMAESTRO_*` override; my shell has none either |
+
+### STRONGEST UNTESTED HYPOTHESIS (start here)
+
+**The daemon's in-process `_liveness_path()` may not resolve to the file I read.** Everything
+above is out-of-process reconstruction; I never observed the daemon's OWN evaluation. If its
+`HOME`/cwd differs from my shell's, `server_capabilities()` returns `None` in-process ⇒ no claim
+⇒ no yield ⇒ every observation above is consistent with no bug at all. Check the daemon's `HOME`
+in `ps eww` output and compare against `_liveness_path()`'s resolution.
+
+Second: whether the loop reaches `daemon.py:2346` on every iteration, and whether `tasks` there
+contains those names.
+
+### WHY THIS BLOCKS ITEM 1
+
+Item 1 proposes a watchdog on "every chore the yield hands to the server". **On this host the
+yield has never handed over anything**, so that watchdog would watch an empty set and report
+healthy forever — a guard that cannot fire, which this project has now shipped twice
+(`cold_cache_compact`, and nearly a third time in TRDD-PXP08ZQC). Establish whether the yield
+path is exercised at all BEFORE building anything that assumes it is.
+
+### Item 2 is OUTWARD-FACING and cannot be closed here
+
+The chore⇄token⇄stamp⇄bound table must be *agreed on the #126/#111 threads* — cross-repo
+negotiation, owner's call to initiate. The janitor-side half is buildable alone, but only after
+the contradiction above is resolved.
 
 ## WHY (three incidents, one shape)
 
