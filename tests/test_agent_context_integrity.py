@@ -269,3 +269,95 @@ def test_every_rule_severity_is_reported() -> None:
         "reports unconditionally. Decide whether those belong in a heartbeat drift line; if "
         "not, add a CASE-INSENSITIVE filter and a test that fails without it."
     )
+
+
+# --------------------------------------------------------------------------- #
+# provenance gates the FIXER recommendation (janitor#167, reported by ai-maestro)
+# --------------------------------------------------------------------------- #
+_LOCAL = "Owner"
+_FOREIGN = "Outside Contributor"
+
+
+def _commit(root: Path, rel: str, who: str) -> None:
+    """Commit `rel` authored by `who`. Authorship is forced through GIT_AUTHOR_NAME rather
+    than `-c user.name`, because git gives the ENV precedence over config — and this machine
+    exports GIT_AUTHOR_NAME, so a `-c`-based helper silently produced the wrong author and
+    made the local-provenance test unfalsifiable."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": who, "GIT_AUTHOR_EMAIL": "a@example.com",
+           "GIT_COMMITTER_NAME": who, "GIT_COMMITTER_EMAIL": "a@example.com"}
+    subprocess.run(["git", "add", rel], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"add {rel}"], cwd=root, check=True,
+                   capture_output=True, env=env)
+
+
+def _repo_with_identity(tmp: Path) -> Path:
+    root = _repo(tmp)
+    subprocess.run(["git", "config", "user.name", "Owner"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "owner@example.com"], cwd=root, check=True)
+    return root
+
+
+def test_a_locally_authored_hit_gets_NO_fixer_recommendation(tmp_path: Path) -> None:
+    """THE janitor#167 case. A prose detector cannot tell text that FORBIDS a pattern from
+    text that PERFORMS it, and safety documentation is the densest concentration of the
+    forbidden phrasings in any repo. When every commit on the file is ours, recommending a
+    fixer points it at our own rule — and deleting a real safety rule looks like remediation
+    in the log. The finding must still be REPORTED; only the fixer is withheld."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _LOCAL)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout, "the finding must still be reported"
+    assert "janitor-security-agent" not in r.stdout, (
+        f"no fixer may be recommended for locally-authored content; got: {r.stdout!r}"
+    )
+    assert "authored solely by this repo's own git identity" in r.stdout
+
+
+def test_a_hit_with_a_foreign_author_DOES_get_the_fixer(tmp_path: Path) -> None:
+    """The control, and the case the detector exists for: positive evidence the content
+    arrived from outside. Without this the gate above would just be a way of never
+    recommending the fixer at all."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _FOREIGN)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "arrived from outside" in r.stdout, f"got: {r.stdout!r}"
+
+
+def test_the_headline_never_asserts_foreign_provenance_it_cannot_prove(tmp_path: Path) -> None:
+    """The old headline said 'These are git-tracked, so they arrived by clone/pull/PR' on
+    EVERY finding. For a file the owner wrote that is simply false, and it is the sentence
+    that made deleting one's own documentation read as the indicated action."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _LOCAL)
+    r = _run(root)
+    assert "arrived by clone/pull/PR" not in r.stdout
+
+
+def test_an_untracked_file_is_reported_but_gets_no_fixer(tmp_path: Path) -> None:
+    """Untracked = no history = provenance UNKNOWN. It is still scanned (a gitignored
+    CLAUDE.md is auto-loaded and poisoning it works fine), but unknown must fail toward 'a
+    human reads it', never toward an auto-fixer."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "janitor-security-agent" not in r.stdout
+
+
+def test_a_symlink_between_two_scanned_paths_is_counted_once(tmp_path: Path) -> None:
+    """Dedupe by RESOLVED path. Two glob-matching paths pointing at the SAME bytes are one
+    text: scanning both doubles the pattern count and the 'in N files' figure a human uses to
+    judge severity. (Note: this needs BOTH ends inside `_GLOBS` — a symlink whose target sits
+    outside them, e.g. `tests/scenarios/*.md`, was never double-scanned.)"""
+    root = _repo_with_identity(tmp_path)
+    rules = root / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "real.md").write_text(_POISON, encoding="utf-8")
+    (rules / "link.md").symlink_to(rules / "real.md")
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "in 1 file(s)" in r.stdout, f"the two paths are one text; got: {r.stdout!r}"

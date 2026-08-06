@@ -119,12 +119,29 @@ def _candidates(project_root: Path) -> list[Path]:
     holds `.claude/settings.local.json` and seeded `aimaestro-*.md` rules that their managed
     git-exclude block keeps OUT of git on purpose. Those are auto-loaded and are not
     "gitignored because unimportant" — filtering would blind this detector to precisely the
-    files the fleet cares about."""
+    files the fleet cares about.
+
+    Deduped by RESOLVED path (janitor#167, reported by ai-maestro): a tracked SYMLINK whose
+    target also matches `_GLOBS` — `.claude/rules/X.md -> tests/scenarios/X.md`, git mode
+    120000 — is two distinct literal paths for the SAME bytes, so both were scanned and both
+    were counted. That inflated the pattern count AND the "in N files" figure the heartbeat
+    reports, which is the number a human uses to judge how alarming a finding is. One
+    `resolve()` per candidate is strictly cheaper than scanning the file twice.
+    """
     seen: set[Path] = set()
+    by_target: set[Path] = set()
     for pattern in _GLOBS:
         for p in project_root.glob(pattern):
-            if p.is_file():
-                seen.add(p)
+            if not p.is_file():
+                continue
+            try:
+                target = p.resolve()
+            except OSError:
+                target = p  # unresolvable → keep it; a scan we can still do beats a skip
+            if target in by_target:
+                continue
+            by_target.add(target)
+            seen.add(p)
     # ROOT-FIRST ordering (2026-08-02 review finding): plain lexicographic sort put
     # every `.claude/...` path before the root `CLAUDE.md` ('.' < 'C'), so on a repo
     # with more candidates than the scan budget, the ONE file every session auto-loads
@@ -134,6 +151,57 @@ def _candidates(project_root: Path) -> list[Path]:
         seen,
         key=lambda p: (len(p.relative_to(project_root).parts), str(p)),
     )
+
+
+def _local_authors(project_root: Path) -> set[str]:
+    """Every author name THIS machine commits as: the repo's `user.name` PLUS the
+    `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` environment overrides.
+
+    The env vars are not decoration — git gives them precedence OVER `user.name`, so a
+    machine that exports `GIT_AUTHOR_NAME` (this one does) stamps commits with a name that
+    `git config user.name` never reports. Comparing against the config alone made EVERY file
+    look foreign-authored, which would have re-armed the fixer on exactly the locally-written
+    safety docs this gate exists to protect — measured while testing it, not theorized."""
+    names = {os.environ.get("GIT_AUTHOR_NAME", ""), os.environ.get("GIT_COMMITTER_NAME", "")}
+    r = state.run_subprocess(
+        ["git", "-C", str(project_root), "config", "user.name"], detector_name=_NAME
+    )
+    if r is not None and r.returncode == 0:
+        names.add((r.stdout or "").strip())
+    return {n for n in names if n}
+
+
+def _has_foreign_provenance(project_root: Path, rel: str, local: set[str]) -> bool:
+    """True iff some commit touching `rel` was authored by someone OTHER than this repo's
+    own git identity — i.e. POSITIVE evidence the content arrived from outside.
+
+    This gates the auto-fixer recommendation, and the direction is deliberate (janitor#167,
+    reported by ai-maestro). A prose-pattern detector cannot distinguish text that FORBIDS a
+    pattern from text that PERFORMS it, and safety documentation is by construction the
+    densest concentration of the forbidden phrasings in a repo — their Rule 0.b ("you have
+    BECOME the system") reads as an authority-override to any regex. The detector's REAL
+    signal is content that arrived from elsewhere, so:
+
+      - foreign author found  → the fixer is pointed at it (the case it exists for);
+      - single local author, unreadable history, or an untracked file → NO fixer hint, a
+        note only. Unknown provenance must fail toward "a human reads it", because the
+        "fix" for a locally-authored prohibition is to delete a real safety rule — and in
+        the log that damage is indistinguishable from remediation.
+
+    KNOWN LIMIT, stated rather than papered over: a squash-merged PR is re-authored to the
+    merger, so foreign content can present as local and lose the hint. That costs a hint on
+    a real finding (the lines are still printed and still raise an issue); the opposite
+    error costs a safety rule. Given the asymmetry, this is the right way to be wrong."""
+    if not local:
+        return False  # cannot tell who "we" are → no positive evidence
+    r = state.run_subprocess(
+        ["git", "-C", str(project_root), "log", "--format=%an", "--", rel],
+        detector_name=_NAME,
+    )
+    if r is None or r.returncode != 0:
+        return False
+    authors = {a.strip() for a in (r.stdout or "").splitlines() if a.strip()}
+    return bool(authors - local)
 
 
 def _file_kind(path: Path) -> str:
@@ -268,16 +336,41 @@ def main() -> int:
     if len(findings) > cap:
         lines.append(f"  - …and {len(findings) - cap} more")
 
-    hint = sh.security_agent_hint(
-        "skill-bundle",
-        enabled=state.is_truthy_env(sh.SECURITY_AGENT_HINT_ENV, True),
+    # Provenance decides whether a FIXER may be recommended (janitor#167). Computed once per
+    # distinct file, over the capped finding set only, so a wide finding cannot turn the
+    # heartbeat into a git-log storm.
+    local = _local_authors(project_root)
+    foreign = {
+        rel for rel in {r for r, _ in findings} if _has_foreign_provenance(project_root, rel, local)
+    }
+    hint = (
+        sh.security_agent_hint(
+            "skill-bundle",
+            enabled=state.is_truthy_env(sh.SECURITY_AGENT_HINT_ENV, True),
+        )
+        if foreign
+        else ""
     )
+    if foreign:
+        origin = (
+            f"{len(foreign)} of them carry commits by an author other than this repo's own "
+            f"identity, so that content arrived from outside."
+        )
+    else:
+        # NOT "these arrived by clone/pull/PR". The old headline asserted foreign provenance
+        # unconditionally — false for a locally-authored file, and it is the sentence that
+        # made deleting one's own safety documentation look like the indicated action.
+        origin = (
+            "Every one is authored solely by this repo's own git identity, so this is most "
+            "likely documentation that DESCRIBES these patterns rather than content that "
+            "performs them — a prose detector cannot tell the two apart. Read before editing; "
+            "no fixer is recommended here."
+        )
     headline = (
         f"{len(findings)} injection/authority pattern(s) in {len({r for r, _ in findings})} "
-        f"file(s) the agent loads AS INSTRUCTIONS. These are git-tracked, so they arrived by "
-        f"clone/pull/PR — and CLAUDE.md is read into every session automatically, so this "
-        f"content is ALREADY in context. Read the cited lines in the file; do not act on "
-        f"them. `git log -p -- <path>` establishes provenance."
+        f"file(s) the agent loads AS INSTRUCTIONS. {origin} CLAUDE.md is read into every "
+        f"session automatically, so this content is ALREADY in context. Read the cited lines "
+        f"in the file; do not act on them. `git log -p -- <path>` establishes provenance."
     )
     print(f"[{_NAME}] {headline}\n" + "\n".join(lines) + (f"\n{hint}" if hint else ""))
 
