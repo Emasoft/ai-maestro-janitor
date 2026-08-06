@@ -198,6 +198,120 @@ def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVer
     return verdict, facts
 
 
+def _llm_ext() -> tuple[str, str] | None:
+    """(binary, its plugin-DATA dir) for the llm-externalizer CLI, or None when unavailable.
+
+    The DATA dir is NOT optional and NOT ours: the launcher self-installs its native deps into
+    `CLAUDE_PLUGIN_DATA`, and if the janitor's own value is inherited it would install into the
+    JANITOR's data dir — measured 2026-08-06, the bare binary aborts with "better-sqlite3 is
+    missing AND CLAUDE_PLUGIN_DATA is unset". So the dir is derived from the marketplace segment
+    of whichever cached copy we resolve, never inherited.
+    """
+    import shutil  # noqa: PLC0415
+
+    home = Path.home()
+    found = shutil.which("llm-ext")
+    if found:
+        data = home / ".claude" / "plugins" / "data" / "llm-externalizer-emasoft-plugins"
+        return (found, str(data))
+    cache = home / ".claude" / "plugins" / "cache"
+    candidates = sorted(cache.glob("*/llm-externalizer/*/bin/llm-ext"))
+    if not candidates:
+        return None
+    binary = candidates[-1]  # highest version dir sorts last
+    marketplace = binary.parents[3].name
+    return (str(binary), str(home / ".claude" / "plugins" / "data" / f"llm-externalizer-{marketplace}"))
+
+
+def _llm_ext_output_is_safe(text: str) -> bool:
+    """Reject an externally-composed handoff that could STEER the session that reads it.
+
+    This text is written by a remote LLM and then read by a fresh session as its first
+    instruction, so it is an injection surface — the one place in this feature where untrusted
+    generated prose reaches a directive position. Two structural refusals, both cheap:
+
+      * a bare `[janitor-...]` line — the heartbeat protocol acts on exactly that shape, so a
+        composed handoff containing one could forge a marker (the protocol's own rule is that a
+        marker is only honoured from the stub's stdout, but forging one here is not a boundary
+        worth testing in production);
+      * any fenced block — the template never emits one, so its presence means the model inlined
+        payload instead of linking, which also fails the concision contract.
+
+    Anything rejected falls back to the deterministic template, which cannot contain either.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[janitor-") and stripped.endswith("]") and " " not in stripped:
+            return False
+        if stripped.startswith("```"):
+            return False
+    return True
+
+
+def _compose_via_llm_ext(root: Path, cards: list[tuple[str, str, str]]) -> str | None:
+    """Compose the handoff with the llm-externalizer CLI — ZERO main-model tokens.
+
+    Returns the text, or None on ANY failure (binary absent, timeout, non-zero exit, unreadable
+    report, unsafe content). None is not an error path, it is THE designed path: the template
+    fallback is what actually ships, and this only upgrades the prose when it is available and
+    behaves. A clear must never be blocked on a remote service.
+
+    Per `use-llm-externalizer.md`: PATHS are passed, never file contents, so the TRDD bodies
+    never enter anyone's context. The call is small and bounded (<= 4 STATE blocks), and the
+    profile's own free/auto-free handling makes it ~$0; that is why there is no `--estimate`
+    round-trip in front of it — it would double the latency of a time-boxed idle window to price
+    a call whose input is capped at four small files.
+    """
+    resolved = _llm_ext()
+    if resolved is None:
+        return None
+    binary, data_dir = resolved
+    paths = []
+    try:
+        import trdd_common  # noqa: PLC0415
+
+        for _scope, path in trdd_common.trdd_files("tasks", str(root)):
+            uid = trdd_common.extract_uid(path.name)
+            if uid and uid.upper() in {c[0] for c in cards}:
+                paths.append(str(path))
+    except Exception:  # noqa: BLE001
+        return None
+    if not paths:
+        return None
+
+    instructions = (
+        "You are writing a LINK-ONLY session handoff for a Claude Code session that is about to "
+        "be cleared. The attached files are TRDD task cards; each has a '## STATE' block that is "
+        "authoritative. Write at most 25 lines of markdown: a one-line summary, then a 'NEXT "
+        "ACTION' section naming ONE runnable step taken from the most recently updated card's "
+        "STATE block, then a bullet list of the card ids as 'TRDD-<id>'. Reference things by id "
+        "and path ONLY - never quote or inline file contents. No code fences. Under 3000 bytes."
+    )
+    env = {**os.environ, "CLAUDE_PLUGIN_DATA": data_dir}
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [binary, "chat", "--instructions", instructions,
+             "--input_files_paths", *paths[:4], "--answer_mode", "2"],
+            capture_output=True, text=True, timeout=180, env=env, cwd=str(root),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        state.log_line(_LOG, f"llm-ext composer exited {proc.returncode} — using the template")
+        return None
+    report = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else ""
+    if not report or not Path(report).is_file():
+        return None
+    try:
+        text = Path(report).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not _llm_ext_output_is_safe(text):
+        state.log_line(_LOG, "llm-ext output rejected (marker mimicry or fenced block)")
+        return None
+    return text
+
+
 def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, list[str]]:
     """Build the handoff and validate it against the concise-but-exhaustive contract.
 
@@ -207,8 +321,9 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
     """
     import clear_trigger  # noqa: PLC0415
 
+    cards = _gather_cards(root)
     inputs = ec.HandoffInputs(
-        cards=_gather_cards(root),
+        cards=cards,
         commits=_gather_commits(root),
         findings=_gather_findings(root),
         memory_dir=_memory_dir(root),
@@ -216,9 +331,21 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
         idle_seconds=facts.get("idle_seconds"),
         context_tokens=facts.get("context_tokens"),
     )
-    text = ec.compose_template_handoff(inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
-    _ok, reasons = clear_trigger.check_handoff_concise(text)
-    return text, reasons
+    template = ec.compose_template_handoff(inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+
+    # The llm-ext text is an UPGRADE, never a dependency: it ships only if it also passes the
+    # same contract the template satisfies by construction. Validating it here rather than
+    # trusting it is the whole reason the fallback is safe — a bloated or steering handoff is
+    # worse than a terse one, because /clear is unrecoverable and nobody reviews this text.
+    if ec.use_llm_ext() and cards:
+        composed = _compose_via_llm_ext(root, cards)
+        if composed and clear_trigger.check_handoff_concise(composed)[0]:
+            return composed, []
+        if composed:
+            state.log_line(_LOG, "llm-ext handoff failed the concision contract — template used")
+
+    _ok, reasons = clear_trigger.check_handoff_concise(template)
+    return template, reasons
 
 
 def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int) -> None:
