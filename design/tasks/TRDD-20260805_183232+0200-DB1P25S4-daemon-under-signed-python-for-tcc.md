@@ -3,17 +3,52 @@ trdd-id: DB1P25S4
 title: Run the daemon under the signed python.org 3.12 so the existing iTerm Automation grant applies
 column: dev
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-05T18:32:32+0200
+updated: 2026-08-06T07:38:08+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 parent-trdd: VQ4LX7ND
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [75332ba0]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-05
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-06
+
+### 2026-08-06 ~07:35 — THE 3-PART CODE FIX IS IMPLEMENTED (the durable half). Tests green. Commit 75332ba0.
+
+Landed in one change-set (per the 21:00 spec below), plus the pure-core guard the
+agentlens/T-RVZX688P report asked for:
+
+1. **Managed interpreter on BOTH spawn paths.** `global_state._managed_python_path()` runs
+   `uv python find --system --managed-python 3.12` (`--system` is LOAD-BEARING — without it a
+   project's `.venv/bin/python3` wins when cwd is inside a repo; measured). `spawn_daemon_detached`
+   ladder: managed → `uv run --script` → `sys.executable`. `keepalive_install.sh::resolve_interpreter`
+   (the plist/unit generator) mirrors it: managed find → `python3`/`python3.x` discovery →
+   `uv run --script` LAST (was FIRST — that ordering was the ephemeral-shim identity source).
+2. **Version-less own paths never evicted.** New `_is_own_stable_daemon()`: argv carrying
+   `daemon_keepalive_entry.py` OR the DATA-staged `.../plugins/data/<slug>/scripts/daemon.py` →
+   `daemon_needs_restart` False. Guarded in BOTH `daemon_needs_restart` (covers its
+   quarantine-read-failure fallback) and the PURE `_restart_decision` (covers any caller —
+   the hole the T-RVZX688P eviction loop went through).
+3. **Quarantine consulted on the DECIDING version in BOTH branches** (janitor#211):
+   roll-forward `current_ver not in quarantined`; roll-down
+   `running_ver in quarantined and current_ver not in quarantined`. All-quarantined answer =
+   refuse and let the running daemon stand (never starves: a daemon is running by definition
+   in this gate).
+
+Proof: 4 old-code probes against cached 2.4.1 all returned True (evict); new code returns
+False. 99 tests in test_launchd_keepalive+test_global_state pass (incl. 9 new + 2 hermetic
+fake-uv plist-rendering tests); test_daemon+test_dispatch_phases 148 pass; ruff+mypy clean.
+
+NOTE the earlier REMAINING wording "resolve a SIGNED python (probe the framework path
+first)" was SUPERSEDED by the same-evening CORRECTION: the implemented target is uv's
+MANAGED interpreter; the framework python is reachable via the `python3` discovery rung.
+
+STILL OPEN: (a) observe a fleet scan enumerate iTerm sessions post-restart (the VQ4LX7ND
+alarm clears end-to-end); (b) publish, then resolution notes on GH#92 + TRDD-VQ4LX7ND.
+
+### (superseded head) — 2026-08-05
 
 ### CORRECTION (same evening, owner) — the granted client is UV'S MANAGED CPYTHON, and the real
 ### mechanism is PATH STABILITY, not code signing
@@ -85,11 +120,13 @@ DONE THIS SESSION (hot-apply, owner-directed):
 - [x] old uv-identity daemon stopped; agent bootstrapped; daemon verified under the signed python
 
 REMAINING (the durable half — code, so a restage/reinstall does not revert the hot fix):
-- [ ] `launchd_keepalive` plist generator: resolve a SIGNED python (codesign TeamIdentifier set;
-      probe the framework path first), fall back to uv only when none exists; regenerate on install
-- [ ] `global_state.spawn_daemon_detached` (the non-launchd spawn path): same resolution, same
-      reason — a session-spawned daemon must not silently reintroduce the adhoc identity
-- [ ] tests: signed-python resolution (present/absent), plist rendering both ways
+- [x] `keepalive_install.sh::resolve_interpreter` (the plist/unit generator): managed
+      interpreter first (per the CORRECTION — not the framework probe this line originally
+      asked for), stable python discovery second, `uv run` last (2026-08-06)
+- [x] `global_state.spawn_daemon_detached` (the non-launchd spawn path): same resolution, same
+      reason — a session-spawned daemon must not silently reintroduce the adhoc identity (2026-08-06)
+- [x] tests: managed-python resolution (present/absent/non-executable), plist rendering both
+      ways (hermetic fake-uv), never-evict guards, quarantine symmetry (2026-08-06)
 - [ ] observe the fleet scan enumerate iTerm sessions (the VQ4LX7ND alarm clears itself) — the
       end-to-end proof the grant actually applies
 - [ ] publish; then GH#92 + TRDD-VQ4LX7ND get the resolution note
