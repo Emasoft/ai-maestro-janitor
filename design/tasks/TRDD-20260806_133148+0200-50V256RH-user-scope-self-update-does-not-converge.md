@@ -76,28 +76,33 @@ machine (correct, unavoidable behaviour), not a defect.
    did, why did it keep running 2.3.0? Check that session's transcript for the marker.
 3. Why does `claimed_chores()` list chores the daemon runs anyway?
 
-### NEXT ACTION (one step, runnable) — needs an ownership decision first
+### NEXT ACTION (one step, runnable)
 
-Stamp the reload generation from the **OBSERVATION that the version changed**, not from the
-ACTION that changed it: a beat that compares the running/installed version against the cached
-latest and stamps `set_reload_flag` when they differ, **regardless of who performed the update**.
+Answer OPEN QUESTION 2 — it is the cheapest and it decides the card's whole shape: grep the
+owner's stale session transcript for a `[janitor-reload]` marker after `2026-08-06T06:25` local.
 
-The decision I will not take unilaterally: **where that writer lives.** The daemon is the
-single-writer of global state by design, but the daemon is precisely what stands down here. The
-two candidates —
-1. the daemon's **chore-coordination path** (it already knows it YIELDED — stamp on observed
-   version change rather than inside the skipped task body); or
-2. a **per-session detector** (runs regardless of any claim, but multiplies writers of a
-   global-state file, weakening the single-writer invariant).
+- **Marker present** ⇒ signalling worked; the defect is in CONSUMPTION (the session saw it and
+  stayed on 2.3.0). Investigate what consuming it is supposed to DO and why it didn't.
+- **Marker absent** ⇒ the 06:25 stamp never reached a session; investigate the stamp→marker path.
 
-Overlaps TRDD-6CRC9SQQ (the delegation contract) — the card itself assigns
-"watchdog on a SERVER-claimed chore" to that sibling. Resolve the boundary before coding.
+Then question 1 (`pmset -g log` for a sleep window) to confirm the daemon gap is benign.
+
+### SUPERSEDED — do NOT carry forward
+
+- The withdrawn root cause, and the fix it implied ("stamp from the OBSERVATION not the ACTION",
+  with an ownership decision between the daemon's chore-coordination path and a per-session
+  detector). That whole plan solved a problem the evidence says does not exist: the daemon did
+  not stand down, and the reload WAS stamped. Do not resurrect it without new evidence.
+- "the SERVER held the claim and did run both chores" as an explanation — `claimed_chores()` says
+  claimed, the daemon ran it anyway, and which side performed the 16:35 no-op is not established.
 
 ### Verified (do not re-verify)
 
 - `set_reload_flag` has exactly THREE call sites, all in `scripts/daemon.py` (grep, whole tree).
-- Chore stamps, claim state and pin/latest all read live via `global_state` / `harness_backend` /
-  `version_update_lib` — numbers above are measurements, not inference.
+  TRUE — but it did NOT imply what I concluded from it.
+- The timeline table above: cache dir mtimes, `reload_generation()`, and the daemon log's own
+  task lines. Measurements, not inference.
+- ZERO `yielding to active ai-maestro server` lines in `daemon.log` or `daemon.log.1`.
 
 ## WHY (measured today)
 
