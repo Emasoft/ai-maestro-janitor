@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7e19b13daf7c digest=603d81aef152 generated=2026-08-06T08:52:03+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7dfd1ec8972d digest=e195ef04ecfd generated=2026-08-06T15:01:11+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1138,6 +1138,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · build_clear_field_steps(terminal) -> list[list[str]] | None — Steps that empty the input field WITHOUT submitting it, or None if unsupported.
   · channel_is_readable(terminal) -> bool — True iff this channel CAN be read back at all — i.e. a None from `read_pane_text` means
   · build_type_only_steps(terminal, command) -> list[list[str]] | None — Steps that TYPE `command` into the field but do NOT submit it, or None if unsupported.
+  · build_esc_only_steps(terminal) -> list[list[str]] | None — Steps that send ESC ALONE — no command, no Enter — or None if unsupported.
   · build_submit_steps(terminal) -> list[list[str]] | None — Steps that press Enter ALONE, or None if unsupported. The other half of the split
   · read_pane_text(terminal) -> str | None — Read a pane's visible text, or None when this channel cannot be read back.
   · wait_for_empty_prompt(terminal, *, interval_s, timeout_s, reader, sleeper, clock) -> tuple[bool, str] — Block until the input field is EMPTY. Returns (ok, why).
@@ -1147,6 +1148,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · build_tmux_steps(pane, commands, *, esc_first) -> list[list[str]] — The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
   · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · build_xdotool_steps(commands, *, esc_first) -> list[list[str]] — The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
+  · send_verified(terminal, command, *, esc_first, giveup_s, sleeper, reader, is_typing) -> tuple[bool, str] — Type ONE command into `terminal` under the three ratified rules. Returns (sent, why).
   · run_chained_inject(terminal, *, first, then, gate_stamp, gate_baseline, pre_submit_first, gate_timeout_s, giveup_s, sleeper) -> tuple[bool, str] — Type `first`, wait for the session it creates to actually EXIST, then type each of
   · fire_detached_argv(delay_s, argv, *, abort_unless_any) -> None — PUBLIC: run one fixed argv through the SAME detached delayed child as the
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
@@ -1221,6 +1223,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · format_burn_line(label, window, *, live) -> str — Render ONE tripped window as the base drift line (no top-consumer clause — the
   · evaluate_trips(accounts_usage, now, ratio, min_util) -> list[dict] — The pure burn verdict: one trip per (account, window) whose burn ratio ≥ `ratio`.
   · evaluate(accounts_usage, now, ratio, min_util) -> list[str] — The detector's pure decision helper: the rendered burn drift lines (no top-consumer
+  · model_fallback_verdict(usage, now, *, scoped_high, account_headroom) -> dict | None — The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
+  · format_model_fallback_line(verdict, target) -> str — The one drift line a fallback emits. Names BOTH numbers, because the whole point is
 `scripts/lib/token_graph.py` — Terminal token-usage graphs (TRDD-4MMXTJFB).
   · sparkline(values) -> str — One-row sparkline of `values`, scaled to the series' own max. Zeros render as
   · render_series(series, lo_ts, hi_ts, *, label, bucket_label) -> list[str] — Render one bucketed series as TWO annotated sparkline rows — the per-bucket RATE
