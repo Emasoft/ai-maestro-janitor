@@ -552,9 +552,10 @@ _SCOPED_HIGH = 90.0
 _ACCOUNT_HEADROOM = 80.0
 
 
-def _verdict(usage: dict):
+def _verdict(usage: dict, *, age_s: float | None = 30.0):
     return tbn.model_fallback_verdict(
-        usage, NOW, scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM
+        usage, NOW, scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
+        snapshot_age_s=age_s,
     )
 
 
@@ -612,3 +613,22 @@ def test_model_fallback_line_names_both_numbers() -> None:
     assert v is not None
     line = tbn.format_model_fallback_line(v, "opus")
     assert "98%" in line and "60%" in line and "opus" in line
+
+
+def test_model_fallback_refuses_a_STALE_snapshot() -> None:
+    """janitor#222, measured by the ai-maestro side: an hour-old 'Fable 98%' may describe a
+    window that has since RESET, and this verdict TYPES INTO A PANE. A snapshot past the
+    freshness bound must not move anything."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.26), model="Fable")]
+    assert _verdict(usage, age_s=30.0) is not None, "precondition: fresh fires"
+    assert _verdict(usage, age_s=3600.0) is None
+
+
+def test_model_fallback_refuses_an_UNKNOWN_snapshot_age() -> None:
+    """Age unknown is refused for the same reason unproven headroom is: acting on a number
+    whose provenance you cannot establish is the failure direction this whole card exists to
+    stop (the rotator's 'all-maxed' on an account it merely could not measure)."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.26), model="Fable")]
+    assert _verdict(usage, age_s=None) is None

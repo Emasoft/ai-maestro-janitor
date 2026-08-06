@@ -301,16 +301,34 @@ def evaluate(accounts_usage: list[dict], now: int, ratio: float, min_util: float
     return [t["line"] for t in evaluate_trips(accounts_usage, now, ratio, min_util)]
 
 
+# How old a usage snapshot may be and still justify TYPING INTO A PANE (janitor#222, the
+# ai-maestro side's measured hazard). Deliberately much tighter than a status display's
+# tolerance: an hour-old "Fable 98%" may describe a window that has since RESET, and acting
+# on it switches a session that had no reason to move.
+_FALLBACK_MAX_SNAPSHOT_AGE_S = 300.0
+
+
 def model_fallback_verdict(
-    usage: dict, now: int, *, scoped_high: float, account_headroom: float
+    usage: dict,
+    now: int,
+    *,
+    scoped_high: float,
+    account_headroom: float,
+    snapshot_age_s: float | None,
+    max_age_s: float = _FALLBACK_MAX_SNAPSHOT_AGE_S,
 ) -> dict | None:
     """The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
 
     PURE. Returns `{model, scoped_label, scoped_util, account_max_util, resets_at_epoch}`
     for the most-exhausted qualifying model-scoped window, or None when no fallback is
-    warranted. The three conditions, and why each is load-bearing (TRDD-QE390SJA,
+    warranted. The four conditions, and why each is load-bearing (TRDD-QE390SJA,
     janitor#222):
 
+      * the snapshot is FRESH — `snapshot_age_s` known and within `max_age_s`. It is a
+        REQUIRED keyword with no default precisely so no caller can forget to answer it:
+        this verdict TYPES INTO A PANE, and an hour-old reading may describe a window that
+        has since reset. `None` (age unknown) refuses, for the same reason unproven headroom
+        refuses below — the two failures are the same failure.
       * a model-scoped window at/above `scoped_high` — the thing that actually stops work.
       * EVERY account-wide window (5h, 7d) at or below `account_headroom` — the gate that
         makes "switch model" the right remedy instead of "rotate or wait". Firing on
@@ -325,6 +343,8 @@ def model_fallback_verdict(
     rotated away from and then disqualified as a return target for ~123h."""
     if not isinstance(usage, dict):
         return None
+    if snapshot_age_s is None or snapshot_age_s > max_age_s:
+        return None  # freshness UNPROVEN or expired → never act on it
     account = [w for w in windows_from_usage(usage, now) if isinstance(w.get("util_pct"), (int, float))]
     if not account:
         return None  # headroom unproven → never act
