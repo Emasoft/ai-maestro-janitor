@@ -89,6 +89,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # condition changes on the scale of days and the check is a few file stats, so a
     # tighter cadence buys nothing; the detector itself dedupes to one line per day.
     ("global-chore-blackout", 3600, "CLAUDE_PLUGIN_OPTION_GLOBAL_CHORE_BLACKOUT_INTERVAL"),
+    # claimed-chore-stale: the MIRROR of the line above (TRDD-6CRC9SQQ item 1). Blackout
+    # watches the chores the server did NOT claim; this watches the ones it DID and then
+    # stopped running — the case `daemon_watchdog` is silent on by design, and the shape of
+    # janitor#221's 3.7-day rotator wedge. Same hourly cadence and same reasoning: a few
+    # file stats, a condition that moves on the scale of hours-to-days, one line per day.
+    ("claimed-chore-stale", 3600, "CLAUDE_PLUGIN_OPTION_CLAIMED_CHORE_STALE_INTERVAL"),
     ("task-pr-mismatch", 1800, "CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL"),
     ("stale-task", 1800, "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree", 300, "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),

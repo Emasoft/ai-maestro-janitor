@@ -1,0 +1,150 @@
+"""claimed_chore_watch — the PURE claimed-but-stale chore watchdog (TRDD-6CRC9SQQ item 1)."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / "scripts"))
+sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
+
+import claimed_chore_watch as ccw  # noqa: E402
+
+
+def test_stale_threshold_uses_3x_when_it_exceeds_the_grace_floor() -> None:
+    """A long cadence (6h) picks the 3x bound (18h) because it exceeds cadence+grace."""
+    assert ccw.stale_threshold(21600) == 64800
+
+
+def test_stale_threshold_uses_grace_floor_when_3x_is_smaller() -> None:
+    """A short cadence (60s) picks the cadence+600s floor (660s), not the tiny 3x (180s)."""
+    assert ccw.stale_threshold(60) == 660
+    assert ccw.stale_threshold(60) != 180
+
+
+def test_classify_ok_for_a_stamp_inside_the_bound() -> None:
+    """A stamp younger than the threshold classifies as VERDICT_OK."""
+    v = ccw.classify(chore="x", last_run=1000, cadence_s=60, now=1000 + 100)
+    assert v.verdict == ccw.VERDICT_OK
+
+
+def test_classify_stale_for_a_stamp_past_the_bound() -> None:
+    """A stamp older than the threshold classifies as VERDICT_STALE."""
+    v = ccw.classify(chore="x", last_run=1000, cadence_s=60, now=1000 + 700)
+    assert v.verdict == ccw.VERDICT_STALE
+
+
+def test_classify_ok_exactly_at_the_boundary() -> None:
+    """Age equal to the threshold is NOT stale — the comparison is strictly greater-than."""
+    threshold = ccw.stale_threshold(60)
+    v = ccw.classify(chore="x", last_run=1000, cadence_s=60, now=1000 + threshold)
+    assert v.verdict == ccw.VERDICT_OK
+    assert v.age_s == threshold
+
+
+def test_classify_no_evidence_when_last_run_not_positive() -> None:
+    """A last_run of 0 (or negative) yields VERDICT_NO_EVIDENCE with age_s == -1."""
+    v = ccw.classify(chore="x", last_run=0, cadence_s=60, now=1000)
+    assert v.verdict == ccw.VERDICT_NO_EVIDENCE
+    assert v.age_s == -1
+
+
+def test_classify_clamps_a_future_stamp_to_zero_age() -> None:
+    """A stamp newer than `now` (clock skew) clamps to age 0 and reports OK, never negative."""
+    v = ccw.classify(chore="x", last_run=2000, cadence_s=60, now=1000)
+    assert v.age_s == 0
+    assert v.verdict == ccw.VERDICT_OK
+
+
+def test_is_finding_false_only_for_ok() -> None:
+    """Verdict.is_finding is False for VERDICT_OK and True for every other verdict."""
+    ok = ccw.Verdict("x", ccw.VERDICT_OK, 10, 60, 660)
+    stale = ccw.Verdict("x", ccw.VERDICT_STALE, 1000, 60, 660)
+    no_evidence = ccw.Verdict("x", ccw.VERDICT_NO_EVIDENCE, -1, 60, 660)
+    assert ok.is_finding is False
+    assert stale.is_finding is True
+    assert no_evidence.is_finding is True
+
+
+def test_evaluate_empty_when_every_chore_is_fresh() -> None:
+    """evaluate() returns no findings when every claimed chore is within its threshold."""
+    out = ccw.evaluate(
+        ["a", "b"],
+        last_run_of=lambda c: 990,
+        cadence_of=lambda c: 60,
+        now=1000,
+    )
+    assert out == []
+
+
+def test_evaluate_skips_chore_with_unknown_cadence() -> None:
+    """A chore whose cadence_of returns None is skipped, never guessed at."""
+    out = ccw.evaluate(
+        ["unknown"],
+        last_run_of=lambda c: 0,
+        cadence_of=lambda c: None,
+        now=1000,
+    )
+    assert out == []
+
+
+def test_evaluate_skips_chore_with_nonpositive_cadence() -> None:
+    """A chore whose cadence is 0 or negative is skipped, even though it would classify."""
+    out = ccw.evaluate(
+        ["zero", "negative"],
+        last_run_of=lambda c: 0,
+        cadence_of=lambda c: {"zero": 0, "negative": -60}[c],
+        now=1000,
+    )
+    assert out == []
+
+
+def test_evaluate_sorts_stale_before_no_evidence() -> None:
+    """STALE findings sort ahead of NO_EVIDENCE findings regardless of chore order."""
+    def last_run_of(c: str) -> int:
+        return {"missing": 0, "wedged": 1000}[c]
+
+    out = ccw.evaluate(
+        ["missing", "wedged"],
+        last_run_of=last_run_of,
+        cadence_of=lambda c: 60,
+        now=1000 + 700,
+    )
+    assert [v.chore for v in out] == ["wedged", "missing"]
+    assert out[0].verdict == ccw.VERDICT_STALE
+    assert out[1].verdict == ccw.VERDICT_NO_EVIDENCE
+
+
+def test_evaluate_sorts_by_ratio_not_absolute_age() -> None:
+    """A short-cadence chore with smaller absolute age but bigger overrun ratio outranks a
+    long-cadence chore with larger absolute age but a smaller overrun ratio."""
+    # short: cadence 60s -> threshold 660s; age 6600s -> ratio 10x
+    # long: cadence 21600s (6h) -> threshold 64800s; age 129600s (36h) -> ratio 2x
+    # long's absolute age (129600) is far bigger than short's (6600), but short's ratio wins.
+    def last_run_of(c: str) -> int:
+        return {"short": 129600 - 6600, "long": 129600 - 129600}[c]
+
+    def cadence_of(c: str) -> int:
+        return {"short": 60, "long": 21600}[c]
+
+    out = ccw.evaluate(
+        ["long", "short"],
+        last_run_of=last_run_of,
+        cadence_of=cadence_of,
+        now=129600,
+    )
+    assert [v.chore for v in out] == ["short", "long"]
+
+
+def test_describe_renders_both_verdict_shapes_distinctly() -> None:
+    """describe() mentions minutes+bound for a stale chore and 'no completion stamp' for
+    a no-evidence chore — the two shapes must not be confusable."""
+    stale = ccw.Verdict("rot", ccw.VERDICT_STALE, 3600, 60, 660)
+    no_evidence = ccw.Verdict("rot", ccw.VERDICT_NO_EVIDENCE, -1, 60, 660)
+    stale_text = ccw.describe(stale)
+    no_evidence_text = ccw.describe(no_evidence)
+    assert "stale" in stale_text
+    assert "bound" in stale_text
+    assert "no completion stamp ever" in no_evidence_text
+    assert stale_text != no_evidence_text

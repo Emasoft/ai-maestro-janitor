@@ -2152,14 +2152,22 @@ def test_main_stamps_fire_time_even_on_the_earliest_early_return(
 
 
 def _arm_idle_clear(
-    dispatch, monkeypatch, *, idle_s, present=False, active=False, ctx=500_000, status="FIRED:x"
+    dispatch, monkeypatch, *, idle_s, present=False, active=False, ctx=500_000, result=(True, "sent")
 ):
     """Put the phase in the state where only the decision under test differs.
 
-    `status` is what the stubbed `send_self_command` returns. It is a PARAMETER, not the
-    hardcoded "FIRED:x" it used to be, because that hardcoding is what hid a real bug: the
-    real function has five outcomes and only one of them typed anything, so a stub that always
-    reports success cannot tell a working phase from one that believes every refusal."""
+    `result` is what the stubbed injector returns. It is a PARAMETER, not a hardcoded success,
+    because that hardcoding is what hid a real bug: a stub that always reports success cannot
+    tell a working phase from one that believes every refusal.
+
+    PATCHES `send_verified`, NOT the retired `send_self_command` (TRDD-5C42VCUX). When the
+    phase moved to the ratified injector this helper kept stubbing the old seam, so the REAL
+    `send_verified` ran, could not reach a pane from pytest, and returned False — four tests
+    went red at once. The subtler damage was to the tests that stayed GREEN: with the happy
+    path unable to send, every `assert sent == []` held against a phase that could not have
+    sent anything either way. Restoring this seam is what gives those assertions teeth again.
+    A stubbed seam that no longer matches its caller does not just fail loudly — it quietly
+    hollows out its neighbours."""
     sent: list = []
     import cold_cache_compact
     import fleet_scan
@@ -2172,7 +2180,9 @@ def _arm_idle_clear(
     monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
     monkeypatch.setattr(
-        terminal_trigger, "send_self_command", lambda cmd, **kw: sent.append((cmd, kw)) or status
+        terminal_trigger,
+        "send_verified",
+        lambda terminal, cmd, **kw: sent.append((cmd, kw)) or result,
     )
     return sent
 
@@ -2188,8 +2198,13 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
     assert dispatch._phase_idle_clear_nudge() is True
     assert len(sent) == 1, "the command was not injected"
     assert sent[0][0] == "/janitor-handoff-and-clear"
-    # It must remain a SELF-trigger that respects a human at the keyboard.
-    assert sent[0][1].get("respect_user_presence") is True
+    # It must not lead with ESC. The retired call carried the keyboard-respecting guarantee in
+    # a `respect_user_presence=True` kwarg that `send_verified` does not have; that guarantee
+    # now lives in the phase's own hard veto and is asserted by
+    # `test_idle_clear_never_fires_on_a_live_session`. What is left to pin HERE is the property
+    # of the keystroke itself: an ESC first would interrupt whatever the pane is showing, and
+    # this phase has no business interrupting anything.
+    assert sent[0][1].get("esc_first") is False
 
 
 def test_idle_clear_fires_regardless_of_context_SIZE(env_isolation: dict, monkeypatch) -> None:
@@ -2213,7 +2228,19 @@ def test_idle_clear_holds_off_under_an_hour(env_isolation: dict, monkeypatch) ->
 def test_idle_clear_never_fires_on_a_live_session(env_isolation: dict, monkeypatch) -> None:
     """Two independent vetoes on an IRREVERSIBLE action, asserted separately so a refactor
     cannot leave one carrying the other: a human at the keyboard, and a session waiting on a
-    resume. Each must block the keystroke, not merely the log line."""
+    resume. Each must block the keystroke, not merely the log line.
+
+    THE SECOND HALF IS THE POINT, and it was missing until 2026-08-06. `present`/`active` are
+    checked TWICE — once by the phase's own early return, and again inside
+    `should_clear_when_long_idle`, which receives both as arguments. So the first half below
+    passes even with the phase's early return deleted (verified by mutation: replacing
+    `if present or active` with `if False` left this test green). A duplicated veto is good
+    defence and a bad test: it makes each guard look protected while neither actually is.
+
+    The isolation is to stub the POLICY permissive and re-assert. Then only the phase-level
+    veto can produce the block, so its deletion has somewhere to show up."""
+    import cold_cache_compact
+
     dispatch = _import_dispatch()
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, present=True)
     assert dispatch._phase_idle_clear_nudge() is False
@@ -2223,27 +2250,47 @@ def test_idle_clear_never_fires_on_a_live_session(env_isolation: dict, monkeypat
     assert dispatch._phase_idle_clear_nudge() is False
     assert sent == []
 
+    # Policy forced permissive: the phase's OWN early return is now the only thing that can
+    # veto, so this half fails the moment it is removed.
+    for kind in ("present", "active"):
+        dispatch = _import_dispatch()
+        sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, **{kind: True})
+        monkeypatch.setattr(
+            cold_cache_compact, "should_clear_when_long_idle", lambda *a, **kw: True
+        )
+        assert dispatch._phase_idle_clear_nudge() is False, (
+            f"{kind}: the phase's own veto is gone — only the policy was blocking"
+        )
+        assert sent == [], f"{kind}: typed into a live session"
+
 
 def test_idle_clear_does_not_claim_a_send_that_never_happened(env_isolation: dict, monkeypatch) -> None:
-    """REGRESSION (found in review, 2026-08-04). `send_self_command` has FIVE outcomes and only
-    `FIRED:` typed anything. The phase tested just `== USER_PRESENT`, so it counted
-    `USE_ITERM_PATH`, `NO_AUTO_TERMINAL:<kind>` and `DRY_RUN:` as sends — and `USE_ITERM_PATH`
-    is what iTerm, the owner's own terminal, returns.
+    """REGRESSION (found in review 2026-08-04; carried to the new injector 2026-08-06).
 
-    The damage was double: it stamped the 2h cooldown (muting the lever on the very next
-    heartbeat, so the outer retry never ran) and printed "firing /janitor-handoff-and-clear"
-    while the pane received nothing. A silently-dead feature that reports success is worse than
-    one that reports failure. Every sibling trigger script checks `!= USE_ITERM_PATH`.
+    The original bug: `send_self_command` had FIVE outcomes and only `FIRED:` typed anything,
+    yet the phase tested just `== USER_PRESENT` — so it counted `USE_ITERM_PATH`,
+    `NO_AUTO_TERMINAL:<kind>` and `DRY_RUN:` as sends, and `USE_ITERM_PATH` is exactly what
+    iTerm, the owner's own terminal, returns. The damage was double: it stamped the 2h cooldown
+    (muting the lever on the very next heartbeat, so the outer retry never ran) and printed
+    "firing /janitor-handoff-and-clear" while the pane received nothing.
 
-    Each non-FIRED status is asserted separately so a future refactor cannot let one carry the
-    others. The cooldown is asserted at the STAMP call rather than by re-firing, so the check is
-    about this phase's decision and not about state-dir persistence between cases."""
+    Those five statuses no longer exist — `send_verified` returns `(ok, why)`, which is why
+    TRDD-5C42VCUX called the old failure "unrepresentable". A boolean cannot grow a sixth
+    outcome that defaults to success. But UNREPRESENTABLE IS NOT UNTESTED: the property under
+    test was never really "these three strings"; it is "a refusal must not be stamped or
+    announced". So the cases become representative refusal reasons, and the assertions are
+    unchanged. Deleting this test with the enum would have been the tempting move and the wrong
+    one — a silently-dead feature that reports success is worse than one that reports failure.
+
+    Each refusal is asserted separately so a future refactor cannot let one carry the others.
+    The cooldown is asserted at the STAMP call rather than by re-firing, so the check is about
+    this phase's decision and not about state-dir persistence between cases."""
     import cold_cache_compact
 
     stamped: list = []
-    for status in ("USE_ITERM_PATH", "NO_AUTO_TERMINAL:iterm", "DRY_RUN:tmux:%1:/x@2s"):
+    for status in ("no readable channel", "pane never went quiet", "field did not echo"):
         dispatch = _import_dispatch()
-        sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, status=status)
+        sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, result=(False, status))
         monkeypatch.setattr(
             cold_cache_compact, "mark_clear_fired", lambda sd, **kw: stamped.append(kw)
         )
