@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7dfd1ec8972d digest=e195ef04ecfd generated=2026-08-06T15:01:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=010b7fab5656 digest=bbd2f048bec2 generated=2026-08-06T21:06:11+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -134,6 +134,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/detectors/memory-scope-leak.py` — memory-scope-leak — keep the PUSHED memory scope free of machine/user-private data.
   · main() -> int
+`scripts/detectors/model-fallback.py` — model-fallback — a spent MODEL window switches the model, instead of stalling the session.
+  · main() -> int
 `scripts/detectors/nested-git-safety.py` — Nested-git-safety detector — Python port of nested-git-safety.sh.
   · main() -> int
 `scripts/detectors/oauth-beacon-refresh.py` — oauth-beacon-refresh — keep the live-identity beacon fresh so rotation isn't blinded.
@@ -232,6 +234,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/doctor_classify.py` — Doctor's second-pass workflow classifier — CLI driver.
   · main() -> int
+`scripts/external_handoff_clear.py` — External (ZERO model turn) handoff-and-clear — the watcher (TRDD-PXP08ZQC).
+  · main() -> int
 `scripts/findings_cli.py` — Backing CLI for /janitor-findings (TRDD-FENWWB4E — ARCHITECTURE.md §4, ratified rev 3).
   · main() -> int
 `scripts/fleet_status.py` — Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
@@ -306,6 +310,12 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/hooks/post-edit-memory-correction.py` — PostToolUse hook — memory correction-protocol advisory (TRDD-c77dae09, rank 5).
   · main() -> int
 `scripts/hooks/post-edit-safety.py` — PostToolUse hook — assistant-being-conned write detector.
+  · main() -> int
+`scripts/hooks/post-edit-wikimem-lint.py` — PostToolUse hook — lint a memory page the moment it is EDITED, not 15 minutes later.
+  · is_memory_page(file_path) -> bool — True iff `file_path` is a wikimem PAGE whose edits the linter governs. PURE.
+  · error_findings(stdout) -> list[str] — The ERROR-level finding lines in `memgrep lint` output. PURE.
+  · gather_file_path(tool_input) -> str — The path a Edit/Write/MultiEdit payload targets ("" when absent).
+  · find_memgrep() -> str | None — Resolve the memgrep binary. Delegates to the shared resolver, with an inline fallback so
   · main() -> int
 `scripts/hooks/post-mcp-response-sanitizer.py` — PostToolUse hook — MCP-response prompt-injection sanitiser.
   · main() -> int
@@ -462,6 +472,19 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · summarize_fork(gh_json, *, upstream_remote) -> dict — Fork/collaboration summary from `gh repo view --json isFork,parent` + any
   · homebrew_tap_status(repo_name, *, has_formula_dir, tapped, trusted) -> Optional[dict] — If this repo is a Homebrew TAP (name `homebrew-*` or a Formula/ dir), return
   · detect_mcp_servers(configs) -> list[dict] — Flatten MCP-server definitions from parsed config files into a SECRET-SAFE
+`scripts/lib/external_clear.py` — External (ZERO model turn) handoff-and-clear — policy + composition (TRDD-PXP08ZQC).
+  · enabled() -> bool
+  · min_context_tokens() -> int
+  · headroom_seconds() -> int
+  · use_llm_ext() -> bool
+  · seconds_until_next_fire(cron, now) -> int | None — Seconds from `now` until the next `*/N * * * *` fire, or None when the cron is not that
+  · next_fire_misses_cache(*, last_turn_age_s, seconds_to_next_fire, ttl_minutes) -> bool — PURE. Will the NEXT heartbeat fire land on an EXPIRED prompt cache (and so pay the full
+  · ClearVerdict — Whether to clear, which rule decided it, and a human-readable why.
+  · should_clear_externally(*, idle_seconds, last_turn_age_s, ttl_minutes, seconds_to_next_fire, context_tokens, min_context, min_idle_s, headroom_s, user_present, active_waiting, in_cooldown) -> ClearVerdict — PURE. The whole external-clear decision, with the deciding rule named.
+  · terminal_from_record(record) -> dict[str, str] — PURE adapter: the FLEET-shaped pane identity a session records at start →
+  · read_ttl_minutes(state_dir) -> int — The probed prompt-cache TTL the dispatcher cached, or `DEFAULT_TTL_MINUTES`.
+  · HandoffInputs — Everything the template composer needs, already gathered from disk.
+  · compose_template_handoff(inputs, *, now_iso, max_bytes) -> str — PURE. Build a link-only handoff from on-disk facts, with ZERO model tokens.
 `scripts/lib/findings_ledger.py` — Per-project findings ledger — the ONE choke point for finding events (TRDD-FENWWB4E).
   · state_dir_for(project_dir) -> Path — The janitor state dir of the AFFECTED project. None ⇒ the CURRENT project
   · ledger_path(project_dir) -> Path
@@ -580,6 +603,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · plugin_update_requests() -> list[dict] — The queued per-plugin update requests (each ``{plugin_id, scope, reason}``). Fail-open
   · clear_plugin_update_request(plugin_id, scope) -> None — Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
   · fleet_stop_flag_state() -> str | None — ``"disarm"`` iff the machine-wide kill-switch is set, else None.
+  · record_rotation_success(now) -> None — Stamp that a rotation just put a NEW live credential in place (TRDD-UA4FAX67).
+  · rotation_succeeded_within(seconds, *, now) -> bool — True iff a rotation landed within the last `seconds` — i.e. the reason a pane is
   · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
   · clear_fleet_injections(flag_state) -> None — Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
@@ -863,6 +888,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · MemoryTxn.abort(self) -> None — Discard a not-yet-committed transaction. Safe to call any time before
   · resume_pending(scope_root, stale_seconds) -> list[str] — Roll forward / clean every interrupted transaction under `scope_root`.
   · apply_atomic(scope_root, op, source_rel_paths, writes, deletes, verify) -> str — begin → stage `writes`/`deletes` → optional `verify(txn)` → commit, all in
+`scripts/lib/model_fallback.py` — Model-scoped fallback PLANNER (TRDD-QE390SJA, janitor#222) — the pure decision layer.
+  · enabled() -> bool — Master opt-in. DEFAULT OFF — this types into the user's own pane, and the failure mode
+  · fallback_target() -> str — The model to switch TO. Configurable so a future model tier does not need a code
+  · plan_model_fallback(*, verdict, current_model, target, last_switch_ts, now, is_enabled, interval_s) -> dict — Decide whether to type `/model <target>` right now. PURE.
 `scripts/lib/notify.py` — Human-notification channel — DAEMON-ONLY (TRDD-4649ZLE0, ARCHITECTURE.md §5, ratified).
   · enabled() -> bool
   · webhook_url() -> str
@@ -1138,6 +1167,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · build_clear_field_steps(terminal) -> list[list[str]] | None — Steps that empty the input field WITHOUT submitting it, or None if unsupported.
   · channel_is_readable(terminal) -> bool — True iff this channel CAN be read back at all — i.e. a None from `read_pane_text` means
   · build_type_only_steps(terminal, command) -> list[list[str]] | None — Steps that TYPE `command` into the field but do NOT submit it, or None if unsupported.
+  · parse_pane_model(pane_text) -> str | None — The model NAME the pane is currently showing, or None when the badge is absent.
+  · confirm_model_switch(pane_text, target) -> bool | None — THREE-STATE: True (switched), False (still not on `target`), None (cannot tell).
   · build_esc_only_steps(terminal) -> list[list[str]] | None — Steps that send ESC ALONE — no command, no Enter — or None if unsupported.
   · build_submit_steps(terminal) -> list[list[str]] | None — Steps that press Enter ALONE, or None if unsupported. The other half of the split
   · read_pane_text(terminal) -> str | None — Read a pane's visible text, or None when this channel cannot be read back.
@@ -1216,6 +1247,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · worst_window_burn(windows, *, now) -> dict | None — The single most-alarming usage window across a fleet of windows.
 `scripts/lib/token_burn.py` — Pure window burn-rate decision layer (TRDD-OY0W6LX5).
   · model_windows_from_usage(usage, now) -> list[dict] — Per-window burn inputs for every MODEL-SCOPED limit in the payload's `limits[]`.
+  · model_family(name) -> str — The comparable FAMILY of a model name: first token, lowercased (`Opus 5` -> `opus`,
+  · models_in_use(usage, now) -> set[str] — The model FAMILIES this account demonstrably ran work on, read from its own scoped
+  · scoped_rotation_veto(live_usage, cand_usage, now, *, bars) -> str | None — The candidate's own scoped window that makes it a POINTLESS rotation target — its
   · account_prefix(email) -> str — The privacy-safe account label for a drift line: the local part of the email only
   · windows_from_usage(usage, now) -> list[dict] — Parse a raw `/api/oauth/usage` payload into per-window burn inputs for `now`.
   · session_is_open(usage, now) -> bool | None — Does this account have an OPEN 5h SESSION window right now?
@@ -1223,7 +1257,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · format_burn_line(label, window, *, live) -> str — Render ONE tripped window as the base drift line (no top-consumer clause — the
   · evaluate_trips(accounts_usage, now, ratio, min_util) -> list[dict] — The pure burn verdict: one trip per (account, window) whose burn ratio ≥ `ratio`.
   · evaluate(accounts_usage, now, ratio, min_util) -> list[str] — The detector's pure decision helper: the rendered burn drift lines (no top-consumer
-  · model_fallback_verdict(usage, now, *, scoped_high, account_headroom) -> dict | None — The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
+  · model_fallback_verdict(usage, now, *, scoped_high, account_headroom, snapshot_age_s, max_age_s) -> dict | None — The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
   · format_model_fallback_line(verdict, target) -> str — The one drift line a fallback emits. Names BOTH numbers, because the whole point is
 `scripts/lib/token_graph.py` — Terminal token-usage graphs (TRDD-4MMXTJFB).
   · sparkline(values) -> str — One-row sparkline of `values`, scaled to the series' own max. Zeros render as
@@ -1590,7 +1624,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=e6954b071585 generated=2026-08-04T18:21:30+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=09e1f96631e7 generated=2026-08-06T21:06:15+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -1614,6 +1648,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-fleet-guardian-reachability](.claude/project/memory/janitor-fleet-guardian-reachability.md) — the status table says a project is NOT armed but I armed it myself
   - [three-pillars-rules-ownership](.claude/project/memory/three-pillars-rules-ownership.md) — which repo owns trdd-design-tasks
   - [janitor-daemon-handover-unowned-chores](.claude/project/memory/janitor-daemon-handover-unowned-chores.md) — every daemon chore stamp is frozen at the same age but no flag is set
+  - [janitor-daemon-process-identity](.claude/project/memory/janitor-daemon-process-identity.md) — the daemon keeps restarting every heartbeat
   - [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
   - [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
   - [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
