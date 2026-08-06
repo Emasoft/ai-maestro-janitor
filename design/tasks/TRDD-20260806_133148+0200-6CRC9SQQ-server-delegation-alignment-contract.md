@@ -110,17 +110,50 @@ hourly in the dispatch roster, the MIRROR of `global-chore-blackout`. 14 unit te
   blind to it, and silence about that is how a guard becomes decorative.
 - **SURFACE-ONLY** — no un-yield. That decision is still open (below).
 
-### NEXT ACTION (one step) — the un-yield decision, then item 2
+### ✔ UN-YIELD DECISION: **NO — alarm only.** (recorded 2026-08-06)
 
-Record the un-yield decision in Acceptance: may the janitor RESUME a chore whose claim has
-demonstrably gone dead? It needs hysteresis or a server restart flaps ownership. Note the
-binary-coordination rule (TRDD-LU0C5KAR) removed exactly this class of janitor-side fallback
-once already — so "no, alarm only" is a defensible answer and may be the right one; what is not
-acceptable is leaving it unrecorded.
+The janitor MUST NOT resume a chore whose claim has gone stale. Three reasons, in order of
+weight:
 
-Then the replay argument: with `claimed-chore-stale` in place, would janitor#221 have alarmed?
-Its recorded timestamps are the input; `oauth-rotator-tick`'s bound is 11m against a 3.7-day
-wedge, so the argument looks trivial — write it down rather than assume it.
+1. **It is the rule, not a judgement call.** TRDD-LU0C5KAR (owner directive 2026-07-17) made
+   coordination BINARY: responsibility follows process liveness, a live server owns the
+   absorbed set outright, and *"a server that runs without executing one of them is a SERVER
+   bug to fix there, never a janitor guard to keep."* An un-yield is precisely the janitor-side
+   guard that directive removed. `claude-code-plugin-rollout-staleness` records the same
+   conclusion reached independently: **do NOT add a janitor-side fallback.**
+2. **Two writers is a worse failure than zero.** These are machine-GLOBAL, once-only chores.
+   `marketplace-refresh` running concurrently in both the server and a resumed daemon is the
+   duplicated bulk `claude plugin marketplace update` that issue #7 exists to prevent; a
+   double `oauth-rotator-tick` races two writers onto one credential store. A wedged chore is
+   visible and recoverable; a corrupted credential store is neither.
+3. **The stale-stamp signal cannot distinguish the cases that need opposite responses.** A
+   stamp goes stale identically for a wedged chore, a restarting server, and a server that
+   simply does not write stamps (`no-evidence`). Hysteresis narrows the third-party flap but
+   cannot separate 1 from 2 — and guessing wrong un-yields against a live owner.
+
+**What would change this:** a positive liveness signal from the claim-holder distinct from its
+completion stamp (a heartbeat, or an explicit release). That is item 2's contract to negotiate,
+not something to infer from staleness. Until such a signal exists, alarm-only is the correct
+shape — and it is what shipped.
+
+### ✔ REPLAY CHECK — would janitor#221 have alarmed? YES, within ~11 minutes
+
+`oauth-rotator-tick` cadence 60s ⇒ bound `max(3x60, 60+600)` = **660s**. The #221 wedge ran
+**3.7 days** (~319,000s) without a completion — 483x the bound. The detector runs hourly, so
+the alarm lands at the first fire after the bound elapses: **worst case ~1 hour**, against 3.7
+days of silence. The `no-evidence` branch covers the other shape (a wedge that also stops
+stamping), so neither failure mode is silent.
+
+Honest limit: this is an argument from the bound and the recorded duration, not a replay
+against #221's actual stamp file — that file no longer exists, so the arithmetic is the
+strongest available evidence. It is not close enough to the threshold for the difference to
+matter.
+
+### NEXT ACTION (one step) — item 2, and it is OUTWARD-FACING
+
+Only item 2 remains: the chore⇄token⇄stamp⇄bound table, agreed on the #126/#111 threads. That
+is cross-repo negotiation and the owner's call to initiate. The janitor-side half is shipped and
+its bounds are now concrete enough to propose as the table's first column.
 
 ### Item 2 is OUTWARD-FACING and cannot be closed here
 
@@ -174,9 +207,16 @@ claimed-but-wedged chore is strictly worse than an unclaimed one, because the fa
       stamp frozen 4 days back. Bound is `max(3 x cadence, cadence + 600s)`; the floor is
       documented in `claimed_chore_watch.DEFAULT_MIN_GRACE_S` and is not a widening of the 3x
       headline, it is what makes 3x usable at a 60s cadence
-- [ ] un-yield-on-dead-claim decision recorded (yes with hysteresis, or no with why)
-- [ ] replay check: with this in place, the #221 wedge would have alarmed on our side
-      — argued in the card, ideally demonstrated with the recorded timestamps
+- [x] un-yield-on-dead-claim decision recorded — **NO, alarm only**, with why (see STATE):
+      TRDD-LU0C5KAR made coordination binary and removed exactly this guard; two writers on a
+      machine-global chore is worse than zero; and a stale stamp cannot distinguish a wedge
+      from a restart from a server that never stamps. Revisit only if the claim-holder
+      publishes a liveness signal distinct from its completion stamp — that is item 2's
+      contract, not something to infer from staleness
+- [x] replay check: **YES, within ~1h** — `oauth-rotator-tick`'s bound is 660s against #221's
+      3.7-day wedge (483x), detector cadence hourly. Argued from the bound and the recorded
+      duration, NOT replayed against #221's actual stamp file (it no longer exists) — the
+      margin is far too large for that gap to change the answer
 
 ## Pointers
 
