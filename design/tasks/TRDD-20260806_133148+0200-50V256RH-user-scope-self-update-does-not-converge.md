@@ -3,7 +3,7 @@ trdd-id: 50V256RH
 title: The janitor does not converge itself to the latest version at user scope — sessions run stale code for a day while the fix sits cached
 column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T19:02:00+0200
+updated: 2026-08-06T19:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -16,8 +16,9 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
 
-**Root cause NOT yet established.** My first answer was published and then DISPROVED by its own
-evidence — see the withdrawal below. The verified timeline stands; the conclusion does not.
+**Root cause ESTABLISHED on the second attempt, from load markers.** `/reload-plugins` does not
+re-point already-loaded SKILLS; only a NEW session does. My FIRST answer was wrong and is kept
+below as a withdrawal — read it before trusting any claim-state API in this area.
 
 ### The body's hypothesis is DISPROVED
 
@@ -68,13 +69,52 @@ So the gap is in **CONSUMPTION, not signalling** — the opposite end from where
 The 9 h 23 m of daemon silence spans an overnight window and is very likely just a sleeping
 machine (correct, unavoidable behaviour), not a defect.
 
-### OPEN QUESTIONS — do not answer these by inference
+### ✔ ROOT CAUSE — established from load markers, second attempt (the first is withdrawn above)
 
-1. Was the machine asleep Aug 5 21:02 → Aug 6 06:25? (`pmset -g log` / `log show`.) If yes, the
-   daemon gap is expected and the card's whole framing shifts to consumption.
-2. Did the owner's session ever RECEIVE a `[janitor-reload]` after the 06:25 stamp — and if it
-   did, why did it keep running 2.3.0? Check that session's transcript for the marker.
-3. Why does `claimed_chores()` list chores the daemon runs anyway?
+**`/reload-plugins` does not re-point already-loaded SKILLS in a live session.** Only a NEW
+session picks up a newly cached plugin version.
+
+Measured from `"Base directory for this skill: …"` lines — genuine load markers, not prose, not
+an API's opinion:
+
+| session | window (local) | skill loads | `/reload-plugins` runs |
+|---|---|---|---|
+| `be8c05d6` | Aug 5 → Aug 6 07:20 | **66 × 2.3.0**, ZERO 2.4.1 | 27 |
+| `643908a6` | Aug 6 07:20 → 17:02 | **9 × 2.3.0**, ZERO 2.4.1 | 23 |
+| `35e1e917` | Aug 6 17:03 → (post-`/clear`) | **2 × 2.4.1**, ZERO 2.3.0 | — |
+
+Not one skill load resolved to 2.4.1 in either pre-clear session, though 2.4.1 had been cached
+since Aug 5 21:02 and one of them ran `/reload-plugins` **23 times** — via a copy of
+`janitor-reload-plugins` that was itself loaded from `2.3.0/skills/`. The fresh session after
+`/clear` picked up 2.4.1 on its first skill load.
+
+**So every link in the janitor's chain WORKED**: cache updated → reload generation stamped
+(06:25) → `[janitor-reload]` markers delivered (23 and 18) → the reload command executed. The
+harness simply does not re-point live skills, and nothing in that chain can.
+
+**Why the session looked half-upgraded:** the auto-rolling stub always resolves the newest cached
+version, so the CRON/detector path ran 2.4.1 while the SKILL path stayed 2.3.0 — two versions
+live at once. That is exactly how the retired `USER_PRESENT` presence-cancel fired from a 2.3.0
+`clear_trigger.py` (a skill-invoked script) while the heartbeat behaved like 2.4.1.
+
+### THE CARD'S PREMISE IS INVERTED — and this changes other cards
+
+The title says *"the janitor does not converge itself"*. It does: cache, pin and signalling all
+converged. What does not converge is the **harness's loaded skill set**, and the ONLY lever that
+moves it is a **new session** — i.e. `/clear` + bootstrap.
+
+That makes TRDD-PXP08ZQC (external zero-turn clear) and TRDD-5C42VCUX (idle auto-clear) far more
+than cost optimisations: **they are the only reliable version-convergence mechanism the janitor
+has.** Weigh their gating decisions with that in mind.
+
+### Remaining open questions (lower value now)
+
+1. Was the machine asleep Aug 5 21:02 → Aug 6 06:25? Likely, and now moot: the 06:25 stamp did
+   its job and the markers were delivered regardless.
+2. Why does `claimed_chores()` list chores the daemon runs anyway? Real disagreement, unrelated to
+   this bug (it makes the daemon do MORE, not less). Belongs to TRDD-6CRC9SQQ.
+3. Is the live-skill staleness a harness LIMITATION or a bug worth filing upstream? Not
+   determined — and filing is outward-facing, so it is the owner's call.
 
 ### NEXT ACTION (one step, runnable)
 
@@ -136,9 +176,11 @@ action, no session left running superseded code for hours.
 
 ## Acceptance
 
-- [ ] today's non-convergence root-caused — **first answer WITHDRAWN as wrong** (see STATE). What
-      IS established: the pin converged, the reload was signalled at 06:25, and the session stayed
-      stale afterward ⇒ the gap is in CONSUMPTION, not signalling. Three open questions recorded
+- [x] today's non-convergence root-caused — **`/reload-plugins` does not re-point already-loaded
+      SKILLS in a live session**; only a NEW session does. Proven from `Base directory for this
+      skill:` load markers: 66 and 9 loads of 2.3.0 with ZERO 2.4.1 across two sessions (one of
+      which ran `/reload-plugins` 23 times), vs 2.4.1 immediately after `/clear`. The janitor's
+      whole chain worked; the harness does not apply it. (First answer withdrawn — see STATE.)
 - [ ] ~~a convergence check that FAILS LOUD when installed != latest~~ — **wrong predicate**:
       installed == latest == 2.4.1 during the incident. Replaced by: **fail loud when the reload
       generation is OLDER than the newest update-chore completion stamp** (measured gap: 729 min
