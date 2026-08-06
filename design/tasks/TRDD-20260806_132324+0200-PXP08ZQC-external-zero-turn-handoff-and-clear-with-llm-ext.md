@@ -1,9 +1,9 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: todo
+column: dev
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T13:23:24+0200
+updated: 2026-08-06T18:07:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -13,6 +13,61 @@ implementation-commits: []
 ---
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+
+**Column `dev` since 2026-08-06.** Design was pre-authored by the owner in the body below, so
+`todo → dev` skipped `design`/`dispatch` (mono-agent self-assignment).
+
+### Component state
+
+| Part | State |
+|---|---|
+| 1. Watcher (policy + gate) | `scripts/lib/external_clear.py` — NOT YET WRITTEN |
+| 2. Handoff writer (llm-ext + template fallback) | NOT YET WRITTEN |
+| 3. Typist | **ALREADY EXISTS** — `clear_trigger.py` chain; needs only an out-of-session terminal source |
+
+### NEXT ACTION (one step, runnable)
+
+Write `scripts/lib/external_clear.py` (pure policy + template composer) and
+`tests/test_external_clear.py`. Nothing else in Phase 1.
+
+### Load-bearing findings (measured on THIS machine 2026-08-06 — do not re-derive)
+
+- **The card's stated trigger is DEAD as written here.** `.janitor/state/ttl-regime.json` says
+  `minutes: 60` (probed) and `armed-cadence.cron` is `*/5 * * * *`. A fire every 5 min against a
+  60-min TTL means the prompt cache **never** expires while armed, so a literal `cache-expired`
+  predicate is never true — the "threshold high enough to never be met is a feature that does not
+  exist" failure `cold_cache_compact` already burned on twice.
+  **DEVIATION (owner may veto):** the gate ORs two triggers and names which one fired —
+  (a) *next-fire-misses* — `age_since_last_turn + seconds_until_next_fire >= ttl` (the card's
+  intent, correctly expressed: the point is that the NEXT fire pays the miss, not that the cache
+  is already cold); and (b) *long-idle* — nothing but beats for ≥1 h (owner directive 2026-08-04),
+  which is what actually bites here: the handoff records ~10 M cache-**read** per warm fire and
+  177.7 M of the 7 d weighted spent on janitor fires alone. Trigger (b) alone justifies the card.
+- **Terminal identity is already solved out-of-session.** `.janitor/state/terminal-identity.json`
+  exists (`iterm_session_id` = `w0t1p0:<uuid>`); `fleet_restart.recorded_terminal()` reads it. It
+  returns the FLEET shape (`iterm_session_id`/`tmux_pane`); `clear_trigger._this_terminal()` and
+  `terminal_trigger` use the OTHER shape (`kind`+`pane`/`session_id`). An adapter is required —
+  and `ITERM_SESSION_ID` is `<tty>:<UUID>`, so the UUID must be split off exactly as
+  `_this_terminal()` does, or `_UUID_RE` rejects it.
+- **Unknown-context must NOT veto** (repeat of the 2026-08-04 correction on
+  `should_clear_when_long_idle`): an unmeasurable transcript silently disabled the lever. Unknown
+  **idle**, however, still vetoes — an unknown idle age may never authorize a destructive act.
+- The existing in-model lever (`dispatch._phase_idle_clear_nudge`, TRDD-5C42VCUX) shares the
+  `idle-clear-fired.ts` cooldown stamp, so whichever fires first stands the other down. Keep that
+  sharing — it is the coexistence contract while both exist.
+
+### SUPERSEDED — do NOT carry forward
+
+- "watcher fires only on idle + **cache-expired** + over-threshold" — replaced by the two-trigger
+  OR above. The acceptance box is rewritten accordingly.
+
+### Artifacts to read first
+
+`scripts/clear_trigger.py` (the typist + `check_handoff_concise`) ·
+`scripts/lib/cold_cache_compact.py` (the CLEAR section + why size was dropped) ·
+`scripts/dispatch.py::_phase_idle_clear_nudge` (the in-model sibling).
 
 ## WHY
 
@@ -45,7 +100,8 @@ the right moment (before the next turn executes).
 
 ## Acceptance
 
-- [ ] watcher fires only on idle + cache-expired + over-threshold + user-absent-per-rules
+- [ ] watcher fires only on user-absent-per-rules AND (next-fire-misses OR long-idle), never on
+      unknown idle; over-threshold applies only when the context is measurable (see STATE)
 - [ ] handoff written by llm-ext with ZERO main-model tokens (or template fallback), passes
       check_handoff_concise
 - [ ] /clear + bootstrap land via run_chained_inject with no model turn before them
