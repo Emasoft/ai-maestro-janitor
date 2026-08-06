@@ -175,6 +175,11 @@
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-memory-correction.py",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-wikimem-lint.py",
+            "timeout": 12
           }
         ]
       },
