@@ -1,9 +1,9 @@
 ---
 trdd-id: 9MQ25PNH
 title: memory-consolidate re-dispatches already-refused candidates because its refusal ledger is written but never read back
-column: testing
+column: ai_review
 created: 2026-08-05T13:09:35+0200
-updated: 2026-08-05T13:57:23+0200
+updated: 2026-08-06T15:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -14,6 +14,35 @@ implementation-commits: [da36c68d, 03b09b7a]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-06 — VERIFIED IN PRODUCTION, both halves, on a real dispatch. `testing → ai_review`.
+
+The 05:22 LOCAL consolidate pass exercised the exact mechanism this card shipped, unprompted,
+and the run is the acceptance evidence (report:
+`reports/janitor-memory-subconscious-agent/20260806_052204+0200-consolidate-local.md` —
+gitignored, so the facts are recorded HERE):
+
+- **The ledger is READ BACK.** `memory_refusals.is_refused("consolidate", "LOCAL", root, <the 4
+  oauth notes>)` was consulted before any work — the read-back this card exists to add.
+- **And the CONTENT-HASH re-arm is real, not theoretical.** It returned **False** despite a
+  2026-08-02 refusal entry for that exact 4-note key, because
+  `reference_oauth_rotator_three_layer_architecture.md` was edited on 08-05: stored hash
+  `4062c90a4e7cf747` vs current `1296d0a580430a76`. So the refusal auto-expired on a genuine
+  content change — which is the half that could have been silently wrong (a key-only ledger
+  would have skipped a candidate whose content had moved).
+- **The agent then re-judged on fresh content, ABSTAINED, and re-recorded the refusal against
+  the CURRENT hash** — closing the loop for another 7 days or until one of the 4 pages changes.
+
+Net: one dispatch, no mutation, no re-dispatch loop. The failure this card names (a refused
+candidate re-dispatched forever, ~189k tokens per fire) did not occur, and the reason it did not
+is the code this card shipped.
+
+REVIEW FOCUS for `ai_review`: whether 7 days is the right TTL now that the hash re-arm is proven
+to work (the TTL is the belt; the hash is the braces), and whether an ABSTAIN outcome deserves a
+ledger-visible counter so "how often do we dispatch to abstain?" is answerable without reading
+reports that are gitignored.
+
+### Original shipping record (superseded above)
 
 **SHIPPED to `column: testing` — `da36c68d` (implementation) + `03b09b7a` (falsification record).**
 Lint clean, 101 tests pass in the module, full suite green (14416 passed; the one unrelated red was
