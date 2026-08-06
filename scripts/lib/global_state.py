@@ -897,6 +897,43 @@ def _read_fleet_injections_raw() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+_ROTATION_SUCCESS_NAME = "rotation-success.ts"
+
+
+def record_rotation_success(now: int) -> None:
+    """Stamp that a rotation just put a NEW live credential in place (TRDD-UA4FAX67).
+
+    This is the causal link the fleet was missing: the rotator fixes the ACCOUNT, but the
+    panes that were rate-limited under the old one keep sitting at the rate-limit UI, so a
+    perfect rotation still ends with a human pressing a key. Recording the event here rather
+    than calling the injector directly keeps the rotator free of fleet-scan/injection
+    machinery, and works no matter who rotated — the daemon's bulk lane, a manual
+    `rotator.py switch`, or a future caller. The consumer (`task_session_liveness`) decides
+    WHETHER and WHOM to wake; this only says "the block's cause was just removed".
+
+    Fail-OPEN: a lost stamp costs one delayed wake, so a FS error is swallowed."""
+    try:
+        init_global_state()
+        path = global_state_dir() / _ROTATION_SUCCESS_NAME
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(f"{int(now)}\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def rotation_succeeded_within(seconds: int, *, now: int) -> bool:
+    """True iff a rotation landed within the last `seconds` — i.e. the reason a pane is
+    stuck may have JUST been removed. Fail-CLOSED (no stamp / unreadable / future-dated ⇒
+    False): this gates typing into a user's pane, so it acts only on positive evidence."""
+    try:
+        raw = (global_state_dir() / _ROTATION_SUCCESS_NAME).read_text(encoding="utf-8")
+        ts = int(raw.strip())
+    except (OSError, ValueError):
+        return False
+    return 0 <= (int(now) - ts) <= max(0, seconds)
+
+
 def record_fleet_injection(pid: int, flag_state: str, now: int) -> None:
     """Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
     every daemon beat. Keyed ``"{pid}:{flag_state}"`` → epoch ``now`` (passed in, never

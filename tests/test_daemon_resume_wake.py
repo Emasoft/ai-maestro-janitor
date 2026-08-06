@@ -223,3 +223,86 @@ def test_resume_wake_skips_when_detector_lock_held(tmp_path, monkeypatch) -> Non
         daemon.task_session_liveness()
     assert _resume_fires(fired) == []
     assert not (sd / "daemon-wake-covered.ts").exists()
+
+
+# --------------------------------------------------------------------------- #
+# rotation-triggered wake (TRDD-UA4FAX67, owner failure report item 4)
+# --------------------------------------------------------------------------- #
+def test_a_fresh_rotation_wakes_the_pane_even_with_the_periodic_pass_OFF(
+    tmp_path, monkeypatch
+) -> None:
+    """THE reported failure: the rotator swapped the credential successfully and the pane sat
+    at the rate-limit UI anyway, so the owner pressed the key the rotation was supposed to make
+    unnecessary. A rotation is positive, causal, freshly-timestamped evidence that the wall
+    those panes are stuck behind was just removed — so it overrides the default-OFF knob that
+    (correctly) suppresses the untriggered periodic sweep."""
+    import time
+
+    root = tmp_path / "proj"
+    _rl(root, since=1000)
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})],
+                   enabled="0")
+    gs.record_rotation_success(int(time.time()))
+    daemon.task_session_liveness()
+
+    assert len(_resume_fires(fired)) == 1, "a rotation must unblock the panes it just fixed"
+
+
+def test_the_control_no_rotation_and_the_knob_off_types_NOTHING(tmp_path, monkeypatch) -> None:
+    """The control that gives the test above its meaning: same pane, same flag, no rotation.
+    Without this, the assertion above would pass on a pass that simply always runs."""
+    root = tmp_path / "proj"
+    _rl(root, since=1000)
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})],
+                   enabled="0")
+    daemon.task_session_liveness()
+
+    assert _resume_fires(fired) == [], "the periodic sweep stays default-OFF"
+
+
+def test_a_STALE_rotation_does_not_authorize_a_wake(tmp_path, monkeypatch) -> None:
+    """The evidence expires. A rotation hours ago says nothing about a pane blocked now, and a
+    stamp that never goes stale would silently convert the default-OFF pass into always-on for
+    the rest of the daemon's life."""
+    import time
+
+    root = tmp_path / "proj"
+    _rl(root, since=1000)
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})],
+                   enabled="0")
+    gs.record_rotation_success(int(time.time()) - daemon._ROTATION_WAKE_WINDOW_S - 60)
+    daemon.task_session_liveness()
+
+    assert _resume_fires(fired) == []
+
+
+def test_a_frozen_pane_is_still_NOT_command_injected_after_a_rotation(
+    tmp_path, monkeypatch
+) -> None:
+    """MF1 / P7WU40G9 survives the new trigger: a frozen pane buffers a typed command on its
+    retry-blocked input line and floods. ESC-only esc_nudge owns frozen panes, and a rotation
+    must not become a back door around that."""
+    import time
+
+    root = tmp_path / "proj"
+    _rl(root, since=1000)
+    fired = _setup(monkeypatch, tmp_path, [_inst("frozen", root, {"tmux_pane": "%5"})],
+                   enabled="0")
+    gs.record_rotation_success(int(time.time()))
+    daemon.task_session_liveness()
+
+    assert _resume_fires(fired) == [], "frozen panes are ESC-only, rotation or not"
+
+
+def test_rotation_evidence_is_fail_CLOSED_on_absent_or_future_stamps(tmp_path, monkeypatch) -> None:
+    """This gate types into a user's pane, so it acts only on positive evidence: no stamp, an
+    unreadable one, or a future-dated one (clock skew / a bad write) all read as 'no rotation'."""
+    import time
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs2"))
+    now = int(time.time())
+    assert gs.rotation_succeeded_within(600, now=now) is False       # absent
+    gs.record_rotation_success(now + 5_000)
+    assert gs.rotation_succeeded_within(600, now=now) is False       # future-dated
+    gs.record_rotation_success(now)
+    assert gs.rotation_succeeded_within(600, now=now) is True        # the positive control

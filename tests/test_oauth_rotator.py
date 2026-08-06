@@ -2031,3 +2031,22 @@ def test_refresh_beacon_restamps_after_a_manual_login(
     assert beacon["fp"] == rotator.fingerprint(live_b)
     # And it is now current, so the next fire is free again.
     assert rotator.refresh_beacon_if_stale(now=2002.0) is False
+
+
+def test_a_successful_switch_records_the_rotation_for_the_fleet(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-UA4FAX67 wiring: _switch_blob must leave the machine-wide breadcrumb the daemon's
+    liveness beat consumes to unblock panes that were rate-limited under the OLD credential.
+    Without it the rotation fixes the account and the pane stays at the rate-limit UI — the
+    owner-reported failure. Asserted at the seam (no global-state writes from a unit test)."""
+    stamps: list = []
+    monkeypatch.setattr(rotator.gs, "record_rotation_success", lambda now: stamps.append(now))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: _blob("LIVE"))
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: None)
+    rotator.save_state({"live_email": "live@x", "slots": {}})
+
+    rotator._switch_blob("alt@x", _blob("ALT"), "test rotation")
+
+    assert len(stamps) == 1, "a successful switch must record the rotation exactly once"

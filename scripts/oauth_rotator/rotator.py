@@ -1452,6 +1452,11 @@ def _switch_blob(email: str, blob: dict, reason: str) -> None:
     state["last_switch_at"] = time.time()
     state["last_switch_reason"] = reason
     state["live_429_streak"] = 0  # new live account starts with a clean debounce slate
+    # The ACCOUNT is fixed; the PANES are not (TRDD-UA4FAX67). Panes that hit the wall under
+    # the old credential are still sitting at the rate-limit UI, so without this the owner
+    # presses the key a successful rotation was supposed to make unnecessary. Stamp only —
+    # the daemon's liveness beat owns the decision of whom to wake and how.
+    gs.record_rotation_success(int(time.time()))
     save_state(state)
     # F2 (TRDD-7PYTX4E9): the rotator AUTHORED this live write, so it knows the identity
     # with certainty even in a context that cannot read the primary back — stamp the

@@ -1362,6 +1362,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
 
 # Daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1) — env knob + window key.
 _RATELIMIT_WAKE_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED"
+# How long after a rotation its "the wall was just removed" evidence stays actionable. One
+# beat is the intent; this is deliberately a few beats so a rotation landing mid-scan is not
+# missed, and short enough that a stale stamp cannot authorize a wake hours later.
+_ROTATION_WAKE_WINDOW_S = 600
 
 
 def _rate_limit_window_key(sd: Path, flag: Path) -> int:
@@ -1412,7 +1416,20 @@ def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
     MF3 — the wake-dedupe + coverage-stamp writes take the per-project `detector.lock`; this
     pass runs NO detector and touches NO `last-run-*.ts` / seen-file, so no dedupe can corrupt.
     """
-    if not state.is_truthy_env(_RATELIMIT_WAKE_ENABLED_ENV, False):
+    # THE DEFAULT DECISION (TRDD-UA4FAX67, owner failure report item 4). The PERIODIC pass
+    # stays default-OFF: it sweeps every rate-limited pane on a timer, with no evidence the
+    # limit has lifted, so most of its injects would be typed at a wall that is still there.
+    #
+    # A rotation is different in kind, and that is why it overrides the knob. It is positive,
+    # causal, freshly-timestamped evidence that the exact thing blocking those panes was just
+    # removed — the case the owner reported, where the credential swap succeeded and the pane
+    # sat blocked anyway. Scope stays narrow: only within `_ROTATION_WAKE_WINDOW_S` of the
+    # switch, and every MF1..MF4 guard below is untouched (healthy-only, no trailing enqueue,
+    # not awaiting a human, injectable pane, per-project lock). Frozen panes remain the
+    # recovery loop's ESC-only esc_nudge (P7WU40G9) — a typed command floods a frozen input.
+    if not state.is_truthy_env(_RATELIMIT_WAKE_ENABLED_ENV, False) and not gs.rotation_succeeded_within(
+        _ROTATION_WAKE_WINDOW_S, now=int(time.time())
+    ):
         return
     for inst in fleet:
         root = inst.project_root
