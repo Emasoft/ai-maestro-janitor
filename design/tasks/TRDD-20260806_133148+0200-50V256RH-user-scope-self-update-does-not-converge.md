@@ -1,9 +1,9 @@
 ---
 trdd-id: 50V256RH
 title: The janitor does not converge itself to the latest version at user scope — sessions run stale code for a day while the fix sits cached
-column: todo
+column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T13:31:48+0200
+updated: 2026-08-06T18:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -13,6 +13,76 @@ implementation-commits: []
 ---
 
 # User-scope self-update does not converge (owner failure report 2026-08-06, item 5)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+
+**Root cause FOUND and PROVEN. It is not the one the body hypothesizes.** No code change yet —
+the fix moves a global-state write, which is an ownership decision (see NEXT ACTION).
+
+### The body's hypothesis is DISPROVED
+
+It asks *"did the server (claim-holder) run `user-plugins-update`/`version-update` at all?"*
+**It did — twice, within the last two hours.** Measured live 2026-08-06:
+
+```
+version-update      ran   106 min ago
+user-plugins-update ran   102 min ago
+reload generation stamped 729 min ago   <-- STALE: predates the update by ~10h
+```
+
+And the pin IS converged: cached/running `2.4.1` == latest published `2.4.1`, install scopes
+`['user','local']`. So "the pin does not converge" is **not** the defect.
+
+### THE ACTUAL ROOT CAUSE
+
+**The reload stamp is a side-effect of the janitor daemon's update TASK BODY, not of the update
+EVENT.** Every writer of the reload generation lives in `scripts/daemon.py` — and nowhere else:
+
+```
+scripts/daemon.py:484   gs.set_reload_flag(",".join(updated_ids[:10]))
+scripts/daemon.py:528   gs.set_reload_flag(f"janitor-self-update@{new_latest}")
+scripts/daemon.py:2067  gs.set_reload_flag(f"plugin-update@{plugin_id}")
+```
+
+When a live ai-maestro server absorbs the update chores — the documented, CORRECT hand-off
+(`[[claude-code-plugin-rollout-staleness]]` `ATOM-14GY-NESV`) — the janitor daemon stands down,
+so **the only code that stamps the reload generation is the code that just stood down.**
+Verified live: `server_is_alive=True`, `server_runs_chores=True`,
+`claimed_chores=['marketplace-refresh','oauth-rotator-supervisor','oauth-rotator-tick',
+'user-plugins-update','version-update']`.
+
+Consequence: **the CACHE converges and the RUNNING SESSIONS never do.** No `[janitor-reload]` is
+ever emitted, so every live session keeps executing the plugin version it loaded at start — which
+is exactly the owner's symptom (2.3.0 skills invoked all day while 2.4.1 sat cached, including
+the retired `USER_PRESENT` presence-cancel whose fix was already published). Nothing errors
+anywhere, because nothing is watching.
+
+This SHARPENS `ATOM-14GY-NESV` rather than repeating it: that atom covers "the server never
+consumes the request". Here the server DID consume it, promptly and correctly — and the machine
+still ran stale code.
+
+### NEXT ACTION (one step, runnable) — needs an ownership decision first
+
+Stamp the reload generation from the **OBSERVATION that the version changed**, not from the
+ACTION that changed it: a beat that compares the running/installed version against the cached
+latest and stamps `set_reload_flag` when they differ, **regardless of who performed the update**.
+
+The decision I will not take unilaterally: **where that writer lives.** The daemon is the
+single-writer of global state by design, but the daemon is precisely what stands down here. The
+two candidates —
+1. the daemon's **chore-coordination path** (it already knows it YIELDED — stamp on observed
+   version change rather than inside the skipped task body); or
+2. a **per-session detector** (runs regardless of any claim, but multiplies writers of a
+   global-state file, weakening the single-writer invariant).
+
+Overlaps TRDD-6CRC9SQQ (the delegation contract) — the card itself assigns
+"watchdog on a SERVER-claimed chore" to that sibling. Resolve the boundary before coding.
+
+### Verified (do not re-verify)
+
+- `set_reload_flag` has exactly THREE call sites, all in `scripts/daemon.py` (grep, whole tree).
+- Chore stamps, claim state and pin/latest all read live via `global_state` / `harness_backend` /
+  `version_update_lib` — numbers above are measurements, not inference.
 
 ## WHY (measured today)
 
@@ -46,8 +116,13 @@ action, no session left running superseded code for hours.
 
 ## Acceptance
 
-- [ ] today's non-convergence root-caused (who held the claim; what did or didn't run)
-- [ ] a convergence check that FAILS LOUD when installed != latest for > one cadence
+- [x] today's non-convergence root-caused — the SERVER held the claim and **did** run both chores
+      (106/102 min ago); the defect is that `set_reload_flag` lives only in the daemon task bodies
+      the daemon skips when it yields, so the CACHE converged and the SESSIONS never did
+- [ ] ~~a convergence check that FAILS LOUD when installed != latest~~ — **wrong predicate**:
+      installed == latest == 2.4.1 during the incident. Replaced by: **fail loud when the reload
+      generation is OLDER than the newest update-chore completion stamp** (measured gap: 729 min
+      vs 106 min), which is the condition that was actually true
 - [ ] observed: next release reaches pin+reload+arm on this host with zero human action
 - [ ] stale 0.60.1 local pins resolved or ruled out-of-scope in writing
 
