@@ -3,13 +3,13 @@ trdd-id: QE390SJA
 title: A model-scoped window limit stops the session while the account has headroom — fall back to another model instead of rotating or stalling
 column: todo
 created: 2026-08-06T14:04:19+0200
-updated: 2026-08-06T14:04:19+0200
+updated: 2026-08-06T15:47:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [d7d8e9c9, dd72291c, 70afff57, b08c2d64, 491a2c3a]
 ---
 
 # Model-scoped window ⇒ switch model, don't rotate (janitor#222; owner failure report item 8)
@@ -48,17 +48,37 @@ Wire the EXISTING detector to the EXISTING injector.
    switch is confusing when the owner later wonders why answers changed character.
 5. **Ask vs act:** default ACT (`/model` is non-destructive and reversible; the failure
    mode without it is a hard stop) behind a knob, per the owner's call.
-6. **DERIVED — the rotator half:** `is_safe_alternate` must stop disqualifying an
-   account on a MODEL-scoped window alone; a scoped-only limit should mark the account
-   "safe, but not for model X". Otherwise the fleet keeps evicting its healthiest
-   account. Coordinate on janitor#222 / TRDD-32acd15f.
+6. **DERIVED — the rotator half. CORRECTED 2026-08-06 after reading the source: the
+   eviction was NOT ours, and our gap is the MIRROR of theirs.**
+
+   Verified first-hand across three copies (working tree, cached 2.3.0, cached 2.4.1):
+   the janitor's `rotator.is_safe_alternate(bfh, bsd)` takes ONLY the 5h and 7d windows —
+   there is no scoped term anywhere in the janitor's selection path, and the string
+   `live fmuaddib@gmail.com 5h=35% 7d=59% Fable=97% -> rotate` sitting in `state.json`
+   CANNOT have been produced by any janitor version (all three build `live_desc` as
+   `"5h=%s 7d=%s%s"`, no scoped clause). The `oauth-rotator-tick` chore was yielded to the
+   ai-maestro server that morning (daemon log, `chore-coordination`), and the server's
+   TypeScript rotator writes the SAME `state.json`. So the over-strict
+   `bfh < SAFE_5H && bsd < SAFE_7D && (scoped === null || scoped < SAFE_SCOPED)` that
+   sidelined the healthiest account for ~123h is THEIRS to fix — reported on janitor#222,
+   not patched here (cross-project rule).
+
+   **The janitor's own gap is the opposite one and is still real:** because
+   `is_safe_alternate` ignores scoped windows entirely, a janitor-run rotation (server
+   down, or the chore unclaimed) can rotate ONTO an account whose scoped window is already
+   spent — trading one exhausted model for the same exhausted model on a different
+   account. The fix is the same rule from the other side: a scoped-only limit marks an
+   account "safe, but not for model X" — so it is a valid target only when the CURRENT
+   model is not the exhausted one, or paired with the model switch above.
 
 ## Acceptance
 
 - [ ] gate fires ONLY on scoped-exhausted + account-has-headroom (unit-tested truth table)
 - [ ] ESC + `/model <fallback>` lands via inject_until_sent on iTerm and tmux
 - [ ] one observed unattended switch at a real scoped-window wall, with the log line
-- [ ] `is_safe_alternate` no longer sidelines an account for a scoped-only limit
+- [ ] janitor's `is_safe_alternate` stops IGNORING scoped windows (our mirror gap — it
+      must not rotate ONTO an account whose scoped window is spent); the over-strict
+      disqualification is the SERVER's and is reported on janitor#222, not fixed here
 - [ ] harness agents explicitly out of scope (the server ships `model-opus`/`model-sonnet`
       on its own allowlist — janitor#222)
 
