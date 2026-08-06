@@ -9,7 +9,7 @@ task-type: feature
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [def783f5, 95a5beda]
 ---
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
@@ -23,14 +23,43 @@ implementation-commits: []
 
 | Part | State |
 |---|---|
-| 1. Watcher (policy + gate) | `scripts/lib/external_clear.py` — NOT YET WRITTEN |
-| 2. Handoff writer (llm-ext + template fallback) | NOT YET WRITTEN |
-| 3. Typist | **ALREADY EXISTS** — `clear_trigger.py` chain; needs only an out-of-session terminal source |
+| 1. Watcher — pure gate | **DONE** `scripts/lib/external_clear.py` (`def783f5`), 29 tests |
+| 1b. Watcher — gather + fire CLI | **DONE** `scripts/external_handoff_clear.py` (`95a5beda`), 14 tests |
+| 2. Handoff writer — template | **DONE** `compose_template_handoff`, passes `check_handoff_concise` by construction |
+| 2b. Handoff writer — llm-ext upgrade | **NOT STARTED** (optional; the template ships and works) |
+| 3. Typist | **DONE, ZERO CHANGES** — `clear_trigger._spawn_chain` reused verbatim |
+| 4. Daemon wiring | **NOT STARTED** — the only thing between this and unattended operation |
+
+Shipped **DEFAULT OFF** (`CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED`, default false).
 
 ### NEXT ACTION (one step, runnable)
 
-Write `scripts/lib/external_clear.py` (pure policy + template composer) and
-`tests/test_external_clear.py`. Nothing else in Phase 1.
+Wire the watcher into `scripts/daemon.py`: add `_INTERVAL_EXTERNAL_CLEAR` (600 s — an idle
+session stays idle; this need not be responsive) + `task_external_handoff_clear()` that walks
+`fleet_scan.gather_fleet()` and runs `external_handoff_clear.py --project-root <inst.project_root>`
+per instance, then register it in `_build_tasks()`.
+
+**Two filters that gate must carry, and neither is optional:**
+- **skip `server_owned` instances** — inside an ai-maestro harness the actuation belongs to the
+  server (the janitor#100 split), so typing into those panes is a boundary violation;
+- **skip any instance whose `diagnosis` is not healthy** — a `frozen` / `cron_dead` session needs
+  RECOVERY, not a clear. Clearing a frozen session destroys its cron while it cannot re-arm.
+
+### Why phase 3 was NOT done in the same pass
+
+It is the first change that can act on OTHER projects' sessions, and `/clear` is unrecoverable.
+Phases 1–2 are inert without it (nothing calls the CLI), so stopping here leaves a fully-tested,
+independently-runnable artifact and no live blast radius. Verify the two filters above against
+`fleet_scan.Instance` before wiring.
+
+### Verified so far (do not re-verify)
+
+- `--dry-run` on this live session → `VERDICT HOLD trigger=- why=user-present`. The presence
+  veto works against a REAL breadcrumb, not a fixture.
+- `clear_trigger.py` needed **no** modification — its `--__chain` child already takes pane +
+  state dir + directive as DATA. The one requirement is setting `CLAUDE_PROJECT_DIR` for the
+  child (its fallbacks resolve to the DAEMON's cwd, which would strand the cleared session).
+- 43 tests green, `ruff` + `mypy` clean.
 
 ### Load-bearing findings (measured on THIS machine 2026-08-06 — do not re-derive)
 
