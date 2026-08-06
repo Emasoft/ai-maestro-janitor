@@ -3,13 +3,13 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: dev
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T18:07:00+0200
+updated: 2026-08-06T18:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: [def783f5, 95a5beda]
+implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 ---
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
@@ -26,7 +26,7 @@ implementation-commits: [def783f5, 95a5beda]
 | 1. Watcher — pure gate | **DONE** `scripts/lib/external_clear.py` (`def783f5`), 29 tests |
 | 1b. Watcher — gather + fire CLI | **DONE** `scripts/external_handoff_clear.py` (`95a5beda`), 14 tests |
 | 2. Handoff writer — template | **DONE** `compose_template_handoff`, passes `check_handoff_concise` by construction |
-| 2b. Handoff writer — llm-ext upgrade | **NOT STARTED** (optional; the template ships and works) |
+| 2b. Handoff writer — llm-ext upgrade | **TRIED AND REJECTED ON EVIDENCE** — `73a426c4` built it, `07e8d986` removed it. Do NOT re-attempt blind (see below) |
 | 3. Typist | **DONE, ZERO CHANGES** — `clear_trigger._spawn_chain` reused verbatim |
 | 4. Daemon wiring | **NOT STARTED** — the only thing between this and unattended operation |
 
@@ -51,6 +51,30 @@ It is the first change that can act on OTHER projects' sessions, and `/clear` is
 Phases 1–2 are inert without it (nothing calls the CLI), so stopping here leaves a fully-tested,
 independently-runnable artifact and no live blast radius. Verify the two filters above against
 `fleet_scan.Instance` before wiring.
+
+### The llm-ext composer: built, measured, removed (do NOT re-attempt blind)
+
+One real call, 2026-08-06, no mocks. `llm-ext` itself works fine (exit 0, report path on
+stdout, ~$0 on the free pool). It is the wrong SHAPE for this consumer:
+
+- it returns an **ensemble report**, not a handoff — a metadata header plus one
+  `## Model: <name>` section per model in the profile's ensemble (3 here), each restating the
+  same summary differently; **3250 bytes for ONE input file**;
+- **one** file took **>90 s** (the first end-to-end run returned `None` purely because the
+  180 s cap could not cover 4 files — a correct fallback, but a silent one);
+- using it would mean parsing three competing answers and picking one — a fresh judgement
+  call, on generated text, in a directive position, guarding an unrecoverable `/clear`. The
+  safety gate it needed (marker-mimicry + fence + concision) was evidence of the problem.
+
+**The card already contains the argument against needing it**, in the owner's own words about
+the fallback: *"a template handoff from the STATE blocks alone (they are the durable payload
+anyway)"*. The STATE block is authoritative and the next session reads it directly; the
+handoff's job is to POINT at it. An LLM summary of an authoritative document is lossy where a
+pointer is not. The acceptance box is met by its stated alternative — zero main-model tokens,
+via the template.
+
+Re-open this only if the goal changes from *pointing at* the payload to *summarising* it, and
+only with a single-model (non-ensemble) profile.
 
 ### Verified so far (do not re-verify)
 
