@@ -50,6 +50,35 @@ In-process, the daemon says it has **never yielded anything**:
 | memoized claim/liveness result | **No.** `server_runs_chores()` documents "No memo"; `server_capabilities()` re-reads the probe file per call |
 | env override in the daemon's inherited environment | **No.** `ps eww -p 30605` shows no `JANITOR_AIMAESTRO_*` override; my shell has none either |
 
+### ⚠ THE "ZERO YIELD LINES" EVIDENCE IS NOT SAFE TO USE YET (added later same day)
+
+The contradiction above leans on *"zero `chore-coordination` lines in `daemon.log`"*. **I never
+established that the GLOBAL daemon writes to the log I grepped.** What is now known:
+
+- The daemon's env has `PWD=/Users/emanuelesabetta/Code/AgentlensPro` and no `CLAUDE_PROJECT_DIR`,
+  while `state.log_line` writes to the PROJECT's `.janitor/logs/` — so its log could be elsewhere.
+- `~/Code/AgentlensPro/.janitor/logs/daemon.log` is **104 bytes, last written Jul 16** — not it.
+- The only other `daemon.log` on the machine is `~/ai-maestro/.janitor/logs/daemon.log`,
+  **127 bytes, Aug 5 18:33** — also not it.
+- The janitor project's own `daemon.log` DOES carry `task 'version-update' starting/done` at
+  16:35:59 — but tagged `[s:643908a6]`, a SESSION id. Per-session detector shims exist for exactly
+  these chores (`detectors/version-update.py`, `detectors/user-plugins-update.py`, the latter
+  documented as "Per-session shim — owned by the global daemon"). **So that line may be a
+  per-session shim, not the global daemon's task loop at all** — in which case "the daemon ran a
+  yielded chore" is unfounded and there may be no contradiction.
+
+**RESOLVE THIS FIRST.** Establish which file the global daemon (pid 30605) actually writes, and
+whether `[s:...]`-tagged lines come from the daemon or from session shims. Until then, treat the
+contradiction as UNCONFIRMED and do not build on it.
+
+### Hypotheses eliminated since (do not re-test)
+
+- **daemon HOME / `_liveness_path()` divergence** — ELIMINATED. `ps eww` shows
+  `HOME=/Users/emanuelesabetta`, identical to the shell's, so it reads the same probe file.
+- **chore-name vs task-name mismatch** — ELIMINATED. Running the daemon's OWN
+  `_build_tasks()` + `_yielded_task_names()` from the 2.4.1 cache returns all five names exactly:
+  `['marketplace-refresh','oauth-rotator-supervisor','oauth-rotator-tick','user-plugins-update','version-update']`.
+
 ### STRONGEST UNTESTED HYPOTHESIS (start here)
 
 **The daemon's in-process `_liveness_path()` may not resolve to the file I read.** Everything
