@@ -3,7 +3,7 @@ trdd-id: 50V256RH
 title: The janitor does not converge itself to the latest version at user scope — sessions run stale code for a day while the fix sits cached
 column: dev
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T18:45:00+0200
+updated: 2026-08-06T19:02:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -16,8 +16,8 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
 
-**Root cause FOUND and PROVEN. It is not the one the body hypothesizes.** No code change yet —
-the fix moves a global-state write, which is an ownership decision (see NEXT ACTION).
+**Root cause NOT yet established.** My first answer was published and then DISPROVED by its own
+evidence — see the withdrawal below. The verified timeline stands; the conclusion does not.
 
 ### The body's hypothesis is DISPROVED
 
@@ -33,33 +33,48 @@ reload generation stamped 729 min ago   <-- STALE: predates the update by ~10h
 And the pin IS converged: cached/running `2.4.1` == latest published `2.4.1`, install scopes
 `['user','local']`. So "the pin does not converge" is **not** the defect.
 
-### THE ACTUAL ROOT CAUSE
+### ⚠ WITHDRAWN — my first root cause was WRONG (recorded, not deleted)
 
-**The reload stamp is a side-effect of the janitor daemon's update TASK BODY, not of the update
-EVENT.** Every writer of the reload generation lives in `scripts/daemon.py` — and nowhere else:
+I published: *"the daemon stands down for the server-claimed update chores, so `set_reload_flag`
+— which lives only in those task bodies — never fires."* **The premise is unsupported and the
+conclusion is false.** What was true: all three `set_reload_flag` call sites really are in
+`scripts/daemon.py` (484, 528, 2067), and `claimed_chores()` really does list
+`user-plugins-update` + `version-update`. What I never checked before concluding: **the daemon's
+own log.** It shows the daemon RAN `version-update` (16:35:59), and there is **not one
+`yielding to active ai-maestro server` line in either `daemon.log` or `daemon.log.1`.** The
+daemon did not stand down. I inferred behaviour from a claim-state API instead of reading the
+log that records what actually ran — the exact "decide on facts" failure, committed while
+writing a card about verification.
 
-```
-scripts/daemon.py:484   gs.set_reload_flag(",".join(updated_ids[:10]))
-scripts/daemon.py:528   gs.set_reload_flag(f"janitor-self-update@{new_latest}")
-scripts/daemon.py:2067  gs.set_reload_flag(f"plugin-update@{plugin_id}")
-```
+### The VERIFIED timeline (facts only)
 
-When a live ai-maestro server absorbs the update chores — the documented, CORRECT hand-off
-(`[[claude-code-plugin-rollout-staleness]]` `ATOM-14GY-NESV`) — the janitor daemon stands down,
-so **the only code that stamps the reload generation is the code that just stood down.**
-Verified live: `server_is_alive=True`, `server_runs_chores=True`,
-`claimed_chores=['marketplace-refresh','oauth-rotator-supervisor','oauth-rotator-tick',
-'user-plugins-update','version-update']`.
+| when | what |
+|---|---|
+| Aug 5 **18:13** | `2.3.0` lands in cache |
+| Aug 5 **21:02** | `2.4.1` lands in cache |
+| Aug 5 21:02 → Aug 6 06:25 | **daemon completely silent — ZERO task lines in `daemon.log`** |
+| Aug 6 **06:25** | reload generation stamped (9 h 23 m after 2.4.1 landed) |
+| Aug 6 (all day) | owner's session still executing `2.3.0` skills |
+| Aug 6 **16:35** | daemon runs `version-update` — a correct NO-OP (already at latest) |
 
-Consequence: **the CACHE converges and the RUNNING SESSIONS never do.** No `[janitor-reload]` is
-ever emitted, so every live session keeps executing the plugin version it loaded at start — which
-is exactly the owner's symptom (2.3.0 skills invoked all day while 2.4.1 sat cached, including
-the retired `USER_PRESENT` presence-cancel whose fix was already published). Nothing errors
-anywhere, because nothing is watching.
+`claimed_chores()` and the daemon's behaviour DISAGREE (it lists them as claimed; the daemon ran
+one anyway). That disagreement is real and worth its own look, but it makes the daemon do MORE,
+not less — it is not this bug.
 
-This SHARPENS `ATOM-14GY-NESV` rather than repeating it: that atom covers "the server never
-consumes the request". Here the server DID consume it, promptly and correctly — and the machine
-still ran stale code.
+### Where the evidence actually narrows to
+
+**The reload WAS signalled at 06:25, and the session was STILL stale for the rest of the day.**
+So the gap is in **CONSUMPTION, not signalling** — the opposite end from where I first pointed.
+The 9 h 23 m of daemon silence spans an overnight window and is very likely just a sleeping
+machine (correct, unavoidable behaviour), not a defect.
+
+### OPEN QUESTIONS — do not answer these by inference
+
+1. Was the machine asleep Aug 5 21:02 → Aug 6 06:25? (`pmset -g log` / `log show`.) If yes, the
+   daemon gap is expected and the card's whole framing shifts to consumption.
+2. Did the owner's session ever RECEIVE a `[janitor-reload]` after the 06:25 stamp — and if it
+   did, why did it keep running 2.3.0? Check that session's transcript for the marker.
+3. Why does `claimed_chores()` list chores the daemon runs anyway?
 
 ### NEXT ACTION (one step, runnable) — needs an ownership decision first
 
@@ -116,9 +131,9 @@ action, no session left running superseded code for hours.
 
 ## Acceptance
 
-- [x] today's non-convergence root-caused — the SERVER held the claim and **did** run both chores
-      (106/102 min ago); the defect is that `set_reload_flag` lives only in the daemon task bodies
-      the daemon skips when it yields, so the CACHE converged and the SESSIONS never did
+- [ ] today's non-convergence root-caused — **first answer WITHDRAWN as wrong** (see STATE). What
+      IS established: the pin converged, the reload was signalled at 06:25, and the session stayed
+      stale afterward ⇒ the gap is in CONSUMPTION, not signalling. Three open questions recorded
 - [ ] ~~a convergence check that FAILS LOUD when installed != latest~~ — **wrong predicate**:
       installed == latest == 2.4.1 during the incident. Replaced by: **fail loud when the reload
       generation is OLDER than the newest update-chore completion stamp** (measured gap: 729 min
