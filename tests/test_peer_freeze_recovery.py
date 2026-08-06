@@ -140,3 +140,39 @@ def test_dispatch_roster_and_harness_denylist() -> None:
     names = [name for name, _, _ in dispatch._DETECTORS]
     assert "peer-freeze-recovery" in names
     assert "peer-freeze-recovery" in dispatch._NON_HARNESS_DETECTORS
+
+
+def test_record_outcome_writes_then_dedupes_then_refreshes(det) -> None:
+    """The outcome breadcrumb (TRDD-KQ9WM4TZ): first write lands; the SAME fresh outcome
+    is deduped (write-amplification guard); a CHANGED outcome or a STALE trace rewrites."""
+    now = 1_800_000_000
+    det.record_outcome("daemon-owns-it", now)
+    assert det._outcome_path().read_text(encoding="utf-8") == f"{now} daemon-owns-it"
+    # Same outcome, fresh trace → no rewrite (the epoch must NOT advance).
+    det.record_outcome("daemon-owns-it", now + 60)
+    assert det._outcome_path().read_text(encoding="utf-8") == f"{now} daemon-owns-it"
+    # Changed outcome → immediate rewrite (a dark window flips the trace at once).
+    det.record_outcome("ran", now + 120)
+    assert det._outcome_path().read_text(encoding="utf-8") == f"{now + 120} ran"
+    # Same outcome but past the hourly freshness window → rewrite (age stays meaningful).
+    later = now + 120 + det._OUTCOME_STAMP_MAX_AGE_S + 1
+    det.record_outcome("ran", later)
+    assert det._outcome_path().read_text(encoding="utf-8") == f"{later} ran"
+
+
+def test_record_outcome_survives_corrupt_trace(det) -> None:
+    """A corrupt breadcrumb is replaced, never raised on — observability is fail-open."""
+    det.gs.init_global_state()
+    det._outcome_path().write_text("garbage-without-epoch", encoding="utf-8")
+    det.record_outcome("no-server", 1_800_000_000)
+    assert det._outcome_path().read_text(encoding="utf-8") == "1800000000 no-server"
+
+
+def test_main_records_every_outcome(det, monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() traces the QUIET gates too — the whole point: `daemon-owns-it` used to
+    leave zero artifacts, making a healthy host look identical to a dead roster."""
+    monkeypatch.setattr(det, "run_once", lambda: "daemon-owns-it")
+    assert det.main() == 0
+    ts, _, outcome = det._outcome_path().read_text(encoding="utf-8").partition(" ")
+    assert outcome == "daemon-owns-it"
+    assert int(ts) > 0

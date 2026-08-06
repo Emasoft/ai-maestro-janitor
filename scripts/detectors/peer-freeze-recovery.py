@@ -150,9 +150,45 @@ def run_once(now: int | None = None) -> str:
             pass
 
 
+# The quiet-gate outcomes (`daemon-owns-it`, `no-server`, `paced`, `lock-held`, …) return
+# with NO stamp and NO log line, so a healthy host is indistinguishable from a roster that
+# never reaches this detector — the exact ambiguity that kept TRDD-KQ9WM4TZ unfalsifiable
+# for days (the pacing stamp only advances on a gate-clean dark-window beat, and the
+# daemon fix made those rare). This breadcrumb makes EVERY beat countable.
+_OUTCOME_STAMP_MAX_AGE_S = 3600
+
+
+def _outcome_path() -> Path:
+    return gs.global_state_dir() / "peer-recovery.outcome"
+
+
+def record_outcome(outcome: str, now: int) -> None:
+    """Leave a `<epoch> <outcome>` trace of the LAST beat, quiet gates included.
+
+    WRITE-AMPLIFICATION GUARD: every armed session runs this every heartbeat, so an
+    unconditional write would churn global-state (the TRDD-ZNN0UK5K fseventsd
+    sensitivity). Rewrite only when the outcome CHANGES or the trace is older than an
+    hour — steady state costs one small write per hour machine-wide, while a dark
+    window still flips the trace at the exact second it opens. Fail-open: a breadcrumb
+    must never break the beat."""
+    try:
+        gs.init_global_state()
+        p = _outcome_path()
+        try:
+            prev_ts, _, prev_outcome = p.read_text(encoding="utf-8").strip().partition(" ")
+            if prev_outcome == outcome and (now - int(prev_ts)) < _OUTCOME_STAMP_MAX_AGE_S:
+                return
+        except (OSError, ValueError):
+            pass  # absent or corrupt → write a fresh trace
+        state.atomic_write(p, f"{now} {outcome}")
+    except Exception:  # noqa: BLE001 — observability must never take down the detector
+        pass
+
+
 def main() -> int:
     state.init_state()
     outcome = run_once()
+    record_outcome(outcome, int(time.time()))
     if outcome == "ran":
         # ONE drift line so the session (and its human) can see the guardian fired —
         # the whole card exists because this going dark was invisible.
