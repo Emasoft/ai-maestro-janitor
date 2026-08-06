@@ -69,6 +69,7 @@ import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
 import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — keychain_scope_args() lever (TRDD-K3WQ7XM9 FIX B)
+import token_burn  # noqa: E402  # scripts/lib/token_burn.py — scoped_rotation_veto (TRDD-QE390SJA)
 import usage_probe  # noqa: E402  # scripts/lib/usage_probe.py (throttled /api/oauth/usage, TRDD-WEBA1RMF)
 
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -1817,6 +1818,11 @@ def cmd_auto() -> int:
     # locally dead) we cannot usage-probe — fall back to LOCAL expiry: any alternate with a known
     # future expiry is a valid target, and we pick the one with the MOST runway.
     candidates: list[tuple[str, dict, float, float]] = []
+    # Usage-confirmed, account-healthy targets whose window for the model this session is
+    # actually running is spent (TRDD-QE390SJA). A SECOND-CHOICE pool, not a rejection pile —
+    # see the tier-1b block below for why they must never be dropped.
+    scoped_blocked: list[tuple[str, dict, float, float]] = []
+    scoped_veto: dict[str, str] = {}  # email -> the window label that demoted it
     degraded: list[tuple[str, dict, float]] = []  # (email, blob, expires_in_h) — no-usage path
     index_healed = False  # set when refresh-on-err re-mints a slot → index meta must be persisted
     meta_dirty = False  # set when an alt_429_streak changes → index meta must be persisted
@@ -1954,6 +1960,20 @@ def cmd_auto() -> int:
                 # incident). Fail-open: sparse history simply never trips this.
                 verdicts.append("%s:walls-soon" % email)
                 continue
+            veto = token_burn.scoped_rotation_veto(
+                live_data, d2, int(time.time()), bars={"5h": SAFE_5H, "7d": SAFE_7D}
+            )
+            if veto:
+                # Account-healthy, but its window for the model the LIVE account is
+                # demonstrably running is spent: landing here trades one model wall for the
+                # same wall on another account. DEMOTED, never dropped — dropping it is the
+                # mirror-image bug that sidelined the fleet's healthiest account for ~123h
+                # (janitor#222). Availability is decided by the account windows above; this
+                # only orders the survivors.
+                scoped_blocked.append((email, b, bfh, bsd))
+                scoped_veto[email] = veto
+                verdicts.append("%s:scoped-spent(%s)" % (email, veto))
+                continue
             candidates.append((email, b, bfh, bsd))
         else:
             eh = expires_in_h(b)
@@ -1970,6 +1990,21 @@ def cmd_auto() -> int:
         _switch_blob(target_email, target_blob, reason)
         _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)" % (live_email or "(live)", target_email, bfh, bsd, reason))
         return 0
+    # 1b) Every usage-confirmed target is spent on the model this session is running. Rotate
+    # onto the best of them ANYWAY: their account windows are below safe, so the rotation
+    # still buys real runway on every other model, and a model wall answered by a model
+    # switch (TRDD-QE390SJA's other half) beats no credential at all. This tier is why the
+    # veto above is allowed to exist — without it the veto would be the very
+    # sideline-the-fleet bug it was written to avoid.
+    if best is None and network_up and scoped_blocked:
+        alt = select_drain_first(scoped_blocked)
+        if alt is not None:
+            target_email, target_blob, bfh, bsd = alt
+            label = scoped_veto.get(target_email, "a model window")
+            reason = "live %s %s -> rotate (every target spent on %s)" % (live_email or "(live)", live_desc, label)
+            _switch_blob(target_email, target_blob, reason)
+            _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%, but its %s is spent — model-scoped runway does NOT improve; switch model to recover it; %s)" % (live_email or "(live)", target_email, bfh, bsd, label, reason))
+            return 0
     # 2) DEGRADED fallback — no usage-confirmed target (or the network is down), but a
     # structurally-valid alternate exists (future expiry; its usage probe failed
     # transiently / its token just needs one mint). Rotating onto the most-runway one

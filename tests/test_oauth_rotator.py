@@ -810,6 +810,79 @@ def test_cmd_auto_rotates_on_401_token_rejected(tmp_path: Path, monkeypatch: pyt
     assert [s[0] for s in switches] == ["alt@x"]
 
 
+def _scoped_usage(five: float, seven: float, *, fable: float | None = None) -> dict:
+    """Account windows, plus an OPTIONAL model-scoped weekly window for `Fable 5` — the shape
+    /api/oauth/usage emits since Anthropic moved scoped limits into `limits[]`."""
+    data: dict = {"five_hour": {"utilization": five}, "seven_day": {"utilization": seven}}
+    if fable is not None:
+        resets = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3 * 86400))
+        data["limits"] = [{
+            "kind": "weekly_scoped", "group": "weekly", "percent": fable, "severity": "normal",
+            "resets_at": resets, "is_active": True,
+            "scope": {"model": {"id": None, "display_name": "Fable 5"}, "surface": None},
+        }]
+    return data
+
+
+def test_cmd_auto_prefers_a_target_whose_model_window_is_not_spent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-QE390SJA: the live account is running Fable (its scoped window is being consumed).
+    `spent@x` is the account DRAIN-FIRST would take — it is fuller (50% vs 10%) — but its own
+    Fable window is done, so landing there trades one model wall for the same wall. Pick the
+    account that actually buys runway on the model in use. The control below proves this
+    assertion flips ONLY because of the scoped rule."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent, clean = _blob("SPENT", expires_ms=_ms_in(50)), _blob("CLEAN", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent, "clean@x": clean},
+        usage={"LIVE": (200, _scoped_usage(98.0, 50.0, fable=60.0)),
+               "SPENT": (200, _scoped_usage(50.0, 50.0, fable=99.0)),
+               "CLEAN": (200, _scoped_usage(10.0, 10.0))},
+    )
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["clean@x"]
+
+
+def test_control_without_model_evidence_drain_first_takes_the_fuller_account(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CONTROL for the test above, and the anti-sideline guard in one: the same fleet, the
+    same fuller-but-Fable-spent account — but the live account shows NO scoped usage, so there
+    is no evidence any model is running and no veto may fire. DRAIN-FIRST wins unchanged. A
+    rule that disqualified `spent@x` here would be the blanket bug of janitor#222."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent, clean = _blob("SPENT", expires_ms=_ms_in(50)), _blob("CLEAN", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent, "clean@x": clean},
+        usage={"LIVE": (200, _scoped_usage(98.0, 50.0)),          # no scoped window in use
+               "SPENT": (200, _scoped_usage(50.0, 50.0, fable=99.0)),
+               "CLEAN": (200, _scoped_usage(10.0, 10.0))},
+    )
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["spent@x"]
+
+
+def test_cmd_auto_still_rotates_when_every_target_is_spent_on_the_model_in_use(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVAILABILITY OVER PREFERENCE — the property that keeps the scoped rule from becoming
+    the bug it prevents. The only alternate's Fable window is spent, but its ACCOUNT windows
+    are healthy, so rotating still buys runway on every other model. It must rotate anyway,
+    and say which window it could not fix so a human (or the model-fallback detector) knows a
+    model switch is the remaining move."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent = _blob("SPENT", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent},
+        usage={"LIVE": (200, _scoped_usage(98.0, 50.0, fable=60.0)),
+               "SPENT": (200, _scoped_usage(50.0, 50.0, fable=99.0))},
+    )
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["spent@x"]
+    assert "7d/Fable" in switches[0][2], "the reason must name the window it could not fix"
+
+
 def test_cmd_auto_degraded_rotates_when_api_down_and_live_expired(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """API unreachable (status 0) + live token LOCALLY expired → degraded rotate to the most-runway non-expired alternate (no usage probe)."""

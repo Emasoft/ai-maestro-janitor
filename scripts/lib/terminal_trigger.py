@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state  # noqa: E402
 import user_intent  # noqa: E402
+from token_burn import model_family  # noqa: E402  # one definition, shared with the rotator
 
 # Returned when the user is AT the terminal and did not ask for this command. Nothing is
 # sent: typing into a pane whose human is mid-sentence destroys what they were typing.
@@ -395,17 +396,6 @@ def parse_pane_model(pane_text: str) -> str | None:
     as "the switch worked" — see `confirm_model_switch`."""
     matches = _PANE_MODEL_RE.findall(pane_text or "")
     return matches[-1].strip() if matches else None
-
-
-def model_family(name: str) -> str:
-    """The comparable FAMILY of a model name: first token, lowercased (`Opus 5` -> `opus`,
-    `claude-fable-5` -> `claude`... so callers pass display names, not ids).
-
-    Why a family and not equality: the pane shows a DISPLAY name (`Opus 5`) while the command
-    types a SHORT name (`opus`), and the version suffix moves under us on every release. The
-    split literal is shared with the ai-maestro side (janitor#222)."""
-    parts = re.split(r"[\s\-_/]+", (name or "").strip())
-    return parts[0].lower() if parts and parts[0] else ""
 
 
 def confirm_model_switch(pane_text: str, target: str) -> bool | None:

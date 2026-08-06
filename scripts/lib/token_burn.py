@@ -15,6 +15,7 @@ window's elapsed fraction and ONE definition of a timestamp across the whole fea
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 import token_baseline as tb
@@ -114,6 +115,73 @@ def model_windows_from_usage(usage: dict, now: int) -> list[dict]:
             }
         )
     return out
+
+
+def model_family(name: str) -> str:
+    """The comparable FAMILY of a model name: first token, lowercased (`Opus 5` -> `opus`,
+    `claude-fable-5` -> `claude`... so callers pass display names, not ids).
+
+    Why a family and not equality: the API's scoped label, the pane badge (`Opus 5`) and the
+    `/model` command's argument (`opus`) are three different spellings of one model, and the
+    version suffix moves under us on every release. The split literal is shared with the
+    ai-maestro side (janitor#222). Lives here, beside the scoped-window parser, because that
+    is what mints the labels these families are compared across."""
+    parts = re.split(r"[\s\-_/]+", (name or "").strip())
+    return parts[0].lower() if parts and parts[0] else ""
+
+
+def models_in_use(usage: dict | None, now: int) -> set[str]:
+    """The model FAMILIES this account demonstrably ran work on, read from its own scoped
+    windows — no pane, no session introspection.
+
+    Evidence is `util_pct > 0`: a model's window cannot be consumed without running that
+    model. An explicit `is_active: false` withdraws the evidence (the API says the limit is
+    not in effect); a MISSING `is_active` does not, so a payload that omits the field still
+    reports. Pure. An empty set means NO EVIDENCE — callers must read it as "unknown", never
+    as "no model is in use"."""
+    out: set[str] = set()
+    if not isinstance(usage, dict):
+        return out
+    for w in model_windows_from_usage(usage, now):
+        if w["util_pct"] <= 0 or w.get("is_active") is False:
+            continue
+        _, _, model = str(w["label"]).partition("/")
+        family = model_family(model)
+        if family:
+            out.add(family)
+    return out
+
+
+def scoped_rotation_veto(
+    live_usage: dict | None, cand_usage: dict | None, now: int, *, bars: dict[str, float]
+) -> str | None:
+    """The candidate's own scoped window that makes it a POINTLESS rotation target — its
+    label (e.g. `7d/Fable`), or None when nothing vetoes it.
+
+    A candidate is vetoed for model M only when BOTH hold:
+      1. the LIVE account shows M in use (`models_in_use`) — so M is the model the session is
+         actually running, established from usage data alone, and
+      2. the candidate's own M window is at or over the bar for that base window.
+
+    Both conditions are POSITIVE evidence, so every unknown fails OPEN (no veto): no scoped
+    entry on either side, a model the live account never touched, an unrecognized base
+    window, or an absent bar. That asymmetry is the entire design. The mirror image of this
+    rule is a BLANKET scoped disqualification — "any spent scoped window makes an account an
+    invalid target" — which is what sidelined the healthiest account in the fleet for ~123h
+    (janitor#222). So a veto here means only "this target does not help THIS model"; it never
+    means "this account is unhealthy", and the caller must DEPRIORITIZE a vetoed candidate
+    rather than drop it."""
+    in_use = models_in_use(live_usage, now)
+    if not in_use or not isinstance(cand_usage, dict):
+        return None
+    for w in model_windows_from_usage(cand_usage, now):
+        base, _, model = str(w["label"]).partition("/")
+        if model_family(model) not in in_use:
+            continue
+        bar = bars.get(base)
+        if bar is not None and w["util_pct"] >= bar:
+            return str(w["label"])
+    return None
 
 
 def account_prefix(email: str | None) -> str:

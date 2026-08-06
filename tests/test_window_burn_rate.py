@@ -120,6 +120,69 @@ def test_windows_from_usage_parses_both_windows() -> None:
     assert all(w["burn_ratio"] is not None for w in wins)
 
 
+def _scoped(pct: float, *, model: str = "Fable", active: bool = True) -> dict:
+    """A usage payload whose only content is ONE model-scoped weekly window."""
+    return {"limits": [_limit(group="weekly", percent=pct, resets_at=_reset_for(_7D, 0.5),
+                              model=model, is_active=active)]}
+
+
+_BARS = {"5h": 97.0, "7d": 99.0}  # the rotator's SAFE_5H / SAFE_7D
+
+
+def test_models_in_use_reads_the_running_model_off_the_scoped_windows() -> None:
+    """No pane and no session introspection needed: a model's window cannot be consumed
+    without running that model, so `util > 0` IS the evidence. Compared as a FAMILY, because
+    the API says `Fable 5` where the `/model` command says `fable`."""
+    assert tbn.models_in_use(_scoped(60.0, model="Fable 5"), NOW) == {"fable"}
+
+
+def test_a_model_window_at_zero_is_not_evidence_of_use() -> None:
+    """Zero consumption is evidence of ABSENCE. Counting a 0% window as "in use" would let
+    any scoped window the account merely HAS veto a rotation target."""
+    assert tbn.models_in_use(_scoped(0.0), NOW) == set()
+
+
+def test_is_active_false_withdraws_the_in_use_evidence() -> None:
+    """The API saying the limit is not in effect beats our inference from the number. A
+    MISSING is_active does not — a payload that omits the field must still report."""
+    assert tbn.models_in_use(_scoped(60.0, active=False), NOW) == set()
+
+
+def test_a_target_spent_on_the_model_in_use_is_vetoed() -> None:
+    """The whole point: rotating here would trade one model wall for the same wall on another
+    account. The label names the window so the decision log says WHY."""
+    assert tbn.scoped_rotation_veto(_scoped(60.0), _scoped(99.0), NOW, bars=_BARS) == "7d/Fable"
+
+
+def test_a_target_spent_on_a_model_THIS_session_never_ran_is_not_vetoed() -> None:
+    """A spent Fable window is irrelevant to a session running Opus. This is the difference
+    between a model-aware rule and the blanket one that caused janitor#222."""
+    assert tbn.scoped_rotation_veto(
+        _scoped(60.0, model="Opus"), _scoped(99.0, model="Fable"), NOW, bars=_BARS
+    ) is None
+
+
+def test_no_live_scoped_evidence_NEVER_vetoes() -> None:
+    """THE anti-sideline guard. With no proof of which model is running, a veto would be a
+    blanket disqualification — the exact bug that benched the fleet's healthiest account for
+    ~123h. Unknown must fail OPEN, on every shape of unknown."""
+    lives: list[dict | None] = [{}, None, _scoped(0.0), {"limits": "junk"}]
+    for live in lives:
+        assert tbn.scoped_rotation_veto(live, _scoped(99.0), NOW, bars=_BARS) is None
+
+
+def test_a_target_below_the_bar_is_not_vetoed() -> None:
+    """The bar is the rotator's own SAFE_*; just under it is still a usable target."""
+    assert tbn.scoped_rotation_veto(_scoped(60.0), _scoped(98.9), NOW, bars=_BARS) is None
+
+
+def test_an_unreadable_candidate_or_an_absent_bar_fails_open() -> None:
+    """Both inputs are POSITIVE evidence; anything missing yields no veto, never a veto."""
+    assert tbn.scoped_rotation_veto(_scoped(60.0), None, NOW, bars=_BARS) is None
+    assert tbn.scoped_rotation_veto(_scoped(60.0), {"limits": "junk"}, NOW, bars=_BARS) is None
+    assert tbn.scoped_rotation_veto(_scoped(60.0), _scoped(99.0), NOW, bars={}) is None
+
+
 def _limit(
     *,
     group: str,
