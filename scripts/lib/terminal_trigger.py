@@ -187,8 +187,15 @@ def prompt_field_shows_only(pane_text: str, command: str) -> bool:
     field = extract_prompt_field(pane_text)
     if field is None or field != command.strip():
         return False
-    # No space anywhere, and none immediately after the `/` — the owner's literal shape.
-    return bool(re.fullmatch(r"/[^\s/][^\s]*", field))
+    # No space BEFORE or AFTER the `/` — the owner's literal shape. Arguments ARE allowed
+    # (single-spaced): the guard used to be `/[^\s/][^\s]*`, which rejected every field
+    # containing a space and so could never verify a command that TAKES one — `/model opus`
+    # (TRDD-QE390SJA) or `/reload-plugins --force`. That failed in the worst way: the field
+    # held exactly the right text, the verifier refused it, the caller CLEARED the field and
+    # retried forever until the give-up. Note the equality check above already pins the field
+    # to the exact intended command, so widening this shape guard cannot admit user prose or
+    # a doubled paste — it only stops rejecting our own valid commands.
+    return bool(re.fullmatch(r"/[^\s/]\S*(?: \S+)*", field))
 
 
 def applescript_quote(command: str) -> str:
@@ -338,6 +345,25 @@ def build_type_only_steps(
         return [["RUN", "osascript", "-e", _iterm_session_script(
             terminal["session_id"],
             [f'            write text "{applescript_quote(command)}" without newline'],
+        )]]
+    return None
+
+
+def build_esc_only_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
+    """Steps that send ESC ALONE — no command, no Enter — or None if unsupported.
+
+    Needed before typing into a pane that may be mid-render or holding a SELECTION MENU: a
+    slash-command typed into a menu does nothing useful (janitor#222). Kept a separate
+    builder from `build_type_only_steps` so ESC is an explicit, auditable act at the call
+    site — the one destructive keystroke in this family is Enter into an open rewind menu,
+    which only an EMPTY-prompt double-ESC can open, so a SINGLE ESC followed by typing (never
+    by a bare Enter) is the safe shape (see [[claude-code-esc-input-semantics]])."""
+    kind = terminal.get("kind", "")
+    if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
+        return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "Escape"]]
+    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+        return [["RUN", "osascript", "-e", _iterm_session_script(
+            terminal["session_id"], iterm_esc_lines(),
         )]]
     return None
 
@@ -772,6 +798,80 @@ def _encode_payload(
 # which can only ever guess.
 
 
+def _step_runners(terminal: Mapping[str, str]):
+    """The `(type_fn_factory, submit_fn, clear_fn)` trio `inject_until_sent` needs for one
+    terminal. ONE definition, so every verified-injection caller drives the pane through the
+    same three builders — a second hand-rolled copy is how one call site quietly loses rule 3
+    (re-read before Enter) while still looking like it follows the ratified procedure."""
+
+    def _runner(cmd: str):
+        def _do() -> None:
+            plan = build_type_only_steps(terminal, cmd)
+            if plan:
+                _run_steps(plan)
+        return _do
+
+    def _submit() -> None:
+        plan = build_submit_steps(terminal)
+        if plan:
+            _run_steps(plan)
+
+    def _clear() -> None:
+        plan = build_clear_field_steps(terminal)
+        if plan:
+            _run_steps(plan)
+
+    return _runner, _submit, _clear
+
+
+def send_verified(
+    terminal: Mapping[str, str],
+    command: str,
+    *,
+    esc_first: bool = False,
+    giveup_s: float | None = None,
+    sleeper=time.sleep,
+    reader=None,
+    is_typing=None,
+) -> tuple[bool, str]:
+    """Type ONE command into `terminal` under the three ratified rules. Returns (sent, why).
+
+    The single-command sibling of `run_chained_inject`, for callers that need a verified
+    self-injection with no fresh-session gate: the model-fallback switch (TRDD-QE390SJA) and
+    the post-rotation unblock (TRDD-UA4FAX67). Use THIS, never
+    `send_self_command(respect_user_presence=True)` — that is the retired one-shot
+    presence-cancel (see this module's notes and [[claude-code-esc-input-semantics]]).
+
+    `esc_first` sends ESC before typing, for a pane that may be mid-render or holding a
+    selection menu (a slash-command typed into a menu does nothing useful). It is a SEPARATE
+    step from the command, and it is sent ONCE up front rather than on every retry: the
+    retries are governed by rules 1-3, and re-ESCing on each pass would be an extra keystroke
+    into a pane the user may have just started typing in.
+
+    `reader`/`is_typing` are the same injectable seams `inject_until_sent` exposes, forwarded
+    only when given: they are bound as DEFAULT ARGUMENTS there, so a caller (or a test) that
+    swaps the module attribute alone would silently keep the original — passing them through
+    explicitly is what makes this function drivable without a live pane.
+    """
+    if build_type_only_steps(terminal, command) is None or build_submit_steps(terminal) is None:
+        return False, f"channel {terminal.get('kind', '?')!r} cannot type-then-verify"
+    if esc_first:
+        plan = build_esc_only_steps(terminal)
+        if plan:
+            _run_steps(plan)
+    _runner, _submit, _clear = _step_runners(terminal)
+    extra = {}
+    if reader is not None:
+        extra["reader"] = reader
+    if is_typing is not None:
+        extra["is_typing"] = is_typing
+    return inject_until_sent(
+        terminal, command,
+        type_fn=_runner(command), submit_fn=_submit, clear_fn=_clear,
+        giveup_s=giveup_s, sleeper=sleeper, **extra,
+    )
+
+
 def run_chained_inject(
     terminal: Mapping[str, str],
     *,
@@ -806,22 +906,7 @@ def run_chained_inject(
     if steps_type is None or steps_submit is None:
         return False, f"channel {terminal.get('kind', '?')!r} cannot type-then-verify"
 
-    def _runner(cmd: str):
-        def _do() -> None:
-            plan = build_type_only_steps(terminal, cmd)
-            if plan:
-                _run_steps(plan)
-        return _do
-
-    def _submit() -> None:
-        plan = build_submit_steps(terminal)
-        if plan:
-            _run_steps(plan)
-
-    def _clear() -> None:
-        plan = build_clear_field_steps(terminal)
-        if plan:
-            _run_steps(plan)
+    _runner, _submit, _clear = _step_runners(terminal)
 
     ok, why = inject_until_sent(
         terminal, first,

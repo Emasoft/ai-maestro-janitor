@@ -773,3 +773,82 @@ def test_iterm_clear_field_is_SUPPORTED_or_rule_3_is_a_silent_noop() -> None:
     for code in ("character id 1", "character id 11", "character id 21"):
         assert code in script, f"missing {code} (C-a / C-k / C-u)"
     assert "(character id 27)" not in script, "ESC would interrupt the turn, never use it here"
+
+
+# --------------------------------------------------------------------------- #
+# ESC-only + single-command verified send (TRDD-QE390SJA / janitor#222) — the
+# primitive the model-fallback switch and the post-rotation unblock both drive.
+# --------------------------------------------------------------------------- #
+
+
+def test_build_esc_only_steps_sends_escape_alone() -> None:
+    """ESC with NO command and NO Enter: a pane holding a selection menu must be dismissed
+    before a slash-command is typed, or the command lands in the menu and does nothing."""
+    steps = tt.build_esc_only_steps({"kind": "tmux", "pane": "%1"})
+    assert steps == [["RUN", "tmux", "send-keys", "-t", "%1", "Escape"]]
+    iterm = tt.build_esc_only_steps({"kind": "iterm", "session_id": "DEADBEEF-1234"})
+    assert iterm is not None and "osascript" in iterm[0]
+    # No Enter anywhere — an Enter into an open rewind menu is the one destructive keystroke.
+    assert not any("Enter" in str(tok) for step in iterm for tok in step)
+
+
+def test_build_esc_only_steps_unsupported_channel_is_none() -> None:
+    """An unresolvable pane yields None rather than a bogus plan — the caller degrades."""
+    for t in ({"kind": "unknown"}, {"kind": "tmux", "pane": "bogus"}, {"kind": "iterm", "session_id": "no"}):
+        assert tt.build_esc_only_steps(t) is None
+
+
+def test_send_verified_refuses_an_unwritable_channel() -> None:
+    """No type/submit builders for this channel ⇒ (False, why) BEFORE anything is typed."""
+    ok, why = tt.send_verified({"kind": "unknown"}, "/model opus")
+    assert ok is False and "cannot type-then-verify" in why
+
+
+def test_send_verified_escs_then_types_then_submits_in_order(monkeypatch) -> None:
+    """The whole contract in one trace: ESC first, then the command typed, then Enter —
+    and the Enter comes LAST, after the read-back verified the field (rule 3)."""
+    calls: list[str] = []
+
+    def _fake_run_steps(steps) -> None:
+        for step in steps:
+            calls.append(" ".join(str(t) for t in step))
+
+    # A pane that reads back as empty first (rule 1), then shows exactly the command (rule 3).
+    reads = iter([_pane(""), _pane("/model opus")])
+    monkeypatch.setattr(tt, "_run_steps", _fake_run_steps)
+
+    ok, why = tt.send_verified(
+        {"kind": "tmux", "pane": "%1"}, "/model opus", esc_first=True, sleeper=lambda _s: None, giveup_s=5.0,
+        reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+    )
+    assert ok is True, why
+    joined = " | ".join(calls)
+    assert "Escape" in calls[0], f"ESC must be first: {calls!r}"
+    assert joined.index("Escape") < joined.index("/model opus") < joined.rindex("Enter")
+
+
+def test_send_verified_without_esc_types_no_escape(monkeypatch) -> None:
+    """esc_first defaults off — a pane that is plainly idle gets no extra keystroke."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([_pane(""), _pane("/model opus")])
+    ok, _ = tt.send_verified(
+        {"kind": "tmux", "pane": "%1"}, "/model opus", sleeper=lambda _s: None, giveup_s=5.0,
+        reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+    )
+    assert ok is True
+    assert not any("Escape" in c for c in calls)
+
+
+def test_a_command_WITH_ARGUMENTS_can_verify() -> None:
+    """Regression (TRDD-QE390SJA): the shape guard used to be `/[^\\s/][^\\s]*`, rejecting any
+    field containing a space — so a command that TAKES one (`/model opus`,
+    `/reload-plugins --force`) could never verify. The field held exactly the right text, the
+    verifier refused it, and the injector cleared and retried until give-up. Arguments are
+    legal; a space before/after the `/` still is not."""
+    assert tt.prompt_field_shows_only(_pane("/model opus"), "/model opus") is True
+    assert tt.prompt_field_shows_only(_pane("/reload-plugins --force"), "/reload-plugins --force") is True
+    # The owner's actual rule is unchanged, and user prose still cannot pass.
+    assert tt.prompt_field_shows_only(_pane(" /model opus"), "/model opus") is False
+    assert tt.prompt_field_shows_only(_pane("/ model opus"), "/model opus") is False
+    assert tt.prompt_field_shows_only(_pane("/model opus please"), "/model opus") is False
