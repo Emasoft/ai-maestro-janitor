@@ -7,6 +7,8 @@ planner that will act on the day its gate is wrong.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -102,3 +104,44 @@ def test_target_is_configurable_with_a_sane_default(
     """A future model tier should not need a code change."""
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET", target_env)
     assert mf.fallback_target() == expected
+
+
+# --- the detector: roster wiring + the dark default (TRDD-QE390SJA) ------------------------
+
+
+def test_detector_is_on_the_roster_and_denied_to_harness_agents() -> None:
+    """A detector that is not on the roster NEVER RUNS — that exact omission kept
+    token-usage-anomaly dark for weeks (TRDD-E9LMBNPE). And it must be denied inside a
+    harness agent: its data source is the OAuth rotator (off in there) and it TYPES INTO A
+    PANE, which is the server's to drive for harness agents (janitor#100)."""
+    sys.path.insert(0, str(_ROOT / "scripts"))
+    import dispatch  # noqa: PLC0415
+
+    names = [name for name, _, _ in dispatch._DETECTORS]
+    assert "model-fallback" in names
+    assert "model-fallback" in dispatch._NON_HARNESS_DETECTORS
+
+
+def test_detector_file_exists_and_is_executable() -> None:
+    """The roster names a FILE; a typo there is a silent no-op."""
+    det = _ROOT / "scripts" / "detectors" / "model-fallback.py"
+    assert det.is_file(), f"roster names a detector that does not exist: {det}"
+    assert os.access(det, os.X_OK), "detector must be executable (the roster runs it directly)"
+
+
+def test_detector_exits_silently_while_the_flag_is_unset(tmp_path: Path) -> None:
+    """SHIPS DARK, proven by running the real thing: with the flag unset it must print
+    NOTHING and touch no pane. This is the test the ai-maestro side pins on their side too —
+    the failure mode of a wrong switch is a session parked on an unanswered dialog."""
+    env = {
+        **os.environ,
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"),
+    }
+    env.pop("CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED", None)
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "detectors" / "model-fallback.py")],
+        env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "", f"dark detector must be silent, got: {proc.stdout!r}"

@@ -414,6 +414,13 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # TRDD-E9LMBNPE). Reads token-meter.jsonl locally — cheap; self-gates on
     # CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_ENABLED.
     ("token-usage-anomaly", 300, "CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_INTERVAL"),
+    # model-fallback (TRDD-QE390SJA, janitor#222): the CONSUMER window-burn-rate never had.
+    # A MODEL-scoped window can be spent while the account is fine — measured 2026-08-06,
+    # 5h=42% / 7d=60% with Fable at ~98% — and the remedy is `/model opus`, not a rotation.
+    # 60s cadence to match the planner's own interval; the planner ALSO enforces it, because
+    # this roster's cadence is dynamic and a faster beat would fire a burst of switches.
+    # SHIPS DARK (CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED defaults off).
+    ("model-fallback", 60, "CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_INTERVAL"),
 ]
 
 # #J THIN MODE (TRDD-PZLVT2RN): detectors that must NOT run inside an ai-maestro
@@ -439,6 +446,11 @@ _NON_HARNESS_DETECTORS = frozenset({
     "keychain-health",
     "window-burn-rate",
     "fleet-github-config",
+    # model-fallback: same reason as window-burn-rate (its data source is the OAuth rotator,
+    # OFF inside a harness agent) AND it types into a pane — a harness agent's pane is the
+    # SERVER's to drive (janitor#100 split). The server ships its own `model-opus` /
+    # `model-sonnet` allowlist entries for exactly that half (janitor#222).
+    "model-fallback",
 })
 
 
