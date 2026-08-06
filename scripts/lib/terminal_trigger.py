@@ -381,6 +381,48 @@ def build_type_only_steps(
     return None
 
 
+# The model badge Claude Code draws in its status line, e.g. `🤖 Opus 5 v2.4.1`. Literal
+# shared VERBATIM with the ai-maestro side (janitor#222) so both implementations read the
+# same thing; non-greedy up to the version token, because the display name contains spaces.
+_PANE_MODEL_RE = re.compile(r"🤖\s*(.+?)\s+v\d")
+
+
+def parse_pane_model(pane_text: str) -> str | None:
+    """The model NAME the pane is currently showing, or None when the badge is absent.
+
+    Scans from the END: a long capture holds earlier badges from before a switch, and only
+    the live one describes the session now. None means "cannot tell" and must never be read
+    as "the switch worked" — see `confirm_model_switch`."""
+    matches = _PANE_MODEL_RE.findall(pane_text or "")
+    return matches[-1].strip() if matches else None
+
+
+def model_family(name: str) -> str:
+    """The comparable FAMILY of a model name: first token, lowercased (`Opus 5` -> `opus`,
+    `claude-fable-5` -> `claude`... so callers pass display names, not ids).
+
+    Why a family and not equality: the pane shows a DISPLAY name (`Opus 5`) while the command
+    types a SHORT name (`opus`), and the version suffix moves under us on every release. The
+    split literal is shared with the ai-maestro side (janitor#222)."""
+    parts = re.split(r"[\s\-_/]+", (name or "").strip())
+    return parts[0].lower() if parts and parts[0] else ""
+
+
+def confirm_model_switch(pane_text: str, target: str) -> bool | None:
+    """THREE-STATE: True (switched), False (still not on `target`), None (cannot tell).
+
+    `None` is a first-class answer and callers MUST NOT collapse it into success (the
+    ai-maestro side's rule, adopted on janitor#222): with no badge in the capture, all you
+    know is that keystrokes were sent. This matters beyond reporting — the cooldown is
+    stamped only on a CONFIRMED switch, so a `None` here means "retry next pass", while
+    treating it as success would suppress the retry for a whole interval on a session that
+    never actually moved."""
+    seen = parse_pane_model(pane_text)
+    if seen is None:
+        return None
+    return model_family(seen) == model_family(target)
+
+
 def build_esc_only_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
     """Steps that send ESC ALONE — no command, no Enter — or None if unsupported.
 

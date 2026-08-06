@@ -893,3 +893,35 @@ def test_a_field_that_merely_starts_with_a_number_is_still_the_field() -> None:
     """The skip must not eat real input: a user typing `2. something` is the FIELD, not a
     menu row — it is on the marker line inside the box, not in a choice list."""
     assert tt.extract_prompt_field(_pane("2. buy milk")) == "2. buy milk"
+
+
+# --- three-state model confirmation (janitor#222, adopted from the ai-maestro side) --------
+
+
+def _badge(model: str) -> str:
+    return f"some output\n🤖 {model} v2.4.1  ·  ~/proj\n" + "─" * 40 + f"\n❯{NBSP}\n" + "─" * 40
+
+
+def test_pane_model_is_read_from_the_LAST_badge() -> None:
+    """A capture holds badges from before the switch; only the live one describes the
+    session now. Reading the first would confirm a switch against a screenshot of the past."""
+    text = _badge("Fable 5") + "\n" + _badge("Opus 5")
+    assert tt.parse_pane_model(text) == "Opus 5"
+
+
+def test_model_family_compares_display_names_to_short_names() -> None:
+    """The pane shows a DISPLAY name ('Opus 5') while the command types a SHORT one
+    ('opus'), and the version suffix moves on every release — so the comparison is on the
+    family token, not equality."""
+    assert tt.model_family("Opus 5") == tt.model_family("opus") == "opus"
+    assert tt.model_family("Fable 5") != tt.model_family("opus")
+    assert tt.model_family("") == ""
+
+
+def test_confirm_model_switch_is_three_state() -> None:
+    """True / False / None, and None is a first-class answer: with no badge in the capture,
+    all we know is that keystrokes were sent. Collapsing it into success would stamp the
+    cooldown and suppress the retry on a session that never moved."""
+    assert tt.confirm_model_switch(_badge("Opus 5"), "opus") is True
+    assert tt.confirm_model_switch(_badge("Fable 5"), "opus") is False
+    assert tt.confirm_model_switch("no badge anywhere in this capture", "opus") is None
