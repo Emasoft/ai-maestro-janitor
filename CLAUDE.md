@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a93ab1fb55a4 digest=d81fd9ca1211 generated=2026-08-05T13:08:19+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7e19b13daf7c digest=603d81aef152 generated=2026-08-06T08:52:03+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -153,6 +153,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/detectors/peer-freeze-recovery.py` — peer-freeze-recovery — freeze recovery for PEER sessions while the daemon is dark
   · run_once(now) -> str — One gated beat. Returns a short outcome tag (for tests + the log line).
+  · record_outcome(outcome, now) -> None — Leave a `<epoch> <outcome>` trace of the LAST beat, quiet gates included.
   · main() -> int
 `scripts/detectors/plugin-updates.py` — Plugin-updates detector — Python port of plugin-updates.sh.
   · should_signal_user_update(*, enabled, scope, is_self, is_fleet, user_scope_enabled, installed, latest) -> bool — True iff the detector should SIGNAL the daemon to update this USER-scope plugin
@@ -745,14 +746,17 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · oversized_mistiered_pages(root, *, max_bytes) -> list[tuple[Path, str]] — Over-cap pages the split skill MUST refuse — `(path, tier)`, cheapest possible check.
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
-  · consolidate_has_work(root, *, last_fingerprint, stamp_age_s, recheck_after_s) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
+  · page_stats(root) -> dict[str, list[int]] | None — `{relpath: [size, mtime_ns]}` for every candidate page — the STAMPED form of
+  · changed_pages(current, last) -> set[str] — Root-relative paths that were added, removed, or whose stat moved. PURE.
+  · refusal_covered_pages(root, scope, *, now) -> set[str] — Root-relative paths covered by a LIVE consolidate refusal (TRDD-9MQ25PNH).
+  · consolidate_has_work(root, *, last_stats, stamp_age_s, recheck_after_s, scope, now) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
   · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
   · retro_lesson_has_work(root) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
   · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
   · conflict_pairs(root, scope) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
   · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
   · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
-  · content_has_work(intervention, root, *, split_max_bytes, scope, last_fingerprint, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
+  · content_has_work(intervention, root, *, split_max_bytes, scope, last_stats, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
   · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
   · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
@@ -838,8 +842,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · interval_s_for(intervention) -> float — Cadence (seconds) for an intervention, derived from its governing per-day
   · read_last_run(intervention, scope, root) -> int
   · mark_ran(intervention, scope, root, now) -> None — Stamp that `intervention` ran for (scope, root) at `now` (epoch seconds).
-  · read_dispatch_fingerprint(intervention, scope, root) -> str | None — The corpus fingerprint recorded when `intervention` was last DISPATCHED for
-  · mark_dispatch_fingerprint(intervention, scope, root, fingerprint) -> None — Record the corpus fingerprint at the moment `intervention` is dispatched.
+  · read_dispatch_fingerprint(intervention, scope, root) -> dict | None — The per-page stat map recorded when `intervention` was last DISPATCHED for
+  · mark_dispatch_fingerprint(intervention, scope, root, fingerprint) -> None — Record the per-page stat map at the moment `intervention` is dispatched.
   · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND a cadence
   · harvest_watermark_path(scope, root) -> Path
   · harvest_watermark_read(scope, root) -> dict — Return the ``{note_name: content_sha256}`` map of buffer notes already mirrored
@@ -1146,7 +1150,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · run_chained_inject(terminal, *, first, then, gate_stamp, gate_baseline, pre_submit_first, gate_timeout_s, giveup_s, sleeper) -> tuple[bool, str] — Type `first`, wait for the session it creates to actually EXIST, then type each of
   · fire_detached_argv(delay_s, argv, *, abort_unless_any) -> None — PUBLIC: run one fixed argv through the SAME detached delayed child as the
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
-  · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence, abort_unless_any) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
+  · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence, presence_wait_s, sleeper, abort_unless_any) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
   · main() -> int
 `scripts/lib/ticket_proposal.py` — The PROJECT-domain bridge: propose → approve → ticket (TRDD-CGYMUKO6).
   · parse_trdd_ref(ref) -> str | None — Accept `TRDD-35AC8I8D` or a bare `35AC8I8D`; return the canonical UPPERCASE id, else None.
