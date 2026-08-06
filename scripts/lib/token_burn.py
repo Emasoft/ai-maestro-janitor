@@ -299,3 +299,57 @@ def evaluate(accounts_usage: list[dict], now: int, ratio: float, min_util: float
     """The detector's pure decision helper: the rendered burn drift lines (no top-consumer
     clause). Thin wrapper over `evaluate_trips` for callers that only need the text."""
     return [t["line"] for t in evaluate_trips(accounts_usage, now, ratio, min_util)]
+
+
+def model_fallback_verdict(
+    usage: dict, now: int, *, scoped_high: float, account_headroom: float
+) -> dict | None:
+    """The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
+
+    PURE. Returns `{model, scoped_label, scoped_util, account_max_util, resets_at_epoch}`
+    for the most-exhausted qualifying model-scoped window, or None when no fallback is
+    warranted. The three conditions, and why each is load-bearing (TRDD-QE390SJA,
+    janitor#222):
+
+      * a model-scoped window at/above `scoped_high` — the thing that actually stops work.
+      * EVERY account-wide window (5h, 7d) at or below `account_headroom` — the gate that
+        makes "switch model" the right remedy instead of "rotate or wait". Firing on
+        ACCOUNT pressure would switch models when the account itself is the constraint,
+        which is the mirror of the mistake that evicted the fleet's healthiest account.
+      * at least one account-wide window COMPUTABLE — headroom must be PROVEN, never
+        assumed. An unreadable payload yields None (do nothing), because acting on
+        unproven headroom is how "could not measure" silently becomes "measured fine".
+
+    Measured motivation (2026-08-06): the live account sat at 5h=42% / 7d=60% with the
+    Fable scoped window at ~98%. The remedy was `/model opus`; instead the account was
+    rotated away from and then disqualified as a return target for ~123h."""
+    if not isinstance(usage, dict):
+        return None
+    account = [w for w in windows_from_usage(usage, now) if isinstance(w.get("util_pct"), (int, float))]
+    if not account:
+        return None  # headroom unproven → never act
+    account_max = max(float(w["util_pct"]) for w in account)
+    if account_max > account_headroom:
+        return None  # the ACCOUNT is the constraint — rotating/waiting is the remedy
+    scoped = [w for w in model_windows_from_usage(usage, now) if float(w["util_pct"]) >= scoped_high]
+    if not scoped:
+        return None
+    worst = max(scoped, key=lambda w: float(w["util_pct"]))
+    label = str(worst["label"])
+    return {
+        "model": label.split("/", 1)[1] if "/" in label else label,
+        "scoped_label": label,
+        "scoped_util": float(worst["util_pct"]),
+        "account_max_util": account_max,
+        "resets_at_epoch": worst.get("resets_at_epoch"),
+    }
+
+
+def format_model_fallback_line(verdict: dict, target: str) -> str:
+    """The one drift line a fallback emits. Names BOTH numbers, because the whole point is
+    that they disagree — a reader who sees only "98%" assumes the account is exhausted."""
+    return (
+        f"[model-fallback] {verdict['scoped_label']} window at {verdict['scoped_util']:.0f}% "
+        f"while the account's worst window is only {verdict['account_max_util']:.0f}% — "
+        f"switching to {target} (the account has headroom; rotating would be the wrong remedy)"
+    )

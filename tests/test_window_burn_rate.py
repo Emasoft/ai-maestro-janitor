@@ -540,3 +540,75 @@ def test_culprit_project_session_gets_the_alarm_and_the_ledger_line(
     ledger = tmp_path / "proj" / ".janitor" / "state" / "findings-ledger.ndjsonl"
     entry = json.loads(ledger.read_text(encoding="utf-8").strip())
     assert entry["code"] == "WINDOW-BURN" and entry["src"] == "window-burn-rate"
+
+
+# --------------------------------------------------------------------------- #
+# model-scoped fallback verdict (TRDD-QE390SJA / janitor#222): a spent MODEL
+# window while the ACCOUNT has headroom means "switch model", never "rotate".
+# The measured case (2026-08-06): 5h=42%, 7d=60%, Fable scoped ~98% — the owner
+# typed /model opus by hand after the rotator evicted the healthiest account.
+# --------------------------------------------------------------------------- #
+_SCOPED_HIGH = 90.0
+_ACCOUNT_HEADROOM = 80.0
+
+
+def _verdict(usage: dict):
+    return tbn.model_fallback_verdict(
+        usage, NOW, scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM
+    )
+
+
+def test_model_fallback_fires_on_the_measured_case() -> None:
+    """Scoped window spent, account windows comfortable → name the model to leave."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.26), model="Fable")]
+    v = _verdict(usage)
+    assert v is not None
+    assert v["model"] == "Fable" and v["scoped_label"] == "7d/Fable"
+    assert v["scoped_util"] == 98.0 and v["account_max_util"] == 60.0
+
+
+def test_model_fallback_silent_when_the_account_is_the_constraint() -> None:
+    """Account 7d over the headroom bar → rotating/waiting is the remedy, not a model
+    switch. Firing here is the mirror of the mistake that evicted the best account."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(95.0, _reset_for(_7D, 0.5)))
+    usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.5), model="Fable")]
+    assert _verdict(usage) is None
+
+
+def test_model_fallback_silent_without_a_spent_scoped_window() -> None:
+    """A comfortable scoped window is not a reason to switch anything."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.5)))
+    usage["limits"] = [_limit(group="weekly", percent=55.0, resets_at=_reset_for(_7D, 0.5), model="Fable")]
+    assert _verdict(usage) is None
+
+
+def test_model_fallback_requires_PROVEN_account_headroom() -> None:
+    """No computable account window → headroom is UNPROVEN, so do nothing. Acting here is
+    how 'could not measure' silently becomes 'measured fine' — the same failure direction
+    that made the rotator call an unmeasurable account 'maxed'."""
+    usage = {"limits": [_limit(group="weekly", percent=99.0, resets_at=_reset_for(_7D, 0.5), model="Fable")]}
+    assert _verdict(usage) is None
+    assert _verdict({}) is None
+
+
+def test_model_fallback_picks_the_worst_of_several_scoped_windows() -> None:
+    """Two models over the bar → leave the one that is furthest gone."""
+    usage = _usage(five=(10.0, _reset_for(_5H, 0.5)), seven=(20.0, _reset_for(_7D, 0.5)))
+    usage["limits"] = [
+        _limit(group="weekly", percent=92.0, resets_at=_reset_for(_7D, 0.5), model="Fable"),
+        _limit(group="weekly", percent=97.0, resets_at=_reset_for(_7D, 0.5), model="Sonnet"),
+    ]
+    v = _verdict(usage)
+    assert v is not None and v["model"] == "Sonnet"
+
+
+def test_model_fallback_line_names_both_numbers() -> None:
+    """The line must carry the scoped AND the account number — a reader shown only '98%'
+    concludes the account is exhausted, which is the misreading the whole card exists for."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.26), model="Fable")]
+    v = _verdict(usage)
+    assert v is not None
+    line = tbn.format_model_fallback_line(v, "opus")
+    assert "98%" in line and "60%" in line and "opus" in line
