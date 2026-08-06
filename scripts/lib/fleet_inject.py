@@ -22,6 +22,21 @@ adds the last two; iTerm/tmux are unchanged):
   raw TTY scan couldn't place (e.g. a nested/managed tmux fleet_scan can't see
   directly). ``fleet_scan`` pre-resolves the CLI path and tmux session name once
   per scan (never per-instance); no raw-ESC primitive on this channel.
+
+  NOT a general-purpose channel — unreachable while the server lives (janitor#218):
+  the ``aimaestro_session``/``aimaestro_cli`` identity fields exist ONLY when the
+  scan's agent list ANSWERED (``tag_aimaestro_identity`` no-ops otherwise), and that
+  same successful list makes ``instance_is_server_owned`` tag the instance
+  ``server_owned`` — which every injection consumer treats as hands-off (the
+  ``_DIAGNOSIS_RECOVERY`` table maps it to None ahead of dead/frozen; the rate-limit
+  wake pass targets only ``healthy``; ``fleet_stop.select_stop_targets`` skips it
+  explicitly). And with the server dead the list fails, so the fields are never
+  attached at all. The one deliberate opening is the operator adoption override
+  (``$JANITOR_AIMAESTRO_SERVER_STATE`` forced down): a human explicitly adopting the
+  harness fleet — never an automatic path. Today even that is moot from the daemon:
+  the list 401s without ``AID_AUTH`` (AM8JD9SG F6), so the daemon never sees a tag;
+  the live consumer of this argv shape is the SESSION-side self-trigger
+  (``terminal_trigger.send_self_command``), a harness agent driving its OWN pane.
 - **Linux GUI** (wtype/xdotool) → reuses ``terminal_trigger.build_wtype_steps`` /
   ``build_xdotool_steps`` (the same builders self-trigger uses), typing into the
   FOCUSED window — best-effort, last resort, tagged by ``fleet_scan`` only when
