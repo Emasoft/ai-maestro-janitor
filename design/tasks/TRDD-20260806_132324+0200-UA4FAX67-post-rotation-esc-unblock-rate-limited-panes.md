@@ -1,18 +1,55 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: todo
+column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T13:23:24+0200
+updated: 2026-08-06T17:26:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [f3f664de]
 ---
 
 # Post-rotation ESC unblock (owner failure report 2026-08-06, item 4)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+
+**Tasks 1 and 2 are DONE (`f3f664de`); task 3 is preserved and pinned by a test; task 4 is
+not ours. `todo → testing` — what remains is one live observation.**
+
+**The link (task 1).** `rotator._switch_blob` stamps `global-state/rotation-success.ts`;
+`daemon.task_session_liveness` consumes it. A breadcrumb rather than a direct call, so the
+rotator stays free of fleet-scan/injection machinery and the trigger works whoever rotated —
+the daemon bulk lane, a manual `rotator.py switch`, or a future caller.
+
+**The default decision (task 2), which was the real question on this card.** The PERIODIC
+wake pass stays **default-OFF**; a rotation **overrides** it inside a 600s window.
+
+The two are not the same kind of thing. The periodic sweep fires on a timer with *no*
+evidence the limit has lifted, so most of its injects would be typed at a wall that is still
+standing — that is why it shipped dormant and why it stays dormant. A rotation is positive,
+causal, freshly-timestamped evidence that the specific thing blocking those panes was just
+removed. Defaulting the whole sweep ON to catch that case would have bought the reported
+failure a fix at the price of a machine-wide timer typing into panes; this buys the same fix
+with a trigger that cannot fire without a cause.
+
+Evidence is **fail-CLOSED** (absent / unreadable / future-dated ⇒ no wake) because the gate
+types into the user's pane, and it **expires**, because a stamp that never went stale would
+quietly convert the default-OFF pass into always-on for the daemon's life.
+
+**Task 3 (P7WU40G9) survives, and is pinned:** frozen panes stay ESC-only esc_nudge — a typed
+command buffers on a frozen input line and floods — and a test asserts the new trigger is not
+a back door around it.
+
+**NEXT ACTION:** the live observation — a real 429 → rotate → pane continues with no
+keystroke. Needs a genuine rate-limit window, so it cannot be manufactured; the wiring is
+proven by tests + falsification, not by that event.
+
+**NOT OURS:** the harness half. The aimaestro CLI channel has no raw-ESC primitive
+(write-only `session command`), filed as ai-maestro#110. Harness panes are `server_owned` and
+this daemon never touches them (janitor#100 split). Do NOT build a call-in.
 
 ## WHY
 
@@ -51,9 +88,11 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
 
 ## Acceptance
 
-- [ ] rotation success observably followed (≤1 beat) by esc_nudge on rate-limited panes
-- [ ] wake-pass default decided + recorded; dormant-by-default either ends or is
-      justified in writing
+- [x] rotation success observably followed (≤1 beat) by a wake on rate-limited panes —
+      `f3f664de`. Linked by breadcrumb (`rotation-success.ts`), not a call, so it fires for
+      the daemon lane, a manual `rotator.py switch`, or any future caller.
+- [x] wake-pass default decided + recorded — the periodic sweep STAYS dormant, a rotation
+      OVERRIDES it. See the STATE block for the reasoning; it is written into the code too.
 - [ ] one live observation: 429 → rotate → pane continues with no human keystroke
 - [ ] harness gap explicitly delegated upstream (#110 cross-referenced)
 
