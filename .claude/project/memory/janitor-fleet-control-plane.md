@@ -89,6 +89,7 @@ both halves on partial failure.
 - [[janitor-has-no-off-switch-but-disarm]] — the opt-IN capability flags
   (`hard_restart_enabled`, `fleet_stop_enabled`, `issues-watch`) that live in this
   control plane and ARM extra capability rather than disable existing work.
+- [[janitor-daemon-process-identity]] — which interpreter the daemon runs under (the TCC-grantable identity), the restart gate that evicted our own version-less daemons, and the breaker that quarantined a healthy version for it.
 
 ## Notes and lessons learned
 

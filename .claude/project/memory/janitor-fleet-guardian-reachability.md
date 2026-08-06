@@ -211,6 +211,10 @@ control flag with readers and no writers is exactly this page's `armed`-column
 mislabeling, generalized: whichever scope is never auto-cleared is where remediation
 piles up.
 
+## See also
+
+- [[janitor-daemon-process-identity]] — which interpreter the daemon runs under (the TCC-grantable identity), the restart gate that evicted our own version-less daemons, and the breaker that quarantined a healthy version for it.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG05-0010, status:valid, keywords:"inferred_resolver_from_one_call_site false_missing_channel_alarm read_function_not_one_callsite", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED, and it shipped: v0.35.5's code

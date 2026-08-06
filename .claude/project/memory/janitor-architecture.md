@@ -317,6 +317,10 @@ must report a crash.[^3]
   above when a live ai-maestro server owns the host: §7.2 withdraws the whole
   daemon, so the six chores nobody absorbed belong to nobody.
 
+- [[janitor-daemon-process-identity]] — WHICH interpreter the daemon runs under
+  and why macOS TCC cares, plus the restart gate that evicted our own
+  version-less daemons every fire and the breaker that quarantined a healthy
+  version for it.
 - [[janitor-two-runtime-backends]] — the #N standalone vs #J harness backend
   split, the ai-maestro boundary IRON RULE (scripts only, never the HTTP API).
 - [[janitor-findings-pipeline]] — the findings-ledger choke point + the
