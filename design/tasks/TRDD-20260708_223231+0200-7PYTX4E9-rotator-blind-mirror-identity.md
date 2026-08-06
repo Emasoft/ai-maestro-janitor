@@ -1,9 +1,9 @@
 ---
 trdd-id: 7PYTX4E9
 title: Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
-column: planned
+column: complete
 created: 2026-07-08T22:32:31+0200
-updated: 2026-07-09T01:55:49+0200
+updated: 2026-08-06T23:35:00+0200
 current-owner: main
 assignee: main
 implementation-commits: [af68a6e, c740a5a]
@@ -28,6 +28,31 @@ external-refs: []
 ---
 
 # Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
+
+## ⏵ COLUMN CORRECTED 2026-08-06 — `planned` -> `complete` (board truth, NOT new work)
+
+This card sat at `column: planned` for **28 days while its code was already in `main`**. Nothing
+was re-done and nothing new was decided here; the column was simply never advanced when the work
+landed on 2026-07-09, so the board asserted "approved, not started" about finished work — the
+failure mode where a stalled card is worse than an unstarted one, because it looks handled.
+
+Verified before the move (not taken from the card's own claims):
+
+- `af68a6e` and `c740a5a` are both ancestors of `main`.
+- All four load-bearing symbols exist in `scripts/oauth_rotator/rotator.py`:
+  `read_live_blob_with_source`, `write_live_identity_beacon`, `_stamp_tick_completed`,
+  `_reconcile_live_email`.
+- The full suite is green today (14 605 passed, 1 skipped), so the 331/331 claimed below has not
+  rotted.
+
+**`complete` is the honest column, not `published`.** The one remaining step is the publish +
+daemon restart the STATE block already names, and that is an owner-gated transition
+(`complete -> publish` is NON-EXEMPT per `manager-approval-defaults.md`) — so it stays open,
+visibly, instead of being quietly closed.
+
+**The caveat below is still LIVE and is the reason this matters:** until the daemon restarts on
+the new code, the running tick executes the pre-fix rotator. The 2026-07-08 band-aid holds it
+correct only until the next user `/login`.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
 
