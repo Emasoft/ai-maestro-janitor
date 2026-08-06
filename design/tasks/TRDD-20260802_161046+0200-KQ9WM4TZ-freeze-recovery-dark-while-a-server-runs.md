@@ -4,7 +4,7 @@ title: Standalone sessions have no freeze recovery while an ai-maestro server ru
 column: testing
 pre-block-column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-05T18:26:46+0200
+updated: 2026-08-06T07:43:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -16,6 +16,29 @@ implementation-commits: []
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+### 2026-08-06 morning — the observation LANDED, one gate-clean dark-window beat PROVEN; plus an observability caveat the criterion missed
+
+Measured (not inferred) this morning:
+- `global-state/peer-recovery.last-run.ts` content = `1785947625` → **2026-08-05 18:33:45+0200 —
+  exactly inside yesterday's daemon eviction-loop dark window** (TRDD-DB1P25S4: the daemon was
+  being SIGTERM'd every ~60-75 s, so daemon-dark + server-alive held repeatedly). The stamp sits
+  AFTER the daemon-alive, server-alive, pacing and flock gates in `run_once`, so its existence is
+  proof of ONE fully gate-clean beat that also won the cross-session lock.
+- No `peer-freeze-recovery.log` exists in any scanned project. That is CONSISTENT, not missing
+  data: after the stamp, the only SILENT outcome is `no-peers` — every louder outcome
+  (`ran`/`scan-failed`/`beat-failed`) logs. So the beat ran, scanned, and found no recoverable
+  peer (plausible: mid-ping-pong, panes were healthy; only the daemon was flapping).
+- **Observability caveat the 300s-window criterion missed:** the quiet gates (`daemon-owns-it`,
+  `paced`, `lock-held`, `no-server`) return with NO artifact — no stamp advance, no log line. With
+  the daemon healthy again (TRDD-DB1P25S4 fix `75332ba0` ended the eviction loop), every beat now
+  exits `daemon-owns-it` invisibly BY DESIGN. "Observe beats across a few 300 s windows" is
+  therefore only satisfiable DURING a genuine dark window, and those are now rare precisely
+  because the daemon was fixed. NEXT ACTION: accept the single proven gate-clean beat + the
+  gate-order code review as the testing evidence, OR (better, small) add a heartbeat-log line /
+  counter for the quiet-gate outcomes so a future dark window leaves a countable trace — decide,
+  then move `testing → ai_review`. Do NOT wait for more dark windows; that is waiting for an
+  event the daemon fix now prevents.
 
 ### 2026-08-05 evening — UNBLOCKED: the publish landed and the stopgap has now RUN. `blocked → testing`.
 
