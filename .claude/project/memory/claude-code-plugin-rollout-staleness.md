@@ -76,6 +76,30 @@ absorbed chore is a SERVER bug. Do NOT hand-run `claude plugin update --scope us
 user-scope writes belong to the single writer (issue #7 / PRRD S2.1). Escalate to the server
 side; the pending flag is the evidence.
 
+
+^ATOM-RGRE-T1Z7 [desc:"/reload-plugins does NOT re-point already-loaded skills — only a new session does; the cron path rolls forward while skills stay pinned", keywords: I_ran_reload-plugins_and_the_skill_is_still_the_old_version session_runs_new_detectors_but_old_skills two_plugin_versions_live_in_one_session reload_markers_delivered_but_nothing_changed only_a_new_session_picks_up_the_new_plugin skill_base_directory_shows_the_old_version, ocd: 2026-08-06, lmd: 2026-08-06]
+
+**A live session can run TWO plugin versions at once, and `/reload-plugins` does not fix it.** The auto-rolling dispatcher stub always resolves the NEWEST cached version, so the CRON/detector path rolls forward on its own — but SKILLS stay on whatever was current when the session loaded them. Result: new detectors and old skills in the same session, which reads as "the fix is published and the bug still happens".
+
+MEASURED 2026-08-06 from `"Base directory for this skill:"` lines (real load markers, not prose):
+
+| session | skill loads | `/reload-plugins` runs |
+|---|---|---|
+| overnight | 66 x 2.3.0, ZERO 2.4.1 | 27 |
+| next day | 9 x 2.3.0, ZERO 2.4.1 | **23** |
+| after `/clear` | 2 x 2.4.1, ZERO 2.3.0 | — |
+
+Not one skill load resolved to the new version in either pre-clear session, though it had been cached for hours and one session ran `/reload-plugins` **23 times** — via a `janitor-reload-plugins` skill that was ITSELF loaded from the old tree. The fresh session after `/clear` picked up the new version on its first load.
+
+So the janitor's convergence chain is NOT the suspect: cache update, reload-generation stamp, `[janitor-reload]` markers and the reload command all worked. **Only a NEW SESSION re-points skills** — which makes `/clear` + bootstrap the ONLY reliable version-convergence mechanism available, not merely a cost optimisation (TRDD-PXP08ZQC, TRDD-5C42VCUX).
+
+
+^ATOM-RGRE-DIAG [desc:"to learn which plugin version a session is really running, read the skill LOAD MARKER's path — never ask a claim-state API", keywords: how_do_I_tell_which_plugin_version_a_session_runs which_version_is_this_session_actually_using claim_state_api_disagreed_with_reality base_directory_for_this_skill_path proving_what_actually_loaded, ocd: 2026-08-06, lmd: 2026-08-06]
+
+To establish which plugin version a session is ACTUALLY running, grep its transcript for `Base directory for this skill:` and read the version out of the PATH. That line is emitted at load time by the thing that did the loading, so it is evidence; a claim-state or install-registry helper describes INTENT and can disagree with what a live session holds.
+
+Learned the expensive way on the same investigation: I first concluded the daemon had "stood down" for server-claimed update chores because `claimed_chores()` listed them — then found the daemon's own log showed it RAN the chore, with zero yield lines anywhere. The published root cause had to be withdrawn. An API that reports ownership is not a record of execution.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-ROLL-GHOST, status:valid, keywords:"fix published but bug still happening stale hooks session loaded old version reload-plugins ghost", ocd:2026-07-18, lmd:2026-07-18]
