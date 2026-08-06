@@ -114,6 +114,29 @@ _ESC_SETTLE_S = "0.6"
 _PROMPT_MARKER = "❯"          # ❯ — starts the input field line
 _NBSP = " "                   # what actually follows the marker
 _BOX_RULE = "─"               # ─ — the frame above/below the field; ends a wrapped field
+# A SELECTION MENU draws the SAME marker on its currently-selected row, so "the last marker
+# line is the input field" reads a menu choice AS the field. Measured on the ai-maestro side
+# and handed over on janitor#222; the literal is theirs VERBATIM so both implementations agree
+# on what a choice row looks like.
+_CHOICE_ROW_RE = re.compile(r"^\s*(?:❯\s*)?(\d{1,2})\.\s+(\S.*)$")
+
+
+def _is_choice_row(line: str) -> bool:
+    """True iff `line` is a MENU CHOICE rather than the input field.
+
+    The choice pattern ALONE over-matches: a user typing `2. buy milk` into the real field
+    produces a marker line that matches it, and skipping that would make us read a stale
+    prompt (or None) while the user's actual text sits in front of us. So the marker's
+    SEPARATOR breaks the tie — the live input field is `❯` + U+00A0 NO-BREAK SPACE (the
+    module's oldest measured fact, see the header), while a menu row separates with an
+    ordinary space. Requiring the NBSP to be ABSENT before skipping keeps every real field.
+
+    NOT YET MEASURED against a live menu capture on this side (asked on janitor#222): if a
+    menu ever draws NBSP too, this returns False and we simply fall back to the previous
+    behaviour — the pane reads as occupied and a verified injection defers. That is the safe
+    direction, which is why the tie-break is written to fail this way.
+    """
+    return bool(_CHOICE_ROW_RE.match(line)) and _NBSP not in line
 _PROMPT_POLL_INTERVAL_S = 5.0      # the owner's "try again after 5 seconds" (a FAILED attempt)
 _PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its own outage
 # Owner directive, refined 2026-08-02: *"even if the user is reported as present, it should not
@@ -147,11 +170,20 @@ def extract_prompt_field(pane_text: str) -> str | None:
     A long entry WRAPS onto following lines, so the field runs from the marker line to the
     next box rule. Reads the LAST marker in the capture: scrollback can contain earlier
     prompts, and only the live one is the field.
+
+    SELECTION-MENU ROWS ARE SKIPPED (janitor#222, measured by the ai-maestro side): a menu
+    draws the same marker on its selected row, so the plain last-marker rule returns a CHOICE
+    (`❯ 2. Yes, and don't ask again`) and reports it as the input field. That is not merely
+    inaccurate — it silently changes what every caller decides: `prompt_field_is_empty` reads
+    the choice text as "field occupied", so a verified injection defers until its give-up
+    instead of typing, and the pane looks permanently busy while a menu is open. Skipping the
+    rows makes the reader fall back to the real field (or to None when the menu is all there
+    is, which correctly reads as "cannot tell" rather than "free to type").
     """
     lines = pane_text.splitlines()
     start = None
     for i, line in enumerate(lines):
-        if line.lstrip().startswith(_PROMPT_MARKER):
+        if line.lstrip().startswith(_PROMPT_MARKER) and not _is_choice_row(line):
             start = i
     if start is None:
         return None

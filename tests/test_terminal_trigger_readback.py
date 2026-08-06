@@ -852,3 +852,44 @@ def test_a_command_WITH_ARGUMENTS_can_verify() -> None:
     assert tt.prompt_field_shows_only(_pane(" /model opus"), "/model opus") is False
     assert tt.prompt_field_shows_only(_pane("/ model opus"), "/model opus") is False
     assert tt.prompt_field_shows_only(_pane("/model opus please"), "/model opus") is False
+
+
+# --- selection-menu rows are not the input field (janitor#222, ai-maestro's measurement) ---
+
+
+def _menu_pane(field: str) -> str:
+    """A capture with an OPEN SELECTION MENU below the input field — the shape that broke the
+    naive last-marker rule. The menu draws `❯` on its SELECTED row, so that row is the last
+    marker line in the capture even though the real field is above it."""
+    return (
+        "some earlier output\n" + "─" * 40 + f"\n❯{NBSP}{field}\n" + "─" * 40 + "\n"
+        "Do you want to proceed?\n"
+        "  1. Yes\n"
+        "❯ 2. Yes, and don't ask again\n"
+        "  3. No\n"
+        "Enter to select · Esc to cancel\n"
+    )
+
+
+def test_a_menu_choice_row_is_NOT_read_as_the_input_field() -> None:
+    """The hazard the ai-maestro side measured and handed over on janitor#222. Reading the
+    choice row as the field is not just wrong text — `prompt_field_is_empty` then reports the
+    pane as occupied forever, so a verified injection defers to its give-up while a menu is
+    open, and the pane looks permanently busy."""
+    assert tt.extract_prompt_field(_menu_pane("")) == ""
+    assert tt.prompt_field_is_empty(_menu_pane("")) is True
+    assert tt.extract_prompt_field(_menu_pane("/model opus")) == "/model opus"
+
+
+def test_a_menu_with_no_field_above_reads_as_UNKNOWN_not_empty() -> None:
+    """When the choice rows are the ONLY markers, the answer is None ("cannot tell"), never
+    "" ("free to type") — unknown is never a licence to type (the module's standing rule)."""
+    only_menu = "Do you want to proceed?\n  1. Yes\n❯ 2. Yes, and don't ask again\n  3. No\n"
+    assert tt.extract_prompt_field(only_menu) is None
+    assert tt.prompt_field_is_empty(only_menu) is False
+
+
+def test_a_field_that_merely_starts_with_a_number_is_still_the_field() -> None:
+    """The skip must not eat real input: a user typing `2. something` is the FIELD, not a
+    menu row — it is on the marker line inside the box, not in a choice list."""
+    assert tt.extract_prompt_field(_pane("2. buy milk")) == "2. buy milk"
