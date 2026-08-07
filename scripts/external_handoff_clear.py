@@ -232,7 +232,10 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int) -> None:
     import clear_trigger  # noqa: PLC0415
     import cold_cache_compact  # noqa: PLC0415
 
-    os.environ["CLAUDE_PROJECT_DIR"] = str(root)
+    # CHILD-ONLY env. Assigning os.environ["CLAUDE_PROJECT_DIR"] here would poison a
+    # Claude-reserved var for the whole parent process — this runs inside the long-lived
+    # daemon, so every later plugin in that process would inherit one project's path.
+    child_env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
     clear_trigger._spawn_chain({
         "delay": 0.0,  # no turn to settle out — nothing is running in front of us
         "terminal": terminal,
@@ -245,7 +248,7 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int) -> None:
             "with no model turn — follow its wikimem/TRDD links via memgrep recall on "
             "demand), then resume your prior in-flight task."
         ),
-    })
+    }, env=child_env)
     # STAMP AT SPAWN, unlike the in-model lever which stamps only on a confirmed send.
     # The difference is real, not a relaxation: there, a refused send meant the USER WAS
     # PRESENT, so stamping would have turned a veto into a two-hour mute. Here presence is

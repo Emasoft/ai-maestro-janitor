@@ -54,7 +54,7 @@ alarm clears end-to-end); (b) publish, then resolution notes on GH#92 + TRDD-VQ4
 ### mechanism is PATH STABILITY, not code signing
 
 The owner identified the authorized runtime exactly:
-`/Users/emanuelesabetta/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/bin/python3.12`.
+`~/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/bin/python3.12`.
 The plist now runs THAT; verified live: daemon pid 73578 under it, heartbeat fresh, launchd
 KeepAlive (note: `launchctl kickstart` restarts the CACHED definition — a plist edit needs
 `bootout` + `bootstrap` to load, and bootstrap can return transient error 5 right after a bootout;

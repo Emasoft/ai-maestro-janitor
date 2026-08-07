@@ -39,7 +39,7 @@ traps). See also [[renew-cdp-attach-real-chrome]].
 
 Second owner constraint, same day: **unbrowse does not support Chrome profiles.** It cannot select
 among the owner's 3 accounts — switching means swapping the per-SITE clone folders under
-**`/Users/emanuelesabetta/.unbrowse/profiles/`** (verified on disk: `claude.ai/`, `krea.ai/`,
+**`~/.unbrowse/profiles/`** (verified on disk: `claude.ai/`, `krea.ai/`,
 parked variants like `krea.ai.bak-krill`) so the wanted account's clone carries the site's
 canonical name, every time. **Never Chrome's own profile dirs** — unbrowse doesn't read them for
 switching, and renaming them would risk the owner's live browser data for zero effect (my first

@@ -384,9 +384,19 @@ def _run_chain_payload(payload_b64: str) -> int:
             os.close(lock_fd)
 
 
-def _spawn_chain(payload: dict) -> None:
+def _spawn_chain(payload: dict, *, env: dict[str, str] | None = None) -> None:
     """Launch the chained child fully detached so this turn can end (which is what lets the
-    typed /clear actually run)."""
+    typed /clear actually run).
+
+    `env` overrides the child's environment ONLY. Callers that need the child to resolve a
+    specific project (the external clear, whose parent is the daemon and whose cwd is
+    therefore the wrong tree) pass `CLAUDE_PROJECT_DIR` HERE rather than assigning
+    `os.environ[...]` in the parent. Mutating a Claude-reserved var in a long-lived parent
+    clobbers it for every later plugin in the same process — CPV flags it as
+    CLAUDE_RESERVED_ENV_POISON / ENV_INJECTION, and the flag is right: `state.py` already
+    avoids the same trap deliberately (`set_project_dir_override` exists precisely so the
+    override never touches `os.environ`). Scoping it to the child keeps the parent clean.
+    """
     blob = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
         [sys.executable, str(Path(__file__).resolve()), "--__chain", blob],
@@ -394,6 +404,7 @@ def _spawn_chain(payload: dict) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env=env,
     )
 
 
