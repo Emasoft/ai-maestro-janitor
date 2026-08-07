@@ -597,3 +597,30 @@ def test_check4_announced_list_in_next_paragraph_is_collected():
         rec, _column_of({"3b9b2040": "published", "aebedbff": "complete"})
     )
     assert sorted(stale) == ["3b9b2040", "aebedbff"]
+
+
+# ── has_stated_precondition (janitor#189: trdd-drift backburner narrowing) ──
+
+
+def test_has_stated_precondition_true_when_blocked_by_populated():
+    """A backburner card waiting on another TRDD has an on-file excuse — not forgotten."""
+    head = "---\ncolumn: backburner\nblocked-by: [TRDD-3b9b2040]\n---\n"
+    assert tc.has_stated_precondition(head) is True
+
+
+def test_has_stated_precondition_true_when_npt_populated():
+    """A card waiting on its own prerequisite tasks is parked on purpose, not idle."""
+    head = "---\ncolumn: backburner\nnpt: [TRDD-aebedbff]\n---\n"
+    assert tc.has_stated_precondition(head) is True
+
+
+def test_has_stated_precondition_false_with_no_stated_reason():
+    """The true-positive shape must still fire: nothing on file explains the staleness."""
+    head = "---\ncolumn: backburner\ntitle: some forgotten idea\n---\n"
+    assert tc.has_stated_precondition(head) is False
+
+
+def test_has_stated_precondition_false_when_fields_are_empty_lists():
+    """An explicit `[]` is 'no precondition', not a stated one — must not silence the card."""
+    head = "---\ncolumn: backburner\nblocked-by: []\nnpt: []\n---\n"
+    assert tc.has_stated_precondition(head) is False

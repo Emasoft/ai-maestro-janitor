@@ -31,14 +31,50 @@ break the heartbeat.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
 _POLLER = Path(__file__).resolve().parent.parent / "gh_issues_monitor" / "gh_notify_poll.py"
 _DETECTOR = "gh-reply-watch"
+
+# Machine-wide poll floor (janitor#215). The 900s per-project interval was reasoned
+# against GitHub's `X-Poll-Interval: 60` response for `GET /notifications` — correct
+# for ONE session, but that header is scoped to the ACCOUNT/token, and every janitor
+# instance on this machine shares the one owner identity. On a host running N
+# concurrent projects the AGGREGATE poll rate is N/900 req/s, unbounded as N grows —
+# at 13 projects that already sits at ~87% of the 60/hour floor. This stamp makes the
+# interval bound the ACCOUNT's poll rate rather than each project's: only one fire,
+# machine-wide, may actually call `gh` within any `_GLOBAL_MIN_INTERVAL_S` window. The
+# same mechanism `marketplace-op.lock` already uses to globalise bulk refreshes
+# (`global_state.py`'s `control_dir()`), applied here as a rate stamp rather than a
+# mutual-exclusion lock — concurrent fires from different projects are meant to
+# interleave, just not all poll in the same second.
+_GLOBAL_MIN_INTERVAL_S = 60
+_GLOBAL_STAMP_TASK = "gh-reply-watch-global-poll"
+
+
+def _global_gate_allows(now: int) -> bool:
+    """True iff no other project's fire has polled `gh` within the floor window.
+
+    Read-then-write is not a lock — two fires racing within the same instant can both
+    pass — but the worst case is a small, bounded overshoot, never the unbounded N/900
+    aggregate the per-project-only interval allowed. Matches the fail-open posture of
+    every other chore here: a missed poll costs a delayed notification, not a broken
+    heartbeat.
+    """
+    return (now - gs.read_last_run(_GLOBAL_STAMP_TASK)) >= _GLOBAL_MIN_INTERVAL_S
+
+
+def _mark_global_poll(now: int) -> None:
+    try:
+        state.atomic_write(gs.last_run_path(_GLOBAL_STAMP_TASK), str(now))
+    except OSError:
+        pass  # best-effort — a failed stamp only means the NEXT fire may poll early
 
 
 def _poll_argv(*args: str) -> list[str]:
@@ -80,6 +116,19 @@ def main() -> int:
     if sdir is None:
         # The poller could not even report its own state dir — treat as unavailable.
         return 0
+
+    # The machine-wide floor (janitor#215): both the baseline call below and the real
+    # poll a few lines down issue a `gh api notifications` request, so the gate sits
+    # BEFORE either — checking it only in front of the real poll would still let every
+    # project's first-fire baseline call through uncapped.
+    now = int(time.time())
+    if not _global_gate_allows(now):
+        state.log_line(
+            _DETECTOR,
+            "deferred — machine-wide poll floor not yet elapsed (janitor#215)",
+        )
+        return 0
+    _mark_global_poll(now)
 
     # FIRST FIRE: adopt the current notification state and say NOTHING. The retired
     # enable-skill ran `--baseline` as its step 1 for exactly this reason. Without it the

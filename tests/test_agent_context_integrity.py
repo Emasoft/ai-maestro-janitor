@@ -348,6 +348,48 @@ def test_an_untracked_file_is_reported_but_gets_no_fixer(tmp_path: Path) -> None
     assert "janitor-security-agent" not in r.stdout
 
 
+# --------------------------------------------------------------------------- #
+# the RAISE gate — a verified-local file must not open a ticket (janitor#214)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_verified_local_hit_opens_no_ticket(tmp_path: Path) -> None:
+    """janitor#214, THE complaint: the fixer hint was already withheld for locally-authored
+    content (janitor#167), but a proposal TRDD was still opened for every hit — 5 proposals
+    from 3 authored lines, all refused, all noise. A file whose ENTIRE known history is this
+    repo's own identity must be reported once and left alone, not turned into a standing
+    proposal a human has to refuse."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _LOCAL)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout, "the finding must still be printed once"
+    assert "approve the fix with" not in r.stdout, (
+        f"a verified-local file must not open a proposal ticket; got: {r.stdout!r}"
+    )
+
+
+def test_a_foreign_authored_hit_still_opens_a_ticket(tmp_path: Path) -> None:
+    """The true positive the RAISE gate must not swallow: content with positive evidence of
+    outside authorship still becomes a proposal, exactly as before this narrowing."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _FOREIGN)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "approve the fix with" in r.stdout, f"got: {r.stdout!r}"
+
+
+def test_an_untracked_hit_still_opens_a_ticket(tmp_path: Path) -> None:
+    """Unknown provenance (no git history at all) is the shape a real attack takes — it must
+    keep opening a ticket, never be folded into the verified-local suppression."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "approve the fix with" in r.stdout, f"got: {r.stdout!r}"
+
+
 def test_a_symlink_between_two_scanned_paths_is_counted_once(tmp_path: Path) -> None:
     """Dedupe by RESOLVED path. Two glob-matching paths pointing at the SAME bytes are one
     text: scanning both doubles the pattern count and the 'in N files' figure a human uses to

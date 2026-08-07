@@ -160,10 +160,20 @@ def main() -> int:
 
         # A stated park is honoured until its own date, then expires on its own.
         try:
-            review_after = review_after_epoch(f.read_text(encoding="utf-8")[:4096])
+            head = f.read_text(encoding="utf-8")[:4096]
         except OSError:
-            review_after = None
+            head = ""
+        review_after = review_after_epoch(head)
         if review_after is not None and now < review_after:
+            continue
+
+        # A `backburner` card whose staleness is EXPLAINED — `blocked-by:` or `npt:`
+        # populated — is not "forgotten": it is correctly parked pending that stated
+        # condition (janitor#189: 31/32 flagged cards were already correct, and this was
+        # the actionable shape among them — a card with a real precondition on file).
+        # Narrower than exempting the whole column: a `backburner` card with NEITHER
+        # field set still fires, so genuinely forgotten work keeps surfacing.
+        if column == "backburner" and trdd_common.has_stated_precondition(head):
             continue
         # Label from the field that DECIDED eligibility above, so the line can never assert a
         # state the card does not hold. The old `status or column` preferred v1 status even on

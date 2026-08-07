@@ -175,6 +175,81 @@ def test_a_forged_janitor_marker_in_a_title_arrives_defanged(tmp_path: Path) -> 
     assert "[janitor-self-disarm]" not in out, "the marker survived verbatim"
 
 
+# --------------------------------------------------------------------------- #
+# machine-wide poll floor (janitor#215): the per-project interval was reasoned
+# against GitHub's `X-Poll-Interval: 60`, but that header scopes the ACCOUNT, and
+# every project on a host shares the one owner identity — the aggregate rate is
+# unbounded as project count grows. These share ONE `HOME` (and so one control-dir
+# stamp) across two DIFFERENT projects to prove the floor is machine-wide, not
+# per-project.
+# --------------------------------------------------------------------------- #
+
+
+def _run_with_home(project: Path, home: Path) -> subprocess.CompletedProcess[str]:
+    env = {
+        "PATH": f"{project / 'bin'}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+        "HOME": str(home),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    return subprocess.run(
+        [sys.executable, str(_DETECTOR)],
+        capture_output=True, text=True, env=env, check=False, timeout=180,
+    )
+
+
+def test_a_second_projects_fire_is_deferred_by_the_shared_machine_floor(tmp_path: Path) -> None:
+    """THE janitor#215 fix. Two DIFFERENT projects, same account (same HOME, so the same
+    control-dir stamp): the second project's fire, moments after the first, must not also
+    hit `gh` — the per-project 900s interval alone would let both through, since each
+    project's OWN cursor has never polled before."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project_a = _project(tmp_path / "a", registered=True, baselined=True)
+    project_b = _project(tmp_path / "b", registered=True, baselined=True)
+    _fake_gh(project_a / "bin", [_thread("reply on A")],
+             comment={"user": {"login": "octocat"}, "body": "hi from A"})
+    _fake_gh(project_b / "bin", [_thread("reply on B")],
+             comment={"user": {"login": "octocat"}, "body": "hi from B"})
+
+    r1 = _run_with_home(project_a, home)
+    assert r1.returncode == 0
+    assert r1.stdout.strip() != "", "the FIRST fire, machine-wide, must be allowed to poll"
+
+    r2 = _run_with_home(project_b, home)
+    assert r2.returncode == 0
+    assert r2.stdout.strip() == "", (
+        f"a second project's fire within the floor window must be deferred, not poll "
+        f"again; got: {r2.stdout!r}"
+    )
+
+
+def test_the_floor_expires_so_a_later_fire_polls_again(tmp_path: Path) -> None:
+    """The gate is a FLOOR, not a mute: once the window has elapsed the next fire (on
+    ANY project sharing the account) polls normally again."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project_a = _project(tmp_path / "a", registered=True, baselined=True)
+    project_b = _project(tmp_path / "b", registered=True, baselined=True)
+    _fake_gh(project_a / "bin", [_thread("reply on A")],
+             comment={"user": {"login": "octocat"}, "body": "hi from A"})
+    _fake_gh(project_b / "bin", [_thread("reply on B")],
+             comment={"user": {"login": "octocat"}, "body": "hi from B"})
+
+    r1 = _run_with_home(project_a, home)
+    assert r1.stdout.strip() != ""
+
+    # Back-date the shared machine-wide stamp past the floor window rather than sleeping.
+    stamp = home / ".claude" / "janitor-control" / "gh-reply-watch-global-poll.last-run.ts"
+    assert stamp.is_file(), "the first fire must have written the machine-wide stamp"
+    stamp.write_text("0", encoding="utf-8")
+
+    r2 = _run_with_home(project_b, home)
+    assert r2.returncode == 0
+    assert r2.stdout.strip() != "", (
+        f"an expired floor must let the next fire poll; got: {r2.stdout!r}"
+    )
+
+
 def test_a_broken_gh_is_silent_not_an_alarm(tmp_path: Path) -> None:
     """Fail-open: no `gh` on PATH at all -> no output, exit 0. A notification feature must
     never be able to break the heartbeat, and must not alarm on every fire either."""

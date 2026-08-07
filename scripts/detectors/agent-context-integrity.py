@@ -204,6 +204,40 @@ def _has_foreign_provenance(project_root: Path, rel: str, local: set[str]) -> bo
     return bool(authors - local)
 
 
+def _is_verified_local_only(project_root: Path, rel: str, local: set[str]) -> bool:
+    """True iff `rel` has a KNOWN, non-empty commit history and EVERY author is one of
+    `local` — i.e. positive evidence this content never left this machine's own identity.
+
+    janitor#214 (ai-maestro): the fixer-hint gate above already stops recommending deletion
+    of a locally-authored safety rule, but it left the SECOND half of the noise standing —
+    `raise_issue` still opened a proposal TRDD for every hit regardless of provenance, so a
+    repo whose own guardrails are dense with prohibition language (negations read as
+    authority-override to a prose regex) got a proposal per pattern, per file, forever open
+    pending a human refusal. This gates the RAISE itself, not just the hint.
+
+    Deliberately NARROWER than "not foreign" (`not _has_foreign_provenance(...)`), which is
+    also true for an UNTRACKED file (no git history at all — e.g. a just-dropped payload from
+    an npm postinstall or an unstaged PR diff). Suppressing the ticket for THAT case would be
+    exactly backwards: unknown provenance is the shape a real attack takes, and it must keep
+    raising (`test_an_untracked_file_is_reported_but_gets_no_fixer` already pins "reported,
+    no fixer" — this function must not turn that into "reported, no ticket" too). Only a file
+    with an ACTUAL git history, entirely inside `local`, counts as verified — the same
+    evidence a human would use to establish provenance by hand.
+    """
+    if not local:
+        return False
+    r = state.run_subprocess(
+        ["git", "-C", str(project_root), "log", "--format=%an", "--", rel],
+        detector_name=_NAME,
+    )
+    if r is None or r.returncode != 0:
+        return False
+    authors = {a.strip() for a in (r.stdout or "").splitlines() if a.strip()}
+    if not authors:
+        return False  # untracked / no history — provenance UNKNOWN, not verified
+    return authors <= local
+
+
 def _file_kind(path: Path) -> str:
     """Prose rules read every byte; source rules skip the injection/authority patterns,
     which fire constantly inside code comments and string literals."""
@@ -340,9 +374,12 @@ def main() -> int:
     # distinct file, over the capped finding set only, so a wide finding cannot turn the
     # heartbeat into a git-log storm.
     local = _local_authors(project_root)
-    foreign = {
-        rel for rel in {r for r, _ in findings} if _has_foreign_provenance(project_root, rel, local)
-    }
+    all_rels = {r for r, _ in findings}
+    foreign = {rel for rel in all_rels if _has_foreign_provenance(project_root, rel, local)}
+    # The RAISE gate (janitor#214): a finding in a file with a KNOWN history that is
+    # entirely local never opens a ticket — it is printed above, once, for a human to read.
+    # See `_is_verified_local_only` for why this is narrower than `all_rels - foreign`.
+    verified_local = {rel for rel in all_rels if _is_verified_local_only(project_root, rel, local)}
     hint = (
         sh.security_agent_hint(
             "skill-bundle",
@@ -376,7 +413,13 @@ def main() -> int:
 
     raised = 0
     skipped = 0
+    provenance_skipped = 0
     for rel, f in findings:
+        if rel in verified_local:
+            # janitor#214: printed above already; a proposal here would just re-ask a
+            # human to refuse content this repo's own git history already vouches for.
+            provenance_skipped += 1
+            continue
         if raised >= issue_catalog.MAX_RAISES_PER_FIRE:
             skipped += 1
             continue
@@ -398,6 +441,12 @@ def main() -> int:
             _NAME,
             f"{skipped} {_CODE} raise(s) skipped by the "
             f"{issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+        )
+    if provenance_skipped:
+        state.log_line(
+            _NAME,
+            f"{provenance_skipped} {_CODE} raise(s) skipped — verified-local-only "
+            f"provenance (janitor#214)",
         )
 
     for uid in issue_catalog.reconcile(_CODE, [f"{rel}:{f.line}" for rel, f in findings]):

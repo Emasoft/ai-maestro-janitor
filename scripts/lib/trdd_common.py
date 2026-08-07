@@ -224,6 +224,10 @@ FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
 FM_CREATED_RE = re.compile(r"^created:[ \t]*(.+)$", re.MULTILINE)
 FM_BLOCKED_BY_RE = re.compile(r"^blocked-by:[ \t]*(.+)$", re.MULTILINE)
 FM_IMPL_COMMITS_RE = re.compile(r"^implementation-commits:[ \t]*(.+)$", re.MULTILINE)
+# `npt:` (Necessary Prerequisite Tasks) — a card that must finish these BEFORE `dev` is
+# legitimately stalled in `backburner`/`todo` on its own dependency chain, not forgotten
+# (trdd-drift narrowing, janitor#189: a card with a stated precondition is not "drift").
+FM_NPT_RE = re.compile(r"^npt:[ \t]*(.+)$", re.MULTILINE)
 # Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
 LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
 
@@ -471,6 +475,29 @@ def blocked_by_ids(raw: str) -> list[str]:
         elif re.fullmatch(r"[0-9A-Za-z]{8}", el):
             ids.append(el)
     return ids
+
+
+def has_stated_precondition(head: str) -> bool:
+    """True iff `head` declares WHY it is stalled — a non-empty `blocked-by:` or `npt:`.
+
+    trdd-drift narrowing (janitor#189): a `backburner`/`todo` card whose staleness is
+    EXPLAINED — it is waiting on another TRDD (`blocked-by:`) or on its own prerequisite
+    tasks (`npt:`) — is not "forgotten work", it is correctly parked pending that stated
+    condition. A card with neither field populated has no on-file excuse and stays
+    drift-eligible: this narrows the false-positive shape (issue #189's 31/32) without
+    exempting the whole column, so a genuinely-forgotten backburner card still fires.
+    """
+    fm = FRONTMATTER_RE.match(head)
+    if not fm:
+        return False
+    block = fm.group(1)
+    bm = FM_BLOCKED_BY_RE.search(block)
+    if bm and blocked_by_ids(bm.group(1)):
+        return True
+    nm = FM_NPT_RE.search(block)
+    if nm and parse_flow_list(nm.group(1)):
+        return True
+    return False
 
 
 def impl_commit_shas(raw: str) -> list[str]:
