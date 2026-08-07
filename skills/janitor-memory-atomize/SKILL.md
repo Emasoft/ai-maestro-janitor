@@ -47,16 +47,21 @@ split / consolidate / conflict / repair / harvest.
    (LOCAL + USER by default; PROJECT only if `edit_project_scope` is True — a PROJECT atomize
    is staged-not-pushed, rides the next `publish.py`). Scope roots resolve as in every wikimem
    skill. (Cadence is `atomize_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
-3. **Candidate set.** Scan the scope for **free-prose pages** — a curated wiki page (frontmatter
-   carries `node_type: memory` or a `tier:`) whose body has substantive facts but **no atom
-   markers** yet. Find pages already carrying markers and skip them:
+3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`.** A `memgrep`-driven
+   marker scan can disagree with the scheduler's own precheck (the same janitor#227 class of bug
+   `memory-repair` hit: a page the scheduler flagged could look "already atomized" to a
+   differently-scoped grep), so scanning independently risks finding nothing to work while the
+   marker keeps re-firing. Get the real list from the same code the scheduler gates on:
 
    ```bash
-   # pages WITH at least one atom marker (already atomized — skip):
-   memgrep -l '^\s*\^[A-Za-z0-9_-]+\s*\[' "$SCOPE_ROOT" | sort -u
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
+     --intervention atomize --scope <LOCAL|PROJECT|USER> --root <memdir>
+   #   → one line per candidate: <page-relative-path>\t<reason-slug (free-prose)>
    ```
 
    Bound the run to the **top-K least-atomized pages** (K ≈ 5), biggest/most-fact-dense first.
+   `memgrep lint`/`validate` still runs — but only AFTER a pass, as the commit's post-edit
+   verifier, never to discover candidates.
 
 ## How to atomize ONE page (the editorial judgment)
 

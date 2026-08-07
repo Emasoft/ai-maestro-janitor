@@ -341,39 +341,68 @@ def consolidate_has_work(
             if scope is not None and moved <= refusal_covered_pages(root, scope, now=now):
                 return False  # every moved page sits in a live, still-matching refusal
 
-    # {(tier, type): [size, ...]} — sizes only collected when max_bytes > 0 (gate 4 is
-    # opt-in on a known cap; see the docstring's UNMERGEABLE-BY-SIZE section).
-    by_key: dict[tuple[object, object], list[int]] = {}
+    # Grouped + judged by the shared (janitor#227) SSOT helpers below — gate 1
+    # (structural pair) and gate 4 (UNMERGEABLE-BY-SIZE, #210) both live in
+    # `consolidate_group_defect` now, so the scheduler's boolean gate and the
+    # CANDIDATE-LISTING CLI can never disagree on which group qualifies.
+    by_key = _group_candidates_by_tier_type(root)
+    if by_key is None:
+        # FAIL-OPEN (libs audit L-11): an unreadable page could be one half of a
+        # mergeable pair, so treating the corpus as idle could wrongly suppress the chore.
+        return True
+    return any(
+        consolidate_group_defect(pages, max_bytes=max_bytes) for pages in by_key.values()
+    )
+
+
+def _group_candidates_by_tier_type(
+    root: Path,
+) -> dict[tuple[object, object], list[Path]] | None:
+    """Every candidate page in `root`, grouped by `(tier, type)` — the structural
+    grouping gate 1 of `consolidate_has_work` and the group-listing CLI share
+    (janitor#227). Only tiers in `memory_edit_verify._MERGEABLE_TIERS` are grouped
+    (a `hub` — or a tier-less raw note — is never a legal-merge leaf).
+
+    Returns `None` on ANY unreadable page — the FAIL-OPEN sentinel every caller here
+    must treat as "cannot prove this corpus is idle" (libs audit L-11)."""
+    by_key: dict[tuple[object, object], list[Path]] = {}
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
         except OSError:
-            # FAIL-OPEN (libs audit L-11): an unreadable page could be one half of a
-            # mergeable pair, so skipping it could wrongly suppress the chore.
-            return True
+            return None
         fm = memory_edit_verify.parse_frontmatter(text)
         tier = fm.get("tier")
         if tier not in memory_edit_verify._MERGEABLE_TIERS:
             continue  # hub / tier-less raw note → never a legal-merge leaf
         key = (tier, fm.get("type"))
-        if max_bytes <= 0:
-            by_key.setdefault(key, []).append(0)
-            if len(by_key[key]) >= 2:
-                return True  # cap unknown → gate 1's plain count>=2 check (unchanged)
-            continue
-        try:
-            size = p.stat().st_size
-        except OSError:
-            return True  # FAIL-OPEN: unknown size can't prove a pair impossible
-        by_key.setdefault(key, []).append(size)
-    if max_bytes > 0:
-        for sizes in by_key.values():
-            if len(sizes) < 2:
-                continue
-            sizes.sort()
-            if sizes[0] + sizes[1] <= max_bytes:
-                return True  # the two SMALLEST pages in this group fit — a real candidate
-    return False
+        by_key.setdefault(key, []).append(p)
+    return by_key
+
+
+def consolidate_group_defect(pages: list[Path], *, max_bytes: int = 0) -> str:
+    """The SINGLE-SOURCE reason slug for why a `(tier, type)` GROUP of candidate
+    pages is a structural consolidate candidate (janitor#227 follow-up) — mirrors
+    gate 1 (structural pair exists) + gate 4 (UNMERGEABLE-BY-SIZE, #210) of
+    `consolidate_has_work`. `""` when the group does not qualify: fewer than 2
+    members, or (when `max_bytes>0`) even its two SMALLEST members cannot fit under
+    the split cap combined — the best case for the group, so if even they don't fit,
+    nothing in it does.
+
+    Consolidate's candidate unit is a GROUP, not a single page (see
+    `refusal_covered_pages`) — this is why it takes `pages`, not `text` like
+    `repair_defect`/`atomize_defect`. Slug: `same-tier-type`."""
+    if len(pages) < 2:
+        return ""
+    if max_bytes <= 0:
+        return "same-tier-type"  # cap unknown → gate 1's plain count>=2 check (unchanged)
+    try:
+        sizes = sorted(p.stat().st_size for p in pages)
+    except OSError:
+        return "same-tier-type"  # FAIL-OPEN: unknown size can't prove a pair impossible
+    if sizes[0] + sizes[1] > max_bytes:
+        return ""  # even the two smallest can't fit together — not a real candidate
+    return "same-tier-type"
 
 
 # Raw-line regexes for the repair/atomize predicates. Top-level `ocd:`/`lmd:` must be
@@ -560,24 +589,45 @@ def retro_lesson_has_work(root: Path) -> bool:
     return False
 
 
-def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
-    """True iff some CURATED wiki page in `root` is still FREE-PROSE — no
-    `^id [keywords: …]` atom marker yet — with a substantive body to mark
-    (TRDD-3XS3PDCF follow-up).
+def atomize_defect(text: str) -> str:
+    """The SINGLE-SOURCE atomize-candidacy predicate (janitor#227 follow-up — mirrors
+    `repair_defect`): return the SHORT, stable reason slug for the FIRST
+    structurally-detectable reason this page is an atomize candidate, or `""` when it
+    is not (RAW buffer note, already atomized, or no substantive body to mark).
 
-    Mirrors the janitor-memory-atomize candidate scan exactly: RAW harness buffer
-    notes are never candidates (`is_curated_wiki_page` is the coexistence
-    discriminator), and a page carrying >=1 marker is skipped ("already
-    atomized" per the skill's own memgrep filter — partial atomization is the
-    agent's judgment, not the scheduler's). A candidate whose body has no
-    markable line (headings + the empty Notes pool only) is the skill's
-    "free-prose-leaf-no-distinct-facts" abstain case → not work. Unreadable
-    pages fail OPEN. Marker shape SSOT: memory_edit_verify._ATOM_MARKER_RE.
+    This is the ONLY place that decides "is this page an atomize candidate" — both the
+    SCHEDULER's boolean gate (`atomize_has_work`, kept as a thin caller below) and the
+    CANDIDATE-LISTING CLI (`scripts/memory_candidates_cli.py`) call this, so a page the
+    scheduler flags can never be a page the candidate lister fails to name (the same
+    janitor#227 disagreement class `repair_defect` exists to prevent — the scheduler and
+    `memgrep lint` used to disagree, so the atomize skill's own memgrep-based scan could
+    likewise diverge from `atomize_has_work`).
+
+    Mirrors the janitor-memory-atomize candidate scan exactly: RAW harness buffer notes
+    are never candidates (`is_curated_wiki_page` is the coexistence discriminator), and
+    a page carrying >=1 marker is skipped ("already atomized" per the skill's own
+    memgrep filter — partial atomization is the agent's judgment, not the scheduler's).
+    A candidate whose body has no markable line (headings + the empty Notes pool only)
+    is the skill's "free-prose-leaf-no-distinct-facts" abstain case → not work. Marker
+    shape SSOT: memory_edit_verify._ATOM_MARKER_RE. Slug: `free-prose`."""
+    if not memory_scopes.is_curated_wiki_page(text):
+        return ""  # RAW buffer note — never an atomize candidate
+    if any(memory_edit_verify._ATOM_MARKER_RE.match(ln) for ln in text.splitlines()):
+        return ""  # >=1 marker → the skill skips it ("already atomized")
+    _fm, body = _split_page(text)
+    if not _has_substantive_body(body):
+        return ""  # free-prose-leaf-no-distinct-facts — nothing markable
+    return "free-prose"
+
+
+def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
+    """True iff some CURATED wiki page in `root` is an atomize candidate per
+    `atomize_defect` (TRDD-3XS3PDCF follow-up). Unreadable pages fail OPEN.
 
     REFUSAL FILTER (janitor#212 — the same TRDD-9MQ25PNH/#124 mechanism `repair_has_work`
-    already carries). A page can look markable to this STRUCTURAL check (non-empty,
-    non-heading prose) and still be genuinely un-atomizable in the skill's own semantic
-    judgment — a boilerplate bootstrap stub is the measured case ("This is the entry
+    already carries). A page can look markable to `atomize_defect`'s STRUCTURAL check
+    (non-empty, non-heading prose) and still be genuinely un-atomizable in the skill's own
+    semantic judgment — a boilerplate bootstrap stub is the measured case ("This is the entry
     point... replace this stub the first time you write real knowledge here"). Without a
     refusal read-back such a page re-qualifies as a candidate on EVERY precheck call
     forever, because nothing about its bytes ever changes: the marker keeps re-firing a
@@ -590,12 +640,7 @@ def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = 
             text = p.read_text(encoding="utf-8")
         except OSError:
             return True  # FAIL-OPEN (libs audit L-11): unreadable → not provably idle
-        if not memory_scopes.is_curated_wiki_page(text):
-            continue  # RAW buffer note — never an atomize candidate
-        if any(memory_edit_verify._ATOM_MARKER_RE.match(ln) for ln in text.splitlines()):
-            continue  # >=1 marker → the skill skips it ("already atomized")
-        _fm, body = _split_page(text)
-        if not _has_substantive_body(body):
+        if not atomize_defect(text):
             continue
         if scope is None:
             return True  # cannot read the ledger ⇒ never suppress

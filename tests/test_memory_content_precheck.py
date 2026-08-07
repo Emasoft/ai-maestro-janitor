@@ -292,6 +292,78 @@ def test_content_has_work_consolidate_forwards_the_size_cap(tmp_path):
     assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is False
 
 
+# --------------------------------------------------------------------------- #
+# consolidate_group_defect — the SINGLE-SOURCE reason-bearing predicate for a
+# (tier, type) GROUP (janitor#227 follow-up — the consolidate equivalent of
+# repair_defect/atomize_defect, but keyed on a group of pages, not one page)
+# --------------------------------------------------------------------------- #
+
+def test_consolidate_group_defect_empty_below_two_members(tmp_path):
+    """A lone page is never a candidate -> ""."""
+    a = _curated(tmp_path, "a.md", tier="component", type_="reference")
+    assert mcp.consolidate_group_defect([a]) == ""
+    assert mcp.consolidate_group_defect([]) == ""
+
+
+def test_consolidate_group_defect_same_tier_type_slug(tmp_path):
+    """A qualifying pair returns the stable 'same-tier-type' slug the CLI prints
+    verbatim, both with the cap unknown and with a cap the pair fits under."""
+    a = _curated_sized(tmp_path, "a.md", tier="component", type_="project", size=1000)
+    b = _curated_sized(tmp_path, "b.md", tier="component", type_="project", size=2000)
+    assert mcp.consolidate_group_defect([a, b]) == "same-tier-type"
+    assert mcp.consolidate_group_defect([a, b], max_bytes=_CAP) == "same-tier-type"
+
+
+def test_consolidate_group_defect_empty_when_over_cap(tmp_path):
+    """janitor#210: even the two smallest members exceeding the cap combined ->
+    "" — not a real candidate, mirrors consolidate_has_work's gate 4 exactly."""
+    small = _curated_sized(tmp_path, "small.md", tier="component", type_="project", size=8152)
+    big = _curated_sized(tmp_path, "big.md", tier="component", type_="project", size=35871)
+    assert 8152 + 35871 > _CAP, "fixture must reproduce the over-cap arithmetic"
+    assert mcp.consolidate_group_defect([small, big], max_bytes=_CAP) == ""
+
+
+def test_consolidate_group_defect_uses_the_smallest_pair(tmp_path):
+    """A group of 3: the size check must use the two SMALLEST members, exactly
+    like consolidate_has_work's own group-arithmetic gate."""
+    huge = _curated_sized(tmp_path, "huge.md", tier="component", type_="project", size=34000)
+    tiny1 = _curated_sized(tmp_path, "tiny1.md", tier="component", type_="project", size=200)
+    tiny2 = _curated_sized(tmp_path, "tiny2.md", tier="component", type_="project", size=300)
+    assert mcp.consolidate_group_defect([huge, tiny1, tiny2], max_bytes=_CAP) == "same-tier-type"
+
+
+def test_consolidate_has_work_matches_consolidate_group_defect_exactly(tmp_path):
+    """`consolidate_has_work`'s gate-1/gate-4 grouping must flag EXACTLY the
+    (tier, type) groups `consolidate_group_defect` flags — proves the janitor#227
+    refactor into `_group_candidates_by_tier_type` + `consolidate_group_defect`
+    changed no outcome, only made the reason nameable."""
+    cases: list[tuple[list[Path], int, bool]] = []
+
+    d1 = tmp_path / "c1"
+    pair = [_curated(d1, "a.md", tier="component", type_="reference"),
+            _curated(d1, "b.md", tier="component", type_="reference")]
+    cases.append((pair, 0, True))
+
+    d2 = tmp_path / "c2"
+    cross = [_curated(d2, "a.md", tier="component", type_="reference"),
+              _curated(d2, "b.md", tier="component", type_="project")]
+    cases.append((cross, 0, False))
+
+    d3 = tmp_path / "c3"
+    over_cap = [_curated_sized(d3, "small.md", tier="component", type_="project", size=8152),
+                _curated_sized(d3, "big.md", tier="component", type_="project", size=35871)]
+    cases.append((over_cap, _CAP, False))
+
+    for pages, max_bytes, expect_flagged in cases:
+        by_key = mcp._group_candidates_by_tier_type(pages[0].parent)
+        assert by_key is not None
+        flagged = any(
+            mcp.consolidate_group_defect(grp, max_bytes=max_bytes) for grp in by_key.values()
+        )
+        assert flagged is expect_flagged
+        assert mcp.consolidate_has_work(pages[0].parent, max_bytes=max_bytes) is expect_flagged
+
+
 def _shaped(
     d: Path,
     name: str,
@@ -503,6 +575,52 @@ def test_atomize_without_a_scope_never_suppresses(tmp_path, monkeypatch):
     p = _shaped(tmp_path, "a.md")
     memory_refusals.record("atomize", "LOCAL", tmp_path, [p], reason="boilerplate stub")
     assert mcp.atomize_has_work(tmp_path) is True
+
+
+# --------------------------------------------------------------------------- #
+# atomize_defect — the SINGLE-SOURCE reason-bearing predicate (janitor#227)
+# --------------------------------------------------------------------------- #
+
+def test_atomize_defect_empty_on_unmarkable_or_marked_pages(tmp_path):
+    """Every non-candidate shape returns "" — RAW buffer note, already-marked
+    page, and a page with no substantive body to mark."""
+    raw = _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    marked = _shaped(tmp_path, "marked.md", marker=True)
+    no_body = _shaped(tmp_path, "stub.md", body="## Some heading")
+    for p in (raw, marked, no_body):
+        assert mcp.atomize_defect(p.read_text(encoding="utf-8")) == ""
+
+
+def test_atomize_defect_free_prose_slug(tmp_path):
+    """A curated page with substantive body and zero markers -> the stable
+    'free-prose' slug the CLI prints verbatim."""
+    p = _shaped(tmp_path, "a.md")
+    assert mcp.atomize_defect(p.read_text(encoding="utf-8")) == "free-prose"
+
+
+def test_atomize_has_work_matches_atomize_defect_exactly(tmp_path):
+    """`atomize_has_work`'s per-page loop must flag EXACTLY the pages
+    `atomize_defect` flags — proves the refactor (janitor#227) changed no
+    outcome, only added a reason."""
+    good_marked = _shaped(tmp_path / "g1", "a.md", marker=True)
+    good_no_body = _shaped(tmp_path / "g2", "a.md", body="## Some heading")
+    good_raw = _curated(tmp_path / "g3", "raw.md", tier=None, type_="reference")
+    bad_free_prose = _shaped(tmp_path / "b1", "a.md")
+
+    for i, (p, expect_flagged) in enumerate((
+        (good_marked, False),
+        (good_no_body, False),
+        (good_raw, False),
+        (bad_free_prose, True),
+    )):
+        text = p.read_text(encoding="utf-8")
+        assert bool(mcp.atomize_defect(text)) is expect_flagged
+        # And a corpus containing ONLY this page agrees with the scheduler gate.
+        only = tmp_path / f"solo-{i}"
+        only.mkdir()
+        solo = only / p.name
+        solo.write_text(text, encoding="utf-8")
+        assert mcp.atomize_has_work(only) is expect_flagged
 
 
 # --------------------------------------------------------------------------- #

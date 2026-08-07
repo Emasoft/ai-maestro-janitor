@@ -100,34 +100,33 @@ PY
 
 ## The procedure
 
-### 1. Narrow the candidate pair (recent-N → memgrep → read the small set)
+### 1. Narrow the candidate pair — run the SCHEDULER's own predicate, not a fresh memgrep scan
 
-Do NOT read the whole corpus. Start from the most-recently-modified notes (a fresh
-duplicate is the common case), then narrow with memgrep:
+A `memgrep`-driven recency+overlap scan can disagree with the scheduler's own precheck
+(`consolidate_has_work`) — the same janitor#227 class of bug `memory-repair` hit: a group the
+scheduler flagged structural-eligible could look like nothing to a differently-scoped memgrep
+query, so scanning independently risks abstaining on the very group it was dispatched for. Get
+the real candidate GROUPS from the same code the scheduler gates on:
 
 ```bash
 MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
-# Most-recently-touched pages (the likely fresh dup), newest first. Two traps: memgrep
-# REJECTS an empty query (so `recall "" --sort lmd` cannot serve as a recency listing),
-# and a flat `ls -t "$MEMDIR"/*.md` misses wikimem/ sub-pages. Hence recursive find +
-# mtime sort, excluding the PRIVATE user-mem/ store (TRDD-4334aad0 — agent-invisible by
-# design), memgrep's index dir, txn staging, and the generated index/stub files.
-find "$MEMDIR" -name '*.md' \
-  ! -path '*/user-mem/*' ! -path '*/.memgrep/*' ! -path '*/.maint-staging/*' \
-  ! -name 'MEMORY.md' ! -name 'memory-index.md' ! -name 'memory-reorg-proposed.md' \
-  -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -12
-# For a recent page's apparent subject, find same-scope notes that overlap:
-memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 8 | grep -v '/user-mem/'
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
+  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root "$MEMDIR" --max-bytes <split_max_bytes>
+#   → one line per candidate GROUP: <comma-joined-page-paths>\t<reason-slug (same-tier-type)>
 ```
+
+Each group is every SAME-`(tier, type)` page the structural gate + size gate (#210) allow — a
+merge fuses exactly TWO, so pick the pair inside the printed group that most plausibly shares a
+subject (favor the most-recently-modified pair when several look equally plausible). If a group
+has no convincing pair, or the CLI prints nothing, abstain — that is success, not failure.
 
 **Privacy guard:** NEVER open, read, merge, or even name a page whose path contains
 `user-mem/` — that is the user's PRIVATE agent-invisible store; it is not part of the
-curated wiki and must never enter a consolidation. The `grep -v '/user-mem/'` above
-strips it from memgrep's recursive output.
+curated wiki and must never enter a consolidation (`memory_content_precheck`'s own
+candidate scan already excludes it, but re-verify before touching any printed path).
 
-Read ONLY the handful memgrep returns (their bodies + frontmatter). Pick at most
-ONE pair `(A, B)` that looks like the same subject. If none is convincing,
-abstain — that is success, not failure.
+Read ONLY the handful pages the printed groups name (their bodies + frontmatter). Pick at
+most ONE pair `(A, B)` that looks like the same subject.
 
 ### 2. Decide subject sameness (the human judgment)
 
