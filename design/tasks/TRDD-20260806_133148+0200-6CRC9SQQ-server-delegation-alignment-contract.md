@@ -1,9 +1,9 @@
 ---
 trdd-id: 6CRC9SQQ
 title: Janitor-server delegation has no alignment contract — a server-claimed chore can wedge for days and neither side notices
-column: dev
+column: human_review
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T23:00:00+0200
+updated: 2026-08-07T12:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -90,7 +90,18 @@ path.
 - The transition-flag inference built on the zero-line count (`daemon.py:2281`) — sound reasoning,
   worthless input.
 
-### ✔ ITEM 1 SHIPPED — `claimed-chore-stale` (`1e803e47`)
+### ⏵ COLUMN 2026-08-07: `dev` -> `human_review` (item 1 is RELEASED; only the owner's item remains)
+
+`claimed-chore-stale` shipped in **v2.5.0**. Three of four acceptance boxes are ticked, and the
+remaining one — the chore⇄token⇄stamp⇄bound table agreed on the #126/#111 threads — is cross-repo
+negotiation only the owner can initiate.
+
+`dev` asserted someone was developing this; nobody was. `human_review` is the true state, and it
+also clears the `prose-frontmatter-mismatch` the reconciliation detector flagged (the prose said
+"owner's call" while the column claimed active development). No `blocked-by:` is set because
+nothing here is blocked by another TRDD — it waits on a person, which is what this column means.
+
+### ✔ ITEM 1 SHIPPED — `claimed-chore-stale` (`1e803e47`, released in v2.5.0)
 
 `scripts/detectors/claimed-chore-stale.py` + the pure `scripts/lib/claimed_chore_watch.py`,
 hourly in the dispatch roster, the MIRROR of `global-chore-blackout`. 14 unit tests; full suite
