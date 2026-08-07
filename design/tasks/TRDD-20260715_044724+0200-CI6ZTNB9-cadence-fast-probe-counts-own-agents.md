@@ -16,6 +16,37 @@ parent-trdd: 0QQX9H0G
 
 # The cadence FAST probe counts the janitor's own background agents
 
+## ⏵ NOT A REPRODUCTION — a claim I made here on 2026-08-07 and WITHDREW the same minute
+
+**Recorded rather than deleted, because the error is more useful than the claim was.**
+
+I wrote that this card had reproduced live: a `[janitor-renew]` promoted the tier to `*/5` while
+three background agents were pending, costing two full arm cycles in five minutes. The churn
+happened exactly as described. **The attribution was wrong.**
+
+`dispatch.py` already implements this card's fix, and says so:
+
+- `_pending_agent_count()` counts ALL agents — and its docstring states it is for the resume
+  nudge and *"must not drive the cadence"*.
+- `_fresh_external_agent_count()` is *"the count the cadence FAST probe must use"*. It already
+  filters through `pending_agents.pending_external(now)` (janitor-spawned chores excluded) AND a
+  recency bound, citing this card and issue #89 by name.
+
+The three agents in my case were **external** — ad-hoc sweep workers spawned by the main session,
+not janitor housekeeping — and that same docstring says explicitly: *"A USER-spawned background
+agent still counts."* So the probe promoted the tier **correctly, by design**. There was no
+defect to observe.
+
+**What I did wrong**, since it is the fourth instance of one habit tonight: I asserted the
+discriminator "may already exist and simply not be wired in" from the project map plus a
+`grep -l` that showed `pending()` at one call site — without opening the function whose behaviour
+I was describing. `_fresh_external_agent_count` was 5 lines below the line I read.
+
+**What remains genuinely open here is a COST question, not this card's bug:** an external fan-out
+promotes the tier to `*/5` on a session with a very large context, and each arm costs roughly six
+quiet fires (the arm skill's own figure). Whether the FAST tier should apply to a session whose
+per-fire cost is that high belongs to TRDD-DLI76AUC / issue #190, not to CI6ZTNB9.
+
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-16
 
 **2026-08-02 — AI REVIEW PERFORMED (`testing → human_review`).** The line below asked for exactly
