@@ -76,4 +76,28 @@ contract ("two same-subject pages may share no words at all"). The measurement i
 atom confirms it empirically, so the next reader does not re-derive it by shipping the gate
 and discovering the loss only when a real merge never surfaces.
 
+
+^ATOM-83MU-YJHL [desc:"the abstaining-chore burn was not a missing gate — is_curated_wiki_page misparsed FLOW-STYLE metadata, so harvest saw every curated overview stub as RAW forever", keywords: memory_chore_dispatches_an_agent_that_abstains harvest_re-fires_on_an_unchanged_corpus 200k_tokens_to_discover_nothing_is_due marker_never_self-clears flow-style_metadata_frontmatter is_curated_wiki_page_returns_False_on_a_curated_page, type: project, ocd: 2026-08-07, lmd: 2026-08-07]
+
+**The gate was fine; its INPUT was wrong.** `atomize_has_work`/`harvest_has_work` shipped
+2026-07-08 and are present in every cached version — so "add a suppression gate" was the wrong
+diagnosis (I reached it myself before measuring, janitor#212).
+
+`memory_scopes.is_curated_wiki_page` scans frontmatter LINE-BY-LINE and takes each line's key as
+the text before the first `:`. For the flow-style line
+`metadata: {node_type: memory, type: overview, tier: hub}` that key is `metadata` — the
+wikimem-only keys `node_type`/`tier` sit INSIDE the braces on the same line and are never seen.
+The discriminator therefore calls an already-curated page RAW, `harvest_has_work` treats it as an
+un-mirrored buffer note, and **nothing can ever "mirror" an already-curated page** — so the
+marker never self-clears and re-dispatches a ~200k-token agent forever.
+
+Blast radius is every project, not one file: that flow-style shape is exactly what SessionStart
+writes for each freshly-bootstrapped scope's `*-overview.md` stub (confirmed on 5+ LOCAL scopes).
+
+Fixed 2026-08-07 (`4bbe7b3e`) by also checking for a wikimem-only key inside a
+`metadata: {...}` flow value. Verified both directions: `True` on the real reported file,
+still `False` for `metadata: {type: feedback}`. [^1]
+
 ## Notes and lessons learned
+
+[^1]: [id:ATOM-6RC1-5FNB, status:valid, desc:"when a guard does not suppress, suspect its INPUT before concluding the guard is missing", keywords:"the_gate_exists_but_does_not_suppress I_concluded_a_guard_was_missing two_parsers_for_one_format discriminator_returns_the_wrong_answer why_did_the_precheck_not_fire", ocd:2026-08-07, lmd:2026-08-07] DO NOT conclude that a guard is MISSING because it failed to suppress, BECAUSE a guard that runs correctly on a wrong ANSWER from its discriminator is indistinguishable from an absent guard at the symptom level — here the suppression gates had shipped a month earlier and the real fault was one line of frontmatter parsing upstream of them. DO establish what the guard's inputs actually evaluate to on the real data BEFORE proposing to add or widen the guard; had the fix followed the first diagnosis, a second redundant gate would have shipped on top of a still-broken discriminator. Corroborating signal for this class: `memory_edit_verify.parse_frontmatter` already parsed flow-style correctly, so TWO parsers for one format disagreed — when a format is parsed in more than one place, a bug in the smaller, dependency-free copy is the likelier fault than a missing feature in the caller.
