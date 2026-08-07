@@ -32,6 +32,7 @@ import hashlib
 import json
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -57,7 +58,7 @@ def _ledger_path(intervention: str, scope: str, root: Path | str) -> Path:
     return global_state.global_state_dir() / f"memory-maint-{intervention}-{scope}-{h}.refusals.json"
 
 
-def candidate_key(root: Path | str, paths: list[Path | str]) -> str:
+def candidate_key(root: Path | str, paths: Sequence[Path | str]) -> str:
     """The stable identity of a candidate: its root-relative paths, sorted, `|`-joined.
 
     Sorted because a pair `(a, b)` and `(b, a)` are the SAME candidate — a chore that surfaced them
@@ -74,7 +75,7 @@ def candidate_key(root: Path | str, paths: list[Path | str]) -> str:
     return "|".join(sorted(rels))
 
 
-def content_hash(root: Path | str, paths: list[Path | str]) -> str | None:
+def content_hash(root: Path | str, paths: Sequence[Path | str]) -> str | None:
     """sha256 over the candidates' actual BYTES, or None if any is unreadable.
 
     Content, not `stat`: the fingerprint gate hashes size+mtime because it must stay free over a
@@ -116,7 +117,7 @@ def record(
     intervention: str,
     scope: str,
     root: Path | str,
-    paths: list[Path | str],
+    paths: Sequence[Path | str],
     *,
     reason: str,
     now: int | None = None,
@@ -146,7 +147,7 @@ def refusal(
     intervention: str,
     scope: str,
     root: Path | str,
-    paths: list[Path | str],
+    paths: Sequence[Path | str],
     *,
     now: int | None = None,
     ttl_s: int = DEFAULT_TTL_S,
@@ -174,7 +175,7 @@ def is_refused(
     intervention: str,
     scope: str,
     root: Path | str,
-    paths: list[Path | str],
+    paths: Sequence[Path | str],
     *,
     now: int | None = None,
     ttl_s: int = DEFAULT_TTL_S,
@@ -183,7 +184,7 @@ def is_refused(
     return refusal(intervention, scope, root, paths, now=now, ttl_s=ttl_s) is not None
 
 
-def clear(intervention: str, scope: str, root: Path | str, paths: list[Path | str]) -> bool:
+def clear(intervention: str, scope: str, root: Path | str, paths: Sequence[Path | str]) -> bool:
     """Forget one refusal — the manual escape hatch. True iff an entry was removed."""
     ledger = read(intervention, scope, root)
     if ledger.pop(candidate_key(root, paths), None) is None:
