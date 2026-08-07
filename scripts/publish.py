@@ -2214,6 +2214,23 @@ def _acquire_publish_lock(root: Path) -> Path | None:
         return None
 
 
+def _lock_pid_is_alive(pid: object) -> bool:
+    """True iff `pid` names a process that exists right now. Mirrors the companion
+    hook's check (pre-tool-publish-lock.py::_lock_pid_is_live) so the two sides
+    agree on what 'live owner' means; PermissionError = exists, owned by another user."""
+    if not isinstance(pid, int):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _reassert_publish_lock(root: Path, lock_path: Path | None) -> Path | None:
     """Re-arm the publish lock if the test gate destroyed it. Returns the live lock path.
 
@@ -2238,7 +2255,20 @@ def _reassert_publish_lock(root: Path, lock_path: Path | None) -> Path | None:
         live = json.loads(lock_path.read_text(encoding="utf-8"))
         if isinstance(live, dict) and live.get("pid") == os.getpid():
             return lock_path
-        detail = "overwritten by another process"
+        # A lock naming ANOTHER pid: only re-take it if that owner is DEAD (review
+        # 2026-08-08). A LIVE foreign owner is a genuinely concurrent publish — the
+        # guard is not disarmed, it is keyed to them, and the companion hook denies
+        # edits for ANY live lock, so protection persists. Stealing it would disarm
+        # THEIR remaining stages, the exact unprotected window this function closes.
+        # Returning None also keeps our `finally` from deleting their lock at exit.
+        if isinstance(live, dict) and _lock_pid_is_alive(live.get("pid")):
+            cprint(
+                f"{YELLOW}Warning: another live publish (pid {live.get('pid')}) now "
+                f"holds the lock — leaving it theirs. Two publishes on one repo will "
+                f"almost certainly fail each other's tree guards; investigate.{NC}"
+            )
+            return None
+        detail = "overwritten by a now-dead process"
     except (OSError, json.JSONDecodeError, ValueError):
         detail = "deleted"
     cprint(

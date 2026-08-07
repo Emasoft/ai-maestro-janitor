@@ -222,9 +222,9 @@ def test_reassert_rearms_a_lock_the_test_gate_deleted(tmp_path: Path, publish_mo
     assert json.loads(live.read_text(encoding="utf-8"))["pid"] == os.getpid()
 
 
-def test_reassert_rearms_a_lock_another_process_overwrote(tmp_path: Path, publish_mod) -> None:
-    """A lock naming someone else's pid is not ours — our guard is disarmed just as surely
-    as if it were gone, because the companion hook checks THAT pid's liveness, not ours."""
+def test_reassert_rearms_a_lock_a_dead_process_overwrote(tmp_path: Path, publish_mod) -> None:
+    """A lock naming a DEAD foreign pid protects nothing (the companion hook allows on a
+    dead owner), so re-acquiring is correct."""
     repo = tmp_path / "repo"
     repo.mkdir()
     lock_path = publish_mod._acquire_publish_lock(repo)
@@ -233,6 +233,29 @@ def test_reassert_rearms_a_lock_another_process_overwrote(tmp_path: Path, publis
     live = publish_mod._reassert_publish_lock(repo, lock_path)
 
     assert json.loads(live.read_text(encoding="utf-8"))["pid"] == os.getpid()
+
+
+def test_reassert_leaves_a_live_foreign_lock_theirs(tmp_path: Path, publish_mod) -> None:
+    """Review 2026-08-08: a lock naming a LIVE foreign pid is a genuinely concurrent
+    publish — stealing it would disarm THEIR remaining stages, the exact unprotected
+    window re-assert exists to close. Leave it, and return None so our `finally`
+    cannot delete their lock either."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lock_path = publish_mod._acquire_publish_lock(repo)
+    # PID 1 (launchd/init) is guaranteed alive and guaranteed not us.
+    foreign = {"pid": 1, "started": time.time(), "repo": str(repo)}
+    lock_path.write_text(json.dumps(foreign), encoding="utf-8")
+
+    live = publish_mod._reassert_publish_lock(repo, lock_path)
+
+    assert live is None, "must not adopt or replace a live foreign lock"
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == 1, (
+        "the foreign owner's lock must survive untouched"
+    )
+    # And release with None must not delete their file.
+    publish_mod._release_publish_lock(live)
+    assert lock_path.is_file()
 
 
 def test_reassert_leaves_an_intact_lock_untouched(tmp_path: Path, publish_mod) -> None:

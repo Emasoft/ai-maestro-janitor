@@ -242,6 +242,46 @@ def refusal_covered_pages(
     return covered
 
 
+def group_has_unjudged_pair(
+    root: Path, scope: str, pages: list[Path], *, now: int | None = None
+) -> bool:
+    """True iff some PAIR within this (tier, type) group has not been judged-and-declined
+    by a live consolidate refusal — the group-level refusal semantics BOTH the scheduler
+    gate and the candidates CLI must share (review 2026-08-08, two findings).
+
+    Why pair-granular: a merge fuses exactly TWO pages, and the merge-protocol records an
+    abstain keyed on the judged PAIR. The CLI used to filter on the FULL group's exact key
+    — which a pair-keyed refusal never matches, so any 3+-member group re-listed forever.
+    The scheduler meanwhile checked no refusals in its structural gate at all, so it could
+    dispatch when the CLI would print nothing. One rule fixes both: a pair (x, y) is JUDGED
+    iff some live refused set contains both x and y (an exact-group refusal therefore
+    covers all its pairs); a group is a candidate only while an UNJUDGED pair remains —
+    which is exactly when there is real judgment work left.
+
+    Fail-open: unresolvable relpaths or an unreadable ledger count as unjudged (dispatch).
+    Each stored refusal is re-validated through `memory_refusals.refusal` (TTL +
+    content_hash), so editing any member page revives its pairs automatically."""
+    rels: list[str] = []
+    for p in pages:
+        try:
+            rels.append(str(p.relative_to(root)))
+        except ValueError:
+            return True  # cannot key it → cannot prove it judged → dispatch
+    live_sets: list[set[str]] = []
+    for key in memory_refusals.read("consolidate", scope, root):
+        members = key.split("|")
+        if memory_refusals.refusal(
+            "consolidate", scope, root, [root / r for r in members], now=now
+        ):
+            live_sets.append(set(members))
+    for i in range(len(rels)):
+        for j in range(i + 1, len(rels)):
+            a, b = rels[i], rels[j]
+            if not any(a in s and b in s for s in live_sets):
+                return True
+    return False
+
+
 def consolidate_has_work(
     root: Path,
     *,
@@ -350,8 +390,14 @@ def consolidate_has_work(
         # FAIL-OPEN (libs audit L-11): an unreadable page could be one half of a
         # mergeable pair, so treating the corpus as idle could wrongly suppress the chore.
         return True
+    # Refusal-aware, same rule as the CLI (review 2026-08-08): a group whose every pair is
+    # already judged-and-declined is not work, and dispatching on it spawns an agent whose
+    # candidate list is empty — the #227 loop. `scope is None` skips the filter (fail-open),
+    # matching gate 3's contract: no scope, no ledger, never a suppression.
     return any(
-        consolidate_group_defect(pages, max_bytes=max_bytes) for pages in by_key.values()
+        consolidate_group_defect(pages, max_bytes=max_bytes)
+        and (scope is None or group_has_unjudged_pair(root, scope, pages, now=now))
+        for pages in by_key.values()
     )
 
 
@@ -391,7 +437,13 @@ def consolidate_group_defect(pages: list[Path], *, max_bytes: int = 0) -> str:
 
     Consolidate's candidate unit is a GROUP, not a single page (see
     `refusal_covered_pages`) — this is why it takes `pages`, not `text` like
-    `repair_defect`/`atomize_defect`. Slug: `same-tier-type`."""
+    `repair_defect`/`atomize_defect`. Slug: `same-tier-type`.
+
+    DELIBERATE deviation from the pre-#227 code (review 2026-08-08): the old inline
+    gate fail-opened (dispatched) on a stat() OSError even for a SINGLE-member group;
+    here a singleton returns "" before any stat. A one-page group cannot yield a merge
+    under any outcome, so that old fail-open dispatched a provably idle agent — the
+    exact waste #227 exists to remove. Groups of >=2 keep the stat fail-open below."""
     if len(pages) < 2:
         return ""
     if max_bytes <= 0:

@@ -219,7 +219,10 @@ def record_iterm_automation_state(blocked: bool) -> None:
                 return  # unchanged — leave the mtime alone so the ack still holds
         except OSError:
             pass  # absent or unreadable → (re)write it below
-        flag.write_text(payload, encoding="utf-8")
+        # Atomic (tmp+rename): dispatch reads this file concurrently from another
+        # process, and a truncate-then-write lets it observe a half-written flag —
+        # json.loads then fails and the alarm prints the wrong fallback diagnosis.
+        state.atomic_write(flag, payload)
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
         pass
 

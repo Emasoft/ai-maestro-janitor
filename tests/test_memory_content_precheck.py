@@ -163,6 +163,44 @@ def test_consolidate_has_work_true_for_aspect_reference_pair(tmp_path):
     assert mcp.consolidate_has_work(tmp_path) is True
 
 
+def test_consolidate_has_work_false_when_every_pair_is_refused(tmp_path):
+    """Review 2026-08-08: the scheduler's structural gate ignored the refusal ledger,
+    so it dispatched an agent whose candidate CLI (which honours refusals) printed
+    nothing — an abstain with nothing to record, the #227 loop. The gate now shares
+    `group_has_unjudged_pair`: every pair judged-and-declined => no work."""
+    import memory_refusals
+
+    a = _curated(tmp_path, "a.md", tier="component", type_="project")
+    b = _curated(tmp_path, "b.md", tier="component", type_="project")
+    assert mcp.consolidate_has_work(tmp_path, scope="LOCAL") is True
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="distinct subjects")
+
+    assert mcp.consolidate_has_work(tmp_path, scope="LOCAL") is False
+    # No scope => no ledger => never a suppression (fail-open, gate 3's own contract).
+    assert mcp.consolidate_has_work(tmp_path) is True
+
+
+def test_group_has_unjudged_pair_is_pair_granular(tmp_path):
+    """A pair-keyed refusal (what the merge-protocol actually records) narrows a
+    3-group but does not clear it; clearing needs EVERY pair judged. An exact-group
+    refusal covers all its pairs at once."""
+    import memory_refusals
+
+    a = _curated(tmp_path, "a.md", tier="component", type_="project")
+    b = _curated(tmp_path, "b.md", tier="component", type_="project")
+    c = _curated(tmp_path, "c.md", tier="component", type_="project")
+    pages = [a, b, c]
+
+    assert mcp.group_has_unjudged_pair(tmp_path, "LOCAL", pages) is True
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="no")
+    assert mcp.group_has_unjudged_pair(tmp_path, "LOCAL", pages) is True  # (a,c),(b,c) remain
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b, c], reason="whole group no")
+    assert mcp.group_has_unjudged_pair(tmp_path, "LOCAL", pages) is False
+
+
 def test_consolidate_has_work_false_on_cross_type_pair(tmp_path):
     """Issue #64 case 1: feedback x reference (same aspect tier, DIFFERENT type) is
     a hard is_legal_merge cross-type refusal -> no structural pair -> no work."""

@@ -111,9 +111,13 @@ the real candidate GROUPS from the same code the scheduler gates on:
 ```bash
 MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
-  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root "$MEMDIR" --max-bytes <split_max_bytes>
+  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root "$MEMDIR"
 #   → one line per candidate GROUP: <comma-joined-page-paths>\t<reason-slug (same-tier-type)>
+# Omit --max-bytes: the CLI resolves the same split_max_bytes the scheduler gated under.
 ```
+
+A line whose reason is `unreadable-page` is not mergeable — report it in your result line
+instead of editing anything.
 
 Each group is every SAME-`(tier, type)` page the structural gate + size gate (#210) allow — a
 merge fuses exactly TWO, so pick the pair inside the printed group that most plausibly shares a

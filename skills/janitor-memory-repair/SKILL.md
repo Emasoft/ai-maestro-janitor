@@ -73,6 +73,9 @@ the job of the other three passes; REPAIR only makes a page well-formed.
    #   → one line per candidate: <page-relative-path>\t<reason-slug>
    ```
 
+   A `unreadable-page` reason names a page the scheduler dispatches on but nobody can
+   read — do NOT edit or recreate it; report it in your result line so a human unbreaks it.
+
    Bound the run to the **top-K most-broken pages** (K ≈ 5); the librarian's
    `memory-reorg-proposed.md` link findings are a useful cross-check. `memgrep
    lint`/`validate` still runs — but only AFTER a repair, as the commit's

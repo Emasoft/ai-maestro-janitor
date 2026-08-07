@@ -217,3 +217,85 @@ def test_consolidate_refused_group_is_omitted(tmp_path):
     code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
     assert code == 0
     assert out.strip() == ""
+
+
+def test_consolidate_pair_refusal_narrows_but_keeps_a_three_group(tmp_path):
+    """Review 2026-08-08: the merge-protocol records abstains keyed on the judged PAIR,
+    and the old exact-group filter never matched one — so any 3+-member group re-listed
+    forever. The rule now: a group stays a candidate while an UNJUDGED pair remains, and
+    disappears exactly when every pair is judged."""
+    a = _curated(tmp_path, "a.md", tier="component")
+    b = _curated(tmp_path, "b.md", tier="component")
+    c = _curated(tmp_path, "c.md", tier="component")
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, b], reason="different subjects")
+    code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert [ln for ln in out.splitlines() if ln] == ["a.md,b.md,c.md\tsame-tier-type"], (
+        "pairs (a,c) and (b,c) are unjudged — the group must stay listed"
+    )
+
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [a, c], reason="different subjects")
+    memory_refusals.record("consolidate", "LOCAL", tmp_path, [b, c], reason="different subjects")
+    code, out = _cli("--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert code == 0
+    assert out.strip() == "", "every pair judged — no judgment work remains"
+
+
+# --------------------------------------------------------------------------- #
+# unreadable pages — the scheduler fails OPEN on them, so the CLI must NAME them
+# (review 2026-08-08: a silent skip hands the dispatched agent an empty list with
+# nothing to record a refusal on — the #227 loop through the tool built to fix it).
+# --------------------------------------------------------------------------- #
+
+def _make_unreadable(p: Path) -> None:
+    import os
+
+    if os.geteuid() == 0:
+        import pytest
+
+        pytest.skip("running as root — chmod 000 does not block reads")
+    p.chmod(0o000)
+
+
+def test_repair_names_an_unreadable_page(tmp_path):
+    """repair_has_work dispatches on a page nobody can read; the CLI must name it."""
+    good = _well_formed(tmp_path, "good.md")
+    bad = _no_notes(tmp_path, "broken.md")
+    _make_unreadable(bad)
+    try:
+        code, out = _cli("--intervention", "repair", "--scope", "LOCAL", "--root", str(tmp_path))
+    finally:
+        bad.chmod(0o644)
+    assert code == 0
+    assert "broken.md\tunreadable-page" in out.splitlines()
+    assert str(good.name) not in out
+
+
+def test_atomize_names_an_unreadable_page(tmp_path):
+    """Same contract as repair — the mirrors must not drift (janitor#227)."""
+    bad = _well_formed(tmp_path, "locked.md")
+    _make_unreadable(bad)
+    try:
+        code, out = _cli("--intervention", "atomize", "--scope", "LOCAL", "--root", str(tmp_path))
+    finally:
+        bad.chmod(0o644)
+    assert code == 0
+    assert "locked.md\tunreadable-page" in out.splitlines()
+
+
+def test_consolidate_names_the_unreadable_page_not_an_empty_list(tmp_path):
+    """The grouping helper returns None on ANY unreadable page (fail-open) and the CLI
+    used to return [] on that — scheduler dispatches, agent gets nothing. Now the
+    unreadable page itself is the named candidate."""
+    _curated(tmp_path, "a.md", tier="component")
+    _curated(tmp_path, "b.md", tier="component")
+    bad = _curated(tmp_path, "sealed.md", tier="component")
+    _make_unreadable(bad)
+    try:
+        code, out = _cli(
+            "--intervention", "consolidate", "--scope", "LOCAL", "--root", str(tmp_path)
+        )
+    finally:
+        bad.chmod(0o644)
+    assert code == 0
+    assert [ln for ln in out.splitlines() if ln] == ["sealed.md\tunreadable-page"]

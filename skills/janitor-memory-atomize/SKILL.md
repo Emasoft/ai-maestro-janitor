@@ -61,7 +61,9 @@ split / consolidate / conflict / repair / harvest.
 
    Bound the run to the **top-K least-atomized pages** (K ≈ 5), biggest/most-fact-dense first.
    `memgrep lint`/`validate` still runs — but only AFTER a pass, as the commit's post-edit
-   verifier, never to discover candidates.
+   verifier, never to discover candidates. A line whose reason is `unreadable-page` names a
+   page the scheduler dispatches on but nobody can read — do NOT edit or recreate it; report
+   it in your result line so a human unbreaks it.
 
 ## How to atomize ONE page (the editorial judgment)
 

@@ -61,7 +61,14 @@ def repair_candidates(
         try:
             text = p.read_text(encoding="utf-8")
         except OSError:
-            continue  # unreadable — the precheck fails OPEN (dispatches); nothing to name here
+            # NAME it (review 2026-08-08): the scheduler fails OPEN on an unreadable page
+            # and dispatches — a CLI that silently skips the same page hands the agent an
+            # empty list with nothing to record a refusal on, recreating the #227 loop.
+            # The SSOT guarantee is exactly this line: what makes the scheduler dispatch
+            # must appear in the list. No refusal filter — an unreadable page cannot be
+            # content-hashed, so it is always named until a human unbreaks or removes it.
+            out.append((_rel(root, p), "unreadable-page"))
+            continue
         reason = memory_content_precheck.repair_defect(text)
         if not reason:
             continue
@@ -83,7 +90,8 @@ def atomize_candidates(
         try:
             text = p.read_text(encoding="utf-8")
         except OSError:
-            continue  # unreadable — the precheck fails OPEN (dispatches); nothing to name here
+            out.append((_rel(root, p), "unreadable-page"))  # see repair_candidates — SSOT
+            continue
         reason = memory_content_precheck.atomize_defect(text)
         if not reason:
             continue
@@ -106,19 +114,30 @@ def consolidate_candidates(
     members — the skill picks the actual pair from among them; narrowing that choice
     is the skill's own semantic judgment (same subject?), not this CLI's.
 
-    Refusal coverage is checked against the group's OWN member set (`candidate_key`
-    is keyed on the exact sorted page list) — a refusal recorded on a DIFFERENT subset
-    of the same group does not match here and the group stays a candidate (fail-open,
-    matching every other predicate in this module)."""
+    Refusal coverage is PAIR-granular, via the same
+    `memory_content_precheck.group_has_unjudged_pair` rule the scheduler gate uses
+    (review 2026-08-08): the merge-protocol records an abstain keyed on the judged
+    PAIR, so a group is dropped only when EVERY pair within it is covered by a live
+    refusal — which is exactly when no judgment work remains. The previous exact-set
+    check never matched a pair-keyed refusal, so 3+-member groups re-listed forever."""
     by_key = memory_content_precheck._group_candidates_by_tier_type(root)
     if by_key is None:
-        return []  # unreadable — the precheck fails OPEN (dispatches); nothing to name here
-    out: list[tuple[str, str]] = []
+        # The grouping helper cannot say WHICH page broke it, but the scheduler fails
+        # OPEN on this same condition and dispatches — so the agent must get a NAME
+        # (review 2026-08-08). Find and emit the unreadable page(s) directly.
+        out = []
+        for p in memory_content_precheck._candidate_pages(root):
+            try:
+                p.read_text(encoding="utf-8")
+            except OSError:
+                out.append((_rel(root, p), "unreadable-page"))
+        return out
+    out = []
     for pages in by_key.values():
         reason = memory_content_precheck.consolidate_group_defect(pages, max_bytes=max_bytes)
         if not reason:
             continue
-        if memory_refusals.is_refused("consolidate", scope, root, pages, now=now):
+        if not memory_content_precheck.group_has_unjudged_pair(root, scope, pages, now=now):
             continue
         rels = sorted(_rel(root, p) for p in pages)
         out.append((",".join(rels), reason))
@@ -138,10 +157,23 @@ def main() -> int:
     ap.add_argument("--scope", required=True)
     ap.add_argument("--root", required=True)
     ap.add_argument(
-        "--max-bytes", type=int, default=0,
-        help="the split-cap size gate (consolidate gate 4, #210); 0 = size check skipped",
+        "--max-bytes", type=int, default=None,
+        help="the split-cap size gate (consolidate gate 4, #210). Omit to resolve the "
+        "SAME `split_max_bytes` setting the scheduler dispatched under — passing a "
+        "guessed value here reopens the scheduler-vs-CLI divergence this tool exists "
+        "to close. 0 = size check explicitly skipped.",
     )
     args = ap.parse_args()
+    if args.max_bytes is None:
+        # Resolve from the shared knob (review 2026-08-08): the SKILL used to say
+        # `--max-bytes <split_max_bytes>` with no way to resolve the placeholder, so an
+        # agent could run the CLI under a different cap than the scheduler's gate used.
+        try:
+            import memory_settings  # noqa: PLC0415
+
+            args.max_bytes = int(memory_settings.get("split_max_bytes") or 0)
+        except Exception:  # noqa: BLE001 - unresolvable knob → size check skipped (fail-open)
+            args.max_bytes = 0
 
     fn = _INTERVENTIONS.get(args.intervention)
     if fn is None:
