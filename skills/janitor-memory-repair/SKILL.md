@@ -117,6 +117,22 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   rewording them; trim an over-cap desc by tightening, never by dropping a fact the
   body lacks elsewhere.
 
+**WRITE DOWN EVERY defect you judge unfixable.** A page can carry a defect this pass cannot
+make STICK — e.g. a frontmatter shape an external writer keeps re-imposing. That page
+re-flags on every future run and, because ranking is by defect count, it is picked ahead of
+pages you actually CAN fix — so an unrecorded call does not just waste this pass, it starves
+the fixable ones. Record the refusal before moving on:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention repair --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --page <slug>.md --reason "<why this defect cannot be durably fixed>"
+```
+
+The refusal re-arms by itself when the page's bytes change, and after 7 days — so it is a
+verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
+reader has to be able to re-check it.
+
 ## EXECUTE the repair THROUGH the transaction core
 
 ```bash

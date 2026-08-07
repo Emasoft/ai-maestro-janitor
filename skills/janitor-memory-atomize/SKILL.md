@@ -100,6 +100,24 @@ body):
   the bottom footnote pool, every fact line stay byte-identical.
 - Bump the page frontmatter `lmd:` to today.
 
+**WRITE DOWN EVERY `free-prose-leaf-no-distinct-facts` judgment.** A page can look markable
+(non-empty, non-heading prose) and still be genuinely un-atomizable in your own semantic
+judgment — a boilerplate bootstrap stub ("This is the entry point... replace this stub the
+first time you write real knowledge here") is the measured case. That page re-qualifies as a
+candidate on EVERY precheck otherwise, so an unrecorded call costs a full dispatch to
+re-derive the same "no" next pass. Record it before you emit the `skipped … (free-prose-leaf-
+no-distinct-facts)` output line:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention atomize --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --page <slug>.md --reason "<why this page has no distinct atomizable fact>"
+```
+
+The refusal re-arms by itself when the page's bytes change, and after 7 days — so it is a
+verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
+reader has to be able to re-check it.
+
 ## EXECUTE through the transaction core
 
 ```bash
