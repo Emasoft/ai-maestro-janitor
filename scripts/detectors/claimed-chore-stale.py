@@ -40,6 +40,7 @@ SILENT unless ALL of these hold:
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -74,6 +75,47 @@ def _cadence_of(chore: str) -> int | None:
     return state.coerce_int(os.environ.get(env_var), default_s)
 
 
+def _completion_log(state_dir: Path) -> Path:
+    return state_dir / "claimed-chore-completions.json"
+
+
+def _record_completions(state_dir: Path, chores: list[str]) -> dict[str, int]:
+    """Append each chore's CURRENT completion stamp to its history; return the measured
+    period per chore.
+
+    This is what makes the bound describe the EXECUTOR rather than our roster
+    (janitor#225). We only ever store DISTINCT completion values, so a wedged chore adds
+    nothing and its measured period stops growing — which is exactly the property that
+    keeps self-calibration from masking the wedge it exists to catch.
+
+    Bounded to the last `_KEEP` completions per chore, and fail-open: any read/write fault
+    yields an empty map, which makes `stale_threshold` fall back to the roster cadence
+    (the pre-#225 behaviour) rather than suppressing the alarm.
+    """
+    _KEEP = 8
+    path = _completion_log(state_dir)
+    try:
+        hist: dict[str, list[int]] = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:  # noqa: BLE001 -- fail-open to the roster bound
+        hist = {}
+    changed = False
+    for chore in chores:
+        ts = gs.read_last_run(chore)
+        if ts <= 0:
+            continue
+        seen = hist.setdefault(chore, [])
+        if ts not in seen:
+            seen.append(ts)
+            del seen[:-_KEEP]
+            changed = True
+    if changed:
+        try:
+            state.atomic_write(path, json.dumps(hist))
+        except Exception:  # noqa: BLE001 -- a bookkeeping fault must not break the beat
+            pass
+    return {c: ccw.observed_period(hist.get(c, [])) for c in chores}
+
+
 def main() -> int:
     try:
         if not harness_backend.server_runs_chores():
@@ -83,11 +125,13 @@ def main() -> int:
             return 0
 
         now = int(time.time())
+        observed = _record_completions(state.state_dir(), claimed)
         findings = ccw.evaluate(
             claimed,
             last_run_of=gs.read_last_run,
             cadence_of=_cadence_of,
             now=now,
+            observed_of=lambda c: observed.get(c, 0),
         )
         if not findings:
             return 0

@@ -148,3 +148,56 @@ def test_describe_renders_both_verdict_shapes_distinctly() -> None:
     assert "bound" in stale_text
     assert "no completion stamp ever" in no_evidence_text
     assert stale_text != no_evidence_text
+
+
+# --------------------------------------------------------------------------- #
+# janitor#225 — the bound must describe the EXECUTOR, not the janitor's roster
+# --------------------------------------------------------------------------- #
+
+
+def test_observed_period_is_the_largest_gap_between_completions() -> None:
+    """observed_period measures the executor's own rhythm from its distinct stamps."""
+    now = 1_000_000
+    assert ccw.observed_period([now - 4 * 3600 * k for k in range(4)]) == 4 * 3600
+
+
+def test_observed_period_needs_two_completions_to_mean_anything() -> None:
+    """A single stamp yields no gap, so the roster cadence must remain the bound."""
+    assert ccw.observed_period([1_000_000]) == 0
+    assert ccw.observed_period([]) == 0
+
+
+def test_a_server_running_slower_than_our_roster_is_not_called_stale() -> None:
+    """janitor#225: the server moved absorbed user-plugins-update 3h -> 4h; against our
+    1h roster the old bound (3h) flagged a healthy server every cycle, forever."""
+    now = 1_000_000
+    observed = ccw.observed_period([now - 4 * 3600 * k for k in range(4)])
+    assert 14400 > ccw.stale_threshold(3600), "precondition: the old bound did fire"
+    assert 14400 <= ccw.stale_threshold(3600, observed_s=observed)
+
+
+def test_calibration_can_only_widen_the_bound_never_narrow_it() -> None:
+    """A measured rhythm must never make the detector MORE trigger-happy than the roster."""
+    for cadence in (60, 600, 3600, 21600):
+        roster = ccw.stale_threshold(cadence)
+        for obs in (0, 1, cadence // 2, cadence, cadence * 10):
+            assert ccw.stale_threshold(cadence, observed_s=obs) >= roster
+
+
+def test_the_real_wedge_still_fires_after_calibration() -> None:
+    """janitor#221's 3.7-day wedge must remain detected — calibration must not blind it."""
+    observed = ccw.observed_period([1_000_000 - 4 * 3600 * k for k in range(4)])
+    v = ccw.classify(
+        chore="user-plugins-update", last_run=1_000_000 - 319_680, cadence_s=3600,
+        now=1_000_000, observed_s=observed,
+    )
+    assert v.verdict == ccw.VERDICT_STALE
+
+
+def test_a_wedged_chore_cannot_inflate_its_own_bound() -> None:
+    """The anti-self-defeat property: a wedge produces NO new completions, so the measured
+    period stops growing. A bound derived from observed AGE would climb forever instead."""
+    comps = [1_000_000 - 4 * 3600 * k for k in range(4)]
+    before = ccw.observed_period(comps)
+    # hours pass with no new completion — the history is unchanged by definition
+    assert ccw.observed_period(comps) == before

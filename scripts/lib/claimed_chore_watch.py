@@ -43,14 +43,50 @@ VERDICT_STALE = "stale"
 VERDICT_NO_EVIDENCE = "no-evidence"
 
 
+def observed_period(completions: list[int]) -> int:
+    """The LARGEST gap between consecutive completions we have actually seen, or 0.
+
+    This is the executor's OWN rhythm, measured from its own stamps — the only cadence
+    evidence that does not depend on guessing what the other side is configured to do.
+
+    It cannot be defeated by the wedge it exists to catch: the gap only grows when a NEW
+    completion lands, and a wedged chore by definition produces none. (A bound derived
+    from "the largest age we ever observed" WOULD self-defeat, because a wedge's age
+    climbs forever and would keep raising its own bar.)
+    """
+    if len(completions) < 2:
+        return 0
+    ordered = sorted(set(completions))
+    return max((b - a for a, b in zip(ordered, ordered[1:])), default=0)
+
+
 def stale_threshold(
     cadence_s: int,
     *,
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
+    observed_s: int = 0,
 ) -> int:
-    """Seconds a claimed chore's completion stamp may age before it counts as stale."""
-    return max(factor * cadence_s, cadence_s + min_grace_s)
+    """Seconds a claimed chore's completion stamp may age before it counts as stale.
+
+    `cadence_s` comes from `harness_backend.GLOBAL_CHORES` — the JANITOR's daemon roster.
+    For a CLAIMED chore that is the cadence of the party which is NOT executing it, so it
+    is a hint, never an authority (janitor#225: the server moved its absorbed
+    `user-plugins-update` from 3h to 4h, and a healthy server was then judged stale for
+    the last hour of every cycle, forever — a daily false alarm on the very detector that
+    exists to catch a 3.7-day wedge).
+
+    `observed_s` — the executor's measured period from `observed_period()` — OVERRIDES the
+    roster whenever we have it, because it describes the party actually doing the work. We
+    take the MAX of the two: a rhythm we have genuinely watched can only ever widen the
+    bound, never narrow it, so self-calibration cannot introduce a false positive.
+
+    The real fix is the contract (TRDD-6CRC9SQQ item 2: the chore⇄token⇄stamp⇄BOUND table,
+    where the executor declares its own bound). This makes the detector correct in the
+    meantime without requiring that negotiation to land first.
+    """
+    roster = max(factor * cadence_s, cadence_s + min_grace_s)
+    return max(roster, factor * observed_s) if observed_s > 0 else roster
 
 
 class Verdict(NamedTuple):
@@ -75,6 +111,7 @@ def classify(
     now: int,
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
+    observed_s: int = 0,
 ) -> Verdict:
     """Judge ONE claimed chore from its completion stamp. Total — never raises.
 
@@ -85,7 +122,9 @@ def classify(
     the claim stands — which is the guard-that-cannot-fire failure this project has now
     shipped twice. Being blind is itself the finding; see `VERDICT_NO_EVIDENCE`.
     """
-    threshold = stale_threshold(cadence_s, factor=factor, min_grace_s=min_grace_s)
+    threshold = stale_threshold(
+        cadence_s, factor=factor, min_grace_s=min_grace_s, observed_s=observed_s
+    )
     if last_run <= 0:
         return Verdict(chore, VERDICT_NO_EVIDENCE, -1, cadence_s, threshold)
     # A stamp in the future is clock skew (or a stamp written by a host whose clock ran
@@ -103,6 +142,7 @@ def evaluate(
     now: int,
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
+    observed_of: Callable[[str], int] | None = None,
 ) -> list[Verdict]:
     """Judge every claimed chore; return only the findings, worst-first.
 
@@ -125,6 +165,7 @@ def evaluate(
             now=now,
             factor=factor,
             min_grace_s=min_grace_s,
+            observed_s=observed_of(chore) if observed_of else 0,
         )
         if v.is_finding:
             out.append(v)
