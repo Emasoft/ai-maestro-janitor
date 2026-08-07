@@ -27,7 +27,13 @@ the project's own findings ledger (TRDD-FENWWB4E) for traceability.
 
 READ-ONLY + FAIL-OPEN: it never rotates or mutates any credential, and every step is
 wrapped so a rotator/network failure is a SILENT skip — a detector crash must never break
-the heartbeat. OPT-OUT via CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=false.
+the heartbeat.
+
+DEFAULT OFF — OPT-IN via CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=true (owner directive
+2026-08-07). The heartbeat must not push account-window telemetry at agents: rotation is the
+daemon's job, so the line is something an agent can only be distracted by, never act on. The
+numbers stay one explicit command away — /janitor-token-report for the 5h/7d view,
+/janitor-token-attribution for who is burning it.
 """
 
 from __future__ import annotations
@@ -246,8 +252,13 @@ def _keychain_opt_in_ok() -> bool:
 def main() -> int:
     state.init_state()
 
-    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", True):
-        return 0  # opt-out — silent no-op before any network / rotator work
+    # DEFAULT OFF (owner directive 2026-08-07). Account-window usage is not an agent's
+    # business: the daemon owns rotation, so an agent can do nothing with this line except
+    # be distracted by it mid-task. An agent that genuinely wants the numbers asks for them
+    # with /janitor-token-report (5h/7d view) or /janitor-token-attribution (who is burning
+    # it) — pull, not push. Set the knob true to restore the heartbeat alarm.
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", False):
+        return 0  # opt-in — silent no-op before any network / rotator work
 
     interval = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"), 900)
     now = int(time.time())

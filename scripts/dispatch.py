@@ -411,7 +411,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # window-burn-rate reads each account's live 5h/7d utilization% READ-ONLY via the OAuth
     # rotator and alarms when a window burns >= RATIO× its even-pace budget (heading for an
     # early rate-limit), naming the top-consuming project when it trips. 15-min cadence;
-    # opt-out CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED; fail-open (silent on any rotator/
+    # DEFAULT OFF — opt-IN via CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=true (owner directive
+    # 2026-08-07: the daemon owns rotation, so pushing account-window telemetry at an agent only
+    # distracts it; /janitor-token-report and /janitor-token-attribution serve it on demand).
+    # fail-open (silent on any rotator/
     # network failure); the detector self-cadences on the same interval too (TRDD-OY0W6LX5).
     ("window-burn-rate", 900, "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"),
     # token-usage-anomaly (TRDD-EDSFEQ5C): the SLOW per-5-min baseline complement of the

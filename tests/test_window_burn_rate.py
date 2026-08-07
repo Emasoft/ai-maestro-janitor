@@ -391,7 +391,12 @@ def test_detector_silent_when_not_due(tmp_path: Path) -> None:
     state_dir = proj / ".janitor" / "state"
     state_dir.mkdir(parents=True)
     (state_dir / "window-burn-rate.selfrun.ts").write_text("9999999999", encoding="utf-8")
-    r = _run_detector({"CLAUDE_PROJECT_DIR": str(proj)})  # enabled by default
+    # ENABLED must be set explicitly: the detector is OPT-IN since 2026-08-07, so without it
+    # this would return at the opt-in gate and pass VACUOUSLY without ever reaching the
+    # not-due gate this test exists to pin.
+    r = _run_detector(
+        {"CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED": "true"}
+    )
     assert r.returncode == 0
     assert r.stdout.strip() == ""
 
@@ -410,7 +415,16 @@ def test_detector_silent_when_not_opted_in(tmp_path: Path) -> None:
     home.mkdir()
     # A CONFIGURED rotator home (state.json present) but deliberately NO opt-in.flag → paused.
     (home / "state.json").write_text('{"slots": {}}', encoding="utf-8")
-    r = _run_detector({"CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_ROTATOR_HOME": str(home)})
+    # ENABLED explicitly true: the detector is OPT-IN since 2026-08-07, and this test's whole
+    # value is that it reaches the keychain gate. Left implicit it would return at the opt-in
+    # gate, still assert silence, and pin NOTHING — the flood guard would be gone silently.
+    r = _run_detector(
+        {
+            "CLAUDE_PROJECT_DIR": str(proj),
+            "CLAUDE_ROTATOR_HOME": str(home),
+            "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED": "true",
+        }
+    )
     assert r.returncode == 0
     assert r.stdout.strip() == ""
 
@@ -552,6 +566,9 @@ def _drive_main_with_trip(monkeypatch, tmp_path: Path, *, culprit: str | None) -
     proj = tmp_path / "proj"
     (proj / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    # OPT-IN since 2026-08-07 — without this every caller of this helper returns at the
+    # opt-in gate, and the two that assert "" would pass while pinning nothing.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", "true")
     for fn in (_wbr.state.project_root, _wbr.state.janitor_root, _wbr.state.state_dir, _wbr.state.log_dir):
         fn.cache_clear()
     monkeypatch.setattr(_wbr, "_keychain_opt_in_ok", lambda: True)
