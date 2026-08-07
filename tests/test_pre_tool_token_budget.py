@@ -146,16 +146,39 @@ def test_default_on_when_unset(tmp_path: Path) -> None:
     assert ctx is not None and "Token spike" in ctx
 
 
-def test_cache_miss_spike_fires_independently_of_output(tmp_path: Path) -> None:
-    """A CACHE-MISS write over its budget fires even when OUTPUT is tiny."""
+def test_cache_miss_spike_over_hard_fires_independently_of_output(tmp_path: Path) -> None:
+    """A CACHE-MISS write over its HARD budget fires even when OUTPUT is tiny."""
     t = _write_transcript(
         tmp_path,
         _user("do real work"),
-        _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over 25000
+        _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over hard 25000
     )
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}))
     assert ctx is not None
     assert "cache-miss" in ctx and "~30k" in ctx  # 30_000 floored to the ~30k bucket (TRDD-YRPUSIFY)
+
+
+def test_cache_miss_advisory_only_is_silent(tmp_path: Path) -> None:
+    """OWNER DIRECTIVE (2026-08-07, janitor#230): a cache-miss write is a sunk cost by the
+    time this hook fires — an ADVISORY-tier nudge for a cache-miss-ONLY trip is pure
+    post-hoc, unactionable telemetry, so it must stay silent (unlike output, which is
+    still actionable — wrap up / compact). The HARD tier keeps firing (see
+    `test_cache_miss_only_wording_omits_compact_recommendation`)."""
+    t = _write_transcript(
+        tmp_path,
+        _user("do real work"),
+        _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over advisory 25000 only
+    )
+    assert _run(str(t), env_extra={_CACHE: "25000"}).stdout.strip() == ""
+
+
+def test_output_advisory_unchanged_even_with_cache_miss(tmp_path: Path) -> None:
+    """The output-driven advisory nudge is UNCHANGED by janitor#230: when output alone
+    trips advisory, the message still fires (and still appends the cache-miss note when
+    that signal is also present)."""
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    ctx = _ctx(_run(str(t)))
+    assert ctx is not None and "Token spike" in ctx
 
 
 def test_hard_tier_emits_strong_stop_nudge(tmp_path: Path) -> None:
@@ -268,29 +291,34 @@ def test_fresh_compact_grace_suppresses_cache_miss(tmp_path: Path) -> None:
 
 def test_stale_compact_ts_does_not_suppress(tmp_path: Path) -> None:
     """A STALE resume-after-compact.ts (older than the grace window) → unchanged
-    behavior — the cache-miss trip still fires (regression)."""
+    behavior — the cache-miss trip still fires (regression). Forced to the HARD tier
+    (janitor#230: an advisory-only cache-miss trip is now silent by design — see
+    `test_cache_miss_advisory_only_is_silent` — so this compact-grace regression check
+    needs a tier that still fires to be meaningful)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_resume_ts(proj, int(time.time()) - 10_000)  # far older than the 600s default grace
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj)))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}, project_dir=str(proj)))
     assert ctx is not None
     assert "cache-miss" in ctx and "~30k" in ctx  # bucketed (TRDD-YRPUSIFY)
 
 
 def test_absent_compact_ts_does_not_suppress(tmp_path: Path) -> None:
     """No resume-after-compact.ts at all (normal turn, no compaction) → unchanged
-    behavior — the cache-miss trip still fires."""
+    behavior — the cache-miss trip still fires. Forced to the HARD tier (see the
+    janitor#230 note on `test_stale_compact_ts_does_not_suppress`)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj)))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}, project_dir=str(proj)))
     assert ctx is not None and "cache-miss" in ctx
 
 
 def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
     """CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S=0 disables the grace window even
-    with a fresh resume-after-compact.ts."""
+    with a fresh resume-after-compact.ts. Forced to the HARD tier (see the janitor#230
+    note on `test_stale_compact_ts_does_not_suppress`)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_resume_ts(proj, int(time.time()))
@@ -298,7 +326,7 @@ def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
     ctx = _ctx(
         _run(
             str(t),
-            env_extra={_CACHE: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
+            env_extra={_CACHE: "25000", _CACHE_HARD: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
             project_dir=str(proj),
         )
     )

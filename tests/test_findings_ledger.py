@@ -160,6 +160,30 @@ def test_surface_block_silent_on_empty_inbox(_isolate: Path) -> None:
     assert fl.surface_block(None) == ""
 
 
+def test_surface_block_omits_window_burn_but_keeps_others_and_advances_cursor(_isolate: Path) -> None:
+    """OWNER DIRECTIVE (2026-08-07, janitor#230): account-window telemetry (WINDOW-BURN)
+    must never be PUSHED at SessionStart. A WINDOW-BURN entry is omitted from the block, a
+    non-WINDOW-BURN entry still shows, and the cursor advances past BOTH — a filtered
+    entry must never re-accumulate into a permanent unread backlog."""
+    fl.record(sev="HIGH", code="WINDOW-BURN", src="window-burn-rate", msg="5h window hot", now=100)
+    fl.record(sev="HIGH", code="GHCFG-001", src="daemon", msg="branch unprotected", now=200)
+    block = fl.surface_block(None)
+    assert "WINDOW-BURN" not in block
+    assert "GHCFG-001" in block
+    assert fl.surface_block(None) == "", "both entries (incl. the filtered one) must be acked"
+
+
+def test_window_burn_entries_are_recorded_and_visible_to_unread_entries(_isolate: Path) -> None:
+    """The suppression is PUSH-only: the data itself is kept (still `record()`-ed to disk)
+    and still visible via `unread_entries()` with no `exclude_codes` — the read
+    `/janitor-findings` uses."""
+    fl.record(sev="HIGH", code="WINDOW-BURN", src="window-burn-rate", msg="5h window hot", now=100)
+    entries = _entries(None)
+    assert len(entries) == 1 and entries[0]["code"] == "WINDOW-BURN"
+    lines, total = fl.unread_entries(None)
+    assert total == 1 and "WINDOW-BURN" in lines[0]
+
+
 # ---------- 5. seams + fail-open ----------
 
 

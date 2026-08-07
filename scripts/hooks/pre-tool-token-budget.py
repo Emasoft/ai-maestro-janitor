@@ -319,6 +319,9 @@ def _response(
                 msg += f" {_CACHE_MISS_NOTE}"
             return _context(msg)
         # cache-miss-only hard trip: NOT an output/context problem — see _CACHE_MISS_NOTE.
+        # Still worth interrupting for (a runaway is a runaway) even though the write
+        # itself is sunk cost — unlike the advisory tier below, this can still stop a
+        # SUSTAINED pattern of repeated cache-miss writes from compounding further.
         return _context(f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. {_CACHE_MISS_NOTE}")
 
     # advisory tier
@@ -327,7 +330,14 @@ def _response(
         if has_cache_miss:
             msg += f" {_CACHE_MISS_NOTE}"
         return _context(msg)
-    return _context(f"⚠ Token spike: this turn {signals}. {_CACHE_MISS_NOTE}")
+    # OWNER DIRECTIVE (2026-08-07, janitor#230): a cache-miss write is a SUNK cost by the
+    # time this hook fires — `_CACHE_MISS_NOTE` itself says so ("that write already
+    # happened and cannot be undone"). An advisory nudge here is a pure post-hoc report,
+    # not an actionable gate, so at the ADVISORY tier (below the runaway threshold) it
+    # must stay silent rather than distract the agent with unactionable telemetry. The
+    # HARD tier above still fires on cache-miss-only — a SUSTAINED pattern there is worth
+    # interrupting even though any single write can't be undone.
+    return None
 
 
 def main() -> int:

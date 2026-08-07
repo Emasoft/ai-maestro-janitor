@@ -58,6 +58,18 @@ MAX_BYTES = 120_000
 SURFACE_CAP_LINES = 10
 SURFACE_BUDGET_BYTES = 1024
 
+# OWNER DIRECTIVE (2026-08-07, janitor#230): account-window telemetry must never be PUSHED
+# into an agent's context — rotation is the daemon's job, and an agent reading burn-rate
+# numbers is only distracted by them. `window-burn-rate` is opt-in at the DETECTOR (commit
+# dc2084c6, so no NEW findings of this code should normally appear), but this ledger's
+# SessionStart surfacing still has a BACKLOG of already-recorded entries, so filtering only
+# the producer does not stop the push. Codes in this set are still `record()`-ed (so
+# `/janitor-findings` keeps showing them — the data is kept) and still ADVANCE the surface
+# cursor (so a filtered entry never re-accumulates into a permanent unread backlog); they
+# are only excluded from the SessionStart `surface_block()` injection. Add a code here when
+# a future detector's findings are useful on-demand but must never be auto-pushed.
+NEVER_SURFACE_CODES = frozenset({"WINDOW-BURN"})
+
 
 def _enabled() -> bool:
     return state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FINDINGS_LEDGER_ENABLED", True)
@@ -197,6 +209,7 @@ def unread_entries(
     *,
     cap: int = SURFACE_CAP_LINES,
     budget_bytes: int = SURFACE_BUDGET_BYTES,
+    exclude_codes: frozenset[str] = frozenset(),
 ) -> tuple[list[str], int]:
     """(rendered unread lines, NEWEST first, capped by count AND byte budget;
     total unread count). Read-only — `advance_cursor()` is the separate ack, so a
@@ -207,6 +220,11 @@ def unread_entries(
     longer addresses the same bytes — fall back to the stored newest-surfaced TS
     (entries with ts > cursor ts are unread), so a trim can neither re-inject the
     whole history nor lose the tail.
+
+    `exclude_codes` drops entries whose `code` is a member BEFORE counting/capping — the
+    janitor#230 owner directive: those codes are still recorded and still ack'd via
+    `advance_cursor()`, they are simply invisible to this read (callers that need the
+    full picture, e.g. `/janitor-findings`, pass the default empty set).
     """
     entries, size = _read_raw(project_dir)
     offset, cursor_ts = _read_cursor(project_dir)
@@ -236,6 +254,8 @@ def unread_entries(
             if consumed >= offset and isinstance(parsed, dict) and isinstance(parsed.get("ts"), (int, float)):
                 unread.append(parsed)
             consumed += line_len
+    if exclude_codes:
+        unread = [e for e in unread if e.get("code") not in exclude_codes]
     total = len(unread)
     lines: list[str] = []
     used = 0
@@ -262,13 +282,25 @@ def advance_cursor(project_dir: str | os.PathLike[str] | None = None) -> None:
 def surface_block(project_dir: str | os.PathLike[str] | None = None) -> str:
     """The SessionStart injection: capped unread lines + ONE fold line, then the cursor
     advances. Empty string when nothing is unread (silence — no empty-inbox chatter).
-    ≤ ~1 KB by construction (the owner's context-budget constraint)."""
-    lines, total = unread_entries(project_dir)
-    if not lines:
-        return ""
-    folded = total - len(lines)
-    out = list(lines)
-    if folded > 0:
-        out.append(f"[findings] …{folded} older unread — `/janitor-findings` to browse")
+    ≤ ~1 KB by construction (the owner's context-budget constraint).
+
+    `NEVER_SURFACE_CODES` (janitor#230 — account-window telemetry must never be PUSHED
+    into an agent's context) is excluded from what gets INJECTED here, but the cursor
+    still advances over the WHOLE ledger (via `advance_cursor()`, which is unconditional
+    and code-agnostic) — so a filtered entry is acked exactly like a shown one and never
+    piles up into a permanent backlog. `/janitor-findings` reads `unread_entries()`
+    directly with no `exclude_codes`, so the data itself is never lost, only unpushed.
+    """
+    lines, total = unread_entries(project_dir, exclude_codes=NEVER_SURFACE_CODES)
+    if lines:
+        folded = total - len(lines)
+        out = list(lines)
+        if folded > 0:
+            out.append(f"[findings] …{folded} older unread — `/janitor-findings` to browse")
+        result = "\n".join(out)
+    else:
+        result = ""
+    # Ack the ENTIRE ledger regardless of what was actually injected — a filtered-out
+    # entry (e.g. WINDOW-BURN) must not sit unread forever just because it is never shown.
     advance_cursor(project_dir)
-    return "\n".join(out)
+    return result
