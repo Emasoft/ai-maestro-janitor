@@ -184,20 +184,9 @@ memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 10 | grep -v 
 If a third page appears, **abstain** and surface all three for a human (they may
 need a different reshape). Never silently drop or ignore the third.
 
-**WRITE DOWN EVERY abstain on a candidate pair** (steps 1–4: not convincing, different
-facets, no topic page, illegal merge, third page found). The librarian re-surfaces the same
-pair every run, so a verdict you keep to yourself costs a full dispatch to re-derive next
-pass — the same "no", forever. The refusal is keyed on the WHOLE pair, so pass BOTH pages:
-
-```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root <memdir> \
-  --page <A>.md --page <B>.md --reason "<why A and B do NOT merge>"
-```
-
-The refusal re-arms by itself when either page's bytes change, and after 7 days — so it is a
-verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
-reader has to be able to re-check it.
+**RECORD EVERY abstain** with `scripts/memory_refusal_cli.py record` before moving on —
+unrecorded, it re-dispatches forever. Exact invocation + why it expires:
+[merge-protocol](references/merge-protocol.md#recording-an-abstain).
 
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 

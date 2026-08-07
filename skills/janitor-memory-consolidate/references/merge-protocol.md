@@ -378,3 +378,30 @@ link your own deletion broke. It does not license editing, reordering, or
 pruning any other line in that file, which remains the harness's.
 `memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
 `no_dangling_memory_md_refs()` is the matching check.
+
+## Recording an abstain
+
+Every step 1–4 abstain — not convincing, different facets, no topic page, illegal
+merge, a third page found — must be written to the refusal ledger before you move
+on. The librarian re-surfaces the same candidate pair on every run and the pages'
+bytes do not change between runs, so a verdict you keep to yourself is re-derived
+by a fresh agent at full dispatch cost, producing the identical "no", forever.
+That idle burn was measured at ~200k–280k tokens per pass (janitor#212, #227).
+
+The refusal is keyed on the WHOLE candidate group, so pass one `--page` per page in
+the pair — a one-page key matches no group and is silently inert.
+
+It is a verdict with an EXPIRY, not a permanent silence: the entry re-arms by itself
+when either page's bytes change, and again after 7 days. So a wrong "no" costs at
+most one cycle, while a right one stops costing anything.
+
+`--reason` is the deliverable, not a formality: the next reader must be able to
+re-check your judgement from it without re-reading both pages.
+
+The invocation, keyed on the whole pair:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --page <A>.md --page <B>.md --reason "<why A and B do NOT merge>"
+```
