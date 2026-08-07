@@ -1,9 +1,9 @@
 ---
 trdd-id: 7PYTX4E9
 title: Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
-column: complete
+column: published
 created: 2026-07-08T22:32:31+0200
-updated: 2026-08-06T23:35:00+0200
+updated: 2026-08-07T09:15:00+0200
 current-owner: main
 assignee: main
 implementation-commits: [af68a6e, c740a5a]
@@ -28,6 +28,20 @@ external-refs: []
 ---
 
 # Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
+
+## ⏵ PUBLISHED 2026-08-07 in **v2.5.0** — the 29-day gap is closed
+
+`complete -> publish -> published`. F1–F5 shipped in
+<https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v2.5.0>, 29 days after the code
+landed in `main`.
+
+**The one thing still required, and it is not a code change:** the running global daemon must
+RESTART onto the new cache before the fix is actually in force. Until it does, the live tick
+executes the pre-fix rotator and the 2026-07-08 band-aid is all that stands between the owner
+and the blind spot — which the next user `/login` recreates. The daemon self-restarts when it
+notices a newer cached version (`daemon_needs_restart`), so this should resolve on its own
+within a cadence; verify rather than assume, since a stale daemon is exactly what this card is
+about.
 
 ## ⏵ COLUMN CORRECTED 2026-08-06 — `planned` -> `complete` (board truth, NOT new work)
 
