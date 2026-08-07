@@ -1,7 +1,7 @@
 {
   "files": {
     "CLAUDE.md": "d17b039bc31a398a30356e4370b930fd080bb218881d759d34224967d14373b1",
-    "README.md": "fa8bbeb3c3102bd9fa9dbb0213bbd78eb94df3a9158fab9eaf3442fbe350a80c",
+    "README.md": "135023c59dd262b734c88bcadface9459ada6a55b6f5b22d64b26e42dc72fe65",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -51,7 +51,7 @@
     "skills/janitor-memory-harvest/SKILL.md": "db6fa3b76535e81b01ec9b8d0f8a346cb76575a43fd7a464f12461b1064ad56b",
     "skills/janitor-memory-recall/SKILL.md": "72d1c8c9db426c7ac67621d03726efefbcc20ba9e2a354154741f3dd4e5ef1b8",
     "skills/janitor-memory-record-recent/SKILL.md": "5aacdcf747a750f43ae867b52de330f1021aaa4e5ac94b7d3e66163a752d7ffe",
-    "skills/janitor-memory-repair/SKILL.md": "27d2ae05c3c3b479aa73cf5922d5f54db0855a34367f1d13ec145f600d9e66b4",
+    "skills/janitor-memory-repair/SKILL.md": "cde85fedd4c92d216fb9889693ffb0dd80f7b2b91472d450c695b614dc6f32eb",
     "skills/janitor-memory-retro-lesson/SKILL.md": "ec169139671059e2db2042cc1883e036f6ad9d92ca7bfae64804fc66a1b58f45",
     "skills/janitor-memory-split/SKILL.md": "2a0d49c7abd460e13230c220028c990fdd1a097dd30d856bad257d7ff97cc6be",
     "skills/janitor-memory-update/SKILL.md": "96700f7aac9cebdf4aabc608e8c441d09e03999c0f550fd151bdb24892afa65a",
