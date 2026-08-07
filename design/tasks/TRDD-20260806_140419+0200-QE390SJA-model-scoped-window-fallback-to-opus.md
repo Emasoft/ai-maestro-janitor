@@ -116,7 +116,7 @@ Wire the EXISTING detector to the EXISTING injector.
 - janitor#222 (the ask, with the owner's verbatim directive + the measured table).
 - Detection: `lib/token_burn.py` (`model_windows_from_usage`, `evaluate_trips`),
   `detectors/window-burn-rate.py`.
-- Injection: `lib/terminal_trigger.py` (`inject_until_sent`), `scripts/resume_trigger.py`
-  + `compact_trigger.py` as the existing self-typing precedents.
+- Injection: `lib/terminal_trigger.py` (`inject_until_sent`), plus `scripts/resume_trigger.py`
+  and `compact_trigger.py` as the existing self-typing precedents.
 - Siblings: TRDD-UA4FAX67 (post-rotation ESC unblock — same actuation layer),
   TRDD-32acd15f (rotator selection policy).
