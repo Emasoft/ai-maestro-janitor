@@ -33,6 +33,7 @@ unrecoverable errors.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -804,7 +805,7 @@ def _pending_agent_count() -> int:
         return 0
 
 
-def _fresh_external_agent_count(now: int) -> int:
+def _fresh_external_agent_count(now: int, state_dir: Path | None = None) -> int:
     """Background agents that are EXTERNAL and RECENT — the count the cadence FAST
     probe must use.
 
@@ -819,13 +820,22 @@ def _fresh_external_agent_count(now: int) -> int:
     `_cadence_active_waiting` for the measurement that forced this.
 
     Fail-open 0 — a controller that cannot read the manifest must fall back to the
-    CHEAP tier, never pin the expensive one."""
+    CHEAP tier, never pin the expensive one.
+
+    `state_dir` pins WHOSE manifest is counted. None = the ambient session (the
+    in-session cadence controller counting its own agents — the original consumer).
+    A caller judging a DIFFERENT project (the external-clear watcher, the future
+    daemon fleet walk) must pass that project's state dir: the ambient default here
+    let THIS session's in-flight review-workflow agents flip an unrelated fixture
+    project's clear verdict to active-waiting and block a release at the test gate
+    (2026-08-08). The resume/directive branches of `_cadence_active_waiting` always
+    took `sd` — this count was the one branch that ignored it."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
         return sum(
             1
-            for e in pending_agents.pending_external(now)
+            for e in pending_agents.pending_external(now, state_dir=state_dir)
             if 0 <= now - int(e.get("ts", 0)) < _RESUME_RECENCY_WINDOW_S
         )
     except Exception:  # noqa: BLE001
@@ -1310,25 +1320,48 @@ def _phase_iterm_automation_alarm() -> None:
     """
     try:
         flag = gs.global_state_dir() / "iterm-automation-blocked.flag"
-        if not flag.is_file():
-            return
         acked = state.state_dir() / "iterm-automation-alarm-acked.ts"
-        if acked.is_file() and state.file_mtime(acked) >= state.file_mtime(flag):
-            return  # already told this session about THIS occurrence
-        state.atomic_write(acked, str(int(time.time())))
+        if not flag.is_file():
+            # The condition ENDED (a healthy scan cleared the flag) — reset the seen-set
+            # so a future re-occurrence, even with identical content, speaks again. This
+            # keeps the refire property while the hash-ack below bounds mid-condition
+            # writer ping-pong.
+            acked.unlink(missing_ok=True)
+            return
+        try:
+            raw_flag = flag.read_text(encoding="utf-8")
+        except OSError:
+            raw_flag = ""
+        # Ack by CONTENT HASH, not mtime (review 2026-08-08): both the daemon and
+        # session-side fleet scans write this flag, each stamping its OWN interpreter.
+        # When they alternate, every rewrite bumps the mtime, and an mtime-keyed ack
+        # re-alarmed on every flip — alarm fatigue on the exact alarm designed against
+        # it. A seen-hash set alarms once per DISTINCT observation per condition
+        # episode: each distinct payload really is new information, a repeat is not.
+        payload_hash = hashlib.sha256(raw_flag.encode("utf-8")).hexdigest()
+        try:
+            seen = set(acked.read_text(encoding="utf-8").split())
+        except OSError:
+            seen = set()
+        if payload_hash in seen:
+            return  # already told this session about THIS exact observation
+        state.atomic_write(acked, "\n".join(sorted(seen | {payload_hash})))
         try:
             import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
 
-            interpreter = fleet_scan.iterm_automation_interpreter(
-                flag.read_text(encoding="utf-8")
-            )
-        except (OSError, ImportError):
+            interpreter = fleet_scan.iterm_automation_interpreter(raw_flag)
+        except ImportError:
             interpreter = ""
+        # SANITIZE before printing (review 2026-08-08): the flag is file-derived text
+        # any local process can write, and this print IS the heartbeat's trusted
+        # stdout — an embedded newline + bare `[janitor-...]` line would otherwise
+        # become an actionable marker. Same defang every other drift line gets.
         binary = (
-            f"the binary that made the call ({interpreter})"
+            f"the binary that made the call ({state.sanitize_for_drift_line(interpreter)})"
             if interpreter
-            else "the janitor daemon's uv/python entry (the flag recorded no path — a "
-            "pre-upgrade flag; the next fleet scan records it)"
+            else "the janitor daemon's uv/python entry (no interpreter path could be "
+            "read from the flag — a pre-JSON flag, a concurrent rewrite, or a read "
+            "error; the next fleet scan records it)"
         )
         print(
             "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
@@ -2163,7 +2196,10 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     # resume and directive branches use, and no polling cadence helps an agent that
     # stopped reporting half a day ago. Like those branches this bounds only the
     # CADENCE claim — the entries are still listed by the nudge and still resumable.
-    return _fresh_external_agent_count(now) > 0
+    # `sd` MUST flow through here: this predicate is borrowed by the external-clear
+    # watcher for OTHER projects, and an ambient manifest read leaks the calling
+    # session's agents into their verdicts (see _fresh_external_agent_count).
+    return _fresh_external_agent_count(now, sd) > 0
 
 
 def _stamp_resume(sd: Path, now: int) -> None:

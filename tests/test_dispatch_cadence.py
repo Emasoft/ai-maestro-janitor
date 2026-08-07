@@ -396,13 +396,13 @@ def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
 
     (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     assert dispatch._cadence_active_waiting(sd, now) is True
     (sd / "resume-directive.txt").unlink()
 
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 1)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 1)
     assert dispatch._cadence_active_waiting(sd, now) is True
 
 
@@ -418,7 +418,7 @@ def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
     dispatch = _import_dispatch()
     sd = _state(proj)
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
     (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, int(time.time())) is True
@@ -436,7 +436,7 @@ def test_ratelimit_resume_demotes_only_with_fresh_coverage(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
     (sd / "last-resume.ts").write_text(str(now))
 
     assert dispatch._cadence_active_waiting(sd, now) is True  # no coverage → FAST
@@ -460,7 +460,7 @@ def test_coverage_ignored_when_feature_disabled(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
     (sd / "last-resume.ts").write_text(str(now))
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, now) is True
@@ -589,7 +589,7 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
     dispatch = _import_dispatch()
     sd = _state(proj)
     now = int(time.time())
-    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now: 0)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
 
     d = sd / "resume-directive.txt"
     d.write_text("continue TRDD-SOMETHING")
@@ -618,3 +618,38 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
     fresh = now - (dispatch._RESUME_RECENCY_WINDOW_S - 60)
     os.utime(d, (fresh, fresh))
     assert dispatch._cadence_active_waiting(sd, now) is True
+
+
+def test_active_waiting_reads_the_manifest_of_the_sd_it_was_given(
+    proj: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review 2026-08-08 (blocked a release at the test gate): the resume and directive
+    branches of `_cadence_active_waiting` always honoured `sd`, but the pending-agents
+    count read the AMBIENT `state.state_dir()` — so a caller judging a DIFFERENT project
+    (the external-clear watcher, the future daemon fleet walk) had the calling session's
+    in-flight agents leak into that project's verdict. Concretely: this session's
+    code-review workflow agents flipped a tmp fixture project to `active-waiting`."""
+    import json as _json
+    import time as _time
+
+    dispatch = _import_dispatch()
+    now = int(_time.time())
+
+    # The AMBIENT project (CLAUDE_PROJECT_DIR) has a fresh, external, in-flight agent.
+    ambient_sd = proj / ".janitor" / "state"
+    (ambient_sd / "pending-agents.json").write_text(
+        _json.dumps([{"agentId": "a" * 17, "description": "workflow-subagent",
+                      "ts": now, "nudges": 0, "transcript": ""}]),
+        encoding="utf-8",
+    )
+
+    # A DIFFERENT project's empty state dir — the one the caller is deciding about.
+    other_sd = tmp_path / "other-project" / ".janitor" / "state"
+    other_sd.mkdir(parents=True)
+
+    assert dispatch._cadence_active_waiting(ambient_sd, now) is True, (
+        "sanity: the ambient project itself IS actively waiting"
+    )
+    assert dispatch._cadence_active_waiting(other_sd, now) is False, (
+        "the ambient session's agents leaked into another project's verdict"
+    )

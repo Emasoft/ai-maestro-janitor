@@ -94,8 +94,16 @@ _JANITOR_AGENT_SIGNATURES = (
 )
 
 
-def _manifest_path() -> Path:
-    return state.state_dir() / MANIFEST_NAME
+def _manifest_path(state_dir: Path | None = None) -> Path:
+    """`state_dir` pins WHICH project's manifest is read. Default (None) is the ambient
+    session project — correct for every in-session consumer (hooks, the cadence
+    controller reading its own session). A caller deciding about a DIFFERENT project
+    (the external-clear watcher handed a --project-root, the future daemon fleet walk)
+    MUST pass that project's state dir explicitly: the ambient default silently reads
+    the CALLING project's manifest, which let one session's in-flight workflow agents
+    veto a clear verdict about an unrelated project (caught by
+    test_unknown_idle_holds_end_to_end_and_touches_nothing failing a publish gate)."""
+    return (state_dir if state_dir is not None else state.state_dir()) / MANIFEST_NAME
 
 
 @contextlib.contextmanager
@@ -152,10 +160,10 @@ def _normalize(entry: object, now: int) -> dict | None:
     }
 
 
-def _load_unlocked(now: int) -> list[dict]:
+def _load_unlocked(now: int, state_dir: Path | None = None) -> list[dict]:
     """Read + sweep the manifest. Corrupt/missing → [] (fail-open, never raises)."""
     try:
-        entries = json.loads(_manifest_path().read_text(encoding="utf-8"))
+        entries = json.loads(_manifest_path(state_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     if not isinstance(entries, list):
@@ -221,11 +229,14 @@ def remove(agent_id: str, now: int | None = None) -> None:
         pass
 
 
-def pending(now: int | None = None) -> list[dict]:
-    """Live (unswept) entries, oldest-first. Fail-open []."""
+def pending(now: int | None = None, *, state_dir: Path | None = None) -> list[dict]:
+    """Live (unswept) entries, oldest-first. Fail-open [].
+
+    `state_dir` selects WHOSE manifest (see `_manifest_path`) — omit for the ambient
+    session, pass the target project's state dir when deciding about another project."""
     try:
         t = int(now if now is not None else time.time())
-        return _load_unlocked(t)
+        return _load_unlocked(t, state_dir)
     except Exception:  # noqa: BLE001 - readers (resume phases) must never die
         return []
 
@@ -242,7 +253,7 @@ def is_janitor_agent(entry: dict) -> bool:
     return any(sig in desc for sig in _JANITOR_AGENT_SIGNATURES)
 
 
-def pending_external(now: int | None = None) -> list[dict]:
+def pending_external(now: int | None = None, *, state_dir: Path | None = None) -> list[dict]:
     """Live entries EXCLUDING the janitor's own housekeeping agents — the set the
     heartbeat cadence FAST probe must count (TRDD-CI6ZTNB9). A USER-spawned
     background agent (a genuine time-sensitive wait) is still counted; only the
@@ -250,7 +261,7 @@ def pending_external(now: int | None = None) -> list[dict]:
     perturbing its own FAST input. Distinct from `pending()`, which the resume
     directive still uses in full (a janitor agent that died is listed there so it
     is not silently stranded)."""
-    return [e for e in pending(now) if not is_janitor_agent(e)]
+    return [e for e in pending(now, state_dir=state_dir) if not is_janitor_agent(e)]
 
 
 def directive_lines(now: int | None = None) -> list[str]:
