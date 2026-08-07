@@ -273,13 +273,18 @@ uninstall_linux() {
   systemctl --user daemon-reload 2>/dev/null || true
 }
 
-# status: exit 0 iff the OS-keepalive artifact for this platform is on disk. Lets the
-# Python orchestrator probe install-state without itself naming any persistence path
-# (so launchd_keepalive.py stays free of the tokens that would trip the discriminator).
+# status: exit 0 iff the OS-keepalive job is actually LOADED/ACTIVE with the service
+# manager — NOT merely that its definition file is present on disk (janitor#217: a
+# `launchctl bootout` leaves the plist in place while unloading the job, so asserting
+# only `[ -f "$PLIST" ]` reports green while the keepalive is entirely absent — the
+# L0 re-arm gate then never re-bootstraps because status already looks healthy). Lets
+# the Python orchestrator probe install-state without itself naming any persistence
+# path (so launchd_keepalive.py stays free of the tokens that would trip the
+# discriminator).
 status_state() {
   case "$plat" in
-  macos) [ -f "$PLIST" ] ;;
-  linux) [ -f "$UNIT" ] ;;
+  macos) launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 ;;
+  linux) systemctl --user is-active --quiet "$LABEL.service" ;;
   *) return 1 ;;
   esac
 }

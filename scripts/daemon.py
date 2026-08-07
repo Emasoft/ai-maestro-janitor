@@ -2415,6 +2415,18 @@ def main() -> int:
             # daemon, which re-installs the keepalive on startup. NOT done on a plain
             # signal/self-update exit, where an immediate respawn is exactly what we want.
             _uninstall_os_keepalive()
+        # janitor#216: record this as a GRACEFUL exit only when the try block above
+        # actually completed its own shutdown path — i.e. no exception is currently
+        # propagating through this `finally`. `sys.exc_info()` inside a `finally` is
+        # the correct way to tell "the loop broke/returned normally" from "an
+        # unhandled exception is unwinding through here": every task body already
+        # swallows its own exceptions (see the `except Exception` guards throughout
+        # this file), so the only way to reach this `finally` WITH a propagating
+        # exception is a genuine, unanticipated crash — exactly the case the
+        # crash-loop breaker must still catch. A SIGKILL/OOM kill never reaches
+        # this line at all, so it too is correctly left uncounted as "graceful".
+        if sys.exc_info()[0] is None:
+            gs.record_graceful_exit()
         state.log_line("daemon", f"stopping ({exit_reason})")
         gs.remove_daemon_pid()
         gs.release_singleton_dual(flock_handle)

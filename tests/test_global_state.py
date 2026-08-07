@@ -772,6 +772,74 @@ def test_crash_loop_active_truth_table(state_dir: Path) -> None:
     assert gs._crash_loop_active(now=now) is False           # aged out → self-reset
 
 
+def test_record_graceful_exit_appends_and_prunes(state_dir: Path) -> None:
+    """The graceful-exit history is a ring: 25 recorded exits keep only the newest 20."""
+    gs = _gs()
+    gs.init_global_state()
+    for i in range(25):
+        gs.record_graceful_exit(now=1000 + i)
+    lines = gs._graceful_exit_history_path().read_text(encoding="utf-8").splitlines()
+    assert len(lines) == gs._GRACEFUL_EXIT_KEEP
+    assert lines[-1] == "1024" and lines[0] == "1005"  # newest kept, oldest pruned
+
+
+def test_spawn_has_graceful_predecessor(state_dir: Path) -> None:
+    """A spawn within the grace window AFTER a graceful exit is attributed to it;
+    one before it, or too far after it, is not."""
+    gs = _gs()
+    assert gs._spawn_has_graceful_predecessor(1010, [1000], grace_s=30) is True
+    assert gs._spawn_has_graceful_predecessor(1000, [1000], grace_s=30) is True   # boundary: 0s after
+    assert gs._spawn_has_graceful_predecessor(1030, [1000], grace_s=30) is True   # boundary: exactly grace_s
+    assert gs._spawn_has_graceful_predecessor(1031, [1000], grace_s=30) is False  # 1s past the window
+    assert gs._spawn_has_graceful_predecessor(990, [1000], grace_s=30) is False   # spawn BEFORE the exit
+    assert gs._spawn_has_graceful_predecessor(1010, [], grace_s=30) is False      # no graceful exits at all
+
+
+def test_crash_loop_breaker_ignores_orderly_sigterm_burst(state_dir: Path) -> None:
+    """janitor#216: N spawns each immediately following a LOGGED graceful exit
+    (an operator launchctl bootout/bootstrap burst, or a mutual-kill ping-pong)
+    must NOT trip the breaker — even though the RAW spawn count alone would."""
+    gs = _gs()
+    gs.init_global_state()
+    now = int(time.time())
+    # _CRASH_LOOP_SPAWN_LIMIT spawns, 60s apart, each preceded by a graceful exit
+    # a few seconds earlier — the exact shape of the #216/#211 SIGTERM ping-pong.
+    spawn_epochs = [now - 60 * (gs._CRASH_LOOP_SPAWN_LIMIT - i) for i in range(gs._CRASH_LOOP_SPAWN_LIMIT)]
+    graceful_epochs = [s - 5 for s in spawn_epochs]
+    gs.state.atomic_write(gs._spawn_history_path(), "\n".join(str(s) for s in spawn_epochs))
+    gs.state.atomic_write(gs._graceful_exit_history_path(), "\n".join(str(g) for g in graceful_epochs))
+    # Sanity: the same raw spawn count WOULD trip the old (pre-#216) predicate.
+    raw = gs._spawn_history_path().read_text(encoding="utf-8")
+    recent = [ln for ln in raw.splitlines() if now - int(ln) <= gs._CRASH_LOOP_WINDOW_S]
+    assert len(recent) >= gs._CRASH_LOOP_SPAWN_LIMIT
+    assert gs._crash_loop_active(now=now) is False, "orderly SIGTERM churn must not read as a crash loop"
+
+
+def test_crash_loop_breaker_still_trips_on_unattributed_spawns(state_dir: Path) -> None:
+    """janitor#216 must not fail OPEN: spawns with NO logged graceful predecessor
+    (the actual crash-on-start case) still trip the breaker exactly as before."""
+    gs = _gs()
+    gs.init_global_state()
+    now = int(time.time())
+    spawn_epochs = [now - 10 * i for i in range(gs._CRASH_LOOP_SPAWN_LIMIT)]
+    gs.state.atomic_write(gs._spawn_history_path(), "\n".join(str(s) for s in spawn_epochs))
+    # No graceful-exit-history file at all — every spawn is unattributed.
+    assert gs._crash_loop_active(now=now) is True
+
+
+def test_crash_loop_breaker_trips_when_graceful_exit_too_stale(state_dir: Path) -> None:
+    """A graceful exit long before the grace window does not launder a later,
+    otherwise-unexplained spawn burst into looking orderly."""
+    gs = _gs()
+    gs.init_global_state()
+    now = int(time.time())
+    spawn_epochs = [now - 10 * i for i in range(gs._CRASH_LOOP_SPAWN_LIMIT)]
+    gs.state.atomic_write(gs._spawn_history_path(), "\n".join(str(s) for s in spawn_epochs))
+    stale_graceful = now - gs._GRACEFUL_EXIT_GRACE_S - 3600  # an hour past any spawn's grace window
+    gs.state.atomic_write(gs._graceful_exit_history_path(), str(stale_graceful))
+    assert gs._crash_loop_active(now=now) is True
+
+
 def test_ensure_daemon_refuses_spawn_when_crash_looping(state_dir: Path) -> None:
     """With the breaker tripped, ensure_daemon_running refuses to spawn (returns False)."""
     gs = _gs()

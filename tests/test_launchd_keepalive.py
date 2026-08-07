@@ -355,6 +355,43 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         assert "$HOME" not in text
 
 
+@pytest.mark.real_subprocess("bash")
+def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
+    """janitor#217: the plist/unit FILE existing on disk must not be enough for
+    `status` to report healthy — the job must actually be LOADED with the service
+    manager. `install` here uses KEEPALIVE_SKIP_ACTIVATION=1 (never registers
+    with real launchd/systemd), so the definition file is written but the job is
+    never loaded — exactly the state a `launchctl bootout` leaves behind. Watch
+    this FAIL (exit 0 / "installed") against the old `[ -f "$PLIST" ]` check.
+    """
+    plat = launchd_keepalive.current_platform()
+    if plat == "other":
+        pytest.skip(f"no OS keepalive on {sys.platform}")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
+    env.pop("XDG_CONFIG_HOME", None)
+    install = subprocess.run(
+        ["bash", str(INSTALLER), "install"], env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert install.returncode == 0, install.stderr
+    # The definition file IS on disk (install wrote it) ...
+    if plat == "macos":
+        cfg = fake_home / "Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist"
+    else:
+        cfg = fake_home / ".config/systemd/user/com.ai-maestro-janitor.daemon.service"
+    assert cfg.is_file(), "install must still write the definition file"
+    # ... but the job was never loaded with the real service manager, so `status`
+    # must report NOT installed (non-zero), not merely "the file exists".
+    status = subprocess.run(
+        ["bash", str(INSTALLER), "status"], env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert status.returncode != 0, (
+        f"status must report NOT installed when the job isn't loaded, even with "
+        f"the definition file present (stdout={status.stdout!r})"
+    )
+
+
 # ── Interpreter resolution both ways (TRDD-DB1P25S4) ─────────────────────────
 # TCC persists an Automation grant only against a STABLE binary identity, so the
 # baked interpreter must be uv's MANAGED CPython when one resolves; the `uv run`

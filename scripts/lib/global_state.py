@@ -68,6 +68,18 @@ _CRASH_LOOP_SPAWN_LIMIT = 5
 _CRASH_LOOP_WINDOW_S = 1800
 _SPAWN_HISTORY_KEEP = 20  # ring length of daemon.spawn-history (one epoch per line)
 
+# Exit-cause awareness for the breaker above (janitor#216). A spawn attempt whose
+# PREDECESSOR exited gracefully (SIGTERM/SIGINT/SIGHUP, kill-switch, server takeover,
+# self-update respawn — anything that reaches the daemon's own shutdown path rather
+# than being killed out from under it) is operator/owner-driven churn, not evidence the
+# build is dying on start. `_GRACEFUL_EXIT_GRACE_S` bounds how soon after a graceful
+# exit a respawn must land to count as "that exit's respawn" — generous enough to cover
+# both an immediate launchd relaunch and the next per-session heartbeat's
+# `ensure_daemon_running()` (fires at most a few minutes apart), tight enough that an
+# unrelated spawn hours later is not laundered by a stale graceful-exit record.
+_GRACEFUL_EXIT_GRACE_S = 300
+_GRACEFUL_EXIT_KEEP = 20  # ring length of daemon.graceful-exit-history (one epoch per line)
+
 # Wedged-daemon kill escalation (Pillar 0). After SIGTERM, wait this long for the
 # process to exit before SIGKILL — a SIGSTOP'd (wedged) process never DELIVERS the
 # queued SIGTERM, so the escalation is mandatory, not a nicety. SIGKILL always works
@@ -460,6 +472,10 @@ def _spawn_marker_path() -> Path:
 
 def _spawn_history_path() -> Path:
     return global_state_dir() / "daemon.spawn-history"
+
+
+def _graceful_exit_history_path() -> Path:
+    return global_state_dir() / "daemon.graceful-exit-history"
 
 
 def _reload_flag_path() -> Path:
@@ -2050,19 +2066,73 @@ def _record_spawn_attempt(now: Optional[int] = None) -> None:
     state.atomic_write(path, "\n".join(lines[-_SPAWN_HISTORY_KEEP:]))
 
 
+def record_graceful_exit(now: Optional[int] = None) -> None:
+    """Append this shutdown's epoch to daemon.graceful-exit-history (ring, keep
+    last _GRACEFUL_EXIT_KEEP) — janitor#216.
+
+    Called by the daemon itself ONLY when its own shutdown path actually ran
+    (SIGTERM/SIGINT/SIGHUP, kill-switch, server-owns-host, self-update-respawn —
+    every case `daemon.py`'s `finally` reaches WITHOUT an exception propagating
+    through it). A real crash — an unhandled exception, a SIGKILL, an OOM kill —
+    never reaches this call, so it is still counted as crash-loop evidence by
+    simple omission; this function only ever ADDS exculpatory evidence, never
+    removes inculpatory evidence. Best-effort: a write failure must not block
+    shutdown, so it is swallowed like every other bookkeeping write in this
+    module (`_record_spawn_attempt` follows the same contract)."""
+    ts = int(now if now is not None else time.time())
+    path = _graceful_exit_history_path()
+    lines: list[str] = []
+    try:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip().isdigit()]
+    except (FileNotFoundError, OSError):
+        lines = []
+    lines.append(str(ts))
+    try:
+        state.atomic_write(path, "\n".join(lines[-_GRACEFUL_EXIT_KEEP:]))
+    except OSError:
+        pass  # bookkeeping only — never let a write failure block shutdown
+
+
+def _spawn_has_graceful_predecessor(spawn_ts: int, graceful_ts: list[int], *, grace_s: int) -> bool:
+    """PURE: does `spawn_ts` land shortly AFTER some epoch in `graceful_ts`?
+
+    "Shortly after" = within [0, grace_s] seconds — a respawn that follows a
+    logged graceful shutdown is presumed to be THAT shutdown's own respawn, not
+    evidence of a crash. A spawn with no graceful exit in that window (the
+    common case: the daemon's first-ever start, or an actual crash) is left
+    counting toward the breaker, exactly as before this function existed."""
+    return any(0 <= spawn_ts - g <= grace_s for g in graceful_ts)
+
+
 def _crash_loop_active(now: Optional[int] = None) -> bool:
-    """True iff _CRASH_LOOP_SPAWN_LIMIT or more spawn attempts landed within the
-    last _CRASH_LOOP_WINDOW_S — the daemon is dying on start; stop feeding it.
-    Self-draining: while active no new attempts are recorded, so entries age out
-    of the window and spawning resumes on its own. Unreadable history → False
-    (never block a spawn on a corrupt bookkeeping file)."""
+    """True iff _CRASH_LOOP_SPAWN_LIMIT or more spawn attempts, EACH NOT
+    ATTRIBUTABLE TO A LOGGED GRACEFUL EXIT, landed within the last
+    _CRASH_LOOP_WINDOW_S — the daemon is dying on start; stop feeding it
+    (janitor#216: a spawn immediately following a graceful shutdown — an
+    operator `launchctl bootout`/`bootstrap`, a deliberate kill-switch, a
+    self-update respawn — is restart CHURN, not a crash, and must not trip
+    this breaker or feed `add_quarantine`). Self-draining: while active no new
+    attempts are recorded, so entries age out of the window and spawning
+    resumes on its own. Unreadable spawn history → False (never block a spawn
+    on a corrupt bookkeeping file). Unreadable graceful-exit history is
+    treated as "no graceful exits known" — the conservative direction: it
+    only makes the breaker MORE likely to trip, never less, so a bookkeeping
+    fault on that side can never mask a real crash loop."""
     ts = int(now if now is not None else time.time())
     try:
         raw = _spawn_history_path().read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return False
-    recent = [ln for ln in raw.splitlines() if ln.strip().isdigit() and ts - int(ln.strip()) <= _CRASH_LOOP_WINDOW_S]
-    return len(recent) >= _CRASH_LOOP_SPAWN_LIMIT
+    recent = [int(ln.strip()) for ln in raw.splitlines() if ln.strip().isdigit() and ts - int(ln.strip()) <= _CRASH_LOOP_WINDOW_S]
+    try:
+        graceful_raw = _graceful_exit_history_path().read_text(encoding="utf-8")
+        graceful_ts = [int(ln.strip()) for ln in graceful_raw.splitlines() if ln.strip().isdigit()]
+    except (FileNotFoundError, OSError):
+        graceful_ts = []
+    unattributed = [
+        s for s in recent if not _spawn_has_graceful_predecessor(s, graceful_ts, grace_s=_GRACEFUL_EXIT_GRACE_S)
+    ]
+    return len(unattributed) >= _CRASH_LOOP_SPAWN_LIMIT
 
 
 # ---------- C4 (TRDD-T198DT1W) — public read-only crash-loop signal ----------

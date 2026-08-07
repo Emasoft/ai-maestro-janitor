@@ -403,6 +403,29 @@ def test_daemon_sigterm_graceful_shutdown(harness: dict) -> None:
     _ = p
 
 
+def test_daemon_sigterm_records_graceful_exit(harness: dict) -> None:
+    """janitor#216: a SIGTERM'd daemon must leave a graceful-exit-history entry
+    so the crash-loop breaker can tell an orderly shutdown from a real crash."""
+    p = harness["spawn"]()
+    pid_path = harness["state_dir"] / "daemon.pid"
+    graceful_path = harness["state_dir"] / "daemon.graceful-exit-history"
+    assert _wait_for(lambda: pid_path.is_file()), "daemon must start"
+    pid = _read_pid(pid_path)
+    assert pid is not None
+
+    before = time.time()
+    os.kill(pid, signal.SIGTERM)
+
+    assert _wait_for(lambda: not _alive(pid), timeout=15.0), \
+        "daemon must exit on SIGTERM"
+    assert _wait_for(lambda: graceful_path.is_file(), timeout=5.0), \
+        "SIGTERM shutdown must record a graceful-exit-history entry"
+    lines = [ln for ln in graceful_path.read_text(encoding="utf-8").splitlines() if ln.strip().isdigit()]
+    assert lines, "graceful-exit-history must carry at least one epoch"
+    assert int(lines[-1]) >= int(before) - 1, "the recorded epoch must be around the SIGTERM time"
+    _ = p
+
+
 def test_daemon_marks_last_run_after_task(harness: dict) -> None:
     """Each task records its last-run.ts on completion."""
     _ = harness["spawn"]()

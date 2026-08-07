@@ -281,9 +281,12 @@ def uninstall() -> tuple[bool, str]:
 
 
 def is_installed() -> bool:
-    """True iff the OS-keepalive artifact for this platform is on disk, as reported by the
-    staged installer's ``status`` subcommand — so this module names no service path of its
-    own (the path knowledge lives only in the scanned installer)."""
+    """True iff the OS-keepalive job for this platform is actually LOADED/ACTIVE with the
+    service manager (not merely that its definition FILE exists on disk — janitor#217: an
+    operator-driven unload can leave the definition file in place while unloading the job),
+    as reported by the staged installer's ``status`` subcommand — so this module names no
+    service path or persistence verb of its own (that knowledge lives only in the scanned
+    installer)."""
     installer = data_scripts_dir() / _INSTALLER_NAME
     if not installer.is_file():
         return False
