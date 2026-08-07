@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import Counter
 from pathlib import Path
 
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
@@ -251,6 +250,7 @@ def consolidate_has_work(
     recheck_after_s: float = _DEFAULT_CONSOLIDATE_RECHECK_S,
     scope: str | None = None,
     now: int | None = None,
+    max_bytes: int = 0,
 ) -> bool:
     """True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
 
@@ -297,6 +297,21 @@ def consolidate_has_work(
     mergeable tier. If NO such pair exists, `is_legal_merge` would categorically refuse
     EVERY pair, the agent can only abstain, and the dispatch is provably idle → suppress.
 
+    4. UNMERGEABLE-BY-SIZE (janitor#210). A structural pair (gate 1) is not necessarily a
+       LEGAL one: two pages whose combined byte size exceeds the page cap can never be
+       merged — the result would be over-cap on its first byte, a fact the corpus's own
+       arithmetic proves without reading a single word of either page. This candidate is
+       worse than a merely-refused one: refusal ledger coverage (TRDD-9MQ25PNH) requires
+       the pages' content_hash to stay unchanged, but these pages only ever GROW (any
+       other memory chore editing either one invalidates the refusal), so a byte-size-
+       impossible pair can re-open the ~189k-token dispatch forever even though the
+       arithmetic that dooms it never changes. When `max_bytes > 0`, a (tier, type) group
+       counts as a real candidate only if its two SMALLEST pages fit together under the
+       cap — the best case for that group, so if even they don't fit, nothing in it does.
+       `max_bytes <= 0` (cap unreadable) falls back to gate 1's plain count>=2 check,
+       exactly as before this fix — the size filter is strictly additive, never a new way
+       to fail open into a false suppress.
+
     Cost: one rglob over the shared candidate SSOT + a tiny leading-frontmatter parse
     per page (no body read, no YAML engine, no LLM, no agent). Uses the SAME SSOTs the
     EXECUTOR uses — `memory_scopes.iter_note_files` (excludes `.maint-staging/`,
@@ -326,7 +341,9 @@ def consolidate_has_work(
             if scope is not None and moved <= refusal_covered_pages(root, scope, now=now):
                 return False  # every moved page sits in a live, still-matching refusal
 
-    by_key: Counter[tuple[object, object]] = Counter()
+    # {(tier, type): [size, ...]} — sizes only collected when max_bytes > 0 (gate 4 is
+    # opt-in on a known cap; see the docstring's UNMERGEABLE-BY-SIZE section).
+    by_key: dict[tuple[object, object], list[int]] = {}
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
@@ -338,9 +355,24 @@ def consolidate_has_work(
         tier = fm.get("tier")
         if tier not in memory_edit_verify._MERGEABLE_TIERS:
             continue  # hub / tier-less raw note → never a legal-merge leaf
-        by_key[(tier, fm.get("type"))] += 1
-        if by_key[(tier, fm.get("type"))] >= 2:
-            return True  # found a structural pair — short-circuit (fail-open)
+        key = (tier, fm.get("type"))
+        if max_bytes <= 0:
+            by_key.setdefault(key, []).append(0)
+            if len(by_key[key]) >= 2:
+                return True  # cap unknown → gate 1's plain count>=2 check (unchanged)
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            return True  # FAIL-OPEN: unknown size can't prove a pair impossible
+        by_key.setdefault(key, []).append(size)
+    if max_bytes > 0:
+        for sizes in by_key.values():
+            if len(sizes) < 2:
+                continue
+            sizes.sort()
+            if sizes[0] + sizes[1] <= max_bytes:
+                return True  # the two SMALLEST pages in this group fit — a real candidate
     return False
 
 
@@ -510,7 +542,7 @@ def retro_lesson_has_work(root: Path) -> bool:
     return False
 
 
-def atomize_has_work(root: Path) -> bool:
+def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
     """True iff some CURATED wiki page in `root` is still FREE-PROSE — no
     `^id [keywords: …]` atom marker yet — with a substantive body to mark
     (TRDD-3XS3PDCF follow-up).
@@ -522,7 +554,19 @@ def atomize_has_work(root: Path) -> bool:
     agent's judgment, not the scheduler's). A candidate whose body has no
     markable line (headings + the empty Notes pool only) is the skill's
     "free-prose-leaf-no-distinct-facts" abstain case → not work. Unreadable
-    pages fail OPEN. Marker shape SSOT: memory_edit_verify._ATOM_MARKER_RE."""
+    pages fail OPEN. Marker shape SSOT: memory_edit_verify._ATOM_MARKER_RE.
+
+    REFUSAL FILTER (janitor#212 — the same TRDD-9MQ25PNH/#124 mechanism `repair_has_work`
+    already carries). A page can look markable to this STRUCTURAL check (non-empty,
+    non-heading prose) and still be genuinely un-atomizable in the skill's own semantic
+    judgment — a boilerplate bootstrap stub is the measured case ("This is the entry
+    point... replace this stub the first time you write real knowledge here"). Without a
+    refusal read-back such a page re-qualifies as a candidate on EVERY precheck call
+    forever, because nothing about its bytes ever changes: the marker keeps re-firing a
+    full agent dispatch to re-discover the same "nothing to atomize here" verdict. Once a
+    refusal is recorded for that exact page, it stops being a candidate until its own
+    bytes change. `scope` is required to read the ledger; without it the filter is simply
+    not applied — never a suppression (same fail-open contract as repair's)."""
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
@@ -533,8 +577,12 @@ def atomize_has_work(root: Path) -> bool:
         if any(memory_edit_verify._ATOM_MARKER_RE.match(ln) for ln in text.splitlines()):
             continue  # >=1 marker → the skill skips it ("already atomized")
         _fm, body = _split_page(text)
-        if _has_substantive_body(body):
-            return True
+        if not _has_substantive_body(body):
+            continue
+        if scope is None:
+            return True  # cannot read the ledger ⇒ never suppress
+        if not memory_refusals.is_refused("atomize", scope, root, [p], now=now):
+            return True  # a candidate nobody has judged un-atomizable yet
     return False
 
 
@@ -715,9 +763,12 @@ def content_has_work(
         # gate: a byte-identical corpus was already examined, so re-spawning cannot yield a
         # different verdict. Absent stamp → fail-open (both args default to None).
         # `scope` is forwarded so the refusal filter can read the ledger (TRDD-9MQ25PNH);
-        # when the caller has no scope the filter is skipped, never inverted.
+        # when the caller has no scope the filter is skipped, never inverted. `max_bytes`
+        # (the SAME split cap) also filters out structural pairs that could never legally
+        # merge because their combined size already exceeds it (#210).
         return consolidate_has_work(
-            root, last_stats=last_stats, stamp_age_s=stamp_age_s, scope=scope
+            root, last_stats=last_stats, stamp_age_s=stamp_age_s, scope=scope,
+            max_bytes=split_max_bytes,
         )
     if intervention == "repair":
         # STRUCTURAL page-shape gate (semantic residual documented on the function).
@@ -726,7 +777,9 @@ def content_has_work(
         return repair_has_work(root, scope=scope)
     if intervention == "atomize":
         # Free-prose curated pages without atom markers (the skill's own candidate scan).
-        return atomize_has_work(root)
+        # `scope` unlocks the per-page refusal filter (#212), so a page judged genuinely
+        # un-atomizable (e.g. a boilerplate bootstrap stub) stops re-qualifying forever.
+        return atomize_has_work(root, scope=scope)
     if intervention == "harvest":
         # Un-mirrored raw buffer notes (the skill's own step-1 scan). Needs the
         # scope to key the watermark ledger; scope unknown → fail-open.

@@ -179,6 +179,37 @@ def test_is_curated_wiki_page_true_for_full_frontmatter():
     assert msc.is_curated_wiki_page(top_tier)
 
 
+def test_is_curated_wiki_page_true_for_flow_style_metadata():
+    """janitor#212: ``metadata: {node_type: memory, type: overview, tier: hub}`` — the
+    EXACT shape SessionStart writes for every freshly-bootstrapped scope's
+    ``*-overview.md`` stub — must read as CURATED. Unfixed, the per-line key scan only
+    ever saw "metadata" as the line's key (the wikimem-only keys sit INSIDE the braces
+    on that same line), so every fresh overview stub misclassified as RAW and harvest
+    tried (and could never succeed) to mirror an already-curated page forever."""
+    flow = (
+        "---\nname: proj-local-overview\n"
+        'description: "LOCAL memory scope entry point"\n'
+        "ocd: 2026-08-06T11:30:26+0200\nlmd: 2026-08-06T11:30:26+0200\n"
+        "metadata: {node_type: memory, type: overview, tier: hub}\n---\nbody\n"
+    )
+    assert msc.is_curated_wiki_page(flow)
+
+
+def test_is_curated_wiki_page_true_for_flow_style_metadata_tier_only():
+    """The flow-style fix must key on ANY wikimem-only key inside the braces, not just
+    node_type — a page carrying only ``tier`` in flow form is still CURATED."""
+    flow = "---\nname: x\nmetadata: {type: reference, tier: component}\n---\nbody\n"
+    assert msc.is_curated_wiki_page(flow)
+
+
+def test_is_curated_wiki_page_false_for_flow_style_metadata_without_wikimem_keys():
+    """A flow-style ``metadata: {type: feedback}`` with NEITHER node_type nor tier
+    inside the braces is still a RAW buffer note — the fix must not over-fire and
+    treat every flow-style metadata line as curated regardless of its content."""
+    flow = '---\nname: foo\ndescription: "a fact"\nmetadata: {type: feedback}\n---\nbody\n'
+    assert not msc.is_curated_wiki_page(flow)
+
+
 def test_is_curated_wiki_page_false_for_raw_harness_note():
     """A raw harness BUFFER note (minimal frontmatter: name/description/metadata.type,
     NO node_type/tier) reads as RAW — harvest MIRRORS it. The harness writes exactly

@@ -3332,13 +3332,18 @@ struct EditArgs {
 /// can interleave a mutation of this page while this command runs.
 ///
 /// The OLD/NEW text is read from FILES rather than argv — both are raw DATA (never
-/// interpreted), and a plain substring match is used (no regex): zero occurrences means the live
-/// page no longer contains the text the caller expected, which is exactly the "changed since your
-/// command was enqueued" case, so it is refused with the CANONICAL `write_gate::STALE_MSG`
-/// verbatim rather than a bespoke "not found" message — one refusal wording for "the page moved
-/// out from under you", whether the cause was a stale hash or stale content. More than one match
-/// without `--replace-all` is refused as ambiguous (a distinct failure mode: the text IS still
-/// there, just not unique) so a ham-fisted replace can never silently touch the wrong occurrence.
+/// interpreted), and a plain substring match is used (no regex). Two DISTINCT preconditions can
+/// fail here, and janitor#201 is precisely that they must not share wording: a `--base-sha256`
+/// mismatch (or a vanished page) is genuine CAS staleness — the page's bytes are not what the
+/// caller last read, so `write_gate::STALE_MSG`'s "reread and retry" instruction is the correct
+/// fix, and it is refused with that message verbatim. Zero occurrences of the old text, with the
+/// base hash otherwise CONFIRMED (or no `--base-sha256` given at all), is a different fault: the
+/// page has NOT changed, the anchor simply does not occur in it (a heredoc's trailing newline is
+/// the measured recurring cause) — rereading an unchanged page and retrying fails identically, so
+/// this case gets its own "no match" wording naming the actual fix (widen or trim the anchor).
+/// More than one match without `--replace-all` is refused as ambiguous (a third, distinct failure
+/// mode: the text IS still there, just not unique) so a ham-fisted replace can never silently
+/// touch the wrong occurrence.
 pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
     let a = EditArgs::parse_from(std::iter::once("edit".to_string()).chain(args.iter().cloned()));
 
@@ -3370,9 +3375,20 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
 
     let count = text.matches(old.as_str()).count();
     if count == 0 {
-        // The old text the caller last saw is no longer present — same class of problem the CAS
-        // check exists to catch, so it gets the SAME canonical wording (see doc comment above).
-        anyhow::bail!(write_gate::STALE_MSG);
+        // janitor#201: this is NOT the same precondition the CAS check guards. `check_base`
+        // above already proved the page's BYTES are exactly what the caller last read (or the
+        // caller passed no --base-sha256 at all) — so "reread and retry", STALE_MSG's own
+        // instruction, is guaranteed to fail identically on retry: the base was fine, the
+        // ANCHOR just does not occur in it (the measured cause: a heredoc's trailing newline
+        // makes --old-file end mid-line differently from the page). Conflating the two sent a
+        // caller who trusts the message into a reread-recompute-retry loop with no way out.
+        // Distinct wording for a distinct fault, naming the concrete fix (widen/trim the
+        // anchor) rather than the CAS's fix (reread), which does not apply here.
+        anyhow::bail!(
+            "no match: the old text does not occur in {} — check for a trailing newline \
+             (heredocs add one) or widen the anchor",
+            a.page.display()
+        );
     }
     if count > 1 && !a.replace_all {
         anyhow::bail!(
@@ -8616,7 +8632,12 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     }
 
     #[test]
-    fn edit_refuses_with_the_canonical_stale_message_when_old_text_is_absent() {
+    fn edit_refuses_with_a_no_match_message_when_old_text_is_absent() {
+        // janitor#201: a zero-match --old-file is NOT the same fault as a stale CAS base, and
+        // must not share its wording — "reread the file" is guaranteed to fail identically on
+        // retry when the page never changed (the measured cause: a heredoc-appended trailing
+        // newline made the anchor mismatch mid-line). No --base-sha256 given here at all, so
+        // there is nothing for the CAS to even judge stale.
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-absent");
         unsafe {
@@ -8638,11 +8659,57 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
 
         let err = res.expect_err("zero matches must refuse");
-        assert_eq!(
-            err.to_string(),
+        let msg = err.to_string();
+        assert_ne!(
+            msg,
             write_gate::STALE_MSG,
-            "a zero-match old-file is exactly the changed-since-enqueued case — same canonical wording"
+            "a zero-match old-file must NOT be reported with the CAS staleness wording — \
+             rereading an unchanged page and retrying can never fix it: {msg}"
         );
+        assert!(msg.contains("no match"), "must name the actual fault: {msg}");
+        assert!(
+            msg.contains("trailing newline") || msg.contains("anchor"),
+            "must hint at the actual fix (widen/trim the anchor), not 'reread': {msg}"
+        );
+        assert_eq!(content_after, "hello world\n", "page byte-identical after refusal");
+    }
+
+    #[test]
+    fn edit_refuses_with_no_match_not_stale_when_base_sha256_matches_but_old_text_is_absent() {
+        // janitor#201's EXACT reported shape: the caller passed a --base-sha256 that is
+        // byte-identical to the live page (so the CAS is provably satisfied — nothing
+        // changed), and the old text is still absent because the anchor itself is wrong.
+        // This must get the "no match" wording, never STALE_MSG, or the caller loops:
+        // reread, recompute the SAME hash, retry, fail identically, forever.
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-absent-goodhash");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-absent-goodhash", "hello world\n");
+        let old = edit_test_file(&scope, "old.txt", "not present anywhere on the page");
+        let new = edit_test_file(&scope, "new.txt", "x");
+        let good_hash = sha256_hex_of("hello world\n");
+        let args = edit_args(&page, &old, &new, &["--base-sha256", &good_hash]);
+
+        let res = cmd_edit_cli(&args);
+        let content_after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("zero matches must refuse even with a matching base hash");
+        let msg = err.to_string();
+        assert_ne!(
+            msg, write_gate::STALE_MSG,
+            "the base hash was PROVEN current — the page is not stale, only the anchor is \
+             wrong, so this must not claim staleness: {msg}"
+        );
+        assert!(msg.contains("no match"), "must name the actual fault: {msg}");
         assert_eq!(content_after, "hello world\n", "page byte-identical after refusal");
     }
 

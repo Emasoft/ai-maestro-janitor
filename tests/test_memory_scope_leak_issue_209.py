@@ -52,6 +52,23 @@ def _scan(text: str) -> list[str]:
         ("git ref spec", "See Emasoft/ai-maestro@governance-rules:docs/GOVERNANCE-RULES.md now"),
         ("repo-relative path", "The file skills/team-governance/references/GOVERNANCE-RULES.md defines it."),
         ("path in a table cell", "| doc | scripts/detectors/memory-scope-leak.py | surfaces it |"),
+        # The THIRD sub-class reported on this same issue (comment, 2026-08-05T16:11Z): a
+        # wikimem `keywords:` recall-address line reads as a high-entropy secret. Every
+        # underscore-joined recall phrase is 30-60 chars of low-actual-entropy lowercase
+        # prose, and every healthy curated page carries them by the format's own mandate —
+        # so unfixed this re-flags every PROJECT memory page on every sweep.
+        (
+            "wikimem keywords: recall-address line",
+            "keywords: what_tests_guard_the_skills is_there_a_check_that_skills_teach_real_commands "
+            "how_is_the_no_direct_api_rule_enforced",
+        ),
+        # The memgrep atom-address MID-line form (`^anchor [desc: …, keywords: …]`) — the
+        # third spelling _META_LINE_RE's third alternative exists for (janitor#204).
+        (
+            "atom-address bracketed keywords",
+            "^governance-scope-check [desc: \"how scope is enforced\", "
+            "keywords: what_tests_guard_the_skills_from_regressing_silently]",
+        ),
     ],
 )
 def test_documentation_shapes_are_not_leaks(label: str, text: str) -> None:

@@ -48,6 +48,23 @@ def _curated(d: Path, name: str, *, tier: str | None, type_: str) -> Path:
     return p
 
 
+def _curated_sized(d: Path, name: str, *, tier: str, type_: str, size: int) -> Path:
+    """Like `_curated`, but the whole file is padded with filler body text to land at
+    EXACTLY `size` bytes — for testing the byte-cap arithmetic in consolidate_has_work
+    (janitor#210), which needs pages of a precise, controllable combined size."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    fm = (
+        f"---\nname: {name[:-3]}\ndescription: a page\nnode_type: memory\n"
+        f"tier: {tier}\nmetadata:\n  type: {type_}\n---\n\n"
+    )
+    assert size >= len(fm.encode("utf-8")), "size too small to hold the frontmatter"
+    filler = "x" * (size - len(fm.encode("utf-8")))
+    p.write_text(fm + filler, encoding="utf-8")
+    assert p.stat().st_size == size
+    return p
+
+
 # --------------------------------------------------------------------------- #
 # split_has_work — the one cheap, unambiguous size gate
 # --------------------------------------------------------------------------- #
@@ -220,6 +237,61 @@ def test_content_has_work_consolidate_delegates_to_structural_gate(tmp_path):
     assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is True
 
 
+# --------------------------------------------------------------------------- #
+# consolidate_has_work — the UNMERGEABLE-BY-SIZE gate (janitor#210)
+#
+# A structural pair (same mergeable tier + type) is not necessarily a LEGAL one:
+# if their combined byte size already exceeds the page cap, the merge would be
+# over-cap on its first byte — provable from stat() alone, no agent needed.
+# --------------------------------------------------------------------------- #
+
+def test_consolidate_has_work_false_when_the_only_pair_exceeds_the_cap(tmp_path):
+    """janitor#210's exact reported shape: two pages whose sizes sum past the cap.
+    Structurally a legal-merge pair (same tier+type), but the merge is impossible on
+    arithmetic alone, so the precheck must not send an agent to re-derive that."""
+    _curated_sized(tmp_path, "small.md", tier="component", type_="project", size=8152)
+    _curated_sized(tmp_path, "big.md", tier="component", type_="project", size=35871)
+    assert 8152 + 35871 > _CAP, "fixture must reproduce the over-cap arithmetic"
+    assert mcp.consolidate_has_work(tmp_path, max_bytes=_CAP) is False
+
+
+def test_consolidate_has_work_true_when_a_pair_fits_under_the_cap(tmp_path):
+    """The companion positive case: a same-tier/type pair whose combined size is
+    within the cap is still a real candidate — the size filter must not over-fire."""
+    _curated_sized(tmp_path, "a.md", tier="component", type_="project", size=1000)
+    _curated_sized(tmp_path, "b.md", tier="component", type_="project", size=2000)
+    assert mcp.consolidate_has_work(tmp_path, max_bytes=_CAP) is True
+
+
+def test_consolidate_has_work_uses_the_smallest_pair_in_a_larger_group(tmp_path):
+    """A group of >2 same-key pages: one oversized pair must not mask a smaller,
+    genuinely mergeable pair within the SAME (tier, type) group."""
+    _curated_sized(tmp_path, "huge.md", tier="component", type_="project", size=34000)
+    _curated_sized(tmp_path, "tiny1.md", tier="component", type_="project", size=200)
+    _curated_sized(tmp_path, "tiny2.md", tier="component", type_="project", size=300)
+    # huge+tiny1 and huge+tiny2 both exceed the cap, but tiny1+tiny2 easily fits.
+    assert mcp.consolidate_has_work(tmp_path, max_bytes=_CAP) is True
+
+
+def test_consolidate_has_work_size_filter_is_fail_open_on_unknown_cap(tmp_path):
+    """max_bytes<=0 (cap unreadable/disabled) must fall back to the OLD plain
+    count>=2 behavior — the size filter is strictly additive, never a new way to
+    silently suppress a real candidate when the cap itself cannot be trusted."""
+    _curated_sized(tmp_path, "small.md", tier="component", type_="project", size=8152)
+    _curated_sized(tmp_path, "big.md", tier="component", type_="project", size=35871)
+    assert mcp.consolidate_has_work(tmp_path, max_bytes=0) is True
+    assert mcp.consolidate_has_work(tmp_path, max_bytes=-1) is True
+
+
+def test_content_has_work_consolidate_forwards_the_size_cap(tmp_path):
+    """content_has_work must pass split_max_bytes through as consolidate's max_bytes,
+    so an unmergeable-by-size pair is suppressed via the SAME entry point the
+    scheduler actually calls (not just the lower-level function directly)."""
+    _curated_sized(tmp_path, "small.md", tier="component", type_="project", size=8152)
+    _curated_sized(tmp_path, "big.md", tier="component", type_="project", size=35871)
+    assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is False
+
+
 def _shaped(
     d: Path,
     name: str,
@@ -378,6 +450,59 @@ def test_content_has_work_atomize_delegates(tmp_path):
     assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is False
     _shaped(tmp_path, "a.md")
     assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# atomize_has_work — the janitor#212 refusal filter (mirrors repair's #124 gate)
+#
+# A page can look markable to the STRUCTURAL check (substantive, unmarked prose)
+# and still be genuinely un-atomizable in the skill's own semantic judgment — the
+# reported case is a boilerplate bootstrap stub. Without a refusal read-back such a
+# page re-qualifies forever because its bytes never change.
+# --------------------------------------------------------------------------- #
+
+def test_a_page_judged_unatomizable_stops_being_a_candidate(tmp_path, monkeypatch):
+    """janitor#212: once the agent records that a page has nothing distinct to mark,
+    it stops re-firing the marker until its own bytes change."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md")
+    assert mcp.atomize_has_work(tmp_path, scope="LOCAL") is True
+
+    memory_refusals.record("atomize", "LOCAL", tmp_path, [p], reason="boilerplate stub, no distinct facts")
+
+    assert mcp.atomize_has_work(tmp_path, scope="LOCAL") is False
+
+
+def test_an_edited_page_re_arms_the_atomize_question(tmp_path, monkeypatch):
+    """The re-ask condition is the page's OWN bytes, exactly like repair's #124 gate —
+    real new prose on a previously-refused page must re-open the question."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md")
+    memory_refusals.record("atomize", "LOCAL", tmp_path, [p], reason="boilerplate stub")
+    assert mcp.atomize_has_work(tmp_path, scope="LOCAL") is False
+
+    p.write_text(p.read_text(encoding="utf-8") + "\nA genuinely new fact appeared here.\n", encoding="utf-8")
+
+    assert mcp.atomize_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_one_unrefused_markable_page_keeps_atomize_due(tmp_path, monkeypatch):
+    """Suppression needs EVERY markable page ruled on — one open one is still work."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a = _shaped(tmp_path, "a.md")
+    _shaped(tmp_path, "b.md")
+    memory_refusals.record("atomize", "LOCAL", tmp_path, [a], reason="boilerplate stub")
+
+    assert mcp.atomize_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_atomize_without_a_scope_never_suppresses(tmp_path, monkeypatch):
+    """No scope ⇒ the ledger cannot be read ⇒ the gate keeps its old (pre-#212) behavior —
+    every existing caller that never passes scope sees NO change from this fix."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md")
+    memory_refusals.record("atomize", "LOCAL", tmp_path, [p], reason="boilerplate stub")
+    assert mcp.atomize_has_work(tmp_path) is True
 
 
 # --------------------------------------------------------------------------- #

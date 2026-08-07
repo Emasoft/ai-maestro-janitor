@@ -63,6 +63,22 @@ WIKI_SUBDIR = "wikimem"  # USER decision 2026-07-08: curated pages live in <scop
 # discriminator (is_curated_wiki_page) is by CONTENT SHAPE, not path.
 _WIKIMEM_ONLY_FM_KEYS = ("node_type", "tier")
 
+# A wikimem-only key spelled INSIDE a flow-style ``metadata: {node_type: memory, tier:
+# hub}`` mapping (janitor#212) — the per-line key scan in is_curated_wiki_page only ever
+# sees the line's own leading key ("metadata"), so a key packed inside the braces on that
+# SAME line was invisible to it. This is the exact shape SessionStart writes for every
+# freshly-bootstrapped scope's ``*-overview.md`` stub — ``metadata: {node_type: memory,
+# tier: hub, type: overview}`` — so unfixed it misclassified EVERY such stub as a RAW
+# buffer note — harvest then tried (and could never succeed) to "mirror" an already-
+# curated page forever, the load-bearing cause of the reported harvest re-fire. Matches a
+# listed key immediately after ``{`` or ``,`` (not merely appearing as a substring of some
+# other value). memory_edit_verify.parse_frontmatter already handles flow-style metadata
+# for its OWN (separate, fuller) parser — TRDD-87935f21 Finding 1 — this is the same bug
+# class in this module's smaller, dependency-free scanner.
+_FLOW_METADATA_KEY_RE = re.compile(
+    r"(?:^|[{,])\s*(?:" + "|".join(re.escape(k) for k in _WIKIMEM_ONLY_FM_KEYS) + r")\s*:"
+)
+
 # --------------------------------------------------------------------------- #
 # What is and is not a real NOTE in a memory dir — the SINGLE SOURCE OF TRUTH
 # (TRDD-87935f21 mandate #3). Before this, every editor/librarian scan site
@@ -468,6 +484,10 @@ def is_curated_wiki_page(text: str) -> bool:
     is by CONTENT SHAPE — the presence of a wikimem-only key anywhere in the leading
     ``---`` frontmatter block — not by path. Cheap line scan; no YAML parse, no deps.
     A file with no well-formed frontmatter block is treated as RAW (not curated).
+
+    Handles BOTH block-style (``tier: hub`` on its own line, nested or top-level) AND
+    flow-style (``metadata: {node_type: memory, tier: hub}`` all on one line) —
+    see ``_FLOW_METADATA_KEY_RE`` (janitor#212).
     """
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
@@ -493,6 +513,8 @@ def is_curated_wiki_page(text: str) -> bool:
         key = ln.split(":", 1)[0].strip().lstrip("-").strip()
         if key in _WIKIMEM_ONLY_FM_KEYS:
             return True
+        if key == "metadata" and _FLOW_METADATA_KEY_RE.search(ln.split(":", 1)[1]):
+            return True  # flow-style: the wikimem-only key sits INSIDE `metadata: {...}`
     return False
 
 
