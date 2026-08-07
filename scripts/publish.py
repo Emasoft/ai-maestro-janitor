@@ -2214,6 +2214,41 @@ def _acquire_publish_lock(root: Path) -> Path | None:
         return None
 
 
+def _reassert_publish_lock(root: Path, lock_path: Path | None) -> Path | None:
+    """Re-arm the publish lock if the test gate destroyed it. Returns the live lock path.
+
+    WHY: the lock lives under `.janitor/state/`, and the plugin's OWN test suite runs
+    mid-publish with full write access to this repo. One of its tests wrote a lock at the
+    REAL repo root and unlinked it in a `finally` — so every publish silently DISARMED its
+    own guard at the test gate, then ran the remaining ~10 minutes (validate, bump, commit,
+    push, release) unprotected. The test is fixed (`a52d5195`), but the class of bug
+    belongs here: this guard must not depend on every future test being careful.
+
+    Deliberately NOT solved by hashing `.janitor/state/` into the real-state write guard —
+    that directory churns constantly during a run (detector stamps, and this very lock), so
+    hashing it would fail every publish. The precise question is "is MY lock still mine?".
+
+    WARNS, never fails: a vanished lock means the guard is disarmed, not that the release
+    is bad. Failing here would turn a disarmed guard into a lost 10-minute run — the exact
+    cost the lock exists to prevent.
+    """
+    if lock_path is None:
+        return None
+    try:
+        live = json.loads(lock_path.read_text(encoding="utf-8"))
+        if isinstance(live, dict) and live.get("pid") == os.getpid():
+            return lock_path
+        detail = "overwritten by another process"
+    except (OSError, json.JSONDecodeError, ValueError):
+        detail = "deleted"
+    cprint(
+        f"{YELLOW}Warning: the publish lock was {detail} during the test gate — the "
+        f"mid-publish edit guard ran DISARMED. Re-arming it for the rest of this run. "
+        f"A test that touches {lock_path.name} is a bug in that test.{NC}"
+    )
+    return _acquire_publish_lock(root)
+
+
 def _release_publish_lock(lock_path: Path | None) -> None:
     """Best-effort removal of the publish-lock marker. Never raises."""
     if lock_path is None:
@@ -2326,6 +2361,10 @@ def main() -> int:
         stage_check_clean(root)
         stage_lint(root)
         stage_tests(root)  # MANDATORY — no skip flag, no exceptions
+        # The suite above runs arbitrary plugin test code with write access to this repo,
+        # and one of its tests used to delete this very lock. Re-arm before the remaining
+        # ~10 minutes of unprotected stages. See _reassert_publish_lock.
+        lock_path = _reassert_publish_lock(root, lock_path)
         stage_validate(root)
         stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
         stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py

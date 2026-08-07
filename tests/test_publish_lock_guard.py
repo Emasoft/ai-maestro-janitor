@@ -207,6 +207,54 @@ def test_acquire_and_release_publish_lock(tmp_path: Path, publish_mod) -> None:
     assert not lock_path.exists()
 
 
+def test_reassert_rearms_a_lock_the_test_gate_deleted(tmp_path: Path, publish_mod) -> None:
+    """The test gate runs arbitrary plugin test code with write access to the repo, and one
+    of its tests really did delete this lock — disarming the guard for the remaining ~10
+    minutes of every publish. Re-assert must notice and re-arm."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lock_path = publish_mod._acquire_publish_lock(repo)
+    lock_path.unlink()
+
+    live = publish_mod._reassert_publish_lock(repo, lock_path)
+
+    assert live is not None and live.is_file()
+    assert json.loads(live.read_text(encoding="utf-8"))["pid"] == os.getpid()
+
+
+def test_reassert_rearms_a_lock_another_process_overwrote(tmp_path: Path, publish_mod) -> None:
+    """A lock naming someone else's pid is not ours — our guard is disarmed just as surely
+    as if it were gone, because the companion hook checks THAT pid's liveness, not ours."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lock_path = publish_mod._acquire_publish_lock(repo)
+    lock_path.write_text(json.dumps({"pid": 2**30 - 1, "started": time.time()}), encoding="utf-8")
+
+    live = publish_mod._reassert_publish_lock(repo, lock_path)
+
+    assert json.loads(live.read_text(encoding="utf-8"))["pid"] == os.getpid()
+
+
+def test_reassert_leaves_an_intact_lock_untouched(tmp_path: Path, publish_mod) -> None:
+    """The healthy path must not rewrite the lock — a needless rewrite is churn, and the
+    warning it would print teaches the reader to ignore a real one."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lock_path = publish_mod._acquire_publish_lock(repo)
+    before = lock_path.stat().st_mtime_ns
+
+    live = publish_mod._reassert_publish_lock(repo, lock_path)
+
+    assert live == lock_path
+    assert lock_path.stat().st_mtime_ns == before
+
+
+def test_reassert_is_a_noop_when_the_lock_was_never_acquired(tmp_path: Path, publish_mod) -> None:
+    """Acquisition failure is already non-fatal (it warns and returns None). Re-assert must
+    not resurrect a lock the run deliberately proceeded without."""
+    assert publish_mod._reassert_publish_lock(tmp_path, None) is None
+
+
 def test_publish_lock_path_is_gitignored(publish_mod) -> None:
     """The lock file must never dirty the tree — `.janitor/` is gitignored repo-wide.
 
