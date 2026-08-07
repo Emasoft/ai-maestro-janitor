@@ -1296,3 +1296,80 @@ def test_without_a_scope_the_filter_is_skipped_never_inverted(tmp_path, monkeypa
     os.utime(a, (2_000_000_000, 2_000_000_000))
 
     assert mcp.consolidate_has_work(tmp_path, last_stats=stamp, stamp_age_s=60.0) is True
+
+
+# --------------------------------------------------------------------------- #
+# repair_defect — the SINGLE-SOURCE reason-bearing predicate (janitor#227)
+# --------------------------------------------------------------------------- #
+
+def test_repair_defect_empty_on_well_formed_page(tmp_path):
+    """A fully-shaped page has no defect -> repair_defect returns ""."""
+    p = _shaped(tmp_path, "a.md")
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
+
+
+def _bare(d: Path) -> Path:
+    p = d / "bare.md"
+    p.write_text("no frontmatter\n", encoding="utf-8")
+    return p
+
+
+def test_repair_defect_slugs_match_each_condition(tmp_path):
+    """Every branch of repair_defect returns its own stable, documented slug —
+    the CLI prints these verbatim, so they are a contract, not an implementation
+    detail."""
+    cases = [
+        (lambda d: _bare(d), "no-frontmatter"),
+        (lambda d: _shaped(d, "a.md", drop=("description",)), "missing-key:description"),
+        (lambda d: _shaped(d, "a.md", drop=("tier",)), "illegal-tier"),
+        (lambda d: _shaped(d, "a.md", tier="banana"), "illegal-tier"),
+        (lambda d: _shaped(d, "a.md", notes=False), "no-notes-heading"),
+        (lambda d: _shaped(d, "a.md", dates_top_level=False), "nested-only-dates"),
+        (lambda d: _shaped(d, "a.md", tier="aspect", body="A rule.\n\n## Governed by\n- [[x]]"),
+         "inverted-tier-shape"),
+        (lambda d: _shaped(d, "a.md", body="A fact.\n\n## Applies to\n- [[x]]"),
+         "inverted-tier-shape"),
+    ]
+    for i, (build, expect) in enumerate(cases):
+        sub = tmp_path / f"case{i}"
+        sub.mkdir()
+        p = build(sub)
+        got = mcp.repair_defect(p.read_text(encoding="utf-8"))
+        assert got == expect, f"case {i}: expected {expect!r}, got {got!r}"
+
+
+def test_repair_defect_superseded_slug(tmp_path):
+    """The superseded-atom misplacement branch reports its own stable slug."""
+    p = _shaped(
+        tmp_path, "a.md",
+        marker=True,
+        body="^fact-1 [desc: x, keywords: y, status: superseded]\nsome body\n",
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == "superseded-misplaced"
+
+
+def test_page_needs_repair_matches_repair_defect_exactly(tmp_path):
+    """`_page_needs_repair` must flag EXACTLY the same set repair_defect flags —
+    it is now a thin `bool(repair_defect(text))` wrapper, and this proves the
+    refactor changed no outcome (janitor#227: same conditions, same order, same
+    behavior, only a reason was added)."""
+    good = _shaped(tmp_path, "good.md")
+    bad_missing_key = _shaped(tmp_path / "b1", "a.md", drop=("tier",))
+    bad_tier = _shaped(tmp_path / "b2", "a.md", tier="banana")
+    bad_notes = _shaped(tmp_path / "b3", "a.md", notes=False)
+    bad_dates = _shaped(tmp_path / "b4", "a.md", dates_top_level=False)
+    bare = tmp_path / "b5" / "bare.md"
+    bare.parent.mkdir()
+    bare.write_text("no frontmatter\n", encoding="utf-8")
+
+    for p, expect_flagged in (
+        (good, False),
+        (bad_missing_key, True),
+        (bad_tier, True),
+        (bad_notes, True),
+        (bad_dates, True),
+        (bare, True),
+    ):
+        text = p.read_text(encoding="utf-8")
+        assert mcp._page_needs_repair(text) is expect_flagged
+        assert mcp._page_needs_repair(text) == bool(mcp.repair_defect(text))

@@ -61,9 +61,22 @@ the job of the other three passes; REPAIR only makes a page well-formed.
    `edit_project_scope` is True — a PROJECT repair is staged-not-pushed, rides the
    next `publish.py`). Scope roots resolve exactly as in every wikimem skill. (Cadence is
    `repair_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
-3. **Candidate set.** Read the librarian's `memory-reorg-proposed.md` in the scope
-   (its page-shape / link findings), OR scan the scope for malformed pages
-   (below). Bound the run to the **top-K most-broken pages** (K ≈ 5).
+3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep lint`.**
+   `memgrep lint` and the scheduler's precheck used to disagree (a page the
+   scheduler flagged could return zero lint findings), so lint-driven discovery
+   found nothing to work and the chore re-dispatched forever (issue #227). Get the
+   real list from the same code the scheduler gates on:
+
+   ```bash
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
+     --intervention repair --scope <LOCAL|PROJECT|USER> --root <memdir>
+   #   → one line per candidate: <page-relative-path>\t<reason-slug>
+   ```
+
+   Bound the run to the **top-K most-broken pages** (K ≈ 5); the librarian's
+   `memory-reorg-proposed.md` link findings are a useful cross-check. `memgrep
+   lint`/`validate` still runs — but only AFTER a repair, as the commit's
+   post-edit verifier, never to discover candidates.
 
 ## What makes a page malformed (the repair checklist)
 

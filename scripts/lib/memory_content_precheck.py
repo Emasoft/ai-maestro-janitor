@@ -396,34 +396,46 @@ def _split_page(text: str) -> tuple[str | None, str]:
     return None, text  # unclosed fence → treat as no frontmatter (malformed)
 
 
-def _page_needs_repair(text: str) -> bool:
-    """True iff this page exhibits a STRUCTURALLY-detectable defect from the
-    janitor-memory-repair checklist. Every check mirrors a bar `verify_repair`
-    (or the skill's own diagnosis list) enforces, via the same SSOT constants —
-    so the precheck and the commit-time verifier can never drift."""
+def repair_defect(text: str) -> str:
+    """The SINGLE-SOURCE repair-candidacy predicate (janitor#227): return the SHORT,
+    stable reason slug for the FIRST structurally-detectable defect this page exhibits
+    from the janitor-memory-repair checklist, or `""` when the page is clean.
+
+    This is the ONLY place that decides "does this page need repair" — both the
+    SCHEDULER's boolean gate (`_page_needs_repair`, kept as a thin wrapper below) and
+    the CANDIDATE-LISTING CLI (`scripts/memory_candidates_cli.py`) call this, so a page
+    the scheduler flags can never be a page the candidate lister fails to name (the
+    janitor#227 bug: `memgrep lint` and this precheck disagreed, so the repair skill
+    found nothing to work and the chore re-dispatched forever).
+
+    Every check mirrors a bar `verify_repair` (or the skill's own diagnosis list)
+    enforces, via the same SSOT constants — so the precheck and the commit-time
+    verifier can never drift. Slugs are printed (by the CLI) and so MUST stay stable:
+    `no-frontmatter`, `missing-key:<key>`, `illegal-tier`, `no-notes-heading`,
+    `nested-only-dates`, `inverted-tier-shape`, `atom-desc`, `superseded-misplaced`."""
     fm_block, _body = _split_page(text)
     if fm_block is None:
-        return True  # no/unclosed frontmatter → invisible to ranked recall
+        return "no-frontmatter"  # no/unclosed frontmatter → invisible to ranked recall
     meta = memory_edit_verify.parse_frontmatter(text)
     for key in memory_edit_verify._REQUIRED_FM_KEYS:
         if not str(meta.get(key, "")).strip():
-            return True  # missing/empty required key — verify_repair's own bar
+            return f"missing-key:{key}"  # missing/empty required key — verify_repair's own bar
     if str(meta.get("tier", "")).strip() not in memory_edit_verify._VALID_TIERS:
-        return True  # tier outside the legal set → repair re-tags it
+        return "illegal-tier"  # tier outside the legal set → repair re-tags it
     if memory_edit_verify._LESSONS_HEADING not in text:
-        return True  # the standing Notes section is mandatory on every page
+        return "no-notes-heading"  # the standing Notes section is mandatory on every page
     for pat in _TOP_LEVEL_DATE_RES:
         if not pat.search(fm_block):
-            return True  # ocd/lmd present only NESTED → placement-normalization work
+            return "nested-only-dates"  # ocd/lmd present only NESTED → placement-normalization work
     tier = str(meta.get("tier", "")).strip()
     has_applies = "## Applies to" in text
     has_governed = "## Governed by" in text
     if tier in ("aspect", "hub") and has_governed and not has_applies:
-        return True  # a radiator built as a receiver (inverted tier shape)
+        return "inverted-tier-shape"  # a radiator built as a receiver
     if tier == "component" and has_applies:
-        return True  # a receiver that radiates (the mirror inversion)
+        return "inverted-tier-shape"  # a receiver that radiates (the mirror inversion)
     if memory_edit_verify.atom_desc_violations(text):
-        return True  # atom desc missing/unquoted-prose/over-cap — verify_repair's own bar
+        return "atom-desc"  # atom desc missing/unquoted-prose/over-cap — verify_repair's own bar
         # (TRDD-3SOO1RWE: extending the precheck is safe ONLY because the repair skill
         # now backfills descs — the WN7M829Y scope note forbade flagging defects the
         # pass cannot fix; this one it can, via the same SSOT check.)
@@ -442,10 +454,16 @@ def _page_needs_repair(text: str) -> bool:
             (i for i, ln in enumerate(lines) if ln.strip() == _SUPERSEDED_HEADING), None
         )
         if heading is None:
-            return True  # superseded atoms but no `## Superseded` section at all
+            return "superseded-misplaced"  # superseded atoms but no `## Superseded` section at all
         if any(i < heading for i in sup_idx):
-            return True  # a superseded atom still sits ABOVE the delimiter
-    return False
+            return "superseded-misplaced"  # a superseded atom still sits ABOVE the delimiter
+    return ""
+
+
+def _page_needs_repair(text: str) -> bool:
+    """True iff this page exhibits a STRUCTURALLY-detectable defect — thin boolean
+    wrapper over `repair_defect`, the single-source predicate (janitor#227)."""
+    return bool(repair_defect(text))
 
 
 def repair_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
