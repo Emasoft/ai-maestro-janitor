@@ -100,6 +100,12 @@ To establish which plugin version a session is ACTUALLY running, grep its transc
 
 Learned the expensive way on the same investigation: I first concluded the daemon had "stood down" for server-claimed update chores because `claimed_chores()` listed them — then found the daemon's own log showed it RAN the chore, with zero yield lines anywhere. The published root cause had to be withdrawn. An API that reports ownership is not a record of execution.
 
+## See also
+
+- [[plugin-cache-install-integrity]] — the sibling failure: there the CACHE itself is
+  incomplete (an install killed partway), so components are missing on disk; here the cache
+  is complete and only the LOADED skills are stale. Tag-diff the cache to tell them apart.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-ROLL-GHOST, status:valid, keywords:"fix published but bug still happening stale hooks session loaded old version reload-plugins ghost", ocd:2026-07-18, lmd:2026-07-18]

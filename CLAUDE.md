@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=010b7fab5656 digest=bbd2f048bec2 generated=2026-08-06T21:06:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6fd32717ae50 digest=75b0493a667c generated=2026-08-08T00:51:16+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -87,6 +87,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/detectors/ci-status.py` — ci-status — after a push, watch the pushed commit's GitHub CI/CD runs; notify on failure.
   · classify_ci_runs(runs, *, now, first_seen_ts, no_run_grace_s, max_wait_s) -> tuple[str, list[dict[str, Any]]] — Decide what to do about the CI runs for one pushed SHA. PURE (no I/O).
   · build_ci_failure_line(pushed_sha, branch, failed_runs) -> str — Build the one-line drift notification for a failed CI run set. Every gh-derived
+  · main() -> int
+`scripts/detectors/claimed-chore-stale.py` — claimed-chore-stale — alarm when the ai-maestro server CLAIMS a chore but stops running it.
   · main() -> int
 `scripts/detectors/claude-md-scope-drift.py` — CLAUDE.md scope drift — Python port of claude-md-scope-drift.sh.
   · main() -> int
@@ -334,6 +336,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · check_bash(command) -> str | None
   · check_edit(tool, tool_input, cwd) -> str | None
   · main() -> int
+`scripts/hooks/pre-tool-publish-lock.py` — PreToolUse hook — deny an edit to a repo while its `publish.py` is running.
+  · main() -> int
 `scripts/hooks/pre-tool-token-budget.py` — PreToolUse hook — real-time token-spike + cache-miss guard (TRDD-KI24GR5Z).
   · main() -> int
 `scripts/identify_environment.py` — Backing script for /janitor-identify-environment (TRDD-db169d9e follow-up).
@@ -389,6 +393,14 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
+`scripts/lib/claimed_chore_watch.py` — Claimed-but-stale chore detection — the PURE decision layer (TRDD-6CRC9SQQ item 1).
+  · observed_period(completions) -> int — The LARGEST gap between consecutive completions we have actually seen, or 0.
+  · stale_threshold(cadence_s, *, factor, min_grace_s, observed_s) -> int — Seconds a claimed chore's completion stamp may age before it counts as stale.
+  · Verdict — One chore's judgement. `age_s` is -1 when there is no stamp to age.
+  · Verdict.is_finding(self) -> bool
+  · classify(*, chore, last_run, cadence_s, now, factor, min_grace_s, observed_s) -> Verdict — Judge ONE claimed chore from its completion stamp. Total — never raises.
+  · evaluate(chores, *, last_run_of, cadence_of, now, factor, min_grace_s, observed_of) -> list[Verdict] — Judge every claimed chore; return only the findings, worst-first.
+  · describe(v) -> str — One chore's finding, as it appears inside the drift line.
 `scripts/lib/cold_cache_compact.py` — Auto-compact policy + readers — the PREVENTIVE (warm) lever only.
   · enabled() -> bool
   · min_context_tokens() -> int — The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
@@ -490,7 +502,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · ledger_path(project_dir) -> Path
   · render_line(entry) -> str — One greppable session line for a ledger entry. Values were sanitized at record
   · record(*, sev, code, src, msg, ref, project_dir, now, notify) -> str | None — THE choke point: record one finding event into the affected project's ledger.
-  · unread_entries(project_dir, *, cap, budget_bytes) -> tuple[list[str], int] — (rendered unread lines, NEWEST first, capped by count AND byte budget;
+  · unread_entries(project_dir, *, cap, budget_bytes, exclude_codes) -> tuple[list[str], int] — (rendered unread lines, NEWEST first, capped by count AND byte budget;
   · advance_cursor(project_dir) -> None — Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises.
   · surface_block(project_dir) -> str — The SessionStart injection: capped unread lines + ONE fold line, then the cursor
 `scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
@@ -537,8 +549,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is the
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
-  · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions — the signature of
-  · record_iterm_automation_state(blocked) -> None — Persist (or clear) the TCC-denial condition for the heartbeat to surface.
+  · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions. PURE.
+  · iterm_automation_payload(*, interpreter) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
+  · record_iterm_automation_state(blocked) -> None — Persist (or clear) the observation for the heartbeat to surface.
+  · iterm_automation_interpreter(raw) -> str — The interpreter path recorded in a flag's contents, or "" when it names none. PURE.
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · stale_threshold_for(armed_cron, base_stale_s) -> int — The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
@@ -635,6 +649,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · clear_skills_reload_flag() -> None — Reset the standalone-skills reload generation from every location it may live.
   · daemon_needs_restart() -> bool — True iff the running daemon should be restarted from the current cache.
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
+  · record_graceful_exit(now) -> None — Append this shutdown's epoch to daemon.graceful-exit-history (ring, keep
   · crash_loop_active(now) -> bool — PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
   · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
   · record_spawn_attempt(now) -> None — PUBLIC: record one daemon spawn attempt into the crash-loop ring.
@@ -754,7 +769,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · staged_is_current(source_scripts_dir) -> bool — True iff EVERY file of the daemon's staged import closure is byte-identical to
   · install(source_scripts_dir) -> tuple[bool, str] — Stage the daemon closure + installer into DATA, then register the OS service —
   · uninstall() -> tuple[bool, str] — Run the STAGED installer's uninstall (idempotent, best-effort, never raises). Uses
-  · is_installed() -> bool — True iff the OS-keepalive artifact for this platform is on disk, as reported by the
+  · is_installed() -> bool — True iff the OS-keepalive job for this platform is actually LOADED/ACTIVE with the
 `scripts/lib/leanctx_allowlist.py` — Self-heal the lean-ctx shell allowlist for the janitor heartbeat
   · required_tokens() -> list[str] — Return the janitor's required lean-ctx allowlist tokens.
   · ensure_janitor_allowed() -> list[str] — Additively allow every janitor-required token on the lean-ctx allowlist.
@@ -774,10 +789,14 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · page_stats(root) -> dict[str, list[int]] | None — `{relpath: [size, mtime_ns]}` for every candidate page — the STAMPED form of
   · changed_pages(current, last) -> set[str] — Root-relative paths that were added, removed, or whose stat moved. PURE.
   · refusal_covered_pages(root, scope, *, now) -> set[str] — Root-relative paths covered by a LIVE consolidate refusal (TRDD-9MQ25PNH).
-  · consolidate_has_work(root, *, last_stats, stamp_age_s, recheck_after_s, scope, now) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
+  · group_has_unjudged_pair(root, scope, pages, *, now) -> bool — True iff some PAIR within this (tier, type) group has not been judged-and-declined
+  · consolidate_has_work(root, *, last_stats, stamp_age_s, recheck_after_s, scope, now, max_bytes) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
+  · consolidate_group_defect(pages, *, max_bytes) -> str — The SINGLE-SOURCE reason slug for why a `(tier, type)` GROUP of candidate
+  · repair_defect(text) -> str — The SINGLE-SOURCE repair-candidacy predicate (janitor#227): return the SHORT,
   · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
   · retro_lesson_has_work(root) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
-  · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
+  · atomize_defect(text) -> str — The SINGLE-SOURCE atomize-candidacy predicate (janitor#227 follow-up — mirrors
+  · atomize_has_work(root, *, scope, now) -> bool — True iff some CURATED wiki page in `root` is an atomize candidate per
   · conflict_pairs(root, scope) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
   · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
   · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
@@ -917,9 +936,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/pending_agents.py` — Pending background-agent manifest (TRDD-82OP4EN9 W1) — deterministic fork
   · add(agent_id, description, now, transcript) -> None — Record a spawned subagent. Fail-open: swallows everything.
   · remove(agent_id, now) -> None — Clear a finished subagent. No-op on empty/unknown id (fail-open).
-  · pending(now) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
+  · pending(now, *, state_dir) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
   · is_janitor_agent(entry) -> bool — True iff this manifest entry is a background agent the JANITOR spawned for
-  · pending_external(now) -> list[dict] — Live entries EXCLUDING the janitor's own housekeeping agents — the set the
+  · pending_external(now, *, state_dir) -> list[dict] — Live entries EXCLUDING the janitor's own housekeeping agents — the set the
   · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
   · spawn_prompt(transcript_path) -> str — The original spawn prompt of an agent, read from the FIRST user message of its
   · respawn_prompt(transcript_path) -> str — The full prompt to respawn an interrupted agent with, preamble included.
@@ -1309,6 +1328,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · extract_trdd_refs(text) -> list[str] — Return every `TRDD-<id8>` id referenced in `text` (order-preserving, deduped).
   · parse_flow_list(raw) -> list[str] — Parse a YAML flow-style list value into its raw element strings.
   · blocked_by_ids(raw) -> list[str] — Extract the blocker TRDD ids from a `blocked-by:` flow-list value.
+  · has_stated_precondition(head) -> bool — True iff `head` declares WHY it is stalled — a non-empty `blocked-by:` or `npt:`.
   · impl_commit_shas(raw) -> list[str] — Extract commit SHAs from an `implementation-commits:` flow-list value.
   · TrddRecord — Everything the four reconciliation checks need, parsed from ONE TRDD.
   · parse_record_text(text, *, uid) -> TrddRecord — Build a TrddRecord from a TRDD's text (frontmatter + body head).
@@ -1391,6 +1411,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · Classifier.classify(self, text) -> Iterator[Finding]
   · Classifier.re2_active(self) -> bool
 `scripts/lib/zizmor_patterns_extra.py` — Extension catalog for the janitor's second-pass workflow auditor.
+`scripts/memory_candidates_cli.py` — List the pages an editorial chore should actually work — the janitor#227 fix.
+  · repair_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.repair_defect` flags, MINUS pages the
+  · atomize_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.atomize_defect` flags, MINUS pages the
+  · consolidate_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every `(tier, type)` GROUP `memory_content_precheck.consolidate_group_defect`
+  · main() -> int
 `scripts/memory_refusal_cli.py` — Record (or inspect) a memory-chore refusal — the write surface of the ledger (issue #131).
   · main() -> int
 `scripts/memory_settings_cli.py` — Backing script for the /janitor-memory-*-frequency-{set,get} + -maxsize commands
@@ -1474,7 +1499,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · account_email(blob) -> str | None — Resolve the account email via the roles endpoint. Network call.
   · usage_request(blob) -> tuple[int, dict | None] — Probe /api/oauth/usage. Returns (http_status, data).
   · account_usage(blob) -> dict | None — Convenience wrapper for display: the usage dict on HTTP 200, else None.
-  · refresh_oauth_token(blob) -> dict | None — Exchange a SLOT's refreshToken for a fresh token pair at the OAuth token endpoint and
+  · classify_refresh_failure(exc, body) -> str — PURE classifier: turn a `refresh_oauth_token` failure into one of the REFRESH_FAIL_*
+  · refresh_oauth_token(blob, *, on_failure) -> dict | None — Exchange a SLOT's refreshToken for a fresh token pair at the OAuth token endpoint and
   · cmd_capture(only_if_running) -> int
   · cmd_list() -> int
   · cmd_switch(email) -> int
