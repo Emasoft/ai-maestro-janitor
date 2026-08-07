@@ -1295,8 +1295,18 @@ def _phase_iterm_automation_alarm() -> None:
     the human can, in System Settings) and nobody reads the daemon log, so the ONLY useful
     thing it can do is say so where a human will see it: here.
 
-    Emitted once per session (the flag persists until the grant lands and the next fleet
-    scan clears it, so without the ack this would repeat every fire). Fail-open.
+    Emitted once per session (the flag persists until sessions enumerate again and the next
+    fleet scan clears it, so without the ack this would repeat every fire). Fail-open.
+
+    **Reports the OBSERVATION, not a conclusion (janitor#229).** This used to assert
+    "macOS is denying it Automation access" — an inference stated as a measurement, from a
+    signal that cannot support it. `iterm_automation_blocked` measures one thing: iTerm up,
+    zero sessions enumerated. A denial produces that; so does a hung or timed-out osascript,
+    and neither writes a distinguishable error. Measured live 2026-08-07 on this host, hours
+    after two independent reports that the grant WAS working: zero denial signatures in
+    either daemon log and an unchanged interpreter path — consistent with both stories. An
+    alarm that picks one anyway sends the human to System Settings to re-grant a permission
+    they may already have, and the toggle looking correct then "disproves" a real fault.
     """
     try:
         flag = gs.global_state_dir() / "iterm-automation-blocked.flag"
@@ -1306,18 +1316,39 @@ def _phase_iterm_automation_alarm() -> None:
         if acked.is_file() and state.file_mtime(acked) >= state.file_mtime(flag):
             return  # already told this session about THIS occurrence
         state.atomic_write(acked, str(int(time.time())))
+        try:
+            import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
+
+            interpreter = fleet_scan.iterm_automation_interpreter(
+                flag.read_text(encoding="utf-8")
+            )
+        except (OSError, ImportError):
+            interpreter = ""
+        binary = (
+            f"the binary that made the call ({interpreter})"
+            if interpreter
+            else "the janitor daemon's uv/python entry (the flag recorded no path — a "
+            "pre-upgrade flag; the next fleet scan records it)"
+        )
         print(
-            "[janitor] The global daemon can see iTerm running but cannot enumerate its "
-            "sessions — macOS is denying it Automation (Apple Events) access. Consequence: "
-            "the fleet guardian CANNOT rescue a frozen/rate-limited Claude in any iTerm "
-            "pane (tmux panes are unaffected); it has been skipping them silently. Fix: "
-            "System Settings → Privacy & Security → Automation → allow the janitor daemon "
-            "(its uv/python entry) to control iTerm. On some hosts (macOS 26+, an "
-            "adhoc-signed uv/python with no stable Team ID) that toggle will not persist and "
-            "reverts to off — if it does, iTerm rescue is not attainable on this host; run "
-            "agents under tmux instead, which the guardian rescues with no Automation grant "
-            "at all. This alarm clears itself on the next fleet scan once the grant lands. "
-            "See TRDD-VQ4LX7ND, GH issue #92."
+            "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
+            "iTerm sessions via osascript. A running iTerm always has at least one, so the "
+            "Apple Event did not come back — but this measurement CANNOT tell you why. Two "
+            "causes fit it equally: (a) macOS is denying Automation (Apple Events) access, "
+            "or (b) the osascript hung/timed out/failed for another reason. Absence of a "
+            "denial message in the logs is NOT evidence of a working grant — a denied event "
+            "that returns empty logs nothing either. The only POSITIVE evidence is the "
+            "guardian actually resolving an iTerm channel (a `FIRED rearm → iterm` line). "
+            "Consequence either way: the fleet guardian CANNOT rescue a frozen/rate-limited "
+            "Claude in any iTerm pane (tmux panes are unaffected) and has been skipping them "
+            "silently. If it is (a): System Settings → Privacy & Security → Automation → "
+            f"allow {binary} to control iTerm. Note the grant follows that exact binary, so "
+            "a uv/python upgrade that moves the path silently orphans a grant you really "
+            "did give. On some hosts (macOS 26+, an adhoc-signed uv/python with no stable "
+            "Team ID) the toggle will not persist and reverts to off — if it does, iTerm "
+            "rescue is not attainable here; run agents under tmux, which the guardian "
+            "rescues with no Automation grant at all. This alarm clears itself on the next "
+            "fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, GH issues #92, #229."
         )
     except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
         state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")

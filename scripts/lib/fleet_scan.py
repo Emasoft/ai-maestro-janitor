@@ -144,30 +144,65 @@ ITERM_TCC_FLAG = "iterm-automation-blocked.flag"
 
 
 def iterm_automation_blocked(*, iterm_running: bool, sessions: dict[str, str]) -> bool:
-    """True iff iTerm is UP but the osascript enumerated ZERO sessions — the signature of
-    a denied macOS Automation (Apple Events) grant. PURE.
+    """True iff iTerm is UP but the osascript enumerated ZERO sessions. PURE.
 
-    A running iTerm always has at least one session, so an empty result cannot mean "no
-    sessions"; it means the Apple Event never reached iTerm. That is the whole reason the
-    launchd-spawned daemon resolved a channel 0 times in 254 beats while a session-spawned
-    daemon resolved 56 (TRDD-VQ4LX7ND): the grant is attributed to a binary identity, and a
-    background daemon's request is denied silently.
+    **This is ONE OBSERVATION, not a diagnosis, and the distinction is load-bearing
+    (janitor#229).** A denied Automation (Apple Events) grant produces exactly this
+    signature — that is the whole reason the launchd-spawned daemon resolved a channel 0
+    times in 254 beats while a session-spawned daemon resolved 56 (TRDD-VQ4LX7ND): the
+    grant is attributed to a binary identity, and a background daemon's request is denied
+    silently. But a denial is not the ONLY thing that produces it: a crashed/hung
+    osascript, a timeout, and an iTerm that is mid-launch all return empty too, and none
+    of them writes a distinguishable error either.
+
+    So callers must report what this MEASURED ("0 sessions enumerated"), never what it
+    implies ("the grant is denied"). Measured live 2026-08-07: the alarm fired on a host
+    where two independent reports said the grant was working, with ZERO denial signatures
+    in the logs and an UNCHANGED interpreter path — evidence consistent with both stories,
+    because absence of an error string is not evidence of a grant.
 
     This is a DETECTION, not a fix. The grant itself can only be given by the human, in
-    System Settings. What this kills is the failure the TRDD actually indicts: a dead
-    channel degrading into a MUTE skip loop for hours. Silence is not success.
+    System Settings. What it kills is the failure the TRDD actually indicts: a dead channel
+    degrading into a MUTE skip loop for hours. Silence is not success.
     """
     return iterm_running and not sessions
 
 
+def iterm_automation_payload(*, interpreter: str) -> str:
+    """The flag's exact content for a blocked observation. PURE — so the compare-and-write
+    below can decide "has anything CHANGED?" without a timestamp making it always-yes.
+    """
+    return json.dumps(
+        {
+            "observed": "iTerm running, 0 iTerm sessions enumerated by osascript",
+            "interpreter": interpreter,
+        },
+        sort_keys=True,
+    )
+
+
 def record_iterm_automation_state(blocked: bool) -> None:
-    """Persist (or clear) the TCC-denial condition for the heartbeat to surface.
+    """Persist (or clear) the observation for the heartbeat to surface.
 
     The daemon is a detached process nobody reads the logs of; the heartbeat is the only
     surface that reaches a human. So the daemon stamps a flag and `dispatch` turns it into
     ONE actionable drift line. Clearing on success matters as much as setting: the moment
-    the human grants the permission, the next beat reads sessions again and the alarm must
-    stop by itself — an alarm you have to remember to silence is one you learn to ignore.
+    sessions come back, the alarm must stop by itself — an alarm you have to remember to
+    silence is one you learn to ignore.
+
+    Two properties, both learned from janitor#229:
+
+    * **Record the INTERPRETER whose Apple Event came back empty** — `sys.executable` of
+      THIS process, which for the real scan is the DAEMON's. A human grants Automation to
+      a *binary*, so an alarm naming no binary is unactionable, and one naming the
+      SESSION's interpreter names the wrong binary entirely. `uv` moves that path on
+      upgrade, silently orphaning a grant that was genuinely given — which is precisely
+      why the path has to be re-read rather than assumed.
+    * **Rewrite when the content CHANGES, and ONLY then.** The previous version wrote only
+      `if not flag.exists()`, so a changed interpreter path could never reach the flag and
+      the alarm went on naming a binary that no longer ran. Rewriting unconditionally is
+      the opposite failure: `dispatch` keys its once-per-occurrence ack on the flag's
+      MTIME, so a rewrite every beat would re-alarm every beat.
 
     Best-effort: this must never break a fleet scan.
     """
@@ -175,17 +210,35 @@ def record_iterm_automation_state(blocked: bool) -> None:
         import global_state as gs  # local import — fleet_scan is imported by non-daemon paths
 
         flag = gs.global_state_dir() / ITERM_TCC_FLAG
-        if blocked:
-            if not flag.exists():
-                flag.write_text(
-                    "iTerm is running but the daemon's osascript enumerated 0 sessions "
-                    "— macOS Automation grant denied (TRDD-VQ4LX7ND)\n",
-                    encoding="utf-8",
-                )
-        else:
+        if not blocked:
             flag.unlink(missing_ok=True)
+            return
+        payload = iterm_automation_payload(interpreter=sys.executable)
+        try:
+            if flag.read_text(encoding="utf-8") == payload:
+                return  # unchanged — leave the mtime alone so the ack still holds
+        except OSError:
+            pass  # absent or unreadable → (re)write it below
+        flag.write_text(payload, encoding="utf-8")
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
         pass
+
+
+def iterm_automation_interpreter(raw: str) -> str:
+    """The interpreter path recorded in a flag's contents, or "" when it names none. PURE.
+
+    Fail-open by construction: the flag was plain prose before this was JSON, so a
+    pre-upgrade flag left on disk parses to "" and the alarm simply omits the path rather
+    than crashing or printing garbage.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    value = data.get("interpreter", "")
+    return value if isinstance(value, str) else ""
 
 
 def parse_tmux_panes(text: str) -> dict[str, str]:

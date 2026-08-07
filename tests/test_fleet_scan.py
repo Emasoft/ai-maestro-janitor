@@ -255,6 +255,73 @@ def test_recording_never_raises_on_an_unusable_state_dir(monkeypatch: "pytest.Mo
 
 
 # ---------------------------------------------------------------------------
+# janitor#229 — the flag must carry the INTERPRETER the Automation grant follows, and
+# must refresh when that path changes, WITHOUT refreshing when nothing changed (dispatch
+# keys its once-per-session ack on this file's mtime).
+# ---------------------------------------------------------------------------
+def test_flag_records_the_interpreter_that_made_the_blocked_call(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """macOS attributes the grant to a binary, so an alarm that names none is
+    unactionable. This process IS the one whose Apple Event came back empty."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+
+    fs.record_iterm_automation_state(True)
+
+    recorded = (tmp_path / fs.ITERM_TCC_FLAG).read_text(encoding="utf-8")
+    assert fs.iterm_automation_interpreter(recorded) == sys.executable
+
+
+def test_unchanged_observation_does_not_touch_the_flag_mtime(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The ack that makes this alarm once-per-session is keyed on the flag's MTIME, so a
+    rewrite on every beat would re-alarm on every beat — the "alarm you learn to ignore"
+    failure this whole flag exists to avoid."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True)
+    first = flag.stat().st_mtime_ns
+    os.utime(flag, ns=(first - 5_000_000_000, first - 5_000_000_000))
+    aged = flag.stat().st_mtime_ns
+
+    fs.record_iterm_automation_state(True)  # same observation, same interpreter
+
+    assert flag.stat().st_mtime_ns == aged, "an unchanged observation must not re-alarm"
+
+
+def test_a_changed_interpreter_path_reaches_the_flag(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The bug this replaces: the writer only wrote `if not flag.exists()`, so when a uv
+    upgrade moved the interpreter the alarm went on naming a binary that no longer ran —
+    sending the human to grant Automation to the wrong thing (janitor#229)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text(
+        fs.iterm_automation_payload(interpreter="/old/uv/python3.12"), encoding="utf-8"
+    )
+
+    fs.record_iterm_automation_state(True)
+
+    assert fs.iterm_automation_interpreter(flag.read_text(encoding="utf-8")) == sys.executable
+
+
+def test_interpreter_parse_fails_open_on_a_pre_upgrade_flag() -> None:
+    """A flag written before this was JSON is plain prose. It must parse to "" so the
+    alarm omits the path, never crashes and never prints garbage as a binary name."""
+    assert fs.iterm_automation_interpreter("macOS Automation grant denied\n") == ""
+    assert fs.iterm_automation_interpreter("") == ""
+    assert fs.iterm_automation_interpreter("[1, 2]") == ""
+    assert fs.iterm_automation_interpreter('{"interpreter": 17}') == ""
+
+
+# ---------------------------------------------------------------------------
 # TRDD-8DR0X08A — substantive liveness: the guardian's own typed command appends
 # a queue-operation line that refreshed the mtime probe, resetting the attempt
 # budget and re-injecting forever. These pin the fix at every layer.

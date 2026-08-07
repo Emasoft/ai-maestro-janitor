@@ -1507,13 +1507,65 @@ def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
     dispatch._phase_iterm_automation_alarm()
     second = capsys.readouterr().out
 
-    assert "cannot enumerate its sessions" in first
+    assert "enumerated ZERO" in first
     assert "Automation" in first
     assert "CANNOT rescue" in first          # the consequence
     assert "System Settings" in first        # the remedy
     assert "will not persist" in first       # #92 — the toggle may revert on adhoc-signed clients
-    assert "tmux instead" in first           # #92 — the honest fallback, not a guaranteed one-click fix
+    assert "tmux" in first                   # #92 — the honest fallback, not a guaranteed one-click fix
     assert second == ""                      # acked — not repeated
+
+
+def test_iterm_alarm_reports_the_observation_not_a_verdict(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """janitor#229: the alarm must say what was MEASURED and name BOTH causes that fit it.
+
+    The old text asserted "macOS is denying it Automation access" from a signal that
+    cannot establish it — `iterm_automation_blocked` only knows "iTerm up, 0 sessions".
+    Measured live 2026-08-07: it fired on a host where two independent reports said the
+    grant worked, with zero denial signatures and an unchanged interpreter path. An alarm
+    that picks a cause anyway sends the human to re-grant a permission they already have,
+    and the correct-looking toggle then "disproves" a real fault.
+    """
+    env_isolation["global_dir"].mkdir(parents=True, exist_ok=True)
+    (env_isolation["global_dir"] / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "OBSERVED" in out
+    assert "CANNOT tell you why" in out
+    assert "hung/timed out" in out                    # cause (b) is named, not just (a)
+    assert "NOT evidence of a working grant" in out   # absence of an error proves nothing
+    assert "FIRED rearm" in out                       # the only POSITIVE evidence
+    # The bare verdict the old line asserted must be gone.
+    assert "macOS is denying it Automation" not in out
+
+
+def test_iterm_alarm_names_the_interpreter_the_grant_follows(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """The grant is attributed to a BINARY, so the alarm must name the one whose Apple
+    Event came back empty — the DAEMON's, recorded in the flag by the fleet scan. Naming
+    none is unactionable; naming the session's names the wrong binary (janitor#229)."""
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+    import fleet_scan as fs
+
+    env_isolation["global_dir"].mkdir(parents=True, exist_ok=True)
+    (env_isolation["global_dir"] / "iterm-automation-blocked.flag").write_text(
+        fs.iterm_automation_payload(interpreter="/opt/uv/python3.13"), encoding="utf-8"
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "/opt/uv/python3.13" in out
+    assert "silently orphans a grant" in out   # why the path must be re-read, not assumed
+    # It prints the RECORDED (daemon) interpreter, never the reading session's own.
+    assert sys.executable not in out
 
 
 def test_iterm_alarm_refires_when_the_condition_recurs(env_isolation: dict,
@@ -1538,7 +1590,7 @@ def test_iterm_alarm_refires_when_the_condition_recurs(env_isolation: dict,
 
     dispatch._phase_iterm_automation_alarm()
 
-    assert "cannot enumerate its sessions" in capsys.readouterr().out
+    assert "enumerated ZERO" in capsys.readouterr().out
 
 
 # ---------- TRDD-QW6RVAKN: "janitor resume is called twice after compacting" ----
