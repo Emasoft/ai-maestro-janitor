@@ -208,16 +208,18 @@ def test_acquire_and_release_publish_lock(tmp_path: Path, publish_mod) -> None:
 
 
 def test_publish_lock_path_is_gitignored(publish_mod) -> None:
-    """The lock file must never dirty the tree — `.janitor/` is gitignored repo-wide."""
+    """The lock file must never dirty the tree — `.janitor/` is gitignored repo-wide.
+
+    Asks git about the PATH and never creates it. The first version of this test wrote a
+    lock file at the REAL repo root and unlinked it in a finally — which meant that every
+    `publish.py` run, whose test gate runs this suite, clobbered and then DELETED the live
+    lock it had just taken, disarming the guard for the rest of its own publish. `git
+    check-ignore` answers on a path that does not exist, so there is nothing to create.
+    """
     lock_path = publish_mod._publish_lock_path(_PROJECT_ROOT)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("{}", encoding="utf-8")
-    try:
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", str(lock_path)],
-            cwd=_PROJECT_ROOT,
-            timeout=10,
-        )
-        assert result.returncode == 0
-    finally:
-        lock_path.unlink(missing_ok=True)
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", str(lock_path)],
+        cwd=_PROJECT_ROOT,
+        timeout=10,
+    )
+    assert result.returncode == 0
