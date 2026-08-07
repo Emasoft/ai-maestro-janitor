@@ -139,6 +139,44 @@ def test_cookie_guard_never_matches_real_consent_buttons(label: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Human-verification-challenge detection (janitor#228)                          #
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Performing security verification...",
+        "Checking your browser before accessing claude.ai",
+        "Please verify you are human",
+        "Verifying you are human. This may take a few seconds.",
+        "cloudflare Ray ID: 1234abcd",
+        "Complete the Turnstile challenge to continue",
+        "Attention Required! | Cloudflare",
+        "Solve this CAPTCHA to proceed",
+    ],
+)
+def test_looks_like_challenge_matches_interstitial_copy(text: str) -> None:
+    """_looks_like_challenge fires on the specific Cloudflare/captcha interstitial copy —
+    the generic-timeout failure mode this detection exists to distinguish (janitor#228)."""
+    assert scb._looks_like_challenge(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "Sign in to claude.ai to continue",
+        "Authorize this app to access your account",
+        "Continue with Google",
+        "Accept All Cookies",
+    ],
+)
+def test_looks_like_challenge_never_matches_ordinary_consent_copy(text: str) -> None:
+    """_looks_like_challenge stays narrow: it must NOT fire on ordinary login/consent/cookie
+    copy — a false "captcha" claim is worse than a generic timeout."""
+    assert scb._looks_like_challenge(text) is False
+
+
+# --------------------------------------------------------------------------- #
 # Shared profiles-root resolver wiring                                          #
 # --------------------------------------------------------------------------- #
 def test_profile_dir_uses_shared_resolver(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -10,12 +10,14 @@ via monkeypatched module paths.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import re
 import stat
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -188,6 +190,30 @@ def test_keepalive_refresh_counts_failures_and_resets_on_success(monkeypatch: py
     monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
     rotator._keepalive_refresh()
     assert state["slots"]["alt@x.com"]["refresh_failures"] == 0
+
+
+def test_keepalive_refresh_records_failure_cause_in_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_keepalive_refresh records the classified cause as meta['last_refresh_failure'] on a
+    failed exchange, WITHOUT changing the refresh_failures escalation counter (janitor#228) —
+    the cause is purely diagnostic."""
+    near_ms = int((time.time() + 1800) * 1000)
+    slot_blob = _blob("refresh-token-value", expires_ms=near_ms)
+    # Annotated `dict`, not inferred: the inferred value type is not indexable, so the
+    # nested assertions at the end of this test would not type-check.
+    state: dict = {"live_email": "live@x.com", "slots": {"alt@x.com": {"fp": "old", "expires_at": near_ms}}}
+    monkeypatch.setattr(rotator, "load_state", lambda: state)
+    monkeypatch.setattr(rotator, "save_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda email: slot_blob if email == "alt@x.com" else None)
+
+    def _fake_refresh(blob: dict, *, on_failure=None) -> None:
+        if on_failure is not None:
+            on_failure(rotator.REFRESH_FAIL_CREDENTIAL_DEAD)
+        return None
+
+    monkeypatch.setattr(rotator, "refresh_oauth_token", _fake_refresh)
+    rotator._keepalive_refresh()
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 1  # counter still increments
+    assert state["slots"]["alt@x.com"]["last_refresh_failure"] == rotator.REFRESH_FAIL_CREDENTIAL_DEAD
 
 
 def test_refresh_and_heal_slot_resets_failures_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1223,6 +1249,85 @@ def test_refresh_oauth_token_network_error_returns_none(monkeypatch: pytest.Monk
     assert rotator.refresh_oauth_token(_blob("OLD", refresh="OLDR")) is None
 
 
+# ---- classify_refresh_failure (janitor#228) — CAUSE, not just None ----
+
+def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:
+    """Build a REAL HTTPError with a readable body — the shape refresh_oauth_token catches."""
+    return rotator.urllib.error.HTTPError(
+        rotator.TOKEN_URL, code, "err", {}, io.BytesIO(body)
+    )
+
+
+def test_classify_refresh_failure_transport_refused_on_cloudflare_403() -> None:
+    """A Cloudflare 403 (bare-UA "banned browser signature", error 1010) classifies as
+    transport-refused — retryable, but alarming (CF tightened, not the token dying)."""
+    exc = _http_error(403, b'{"error":"1010"}')
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_TRANSPORT_REFUSED
+
+
+def test_classify_refresh_failure_credential_dead_on_invalid_grant() -> None:
+    """A 400 invalid_grant means the refresh token is genuinely revoked — human-actionable,
+    distinct from a transient network/CF hiccup."""
+    exc = _http_error(400, b'{"error":"invalid_grant","error_description":"Refresh token not found"}')
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_CREDENTIAL_DEAD
+
+
+def test_classify_refresh_failure_network_on_plain_url_error() -> None:
+    """A non-HTTP URLError (DNS/connection failure) classifies as network — retryable, benign."""
+    exc = rotator.urllib.error.URLError("Name or service not known")
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_NETWORK
+
+
+def test_classify_refresh_failure_malformed_on_bad_json() -> None:
+    """A response body that fails to parse as JSON classifies as malformed."""
+    exc = json.JSONDecodeError("Expecting value", "not json", 0)
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_MALFORMED
+
+
+def test_classify_refresh_failure_never_raises_on_unreadable_body() -> None:
+    """An HTTPError whose .read() itself raises (socket already closed) must never crash the
+    classifier — it degrades to a best-effort classification instead."""
+    class _DeadFp:
+        def read(self) -> bytes:
+            raise OSError("socket closed")
+
+        def close(self) -> None:
+            pass
+
+    exc = rotator.urllib.error.HTTPError(rotator.TOKEN_URL, 500, "err", {}, _DeadFp())
+    # Must not raise, and must return SOME valid cause string.
+    assert rotator.classify_refresh_failure(exc) in {
+        rotator.REFRESH_FAIL_TRANSPORT_REFUSED,
+        rotator.REFRESH_FAIL_CREDENTIAL_DEAD,
+        rotator.REFRESH_FAIL_NETWORK,
+        rotator.REFRESH_FAIL_MALFORMED,
+    }
+
+
+def test_refresh_oauth_token_reports_credential_dead_via_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """refresh_oauth_token still returns None on a 400 invalid_grant, but now ALSO calls
+    on_failure with the classified cause — the return contract is unchanged (janitor#228)."""
+    def _boom(req: object, timeout: float = 0) -> _FakeResp:
+        raise _http_error(400, b'{"error":"invalid_grant"}')
+    monkeypatch.setattr(rotator.urllib.request, "urlopen", _boom)
+    causes: list[str] = []
+    result = rotator.refresh_oauth_token(_blob("OLD", refresh="OLDR"), on_failure=causes.append)
+    assert result is None
+    assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]
+
+
+def test_refresh_oauth_token_reports_transport_refused_via_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """refresh_oauth_token still returns None on a Cloudflare 403, but ALSO calls on_failure
+    with transport-refused — distinguishable from a dead credential (janitor#228)."""
+    def _boom(req: object, timeout: float = 0) -> _FakeResp:
+        raise _http_error(403, b'{"error":"1010"}')
+    monkeypatch.setattr(rotator.urllib.request, "urlopen", _boom)
+    causes: list[str] = []
+    result = rotator.refresh_oauth_token(_blob("OLD", refresh="OLDR"), on_failure=causes.append)
+    assert result is None
+    assert causes == [rotator.REFRESH_FAIL_TRANSPORT_REFUSED]
+
+
 def test_keepalive_refresh_only_near_expiry_refreshable_non_live_slots(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_keepalive_refresh refreshes a near-expiry slot WITH a refreshToken; skips fresh slots, setup-token (no refreshToken) slots, and the live account; updates the index."""
@@ -1239,7 +1344,7 @@ def test_keepalive_refresh_only_near_expiry_refreshable_non_live_slots(
     monkeypatch.setattr(rotator, "read_slot", lambda e: blobs.get(e))
     monkeypatch.setattr(rotator, "write_slot", lambda e, b: written.__setitem__(e, b))
     monkeypatch.setattr(rotator, "refresh_oauth_token",
-                        lambda b: {"claudeAiOauth": {**b["claudeAiOauth"],
+                        lambda b, **_k: {"claudeAiOauth": {**b["claudeAiOauth"],
                                                      "accessToken": "R-" + b["claudeAiOauth"]["accessToken"],
                                                      "expiresAt": _ms_in(8)}})
     rotator.save_state({"live_email": "live@x", "live_fp": "x",

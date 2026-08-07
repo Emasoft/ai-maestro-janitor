@@ -99,6 +99,17 @@ APPROVE_SELECTORS = [
 _COOKIE_BUTTON_RE = re.compile(r"cookie|accept all|reject|decline", re.IGNORECASE)
 # Page elements that may carry the displayed code on the callback page.
 CODE_SELECTORS = ["code", "pre", "input[readonly]", ".code", "[data-code]", "textarea"]
+# A human-verification interstitial (Cloudflare Turnstile / a captcha) blocks the automated
+# click loop from ever reaching consent — the wait then silently times out and reads exactly
+# like a slow network. These markers are the SPECIFIC, low-false-positive text Cloudflare's
+# interstitial and common captcha widgets render (janitor#228); kept narrow on purpose — a
+# false "captcha" claim is worse than a generic timeout, so this must not fire on ordinary
+# consent/login copy.
+_CHALLENGE_MARKERS_RE = re.compile(
+    r"performing security verification|checking your browser|verify you are human"
+    r"|verifying you are human|cloudflare|turnstile|captcha|attention required",
+    re.IGNORECASE,
+)
 
 
 def _b64url(b: bytes) -> str:
@@ -161,6 +172,13 @@ def _wait_for_cdp(port: int, timeout: float = 30.0) -> bool:
             pass
         time.sleep(0.3)
     return False
+
+
+def _looks_like_challenge(text: str) -> bool:
+    """True iff `text` (page title + body) carries a human-verification interstitial marker
+    (Cloudflare Turnstile / captcha / "Performing security verification"). Pure string match —
+    narrow by design, see `_CHALLENGE_MARKERS_RE`."""
+    return bool(text) and bool(_CHALLENGE_MARKERS_RE.search(text))
 
 
 def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | None:
@@ -232,6 +250,7 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                 print("[capture] waiting for consent + callback — if a login prompt shows in "
                       "the window, log in as the target account; auto-proceeds (up to 5 min)…")
                 reached = False
+                challenge_seen = False
                 deadline = time.time() + 300
                 while time.time() < deadline:
                     try:
@@ -241,6 +260,14 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                     if "/oauth/code/callback" in cur:
                         reached = True
                         break
+                    # Distinguish a human-verification interstitial from an ordinary slow
+                    # load/consent page — both otherwise look identical to this loop (janitor#228).
+                    try:
+                        page_text = (page.title() or "") + " " + (page.text_content("body") or "")
+                    except Exception:
+                        page_text = ""
+                    if _looks_like_challenge(page_text):
+                        challenge_seen = True
                     for sel in APPROVE_SELECTORS:
                         try:
                             btn = page.query_selector(sel)
@@ -260,7 +287,13 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                             continue
                     page.wait_for_timeout(2000)
                 if not reached:
-                    print("[capture] FAILED: never reached the /oauth/code/callback page within 5 min.")
+                    if challenge_seen:
+                        print("[capture] FAILED: human-verification challenge (Cloudflare/captcha) "
+                              "blocked the automated flow — never reached the /oauth/code/callback "
+                              "page within 5 min. Re-run interactively (headless=False) and clear it "
+                              "by hand, then retry.")
+                    else:
+                        print("[capture] FAILED: never reached the /oauth/code/callback page within 5 min.")
                     return None
                 page.wait_for_timeout(1500)
                 # NO SCREENSHOT HERE (audit finding 2). This module's own docstring promises

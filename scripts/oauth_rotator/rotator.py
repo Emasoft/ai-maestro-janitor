@@ -53,6 +53,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 # scripts/lib holds janitor_integrity (backup + corruption-recovery, TRDD-7100178d); the
 # sibling `cascade` lives in THIS dir (scripts/oauth_rotator). rotator.py runs standalone
@@ -1274,12 +1275,62 @@ def account_usage(blob: dict) -> dict | None:
     return data if status == 200 else None
 
 
-def refresh_oauth_token(blob: dict) -> dict | None:
+# refresh_oauth_token failure causes (janitor#228) — HTTPError subclasses URLError, so a bare
+# `except URLError` cannot tell a Cloudflare transport refusal, a genuinely revoked refresh
+# token, and a plain network blip apart. These four constants are the classifier's whole output
+# vocabulary; keep them stable, they are logged into slot state (`last_refresh_failure`).
+REFRESH_FAIL_TRANSPORT_REFUSED = "transport-refused"  # CF 403 / error 1010 — retryable, alarming
+REFRESH_FAIL_CREDENTIAL_DEAD = "credential-dead"  # 400/401 invalid_grant — human-actionable
+REFRESH_FAIL_NETWORK = "network"  # timeout / DNS / connection — retryable, benign
+REFRESH_FAIL_MALFORMED = "malformed"  # bad JSON or a 200 with no access token
+
+
+def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
+    """PURE classifier: turn a `refresh_oauth_token` failure into one of the REFRESH_FAIL_*
+    causes above, so callers can tell "Cloudflare is blocking us" from "this refresh token is
+    dead" from "the network hiccuped" instead of collapsing all three into a bare None.
+
+    `body` is an already-read fallback (the caller may have consumed `exc.read()` itself);
+    when `exc` is an HTTPError this function ALSO tries to read the body straight off it —
+    defensively, since `.read()` can raise (socket already closed) or return b"" (body
+    already consumed upstream). Never raises."""
+    if isinstance(exc, urllib.error.HTTPError):
+        status = exc.code
+        text = body
+        if not text:
+            try:
+                raw = exc.read()
+                text = raw.decode("utf-8", "replace") if raw else ""
+            except Exception:  # noqa: BLE001 -- defensive: a dead/consumed HTTPError body must never crash the classifier
+                text = ""
+        low = text.lower()
+        if status == 403 or "1010" in text or "banned" in low:
+            return REFRESH_FAIL_TRANSPORT_REFUSED
+        if status in (400, 401) and ("invalid_grant" in low or "invalid_request" in low):
+            return REFRESH_FAIL_CREDENTIAL_DEAD
+        return REFRESH_FAIL_NETWORK
+    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+        return REFRESH_FAIL_MALFORMED
+    return REFRESH_FAIL_NETWORK  # URLError (non-HTTP) / TimeoutError — plain network trouble
+
+
+def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None = None) -> dict | None:
     """Exchange a SLOT's refreshToken for a fresh token pair at the OAuth token endpoint and
     return a NEW blob (accessToken / refreshToken / expiresAt updated, other inner fields kept),
     or None on any failure (no refreshToken, HTTP/network error, or a response without an access
     token). Fail-soft by design — a keepalive failure must never crash the tick; the slot keeps
     its still-current token and F2a rotates away if it ever lapses.
+
+    `on_failure`, when given, is called with the `classify_refresh_failure` cause on every
+    failure path that ACTUALLY ATTEMPTED an exchange — the HTTP/network errors, and a 200 with
+    no access token ("malformed"). It is deliberately NOT called for a blob carrying no
+    refreshToken at all: no request was made, so there is no failure to classify, and reporting
+    a cause there would invent one. (`_keepalive_refresh` skips such slots before calling, so
+    that path is unreachable from the keepalive leg anyway.)
+
+    The return contract is UNCHANGED — this still always returns None on failure. Callers use
+    `on_failure` only to make the CAUSE visible (janitor#228); it must never change control
+    flow here.
 
     Only ever call this on SLOT tokens. The LIVE credential's refresh is owned by Claude Code;
     refreshing it here would race Claude's own (single-use, rotating) refresh-token grant and
@@ -1287,6 +1338,8 @@ def refresh_oauth_token(blob: dict) -> dict | None:
     inner = _oauth(blob)
     rtok = inner.get("refreshToken") or inner.get("refresh_token")
     if not rtok:
+        # Not a network/CF/credential failure — there was never a call to make. Nothing to
+        # classify, so on_failure is deliberately not invoked here.
         return None
     body = json.dumps(
         {
@@ -1308,10 +1361,14 @@ def refresh_oauth_token(blob: dict) -> dict | None:
     try:
         with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             tok = json.loads(r.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError):
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError) as exc:
+        if on_failure is not None:
+            on_failure(classify_refresh_failure(exc))
         return None
     access = tok.get("access_token") or tok.get("accessToken")
     if not access:
+        if on_failure is not None:
+            on_failure(REFRESH_FAIL_MALFORMED)
         return None
     expires_at = tok.get("expiresAt")
     if expires_at is None and "expires_in" in tok:
@@ -2063,18 +2120,27 @@ def _keepalive_refresh() -> list[str]:
         eh = expires_in_h(blob)
         if eh is None or eh > KEEPALIVE_AHEAD_H:
             continue  # plenty of runway (or undatable) — leave it
-        fresh = refresh_oauth_token(blob)
+        failure_cause: list[str] = []
+        fresh = refresh_oauth_token(blob, on_failure=failure_cause.append)
         if fresh is None:
             # Refresh FAILED — keep the old token (F2a rotates away if it lapses) AND record the
             # failure. A refresh token that keeps failing to exchange is DEAD; N consecutive
             # failures escalate this slot from RENEW_REFRESH to the human REAUTH nudge via the
             # cascade SSOT (TRDD-HJGR4I5W) so a dead alternate is never silent. The counter lives
             # in the slot's state-index meta so it survives daemon restarts; it is reset to 0 on
-            # any successful exchange below.
+            # any successful exchange below. `on_failure` (janitor#228) additionally records the
+            # CAUSE (transport-refused / credential-dead / network / malformed) so a Cloudflare
+            # block is no longer indistinguishable from a genuinely revoked token — this is
+            # purely diagnostic and must NEVER change the escalation counter above.
+            cause = failure_cause[0] if failure_cause else None
             meta = slots.get(email)
             if isinstance(meta, dict):
                 meta["refresh_failures"] = int(meta.get("refresh_failures", 0)) + 1
+                if cause is not None:
+                    meta["last_refresh_failure"] = cause
                 changed = True
+            if cause is not None:
+                _log("[keepalive] %s: refresh failed (%s)" % (email, cause))
             continue
         try:
             write_slot(email, fresh)
