@@ -355,14 +355,43 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         assert "$HOME" not in text
 
 
+def _service_manager_pathdir(tmp_path: Path, *, name: str, loaded: bool) -> Path:
+    """A curated PATH dir whose `launchctl`/`systemctl` is a scripted stand-in that
+    answers "job loaded" (exit 0) or "job absent" (exit 1).
+
+    WHY a fake and not the host's real service manager: the launchd/systemd job
+    LABEL is a machine-global identifier (`gui/<uid>/com.ai-maestro-janitor.daemon`),
+    and `$HOME` does not redirect it. A fake HOME moves the plist FILE only, so on a
+    host where the janitor's own keepalive is genuinely loaded — the developer's
+    machine, and every machine this feature actually runs on — `status` would report
+    installed no matter what this test wrote, and the assertion would fail on correct
+    code. Scripting the service manager makes the test depend on nothing but itself.
+    """
+    d = tmp_path / f"sm-{'loaded' if loaded else 'unloaded'}"
+    d.mkdir()
+    for tool in ("uname", "id", "mkdir", "cat", "awk", "mv", "rm"):
+        real = shutil.which(tool)
+        assert real is not None, f"host is missing {tool}"
+        (d / tool).symlink_to(real)
+    fake = d / name
+    fake.write_text(f"#!/bin/sh\nexit {0 if loaded else 1}\n", encoding="utf-8")
+    fake.chmod(0o755)
+    return d
+
+
 @pytest.mark.real_subprocess("bash")
 def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
     """janitor#217: the plist/unit FILE existing on disk must not be enough for
     `status` to report healthy — the job must actually be LOADED with the service
     manager. `install` here uses KEEPALIVE_SKIP_ACTIVATION=1 (never registers
     with real launchd/systemd), so the definition file is written but the job is
-    never loaded — exactly the state a `launchctl bootout` leaves behind. Watch
-    this FAIL (exit 0 / "installed") against the old `[ -f "$PLIST" ]` check.
+    never loaded — exactly the state a `launchctl bootout` leaves behind.
+
+    Both directions are asserted against a SCRIPTED service manager. Asserting only
+    the not-loaded direction would also pass for a `status` that always failed; the
+    pair pins the actual contract, "status reports what the service manager says".
+    A regression to the old `[ -f "$PLIST" ]` check fails the first assertion, since
+    install wrote the definition file either way.
     """
     plat = launchd_keepalive.current_platform()
     if plat == "other":
@@ -381,14 +410,29 @@ def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
     else:
         cfg = fake_home / ".config/systemd/user/com.ai-maestro-janitor.daemon.service"
     assert cfg.is_file(), "install must still write the definition file"
-    # ... but the job was never loaded with the real service manager, so `status`
-    # must report NOT installed (non-zero), not merely "the file exists".
-    status = subprocess.run(
-        ["bash", str(INSTALLER), "status"], env=env, capture_output=True, text=True, timeout=30,
-    )
-    assert status.returncode != 0, (
+    # ... but whether `status` calls it installed must come from the SERVICE MANAGER,
+    # never from that file. Drive both answers with a scripted stand-in.
+    bash = shutil.which("bash")
+    assert bash is not None
+    sm = "launchctl" if plat == "macos" else "systemctl"
+
+    def _status(*, loaded: bool) -> subprocess.CompletedProcess[str]:
+        pathdir = _service_manager_pathdir(tmp_path, name=sm, loaded=loaded)
+        return subprocess.run(
+            [bash, str(INSTALLER), "status"],
+            env={**env, "PATH": str(pathdir)},
+            capture_output=True, text=True, timeout=30,
+        )
+
+    unloaded = _status(loaded=False)
+    assert unloaded.returncode != 0, (
         f"status must report NOT installed when the job isn't loaded, even with "
-        f"the definition file present (stdout={status.stdout!r})"
+        f"the definition file present (stdout={unloaded.stdout!r})"
+    )
+    live = _status(loaded=True)
+    assert live.returncode == 0, (
+        f"status must report installed when the service manager holds the job "
+        f"(stdout={live.stdout!r}, stderr={live.stderr!r})"
     )
 
 
