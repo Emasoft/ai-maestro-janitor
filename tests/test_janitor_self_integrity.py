@@ -852,3 +852,52 @@ def test_manifest_check_still_fires_outside_source_checkout(tmp_path: Path) -> N
     mod._MANIFEST_PATH = manifest_path
     finding = mod._check_manifest()
     assert finding is not None and "mutated=1" in finding and "README.md" in finding
+
+
+# ---------------------------------------------------------------------------
+# A MISSING manifest on an INSTALLED root. Measured 2026-08-07: an install
+# interrupted under memory pressure removed agents/, commands/, hooks/,
+# .claude-plugin/plugin.json AND the manifest together — so the check that exists to
+# catch a partial install was disabled by the very event it exists to catch, and the
+# mutilated install ran silently on every session on the machine.
+# ---------------------------------------------------------------------------
+def test_missing_manifest_on_an_installed_root_is_a_finding(tmp_path: Path) -> None:
+    """"I cannot verify" must not read as "nothing is wrong". The absent anchor
+    silently disables every hash check, which is strictly worse than drift."""
+    root = tmp_path / "installed"
+    root.mkdir(parents=True, exist_ok=True)
+    _seed_plugin_tree(root)
+    (root / ".claude-plugin").mkdir(exist_ok=True)
+    (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
+
+    mod = _load_detector_module()
+    mod._PLUGIN_ROOT = root
+    mod._MANIFEST_PATH = root / ".integrity" / "manifest-sha256.json"
+    assert not mod._MANIFEST_PATH.exists()
+
+    finding = mod._check_manifest()
+
+    assert finding is not None, "a missing manifest on an INSTALLED root must not be silent"
+    assert "MISSING" in finding
+    assert "verification is DISABLED" in finding
+    assert "INTERRUPTED INSTALL" in finding   # names the cause actually measured
+    assert "re-install" in finding            # and the correct remedy, not a hand-patch
+
+
+def test_missing_manifest_in_a_source_checkout_stays_silent(tmp_path: Path) -> None:
+    """The other half, and why the fix is not simply "alarm when absent": a dev tree
+    before its first publish has no manifest by construction. Alarming there would
+    fire on every contributor's checkout forever — the false positive that gets a
+    detector switched off, taking the real finding above with it."""
+    root = tmp_path / "checkout"
+    root.mkdir(parents=True, exist_ok=True)
+    _seed_plugin_tree(root)
+    (root / ".git").mkdir(exist_ok=True)
+    (root / ".claude-plugin").mkdir(exist_ok=True)
+    (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
+
+    mod = _load_detector_module()
+    mod._PLUGIN_ROOT = root
+    mod._MANIFEST_PATH = root / ".integrity" / "manifest-sha256.json"
+
+    assert mod._check_manifest() is None

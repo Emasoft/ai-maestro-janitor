@@ -128,12 +128,38 @@ def _resolve_audit_chain_path() -> Path | None:
 def _check_manifest() -> str | None:
     """Return a drift-line body if manifest verification flags drift.
 
-    Returns None if no manifest exists yet (legitimate pre-publish
-    state) OR if everything verifies clean OR if the plugin root is a
-    git SOURCE CHECKOUT (see the guard below).
+    Returns None if everything verifies clean, if the plugin root is a git SOURCE
+    CHECKOUT (see the guard below), or if a SOURCE checkout simply has no manifest yet
+    (legitimate pre-publish state).
+
+    An INSTALLED root with no manifest is NOT silence-worthy — see below.
     """
     if not _MANIFEST_PATH.is_file():
-        return None
+        # A source checkout legitimately has none: the manifest is a RELEASE artifact,
+        # so a pre-publish tree not having one is dev state, not tampering.
+        if is_plugin_source_checkout(_PLUGIN_ROOT):
+            return None
+        # An INSTALLED root must carry one, and its absence is the worst case rather
+        # than the empty one: it is the verification ANCHOR itself being gone, which
+        # silently disables every hash check below. Returning None here treated "I
+        # cannot check" as "nothing is wrong".
+        #
+        # MEASURED 2026-08-07 (janitor#229's sibling). A plugin install interrupted
+        # under memory pressure removed `agents/`, `commands/`, `hooks/`,
+        # `.claude-plugin/plugin.json` AND this manifest together. Because the manifest
+        # went with them, this function returned None, so the mutilated install ran
+        # silently on EVERY session on the machine — every `[janitor-memory-*]` marker
+        # naming an agent that was no longer on disk — until a peer happened to need
+        # one and refused to substitute. The one check that existed to catch a partial
+        # install was disabled by the very event it existed to catch.
+        return (
+            "plugin integrity manifest MISSING from an installed plugin root "
+            f"({state.sanitize_for_drift_line(str(_MANIFEST_PATH))}) — file-hash "
+            "verification is DISABLED, so a partial or tampered install cannot be "
+            "detected at all. Most likely an INTERRUPTED INSTALL (check for missing "
+            "agents/, commands/, hooks/): compare this dir against the release tag, "
+            "then re-install the plugin rather than patching it in place."
+        )
     # SOURCE-CHECKOUT guard (tickets T-BR3M3IUU, T-DTTXJGC7). The manifest is a
     # RELEASE artifact — publish.py regenerates it at each release — so in a git
     # source checkout every legitimate post-release commit touching an
