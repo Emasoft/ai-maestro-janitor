@@ -81,6 +81,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Load gh / git retry wrappers from the sibling module so every push +
@@ -2183,6 +2184,46 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     sys.exit(1)
 
 
+# -- Publish lock ----------------------------------------------------------------
+#
+# WHY: an agent editing the working tree WHILE publish.py is running trips publish's
+# own real-state write guard ("[source-tree] CHANGED: ...") and fails the release —
+# happened twice in one session, ~10 minutes of test time each. The lock below makes
+# a mid-publish edit mechanically impossible instead of relying on discipline: a
+# companion PreToolUse hook (pre-tool-publish-lock.py) reads this file and DENIES
+# Edit/Write/MultiEdit/NotebookEdit while a live publish holds it.
+
+
+def _publish_lock_path(root: Path) -> Path:
+    return root / ".janitor" / "state" / "publish-in-progress.json"
+
+
+def _acquire_publish_lock(root: Path) -> Path | None:
+    """Write the publish-lock marker atomically. Returns the lock path on success,
+    None on any failure — a lock failure must never break the publish itself."""
+    try:
+        lock_path = _publish_lock_path(root)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"pid": os.getpid(), "started": int(time.time()), "repo": str(root)}
+        tmp_path = lock_path.with_suffix(f"{lock_path.suffix}.tmp{os.getpid()}")
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp_path, lock_path)
+        return lock_path
+    except OSError as exc:
+        cprint(f"{YELLOW}Warning: could not write publish lock ({exc}) — continuing anyway.{NC}")
+        return None
+
+
+def _release_publish_lock(lock_path: Path | None) -> None:
+    """Best-effort removal of the publish-lock marker. Never raises."""
+    if lock_path is None:
+        return
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 # -- Main ----------------------------------------------------------------------
 
 def main() -> int:
@@ -2217,80 +2258,88 @@ def main() -> int:
 
     root = get_repo_root()
 
-    # --install-hook mode: just set up the hook and exit
-    if args.install_hook:
-        return install_hook(root)
+    # Publish lock: held for the ENTIRE rest of main() so a companion PreToolUse
+    # hook (pre-tool-publish-lock.py) can deny an agent's Edit/Write mid-run —
+    # see "-- Publish lock --" above for why this exists. Released in `finally`
+    # so a crash or an early `return` inside any branch below cannot strand it.
+    lock_path = _acquire_publish_lock(root)
+    try:
+        # --install-hook mode: just set up the hook and exit
+        if args.install_hook:
+            return install_hook(root)
 
-    # --install-branch-rules mode: apply the server-side GitHub ruleset
-    if args.install_branch_rules:
-        return install_branch_rules(root)
+        # --install-branch-rules mode: apply the server-side GitHub ruleset
+        if args.install_branch_rules:
+            return install_branch_rules(root)
 
-    # --gate mode: run quality checks only (called by pre-push hook)
-    if args.gate:
-        return run_gate(root)
+        # --gate mode: run quality checks only (called by pre-push hook)
+        if args.gate:
+            return run_gate(root)
 
-    # Full publish pipeline — auto-detect bump type unless user forced one.
-    # Idempotency: read REMOTE plugin.json (origin/master) as the bump
-    # baseline. When local is ahead (interrupted publish: bumped + committed
-    # but not pushed), bumping from local would double-bump. From remote,
-    # bumping recomputes the SAME target as the original interrupted run,
-    # and stage_bump's "already-at-target" guard then skips the bump.
-    local = get_current_version(root)
-    if not local:
-        cprint(f"{RED}Cannot read version from .claude-plugin/plugin.json{NC}")
-        return 1
-    remote = _read_remote_version(root)
-    baseline = remote or local
+        # Full publish pipeline — auto-detect bump type unless user forced one.
+        # Idempotency: read REMOTE plugin.json (origin/master) as the bump
+        # baseline. When local is ahead (interrupted publish: bumped + committed
+        # but not pushed), bumping from local would double-bump. From remote,
+        # bumping recomputes the SAME target as the original interrupted run,
+        # and stage_bump's "already-at-target" guard then skips the bump.
+        local = get_current_version(root)
+        if not local:
+            cprint(f"{RED}Cannot read version from .claude-plugin/plugin.json{NC}")
+            return 1
+        remote = _read_remote_version(root)
+        baseline = remote or local
 
-    if args.bump is None:
-        bump_type = detect_bump_type(root)
-        cprint(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
-    else:
-        bump_type = args.bump
-        cprint(f"{BLUE}Bump type: {bump_type} (forced via --{bump_type}){NC}")
+        if args.bump is None:
+            bump_type = detect_bump_type(root)
+            cprint(f"{BLUE}Bump type: {bump_type} (auto-detected from git-cliff){NC}")
+        else:
+            bump_type = args.bump
+            cprint(f"{BLUE}Bump type: {bump_type} (forced via --{bump_type}){NC}")
 
-    new_ver = bump_semver(baseline, bump_type)
-    if not new_ver:
-        cprint(f"{RED}Cannot parse baseline version: {baseline}{NC}")
-        return 1
+        new_ver = bump_semver(baseline, bump_type)
+        if not new_ver:
+            cprint(f"{RED}Cannot parse baseline version: {baseline}{NC}")
+            return 1
 
-    if remote and local != remote:
-        cprint(f"{YELLOW}Local plugin.json is at {local} but origin is at {remote} — "
-               f"using remote as bump baseline (interrupted-publish recovery).{NC}")
-    current = baseline
+        if remote and local != remote:
+            cprint(f"{YELLOW}Local plugin.json is at {local} but origin is at {remote} — "
+                   f"using remote as bump baseline (interrupted-publish recovery).{NC}")
+        current = baseline
 
-    cprint(f"\n{BOLD}Publish pipeline: {current} -> {new_ver}{NC}")
-    if args.dry_run:
-        cprint(f"{YELLOW}(dry-run mode — no changes will be made){NC}")
+        cprint(f"\n{BOLD}Publish pipeline: {current} -> {new_ver}{NC}")
+        if args.dry_run:
+            cprint(f"{YELLOW}(dry-run mode — no changes will be made){NC}")
 
-    # Gate 0: reject bypass attempts BEFORE running any other stage.
-    # Pipeline order (per the cornerstone rule "every push is a bump"):
-    #   lint+typecheck → tests → validate → ci-preflight → marketplace-reg →
-    #   consistency → bump → badge → changelog → commit → push → github release
-    # Lint runs before tests (cheap fails first). Tests run before validate
-    # so behavioral regressions fail the test suite before the structural
-    # validator inspects the manifest.
-    #
-    # EVERY check above runs BEFORE stage_bump. That ordering is the whole point
-    # of stage_ci_preflight: a CI-parity defect aborts the publish with the tree
-    # untouched, instead of being discovered on GitHub after the tag was pushed
-    # and the release was cut.
-    stage_bypass_guard()
-    stage_check_clean(root)
-    stage_lint(root)
-    stage_tests(root)  # MANDATORY — no skip flag, no exceptions
-    stage_validate(root)
-    stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
-    stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
-    stage_consistency(root)
-    stage_bump(root, new_ver, args.dry_run)
-    stage_update_badges(root, current, new_ver, args.dry_run)
-    stage_changelog(root, new_ver, args.dry_run)
-    stage_commit_and_push(root, new_ver, args.dry_run)
-    stage_gh_release(root, new_ver, args.dry_run)
+        # Gate 0: reject bypass attempts BEFORE running any other stage.
+        # Pipeline order (per the cornerstone rule "every push is a bump"):
+        #   lint+typecheck → tests → validate → ci-preflight → marketplace-reg →
+        #   consistency → bump → badge → changelog → commit → push → github release
+        # Lint runs before tests (cheap fails first). Tests run before validate
+        # so behavioral regressions fail the test suite before the structural
+        # validator inspects the manifest.
+        #
+        # EVERY check above runs BEFORE stage_bump. That ordering is the whole point
+        # of stage_ci_preflight: a CI-parity defect aborts the publish with the tree
+        # untouched, instead of being discovered on GitHub after the tag was pushed
+        # and the release was cut.
+        stage_bypass_guard()
+        stage_check_clean(root)
+        stage_lint(root)
+        stage_tests(root)  # MANDATORY — no skip flag, no exceptions
+        stage_validate(root)
+        stage_ci_preflight(root)  # MANDATORY — the gates validate_plugin omits
+        stage_marketplace_registration(root)  # Gate 6 parity with CPV's own publish.py
+        stage_consistency(root)
+        stage_bump(root, new_ver, args.dry_run)
+        stage_update_badges(root, current, new_ver, args.dry_run)
+        stage_changelog(root, new_ver, args.dry_run)
+        stage_commit_and_push(root, new_ver, args.dry_run)
+        stage_gh_release(root, new_ver, args.dry_run)
 
-    cprint(f"\n{GREEN}{BOLD}Published {new_ver} successfully!{NC}")
-    return 0
+        cprint(f"\n{GREEN}{BOLD}Published {new_ver} successfully!{NC}")
+        return 0
+    finally:
+        _release_publish_lock(lock_path)
 
 
 if __name__ == "__main__":
