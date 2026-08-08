@@ -215,6 +215,24 @@ piles up.
 
 - [[janitor-daemon-process-identity]] — which interpreter the daemon runs under (the TCC-grantable identity), the restart gate that evicted our own version-less daemons, and the breaker that quarantined a healthy version for it.
 
+
+^ATOM-O1K6-F8D8 [desc:"Since v2.8.0 the guardian runs a grant-free claude-agents-json second view when osascript returns zero - the alarm states channel-blocked-not-empty vs consistent-empty instead of guessing.", keywords: denied_vs_empty_iterm_channel second_view_claude_agents_json grant_free_enumeration channel-blocked-not-empty_verdict cwd_keyed_roster_never_name alarm_states_which_way_it_discriminated, ocd: 2026-08-08, lmd: 2026-08-08]
+
+Since v2.8.0 (TRDD-DFKEXO79) the guardian no longer has to GUESS what osascript's zero
+means: `scripts/lib/cli_agent_roster.py` runs `claude agents --json` — which needs no
+session and no macOS Automation grant (CC 2.1.224) — as an INDEPENDENT second view, probed
+only on the rare blocked path in `gather_fleet`. The three-way `second_view_verdict` rides
+the `iterm-automation-blocked.flag` payload, and the heartbeat alarm states which way it
+discriminated: `channel-blocked-not-empty` (live sessions demonstrably exist while the
+channel returns zero — a denial or hung osascript, PROVEN), `consistent-empty`, or a failed
+probe reported AS a failed probe ("the ambiguity stands" — an unrun check strengthens
+neither reading). Rows are keyed by CWD (+pid), never `name`: name is a mutable display
+string (six misroutes in one day were all name-drift); measured, the CLI enumerates MORE
+than in-session ListAgents (25 vs 18 rows, including pane-less sessions). What this
+deliberately does NOT solve: pane RESCUE — ESC injection and the TCC grant (see the atoms
+above) still own that rung; the second view proves the channel is blocked, it cannot type
+into a pane. [^6]
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG05-0010, status:valid, keywords:"inferred_resolver_from_one_call_site false_missing_channel_alarm read_function_not_one_callsite", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED, and it shipped: v0.35.5's code
@@ -273,3 +291,4 @@ piles up.
   inspected and dry-run, and an invisible subprocess in one is the "machine-touching call as
   an invisible default" that guard exists to surface. DO pass the resolved value in as data
   and let the layer that already owns I/O (the daemon) obtain it.
+[^6]: [id:ATOM-5GHB-FA72, status:valid, keywords:"backticks_in_double_quoted_shell_argument command_substitution_ran_the_cli desc_executed_the_command_it_named memory_write_leaked_another_project_path injection_into_own_memory_page", ocd:2026-08-08, lmd:2026-08-08] DO NOT put backticks around a CLI name inside a DOUBLE-QUOTED shell argument (a memgrep --desc, a commit -m, any inline flag), BECAUSE the shell command-substitutes it — writing this very atom, `claude agents --json` in the --desc EXECUTED and spliced another project's cwd + a sessionId into tracked PROJECT memory (caught by memgrep lint's unclosed-props ERROR; scrubbed from history while unpushed). DO pass prose bodies via a quoted-delimiter heredoc (<<'EOF' — no substitution) and keep inline args free of backticks/$( ).
