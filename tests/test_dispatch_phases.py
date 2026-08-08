@@ -1613,9 +1613,16 @@ def test_iterm_alarm_downgrades_on_recent_rearm_evidence(
     (gdir / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
     dispatch = _import_dispatch()
 
+    # The NEWEST line uses the VARIANT format measured on the maintainer host
+    # (2026-08-08: 44 of 81 lines carried an extra `[s:<8hex>]` segment between the
+    # timestamp and `session-liveness:`). The parse must anchor the timestamp to the
+    # FIRST bracket on the line — a nearest-bracket regression would read `[s:...]`,
+    # fail strptime, silently DROP this line, and fall back to the 3h-old plain line.
     recent = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 3600))
+    older = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 3 * 3600))
     (gdir / "daemon.log").write_text(
-        f"[{recent}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n",
+        f"[{recent}] [s:c9ae7481] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n"
+        f"[{older}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n",
         encoding="utf-8",
     )
 
@@ -1626,6 +1633,9 @@ def test_iterm_alarm_downgrades_on_recent_rearm_evidence(
     assert "worked RECENTLY" in out          # the honest tense — not "works now"
     assert "CANNOT rescue" not in out        # the standing-outage assertion must be gone
     assert "System Settings" not in out or "should send anyone" in out
+    # 60 minutes = the VARIANT line's age. 180 here means the variant line was dropped
+    # and the plain 3h line won — i.e. the first-bracket anchor regressed.
+    assert "60 minutes ago" in out
 
 
 def test_iterm_alarm_stands_when_rearm_evidence_is_stale(
