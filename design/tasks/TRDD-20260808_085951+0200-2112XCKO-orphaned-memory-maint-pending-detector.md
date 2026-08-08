@@ -3,13 +3,14 @@ trdd-id: 2112XCKO
 title: Orphaned memory-maint-pending detector — a silently dropped memory pass must alarm
 column: todo
 created: 2026-08-08T08:59:51+0200
-updated: 2026-08-08T08:59:51+0200
+updated: 2026-08-08T10:48:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
+external-refs: [janitor#238, janitor#232]
 ---
 
 # Orphaned memory-maint-pending detector — a silently dropped memory pass must alarm
@@ -48,6 +49,22 @@ A heartbeat detector (`scripts/detectors/orphaned-memory-maint.py`, pattern-copi
 - [ ] A consumed (absent) pending file emits nothing and clears any prior dedupe state
 - [ ] Malformed/unreadable pending JSON is itself a finding (absence-of-signal-is-not-health)
 - [ ] Test that 3 consecutive drops (the AMOA case) produce a finding after the first window
+
+## LOCAL scope is the load-bearing case (janitor#238, orchestrator peer)
+
+The "a dropped pass is not lost — another session's heartbeat picks it up" reasoning holds
+ONLY for the shared USER root. A LOCAL root belongs to one project: if that project's only
+session has the broken registry (#232's partial-install shape — skills present, ZERO
+`ai-maestro-janitor:*` agents enumerable while the cache dir has all 3), the pass is not
+deferred but STRANDED until the project gets a healthy session. #238 measured 4 consecutive
+drops in one session, 3 of them LOCAL, each with fresh valid pending state and a failed spawn.
+Therefore: the staleness bound SHOULD be tighter for LOCAL-scope pending files than USER-scope
+ones, and the finding text should name the stranding ("no other session can recover this
+scope") so the reader restarts the session rather than waiting.
+
+Also confirmed by #238's discriminating test: bare AND qualified agent names both fail in an
+affected session, both enumerating zero janitor agents — availability, not naming — matching
+the heartbeat-protocol rule's #232 guidance verbatim.
 
 ## Notes
 
