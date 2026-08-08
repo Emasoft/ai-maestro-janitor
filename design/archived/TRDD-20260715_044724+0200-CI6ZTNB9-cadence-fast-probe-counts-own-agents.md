@@ -1,20 +1,38 @@
 ---
 trdd-id: CI6ZTNB9
 title: The cadence FAST probe counts the janitor's OWN background agents, so memory chores force re-arm churn
-column: human_review
+column: superseded
 implementation-commits: [1516fee, 78e413d]
 created: 2026-07-15T04:47:24+0200
-updated: 2026-08-02T13:40:00+0200
-current-owner: janitor-session
+updated: 2026-08-08T15:57:07+0200
+current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 severity: high
 labels: [heartbeat, cadence, token-economy, memory-agents]
 relevant-rules: [1]
 parent-trdd: 0QQX9H0G
+superseded-by: [BRHJHWW0]
 ---
 
 # The cadence FAST probe counts the janitor's own background agents
+
+## ⏵ SUPERSEDED — 2026-08-08
+
+[[TRDD-BRHJHWW0]] retired the whole dynamic-tier controller this card's fixes (half 1 exclusion,
+half 2 dwell) lived inside of: `_phase_cadence_tier`, `heartbeat_cadence.py`'s tier/hysteresis/dwell
+machinery, and `desired-cadence.cron`/`cadence-state.json` are all deleted. With no tier promotion
+left to trigger on a pending-agent signal, this card's defect class (a self-perturbing FAST probe
+re-arming the cron on the janitor's own housekeeping) is unreachable — there is no re-arm left for
+it to cause. `_cadence_active_waiting` (half 1's `pending_agents.pending_external` exclusion) still
+exists and is still correct, but it now only gates the idle-compact/idle-clear phases, never a
+cron re-arm.
+
+## Approval log
+
+- 2026-08-08T15:57:07+0200 — SUPERSEDED by janitor-main-session (TRDD-BRHJHWW0, tier 0). The
+  dynamic cadence this card patched is retired wholesale; its defect is unreachable in the new
+  fixed-cron design.
 
 ## ⏵ NOT A REPRODUCTION — a claim I made here on 2026-08-07 and WITHDREW the same minute
 
