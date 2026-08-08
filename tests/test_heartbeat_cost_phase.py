@@ -172,5 +172,9 @@ def test_main_calls_the_phase_on_every_fire_that_is_not_a_recovery() -> None:
     body = src[src.index("def main(") :]
     assert 'if mode == "maintenance":' not in body, "the maintenance early-return must be gone"
     call = body.index("_phase_heartbeat_cost()")
-    detectors = body.index("_phase_cadence_tier()")
+    # Anchor on the first CHORE phase after the cheap survival block. This was
+    # `_phase_cadence_tier()` until TRDD-BRHJHWW0 deleted the tier controller outright
+    # (mid-session re-arms retired, USER directive 2026-08-08); the roster now starts at
+    # the autofix-mode reminder.
+    detectors = body.index("_phase_autofix_mode_reminder()")
     assert call < detectors, "_phase_heartbeat_cost() must stay with the cheap survival phases"
