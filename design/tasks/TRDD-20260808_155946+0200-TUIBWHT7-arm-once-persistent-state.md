@@ -1,9 +1,10 @@
 ---
 trdd-id: TUIBWHT7
 title: Arm once, armed forever — persistent arm state; per-session cron is silent plumbing
-column: todo
+column: complete
 created: 2026-08-08T15:59:46+0200
-updated: 2026-08-08T15:59:46+0200
+updated: 2026-08-08T17:05:00+0200
+implementation-commits: [65e537dc]
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
