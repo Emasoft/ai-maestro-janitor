@@ -46,7 +46,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
-DEFAULT_CRON = "*/5 * * * *"
+DEFAULT_CRON = "*/15 * * * *"
 CRON_ID_FILE = "heartbeat-cron-id.txt"
 DESIRED_CADENCE_FILE = "desired-cadence.cron"
 
@@ -68,10 +68,9 @@ def resolve_data_dir(env: Mapping[str, str] | None = None) -> Path:
 
 
 def resolve_cron(state_dir: Path, env: Mapping[str, str] | None = None) -> str:
-    """The cadence to arm: the tier the dispatcher ASKED for, else config, else the default.
-
-    Reading `desired-cadence.cron` FIRST is what makes a `[janitor-renew]` re-arm bake the tier
-    the dynamic cadence chose (TRDD-0QQX9H0G) rather than silently resetting it to the default.
+    """The cadence to arm: an explicit `desired-cadence.cron` override, else the user's config
+    knob, else the fixed default (TRDD-BRHJHWW0 — the dispatcher no longer drives tiers, so this
+    file is normally absent; the read stays so a future or manual override still wins).
     """
     environ: Mapping[str, str] = os.environ if env is None else env
     desired = state_dir / DESIRED_CADENCE_FILE

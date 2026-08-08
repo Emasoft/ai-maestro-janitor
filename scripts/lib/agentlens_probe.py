@@ -9,8 +9,8 @@ tool. The janitor NEVER hard-depends on it: every probe here is
                      output all return None, and the caller falls back to its own
                      native estimate SILENTLY.
 
-Same contract as the shipped #83 TTL-regime probe
-(``heartbeat_cadence.probe_account_status``) and the #78 heartbeat-cost command —
+Same contract as the #78 heartbeat-cost command (the #83 TTL-regime probe this once
+mirrored, ``heartbeat_cadence.probe_account_status``, was retired by TRDD-BRHJHWW0) —
 this module is deliberately the same shape so there is ONE integration pattern.
 
 WHY the parsers only trust a NARROW slice of the payload (verified live 2026-07-12,

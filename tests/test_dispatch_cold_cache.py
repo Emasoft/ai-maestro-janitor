@@ -63,7 +63,6 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     project.mkdir()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
     for var in (
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED",
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_IDLE_SECONDS",
@@ -78,7 +77,7 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS", "350000")
     monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
 
-    for mod in ("dispatch", "state", "global_state", "cold_cache_compact", "heartbeat_cadence"):
+    for mod in ("dispatch", "state", "global_state", "cold_cache_compact"):
         sys.modules.pop(mod, None)
 
     dispatch = _import_dispatch()

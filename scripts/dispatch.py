@@ -34,7 +34,6 @@ unrecoverable errors.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import subprocess
@@ -57,7 +56,6 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
-import heartbeat_cadence as hc  # noqa: E402  # TTL-aware cadence tiers (TRDD-0QQX9H0G, #83)
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
@@ -2149,33 +2147,16 @@ def _phase_user_presence_breadcrumb() -> None:
         state.log_line("dispatch", f"user-presence refresh failed: {exc}")
 
 
-_CADENCE_STATE_FILE = "cadence-state.json"
-_DESIRED_CADENCE_FILE = "desired-cadence.cron"
-_ARMED_CADENCE_FILE = "armed-cadence.cron"
-_TTL_REGIME_FILE = "ttl-regime.json"
 _LAST_RESUME_FILE = "last-resume.ts"
-# A genuine user prompt within this window holds the cadence at MID (timely
-# chore/drift pickup); past it, an idle session is free to demote to SLOW.
-_RECENT_ACTIVITY_WINDOW_S = 7200  # 2h
 # A session that emitted a [janitor-resume] cue within this window counts as
-# ACTIVELY WAITING (→ FAST). This is the ONLY way the cadence can see a rate-limit
-# or post-compact resume at all: both resume phases UNLINK their flag and early-return
-# from main() before the cadence phase runs, so reading the flags there is dead code.
-# Without this stamp a rate-limited unattended session would sit at SLOW and retry the
-# resume every 30 min instead of every 5 — and a post-resume session doing unattended
-# work writes no user-presence breadcrumb, so it would read as idle while it works.
+# ACTIVELY WAITING (used by the idle-compact/idle-clear phases below). This is the
+# ONLY way those phases can see a rate-limit or post-compact resume at all: both
+# resume phases UNLINK their flag and early-return from main() before either phase
+# runs, so reading the flags there is dead code.
+# Without this stamp a rate-limited unattended session would be treated as idle and
+# retried too slowly — and a post-resume session doing unattended work writes no
+# user-presence breadcrumb, so it would read as idle while it works.
 _RESUME_RECENCY_WINDOW_S = 1800  # 30 min
-
-
-def _read_json_file(path: Path) -> dict | None:
-    """Read a small JSON state file. None on absent/unreadable/malformed (fail-open)."""
-    try:
-        if not path.is_file():
-            return None
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def _daemon_wake_coverage_window_s() -> int:
@@ -2209,29 +2190,29 @@ def _daemon_wake_covered_fresh(sd: Path, now: int) -> bool:
 
 
 def _cadence_active_waiting(sd: Path, now: int) -> bool:
-    """True iff this session is waiting on something time-sensitive (→ FAST tier):
-    a RECENT resume cue (rate-limit or post-compact), a pending directive resume, or
-    in-flight background agents. Fail-open (any read error → the pending agents probe,
-    itself fail-open).
+    """True iff this session is waiting on something time-sensitive: a RECENT resume cue
+    (rate-limit or post-compact), a pending directive resume, or in-flight background agents.
+    Fail-open (any read error → the pending agents probe, itself fail-open).
 
-    The `keep-going` opt-in flag used to be a fourth signal. It is gone with the rest of
-    the off-switches (owner directive 2026-07-31) — and it could not have meant much here
-    anyway: the nudge it gated is now unconditional, so "keep-going is on" is true of every
-    session and would have pinned the whole fleet to the FAST tier, which is the opposite of
-    what this controller is for. The three signals below are all genuinely per-session.
+    Formerly the FAST-tier signal for a since-removed dynamic-cadence controller
+    (TRDD-0QQX9H0G, retired by TRDD-BRHJHWW0 — mid-session tier flips were re-arming the cron
+    on every flip, several times an hour). What survives is the boolean itself: the idle-compact
+    and idle-clear phases below still need "is this session waiting on something" to avoid
+    shrinking/clearing a context a resume is about to need. The three signals below are all
+    genuinely per-session.
 
     The resume signal is the `last-resume.ts` STAMP, not the `rate-limited.flag` /
     `resume-after-compact.flag` files: those are unlinked by their own phase, which
-    then early-returns from main() BEFORE this phase runs, so testing them here would
-    always read False. The stamp survives the flag, so the fire AFTER a resume cue
-    promotes to FAST and the recovery retry loop runs at the fast cadence.
+    then early-returns from main() before either idle phase runs, so testing them here
+    would always read False. The stamp survives the flag, so the fire after a resume cue
+    still reads as actively-waiting.
 
     MF4 handshake (TRDD-X07E7HTN, D1 v1): a fresh `daemon-wake-covered.ts` is the SOLE
-    condition that lets a rate-limit resume DEMOTE off FAST — the daemon owns the wake for
-    free, so the paid FAST poll is redundant. It suppresses ONLY the resume-stamp reason: the
-    coverage stamp (not `active_waiting` itself) is what authorizes leaving FAST, and the
-    keep-going / directive / pending-agents reasons below still hold FAST on their own. Absent
-    the feature (or its stamp) this collapses to the exact pre-existing behavior.
+    condition that lets a rate-limit resume stop counting as active-waiting — the daemon owns
+    the wake for free, so there is nothing left to poll for. It suppresses ONLY the resume-stamp
+    reason: the coverage stamp (not `active_waiting` itself) is what authorizes that, and the
+    directive / pending-agents reasons below still hold True on their own. Absent the feature
+    (or its stamp) this collapses to the exact pre-existing behavior.
     """
     try:
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
@@ -2292,146 +2273,13 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
 
 
 def _stamp_resume(sd: Path, now: int) -> None:
-    """Record that a [janitor-resume] cue was emitted now — the cadence phase's only
+    """Record that a [janitor-resume] cue was emitted now — the idle phases' only
     view of a resume (see _cadence_active_waiting). Best-effort: a stamp failure must
     never break the resume cue itself, which is the survival-critical part."""
     try:
         state.atomic_write(sd / _LAST_RESUME_FILE, str(now))
     except OSError as exc:
         state.log_line("dispatch", f"last-resume stamp failed: {exc}")
-
-
-def _cadence_recent_activity(now: int) -> bool:
-    """True iff a genuine user prompt landed within the MID window. Reads the
-    user-presence breadcrumb's `last_user_input_epoch` (owned by the
-    UserPromptSubmit hook, NOT bumped by cron ticks), so an unattended idle
-    session reads False and is free to demote to SLOW."""
-    data = _read_json_file(state.user_presence_path())
-    if data is None:
-        return False
-    last = data.get("last_user_input_epoch", 0)
-    if not isinstance(last, (int, float)) or isinstance(last, bool):
-        return False
-    return int(last) > 0 and (now - int(last)) < _RECENT_ACTIVITY_WINDOW_S
-
-
-def _phase_cadence_tier() -> None:
-    """Dynamic TTL-aware heartbeat cadence (TRDD-0QQX9H0G, issue #83).
-
-    Picks a cadence tier from live state each fire — FAST when actively waiting,
-    MID on recent user activity, SLOW when idle — and applies a tier change by
-    RE-USING the [janitor-renew] marker (dispatch cannot call CronCreate itself).
-    The SLOW ceiling is bounded by the REAL cache-TTL, resolved authoritatively
-    via the agentlensPro get_account_status probe (fail-open, cached ~30 min).
-
-    Called AFTER the rate-limit / compact resume early-returns (so a recovery fire's
-    output stays clean — a [janitor-renew] must never precede its [janitor-resume])
-    and after the keep-going nudge. Because those resume phases return early, a resume
-    is visible here only via the `last-resume.ts` stamp they leave behind — see
-    _cadence_active_waiting. A TOTAL no-op when heartbeat_cadence_dynamic is off.
-    Fail-open throughout: a cadence bug must never break the fire.
-
-    The SLOW tier is the ONLY sanctioned answer to cost pressure, because it slows fires
-    without stopping work: every detector still runs, just less often, and the cron is
-    still there. It replaced a self-budget clamp that could force SLOW and then drop the
-    project into maintenance — see _phase_self_cost_alarm for why that had to go.
-
-    A differing desired cron does not automatically re-emit [janitor-renew]: a
-    re-arm dwell (issue #89 half 2, hc.should_emit_renew) also gates it, so a
-    committed-tier flip does not pay for a full re-arm turn more often than
-    once per dwell window — UNLESS the flip is a genuine tier PROMOTION, which
-    stays immediate (see hc.should_emit_renew's docstring).
-    """
-    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", True):
-        return
-    try:
-        now = int(time.time())
-        sd = state.state_dir()
-
-        # 1. live signals → the un-smoothed tier this fire asks for.
-        signals = hc.Signals(
-            active_waiting=_cadence_active_waiting(sd, now),
-            recent_activity=_cadence_recent_activity(now),
-        )
-        raw = hc.raw_tier(signals)
-
-        # 2. authoritative cache-TTL (probe + cache + env fallback, all fail-open).
-        regime_config = (
-            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "auto").strip().lower() or "auto"
-        )
-        probe_cmd = os.environ.get(
-            "CLAUDE_PLUGIN_OPTION_HEARTBEAT_ACCOUNT_STATUS_COMMAND", "agentlenspro get_account_status"
-        )
-        probe_interval = state.coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_REGIME_PROBE_INTERVAL"), 1800
-        )
-        ttl_minutes, cache_write = hc.resolve_ttl_minutes(
-            now=now,
-            regime_config=regime_config,
-            cached=_read_json_file(sd / _TTL_REGIME_FILE),
-            probe_interval=probe_interval,
-            probe=lambda: hc.probe_account_status(probe_cmd),
-            env=os.environ,
-        )
-        if cache_write is not None:
-            state.atomic_write(sd / _TTL_REGIME_FILE, json.dumps(cache_write))
-
-        # 3. hysteresis → the tier actually in force (promote now / demote after N).
-        demote_fires = state.coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES"), 2
-        )
-        prev = hc.state_from_dict(_read_json_file(sd / _CADENCE_STATE_FILE))
-        committed = hc.commit_tier(raw, prev, demote_fires)
-
-        # 4. tier → desired cron.
-        overrides = {
-            hc.FAST: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_FAST", ""),
-            hc.MID: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_MID", ""),
-            hc.SLOW: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW", ""),
-        }
-        desired = hc.tier_to_cron(committed.committed_tier, ttl_minutes, overrides)
-        state.atomic_write(sd / _DESIRED_CADENCE_FILE, desired)
-
-        armed = ""
-        armed_path = sd / _ARMED_CADENCE_FILE
-        try:
-            if armed_path.is_file():
-                armed = armed_path.read_text().strip()
-        except OSError:
-            armed = ""
-
-        # 5. re-arm dwell (issue #89 half 2): a differing cron is necessary but not
-        # sufficient to re-emit [janitor-renew] — the LAST actual re-arm must also be
-        # at least dwell_s old, unless this fire is PROMOTING to a faster tier (a
-        # genuine time-sensitive signal — after the TRDD-CI6ZTNB9 self-exclusion fix
-        # the FAST/MID promotion path can no longer be the janitor's own housekeeping,
-        # so there is nothing left to damp on a promotion). This is a SEPARATE damping
-        # axis from demote_fires: that decides WHICH tier wins; this decides how OFTEN
-        # the winning tier may actually pay for a re-arm. Persisted in cadence-state.json
-        # (hc.CadenceState.last_rearm_ts) so the dwell survives across fires.
-        dwell_s = state.coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S"), hc.DEFAULT_DWELL_S
-        )
-        do_renew = hc.should_emit_renew(
-            desired_differs=desired.strip() != armed,
-            committed=committed,
-            prev=prev,
-            now=now,
-            dwell_s=dwell_s,
-        )
-        if do_renew:
-            committed = hc.stamp_rearm(committed, now)
-        state.atomic_write(sd / _CADENCE_STATE_FILE, json.dumps(hc.state_to_dict(committed)))
-        if do_renew:
-            # Re-cadence == re-arm: the protocol rule maps [janitor-renew] to
-            # /janitor-arm, which reads desired-cadence.cron, bakes it, and writes
-            # armed-cadence.cron — so this marker stops firing once reconciled.
-            # The call site (main) places this phase AFTER the rate-limit / compact
-            # resume early-returns, so a recovery fire never reaches here and stays
-            # clean — no resume-vs-renew gate is needed.
-            _emit_decision("[janitor-renew]")  # D5: bare token via the funnel
-    except Exception as exc:  # noqa: BLE001 - cadence must never break the fire
-        state.log_line("dispatch", f"cadence-tier phase failed: {exc}")
 
 
 def main() -> int:
@@ -2559,13 +2407,12 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 — belt-and-suspenders: survival is best-effort
         state.log_line("dispatch", f"self-cost call failed: {exc}")
 
-    # Phase 1.5a3: dynamic TTL-aware cadence tier (TRDD-0QQX9H0G, #83). Placed
-    # AFTER the rate-limit / compact resume early-returns (so a recovery fire
-    # never emits a re-arm marker and stays clean) and AFTER the keep-going nudge
-    # (so the nudge still leads that fire's output). It re-uses [janitor-renew] to
-    # re-arm the cron at the chosen tier; a total no-op when heartbeat_cadence_dynamic
-    # is off. The SLOW tier is the only cost lever left, and it never stops work.
-    _phase_cadence_tier()
+    # Phase 1.5a3 (TRDD-0QQX9H0G's tier-driven cadence, TRDD-BRHJHWW0's [janitor-renew] on
+    # every tier flip) is GONE — measured 2026-08-08: 5 re-arms in ~6.5h, each a full billed
+    # turn, driven by the janitor's OWN memory-chore agents flipping the tier back and forth.
+    # The ONLY remaining renew trigger is `_phase_heartbeat_renew`'s 7-day cron expiry, above.
+    # Per-detector last-run stamps still throttle the actual work on a quiet fire; the cadence
+    # itself is now a single fixed cron (`arm_prepare.DEFAULT_CRON`, user-overridable).
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
     _phase_autofix_mode_reminder()

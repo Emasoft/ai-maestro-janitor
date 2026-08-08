@@ -41,11 +41,10 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     # would share the real process's $HOME/.claude/janitor-control, and one test's
     # gs.set_maintenance_mode() would leak into the next test's assertions.
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "janitor-control"))
-    # These tests exercise OTHER phases via dispatch.main(); the dynamic cadence
-    # phase (TRDD-0QQX9H0G) is orthogonal noise for them (it would emit a one-time
-    # [janitor-renew] and, in "auto" regime, shell out to agentlenspro). Turn it
-    # off so their exact-output assertions stay focused — cadence has its own file.
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
+    # The dynamic-cadence phase (TRDD-0QQX9H0G) that used to run here — and emit its own
+    # one-time [janitor-renew] noise — was retired by TRDD-BRHJHWW0: mid-session tier flips
+    # were re-arming the cron several times an hour. Nothing left in main() reads
+    # CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC any more, so there is no env var to set.
 
     # Force-reload so module-level path resolution picks up the env.
     for mod in ("dispatch", "global_state", "state"):

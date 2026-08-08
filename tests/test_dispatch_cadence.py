@@ -1,11 +1,15 @@
-"""Integration tests for the dynamic cadence dispatch phase (TRDD-0QQX9H0G, #83).
+"""Tests for the heartbeat cadence surface after TRDD-BRHJHWW0.
 
-Real I/O, no mocks: each test points CLAUDE_PROJECT_DIR at a tmp dir, seeds the
-state files the phase reads, runs dispatch._phase_cadence_tier() in-process, and
-asserts the desired-cadence.cron it wrote + whether it emitted [janitor-renew].
-HEARTBEAT_TTL_REGIME is forced (subscription / api-key) so the phase never shells
-out to the agentlensPro probe — the probe itself is covered in
-test_heartbeat_cadence.py.
+TRDD-0QQX9H0G's dynamic tier controller (`_phase_cadence_tier`, `[janitor-renew]` on every
+promote/demote) is GONE: measured 2026-08-08, the janitor's own memory-chore agents flipped the
+tier back and forth and re-armed the cron five times in ~6.5h, each re-arm a full billed model
+turn. The cadence is now a single fixed cron (`arm_prepare.DEFAULT_CRON`, still overridable by
+`CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON`), and the ONLY surviving renew trigger is
+`_phase_heartbeat_renew`'s 7-day cron-expiry check.
+
+`_cadence_active_waiting` survives — it still gates the idle-compact and idle-clear phases (a
+session waiting on a resume must not be shrunk/cleared out from under itself) — so its own
+behavior is still exercised directly here, real I/O, no mocks.
 """
 
 from __future__ import annotations
@@ -43,17 +47,6 @@ def _import_dispatch():
     return mod
 
 
-def _run_phase(dispatch) -> str:
-    buf = StringIO()
-    old = sys.stdout
-    sys.stdout = buf
-    try:
-        dispatch._phase_cadence_tier()
-    finally:
-        sys.stdout = old
-    return buf.getvalue()
-
-
 def _run_main(dispatch) -> str:
     """Run a WHOLE fire (dispatch.main()) and return its stdout."""
     buf = StringIO()
@@ -70,75 +63,20 @@ def _state(proj: Path) -> Path:
     return proj / ".janitor" / "state"
 
 
-def test_dynamic_off_is_total_noop(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """heartbeat_cadence_dynamic=false → no files written, no output."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out == ""
-    assert not (_state(proj) / "desired-cadence.cron").exists()
-    assert not (_state(proj) / "cadence-state.json").exists()
+# --------------------------------------------------------------------------- #
+# TRDD-BRHJHWW0 acceptance: zero renews across a simulated day of tier-state
+# flapping — pending background agents (the exact TRDD-CI6ZTNB9 driver) appear
+# and disappear across many fires, and none of it may emit [janitor-renew].
+# --------------------------------------------------------------------------- #
 
 
-def test_idle_writes_slow_and_emits_renew(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Idle session, subscription regime → SLOW cron; armed absent → [janitor-renew]."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
-    assert out.strip() == "[janitor-renew]"
+def test_a_day_of_tier_state_flapping_emits_no_renew(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate ~24 fires with pending agents flapping on/off (the old FAST/SLOW churn driver).
+    With the tier controller gone there is nothing left to flap, and no `heartbeat-armed-at.ts`
+    on disk means `_phase_heartbeat_renew` has nothing to expire either — so across the whole
+    simulated day, not one fire may print `[janitor-renew]`."""
+    import json
 
-
-def test_silent_when_armed_matches_desired(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Once /janitor-arm has recorded armed-cadence.cron == desired, no marker fires."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "armed-cadence.cron").write_text("*/30 * * * *")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out == ""
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
-
-
-def test_recent_resume_promotes_to_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A FRESH last-resume.ts stamp is an active-waiting signal → FAST cron.
-
-    The stamp — not rate-limited.flag — is the cadence's view of a resume: the resume
-    phases unlink their flag and early-return from main() before this phase ever runs.
-    """
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
-
-
-def test_stale_resume_stamp_does_not_hold_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An OLD resume stamp expires → the session is free to demote back to SLOW."""
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    (_state(proj) / "last-resume.ts").write_text(str(int(time.time()) - 7200))
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
-
-
-def test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast(
-    proj: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """END-TO-END regression guard for the dead-signal bug (TRDD-0QQX9H0G).
-
-    Fire 1: rate-limited.flag → main() emits [janitor-resume] and returns EARLY, having
-    unlinked the flag — so the cadence phase never sees it and the fire's output must
-    stay clean (no [janitor-renew]). It leaves a last-resume.ts stamp.
-    Fire 2: the flag is gone, but the stamp makes the session ACTIVE-WAITING → FAST, so
-    the recovery retry loop runs at */5 instead of the idle */30 it would otherwise sit
-    at. Before the fix, fire 2 read no signal at all and demoted the session to SLOW.
-    """
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
     dispatch = _import_dispatch()
     import global_state as gs
     import state as st
@@ -146,72 +84,59 @@ def test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast(
     gs.init_global_state()
     st.init_state()
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
-    # Fire 2 runs the FULL roster now — the maintenance sentinel this test used to set to skip
-    # the chores is gone (owner directive 2026-07-31), so stub the detector runner instead. The
-    # cadence assertions are unchanged: they never depended on the mode, only on the signals.
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
+    sd = _state(proj)
+
+    for i in range(24):
+        pending = sd / "pending-agents.json"
+        if i % 2 == 0:
+            pending.write_text(
+                json.dumps([{"agentId": "a" * 17, "description": "memory-chore", "ts": 0, "nudges": 0, "transcript": ""}]),
+                encoding="utf-8",
+            )
+        else:
+            pending.unlink(missing_ok=True)
+        out = _run_main(dispatch)
+        assert "[janitor-renew]" not in out, f"fire {i} emitted a renew — tier flapping must never re-arm"
+
+    assert not (sd / "desired-cadence.cron").exists(), "nothing writes a tier-driven cron any more"
+    assert not (sd / "cadence-state.json").exists()
+
+
+def test_rate_limit_fire_stamps_resume_and_never_renews(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rate-limit recovery, and the fire right after it, must both stay renew-free.
+
+    Fire 1: rate-limited.flag → main() emits [janitor-resume] and returns EARLY, having unlinked
+    the flag, leaving a last-resume.ts stamp. Fire 2: the flag is gone but the stamp is still
+    fresh — `_cadence_active_waiting` reads True — yet with the tier controller retired that
+    boolean no longer drives any cron write or renew at all."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state as st
+
+    gs.init_global_state()
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
     monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
     (_state(proj) / "rate-limited.flag").write_text("")
 
     out1 = _run_main(dispatch)
     assert "[janitor-resume]" in out1
-    assert "rate-limit cleared" in out1
-    assert "[janitor-renew]" not in out1  # a recovery fire stays clean
+    assert "[janitor-renew]" not in out1
     assert not (_state(proj) / "rate-limited.flag").exists()
     assert (_state(proj) / "last-resume.ts").is_file()
-    assert not (_state(proj) / "desired-cadence.cron").exists()  # phase did not run
 
     out2 = _run_main(dispatch)
-    assert "rate-limit cleared" not in out2  # the flag is consumed; no second cue
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
-    assert "[janitor-renew]" in out2  # re-arm to FAST
-
-
-def test_api_key_regime_all_tiers_5min(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Under the 5-min-TTL regime every tier collapses to */5 (idle here)."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "api-key")
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
-
-
-def test_cadence_state_persisted(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The phase persists its hysteresis state for the next fire to read."""
-    import json
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    data = json.loads((_state(proj) / "cadence-state.json").read_text())
-    assert data["committed_tier"] == "slow"
-    assert data["raw_tier"] == "slow"
-
-
-def test_demote_hysteresis_holds_fast_one_idle_fire(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Seeded committed=FAST + one idle fire → stays FAST (demote needs 2 fires)."""
-    import json
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "cadence-state.json").write_text(
-        json.dumps({"raw_tier": "fast", "stable_count": 1, "committed_tier": "fast"})
-    )
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)  # idle fire (no signals)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+    assert "[janitor-renew]" not in out2
+    assert not (_state(proj) / "desired-cadence.cron").exists()
 
 
 def test_a_retired_maintenance_sentinel_changes_nothing_about_the_fire(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """INVERTED. This used to be the END-TO-END placement proof that a maintenance fire still
-    reached the cadence phase before its early-return — the phase deliberately sat ABOVE that
-    return so an idle maintenance session could demote to SLOW and get cheaper still.
-
-    There is no maintenance branch left to sit above (owner directive 2026-07-31). What the test
-    guards now is the MIGRATION: a host upgraded while in local maintenance still has
-    `.janitor/state/maintenance-mode` on disk, and that file must be inert — the fire runs its
-    full course and the cadence phase behaves exactly as it does without it. The old failure
-    mode, a leftover sentinel quietly suppressing every fire, is precisely what this pins shut."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    """A host upgraded while in local maintenance still has `.janitor/state/maintenance-mode` on
+    disk from an older janitor version; that file must be inert — the fire runs its full course
+    and, absent a `heartbeat-armed-at.ts`, emits no renew at all."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state as st
@@ -219,157 +144,104 @@ def test_a_retired_maintenance_sentinel_changes_nothing_about_the_fire(
     gs.init_global_state()
     st.init_state()
     (st.state_dir() / "maintenance-mode").write_text("set by an older janitor")
-    # Keep the fire hermetic: no daemon spawn, no real detector subprocesses.
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
     monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
 
     out = _run_main(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
-    assert "[janitor-renew]" in out  # first fire, armed absent → re-arm to SLOW
+    assert "[janitor-renew]" not in out
+    assert not (_state(proj) / "desired-cadence.cron").exists()
     # And the sentinel is SWEPT, so it cannot keep confusing whoever reads the state dir.
     assert not (st.state_dir() / "maintenance-mode").exists()
 
 
 # --------------------------------------------------------------------------- #
-# issue #89 half 2 — the re-arm DWELL. desired_differs != committed-tier-change:
-# even once the tier hysteresis picks a new committed tier, the ACTUAL re-arm
-# (a full billed model turn) must not fire again inside the dwell window unless
-# this is a genuine tier PROMOTION. Sibling of TRDD-CI6ZTNB9 (half 1, the
-# self-exclusion fix, tested above).
+# TRDD-BRHJHWW0 acceptance: the 7-day expiry renew still fires, exactly once.
 # --------------------------------------------------------------------------- #
 
 
-def _seed_cadence_state(proj: Path, *, raw_tier: str, committed_tier: str, last_rearm_ts: int, stable_count: int = 1) -> None:
-    import json
-
-    (_state(proj) / "cadence-state.json").write_text(
-        json.dumps(
-            {
-                "raw_tier": raw_tier,
-                "stable_count": stable_count,
-                "committed_tier": committed_tier,
-                "last_rearm_ts": last_rearm_ts,
-            }
-        )
-    )
-
-
-def test_dwell_suppresses_demotion_renew_within_window(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A demotion (FAST->SLOW, demote_fires=1 so it commits on this fire) whose last
-    re-arm was recent must NOT emit [janitor-renew] — this is exactly the re-arm
-    churn issue #89 describes. desired-cadence.cron is still updated (so /janitor-arm
-    picks up the right value once the dwell later allows a renew)."""
+def test_armed_cron_near_7day_expiry_renews_exactly_once(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`heartbeat-armed-at.ts` older than the threshold (default 6 days) renews on the first
+    fire that sees it, and the day-bucket dedupe silences every later fire on the same day."""
     import time
 
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 500)
-    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")  # armed to the old FAST cron
     dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out == ""  # dwell (default 1200s) suppresses the renew at only 500s
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+    import global_state as gs
+    import state as st
+
+    gs.init_global_state()
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
+    armed_at = int(time.time()) - 7 * 86400
+    (_state(proj) / "heartbeat-armed-at.ts").write_text(str(armed_at), encoding="utf-8")
+
+    out1 = _run_main(dispatch)
+    assert out1.count("[janitor-renew]") == 1
+
+    out2 = _run_main(dispatch)
+    assert "[janitor-renew]" not in out2, "same-day dedupe must silence the second fire"
 
 
-def test_dwell_allows_demotion_renew_after_window_expires(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The SAME demotion, but the last re-arm is old enough — dwell no longer blocks it."""
+def test_armed_cron_within_threshold_does_not_renew(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A freshly-armed cron (age well under the 6-day default threshold) never renews."""
     import time
 
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 1300)
-    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
     dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out.strip() == "[janitor-renew]"
-    import json
+    import global_state as gs
+    import state as st
 
-    data = json.loads((_state(proj) / "cadence-state.json").read_text())
-    assert data["committed_tier"] == "slow"
-    assert data["last_rearm_ts"] > now - 1300  # re-stamped to THIS fire
+    gs.init_global_state()
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
+    armed_at = int(time.time()) - 3600  # 1h old
+    (_state(proj) / "heartbeat-armed-at.ts").write_text(str(armed_at), encoding="utf-8")
+
+    out = _run_main(dispatch)
+    assert "[janitor-renew]" not in out
 
 
-def test_dwell_bypassed_for_a_genuine_fast_promotion(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A PROMOTION (SLOW->FAST via a fresh resume stamp) renews immediately even
-    seconds after the last re-arm — recovery latency must never wait on the dwell."""
+# --------------------------------------------------------------------------- #
+# TRDD-BRHJHWW0 acceptance: a compact-resume path never renews either.
+# --------------------------------------------------------------------------- #
+
+
+def test_post_compact_resume_fire_never_renews(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A post-compact resume returns early with [janitor-resume] (never [janitor-renew]),
+    and — with no tier controller left to react to the stamp it leaves behind — the very next
+    fire stays renew-free too."""
     import time
 
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="slow", committed_tier="slow", last_rearm_ts=now - 10)
-    (_state(proj) / "armed-cadence.cron").write_text("*/30 * * * *")  # armed to the old SLOW cron
-    (_state(proj) / "last-resume.ts").write_text(str(now))  # a genuine active-waiting signal
     dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out.strip() == "[janitor-renew]"
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+    import global_state as gs
+    import state as st
 
+    gs.init_global_state()
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda *a, **k: None)
+    sd = _state(proj)
+    sd.mkdir(parents=True, exist_ok=True)
+    dispatch.state.atomic_write(sd / "resume-after-compact.ts", str(int(time.time())))
+    dispatch.state.atomic_write(sd / "resume-after-compact.flag", "continue TRDD-SOMETHING")
 
-def test_dwell_env_var_zero_disables_the_feature(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S=0 restores the pre-dwell
-    behavior: every cron divergence renews, even a demotion moments after the
-    previous re-arm."""
-    import time
+    out1 = _run_main(dispatch)
+    assert out1.startswith("[janitor-resume]")
+    assert "[janitor-renew]" not in out1
+    assert not (sd / "resume-after-compact.flag").exists()
 
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S", "0")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 5)
-    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out.strip() == "[janitor-renew]"
-
-
-def test_dwell_env_var_custom_window_honored(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A short custom dwell (e.g. 60s) lets a re-arm land sooner than the 1200s default."""
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S", "60")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 90)
-    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out.strip() == "[janitor-renew]"  # 90s >= the 60s custom dwell
-
-
-def test_dwell_state_persists_across_two_suppressed_fires(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE regression this whole half exists to prevent: issue #89's observed
-    oscillation (*/15 <-> */5 every fire). Two consecutive fires inside the dwell
-    window must BOTH stay silent, and neither may reset the dwell anchor."""
-    import json
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    now = int(time.time())
-    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 100)
-    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
-    dispatch = _import_dispatch()
-
-    out1 = _run_phase(dispatch)
-    assert out1 == ""
-    data1 = json.loads((_state(proj) / "cadence-state.json").read_text())
-    assert data1["last_rearm_ts"] == now - 100  # unchanged — no renew happened
-
-    out2 = _run_phase(dispatch)
-    assert out2 == ""
-    data2 = json.loads((_state(proj) / "cadence-state.json").read_text())
-    assert data2["last_rearm_ts"] == now - 100  # still unchanged on the second silent fire
+    out2 = _run_main(dispatch)
+    assert "[janitor-renew]" not in out2
 
 
 # --------------------------------------------------------------------------- #
 # MF4 — the daemon-injectability handshake (TRDD-X07E7HTN, D1 v1). A rate-limit
-# resume may DEMOTE off FAST ONLY when the daemon has stamped daemon-wake-covered.ts
-# (it injected /janitor-resume into this pane for free). The coverage stamp — not
-# active_waiting itself — is the SOLE demotion authority, and it demotes ONLY the
-# rate-limit/resume reason. DEFAULT-OFF: absent the opt-in a stamp is ignored.
+# resume may DEMOTE off "active waiting" ONLY when the daemon has stamped
+# daemon-wake-covered.ts (it injected /janitor-resume into this pane for free).
+# The coverage stamp — not active_waiting itself — is the SOLE demotion authority,
+# and it demotes ONLY the rate-limit/resume reason. DEFAULT-OFF: absent the opt-in
+# a stamp is ignored. `_cadence_active_waiting` itself is exercised directly since
+# it still gates the idle-compact / idle-clear phases (see their own test files).
 # --------------------------------------------------------------------------- #
 
 
@@ -379,17 +251,13 @@ def _fresh_cover(proj: Path) -> None:
     (_state(proj) / "daemon-wake-covered.ts").write_text(str(int(time.time())))
 
 
-def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
+def test_active_waiting_non_ratelimit_reasons_stay_true_without_coverage(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE NEGATIVE TEST (MF4): a session active-waiting for a NON-rate-limit reason — a resume
-    directive or pending background agents — stays FAST with NO fresh daemon-wake-covered.ts.
-    This proves the coverage stamp, NOT active_waiting, authorizes demotion: the stamp demotes
-    ONLY the rate-limit/resume reason, never these.
-
-    `keep-going` used to be a third reason here and is gone with the off-switches: the nudge it
-    gated is unconditional now, so it would be true of every session and pin the whole fleet FAST.
-    """
+    """THE NEGATIVE TEST (MF4): active-waiting for a NON-rate-limit reason — a resume directive
+    or pending background agents — stays True with NO fresh daemon-wake-covered.ts. This proves
+    the coverage stamp, NOT active_waiting, authorizes demotion: the stamp demotes ONLY the
+    rate-limit/resume reason, never these."""
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
@@ -410,9 +278,9 @@ def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Even a FRESH coverage stamp must NOT demote a session waiting on a resume DIRECTIVE: the
-    stamp suppresses ONLY the rate-limit/resume reason. A pending directive is an independent FAST
-    signal, so a covered session with one is still FAST — this is why the demotion keys on the
-    reason, not on active_waiting as a whole."""
+    stamp suppresses ONLY the rate-limit/resume reason. A pending directive is an independent
+    True signal, so a covered session with one is still True — this is why the demotion keys on
+    the reason, not on active_waiting as a whole."""
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
@@ -427,9 +295,9 @@ def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
 def test_ratelimit_resume_demotes_only_with_fresh_coverage(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The SOLE demotion condition: a recent resume stamp forces FAST UNLESS a FRESH
+    """The SOLE demotion condition: a recent resume stamp forces True UNLESS a FRESH
     daemon-wake-covered.ts proves the daemon owns the wake for free. Stale/absent coverage
-    keeps FAST (the cron stays the trigger)."""
+    keeps True (the cron stays the trigger)."""
     import time
 
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
@@ -439,20 +307,20 @@ def test_ratelimit_resume_demotes_only_with_fresh_coverage(
     monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
     (sd / "last-resume.ts").write_text(str(now))
 
-    assert dispatch._cadence_active_waiting(sd, now) is True  # no coverage → FAST
+    assert dispatch._cadence_active_waiting(sd, now) is True  # no coverage → True
 
     (sd / "daemon-wake-covered.ts").write_text(str(now))
     assert dispatch._cadence_active_waiting(sd, now) is False  # fresh coverage → demote
 
     (sd / "daemon-wake-covered.ts").write_text(str(now - 100_000))
-    assert dispatch._cadence_active_waiting(sd, now) is True  # stale coverage → FAST again
+    assert dispatch._cadence_active_waiting(sd, now) is True  # stale coverage → True again
 
 
 def test_coverage_ignored_when_feature_disabled(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """DEFAULT-OFF preserves today's behavior: a fresh coverage stamp is IGNORED unless the
-    opt-in is set, so a rate-limited session stays FAST exactly as before D1 — a stray stamp
+    opt-in is set, so a rate-limited session stays True exactly as before D1 — a stray stamp
     can never silently demote (and under-cover) a session while the feature is disabled."""
     import time
 
@@ -464,25 +332,6 @@ def test_coverage_ignored_when_feature_disabled(
     (sd / "last-resume.ts").write_text(str(now))
     _fresh_cover(proj)
     assert dispatch._cadence_active_waiting(sd, now) is True
-
-
-def test_phase_demotes_ratelimit_window_with_fresh_coverage(
-    proj: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """END-TO-END: a rate-limited (recent-resume) session with FRESH daemon coverage demotes
-    the cron off FAST to the survival floor — the paid FAST poll is redundant because the
-    daemon owns the wake. Contrast test_recent_resume_promotes_to_fast (no coverage → FAST)."""
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
-    now = int(time.time())
-    (_state(proj) / "last-resume.ts").write_text(str(now))
-    (_state(proj) / "daemon-wake-covered.ts").write_text(str(now))
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
 
 
 def test_daemon_feature_on_does_not_disable_cron_resume_fallback(
@@ -508,62 +357,7 @@ def test_daemon_feature_on_does_not_disable_cron_resume_fallback(
     assert not (_state(proj) / "rate-limited.flag").exists(), "single-consumer flag cleared by the cron"
 
 
-# --------------------------------------------------------------------------- #
-# INVERTED (owner directive 2026-07-31) — the self-budget SLOW cap is GONE.
-# `_phase_cadence_tier` used to take `budget_cap_slow`, which clamped the committed tier
-# to the SLOW floor even when the live signals asked for FAST. Cost may no longer steer
-# the cadence at all: the tier follows the session's real state, and the user picks the
-# tier's cron. See scripts/dispatch.py::_phase_self_cost_alarm.
-# --------------------------------------------------------------------------- #
-
-
-def test_the_phase_takes_no_budget_argument(proj: Path) -> None:
-    """The signature IS the guarantee. A `budget_cap_slow` parameter is what let a cost
-    verdict override a live promote signal — a resuming session, told to check back
-    every 30 minutes because the week had been expensive."""
-    import inspect
-
-    dispatch = _import_dispatch()
-    params = inspect.signature(dispatch._phase_cadence_tier).parameters
-    assert list(params) == [], f"the cadence phase must take no arguments, got {list(params)}"
-
-
-def test_a_fast_signal_wins_regardless_of_recorded_cost(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The behavioural half: a fresh `last-resume.ts` promotes to FAST (*/5) even with a
-    token-meter log far above any budget. This is the case the cap got wrong — an
-    actively-waiting session is the one that must be checked on MOST often, and it is also,
-    inevitably, the one that has been spending."""
-    import json
-    import time
-
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
-    now = int(time.time())
-    (_state(proj) / "last-resume.ts").write_text(str(now))  # active-waiting → FAST signal
-    (_state(proj) / "token-meter.jsonl").write_text(
-        json.dumps({"ts": now, "heartbeat": True, "output": 5_000_000}) + "\n", encoding="utf-8"
-    )
-    dispatch = _import_dispatch()
-    _run_phase(dispatch)
-    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
-    assert json.loads((_state(proj) / "cadence-state.json").read_text())["committed_tier"] == "fast"
-
-
-def test_dynamic_off_is_still_a_total_noop(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With heartbeat_cadence_dynamic OFF the whole phase writes nothing and never errors.
-
-    The old version of this test closed by "documenting that maintenance is then the only
-    effective throttle" — that sentence is now false in both halves: maintenance is gone, and
-    the throttle it named was the thing that had to go. With dynamic cadence off, the cadence is
-    simply whatever the user armed."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
-    dispatch = _import_dispatch()
-    out = _run_phase(dispatch)
-    assert out == ""
-    assert not (_state(proj) / "desired-cadence.cron").exists()
-
-
-def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
+def test_a_stale_resume_directive_no_longer_pins_active_waiting(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """THE measured idle-burn defect (2026-08-02), and the asymmetry that caused it.
@@ -574,11 +368,6 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
     check was `is_file() and st_size > 0` with NO age bound, while its sibling signal — the
     resume STAMP one line above — has always been bounded to 30 min. Same signal class, one
     bounded, one not.
-
-    Consequence measured on a live host: an idle session held the FAST `*/5` tier for 2.9 h on a
-    directive written TWO DAYS earlier, which agentlensPro then reported as the fleet's #1
-    IDLE_FLEET_KEEPWARM culprit inside a ~$200 window. 6x the fires, indefinitely, for a wait
-    that had ended two days before.
 
     The fix bounds the CADENCE claim only. The file is still read as CONTENT by the resume
     phases and the keep-going nudge — an old directive still says what to resume, it just stops
@@ -601,20 +390,20 @@ def test_a_stale_resume_directive_no_longer_pins_the_session_to_FAST(
     # other case here already sets its own mtime; this one just inherited the clock.
     os.utime(d, (now, now))
 
-    # Fresh: still FAST — the signal must keep working for a real, current wait.
+    # Fresh: still True — the signal must keep working for a real, current wait.
     assert dispatch._cadence_active_waiting(sd, now) is True
 
-    # Two days old, exactly the observed case: must NOT hold FAST any more.
+    # Two days old, exactly the observed case: must NOT hold True any more.
     stale = now - 2 * 24 * 3600
     os.utime(d, (stale, stale))
     assert dispatch._cadence_active_waiting(sd, now) is False, (
-        "a stale directive still pins FAST — the idle-burn defect is back"
+        "a stale directive still pins active-waiting — the idle-burn defect is back"
     )
 
     # ...and the file is NOT deleted: it is still the pointer to what to resume.
     assert d.is_file() and d.read_text() == "continue TRDD-SOMETHING"
 
-    # Just inside the window is still FAST (boundary, so the bound cannot be silently widened).
+    # Just inside the window is still True (boundary, so the bound cannot be silently widened).
     fresh = now - (dispatch._RESUME_RECENCY_WINDOW_S - 60)
     os.utime(d, (fresh, fresh))
     assert dispatch._cadence_active_waiting(sd, now) is True

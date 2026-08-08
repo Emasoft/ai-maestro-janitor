@@ -74,6 +74,33 @@ def _prepare(project: Path) -> tuple[int, dict[str, str], str]:
     return _run(PREPARE, project, "--plugin-root", str(ROOT), "--data-dir", str(project / "data"))
 
 
+def _prepare_with_cron_env(project: Path, cron: str) -> tuple[int, dict[str, str], str]:
+    """Like `_prepare`, but with `CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON` set — the user's own
+    override knob (TRDD-BRHJHWW0 acceptance: the knob still wins once tiers stop driving
+    `desired-cadence.cron`)."""
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(project / "home"),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "CLAUDE_PLUGIN_DATA": str(project / "data"),
+        "JANITOR_GLOBAL_STATE_DIR": str(project / "gs"),
+        "CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON": cron,
+    }
+    proc = subprocess.run(
+        [sys.executable, str(PREPARE), "--plugin-root", str(ROOT), "--data-dir", str(project / "data")],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=project,
+    )
+    kv = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            kv[k.strip()] = v.strip()
+    return proc.returncode, kv, proc.stdout
+
+
 # --------------------------------------------------------------------------- #
 # The crash-safety property — a half-finished arm must never leak a heartbeat
 # --------------------------------------------------------------------------- #
@@ -145,11 +172,32 @@ def test_prepare_arms_the_cadence_the_DISPATCHER_asked_for(project: Path) -> Non
 
 
 def test_prepare_falls_back_to_the_default_cadence(project: Path) -> None:
-    """No tier chosen yet (dynamic cadence off, or a first arm) — the documented default."""
+    """No override on disk and no user config knob (TRDD-BRHJHWW0) — the fixed default."""
     rc, kv, _ = _prepare(project)
 
     assert rc == 0
-    assert kv["cron"] == "*/5 * * * *"
+    assert kv["cron"] == "*/15 * * * *"
+
+
+def test_prepare_honors_the_user_cron_knob(project: Path) -> None:
+    """TRDD-BRHJHWW0 acceptance: `CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON` still overrides the
+    fixed default once the dispatcher no longer writes a tier-driven `desired-cadence.cron`."""
+    rc, kv, _ = _prepare_with_cron_env(project, "*/10 * * * *")
+
+    assert rc == 0
+    assert kv["cron"] == "*/10 * * * *"
+
+
+def test_prepare_prefers_an_on_disk_override_over_the_user_knob(project: Path) -> None:
+    """An explicit `desired-cadence.cron` (a manual or future override) still wins over the
+    config knob — `resolve_cron`'s documented precedence, unchanged by TRDD-BRHJHWW0."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / "desired-cadence.cron").write_text("*/20 * * * *\n", encoding="utf-8")
+
+    rc, kv, _ = _prepare_with_cron_env(project, "*/10 * * * *")
+
+    assert rc == 0
+    assert kv["cron"] == "*/20 * * * *"
 
 
 def test_prepare_revokes_the_opt_out_and_installs_the_stub(project: Path) -> None:

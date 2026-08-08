@@ -287,9 +287,11 @@ def terminal_from_record(record: Mapping[str, str]) -> dict[str, str]:
 def read_ttl_minutes(state_dir: Path) -> int:
     """The probed prompt-cache TTL the dispatcher cached, or `DEFAULT_TTL_MINUTES`.
 
-    Read rather than re-probed: `heartbeat_cadence.resolve_ttl_minutes` needs a probe callable
-    and owns its own refresh cadence, and a watcher that runs outside the model has no business
-    spending a subprocess on something the heartbeat already resolves and persists.
+    `ttl-regime.json` was written by the dynamic-cadence phase's TTL probe, retired by
+    TRDD-BRHJHWW0 — nothing writes this file any more, so this reader now always falls
+    back to `DEFAULT_TTL_MINUTES`. Left in place (rather than deleted) because a future
+    probe could still populate the same file, and a watcher that runs outside the model
+    has no business spending a subprocess on a probe of its own.
     """
     import json  # noqa: PLC0415 -- only this reader needs it
 

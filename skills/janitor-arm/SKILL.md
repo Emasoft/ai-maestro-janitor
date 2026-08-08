@@ -8,13 +8,15 @@ description: Arms or renews the ai-maestro-janitor heartbeat cron. Use when firs
 Creates (or replaces) the single heartbeat cron. The cron fires an **auto-rolling stub** in the
 plugin DATA dir, which re-resolves the newest cached plugin version on every fire — so plugin
 updates roll forward with **no re-arm**. Re-arming is needed only on first install, on a
-`[janitor-renew]` marker, or when the user asks. Re-running is safe and idempotent.
+`[janitor-renew]` marker near the cron's 7-day auto-expiry, or when the user asks. There is no
+dynamic-tier trigger any more (TRDD-BRHJHWW0 retired it — mid-session tier flips were re-arming
+the cron several times an hour). Re-running is safe and idempotent.
 
 **Four tool calls, in this order.** The count is the point: every tool round-trip re-reads the
 whole conversation at the 0.1× cache-read rate (~52k weighted at a 520k context), so an arm costs
-roughly what six quiet heartbeat fires cost. The dynamic cadence re-arms on every tier change, so
-a cheap arm is what keeps that feature from costing more than it saves (TRDD-DLI76AUC). Do not add
-calls back.
+roughly what six quiet heartbeat fires cost. Re-arms are now rare — only the 7-day expiry, a
+fresh install, or an explicit ask — but each one is still a full billed turn, so a cheap arm keeps
+even that occasional cost small (TRDD-DLI76AUC). Do not add calls back.
 
 ## 1. Prepare
 
@@ -57,9 +59,9 @@ is already gone is fine — proceed.
 
 ## 3. Create the new cron
 
-Build the heartbeat prompt, then `CronCreate` with `cron` **exactly as step 1 printed it** (it is
-the tier the dispatcher asked for — re-arming a different cadence makes the dispatcher ask again on
-the next fire, a renew loop that never converges) and `recurring: true`. Do **not** pass
+Build the heartbeat prompt, then `CronCreate` with `cron` **exactly as step 1 printed it** (the
+fixed cadence — the user's config knob, or the default — resolved by `arm_prepare.resolve_cron`)
+and `recurring: true`. Do **not** pass
 `durable: true`: the CronCreate tool documents it as having no effect — every scheduled job is
 session-only by platform design — so sending it implies a persistence that does not exist. Replace
 `{{STUB_DEST}}` with the absolute path `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`:
