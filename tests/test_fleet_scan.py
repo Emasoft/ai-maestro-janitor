@@ -321,6 +321,33 @@ def test_interpreter_parse_fails_open_on_a_pre_upgrade_flag() -> None:
     assert fs.iterm_automation_interpreter('{"interpreter": 17}') == ""
 
 
+def test_flag_carries_the_second_view_verdict(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-DFKEXO79: the grant-free `claude agents --json` verdict rides the flag so a
+    verdict CHANGE re-alarms once — the moment the second view first proves
+    'blocked-not-empty' is exactly new information the human needs."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True, second_view="channel-blocked-not-empty")
+
+    raw = flag.read_text(encoding="utf-8")
+    assert fs.iterm_automation_second_view(raw) == "channel-blocked-not-empty"
+    assert fs.iterm_automation_interpreter(raw) == sys.executable  # both fields coexist
+    # A verdict change IS a content change → compare-and-write rewrites (re-alarm once).
+    fs.record_iterm_automation_state(True, second_view="consistent-empty")
+    assert fs.iterm_automation_second_view(flag.read_text(encoding="utf-8")) == "consistent-empty"
+
+
+def test_second_view_parse_fails_open() -> None:
+    """Same fail-open contract as the interpreter field: absent/pre-upgrade/garbage → ""."""
+    assert fs.iterm_automation_second_view("plain prose flag") == ""
+    assert fs.iterm_automation_second_view('{"interpreter": "/x"}') == ""
+    assert fs.iterm_automation_second_view('{"second_view": 3}') == ""
+
+
 # ---------------------------------------------------------------------------
 # TRDD-8DR0X08A — substantive liveness: the guardian's own typed command appends
 # a queue-operation line that refreshed the mtime probe, resetting the attempt

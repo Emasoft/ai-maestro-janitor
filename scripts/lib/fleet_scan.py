@@ -168,20 +168,25 @@ def iterm_automation_blocked(*, iterm_running: bool, sessions: dict[str, str]) -
     return iterm_running and not sessions
 
 
-def iterm_automation_payload(*, interpreter: str) -> str:
+def iterm_automation_payload(*, interpreter: str, second_view: str = "") -> str:
     """The flag's exact content for a blocked observation. PURE — so the compare-and-write
     below can decide "has anything CHANGED?" without a timestamp making it always-yes.
+
+    `second_view` carries the grant-free `claude agents --json` verdict (TRDD-DFKEXO79):
+    `channel-blocked-not-empty` / `consistent-empty` / `probe-failed:<why>` / "" (not
+    probed). It is part of the payload so a verdict CHANGE re-alarms once — the moment
+    the second view first proves "blocked-not-empty" is exactly new information.
     """
-    return json.dumps(
-        {
-            "observed": "iTerm running, 0 iTerm sessions enumerated by osascript",
-            "interpreter": interpreter,
-        },
-        sort_keys=True,
-    )
+    data = {
+        "observed": "iTerm running, 0 iTerm sessions enumerated by osascript",
+        "interpreter": interpreter,
+    }
+    if second_view:
+        data["second_view"] = second_view
+    return json.dumps(data, sort_keys=True)
 
 
-def record_iterm_automation_state(blocked: bool) -> None:
+def record_iterm_automation_state(blocked: bool, *, second_view: str = "") -> None:
     """Persist (or clear) the observation for the heartbeat to surface.
 
     The daemon is a detached process nobody reads the logs of; the heartbeat is the only
@@ -213,7 +218,7 @@ def record_iterm_automation_state(blocked: bool) -> None:
         if not blocked:
             flag.unlink(missing_ok=True)
             return
-        payload = iterm_automation_payload(interpreter=sys.executable)
+        payload = iterm_automation_payload(interpreter=sys.executable, second_view=second_view)
         try:
             if flag.read_text(encoding="utf-8") == payload:
                 return  # unchanged — leave the mtime alone so the ack still holds
@@ -234,13 +239,23 @@ def iterm_automation_interpreter(raw: str) -> str:
     pre-upgrade flag left on disk parses to "" and the alarm simply omits the path rather
     than crashing or printing garbage.
     """
+    return _iterm_flag_field(raw, "interpreter")
+
+
+def iterm_automation_second_view(raw: str) -> str:
+    """The second-view verdict recorded in a flag's contents, or "" when absent. PURE.
+    Same fail-open contract as `iterm_automation_interpreter`."""
+    return _iterm_flag_field(raw, "second_view")
+
+
+def _iterm_flag_field(raw: str, key: str) -> str:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return ""
     if not isinstance(data, dict):
         return ""
-    value = data.get("interpreter", "")
+    value = data.get(key, "")
     return value if isinstance(value, str) else ""
 
 
@@ -697,9 +712,29 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     # Record it so the heartbeat can tell the human ONCE, instead of the daemon skipping
     # every frozen iTerm instance in silence forever. Self-clears the moment the grant
     # lands and sessions come back.
-    record_iterm_automation_state(
-        iterm_automation_blocked(iterm_running=iterm_running, sessions=iterm_by_tty)
-    )
+    blocked = iterm_automation_blocked(iterm_running=iterm_running, sessions=iterm_by_tty)
+    second_view = ""
+    if blocked:
+        # The INDEPENDENT SECOND VIEW (TRDD-DFKEXO79, janitor#92): osascript's zero alone
+        # cannot distinguish a denied/hung channel from a genuinely empty host — a denial
+        # returning empty writes no error either. `claude agents --json` needs no session
+        # and no Automation grant, so its answer discriminates. Only probed on the RARE
+        # blocked path (one ~1s subprocess), never on a healthy scan. A failed probe is
+        # recorded AS a failed probe — "cannot check" must never read as "checked, empty".
+        try:
+            import cli_agent_roster  # noqa: PLC0415 -- local, like global_state below
+
+            rows, why = cli_agent_roster.fetch_agents()
+            second_view = (
+                f"probe-failed:{why}"
+                if why
+                else cli_agent_roster.second_view_verdict(
+                    osascript_sessions=0, cli_rows_for_host=len(rows)
+                )
+            )
+        except Exception:  # noqa: BLE001 -- the second view must never break a scan
+            second_view = ""
+    record_iterm_automation_state(blocked, second_view=second_view)
     aimaestro_cli, aimaestro_agents, aimaestro_list_ok = _aimaestro_agents()
     # The harness-exclusion inputs (TRDD-PZLVT2RN): a SUCCESSFUL list refreshes the
     # last-known agent-roots cache; a FAILED one (server down OR hiccup — we cannot

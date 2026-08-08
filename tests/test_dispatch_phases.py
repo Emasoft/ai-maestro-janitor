@@ -1600,6 +1600,48 @@ def test_iterm_alarm_acks_per_distinct_observation_not_per_mtime(
     assert capsys.readouterr().out == "", "a re-flip to seen content must stay silent"
 
 
+def test_iterm_alarm_states_the_second_view_verdict(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """TRDD-DFKEXO79: when the grant-free enumeration ran, the alarm must SAY which way
+    it discriminated — 'blocked-not-empty' resolves the (a)/(b) ambiguity the base text
+    is honest about, 'consistent-empty' points away from a denial, and a failed probe is
+    reported as a failed probe, never silently dropped."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    dispatch = _import_dispatch()
+
+    flag.write_text(
+        json.dumps({"observed": "o", "interpreter": "/d/py",
+                    "second_view": "channel-blocked-not-empty"}, sort_keys=True),
+        encoding="utf-8",
+    )
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+    assert "AMBIGUITY IS RESOLVED" in out
+    assert "DID find live sessions" in out
+
+    flag.write_text(
+        json.dumps({"observed": "o", "interpreter": "/d/py",
+                    "second_view": "consistent-empty"}, sort_keys=True),
+        encoding="utf-8",
+    )
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+    assert "ALSO found zero sessions" in out
+
+    flag.write_text(
+        json.dumps({"observed": "o", "interpreter": "/d/py",
+                    "second_view": "probe-failed:claude-not-on-PATH"}, sort_keys=True),
+        encoding="utf-8",
+    )
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+    assert "could not run" in out
+    assert "ambiguity stands" in out
+
+
 def test_iterm_alarm_names_the_interpreter_the_grant_follows(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:

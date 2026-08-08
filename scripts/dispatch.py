@@ -1350,8 +1350,32 @@ def _phase_iterm_automation_alarm() -> None:
             import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
 
             interpreter = fleet_scan.iterm_automation_interpreter(raw_flag)
+            second_view = fleet_scan.iterm_automation_second_view(raw_flag)
         except ImportError:
             interpreter = ""
+            second_view = ""
+        # The grant-free second view (TRDD-DFKEXO79): `claude agents --json` needs no
+        # Automation grant, so its answer can discriminate what osascript's zero cannot.
+        # Sanitized like every other flag-derived string — this print is trusted stdout.
+        if second_view == "channel-blocked-not-empty":
+            discriminated = (
+                " THIS TIME THE AMBIGUITY IS RESOLVED: an independent grant-free "
+                "enumeration (`claude agents --json`) DID find live sessions on this "
+                "host in the same scan — the channel is BLOCKED (denied grant or hung "
+                "osascript), NOT an empty host."
+            )
+        elif second_view == "consistent-empty":
+            discriminated = (
+                " An independent grant-free enumeration ALSO found zero sessions — "
+                "consistent with a genuinely session-less host, not a blocked channel."
+            )
+        elif second_view:
+            discriminated = (
+                " The independent second view could not run "
+                f"({state.sanitize_for_drift_line(second_view)}) — the ambiguity stands."
+            )
+        else:
+            discriminated = ""
         # SANITIZE before printing (review 2026-08-08): the flag is file-derived text
         # any local process can write, and this print IS the heartbeat's trusted
         # stdout — an embedded newline + bare `[janitor-...]` line would otherwise
@@ -1366,12 +1390,13 @@ def _phase_iterm_automation_alarm() -> None:
         print(
             "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
             "iTerm sessions via osascript. A running iTerm always has at least one, so the "
-            "Apple Event did not come back — but this measurement CANNOT tell you why. Two "
-            "causes fit it equally: (a) macOS is denying Automation (Apple Events) access, "
-            "or (b) the osascript hung/timed out/failed for another reason. Absence of a "
-            "denial message in the logs is NOT evidence of a working grant — a denied event "
-            "that returns empty logs nothing either. The only POSITIVE evidence is the "
-            "guardian actually resolving an iTerm channel (a `FIRED rearm → iterm` line). "
+            "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
+            "Two causes fit it equally: (a) macOS is denying Automation (Apple Events) "
+            "access, or (b) the osascript hung/timed out/failed for another reason. Absence "
+            "of a denial message in the logs is NOT evidence of a working grant — a denied "
+            "event that returns empty logs nothing either. The only POSITIVE evidence is the "
+            "guardian actually resolving an iTerm channel (a `FIRED rearm → iterm` line)."
+            f"{discriminated} "
             "Consequence either way: the fleet guardian CANNOT rescue a frozen/rate-limited "
             "Claude in any iTerm pane (tmux panes are unaffected) and has been skipping them "
             "silently. If it is (a): System Settings → Privacy & Security → Automation → "
