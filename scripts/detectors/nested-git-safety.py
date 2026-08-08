@@ -23,6 +23,7 @@ under the 10s budget.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -32,6 +33,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+
+
+def _git_env() -> dict[str, str]:
+    """Read-only detector: GIT_OPTIONAL_LOCKS=0 so `rev-parse`/`check-ignore`/
+    `submodule status` never take .git/index.lock and collide with a
+    concurrent `publish.py` commit (janitor#245)."""
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    return env
 
 _PRUNE_NAMES = {".git", ".trashcan", "node_modules", "dist", "build", ".venv", "venv"}
 _MIN_DEPTH = 2
@@ -74,10 +84,13 @@ def main() -> int:
     seen = state.state_dir() / "nested-git-safety-seen.txt"
     root = state.project_root()
 
+    git_env = _git_env()
+
     if subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(root),
         capture_output=True, text=True, check=False,
+        env=git_env,
     ).returncode != 0:
         state.log_line("nested-git-safety", "not a git repo — skipping")
         return 0
@@ -101,12 +114,14 @@ def main() -> int:
             ["git", "check-ignore", "-q", "--", parent_dir],
             cwd=str(root),
             capture_output=True, text=True, check=False,
+            env=git_env,
         ).returncode == 0:
             continue
         if subprocess.run(
             ["git", "check-ignore", "-q", "--", rel_str],
             cwd=str(root),
             capture_output=True, text=True, check=False,
+            env=git_env,
         ).returncode == 0:
             continue
 
@@ -115,6 +130,7 @@ def main() -> int:
             ["git", "submodule", "status", "--", parent_dir],
             cwd=str(root),
             capture_output=True, text=True, check=False,
+            env=git_env,
         ).returncode == 0:
             continue
 

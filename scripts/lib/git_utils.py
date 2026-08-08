@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,7 +32,14 @@ def _git(
     .returncode and .stdout themselves. `_stdin` feeds a payload to commands that
     read one (`check-ignore --stdin`) so a large batch costs ONE fork instead of
     one per item; it is underscore-prefixed to keep it out of the *args passthrough.
+
+    Every call here is read-only, so the child gets `GIT_OPTIONAL_LOCKS=0`
+    (janitor#245): `git status`/`git diff` still WRITE `.git/index.lock` for
+    their optional stat-cache write-back, and that collided with a concurrent
+    `publish.py` commit — a read-only helper must never contend for that lock.
     """
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd is not None else None,
@@ -39,6 +47,7 @@ def _git(
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 

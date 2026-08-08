@@ -49,9 +49,15 @@ _SECURITY_DETECTORS = (
 
 
 def _run(cmd: list[str], *, timeout: int = 10, cwd: str | None = None) -> str:
+    # Every probe here is read-only. GIT_OPTIONAL_LOCKS=0 stops `git status`/
+    # `rev-parse` from taking .git/index.lock and colliding with a concurrent
+    # `publish.py` commit (janitor#245); it is inert for the non-git probes
+    # (`ps`, `gh`) this helper also runs.
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         return subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd
+            cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env
         ).stdout.strip()
     except Exception:  # noqa: BLE001 -- a probe must never break the dashboard
         return ""

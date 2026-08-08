@@ -63,10 +63,17 @@ def main() -> int:
     stale_days = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_STASH_STALE_DAYS"), 30)
 
     project_root = state.project_root()
+
+    # Read-only: GIT_OPTIONAL_LOCKS=0 so these never take .git/index.lock and
+    # collide with a concurrent `publish.py` commit (janitor#245).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+
     if subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(project_root),
         capture_output=True, text=True, check=False,
+        env=git_env,
     ).returncode != 0:
         state.log_line("stale-stash", "not a git repo — skipping")
         return 0
@@ -79,6 +86,7 @@ def main() -> int:
         ["git", "stash", "list", "--format=%gd%x09%cI%x09%s"],
         cwd=str(project_root),
         capture_output=True, text=True, check=False,
+        env=git_env,
     )
     if proc.returncode != 0:
         state.log_line("stale-stash", "git stash list failed — skipping")

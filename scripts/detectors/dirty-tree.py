@@ -70,12 +70,20 @@ def main() -> int:
     dirty_since = state.state_dir() / "dirty-tree-since.ts"
     threshold = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_DIRTY_TREE_THRESHOLD"), 1800)
 
+    # Read-only calls only: GIT_OPTIONAL_LOCKS=0 stops `git status` from taking
+    # .git/index.lock for its optional stat-cache write-back, which otherwise
+    # collides with a concurrent `publish.py` commit (janitor#245 — this is the
+    # named repro site: a heartbeat `git status` killed a real publish).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+
     proc = subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True,
         text=True,
         check=False,
+        env=git_env,
     )
     if proc.returncode != 0:
         state.log_line("dirty-tree", "not a git repo — skipping")
@@ -93,6 +101,7 @@ def main() -> int:
         capture_output=True,
         text=True,
         check=False,
+        env=git_env,
     )
     dirty_lines = sum(1 for line in status.stdout.splitlines() if line and not _is_janitor_proposal(line))
 

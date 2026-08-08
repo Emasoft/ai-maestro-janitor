@@ -104,10 +104,16 @@ def _settings_is_dirty(project_root: Path) -> bool:
     if not settings.is_file():
         return False
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so `git status` never takes
+        # .git/index.lock and collides with a concurrent `publish.py` commit
+        # (janitor#245 — the named repro site for exactly this call shape).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "-C", str(project_root), "status", "--porcelain",
              "--", SETTINGS_REL_PATH],
             capture_output=True, text=True, timeout=15, check=False,
+            env=git_env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False

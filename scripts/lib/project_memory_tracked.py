@@ -43,12 +43,17 @@ def _check_ignored(repo_root: Path) -> bool | None:
     file exists on disk — exactly what we need to verify the exception works.
     """
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "-C", str(repo_root), "check-ignore", "-q", _PROBE_REL],
             capture_output=True,
             text=True,
             check=False,
             timeout=10,
+            env=git_env,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return None

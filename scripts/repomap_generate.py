@@ -146,14 +146,21 @@ def _resolve_root(arg: str | None) -> Path:
 
 
 def _git(root: Path, *args: str) -> str | None:
-    """Run a git command in `root`; None on any failure (non-repo, no git)."""
+    """Run a git command in `root`; None on any failure (non-repo, no git).
+
+    Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    collides with a concurrent `publish.py` commit (janitor#245).
+    """
     try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         res = subprocess.run(
             ["git", *args],
             cwd=root,
             capture_output=True,
             text=True,
             timeout=30,
+            env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

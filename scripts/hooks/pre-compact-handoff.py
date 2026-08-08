@@ -115,8 +115,13 @@ def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
 
     Best-effort and exception-proof: a missing git, a non-repo cwd, or a timeout
     must not break the handoff (the section degrades to "(unavailable)").
+
+    Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    collides with a concurrent `publish.py` commit (janitor#245).
     """
     try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", *args],
             cwd=str(cwd),
@@ -124,6 +129,7 @@ def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
             text=True,
             timeout=timeout,
             check=False,
+            env=git_env,
         )
     except (OSError, subprocess.SubprocessError):
         return ""

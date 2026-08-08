@@ -63,13 +63,20 @@ _FRONTMATTER_BYTES = 4096
 
 def _run_git(root: Path, *args: str) -> str:
     """Best-effort `git` in `root`; "" on any failure. Never raises — a repo-less project must
-    still get a handoff, just one without the commit section."""
+    still get a handoff, just one without the commit section.
+
+    Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    collides with a concurrent `publish.py` commit (janitor#245).
+    """
     try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         out = subprocess.run(  # noqa: S603 - fixed argv, no shell
             ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
             timeout=15,
+            env=git_env,
         )
     except (OSError, subprocess.SubprocessError):
         return ""

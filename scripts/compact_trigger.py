@@ -93,11 +93,16 @@ def _project_root() -> Path:
     if explicit:
         return Path(explicit)
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=True,
+            env=git_env,
         )
         return Path(out.stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):

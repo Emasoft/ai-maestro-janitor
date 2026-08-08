@@ -33,6 +33,15 @@ import state  # noqa: E402
 _ORIGIN_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 
 
+def _git_env() -> dict[str, str]:
+    """Read-only detector: GIT_OPTIONAL_LOCKS=0 so these never take
+    .git/index.lock and collide with a concurrent `publish.py` commit
+    (janitor#245)."""
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    return env
+
+
 def _resolve_repo() -> Optional[str]:
     repo = os.environ.get("CLAUDE_PLUGIN_OPTION_GITHUB_REPO", "").strip()
     if repo:
@@ -43,6 +52,7 @@ def _resolve_repo() -> Optional[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     if proc.returncode != 0:
         return None
@@ -68,6 +78,7 @@ def main() -> int:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     if main_proc.returncode != 0:
         state.log_line("pr-reconciler", "origin/main not resolvable — skipping")
@@ -138,6 +149,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             check=False,
+            env=_git_env(),
         )
         if is_ancestor.returncode == 0:
             out = dedupe.emit_once(

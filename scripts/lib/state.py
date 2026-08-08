@@ -117,11 +117,16 @@ def _resolve_project_root() -> Path:
     if _PROJECT_DIR_OVERRIDE:
         return Path(_PROJECT_DIR_OVERRIDE)
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=True,
+            env=git_env,
         )
         return Path(proc.stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -922,7 +927,18 @@ def run_subprocess(
     Capture defaults on (`capture_output=True`); pass `capture=False` for
     detectors whose stdout must flow through to the cron prompt
     (dispatch.py's detector-invocation path uses that direct form).
+
+    Every child inherits `GIT_OPTIONAL_LOCKS=0` (janitor#245): a read-only
+    `git status`/`git diff` still WRITES `.git/index.lock` for its optional
+    stat-cache write-back, and the ~5-minute heartbeat overlapping a
+    minutes-long `publish.py` commit made that lock collision SCHEDULED,
+    not unlucky — it killed real publishes with "Unable to create
+    .git/index.lock". `git status` itself fails soft on the collision
+    (rc=0, no visible symptom), so the janitor never noticed. This env var
+    is git's own documented escape hatch and is inert for non-git children.
     """
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         return subprocess.run(
             cmd,
@@ -931,6 +947,7 @@ def run_subprocess(
             text=True,
             check=False,
             timeout=timeout,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         if detector_name:

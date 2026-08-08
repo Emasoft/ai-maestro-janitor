@@ -34,6 +34,7 @@ Out of scope (good follow-ups):
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -228,10 +229,16 @@ def main() -> int:
     seen = state.state_dir() / "cross-scope-reference-drift-seen.txt"
     root = state.project_root()
 
+    # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    # collides with a concurrent `publish.py` commit (janitor#245).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+
     if subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(root),
         capture_output=True, text=True, check=False,
+        env=git_env,
     ).returncode != 0:
         state.log_line("cross-scope-reference-drift", "not a git repo — skipping")
         return 0

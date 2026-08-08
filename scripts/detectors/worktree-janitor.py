@@ -27,6 +27,7 @@ because `locked` can appear after `branch` in the block.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -41,10 +42,16 @@ import state  # noqa: E402
 
 
 def _git(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
+    # Read-only detector: GIT_OPTIONAL_LOCKS=0 keeps `git status`/`rev-parse`
+    # from taking .git/index.lock and colliding with a concurrent `publish.py`
+    # commit (janitor#245).
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd is not None else None,
         capture_output=True, text=True, check=False,
+        env=env,
     )
 
 
@@ -108,10 +115,7 @@ def _process_block(
     display_branch = state.sanitize_for_drift_line(branch)
 
     # Branch ref deleted out from under the worktree.
-    show_ref = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        capture_output=True, text=True, check=False,
-    )
+    show_ref = _git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
     if show_ref.returncode != 0:
         line = dedupe.emit_once(
             seen,
@@ -162,10 +166,7 @@ def _process_block(
     if upstream_proc.returncode == 0:
         upstream = upstream_proc.stdout.strip()
     if not upstream:
-        if subprocess.run(
-            ["git", "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],
-            capture_output=True, text=True, check=False,
-        ).returncode == 0:
+        if _git("show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}").returncode == 0:
             upstream = f"origin/{branch}"
 
     if not upstream:

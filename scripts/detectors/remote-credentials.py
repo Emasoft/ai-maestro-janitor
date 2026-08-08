@@ -19,6 +19,7 @@ leaking.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -71,10 +72,16 @@ def main() -> int:
 
     seen = state.state_dir() / "remote-credentials-seen.txt"
 
+    # Read-only: GIT_OPTIONAL_LOCKS=0 so these never take .git/index.lock and
+    # collide with a concurrent `publish.py` commit (janitor#245).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+
     if subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
+        env=git_env,
     ).returncode != 0:
         state.log_line("remote-credentials", "not a git repo — skipping")
         return 0
@@ -83,6 +90,7 @@ def main() -> int:
         ["git", "remote", "-v"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
+        env=git_env,
     )
     if proc.returncode != 0:
         return 0

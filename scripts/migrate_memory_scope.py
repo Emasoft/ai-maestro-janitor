@@ -34,6 +34,7 @@ clear message. Nothing is ever half-applied.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -62,9 +63,14 @@ def _cwd_repo_root() -> Path | None:
     """The git root of the CURRENT working directory, or None when cwd is not in a repo.
     This is what the ownership guard compares against `--project-repo`."""
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10, check=False,
+            env=git_env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None

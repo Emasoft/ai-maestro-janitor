@@ -52,9 +52,15 @@ def _early_log(message: str) -> None:
                 root = Path(proj)
             else:
                 try:
+                    # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes
+                    # .git/index.lock and collides with a concurrent
+                    # `publish.py` commit (janitor#245).
+                    git_env = dict(os.environ)
+                    git_env["GIT_OPTIONAL_LOCKS"] = "0"
                     out = subprocess.run(
                         ["git", "rev-parse", "--show-toplevel"],
                         capture_output=True, text=True, check=True, timeout=5,
+                        env=git_env,
                     ).stdout.strip()
                     root = Path(out) if out else Path.cwd()
                 except (OSError, subprocess.SubprocessError):

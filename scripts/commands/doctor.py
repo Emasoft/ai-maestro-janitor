@@ -127,10 +127,15 @@ def _check_git_available() -> CheckResult:
 
 
 def _check_in_git_repo() -> CheckResult:
+    # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    # collides with a concurrent `publish.py` commit (janitor#245).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
         ["git", "rev-parse", "--git-dir"],
         cwd=str(state.project_root()),
         capture_output=True, text=True, check=False,
+        env=git_env,
     )
     if proc.returncode == 0:
         return ("in-git-repo", "PASS", f"{state.project_root()} is a git repo", "")

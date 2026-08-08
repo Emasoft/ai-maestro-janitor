@@ -228,9 +228,14 @@ def resolve_project_dir() -> Path | None:
     finds the repo root (TRDD-c77dae09)."""
     proj = _project_dir() or None
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=proj, capture_output=True, text=True, timeout=10, check=False,
+            env=git_env,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None

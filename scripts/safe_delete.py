@@ -98,9 +98,14 @@ def _resolve_project_root() -> Path:
     explicit = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
     if explicit and Path(explicit).is_dir():
         return Path(explicit).resolve()
+    # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
+    # collides with a concurrent `publish.py` commit (janitor#245).
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
     proc = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, check=False,
+        env=git_env,
     )
     if proc.returncode == 0 and proc.stdout.strip():
         return Path(proc.stdout.strip()).resolve()

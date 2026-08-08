@@ -171,6 +171,10 @@ def _project_memdir(project_dir: str | None) -> Path | None:
     the repo root."""
     cwd = (project_dir or os.getcwd()).strip() or None
     try:
+        # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
+        # and collides with a concurrent `publish.py` commit (janitor#245).
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
         proc = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=cwd,
@@ -178,6 +182,7 @@ def _project_memdir(project_dir: str | None) -> Path | None:
             text=True,
             timeout=_TIMEOUT_S,
             check=False,
+            env=git_env,
         )
     except (subprocess.TimeoutExpired, OSError, ValueError):
         return None
