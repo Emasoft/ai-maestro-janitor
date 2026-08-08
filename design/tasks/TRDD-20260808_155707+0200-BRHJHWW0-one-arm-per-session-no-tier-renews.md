@@ -1,9 +1,9 @@
 ---
 trdd-id: BRHJHWW0
 title: One arm per session — kill mid-session tier renews; the dispatcher throttles internally
-column: dev
+column: complete
 created: 2026-08-08T15:57:07+0200
-updated: 2026-08-08T15:57:07+0200
+updated: 2026-08-08T16:38:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
