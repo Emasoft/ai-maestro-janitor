@@ -158,9 +158,13 @@ def cprint(msg: str) -> None:
 # A cap the suite cannot finish inside does not make the gate stricter — it makes
 # it UNSATISFIABLE, and a timeout is indistinguishable from a hang, so it asserts
 # nothing about the code. The gate itself is unchanged: every test must still
-# pass. 1800 s is headroom (~2x the measured clean run), and still bounds a truly
+# pass. 3600 s: the 1800 s (~2x clean-run) bound died at 84% PROGRESS on
+# 2026-08-08 under host loadavg 195 (dozens of concurrent agent sessions + a
+# remote-desktop proxy at 230% CPU) — dots advancing to the kill, i.e. slow,
+# not wedged, the exact coin-flip-not-a-check defect the _CPV_TIMEOUT_SEC note
+# below records for the identical reason. ~7x clean-run still bounds a truly
 # wedged suite an order of magnitude below anything a human would wait out.
-_TEST_SUITE_TIMEOUT_SEC = 1800
+_TEST_SUITE_TIMEOUT_SEC = 3600
 
 # Wall-clock bound for every remote-CPV invocation, for the same reason as above.
 # MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on
