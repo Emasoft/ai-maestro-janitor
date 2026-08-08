@@ -65,13 +65,13 @@ jobs:
         # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
         # v2.153.2 regression.) Never bump without running the candidate ref
         # against the tree locally first.
-        # PINNED AT v3.19.0 as of the 2026-07-25 canonical-pipeline update
-        # (bumped from v3.16.0): scripts/publish.py was regenerated from the
-        # v3.19.0 canonical template and emits this exact ref, so all three
-        # sites are byte-identical by construction.
-        # Verified locally against this tree BEFORE the bump: v3.16.0 and the
-        # outgoing v3.11.0 pin produce an identical severity profile and the same
-        # exit code on this commit, so the bump is behaviour-neutral here.
+        # PINNED AT v5.4.0 as of the 2026-08-08 canon-alignment pass (bumped
+        # from v5.1.4). publish.py now DERIVES its spec from `.cpv-version`
+        # (_read_cpv_pin), so the moving sites are `.cpv-version` + the two
+        # workflow literals, and tests/test_cpv_pin_ssot.py holds them equal.
+        # Verified locally against this tree BEFORE the bump: the candidate
+        # ref was run in full --strict from the repo root and the residuals
+        # were resolved in the same change, so the gate is green at this pin.
         # Do NOT keep a running scanner-finding narrative here: tracked content is
         # scanned content, so a commentary naming finding codes becomes a finding
         # itself. Per-finding history belongs in the TRDD / .janitor handoff.
@@ -110,11 +110,11 @@ jobs:
           # alone. `|| true` and a discarded stdout: this step must never be able to fail
           # the release — even if the probe subcommand errors, uvx has already BUILT and
           # cached the package, which is the only thing being bought here.
-          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.1.4" \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.4.0" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.1.4" \
+            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.4.0" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
