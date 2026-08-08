@@ -59,4 +59,9 @@ CANNOT succeed while the daemon is launchd-spawned — a repeated instruction th
       text unchanged)
 - [ ] Flag includes rearm-evidence age; absent evidence → field absent, not 0
 - [ ] The 0/254-vs-56 provenance stays cited in code comment or docstring
-- [ ] #233 #235 #236 #237 answered when it ships (#92 updated)
+- [ ] **Host-type surfacing (#240 ask 2 + #235):** the alarm names how many currently-scanned
+      claude instances are iTerm-hosted (the unprotected set) — fleet_scan already resolves
+      per-instance terminal identity, so "unreadable" and "healthy" stop looking identical to
+      a fleet-continuity reader; the launchd branch states the operational guidance plainly
+      (run fleet agents under tmux — rescued with no grant, moots #92 for them, #240 ask 3)
+- [ ] #233 #235 #236 #237 answered when it ships (#92 updated, #240 noted)
