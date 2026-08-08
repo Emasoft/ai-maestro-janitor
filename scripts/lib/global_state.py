@@ -695,6 +695,50 @@ def clear_kill_switch() -> None:
     _flag_clear_dual("kill-switch.flag")
 
 
+def _armed_flag_path() -> Path:
+    return _control_path("armed.flag")
+
+
+def record_armed(reason: str = "") -> None:
+    """Persist the machine-wide "the janitor is armed" claim (TRDD-TUIBWHT7).
+
+    The USER directive was "arm once, then it stays armed forever until I disarm it" — but
+    Claude Code crons are SESSION-ONLY (`CronCreate`'s `durable` flag has no effect) and expire
+    at 7 days, so nothing about the cron itself can be "forever". This flag is the thing that
+    actually survives a restart: `/janitor-arm` (`arm_record.py`, once a cron has actually
+    landed) writes it, and `armed_state()` reading "armed" is what lets SessionStart silently
+    re-plumb the per-session cron with no user-facing ceremony on every later session. Only
+    `clear_armed()` (wired to `/janitor-disarm` and the machine-wide kill-switch) may undo it —
+    nothing else is allowed to silently un-arm a deliberate choice.
+    """
+    _write_flag_provenance(_armed_flag_path(), reason or "armed")
+
+
+def clear_armed() -> None:
+    """Remove the persistent arm claim — the disarm half of `record_armed`. Idempotent."""
+    _flag_clear_dual("armed.flag")
+
+
+def armed_state() -> str:
+    """"armed" | "disarmed" | "absent" — the persistent, machine-wide arm claim (TRDD-TUIBWHT7).
+
+    The kill-switch ALWAYS wins and reads as "disarmed" regardless of whether `armed.flag` is
+    still present: a stray flag left behind by a crashed disarm (or a `clear_armed()` call that
+    landed on only two of the three dual-write locations) must never let a machine-wide STOP
+    look armed. Absent the kill-switch, presence of `armed.flag` means "armed" (SessionStart
+    re-plumbs silently); its absence means "absent" — the genuinely-first-install case where the
+    old first-run nudge still applies. `/janitor-disarm` clearing the flag also lands here as
+    "absent", not "disarmed" — "disarmed" is reserved for the loud, machine-wide kill-switch stop
+    (which already gets its own rich SessionStart reminder), so a plain un-arm and a genuine
+    first-install share the same quiet "nudge to arm" behavior.
+    """
+    if kill_switch_present():
+        return "disarmed"
+    if _flag_present_dual("armed.flag"):
+        return "armed"
+    return "absent"
+
+
 def clear_maintenance_mode() -> None:
     """Clear a RETIRED machine-wide MAINTENANCE flag from every location it may live.
 

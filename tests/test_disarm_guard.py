@@ -49,6 +49,11 @@ def _flag(project: Path) -> Path:
     return project / ".janitor" / "state" / "disarmed.flag"
 
 
+def _armed_flag(project: Path) -> Path:
+    # HOME is redirected to `project` (see `_run`), so control_dir() resolves under it.
+    return project / ".claude" / "janitor-control" / "armed.flag"
+
+
 def test_an_agent_alone_cannot_write_the_flag(project: Path, gstate: Path) -> None:
     """THE test. No user request, no global stop — an agent running /janitor-disarm on its own
     judgment must NOT be able to claim the user opted out.
@@ -68,6 +73,28 @@ def test_a_user_request_records_the_flag(project: Path, gstate: Path) -> None:
     user_intent.record_intent_from_prompt("/janitor-disarm", state_dir=sdir)
     assert _run(project, gstate).startswith("DISARM_RECORDED:user-asked")
     assert _flag(project).exists()
+
+
+def test_a_user_request_clears_the_persistent_armed_claim(
+    project: Path, gstate: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-TUIBWHT7: `/janitor-disarm` is one of the two things allowed to clear the machine-
+    global "armed forever" claim — a plain disarm must not leave SessionStart believing it should
+    keep silently re-plumbing the cron."""
+    # Mirror `_run`'s subprocess env (HOME=project, no JANITOR_CONTROL_DIR override) for this
+    # IN-PROCESS check, so both the subprocess's clear_armed() and this test's read hit the
+    # same control_dir() — the session's autouse `_isolate_control_dir` fixture would otherwise
+    # point THIS process's control_dir() at a different tmp dir than the subprocess resolves.
+    monkeypatch.setenv("HOME", str(project))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(_armed_flag(project).parent))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gstate))
+    import global_state as gs  # noqa: E402
+
+    gs.record_armed("arm")
+    sdir = project / ".janitor" / "state"
+    user_intent.record_intent_from_prompt("/janitor-disarm", state_dir=sdir)
+    assert _run(project, gstate).startswith("DISARM_RECORDED:user-asked")
+    assert gs.armed_state() == "absent", "a recorded disarm must clear the persistent arm claim"
 
 
 def test_a_machine_wide_stop_authorizes_the_self_disarm(project: Path, gstate: Path) -> None:

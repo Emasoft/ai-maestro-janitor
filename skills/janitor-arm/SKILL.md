@@ -90,12 +90,15 @@ heartbeat and double the fire cost with nothing reporting it.
 ## 5. Report honestly
 
 Every scheduled job is **session-only** — it is not written to disk and dies on a Claude restart
-(`CronList` shows `[session-only]`; the CronCreate response says the same). The heartbeat re-arms
-itself at the next SessionStart, so a restart costs only the gap until the next session begins.
+(`CronList` shows `[session-only]`; the CronCreate response says the same). What actually persists
+across a restart is the `armed.flag` this step just recorded (TRDD-TUIBWHT7): SessionStart reads it
+and silently re-plumbs a fresh session-only cron with no user-facing ceremony, so a restart costs
+only the gap until the next session begins — never a re-arm the user has to ask for again.
 
-Report: `Janitor armed (session-only): <cron>. Heartbeat ID: <id>. Re-arms at the next SessionStart
-after a restart (ai-maestro-janitor#23).` Append `(replaced <N>)` if you deleted any. **Never claim
-"survives restarts"** — no scheduled job does on the current platform.
+Report: `Janitor armed (persistent). Sessions re-plumb silently at start; /janitor-disarm is the off
+switch.` Append `(replaced <N>)` if you deleted any. **Never claim the CRON itself "survives
+restarts"** — no scheduled job does on the current platform; it is the ARM STATE that persists and
+re-plumbs a new cron every session.
 
 ## Scope
 
@@ -132,3 +135,6 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — reads `desired-cadence.cron`; writes
   `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`,
   `heartbeat-renew-seen.txt` and the retired `paused` / `maintenance-mode` sentinels.
+- the janitor control plane (`global_state.control_dir()`) — step 4 writes `armed.flag`, the
+  machine-global persistent claim (TRDD-TUIBWHT7) SessionStart reads via `armed_state()`; only
+  `/janitor-disarm` and the machine-wide kill-switch clear it.

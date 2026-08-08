@@ -285,6 +285,17 @@ def test_record_writes_the_state_the_dispatcher_reads_back(project: Path) -> Non
     assert "1d703364" in out
 
 
+def test_record_writes_the_persistent_armed_flag(project: Path) -> None:
+    """TRDD-TUIBWHT7: a completed arm also records the machine-global "armed" claim that
+    SessionStart reads via `armed_state()` — the thing that survives a restart when the
+    session-only cron itself cannot."""
+    rc, _, _ = _run(RECORD, project, "--cron", "*/15 * * * *", "--id", "1d703364")
+
+    assert rc == 0
+    armed_flag = project / "home" / ".claude" / "janitor-control" / "armed.flag"
+    assert armed_flag.is_file(), "arm_record must persist the machine-global armed claim"
+
+
 def test_record_clears_the_stale_renew_dedupe(project: Path) -> None:
     """The renew-marker dedupe is about the cron we just replaced. Carried across an arm it would
     suppress the NEXT genuine renew, stranding the heartbeat on a tier nobody wants."""

@@ -1170,3 +1170,57 @@ def test_daemon_needs_restart_non_cache_path_fails_safe_true(
         assert gs.daemon_needs_restart() is True
     finally:
         _reap(proc)
+
+
+# --------------------------------------------------------------------------- #
+# Persistent arm state (TRDD-TUIBWHT7) — "arm once, armed forever"
+# --------------------------------------------------------------------------- #
+
+
+def test_armed_state_absent_by_default(state_dir: Path) -> None:
+    """Never armed, never disarmed → "absent" (the genuinely-first-install case)."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.armed_state() == "absent"
+
+
+def test_armed_state_round_trip(state_dir: Path) -> None:
+    """record_armed() → "armed"; clear_armed() → back to "absent"."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.record_armed("arm")
+    assert gs.armed_state() == "armed"
+    gs.clear_armed()
+    assert gs.armed_state() == "absent"
+
+
+def test_armed_state_clear_is_idempotent(state_dir: Path) -> None:
+    """clear_armed() on an already-absent flag is a silent no-op."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.clear_armed()  # must not raise
+    gs.clear_armed()  # nor on the second call
+    assert gs.armed_state() == "absent"
+
+
+def test_armed_state_kill_switch_always_wins(state_dir: Path) -> None:
+    """A machine-wide STOP reads as "disarmed" even while `armed.flag` is still present — a
+    stray flag left by a crashed disarm must never make a stopped machine look armed."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.record_armed("arm")
+    assert gs.armed_state() == "armed"
+    gs.set_kill_switch("test")
+    assert gs.armed_state() == "disarmed", "the kill-switch must override a present armed.flag"
+    gs.clear_kill_switch()
+    assert gs.armed_state() == "armed", "clearing the stop reveals the still-present arm claim"
+
+
+def test_record_armed_stores_provenance(state_dir: Path) -> None:
+    """The flag body is provenance JSON, same shape as every other control-plane flag."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.record_armed("arm")
+    prov = gs.read_flag_provenance("armed.flag")
+    assert prov["set_at"] > 0, f"body must carry a positive set_at, got {prov!r}"
+    assert prov["reason"] == "arm"

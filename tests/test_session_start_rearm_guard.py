@@ -48,6 +48,8 @@ def _run_session_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, flag:
         cd = gs.control_dir()
         cd.mkdir(parents=True, exist_ok=True)
         (cd / "global-pause.flag").write_text('{"reason": "test"}', encoding="utf-8")
+    elif flag == "armed":
+        gs.record_armed("arm")
 
     # Neutralize the heavy best-effort filesystem side effects so the test only exercises the
     # guard (and never runs the real lean-ctx binary or copies real rule files).
@@ -85,6 +87,7 @@ def test_session_start_skips_rearm_when_globally_disarmed(tmp_path: Path, monkey
     assert 'reason: "test"' in out, "the reminder must name the reason so a forgotten stop can't persist"
     assert "/janitor-global-arm" in out, "the reminder must name the revive command"
     assert "run /janitor-arm to arm it" not in out, "must NOT nudge re-arm while globally disarmed"
+    assert "[janitor] armed (persistent)" not in out, "must NOT re-plumb silently while globally disarmed"
 
 
 def test_session_start_ignores_a_stale_pause_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,8 +104,20 @@ def test_session_start_ignores_a_stale_pause_flag(tmp_path: Path, monkeypatch: p
 
 
 def test_session_start_nudges_rearm_when_not_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No stop flag → the normal 'run /janitor-arm' nudge IS printed (unchanged behavior)."""
+    """No stop flag, never armed → "absent" → the normal 'run /janitor-arm' nudge (unchanged)."""
     out = _run_session_start(monkeypatch, tmp_path, flag=None)
     assert "run /janitor-arm to arm it" in out, f"expected the arm nudge, got {out!r}"
     assert "globally DISARMED" not in out, "the disarmed reminder must not appear when armed"
     assert "globally PAUSED" not in out, "the paused reminder must not appear when armed"
+
+
+def test_session_start_replumbs_silently_when_persistently_armed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-TUIBWHT7: once `armed.flag` is recorded, SessionStart re-plumbs the session's cron
+    with a terse machine line instead of the old user-facing nag banner."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed")
+    assert "run /janitor-arm to arm it" not in out, f"the nag banner must not appear once armed, got {out!r}"
+    assert "[janitor] armed (persistent)" in out, f"expected the silent re-plumb line, got {out!r}"
+    assert "globally DISARMED" not in out
+    assert "globally PAUSED" not in out

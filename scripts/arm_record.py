@@ -15,6 +15,9 @@ The counterpart to `arm_prepare.py`. It records what was actually armed:
                                 of spending a CronList round-trip to find it (the call this whole
                                 TRDD exists to remove)
   - clears `heartbeat-renew-seen.txt` — the renew-marker dedupe, stale the moment we re-arm
+  - `armed.flag` (machine-global) — records the persistent "armed" claim (TRDD-TUIBWHT7) that
+                                SessionStart reads to decide whether to re-plumb the next
+                                session's cron silently, instead of nagging the user again
 
 Storing the id is what makes the next arm cheap, and it is why `arm_prepare` CONSUMES the id
 rather than merely reading it: if this script never runs (the turn died), no id is stored, and
@@ -33,6 +36,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
 # A cron id comes back from CronCreate and goes straight onto a CronDelete argument on the next
@@ -55,6 +59,10 @@ def record(state_dir: Path, *, cron: str, cron_id: str, now: int) -> None:
         (state_dir / "heartbeat-renew-seen.txt").unlink()
     except OSError:
         pass
+    # The persistent, machine-global "armed forever" claim (TRDD-TUIBWHT7) — recorded HERE,
+    # after CronCreate actually landed a cron, not in arm_prepare.py: a scope refusal or a
+    # crash before this point must never claim the janitor is armed when no cron exists.
+    gs.record_armed("arm")
 
 
 def main() -> int:

@@ -82,6 +82,14 @@ def main() -> int:
     except OSError as e:
         print(f"DISARM_UNVERIFIED (could not write the flag: {e})")
         return 0
+    # Clear the persistent, machine-global "armed forever" claim (TRDD-TUIBWHT7) whenever a
+    # disarm is actually recorded — both authorities above (a fresh user `disarm` intent, or the
+    # machine-wide kill-switch already being set) are exactly the two things the card names as
+    # allowed to clear it. Best-effort: a disarm must still succeed even if this write fails.
+    try:
+        gs.clear_armed()
+    except OSError:
+        pass
     print(f"DISARM_RECORDED:{why}")
     return 0
 
