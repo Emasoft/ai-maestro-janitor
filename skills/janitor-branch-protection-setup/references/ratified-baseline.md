@@ -43,8 +43,7 @@ admins.
   "bypass_actors": [],
   "rules": [
     { "type": "deletion" },
-    { "type": "non_fast_forward" },
-    { "type": "required_linear_history" }
+    { "type": "non_fast_forward" }
   ]
 }
 ```
