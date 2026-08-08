@@ -81,6 +81,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -2181,6 +2182,69 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
                    f"nothing, or the network was unreachable).{NC}")
             cprint(f"  {YELLOW}  Check with: git ls-remote --tags origin '*{_verify_tag}'{NC}")
 
+_RELEASE_NOTES_MAX_CHARS = 120_000
+_RELEASE_NOTES_TRUNCATED_MARKER = (
+    "\n\n...(truncated — see CHANGELOG.md in the repository for the complete record)\n"
+)
+
+
+def _release_notes_for(root: Path, new_ver: str) -> str:
+    """Extract the newest version's section from CHANGELOG.md for the release body.
+
+    WHY: CHANGELOG.md is now FULL-HISTORY (git-cliff's `--unreleased` flag was
+    removed on purpose — it was destroying history — and, unnoticed, had also
+    been keeping the release-notes file small). Passing the whole file to
+    `gh release create --notes-file` hit GitHub's 125,000-char release-body
+    limit on 2026-08-08 (run 12, HTTP 422 "body is too long") once the file
+    grew past a handful of releases. The release body is the RELEASE's own
+    notes; the full history lives in CHANGELOG.md in-repo — so only the
+    newest section belongs in the release. The 120k cap below is the
+    invariant that can never 422 again, regardless of how the extraction
+    or the fallback behaves.
+    """
+    changelog_file = root / "CHANGELOG.md"
+    text = ""
+    if changelog_file.is_file():
+        text = changelog_file.read_text(encoding="utf-8")
+        # git-cliff emits "## [X.Y.Z] - ..." or "## X.Y.Z - ..." heading shapes.
+        # Match the version string on a top-level "## " heading line, then take
+        # everything up to (not including) the next "## " heading.
+        pattern = re.compile(
+            rf"^##\s.*{re.escape(new_ver)}.*$", re.MULTILINE,
+        )
+        match = pattern.search(text)
+        if match:
+            start = match.start()
+            next_heading = re.search(r"^## ", text[match.end():], re.MULTILINE)
+            end = match.end() + next_heading.start() if next_heading else len(text)
+            section = text[start:end].rstrip() + "\n"
+            if len(section) > _RELEASE_NOTES_MAX_CHARS:
+                section = (
+                    section[: _RELEASE_NOTES_MAX_CHARS - len(_RELEASE_NOTES_TRUNCATED_MARKER)]
+                    + _RELEASE_NOTES_TRUNCATED_MARKER
+                )
+            return section
+    # Fallback: the changelog section could not be resolved (no CHANGELOG.md,
+    # or its heading for this version was not found). Use the raw commit log
+    # since the previous tag instead of failing the whole release stage.
+    preamble = (
+        f"(changelog section for v{new_ver} could not be resolved; "
+        "showing recent commits instead)\n\n"
+    )
+    prev_tags = run(
+        ["git", "tag", "--sort=-creatordate"], cwd=root, check=False, capture=True,
+    ).stdout.splitlines()
+    prev_tag = next((t for t in prev_tags if t.strip() and t.strip() != f"v{new_ver}"), None)
+    log_range = f"{prev_tag}..HEAD" if prev_tag else "HEAD"
+    log_result = run(
+        ["git", "log", "--oneline", "-n", "200", log_range], cwd=root, check=False, capture=True,
+    )
+    body = preamble + (log_result.stdout or "(no commits found)\n")
+    if len(body) > _RELEASE_NOTES_MAX_CHARS:
+        body = body[: _RELEASE_NOTES_MAX_CHARS - len(_RELEASE_NOTES_TRUNCATED_MARKER)] + _RELEASE_NOTES_TRUNCATED_MARKER
+    return body
+
+
 def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 11: Create GitHub release via gh CLI.
 
@@ -2199,18 +2263,28 @@ def stage_gh_release(root: Path, new_ver: str, dry_run: bool) -> None:
     owner, repo = _resolve_owner_repo(root)
     _ensure_gh_auth(owner, repo)
     changelog_file = root / "CHANGELOG.md"
-    # Use --notes-file when CHANGELOG exists (the git-cliff structured
-    # release notes are the right thing to ship). Fall back to
+    # Use --notes-file with ONLY this version's section (see
+    # _release_notes_for's docstring — the full CHANGELOG.md 422s past
+    # GitHub's 125,000-char release-body limit). Fall back to
     # --generate-notes only when no CHANGELOG is present. Passing both
     # flags simultaneously produces undefined behavior across gh versions
     # (some concatenate, some override) — never both.
+    notes_tmp: str | None = None
     args = ["gh", "release", "create", tag, "--title", tag]
     if changelog_file.is_file():
-        args.extend(["--notes-file", str(changelog_file)])
+        notes = _release_notes_for(root, new_ver)
+        fd, notes_tmp = tempfile.mkstemp(prefix="gh-release-notes-", suffix=".md")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(notes)
+        args.extend(["--notes-file", notes_tmp])
     else:
         args.append("--generate-notes")
-    cprint(f"  {BLUE}$ {' '.join(args)}{NC}")
-    result = gh_with_retry(args, cwd=str(root), check=False, capture_output=True)
+    try:
+        cprint(f"  {BLUE}$ {' '.join(args)}{NC}")
+        result = gh_with_retry(args, cwd=str(root), check=False, capture_output=True)
+    finally:
+        if notes_tmp is not None:
+            Path(notes_tmp).unlink(missing_ok=True)
     if result.stdout and result.stdout.strip():
         cprint(result.stdout.strip())
     if result.stderr and result.stderr.strip():

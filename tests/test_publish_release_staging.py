@@ -310,3 +310,55 @@ def test_cpv_timeout_has_real_headroom_over_the_measured_run() -> None:
         f"_CPV_TIMEOUT_SEC={publish._CPV_TIMEOUT_SEC}s is too close to the measured "
         f"{measured_seconds}s run to survive a loaded machine"
     )
+
+
+# -- _release_notes_for: the run-12 HTTP 422 fix ---------------------------------
+#
+# CHANGELOG.md is full-history (git-cliff's `--unreleased` flag was removed on
+# purpose). Passing the whole file to `gh release create --notes-file` hit
+# GitHub's 125,000-char release-body limit on 2026-08-08 (run 12). These tests
+# prove the release body is bounded to the newest section, with a hard cap.
+
+
+def test_release_notes_extracts_only_the_newest_section(tmp_path: Path) -> None:
+    """Only the v2.0.0 section is returned, not the older v1.1.0/v1.0.0 history."""
+    changelog = (
+        "# Changelog\n\n"
+        "## [2.0.0] - 2026-08-08\n\n"
+        "### Added\n- feature X\n\n"
+        "## [1.1.0] - 2026-07-01\n\n"
+        "### Fixed\n- bug Y\n\n"
+        "## [1.0.0] - 2026-06-01\n\n"
+        "### Added\n- initial release\n"
+    )
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    notes = publish._release_notes_for(tmp_path, "2.0.0")
+    assert "feature X" in notes
+    assert "bug Y" not in notes
+    assert "initial release" not in notes
+
+
+def test_release_notes_falls_back_when_version_heading_is_absent(tmp_path: Path) -> None:
+    """A CHANGELOG.md with no matching version heading falls back to the commit log."""
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [1.0.0] - 2026-06-01\n\n- initial release\n", encoding="utf-8",
+    )
+    _git(tmp_path.parent, "init", "-q", tmp_path.name)
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed commit for fallback log")
+    notes = publish._release_notes_for(tmp_path, "9.9.9")
+    assert "could not be resolved" in notes
+    assert "seed commit for fallback log" in notes
+
+
+def test_release_notes_are_hard_capped_at_120000_chars(tmp_path: Path) -> None:
+    """An oversized matched section is truncated with a marker, never sent whole."""
+    oversized_body = "x" * 200_000
+    changelog = f"# Changelog\n\n## [3.0.0] - 2026-08-08\n\n{oversized_body}\n\n## [2.0.0]\n\nold\n"
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    notes = publish._release_notes_for(tmp_path, "3.0.0")
+    assert len(notes) <= publish._RELEASE_NOTES_MAX_CHARS
+    assert "truncated" in notes
+    assert "CHANGELOG.md" in notes
