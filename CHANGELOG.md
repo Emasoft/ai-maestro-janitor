@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] — 2026-08-08
+
+### Bug Fixes
+
+- **publish:** Bound the release-notes body — run 12's HTTP 422 (b789109)
+- **detectors:** Read-only git never takes index.lock — GIT_OPTIONAL_LOCKS=0 (janitor#245, TRDD-76XSELZ7) (846fd20)
+
+### Documentation
+
+- Align the last two artifacts with the linear-history removal (USER Tier-3 ruling) (2216360)
+- Add TRDD-88ZVEQY7 + TRDD-76XSELZ7 — stale fleet-audit payload; detector optional-locks (365eac8)
+- Add TRDD-BRHJHWW0 — one arm per session, no tier renews (USER directive) (4fdbe31)
+- Add TRDD-TUIBWHT7 — arm once, persistent state, silent session plumbing (USER directive) (3feca4a)
+- TRDD-EZ3PMQYX REVISED — launch-context cause retracted; call-site error-vs-timeout is the fix (26ab182)
+- TRDD-BRHJHWW0 dev -> complete — tier renews deleted at af499ee3 (TRDD-BRHJHWW0) (71e2e1c)
+- Complete CI6ZTNB9's archival frontmatter (column: superseded) — the mv-stages-only-the-rename gotcha struck again (84223e3)
+- TRDD-TUIBWHT7 todo -> complete — shipped at 65e537dc (TRDD-TUIBWHT7) (b26efe5)
+
+### Features
+
+- **cadence:** One arm per session — tier-driven renews deleted (USER directive, TRDD-BRHJHWW0) (af499ee)
+- **arm:** Arm once, armed forever — persistent machine claim + silent re-plumb (USER directive, TRDD-TUIBWHT7) (65e537d)
+
+### Testing
+
+- Re-anchor the cost-phase order guard — its old anchor was the deleted tier phase (TRDD-BRHJHWW0) (b47c099)
 ## [2.8.2] — 2026-08-08
 
 ### Bug Fixes
@@ -24,6 +50,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - **pipeline:** Align to CPV canon 5.4.0 — pin bump, 4 canon deltas, needle-inert nosec (65078ef)
+- Bump version to 2.8.2 (2ed243f)
 ## [2.8.1] — 2026-08-08
 
 ### Bug Fixes
