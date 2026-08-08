@@ -13,37 +13,43 @@ eht: []
 external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237]
 ---
 
-# iTerm alarm must branch on the daemon's launch context
+# iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence
 
-## Why — the peer-issue cluster converges on ONE cause, confirmed on this host
+## ⚠ REVISED 2026-08-08 ~16:20 — the launch-context CAUSE claim is RETRACTED
 
-- #233 (assistant-manager): the EXACT binary the alarm names enumerates **32 sessions**
-  sub-second when run terminal-parented — cause (b) does not reproduce; the peer correctly
-  flagged TCC responsible-process semantics (a shell child is attributed to the TERMINAL app).
-- The janitor's own prior data (dispatch.py alarm docstring, TRDD-VQ4LX7ND): **0 channel
-  resolutions in 254 launchd-spawned beats vs 56 from a session-spawned daemon.**
-- Confirmed live 2026-08-08 10:35: daemon.pid 61025 = `daemon_keepalive_entry.py --keepalive`,
-  **parent launchd (pid 1)** — while the day's 18 successful `FIRED rearm → iterm` (#237,
-  02:51–04:32) predate the launchd takeover.
-- #92's "toggle will not persist" observation is CONSISTENT with this: a grant aimed at a
-  context that cannot receive Apple Events looks exactly like a grant that will not stick.
+The original Why below asserted a confirmed structural cause ("launchd-parented daemon cannot
+receive Apple Events"). **Refuted the same day by the daemon's own log**: the launchd daemon
+(pid 61025, parent 1, up since 05:03) fired MULTIPLE successful `FIRED rearm → iterm` today
+(13:12, 13:14, 13:40+; 99 all-time). A systematic context barrier cannot produce those. The
+webdesign peer retracted the same over-generalization on #233 first; this card repeats the
+correction rather than hiding it. The honest reading: **intermittent osascript hangs/timeouts**
+(plausibly load-correlated — host loadavg hit 195 today), against a grant that demonstrably
+works. The 0/254-vs-56 datum (TRDD-VQ4LX7ND) described an EARLIER regime, not today's daemon.
+Lesson (same one, both of us): parentage + timing correlation were correct measurements
+published as a stronger conclusion than they supported.
 
-**Cause (c): the LAUNCH CONTEXT.** A launchd-parented, adhoc-signed uv-python daemon is not a
-context macOS grants interactive Automation to. The System Settings trip the alarm recommends
-CANNOT succeed while the daemon is launchd-spawned — a repeated instruction that cannot succeed
-(#233's phrasing) trains the reader to ignore the channel (#234's point).
+## Why (revised)
 
-## What
+- The alarm names two causes it cannot distinguish (denied grant vs hung osascript), and the
+  reader cannot tell which they have. The v2.8.1 rearm-evidence downgrade resolves it by
+  CORRELATION (a recent success), which works but is indirect and windowed.
+- With success evidence on the SAME day, the System Settings remedy is wrong to recommend —
+  a grant that works intermittently is not a missing grant (this part of the original card
+  SURVIVES, on different grounds: the discriminator is success evidence, not parentage).
 
-1. **Record parentage in the flag**: `fleet_scan.record_iterm_automation_state` payload gains
-   `daemon_context: "launchd" | "session"` (from ppid==1 or equivalent), compare-and-write
-   stable.
-2. **Branch the alarm text** (`dispatch._phase_iterm_automation_alarm`):
-   - `launchd` → structural: "iTerm injection is unavailable under the OS-keepalive daemon —
-     this is a launch-context limit, NOT a missing grant; do NOT toggle System Settings. tmux
-     panes remain covered. Options: run agents under tmux, or a session-spawned daemon covers
-     iTerm while its parent session lives." Cite the 0/254-vs-56 measurement.
-   - `session` → today's two-cause text (grant advice is then plausible).
+## What (revised)
+
+1. **The primary fix — the #233 peer's call-site log line**: where the fleet scan invokes
+   osascript for iTerm enumeration, log DISTINGUISHABLY "Apple Event returned an error: <err>"
+   vs "call exceeded timeout (<N>s)" vs "returned empty". The flag payload carries that
+   outcome (`probe_outcome: error|timeout|empty`), so the alarm can say WHICH failure this
+   scan actually had instead of naming two causes it cannot tell apart — making the rearm
+   correlation a corroborator instead of the only signal.
+2. **Alarm text weighs evidence, not parentage**: recent success (any daemon context) ⇒ the
+   v2.8.1 transient downgrade; `probe_outcome: timeout` ⇒ name the timeout + system load as
+   the likely mechanism, no remedy trip; only `probe_outcome: error` with a TCC-shaped error
+   AND no recent success ⇒ the grant advice. Parentage may be RECORDED as context but must
+   not gate any branch (it discriminates nothing on this host).
 3. **Flag carries evidence age** (#237's ask): at write time, include the age of the newest
    `FIRED rearm → iterm` line so the flag is self-contained for other consumers (the alarm's
    own 6h-window parse, shipped v2.8.1, stays authoritative).
