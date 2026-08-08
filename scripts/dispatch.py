@@ -1295,6 +1295,39 @@ def _phase_plugin_reload() -> None:
     )
 
 
+_ITERM_REARM_EVIDENCE_WINDOW_S = 6 * 3600  # peer-measured: rescues landed 1-4h before a false alarm
+
+
+def _latest_iterm_rearm_epoch(log_text: str) -> int | None:
+    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
+
+    Peer finding (maintainer session, 2026-08-08, on #92/#229): the alarm named
+    `FIRED rearm → iterm` as the only POSITIVE evidence of a working channel — and then
+    never looked for it. On a host where the guardian had rescued two iTerm panes in the
+    hour before the alarm fired, the alarm still asserted "iTerm rescue is unavailable"
+    and sent the reader to re-toggle a working grant, which the "will not persist" warning
+    would then make look broken. This parser is the cheap fix: the evidence is already on
+    disk, written by session_liveness.
+
+    Malformed timestamps are skipped, never fatal — a log line we cannot date is not
+    evidence in either direction.
+    """
+    import datetime as _dt
+
+    latest: int | None = None
+    for line in log_text.splitlines():
+        if "FIRED rearm → iterm" not in line or not line.startswith("["):
+            continue
+        try:
+            stamp = line[1 : line.index("]")]
+            epoch = int(_dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp())
+        except (ValueError, IndexError):
+            continue
+        if latest is None or epoch > latest:
+            latest = epoch
+    return latest
+
+
 def _phase_iterm_automation_alarm() -> None:
     """Surface the daemon's TCC-denial finding ONCE per session (TRDD-VQ4LX7ND part 2).
 
@@ -1346,6 +1379,37 @@ def _phase_iterm_automation_alarm() -> None:
         if payload_hash in seen:
             return  # already told this session about THIS exact observation
         state.atomic_write(acked, "\n".join(sorted(seen | {payload_hash})))
+        # THE THIRD EVIDENCE SOURCE (peer finding 2026-08-08): before asserting "rescue is
+        # unavailable", look for the positive evidence the alarm itself names. A recent
+        # `FIRED rearm → iterm` proves the channel WORKED inside the window, refuting the
+        # standing-outage reading — the honest finding is then a transient probe hang, and
+        # the System-Settings remedy would be actively misleading (a working toggle that
+        # "will not persist" makes a healthy system look broken). Honest tense: the grant
+        # worked RECENTLY; a grant orphaned since would produce the same log.
+        rearm_epoch: int | None = None
+        try:
+            for log_name in ("daemon.log", "daemon.log.1"):
+                log_path = gs.global_state_dir() / log_name
+                if log_path.is_file():
+                    found = _latest_iterm_rearm_epoch(log_path.read_text(encoding="utf-8"))
+                    if found is not None and (rearm_epoch is None or found > rearm_epoch):
+                        rearm_epoch = found
+        except OSError:
+            rearm_epoch = None
+        now_epoch = int(time.time())
+        if rearm_epoch is not None and 0 <= now_epoch - rearm_epoch <= _ITERM_REARM_EVIDENCE_WINDOW_S:
+            age_min = (now_epoch - rearm_epoch) // 60
+            print(
+                "[janitor] OBSERVED: the global daemon's osascript enumerated ZERO iTerm "
+                "sessions this scan — BUT the guardian successfully resolved an iTerm "
+                f"channel {age_min} minutes ago (`FIRED rearm → iterm` in the daemon log), "
+                "which is the positive evidence a denial cannot produce. So this reads as "
+                "a TRANSIENT osascript hang/timeout, not an unavailable rescue path. No "
+                "remedy needed; honest tense: the channel worked RECENTLY — a grant "
+                "orphaned since would look identical, so only a re-fire with NO recent "
+                "rearm evidence should send anyone to System Settings. See janitor#92."
+            )
+            return
         try:
             import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
 

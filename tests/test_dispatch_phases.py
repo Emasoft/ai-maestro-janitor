@@ -1600,6 +1600,58 @@ def test_iterm_alarm_acks_per_distinct_observation_not_per_mtime(
     assert capsys.readouterr().out == "", "a re-flip to seen content must stay silent"
 
 
+def test_iterm_alarm_downgrades_on_recent_rearm_evidence(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """Peer finding 2026-08-08: the alarm named `FIRED rearm → iterm` as the only positive
+    evidence and never looked for it — asserting 'rescue unavailable' on a host that had
+    rescued two panes in the previous hour, sending the reader to re-toggle a WORKING
+    grant. With recent evidence the finding downgrades to a transient probe hang; without
+    it (stale or absent) the full alarm stands."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    recent = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 3600))
+    (gdir / "daemon.log").write_text(
+        f"[{recent}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n",
+        encoding="utf-8",
+    )
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "TRANSIENT" in out
+    assert "worked RECENTLY" in out          # the honest tense — not "works now"
+    assert "CANNOT rescue" not in out        # the standing-outage assertion must be gone
+    assert "System Settings" not in out or "should send anyone" in out
+
+
+def test_iterm_alarm_stands_when_rearm_evidence_is_stale(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """Evidence outside the window proves nothing about the present — the full alarm
+    (both causes, the remedy, the honest ambiguity) must stand exactly as written."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    stale = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 48 * 3600))
+    (gdir / "daemon.log").write_text(
+        f"[{stale}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n"
+        "[not-a-timestamp] session-liveness: FIRED rearm → iterm garbage line\n",
+        encoding="utf-8",
+    )
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "CANNOT tell you why" in out      # the full honest alarm
+    assert "TRANSIENT" not in out
+
+
 def test_iterm_alarm_states_the_second_view_verdict(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:
