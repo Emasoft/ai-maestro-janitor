@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6fd32717ae50 digest=75b0493a667c generated=2026-08-08T00:51:16+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=818d20ee6278 digest=701e20f9c52e generated=2026-08-08T06:16:25+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -401,6 +401,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · classify(*, chore, last_run, cadence_s, now, factor, min_grace_s, observed_s) -> Verdict — Judge ONE claimed chore from its completion stamp. Total — never raises.
   · evaluate(chores, *, last_run_of, cadence_of, now, factor, min_grace_s, observed_of) -> list[Verdict] — Judge every claimed chore; return only the findings, worst-first.
   · describe(v) -> str — One chore's finding, as it appears inside the drift line.
+`scripts/lib/cli_agent_roster.py` — CLI agent roster — the INDEPENDENT SECOND VIEW of the running fleet (TRDD-DFKEXO79).
+  · parse_agents_json(stdout) -> list[dict[str, Any]] — Parse `claude agents --json` stdout into a list of row dicts.
+  · roster_by_cwd(agents) -> dict[str, list[dict[str, Any]]] — Group agent rows by NORMALIZED `cwd` — never by `name`.
+  · second_view_verdict(*, osascript_sessions, cli_rows_for_host) -> str — The janitor#92 discriminator: is an empty osascript enumeration REALLY empty?
+  · fetch_agents(*, timeout_s) -> tuple[list[dict[str, Any]], str] — Run `claude agents --json` and return `(rows, why)`. The ONE I/O function here.
 `scripts/lib/cold_cache_compact.py` — Auto-compact policy + readers — the PREVENTIVE (warm) lever only.
   · enabled() -> bool
   · min_context_tokens() -> int — The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
@@ -550,9 +555,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
   · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions. PURE.
-  · iterm_automation_payload(*, interpreter) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
-  · record_iterm_automation_state(blocked) -> None — Persist (or clear) the observation for the heartbeat to surface.
+  · iterm_automation_payload(*, interpreter, second_view) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
+  · record_iterm_automation_state(blocked, *, second_view) -> None — Persist (or clear) the observation for the heartbeat to surface.
   · iterm_automation_interpreter(raw) -> str — The interpreter path recorded in a flag's contents, or "" when it names none. PURE.
+  · iterm_automation_second_view(raw) -> str — The second-view verdict recorded in a flag's contents, or "" when absent. PURE.
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · stale_threshold_for(armed_cron, base_stale_s) -> int — The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
@@ -1650,7 +1656,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=09e1f96631e7 generated=2026-08-06T21:06:15+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=e03c5fb5f4b6 generated=2026-08-08T06:16:24+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -1700,6 +1706,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
+- [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
 - [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
 - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
