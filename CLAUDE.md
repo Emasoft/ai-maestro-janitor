@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=818d20ee6278 digest=701e20f9c52e generated=2026-08-08T06:16:25+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5114784291b0 digest=fb228f0aa89c generated=2026-08-08T12:42:32+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1591,6 +1591,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · stage_changelog(root, new_ver, dry_run) -> None — Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
   · stage_commit_and_push(root, new_ver, dry_run) -> None — Step 10: Commit, tag, push. Idempotent on commit + tag.
   · stage_gh_release(root, new_ver, dry_run) -> None — Step 11: Create GitHub release via gh CLI.
+  · stage_install_smoke(root, new_ver, dry_run) -> None — Prove the just-published release actually INSTALLS (ai-maestro#62 R2).
+  · fetch_latest_canon_version() — Newest canon version per the canon repo's manifest, or None.
+  · print_canon_version() -> int — Print the canon version report. Always returns 0 — info never fails.
   · main() -> int
 `scripts/reload_skills_trigger.py` — Backing script for /janitor-reload-skills (analogue of reload_trigger.py).
   · main() -> int
