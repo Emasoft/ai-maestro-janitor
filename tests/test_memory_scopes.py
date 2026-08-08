@@ -11,6 +11,7 @@ time points at the wrong plugin).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -432,3 +433,64 @@ def test_restore_never_reinjects_a_staging_tree_into_the_live_corpus():
     primary = msc.resolve_user_dir()
     assert (primary / "note.md").read_text(encoding="utf-8") == "survived the uninstall\n"
     assert not (primary / ".maint-staging").exists(), "a stale txn was restored into the corpus"
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-DFKEXO79 component 2 — the CC 2.1.224 long-path tripwire.
+#
+# 2.1.224 fixed >200-char project paths colliding under a shared sanitized prefix,
+# which implies the harness now TRUNCATES or HASHES such slugs. Our project_slug
+# re-derives by plain dashing, so the day a long-path project appears on a host,
+# every derived-slug consumer (LOCAL memory, transcript-age, user-mem) silently
+# resolves a NONEXISTENT dir — the exact failure the separators bug already caused
+# once (see project_slug's docstring). These tests pin today's reality and fail
+# LOUDLY, naming the fix, the day it stops holding. Environment-dependent by
+# design: they skip on hosts with no harness dir (CI).
+# --------------------------------------------------------------------------- #
+
+# The REAL home, resolved via the passwd db: the suite's conftest points $HOME (and
+# Path.home()) at a fake isolation tree, which would make these env-dependent tests skip
+# EVERYWHERE — a test that can never run is decoration. Read-only access; the write guard
+# is about mutations, and these only iterdir().
+def _real_harness_projects() -> Path:
+    import pwd
+
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".claude" / "projects"
+
+
+def test_derived_slug_matches_the_harness_dir_for_this_repo() -> None:
+    """CANARY: the slug we derive for THIS repo must name a dir the harness actually
+    created. If this fails, derivation has diverged from the harness (a CC slug-scheme
+    change) and every LOCAL-scope consumer is silently reading an empty dir — implement
+    resolve-don't-rederive (TRDD-DFKEXO79 component 2) before trusting LOCAL memory."""
+    harness = _real_harness_projects()
+    if not harness.is_dir():
+        pytest.skip("no harness projects dir on this host (CI)")
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    derived = harness / msc.project_slug(repo_root)
+    if not any(harness.iterdir()):
+        pytest.skip("harness projects dir empty")
+    assert derived.is_dir(), (
+        f"derived slug {derived.name!r} names no harness dir — the harness slug scheme "
+        "has diverged from project_slug; implement resolve-don't-rederive (TRDD-DFKEXO79)"
+    )
+
+
+def test_this_repos_slug_stays_clear_of_the_truncation_regime() -> None:
+    """TRIPWIRE (TRDD-DFKEXO79 component 2). The CC 2.1.224 long-path scheme is PROVEN
+    live on this host, not latent: a probe artifact sits in the harness dir at 207 chars —
+    exactly 200 chars of plain-dashed path plus a `-<hash6>` suffix — so for any path whose
+    dashed form exceeds ~200, the harness's name and `project_slug`'s plain dashing
+    DIVERGE, and every derived-slug consumer (LOCAL memory, transcript-age, user-mem)
+    resolves a nonexistent dir. This repo's slug is 132 chars today; this test fails while
+    there is still margin, naming the fix, if the path ever grows toward the cliff. The
+    fix at that point is resolve-don't-rederive: stamp the AUTHORITATIVE slug dir at
+    SessionStart from the hook payload's transcript_path, and prefer the stamp."""
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    derived = msc.project_slug(repo_root)
+    assert len(derived) < 190, (
+        f"this repo's derived slug is {len(derived)} chars — inside the margin of the "
+        "harness's 200-char truncate+hash regime, where plain dashing diverges from the "
+        "real dir name. Implement resolve-don't-rederive (TRDD-DFKEXO79 component 2) "
+        "BEFORE trusting any derived-slug consumer here."
+    )
