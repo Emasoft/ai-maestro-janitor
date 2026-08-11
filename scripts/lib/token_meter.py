@@ -495,29 +495,55 @@ class BudgetVerdict:
     reasons: list[str]
 
 
+# TRDD-KI6OWCZT (janitor#246) — the minimum count of historical per-turn output samples
+# before the output-advisory bar is allowed to fire at all. Below this there is no basis
+# to call anything a spike, so the signal stays silent rather than fall back to a fixed
+# number (the whole point of moving off a fixed threshold in the first place).
+_MIN_OUTPUT_BASELINE_HISTORY = 8
+
+
 def evaluate_turn_budget(
     usage: TurnUsage,
     *,
-    output_advisory: int,
     output_hard: int,
-    cache_creation_advisory: int,
     cache_creation_hard: int,
+    output_baseline_history: list[int] | None = None,
+    output_advisory_floor_pct: float = 95.0,
+    output_advisory_z: float = 6.0,
+    output_advisory_ratio: float = 4.0,
     ignore_cache_creation: bool = False,
 ) -> BudgetVerdict:
     """Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
 
-    - **output** tokens — full-price agent work (long replies / many tool calls).
+    - **output** tokens — full-price agent work (long replies / many tool calls). The
+      HARD cap is a fixed budget (a runaway is a runaway regardless of history); the
+      ADVISORY tier is BASELINE-RELATIVE (TRDD-KI6OWCZT, janitor#246) — it fires only
+      when `usage.output_tokens` clears a bar derived from `output_baseline_history`
+      (the session's own recent per-turn output samples), reusing the existing robust
+      statistics primitives (`token_baseline.robust_baseline` / `percentile`) rather
+      than a fixed knob. The bar is the MAX of three gates — mirrors
+      `token_baseline.classify_recent`'s combination, applied to a flat per-turn
+      history instead of a bucketed time series:
+        * `percentile(history, output_advisory_floor_pct)` — an absolute floor (never
+          advise on a value that is unremarkable next to this session's own recent
+          turns);
+        * `median + output_advisory_z * 1.4826 * MAD` — the robust-z band;
+        * `median * output_advisory_ratio` — a multiplicative bar that stays
+          meaningful when MAD≈0 (a flat history), where the z-band collapses to the
+          median and a genuine multi-x spike would otherwise score 0.
+      Fewer than `_MIN_OUTPUT_BASELINE_HISTORY` samples (including none at all) means
+      there is no basis to judge a spike, so the advisory NEVER fires — not a silent
+      fallback to a fixed number.
     - **cache_creation** tokens — a CACHE-MISS cache WRITE (the prompt prefix changed, so
       the new prefix is written to cache at a ~2× premium on the main agent's 1-hour cache
-      TTL, ~1.25× on a subagent's 5-minute one). A large value in one turn is the "cache
-      write caused by a cache miss" the guard must catch — distinct from the cheap 0.1×
-      ``cache_read`` re-read, which is NOT billed here. This is the MOST expensive token
-      class there is, which is why it gets its own signal rather than riding on `output`.
+      TTL, ~1.25× on a subagent's 5-minute one). Only the HARD tier is checked here
+      (janitor#246): the write is a SUNK cost by the time this turn is observed — a
+      single-write advisory would report on something already done and undoable, which
+      fails the "actionable now" bar, so that advisory branch was deleted outright. A
+      SUSTAINED pattern crossing the hard cap is still worth interrupting for.
 
-    Each threshold is checked INDEPENDENTLY; a threshold of ``0`` DISABLES that check
-    (so a user can watch only output, only cache-miss, or both). ``tier`` is the worst
-    tripped tier; ``reasons`` lists every tripped signal, hard first. Pure — no I/O, so
-    it is unit-tested with plain ``TurnUsage`` values.
+    `tier` is the worst tripped tier; `reasons` lists every tripped signal, hard first.
+    Pure — no I/O, so it is unit-tested with plain ``TurnUsage`` values.
 
     ``ignore_cache_creation`` (TRDD-TKNSTP82 A1) — when True, the cache_creation signal
     is EXCLUDED from classification entirely: it neither contributes a reason nor raises
@@ -534,13 +560,18 @@ def evaluate_turn_budget(
     c = usage.cache_creation_input_tokens
     if output_hard > 0 and o >= output_hard:
         reasons_hard.append(f"output {o} ≥ hard {output_hard}")
-    elif output_advisory > 0 and o >= output_advisory:
-        reasons_advisory.append(f"output {o} ≥ {output_advisory}")
+    elif output_baseline_history is not None and len(output_baseline_history) >= _MIN_OUTPUT_BASELINE_HISTORY:
+        median, mad = token_baseline.robust_baseline(output_baseline_history)
+        threshold = max(
+            float(token_baseline.percentile(output_baseline_history, output_advisory_floor_pct)),
+            median + output_advisory_z * 1.4826 * mad,
+            median * output_advisory_ratio,
+        )
+        if threshold > 0 and o >= threshold:
+            reasons_advisory.append(f"output {o} ≥ baseline {threshold:.0f} (median {median:.0f})")
     if not ignore_cache_creation:
         if cache_creation_hard > 0 and c >= cache_creation_hard:
             reasons_hard.append(f"cache-miss write {c} ≥ hard {cache_creation_hard}")
-        elif cache_creation_advisory > 0 and c >= cache_creation_advisory:
-            reasons_advisory.append(f"cache-miss write {c} ≥ {cache_creation_advisory}")
     if reasons_hard:
         return BudgetVerdict(tier="hard", reasons=reasons_hard + reasons_advisory)
     if reasons_advisory:

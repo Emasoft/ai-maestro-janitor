@@ -1,13 +1,16 @@
 """Tests for the pre-tool-token-budget PreToolUse hook (TRDD-a4e41e89 Phase 2).
 
-OPT-IN; tests set the enable env var and a low budget so fixtures stay small.
+OPT-IN; tests set the enable env var and a low hard budget so fixtures stay small.
 Verify:
-  * a turn whose summed output >= the budget → an `additionalContext` nudge
-  * a turn under budget → silent
+  * a turn whose output clears its own recent baseline (TRDD-KI6OWCZT, janitor#246)
+    → an `additionalContext` nudge
+  * a turn with no baseline history, however large its output → silent (no fixed
+    fallback threshold survives)
+  * a turn under the hard budget → silent
   * disabled (no env) → silent even when over budget
   * missing transcript_path → silent
-  * budget=0 → turn check disabled → silent
   * malformed / boundary-not-in-tail → silent
+  * a cache-miss-only trip never advises (the advisory branch was deleted outright)
   * advisory only: never emits a permissionDecision
 """
 
@@ -37,13 +40,11 @@ def _import_hook():
 
 
 _ENABLED = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED"
-_BUDGET = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"
 _BUDGET_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"
-_CACHE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION"
 _CACHE_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"
 _ENFORCE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE"
 _REPEAT = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"
-_ALL_VARS = (_ENABLED, _BUDGET, _BUDGET_HARD, _CACHE, _CACHE_HARD, _ENFORCE, _REPEAT)
+_ALL_VARS = (_ENABLED, _BUDGET_HARD, _CACHE_HARD, _ENFORCE, _REPEAT)
 
 
 def _user(text: str) -> str:
@@ -63,11 +64,24 @@ def _write_transcript(tmp: Path, *lines: str) -> Path:
     return p
 
 
+def _seed_baseline(project_dir: Path, values: list[int]) -> None:
+    """Seed `<project_dir>/.janitor/state/token-meter.jsonl` with historical
+    INTERACTIVE (non-heartbeat) turns so the output-advisory has a baseline to
+    compare against (TRDD-KI6OWCZT, janitor#246: the advisory is baseline-relative,
+    not a fixed threshold — see `pre-tool-token-budget._load_output_baseline`)."""
+    sd = project_dir / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({"ts": 1000 + i, "heartbeat": False, "output": v, "input": 0, "cache_read": 0, "cache_creation": 0})
+        for i, v in enumerate(values)
+    ]
+    (sd / "token-meter.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _run(
     transcript_path: str | None,
     *,
     enabled: bool | None = True,
-    budget: str | None = "100",
     tool_name: str = "Bash",
     env_extra: dict[str, str] | None = None,
     project_dir: str = "",
@@ -88,8 +102,6 @@ def _run(
     elif enabled is False:
         env[_ENABLED] = "false"
     # enabled is None → leave the var UNSET, exercising the DEFAULT-ON behaviour.
-    if budget is not None:
-        env[_BUDGET] = budget
     # ALWAYS set CLAUDE_PROJECT_DIR explicitly (default "") so the compact-grace check
     # (TRDD-TKNSTP82 A2) is deterministic regardless of the ambient shell's env — an
     # inherited CLAUDE_PROJECT_DIR pointing at a real project could otherwise pick up a
@@ -129,9 +141,14 @@ def _ctx(proc: subprocess.CompletedProcess[str]) -> str | None:
     return out.get("additionalContext")
 
 
-def test_warns_over_budget(tmp_path: Path) -> None:
+def test_warns_over_baseline(tmp_path: Path) -> None:
+    """TRDD-KI6OWCZT (janitor#246): the output advisory is baseline-relative — a clear
+    multiple of this project's own recent per-turn output history fires the nudge."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
-    ctx = _ctx(_run(str(t)))
+    ctx = _ctx(_run(str(t), project_dir=str(proj)))
     assert ctx is not None
     assert "Token spike" in ctx
     # TRDD-YRPUSIFY: the raw per-call count is bucketed away — the exact output (150) must
@@ -139,10 +156,20 @@ def test_warns_over_budget(tmp_path: Path) -> None:
     assert "150" not in ctx
 
 
+def test_no_baseline_history_stays_silent(tmp_path: Path) -> None:
+    """TRDD-KI6OWCZT: no historical baseline (routine, fresh project) → the advisory
+    NEVER fires, however large the output — there is no fixed-threshold fallback."""
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20_000, tool=True))
+    assert _run(str(t)).stdout.strip() == ""
+
+
 def test_default_on_when_unset(tmp_path: Path) -> None:
-    """DEFAULT-ON (TRDD-KI24GR5Z): with ENABLED unset, an over-advisory turn still fires."""
+    """DEFAULT-ON (TRDD-KI24GR5Z): with ENABLED unset, an over-baseline turn still fires."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
-    ctx = _ctx(_run(str(t), enabled=None))
+    ctx = _ctx(_run(str(t), enabled=None, project_dir=str(proj)))
     assert ctx is not None and "Token spike" in ctx
 
 
@@ -151,34 +178,22 @@ def test_cache_miss_spike_over_hard_fires_independently_of_output(tmp_path: Path
     t = _write_transcript(
         tmp_path,
         _user("do real work"),
-        _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over hard 25000
+        _assistant(20, tool=True, cache_creation=30_000),  # output tiny, cache-miss over hard 25000
     )
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE_HARD: "25000"}))
     assert ctx is not None
     assert "cache-miss" in ctx and "~30k" in ctx  # 30_000 floored to the ~30k bucket (TRDD-YRPUSIFY)
 
 
-def test_cache_miss_advisory_only_is_silent(tmp_path: Path) -> None:
-    """OWNER DIRECTIVE (2026-08-07, janitor#230): a cache-miss write is a sunk cost by the
-    time this hook fires — an ADVISORY-tier nudge for a cache-miss-ONLY trip is pure
-    post-hoc, unactionable telemetry, so it must stay silent (unlike output, which is
-    still actionable — wrap up / compact). The HARD tier keeps firing (see
+def test_cache_miss_advisory_is_never_emitted(tmp_path: Path) -> None:
+    """TRDD-KI6OWCZT (janitor#246): the cache-miss ADVISORY branch was deleted outright
+    — a cache-miss write is a sunk cost by the time this hook fires, so a nudge about a
+    single write is pure post-hoc, unactionable telemetry. Below the hard cap, a
+    cache-miss trip now stays silent unconditionally (no knob re-enables it). The HARD
+    tier keeps firing on a SUSTAINED pattern (see
     `test_cache_miss_only_wording_omits_compact_recommendation`)."""
-    t = _write_transcript(
-        tmp_path,
-        _user("do real work"),
-        _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over advisory 25000 only
-    )
-    assert _run(str(t), env_extra={_CACHE: "25000"}).stdout.strip() == ""
-
-
-def test_output_advisory_unchanged_even_with_cache_miss(tmp_path: Path) -> None:
-    """The output-driven advisory nudge is UNCHANGED by janitor#230: when output alone
-    trips advisory, the message still fires (and still appends the cache-miss note when
-    that signal is also present)."""
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
-    ctx = _ctx(_run(str(t)))
-    assert ctx is not None and "Token spike" in ctx
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
+    assert _run(str(t)).stdout.strip() == ""
 
 
 def test_hard_tier_emits_strong_stop_nudge(tmp_path: Path) -> None:
@@ -213,28 +228,31 @@ def test_hard_tier_no_deny_for_non_spawner_tool(tmp_path: Path) -> None:
 
 
 def test_silent_under_budget(tmp_path: Path) -> None:
+    """No baseline history and a modest turn → stays silent."""
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(50, tool=True))
     assert _run(str(t)).stdout.strip() == ""
 
 
 def test_silent_when_disabled(tmp_path: Path) -> None:
-    """Over budget but the option is off → no output (zero-cost default)."""
+    """Over baseline but the option is off → no output (zero-cost default)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
-    assert _run(str(t), enabled=False).stdout.strip() == ""
+    assert _run(str(t), enabled=False, project_dir=str(proj)).stdout.strip() == ""
 
 
 def test_silent_without_transcript_path() -> None:
     assert _run(None).stdout.strip() == ""
 
 
-def test_budget_zero_disables_turn_check(tmp_path: Path) -> None:
-    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
-    assert _run(str(t), budget="0").stdout.strip() == ""
-
-
 def test_multistep_turn_sums_output(tmp_path: Path) -> None:
     """Output is summed across the turn's assistant messages (with tool_results
-    interleaved), so a turn that drips over the budget across steps still fires."""
+    interleaved), so a turn that drips over the baseline-derived bar across steps
+    still fires."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)  # baseline-derived bar: 80 (median 20 * ratio 4)
     tool_result = json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
     t = _write_transcript(
         tmp_path,
@@ -243,9 +261,9 @@ def test_multistep_turn_sums_output(tmp_path: Path) -> None:
         tool_result,
         _assistant(60, tool=True),
     )
-    ctx = _ctx(_run(str(t)))
+    ctx = _ctx(_run(str(t), project_dir=str(proj)))
     assert ctx is not None
-    # 60 + 60 = 120 crosses the 100 budget (a single 60 stays silent), proving the sum;
+    # 60 + 60 = 120 crosses the 80 bar (a single 60 stays under it), proving the sum;
     # TRDD-YRPUSIFY buckets the raw total away, so we assert it FIRED, not the literal 120.
     assert "Token spike" in ctx
 
@@ -280,44 +298,46 @@ def _write_resume_ts(project_dir: Path, ts: int) -> None:
 
 def test_fresh_compact_grace_suppresses_cache_miss(tmp_path: Path) -> None:
     """TRDD-TKNSTP82 A2: a FRESH resume-after-compact.ts + high cache_creation + low
-    output → silent (the post-compact re-cache window)."""
+    output → silent (the post-compact re-cache window). Forced to a value that would
+    otherwise trip the HARD cache tier (janitor#246: the cache-miss ADVISORY tier no
+    longer exists at all, so only the HARD tier is left to exercise grace suppression)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_resume_ts(proj, int(time.time()))
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
-    r = _run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj))
+    r = _run(str(t), env_extra={_CACHE_HARD: "25000"}, project_dir=str(proj))
     assert r.stdout.strip() == ""
 
 
 def test_stale_compact_ts_does_not_suppress(tmp_path: Path) -> None:
     """A STALE resume-after-compact.ts (older than the grace window) → unchanged
-    behavior — the cache-miss trip still fires (regression). Forced to the HARD tier
-    (janitor#230: an advisory-only cache-miss trip is now silent by design — see
-    `test_cache_miss_advisory_only_is_silent` — so this compact-grace regression check
+    behavior — the cache-miss HARD trip still fires (regression). Forced to the HARD
+    tier (janitor#246: the advisory-only cache-miss trip no longer exists at all — see
+    `test_cache_miss_advisory_is_never_emitted` — so this compact-grace regression check
     needs a tier that still fires to be meaningful)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_resume_ts(proj, int(time.time()) - 10_000)  # far older than the 600s default grace
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}, project_dir=str(proj)))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE_HARD: "25000"}, project_dir=str(proj)))
     assert ctx is not None
     assert "cache-miss" in ctx and "~30k" in ctx  # bucketed (TRDD-YRPUSIFY)
 
 
 def test_absent_compact_ts_does_not_suppress(tmp_path: Path) -> None:
     """No resume-after-compact.ts at all (normal turn, no compaction) → unchanged
-    behavior — the cache-miss trip still fires. Forced to the HARD tier (see the
-    janitor#230 note on `test_stale_compact_ts_does_not_suppress`)."""
+    behavior — the cache-miss HARD trip still fires. Forced to the HARD tier (see the
+    janitor#246 note on `test_stale_compact_ts_does_not_suppress`)."""
     proj = tmp_path / "proj"
     proj.mkdir()
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
-    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000", _CACHE_HARD: "25000"}, project_dir=str(proj)))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE_HARD: "25000"}, project_dir=str(proj)))
     assert ctx is not None and "cache-miss" in ctx
 
 
 def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
     """CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S=0 disables the grace window even
-    with a fresh resume-after-compact.ts. Forced to the HARD tier (see the janitor#230
+    with a fresh resume-after-compact.ts. Forced to the HARD tier (see the janitor#246
     note on `test_stale_compact_ts_does_not_suppress`)."""
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -326,7 +346,7 @@ def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
     ctx = _ctx(
         _run(
             str(t),
-            env_extra={_CACHE: "25000", _CACHE_HARD: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
+            env_extra={_CACHE_HARD: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
             project_dir=str(proj),
         )
     )
@@ -400,10 +420,13 @@ def test_same_bucket_emits_identical_text(tmp_path: Path) -> None:
     """TRDD-YRPUSIFY: two turns whose raw output differs but falls in the SAME 10k bucket
     emit BYTE-IDENTICAL additionalContext (cache-shareable); a different bucket differs.
     Hard budget is raised so all three stay ADVISORY — isolating the bucket from the tier."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)
 
     def ctx_for(out: int) -> str | None:
         t = _write_transcript(tmp_path, _user("do real work"), _assistant(out, tool=True))
-        return _ctx(_run(str(t), env_extra={_BUDGET_HARD: "1000000"}))
+        return _ctx(_run(str(t), env_extra={_BUDGET_HARD: "1000000"}, project_dir=str(proj)))
 
     a = ctx_for(43_366)
     b = ctx_for(47_912)  # same ~40k bucket as 43_366

@@ -256,50 +256,74 @@ def _usage(*, output: int = 0, cache_creation: int = 0) -> token_meter.TurnUsage
 
 
 class TestEvaluateTurnBudget(unittest.TestCase):
-    """The pure real-time budget classifier (TRDD-KI24GR5Z)."""
+    """The pure real-time budget classifier (TRDD-KI24GR5Z).
 
-    _TH = dict(output_advisory=100, output_hard=1000, cache_creation_advisory=200, cache_creation_hard=2000)
+    TRDD-KI6OWCZT (janitor#246): the cache-miss ADVISORY branch was deleted outright
+    (a single cache-miss write is a sunk cost, never actionable as an advisory — only
+    the HARD tier still fires on a SUSTAINED pattern); the surviving OUTPUT advisory
+    is now BASELINE-RELATIVE (`output_baseline_history`), not a fixed knob.
+    """
 
-    def test_ok_below_both_advisory(self):
+    _TH = dict(output_hard=1000, cache_creation_hard=2000)
+
+    def test_ok_below_hard_no_baseline(self):
         v = token_meter.evaluate_turn_budget(_usage(output=50, cache_creation=50), **self._TH)
         self.assertEqual(v.tier, "ok")
         self.assertEqual(v.reasons, [])
-
-    def test_output_advisory(self):
-        v = token_meter.evaluate_turn_budget(_usage(output=150), **self._TH)
-        self.assertEqual(v.tier, "advisory")
-        self.assertTrue(any("output 150" in r for r in v.reasons))
 
     def test_output_hard(self):
         v = token_meter.evaluate_turn_budget(_usage(output=1500), **self._TH)
         self.assertEqual(v.tier, "hard")
 
-    def test_cache_miss_advisory_independent_of_output(self):
-        """A cache-miss write over its advisory budget trips even with zero output."""
-        v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=300), **self._TH)
-        self.assertEqual(v.tier, "advisory")
-        self.assertTrue(any("cache-miss write 300" in r for r in v.reasons))
-
     def test_cache_miss_hard(self):
         v = token_meter.evaluate_turn_budget(_usage(cache_creation=2500), **self._TH)
         self.assertEqual(v.tier, "hard")
 
+    def test_no_advisory_without_baseline_however_large_the_output(self):
+        """janitor#246: no fixed threshold survives — with no baseline to compare
+        against, a value just under the hard cap stays silent rather than fall back
+        to a fixed number."""
+        v = token_meter.evaluate_turn_budget(_usage(output=999), **self._TH)
+        self.assertEqual(v.tier, "ok")
+
+    def test_insufficient_history_never_advises(self):
+        """Fewer than the minimum baseline samples -> no basis to judge -> stays
+        silent, never a fallback to a fixed threshold."""
+        v = token_meter.evaluate_turn_budget(_usage(output=999), output_baseline_history=[20, 20], **self._TH)
+        self.assertEqual(v.tier, "ok")
+
+    def test_output_advisory_fires_from_baseline(self):
+        """A steady low baseline + a clear multiple-of-baseline spike -> advisory."""
+        v = token_meter.evaluate_turn_budget(_usage(output=150), output_baseline_history=[20] * 8, **self._TH)
+        self.assertEqual(v.tier, "advisory")
+        self.assertTrue(any(r.startswith("output ") for r in v.reasons))
+
+    def test_output_below_baseline_bar_stays_silent(self):
+        """An output value that does not clear the baseline-derived bar stays 'ok'."""
+        v = token_meter.evaluate_turn_budget(_usage(output=25), output_baseline_history=[20] * 8, **self._TH)
+        self.assertEqual(v.tier, "ok")
+
+    def test_output_hard_wins_over_its_own_baseline_advisory(self):
+        """A value at/above output_hard reports as hard, not hard+advisory double count."""
+        v = token_meter.evaluate_turn_budget(_usage(output=1500), output_baseline_history=[20] * 8, **self._TH)
+        self.assertEqual(v.tier, "hard")
+        self.assertEqual(len(v.reasons), 1)
+
     def test_hard_wins_over_advisory_across_signals(self):
-        """One signal hard + the other advisory → tier is hard; reasons name both."""
-        v = token_meter.evaluate_turn_budget(_usage(output=1500, cache_creation=300), **self._TH)
+        """cache-miss HARD + output ADVISORY (baseline) together -> tier hard; both named."""
+        v = token_meter.evaluate_turn_budget(
+            _usage(output=150, cache_creation=2500), output_baseline_history=[20] * 8, **self._TH
+        )
         self.assertEqual(v.tier, "hard")
         self.assertEqual(len(v.reasons), 2)
 
-    def test_zero_threshold_disables_that_signal(self):
-        """output budgets = 0 → output never trips, even at a huge value."""
+    def test_zero_hard_threshold_disables_hard_but_baseline_can_still_advise(self):
+        """output_hard=0 disables the hard cap; the baseline-relative advisory is
+        independent of it and still fires."""
         v = token_meter.evaluate_turn_budget(
-            _usage(output=10_000_000),
-            output_advisory=0,
-            output_hard=0,
-            cache_creation_advisory=200,
-            cache_creation_hard=2000,
+            _usage(output=150), output_hard=0, cache_creation_hard=2000, output_baseline_history=[20] * 8
         )
-        self.assertEqual(v.tier, "ok")
+        self.assertEqual(v.tier, "advisory")
 
     def test_ignore_cache_creation_suppresses_hard_trip(self):
         """TRDD-TKNSTP82 A1: ignore_cache_creation=True + cache_creation past HARD threshold
@@ -307,11 +331,6 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=5000), ignore_cache_creation=True, **self._TH)
         self.assertEqual(v.tier, "ok")
         self.assertEqual(v.reasons, [])
-
-    def test_ignore_cache_creation_suppresses_advisory_trip(self):
-        """Same suppression at the advisory tier, not just hard."""
-        v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=300), ignore_cache_creation=True, **self._TH)
-        self.assertEqual(v.tier, "ok")
 
     def test_ignore_cache_creation_does_not_suppress_output(self):
         """The output signal is UNAFFECTED by ignore_cache_creation — a genuine runaway

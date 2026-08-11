@@ -30,9 +30,7 @@ OPT-IN — advisory is the default, matching the user's word "nudge".
 
 CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; any threshold of 0 disables that check):
   * ENABLED                  — master switch, DEFAULT ON (false/0/no/off disables).
-  * TURN_OUTPUT              — advisory output budget (default 10000).
   * TURN_OUTPUT_HARD         — hard output budget (default 40000).
-  * TURN_CACHE_CREATION      — advisory cache-miss-write budget (default 25000).
   * TURN_CACHE_CREATION_HARD — hard cache-miss-write budget (default 75000).
   * ENFORCE                  — DEFAULT OFF; when on, a `Task`/`Agent` spawn at the hard
                                tier is DENIED (not just advised).
@@ -42,8 +40,18 @@ CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; any threshold of 0 disables t
                                CHANGE, never periodically) and does NOT gate the deny path.
                                <= 0 disables ALL throttling (every non-ok tier always nudges).
 
+TRDD-KI6OWCZT (janitor#246) — there is no fixed OUTPUT-advisory knob any more. The
+advisory tier is now BASELINE-RELATIVE: it compares the in-progress turn's output
+against this project's own recent per-turn output history (`token-meter.jsonl`, the
+Stop-hook meter's log), reusing `token_baseline`'s robust statistics (see
+`token_meter.evaluate_turn_budget`). The CACHE-CREATION advisory tier was deleted
+outright — a cache-miss write is a sunk cost by the time this hook fires, so a
+single-write nudge is never actionable (only a SUSTAINED pattern past the HARD cap
+still interrupts).
+
 DATA: reuses `token_meter.tail_turn_usage` (the tested turn-boundary parser the Stop-hook
-meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn). No new accounting.
+meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn) + `token_meter.load_log`
+(the project's own historical per-turn output samples). No new accounting.
 """
 
 from __future__ import annotations
@@ -60,10 +68,10 @@ import time
 import state  # noqa: E402  # atomic_write — the tier-transition state file (issue #79)
 import token_meter  # noqa: E402
 
-_DEFAULT_TURN_OUTPUT = 10_000
 _DEFAULT_TURN_OUTPUT_HARD = 40_000
-_DEFAULT_TURN_CACHE_CREATION = 25_000
 _DEFAULT_TURN_CACHE_CREATION_HARD = 75_000
+# TRDD-KI6OWCZT — recent-only: the session's OWN RECENT baseline, not its all-time history.
+_MAX_OUTPUT_BASELINE_SAMPLES = 200
 # TRDD-TKNSTP82 A2 — window (seconds) after a compaction during which cache_creation is
 # EXPECTED to spike (the one-time full-prefix re-cache) and is therefore ignored by the
 # classifier. A bit more generous than the ~5-min heartbeat cadence that clears the
@@ -237,6 +245,29 @@ def _in_compact_grace(project_dir: str, now: int, grace_s: int) -> bool:
     return 0 <= (now - ts) < grace_s
 
 
+def _token_meter_log_path(project_dir: str) -> Path:
+    return Path(project_dir) / ".janitor" / "state" / "token-meter.jsonl"
+
+
+def _load_output_baseline(project_dir: str) -> list[int]:
+    """This project's own recent INTERACTIVE (non-heartbeat) per-turn output-token
+    counts, oldest first — the baseline `evaluate_turn_budget` measures a live turn's
+    output spike against (TRDD-KI6OWCZT, janitor#246).
+
+    Heartbeat turns are EXCLUDED: their near-zero output would collapse the baseline
+    toward zero and make every real interactive turn look like a spike. No project
+    dir / no log yet / read failure all resolve to `[]` — `evaluate_turn_budget`
+    treats that as "no basis to judge", so the advisory stays silent rather than
+    guess (same correct-by-omission stance as the rest of this hook), never a
+    fallback to a fixed number.
+    """
+    if not project_dir:
+        return []
+    records = token_meter.load_log(_token_meter_log_path(project_dir))
+    values = [int(r.get("output", 0) or 0) for r in records if isinstance(r, dict) and not r.get("heartbeat", True)]
+    return values[-_MAX_OUTPUT_BASELINE_SAMPLES:]
+
+
 def _emit(obj: dict) -> None:
     sys.stdout.write(json.dumps(obj))
 
@@ -324,20 +355,13 @@ def _response(
         # SUSTAINED pattern of repeated cache-miss writes from compounding further.
         return _context(f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. {_CACHE_MISS_NOTE}")
 
-    # advisory tier
-    if has_output:
-        msg = f"⚠ Token spike: this turn {signals}. Be terse, wrap up the step, or compact — long output is billed at full price."
-        if has_cache_miss:
-            msg += f" {_CACHE_MISS_NOTE}"
-        return _context(msg)
-    # OWNER DIRECTIVE (2026-08-07, janitor#230): a cache-miss write is a SUNK cost by the
-    # time this hook fires — `_CACHE_MISS_NOTE` itself says so ("that write already
-    # happened and cannot be undone"). An advisory nudge here is a pure post-hoc report,
-    # not an actionable gate, so at the ADVISORY tier (below the runaway threshold) it
-    # must stay silent rather than distract the agent with unactionable telemetry. The
-    # HARD tier above still fires on cache-miss-only — a SUSTAINED pattern there is worth
-    # interrupting even though any single write can't be undone.
-    return None
+    # advisory tier — TRDD-KI6OWCZT (janitor#246): OUTPUT is the ONLY signal that can
+    # ever reach here now. `evaluate_turn_budget` never adds a cache-miss reason to
+    # `reasons_advisory` any more (that branch was deleted outright — a single cache-
+    # miss write is a sunk cost the moment this hook fires, so an advisory-tier nudge
+    # about it is unactionable telemetry, not a gate). The HARD tier above still fires
+    # on a SUSTAINED cache-miss pattern, which is worth interrupting for.
+    return _context(f"⚠ Token spike: this turn {signals}. Be terse, wrap up the step, or compact — long output is billed at full price.")
 
 
 def main() -> int:
@@ -378,19 +402,15 @@ def main() -> int:
 
     verdict = token_meter.evaluate_turn_budget(
         usage,
-        output_advisory=_coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"), _DEFAULT_TURN_OUTPUT),
         output_hard=_coerce_int(
             os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"),
             _DEFAULT_TURN_OUTPUT_HARD,
-        ),
-        cache_creation_advisory=_coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION"),
-            _DEFAULT_TURN_CACHE_CREATION,
         ),
         cache_creation_hard=_coerce_int(
             os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"),
             _DEFAULT_TURN_CACHE_CREATION_HARD,
         ),
+        output_baseline_history=_load_output_baseline(project_dir),
         ignore_cache_creation=ignore_cache_creation,
     )
     # issue #79 — unconditional per-call tier bookkeeping, BEFORE building the response.
