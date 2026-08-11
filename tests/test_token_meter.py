@@ -298,6 +298,25 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         self.assertEqual(v.tier, "advisory")
         self.assertTrue(any(r.startswith("output ") for r in v.reasons))
 
+    def test_advisory_bar_stays_reachable_under_hard_cap(self):
+        """janitor#246 follow-up: with REALISTIC dispersion the baseline bar must land
+        strictly BELOW `output_hard`, or the advisory tier is unreachable by construction
+        and every trip lands on `hard` instead.
+
+        Every OTHER baseline test here seeds a FLAT `[20]*8` history (MAD=0) — the one
+        shape where the z-band collapses to the median — which is exactly why a dead tier
+        shipped. Measured on the janitor's own meter log (200 interactive turns): median
+        4638 / MAD 3886 produced a bar of 39_202 against the 40_000 cap, an 800-token
+        window. This history scores 50_744 unclamped: the advisory could never have fired.
+        """
+        hist = [1200, 2400, 3100, 4800, 5200, 6900, 8300, 11000, 13500, 16000, 21000, 27000]
+        th = dict(output_hard=40_000, cache_creation_hard=75_000, output_baseline_history=hist)
+        # The bar is real (it does not simply always fire) ...
+        self.assertEqual(token_meter.evaluate_turn_budget(_usage(output=29_000), **th).tier, "ok")
+        # ... and it is REACHABLE strictly below the hard cap.
+        v = token_meter.evaluate_turn_budget(_usage(output=31_000), **th)
+        self.assertEqual(v.tier, "advisory")
+
     def test_output_below_baseline_bar_stays_silent(self):
         """An output value that does not clear the baseline-derived bar stays 'ok'."""
         v = token_meter.evaluate_turn_budget(_usage(output=25), output_baseline_history=[20] * 8, **self._TH)

@@ -501,6 +501,17 @@ class BudgetVerdict:
 # number (the whole point of moving off a fixed threshold in the first place).
 _MIN_OUTPUT_BASELINE_HISTORY = 8
 
+# TRDD-KI6OWCZT follow-up — the advisory bar may never REACH the hard cap. The advisory
+# exists to warn BEFORE the hard tier; a baseline-derived bar at or above `output_hard` does
+# not tune the tier, it DELETES it — every trip lands on `hard` instead, so the "be terse /
+# wrap up" nudge this card is about can never be delivered. MEASURED on this repo's own
+# `token-meter.jsonl` (200 interactive turns): median 4638, MAD 3886 — the z-band alone was
+# 39_202 against the 40_000 default hard cap, an 800-token-wide advisory window; a project
+# with median 10_000 / MAD 7_500 scores 76_717 and closes it outright. Lowering
+# `output_advisory_z` alone does NOT fix that second case (43_358 — still dead), so the bar
+# must ALSO be clamped under the hard cap. Both levers are load-bearing; neither is enough.
+_ADVISORY_HARD_CEILING = 0.75
+
 
 def evaluate_turn_budget(
     usage: TurnUsage,
@@ -509,7 +520,7 @@ def evaluate_turn_budget(
     cache_creation_hard: int,
     output_baseline_history: list[int] | None = None,
     output_advisory_floor_pct: float = 95.0,
-    output_advisory_z: float = 6.0,
+    output_advisory_z: float = 3.0,
     output_advisory_ratio: float = 4.0,
     ignore_cache_creation: bool = False,
 ) -> BudgetVerdict:
@@ -527,7 +538,9 @@ def evaluate_turn_budget(
         * `percentile(history, output_advisory_floor_pct)` — an absolute floor (never
           advise on a value that is unremarkable next to this session's own recent
           turns);
-        * `median + output_advisory_z * 1.4826 * MAD` — the robust-z band;
+        * `median + output_advisory_z * 1.4826 * MAD` — the robust-z band (z is 3.0 here,
+          NOT the 6.0 `classify_recent` uses: that one scores 5-minute BUCKET SUMS with no
+          competing hard cap, and the constant does not transfer to per-turn output);
         * `median * output_advisory_ratio` — a multiplicative bar that stays
           meaningful when MAD≈0 (a flat history), where the z-band collapses to the
           median and a genuine multi-x spike would otherwise score 0.
@@ -567,6 +580,11 @@ def evaluate_turn_budget(
             median + output_advisory_z * 1.4826 * mad,
             median * output_advisory_ratio,
         )
+        # Keep the tier REACHABLE on ANY history — see `_ADVISORY_HARD_CEILING`. The three
+        # gates above are unbounded, so on a real (heavy-tailed) history they routinely land
+        # past `output_hard`, which silently removes the advisory tier instead of tuning it.
+        if output_hard > 0:
+            threshold = min(threshold, output_hard * _ADVISORY_HARD_CEILING)
         if threshold > 0 and o >= threshold:
             reasons_advisory.append(f"output {o} ≥ baseline {threshold:.0f} (median {median:.0f})")
     if not ignore_cache_creation:

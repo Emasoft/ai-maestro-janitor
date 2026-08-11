@@ -1057,12 +1057,17 @@ any plugin-side change — staying on a recent CC build is recommended:
   spikes. It fires on **output** (long replies) AND **cache-miss cache writes**
   (`cache_creation`, billed ~1.25× — the cheap 0.1× cache re-read is not counted).
   All configurable via `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`:
-  `ENABLED` (default on; set `false` to silence), advisory budgets `TURN_OUTPUT`
-  (10000) / `TURN_CACHE_CREATION` (25000), hard budgets `TURN_OUTPUT_HARD`
+  `ENABLED` (default on; set `false` to silence), hard budgets `TURN_OUTPUT_HARD`
   (40000) / `TURN_CACHE_CREATION_HARD` (75000), and `ENFORCE` (default off) which,
   when on, DENIES a new `Task`/`Agent` subagent spawn at the hard tier — the
-  strongest cap, since subagents are the biggest token multiplier. Any budget of
-  0 disables that signal.
+  strongest cap, since subagents are the biggest token multiplier. A hard budget
+  of 0 disables that hard cap. There is **no advisory knob** (janitor#246): the
+  output advisory is BASELINE-RELATIVE — it fires only when the turn clears a bar
+  derived from this project's own recent per-turn output history, and never at all
+  until there is enough history to judge — and the cache-miss advisory was removed
+  outright (that write is already sunk by the time the hook sees it, so nudging
+  about it was never actionable). Because the advisory is independent of
+  `TURN_OUTPUT_HARD`, setting that to 0 disables only the hard tier.
 - **Adaptive token-usage anomaly detector** (default-on, TRDD-EDSFEQ5C): the
   SLOW, pattern-based companion to the per-turn guard. Each heartbeat it reads
   `token-meter.jsonl`, learns a **robust** per-5-min baseline (median + MAD —

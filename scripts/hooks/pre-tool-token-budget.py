@@ -28,7 +28,9 @@ DEFAULT-ON (opt-out): the user asked for an always-present monitor; the threshol
 generous so it stays SILENT in normal use and only fires on a genuine spike. The DENY is
 OPT-IN — advisory is the default, matching the user's word "nudge".
 
-CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; any threshold of 0 disables that check):
+CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; a HARD threshold of 0 disables that hard
+cap — note the output ADVISORY is baseline-relative and independent of `TURN_OUTPUT_HARD`, so
+setting that to 0 disables only the hard tier, not the output signal as a whole):
   * ENABLED                  — master switch, DEFAULT ON (false/0/no/off disables).
   * TURN_OUTPUT_HARD         — hard output budget (default 40000).
   * TURN_CACHE_CREATION_HARD — hard cache-miss-write budget (default 75000).
@@ -50,8 +52,9 @@ single-write nudge is never actionable (only a SUSTAINED pattern past the HARD c
 still interrupts).
 
 DATA: reuses `token_meter.tail_turn_usage` (the tested turn-boundary parser the Stop-hook
-meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn) + `token_meter.load_log`
-(the project's own historical per-turn output samples). No new accounting.
+meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn), plus a BOUNDED TAIL read
+of the meter's own `token-meter.jsonl` for the historical per-turn output samples. No new
+accounting.
 """
 
 from __future__ import annotations
@@ -72,6 +75,12 @@ _DEFAULT_TURN_OUTPUT_HARD = 40_000
 _DEFAULT_TURN_CACHE_CREATION_HARD = 75_000
 # TRDD-KI6OWCZT — recent-only: the session's OWN RECENT baseline, not its all-time history.
 _MAX_OUTPUT_BASELINE_SAMPLES = 200
+# How much of the meter log to read for that baseline. This hook runs on EVERY tool call in
+# EVERY session, so parsing the WHOLE file (up to `trim_log`'s 1 MB cap — measured 412 KB /
+# 3147 records on this repo) per call is pure waste when only the last
+# `_MAX_OUTPUT_BASELINE_SAMPLES` records are ever used. 64 KB holds ~500 records at the ~130
+# bytes each `as_record` emits, comfortably more than the window.
+_BASELINE_TAIL_BYTES = 64 * 1024
 # TRDD-TKNSTP82 A2 — window (seconds) after a compaction during which cache_creation is
 # EXPECTED to spike (the one-time full-prefix re-cache) and is therefore ignored by the
 # classifier. A bit more generous than the ~5-min heartbeat cadence that clears the
@@ -260,11 +269,46 @@ def _load_output_baseline(project_dir: str) -> list[int]:
     treats that as "no basis to judge", so the advisory stays silent rather than
     guess (same correct-by-omission stance as the rest of this hook), never a
     fallback to a fixed number.
+
+    Reads only the last `_BASELINE_TAIL_BYTES` rather than going through
+    `token_meter.load_log`, for two reasons — both of which that helper fails HERE, on a
+    per-tool-call hot path it was never written for:
+      * COST — `load_log` parses the entire file on every single tool call to use at most
+        the last `_MAX_OUTPUT_BASELINE_SAMPLES` records.
+      * SAFETY — `load_log` guards only `json.loads`: its `p.open()` and its STRICT-utf-8
+        line iteration are unguarded, so an unreadable log (permissions, I/O error) or one
+        torn mid-append by a concurrent writer raises straight through a hook that must
+        never crash. `trim_log` already decodes with `errors="replace"` precisely because
+        it expects such bytes. Every OTHER file read in this hook catches OSError; this one
+        must too. A truncated first line in the window is dropped by its own json-parse
+        failure, exactly as `token_meter._read_tail_lines` documents.
     """
     if not project_dir:
         return []
-    records = token_meter.load_log(_token_meter_log_path(project_dir))
-    values = [int(r.get("output", 0) or 0) for r in records if isinstance(r, dict) and not r.get("heartbeat", True)]
+    p = _token_meter_log_path(project_dir)
+    try:
+        size = p.stat().st_size
+        with p.open("rb") as f:
+            if size > _BASELINE_TAIL_BYTES:
+                f.seek(size - _BASELINE_TAIL_BYTES)
+            raw = f.read()
+    except OSError:
+        return []
+    values: list[int] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            rec = json.loads(s)
+        except ValueError:
+            continue  # partial first line of the tail window / non-JSON noise
+        if not isinstance(rec, dict) or rec.get("heartbeat", True):
+            continue
+        try:
+            values.append(int(rec.get("output", 0) or 0))
+        except (TypeError, ValueError):
+            continue  # a hand-edited / corrupt `output` must not crash the hook
     return values[-_MAX_OUTPUT_BASELINE_SAMPLES:]
 
 

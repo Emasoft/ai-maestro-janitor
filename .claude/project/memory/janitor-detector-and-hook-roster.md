@@ -1,6 +1,6 @@
 ---
 name: janitor-detector-and-hook-roster
-description: "full list of the 39 janitor detectors by group / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py"
+description: "full list of the 39 janitor detectors by group / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py / why does the token-spike advisory never fire / TURN_OUTPUT knob has no effect"
 ocd: 2026-08-02
 lmd: 2026-08-02
 metadata:
@@ -91,11 +91,12 @@ reuses `token_meter.tail_turn_usage` + the pure `token_meter.evaluate_turn_budge
 to classify the IN-PROGRESS turn on TWO signals — `output` (full-price work) AND
 `cache_creation` (a CACHE-MISS cache WRITE, ~1.25×; the cheap 0.1× cache_read is
 NOT billed) — into ok/advisory/hard. **DEFAULT-ON** (opt-out
-`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`); silent below `…TURN_OUTPUT` (10000) /
-`…TURN_CACHE_CREATION` (25000); a strong stop-the-subagents/skill nudge at
+`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`); a strong stop-the-subagents/skill nudge at
 `…TURN_OUTPUT_HARD` (40000) / `…TURN_CACHE_CREATION_HARD` (75000); and — opt-in
 `…TOKEN_BUDGET_ENFORCE` — a `permissionDecision: deny` of a `Task`/`Agent` spawn at
-the hard tier (subagents are the biggest multiplier). Any threshold 0 disables it. The context-watchdog trio
+the hard tier (subagents are the biggest multiplier). A hard threshold of 0 disables that
+hard cap ONLY. There is NO advisory knob since janitor#246: the output advisory is
+baseline-relative (clamped under the hard cap) and the cache-miss advisory is gone.[^1] The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
 skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥80%, enforcing
 ≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
@@ -121,3 +122,16 @@ subsystem, not to the heartbeat.
 Agent context is poisoned three ways: a dependency postinstall WRITES `CLAUDE.md` (caught by `ai-context-poisoning`), an MCP response carries a hostile payload (caught by `post-mcp-response-sanitizer`), or the context file ARRIVES ALREADY POISONED via a clone, a pull, or a merged PR. The third was the unwatched one and is the cheapest: it needs NO EXECUTION — no install script, no server, no command — because `CLAUDE.md` is read into every session automatically, so the hostile line is ACTED ON before any detector could report it. `agent-context-integrity` (janitor#167) covers it. Three deliberate convention breaks follow from that vector, each of which looks like a bug until you see why: (1) NO silent first-fire baseline, unlike every other watcher here — a file poisoned BEFORE the janitor arrived is still poisoned, so adopting current state as clean is the silent-disable shape; content-hash dedupe stops the nagging instead. (2) NO gitignore filter, the documented exception to janitor#99 — that rule asks "what does the repo SHIP?", this one asks "what does the agent LOAD?", and a gitignored `CLAUDE.md` is still auto-loaded. (3) EVERY emitted byte is sanitized, because this detector quotes attacker-controlled text into heartbeat stdout, where the model reads lines as instructions — a poisoned file containing a bare marker must arrive defanged. See [[janitor-findings-pipeline]] for where its findings land.
 
 ## Notes and lessons learned
+
+[^1]: [id: LESSON-NBGE-TKBUDGET-KNOBS, status: current, keywords: TURN_OUTPUT_has_no_effect token_budget_advisory_knob_ignored why_does_the_token_spike_advisory_never_fire baseline_relative_advisory_bar setting_TURN_OUTPUT_HARD_to_0_did_not_silence_output roster_documented_a_deleted_knob, ocd: 2026-08-11, lmd: 2026-08-11]
+    SUPERSEDED BODY: "silent below `…TURN_OUTPUT` (10000) / `…TURN_CACHE_CREATION` (25000) … Any threshold 0 disables it."
+    DO NOT describe the token-budget hook's advisory tier as a fixed knob, BECAUSE janitor#246
+    deleted `…TURN_OUTPUT` and `…TURN_CACHE_CREATION` outright and this page kept advertising
+    them — a reader who set either got silence and no effect, and "any threshold 0 disables it"
+    is now false for output (the baseline advisory is independent of `…TURN_OUTPUT_HARD`).
+    DO state the advisory is BASELINE-RELATIVE and clamped under the hard cap instead. Root
+    cause of BOTH the stale page and the shipped bug: the fix's tests seeded a FLAT `[20]*8`
+    history (MAD=0), the one shape where the robust-z gate collapses — so nobody saw that on a
+    real heavy-tailed history the bar (39_202, measured) lands at the 40_000 hard cap and the
+    advisory tier is unreachable. DO seed baseline fixtures with NONZERO dispersion at
+    realistic magnitudes, and assert the bar sits strictly below the hard cap.
