@@ -479,10 +479,18 @@ def _split_page(text: str) -> tuple[str | None, str]:
 
 def _footer_heading_line(text: str) -> int | None:
     """0-based line index of the EARLIEST footer heading — `## Applies to`, `## Governed
-    by`, or the Notes heading (any spelling `memory_edit_verify._LESSONS_HEADING`'s own
-    match accepts) — fence-aware, or None when the page carries none of them. Mirrors the
-    memgrep crate's `footer_section_line` (janitor#250) so this precheck and `add-atom`'s
-    insertion boundary can never disagree about where the footer starts."""
+    by`, `## See also`, or the Notes heading (any spelling
+    `memory_edit_verify._LESSONS_HEADING`'s own match accepts) — fence-aware, or None when
+    the page carries none of them. Mirrors the memgrep crate's `footer_section_line`
+    (janitor#250) so this precheck and `add-atom`'s insertion boundary can never disagree
+    about where the footer starts — if they drift, one of them relocates atoms the other
+    then flags as defects, forever.
+
+    `## See also` joined the family from the reporter's THIRD reproduction (a USER-scope
+    page whose only footer was See also). The governing rule is "ANY trailing footer that
+    precedes Notes", not "the link law's two sections" — the first fix covered three
+    headings only because it was written from the issue body, whose examples happened to
+    be `## Governed by` twice."""
     in_fence = False
     for i, line in enumerate(text.splitlines()):
         stripped = line.lstrip()
@@ -497,6 +505,7 @@ def _footer_heading_line(text: str) -> int | None:
             if (
                 heading_text == "applies to"
                 or heading_text == "governed by"
+                or heading_text == "see also"
                 or "notes and lessons learned" in low
                 or "lessons learned" in low
             ):

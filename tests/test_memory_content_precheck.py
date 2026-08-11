@@ -724,6 +724,35 @@ def test_repair_defect_clean_when_atom_precedes_all_footer_sections(tmp_path):
     assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
 
 
+def test_repair_defect_atom_after_footer_when_atom_lands_after_see_also(tmp_path):
+    """janitor#250 third reproduction: `## See also` is a footer member too — a
+    USER-scope page whose only footer was `## See also` had its atom spliced
+    BELOW it. An atom after `## See also` is flagged `atom-after-footer`."""
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        body=(
+            "A live fact line.\n\n"
+            "## See also\n- [[y]]\n\n"
+            "^stray-fact [desc: stray, keywords: stray fact]\nStray body."
+        ),
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == "atom-after-footer"
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_defect_clean_when_atom_precedes_see_also(tmp_path):
+    """The correctly-shaped page — atom(s) ABOVE `## See also` — is not flagged
+    `atom-after-footer`."""
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        marker=True,
+        body="A live fact line.\n\n## See also\n- [[y]]",
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
+
+
 def test_retro_lesson_has_work_true_for_pointerless_superseded_atom(tmp_path):
     """A curated page with a status:superseded atom marker and NO superseded-by:
     pointer is the retro skill's exact candidate -> work."""

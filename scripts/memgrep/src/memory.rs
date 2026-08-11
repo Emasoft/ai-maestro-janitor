@@ -2223,14 +2223,21 @@ fn notes_section_line(text: &str) -> Option<usize> {
 }
 
 /// The 0-based line index of the EARLIEST footer-section heading — `## Applies to`, `## Governed
-/// by`, or `## Notes and lessons learned` (any spelling `notes_section_line` accepts) — fence-aware,
-/// or `None` when the page carries none of them. This is `add-atom`'s insertion boundary
-/// (janitor#250): the link law (`markdown-memory-recall.md`) puts `## Applies to` / `## Governed
-/// by` sections BEFORE `## Notes and lessons learned`, so anchoring only on Notes let a new atom
+/// by`, `## See also`, or `## Notes and lessons learned` (any spelling `notes_section_line`
+/// accepts) — fence-aware, or `None` when the page carries none of them. This is `add-atom`'s
+/// insertion boundary (janitor#250): the link law (`markdown-memory-recall.md`) puts the link
+/// sections BEFORE `## Notes and lessons learned`, so anchoring only on Notes let a new atom
 /// land INSIDE the last link section — where `--in "Governed by"` then misread it as belonging to
-/// that section. Treating all three as one FOOTER family keeps the documented "before Notes"
+/// that section. Treating them as one FOOTER family keeps the documented "before Notes"
 /// behaviour true on the common case (a page with only Notes) while never splicing past a link
 /// section that comes first.
+///
+/// `## See also` is in the family because the reporter's THIRD reproduction measured it there —
+/// a USER-scope page whose only footer was `## See also`, atom spliced below it, and
+/// `--in "See also"` returned the atom and its body. The first fix shipped with three headings
+/// because it was written from the issue BODY, whose two examples were both `## Governed by`;
+/// the fourth was named in a comment. The rule is not "the link law's two sections" but "ANY
+/// trailing footer that precedes Notes", and `See also` is the lateral-link member of that set.
 fn footer_section_line(text: &str) -> Option<usize> {
     let mut in_fence = false;
     for (i, line) in text.lines().enumerate() {
@@ -2247,6 +2254,7 @@ fn footer_section_line(text: &str) -> Option<usize> {
             let heading_text = low.trim_start_matches('#').trim();
             if heading_text == "applies to"
                 || heading_text == "governed by"
+                || heading_text == "see also"
                 || low.contains("notes and lessons learned")
                 || low.contains("lessons learned")
             {
@@ -2406,7 +2414,7 @@ fn read_body_from_stdin() -> Result<String> {
 struct AddAtomArgs {
     /// The wikimem page (`.md`) to append the atom to — it must already exist (create one with
     /// `memgrep new-page`). The atom is inserted before the trailing footer section — the
-    /// EARLIEST of `## Applies to` / `## Governed by` / `## Notes and lessons learned` — when
+    /// EARLIEST of `## Applies to` / `## Governed by` / `## See also` / `## Notes and lessons learned` — when
     /// present, else at EOF.
     #[arg(long = "page")]
     page: PathBuf,
@@ -8543,6 +8551,28 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     #[test]
     fn footer_section_line_none_when_no_footer_at_all() {
         assert_eq!(footer_section_line("# p\nno footer here\n"), None);
+    }
+
+    // janitor#250 third reproduction — `## See also` is a footer member too (a USER-scope page
+    // whose only footer was `## See also`, atom spliced BELOW it, `--in "See also"` returned it).
+
+    #[test]
+    fn footer_section_line_finds_see_also_only() {
+        let text = "# p\nbody\n## See also\n- [[x]]\n";
+        assert_eq!(footer_section_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_line_finds_see_also_before_notes() {
+        let text = "# p\nbody\n## See also\n- [[x]]\n## Notes and lessons learned\n";
+        // `## See also` at line 2 is the earliest footer heading, not Notes at line 4.
+        assert_eq!(footer_section_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_line_ignores_see_also_inside_fence() {
+        let text = "# p\nbody\n```\n## See also\n```\nmore body\n";
+        assert_eq!(footer_section_line(text), None);
     }
 
     #[test]
