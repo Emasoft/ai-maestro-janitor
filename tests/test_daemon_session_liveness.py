@@ -241,6 +241,11 @@ def test_session_awaiting_a_human_answer_is_never_typed_at(tmp_path, monkeypatch
     monkeypatch.setattr(
         daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED"
     )
+    # Deterministic "present-ish" idle reading: above the 20s typing gate (so the
+    # beat actually runs) but well below the 1800s unattended-ESC threshold, so
+    # this test exercises ONLY the pre-existing decline+notify path — never the
+    # ESC-dismiss addition (covered separately below).
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 600.0)
     daemon.task_session_liveness()
     assert fired == []                                    # never typed at
     assert "AWAITING USER" in _log(tmp_path)
@@ -264,6 +269,7 @@ def test_awaiting_user_outranks_even_the_esc_first_rungs(tmp_path, monkeypatch) 
     fleet = [_inst("frozen", "/p/proj-af", {"tmux_pane": "%8"}, trailing=3, awaiting=True)]
     fired = _setup(monkeypatch, tmp_path, fleet)
     monkeypatch.setattr(daemon.notify, "push", lambda **kw: "PUSHED")
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 600.0)
     daemon.task_session_liveness()
     assert fired == [], "an ESC would dismiss the pending prompt — must not fire"
     assert "AWAITING USER" in _log(tmp_path)
@@ -277,3 +283,52 @@ def test_wedged_short_circuit_exempts_esc_first_rungs(tmp_path, monkeypatch) -> 
     fired = _setup(monkeypatch, tmp_path, fleet)
     daemon.task_session_liveness()
     assert len(fired) == 1                                # still fired: ESC unwedges
+
+
+def test_awaiting_user_present_never_esc_dismisses(tmp_path, monkeypatch) -> None:
+    """Owner directive 2026-08-11 + the 2026-07-17 incident: a human recently at the
+    machine must never have their pending prompt touched — only the pre-existing
+    decline+notify path runs, exactly as before this feature."""
+    proj = tmp_path / "proj-esc-present"
+    fleet = [_inst("cron_dead", str(proj), {"tmux_pane": "%9"}, awaiting=True)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: "PUSHED")
+    # Present-ish: above the 20s typing gate, well below the 1800s unattended bar.
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 600.0)
+    daemon.task_session_liveness()
+    assert fired == [], "the human is present — nothing may be typed, not even ESC"
+    ledger = proj / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert not ledger.exists(), "no dismissal happened, so nothing should be recorded"
+
+
+def test_awaiting_user_unattended_esc_dismisses_and_records(tmp_path, monkeypatch) -> None:
+    """Past the unattended threshold, the guard may ESC-dismiss the stale dialog —
+    never answer it — and MUST leave a durable, findable record of what happened."""
+    proj = tmp_path / "proj-esc-unattended"
+    fleet = [_inst("cron_dead", str(proj), {"tmux_pane": "%10"}, awaiting=True)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: "PUSHED")
+    # Comfortably unattended: above both the 20s typing gate and the 1800s bar.
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: 5000.0)
+    daemon.task_session_liveness()
+    assert len(fired) == 1, "exactly one ESC plan must fire for the parked dialog"
+    plan = fired[0]
+    assert plan["command"] == "", "the plan must be ESC-only — never a typed command"
+    ledger = proj / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert ledger.exists(), "the dismissal must be recorded so a human can learn of it"
+    entries = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert any(e["code"] == "FLEET-AWAITING-DISMISS" for e in entries)
+
+
+def test_awaiting_user_unknown_idle_never_esc_dismisses(tmp_path, monkeypatch) -> None:
+    """`hid_idle_seconds` returning None means "cannot tell" — fail toward NOT
+    touching the pane, same as the typing gate above the loop."""
+    proj = tmp_path / "proj-esc-unknown"
+    fleet = [_inst("cron_dead", str(proj), {"tmux_pane": "%11"}, awaiting=True)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: "PUSHED")
+    monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: None)
+    daemon.task_session_liveness()
+    assert fired == [], "an unknown idle reading must never license an ESC"
+    ledger = proj / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert not ledger.exists()

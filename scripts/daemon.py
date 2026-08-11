@@ -1321,6 +1321,64 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 )
             except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
                 pass
+            # Owner directive 2026-08-11: "no session may sit blocked — any blocking
+            # error or askuser prompt is answered with the default option or escaped".
+            # This must NEVER answer for the human — that is exactly the 2026-07-17
+            # incident the guard above exists to prevent (the guardian typed
+            # `/janitor-arm` INTO an approval dialog). ESC only: it can DISMISS a
+            # dialog, never approve/select anything, so it can never make the wrong
+            # choice on the human's behalf — only defer the decision back to a clean
+            # prompt. And ESC only once the machine has plainly been left unattended:
+            # `hid_idle_seconds` is machine-wide HID idle (keyboard/mouse), so a human
+            # about to answer THIS prompt reads as recent and we leave the dialog
+            # alone — the same 2026-07-17 lesson, restated for the unattended case.
+            # A None reading (cannot tell) fails toward NOT touching it, same as the
+            # typing gate above this loop.
+            esc_idle_s = state.coerce_int(
+                os.environ.get("CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S"),
+                1800,
+                detector_name="session-liveness",
+                var_name="fleet_awaiting_esc_idle_s",
+            )
+            hid_awaiting = user_intent.hid_idle_seconds()
+            if hid_awaiting is not None and hid_awaiting >= esc_idle_s:
+                esc_plan = fleet_inject.build_esc_plan(inst.terminal)
+                if esc_plan is not None:
+                    if not fire:
+                        state.log_line(
+                            "daemon",
+                            f"session-liveness:DRY would ESC-dismiss stale prompt "
+                            f"({hid_awaiting:.0f}s unattended) → {esc_plan['channel']} "
+                            f"for {tag}",
+                        )
+                    else:
+                        esc_ok = fleet_inject.fire(esc_plan)
+                        state.log_line(
+                            "daemon",
+                            f"session-liveness: "
+                            f"{'ESC-DISMISSED' if esc_ok else 'ESC-FAILED'} stale "
+                            f"prompt ({hid_awaiting:.0f}s unattended) for {tag}",
+                        )
+                        _audit(
+                            inst,
+                            "esc_dismissed_awaiting" if esc_ok else "esc_dismiss_failed",
+                            "esc_nudge",
+                            str(esc_plan["channel"]),
+                        )
+                        # RECORD IT — a dismissal must never be silent: the human can
+                        # only learn what was dismissed via the ledger (a stall would
+                        # be worse, but a SILENT dismissal is worse still).
+                        findings_ledger.record(
+                            sev="HIGH",
+                            code="FLEET-AWAITING-DISMISS",  # <=24 chars: findings_ledger._clean cap
+                            src="daemon",
+                            msg=(
+                                f"pending prompt ESC-dismissed after "
+                                f"{hid_awaiting:.0f}s unattended — nothing was "
+                                "answered; review what was asked"
+                            ),
+                            project_dir=inst.project_root,
+                        )
             continue
         if sl.is_hard_rung(action):
             # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
