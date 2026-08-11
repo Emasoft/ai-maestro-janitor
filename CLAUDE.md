@@ -21,11 +21,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5114784291b0 digest=fb228f0aa89c generated=2026-08-08T12:42:32+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=46a95bb3085b digest=942c351e32ef generated=2026-08-12T00:49:03+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
-  · resolve_cron(state_dir, env) -> str — The cadence to arm: the tier the dispatcher ASKED for, else config, else the default.
+  · resolve_cron(state_dir, env) -> str — The cadence to arm: an explicit `desired-cadence.cron` override, else the user's config
   · take_prior_cron_id(state_dir) -> str — Read the stored cron id AND clear it. Returns "" when unknown (⇒ the caller must sweep).
   · install_stub(plugin_root, data_dir) -> Path — Copy the dispatcher stub into the persistent DATA dir, atomically (tmp + rename).
   · scope_is_user(plugin_root) -> tuple[bool, str] — The janitor MUST be a user-scope install: it guards OAuth, the machine-global daemon, and
@@ -57,6 +57,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/daemon.py` — Global janitor daemon — single-instance owner of machine-global auto-update tasks.
   · task_marketplace_refresh() -> None — Run `claude plugin marketplace update` (bulk → all marketplaces).
   · task_user_plugins_update() -> None — Enumerate user-scope plugins and update each sequentially.
+  · task_fleet_plugins_update() -> None — Update every enabled PROJECT/LOCAL-scope plugin across every project on the machine.
   · task_version_update() -> None — Auto-update the janitor plugin itself when GitHub is ahead of the
   · task_oauth_rotator_supervisor() -> None — Governance (alert-only) for the opt-in OAuth account rotator
   · task_oauth_rotator_tick() -> None — 60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
@@ -520,6 +521,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
   · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
   · build_injection(terminal, action, *, esc_first, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
+  · command_plan_field_busy(terminal, plan) -> bool — True iff `plan` TYPES A COMMAND (never an ESC-only plan) and the target pane's own
   · fire(plan) -> bool — Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
 `scripts/lib/fleet_plugin_updates.py` — Fleet-wide plugin updates — update EVERY project's enabled plugins, not just the live one.
   · registry_path() -> Path — Claude Code's authoritative install registry — the same file `version_update_lib` reads.
@@ -614,6 +616,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · kill_switch_present() -> bool
   · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
   · clear_kill_switch() -> None — Remove the kill-switch flag from every location it may live (control_dir(), the
+  · record_armed(reason) -> None — Persist the machine-wide "the janitor is armed" claim (TRDD-TUIBWHT7).
+  · clear_armed() -> None — Remove the persistent arm claim — the disarm half of `record_armed`. Idempotent.
+  · armed_state() -> str — "armed" | "disarmed" | "absent" — the persistent, machine-wide arm claim (TRDD-TUIBWHT7).
   · clear_maintenance_mode() -> None — Clear a RETIRED machine-wide MAINTENANCE flag from every location it may live.
   · clear_global_pause() -> None — Clear a RETIRED machine-wide PAUSE flag from every location it may live.
   · version_update_requested_present() -> bool — True iff a session detector (or an external control-plane writer) has requested
@@ -688,18 +693,6 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · run_selftest(*, snapshot_path, settings_paths, env, now) -> list[tuple[str, str, str]] — Run every probe (resolving the default paths when not injected) and return the list
   · format_drift_line(failures) -> str — The one-line stdout drift string for a non-empty failure set. Empty on all-green.
   · failure_digest(failures) -> str — A stable content-hash of the failure SET (ATOM-B0SA-DDUP): sha256 over the sorted
-`scripts/lib/heartbeat_cadence.py` — TTL-aware heartbeat cadence tiers (TRDD-0QQX9H0G, issue #83).
-  · Signals — The two booleans the dispatcher resolves from state files each fire.
-  · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
-  · raw_tier(signals) -> str — The un-smoothed tier this fire's signals ask for. Pure.
-  · commit_tier(raw, prev, demote_fires) -> CadenceState — Apply hysteresis: promote to a faster tier IMMEDIATELY, demote to a slower
-  · should_emit_renew(*, desired_differs, committed, prev, now, dwell_s) -> bool — Decide whether THIS fire may emit ``[janitor-renew]`` (issue #89 half 2).
-  · stamp_rearm(state, now) -> CadenceState — Return `state` with `last_rearm_ts` set to `now`.
-  · tier_to_cron(tier, ttl_minutes, overrides) -> str — Map (tier, real cache-TTL) -> a 5-field cron. Pure.
-  · probe_account_status(command, *, timeout) -> int | None — Run the configured account-status command and return ``cacheTtl.minutes``.
-  · resolve_ttl_minutes(*, now, regime_config, cached, probe_interval, probe, env) -> tuple[int, dict | None] — Resolve the authoritative cache-TTL (minutes) for the SLOW ceiling.
-  · state_to_dict(state) -> dict — Serialize CadenceState for ``cadence-state.json``.
-  · state_from_dict(data) -> CadenceState | None — Parse CadenceState from disk. None on absent/malformed input (treated as
 `scripts/lib/hibernation.py` — Consume the ai-maestro server's hibernation answer (janitor#194).
   · Hibernation — One live answer. `agent` is this workdir's OWN record (agent workdirs); `roster` is
   · Hibernation.state(self) -> str — This workdir's agent state, or "" when the answer carries no per-agent record.
@@ -914,7 +907,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · resume_pending(scope_root, stale_seconds) -> list[str] — Roll forward / clean every interrupted transaction under `scope_root`.
   · apply_atomic(scope_root, op, source_rel_paths, writes, deletes, verify) -> str — begin → stage `writes`/`deletes` → optional `verify(txn)` → commit, all in
 `scripts/lib/model_fallback.py` — Model-scoped fallback PLANNER (TRDD-QE390SJA, janitor#222) — the pure decision layer.
-  · enabled() -> bool — Master opt-in. DEFAULT OFF — this types into the user's own pane, and the failure mode
+  · enabled() -> bool — Master opt-in. DEFAULT ON — a spent model window otherwise STALLS the session until the
   · fallback_target() -> str — The model to switch TO. Configurable so a future model tier does not need a code
   · plan_model_fallback(*, verdict, current_model, target, last_switch_ts, now, is_enabled, interval_s) -> dict — Decide whether to type `/model <target>` right now. PURE.
 `scripts/lib/notify.py` — Human-notification channel — DAEMON-ONLY (TRDD-4649ZLE0, ARCHITECTURE.md §5, ratified).
@@ -1313,7 +1306,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · append_exhaustion_event(path, event, *, max_events) -> None — Append ONE window-exhaustion snapshot (a turn-ending API error / rate-limit) as a
   · load_log(log_path) -> list[dict]
   · BudgetVerdict — The budget-tier decision for the IN-PROGRESS turn (TRDD-KI24GR5Z).
-  · evaluate_turn_budget(usage, *, output_advisory, output_hard, cache_creation_advisory, cache_creation_hard, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
+  · evaluate_turn_budget(usage, *, output_hard, cache_creation_hard, output_baseline_history, output_advisory_floor_pct, output_advisory_z, output_advisory_ratio, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
   · heartbeat_cost_7d(records, *, now) -> int — THIS project's rolling-7d WEIGHTED cost of the janitor's OWN heartbeat fires. PURE.
   · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
 `scripts/lib/trdd_common.py` — Shared TRDD-parsing helpers + the state-reconciliation checks (stdlib-only).
@@ -1659,7 +1652,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=e03c5fb5f4b6 generated=2026-08-08T06:16:24+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=ca98bbe4ce20 generated=2026-08-12T00:49:03+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
