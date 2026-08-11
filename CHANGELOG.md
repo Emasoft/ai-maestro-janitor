@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.1] — 2026-08-11
+
+### Bug Fixes
+
+- **memgrep:** Treat link sections as footers when inserting an atom (janitor#250) (7edbb75)
+- **memgrep:** `## See also` is a footer too — completing the janitor#250 anchor (36a416e)
+
+### Documentation
+
+- TRDD-G4BCRUP7 STATE — released as v3.1.0, CLI-verified, two owner decisions left (88994ef)
+- Correct TRDD-G4BCRUP7 — a permission-blocked session is ALREADY ESC'd (79489cb)
+- **memory:** Record the twin footer-anchor invariant (ATOM-Q2PU-PYE0) (b72fd5e)
 ## [3.1.0] — 2026-08-11
 
 ### Bug Fixes
@@ -31,6 +43,10 @@ All notable changes to this project will be documented in this file.
 - **daemon:** Actually run the fleet-wide plugin updater (R3) (fddbbe2)
 - **plugins:** Commit the settings file in the script, not via the model (C2) (4037b1f)
 - **fleet:** Dismiss a blocked session when nobody is there to answer (R6) (870cddb)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.1.0 (5a98fbd)
 
 ### Testing
 
