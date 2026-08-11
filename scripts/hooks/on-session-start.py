@@ -707,6 +707,20 @@ def main() -> int:
         state.log_line("session-start", f"armed_state() failed, defaulting to absent: {exc}")
         armed = "absent"
     if armed == "armed":
+        # ONLY on a fresh PROCESS. `clear` and `compact` re-enter SessionStart inside the
+        # SAME process, where the session-only cron is still registered and firing — so a
+        # nudge there is a pure mid-session RE-ARM: 4 tool calls plus a CronDelete/CronCreate
+        # to replace a live cron with an identical one. That is the exact waste the owner
+        # banned ("rearmed randomly in the middle of the sessions", directive 2026-08-08,
+        # TRDD-BRHJHWW0/TUIBWHT7) — the tier controller was deleted for it, and this hook was
+        # left as the surviving emitter. Measured 2026-08-11: cron id 73fb3358 recorded on
+        # 08-08 was still the live id after both a /clear and a compaction, i.e. neither
+        # event kills the cron. A cron lost to the 7-day auto-expiry is NOT this branch's
+        # job either — dispatch.py's `_phase_heartbeat_renew` emits `[janitor-renew]` for
+        # that, so gating here leaves no coverage gap.
+        if source not in ("startup", "resume"):
+            state.log_line("session-start", f"armed; source={source} keeps the live cron -> no re-arm")
+            return 0
         print(
             "[janitor] armed (persistent) — re-plumbing the session heartbeat. "
             "Silently run /janitor-arm (its 4 tool calls); do not narrate this to the user."

@@ -25,7 +25,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 
-def _run_session_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, flag: str | None) -> str:
+def _run_session_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, flag: str | None, source: str | None = None
+) -> str:
     """Run the SessionStart hook's main() under full isolation; return captured stdout."""
     project = tmp_path / "project"
     project.mkdir()
@@ -66,7 +68,10 @@ def _run_session_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, flag:
 
     buf = StringIO()
     old_in, old_out = sys.stdin, sys.stdout
-    sys.stdin = StringIO("")  # non-tty, empty → source defaults to "startup"
+    if source is None:
+        sys.stdin = StringIO("")  # non-tty, empty → source defaults to "startup"
+    else:
+        sys.stdin = StringIO(f'{{"source": "{source}"}}')
     sys.stdout = buf
     try:
         hook.main()
@@ -121,3 +126,29 @@ def test_session_start_replumbs_silently_when_persistently_armed(
     assert "[janitor] armed (persistent)" in out, f"expected the silent re-plumb line, got {out!r}"
     assert "globally DISARMED" not in out
     assert "globally PAUSED" not in out
+
+
+def test_session_start_replumbs_on_startup_when_armed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """source="startup" + armed → the re-plumb nudge fires (a genuinely fresh process)."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="startup")
+    assert "re-plumbing" in out, f"expected the re-plumb nudge on startup, got {out!r}"
+
+
+def test_session_start_replumbs_on_resume_when_armed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """source="resume" + armed → the re-plumb nudge fires (a genuinely fresh process)."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="resume")
+    assert "re-plumbing" in out, f"expected the re-plumb nudge on resume, got {out!r}"
+
+
+def test_session_start_skips_replumb_on_compact_when_armed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """source="compact" + armed → NO re-plumb nudge (same process, live cron survives)."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="compact")
+    assert "re-plumbing" not in out, f"must not re-plumb mid-session on compact, got {out!r}"
+
+
+def test_session_start_skips_replumb_on_clear_when_armed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """source="clear" + armed → NO re-plumb nudge (same process, live cron survives)."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="clear")
+    assert "re-plumbing" not in out, f"must not re-plumb mid-session on clear, got {out!r}"
