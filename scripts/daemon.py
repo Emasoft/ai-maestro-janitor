@@ -69,6 +69,7 @@ import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TR
 import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
 import findings_ledger  # noqa: E402  # the ONE finding choke point (TRDD-FENWWB4E)
 import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
+import fleet_plugin_updates as fpu  # noqa: E402  # fleet-wide PROJECT/LOCAL plugin sweep
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
@@ -128,6 +129,15 @@ _INTERVAL_VERSION_UPDATE = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600
 )  # 6 h — janitor self-update cadence. GitHub releases land at human-day
 #  granularity; checking every 6 h is plenty and keeps the load light.
+_INTERVAL_FLEET_PLUGINS_UPDATE = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_PLUGINS_UPDATE_INTERVAL", 21600
+)  # 6 h — fleet-wide PROJECT/LOCAL-scope plugin sweep (fleet_plugin_updates.sweep()). This is
+#  the ONLY actor that ever updates a project with no live Claude session — every per-session
+#  detector (local-plugins-update.py / project-plugins-update.py) only ever reaches the ONE
+#  project it happens to be running in. Deliberately slower than the 1 h user-plugins-update:
+#  each sweep is up to MAX_TARGETS_PER_SWEEP=60 project-scoped `claude plugin update`
+#  invocations across the WHOLE fleet (not one scope on one host), so it sits at the same
+#  conservative cadence as version-update/cache-prune rather than the narrower hourly sweep.
 _INTERVAL_OAUTH_SUPERVISOR = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", 600
 )  # 10 min — the opt-in OAuth-rotator governance/auto-heal task (TRDD-32acd15f
@@ -486,6 +496,42 @@ def task_user_plugins_update() -> None:
             "daemon",
             f"  user-plugins-update: reload-needed.flag SET ({len(updated_ids)} plugin(s) updated)",
         )
+
+
+def task_fleet_plugins_update() -> None:
+    """Update every enabled PROJECT/LOCAL-scope plugin across every project on the machine.
+
+    `task_user_plugins_update` (above) only reaches `user`/`managed`-scope installs, which are
+    machine-global by construction. `local`/`project`-scope installs are per-PROJECT, and
+    `claude plugin update` has no project flag — it resolves *which* project purely from the
+    subprocess cwd. So every prior caller silently updated nothing for a project with no live
+    Claude session open right now (measured on the host `fleet_plugin_updates.py` was written
+    for: 101 local-scope install records across 79 project paths, six pinned at a version six
+    minor releases behind). This task is the fleet-wide sweep that reaches those other
+    projects too — the per-session detectors only ever cover the ONE project a session happens
+    to be running in.
+
+    Runs under the shared marketplace lock: `claude plugin update` mutates the same
+    plugin-cache/registry state as `claude plugin marketplace update` and the user-scope sweep,
+    and two concurrent updaters racing on that state is exactly the pile-up issue #7 exists to
+    prevent.
+    """
+    with gs.marketplace_lock() as got:
+        if not got:
+            state.log_line(
+                "daemon",
+                "  fleet-plugins-update deferred (another marketplace op holds the lock)",
+            )
+            return
+        updated_ids = fpu.sweep()
+    if updated_ids:
+        gs.set_reload_flag(",".join(updated_ids[:10]))
+        state.log_line(
+            "daemon",
+            f"  fleet-plugins-update: reload-needed.flag SET ({len(updated_ids)} plugin(s) updated)",
+        )
+    else:
+        state.log_line("daemon", "  fleet-plugins-update: no updates")
 
 
 def task_version_update() -> None:
@@ -1819,6 +1865,8 @@ def _build_tasks() -> list[Task]:
         Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh,
              background=True),
         Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update,
+             background=True),
+        Task("fleet-plugins-update", _INTERVAL_FLEET_PLUGINS_UPDATE, task_fleet_plugins_update,
              background=True),
         Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update,
              background=True),
