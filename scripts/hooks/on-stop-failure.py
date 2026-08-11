@@ -79,6 +79,60 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- telemetry MUST NOT break the resume-cue capture
         pass
 
+    # ACTIVE 429 RECOVERY (TRDD-G4BCRUP7 R9) — best-effort, STRICTLY AFTER the critical
+    # flag write. Until now this hook was PASSIVE: it recorded the rate limit and waited for
+    # "when the API is reachable again", i.e. for the window to RESET. On a spent 7-day
+    # window that is days of a dead session, which is exactly the failure the owner's
+    # directive names ("if it misses it, escape the error or the retry countdown so it can
+    # resume with the rotated token").
+    #
+    # THE ROTATION MUST HAPPEN OUTSIDE A CLAUDE TURN, which is why it lives here and not in
+    # dispatch: a heartbeat fire IS a turn, so on a rate-limited account the fire that was
+    # supposed to trigger recovery hits the same 429 and dies with it. This hook is a plain
+    # subprocess and is the only recovery point the rate limit cannot reach.
+    #
+    # `auto` is the right verb rather than a forced switch: it is self-guarding (no live
+    # credential, no SAFE alternate, or an anti-thrash dwell ⇒ no-op) so it can never strand
+    # the session on an account that is itself near a limit. It also calls
+    # `burn_gate.observe_wall`, which records this 429 as an effective-cap sample — so the
+    # limit we just hit LOWERS the bar at which the next proactive rotation fires. That is
+    # what turns "escape after the limit" into "rotate before it": each miss teaches the
+    # gate where the real wall is.
+    #
+    # Gated on the rotator opt-in flag: without it, `auto` would still read the live
+    # credential, and on macOS a credential read can raise a keychain prompt — a user who
+    # never enabled rotation must not get one because an unrelated API call failed.
+    # Detached (Popen, no wait) for the same reason as the delegation below: the network
+    # calls exceed this hook's budget, and a detached child costs it nothing.
+    try:
+        # `scripts/lib` MUST be on the path too, not just `scripts`: global_state.py does a
+        # BARE `import state`, so `from lib import global_state` raises ModuleNotFoundError
+        # with only `scripts` inserted (on-session-start.py:272-273 inserts both for this
+        # exact reason). Caught by verification, not by review — the except below would have
+        # swallowed it and this recovery would have been permanently dead while looking
+        # shipped, which is the same silent-disable shape this whole card exists to remove.
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
+        from lib import global_state as _gs  # noqa: E402  -- local package, not PyPI
+
+        rotator = Path(plugin_root) / "scripts" / "oauth_rotator" / "rotator.py"
+        opt_in = _gs.global_state_dir().parent / "oauth-rotator" / "opt-in.flag"
+        if opt_in.exists() and rotator.is_file():
+            import subprocess  # noqa: PLC0415 -- only needed on this rare path
+
+            subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
+                ["uv", "run", "--script", "--quiet", str(rotator), "auto"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=state.detached_uv_env(),
+            )
+            state.log_line(
+                "stop-failure",
+                "rate limit: fired detached rotator auto (rotate away + learn the wall)",
+            )
+    except Exception:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
+        pass
+
     # #J delegation (TRDD-PZLVT2RN Phase D) — best-effort, STRICTLY AFTER the critical
     # flag write. Inside an ai-maestro harness agent the SERVER owns Family-A resume, so
     # also tell it this turn died on an API error: `aimaestro-continuity.sh ensure-resume
