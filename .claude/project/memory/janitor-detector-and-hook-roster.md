@@ -128,7 +128,8 @@ Agent context is poisoned three ways: a dependency postinstall WRITES `CLAUDE.md
     DO NOT describe the token-budget hook's advisory tier as a fixed knob, BECAUSE janitor#246
     deleted `…TURN_OUTPUT` and `…TURN_CACHE_CREATION` outright and this page kept advertising
     them — a reader who set either got silence and no effect, and "any threshold 0 disables it"
-    is now false for output (the baseline advisory is independent of `…TURN_OUTPUT_HARD`).
+    is now false for output (zeroing `…TURN_OUTPUT_HARD` drops the clamp that keeps the
+    baseline bar reachable, so it can silence BOTH tiers instead of only the hard one).
     DO state the advisory is BASELINE-RELATIVE and clamped under the hard cap instead. Root
     cause of BOTH the stale page and the shipped bug: the fix's tests seeded a FLAT `[20]*8`
     history (MAD=0), the one shape where the robust-z gate collapses — so nobody saw that on a

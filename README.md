@@ -1066,8 +1066,10 @@ any plugin-side change — staying on a recent CC build is recommended:
   derived from this project's own recent per-turn output history, and never at all
   until there is enough history to judge — and the cache-miss advisory was removed
   outright (that write is already sunk by the time the hook sees it, so nudging
-  about it was never actionable). Because the advisory is independent of
-  `TURN_OUTPUT_HARD`, setting that to 0 disables only the hard tier.
+  about it was never actionable). `TURN_OUTPUT_HARD` still governs BOTH tiers: the
+  baseline bar is clamped below it so the advisory stays reachable, so setting it
+  to 0 removes that clamp as well as the hard tier and can leave the advisory bar
+  out of reach on a heavy-tailed history. To keep both tiers, raise it, don't zero it.
 - **Adaptive token-usage anomaly detector** (default-on, TRDD-EDSFEQ5C): the
   SLOW, pattern-based companion to the per-turn guard. Each heartbeat it reads
   `token-meter.jsonl`, learns a **robust** per-5-min baseline (median + MAD —

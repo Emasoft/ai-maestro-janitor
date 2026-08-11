@@ -570,3 +570,50 @@ def test_deny_path_fires_every_time_regardless_of_the_additionalContext_throttle
     second = _decision(_run(str(t), tool_name="Task", project_dir=str(proj), env_extra=env))
     assert first.get("permissionDecision") == "deny"
     assert second.get("permissionDecision") == "deny", "the deny path must never be throttled"
+
+
+def test_baseline_survives_a_heartbeat_dominated_log(tmp_path: Path) -> None:
+    """The baseline counts only INTERACTIVE records, but the meter log is dominated by
+    ~5-minute HEARTBEAT turns (measured on this repo: a 64 KB tail = 480 records, only 118
+    of them interactive). A fixed 64 KB read therefore starves the window — and on a
+    lightly-used project it can fall under `token_meter._MIN_OUTPUT_BASELINE_HISTORY`,
+    silently killing the advisory tier. The tail read must ESCALATE until it has enough
+    interactive samples (or the whole file)."""
+    mod = _import_hook()
+    proj = tmp_path / "proj"
+    sd = proj / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    lines = []
+    # 30 heartbeats per interactive turn — far past the point where 64 KB holds fewer than
+    # the 200-sample window (and, at the head of the file, fewer than the 8-sample minimum).
+    for i in range(300):
+        lines.append(json.dumps({"ts": 1000 + i, "heartbeat": False, "output": 3000 + i, "input": 0, "cache_read": 0, "cache_creation": 0}))
+        lines += [json.dumps({"ts": 1000 + i, "heartbeat": True, "output": 40, "input": 0, "cache_read": 0, "cache_creation": 0})] * 30
+    (sd / "token-meter.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    values = mod._load_output_baseline(str(proj))
+    assert len(values) == 200, f"the escalating tail must fill the whole sample window, got {len(values)}"
+    assert values == sorted(values), "samples must stay oldest-first"
+    assert all(v >= 3000 for v in values), "heartbeat records must never enter the baseline"
+
+
+def test_baseline_drops_corrupt_and_negative_records(tmp_path: Path) -> None:
+    """A hand-edited / torn record must neither crash the hook nor drag the median (the
+    whole baseline) below zero."""
+    mod = _import_hook()
+    proj = tmp_path / "proj"
+    sd = proj / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "token-meter.jsonl").write_text(
+        "\n".join(
+            [
+                "{not json at all",
+                json.dumps({"ts": 1, "heartbeat": False, "output": -5000}),
+                json.dumps({"ts": 2, "heartbeat": False, "output": "junk"}),
+                json.dumps({"ts": 3, "heartbeat": False, "output": 700}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert mod._load_output_baseline(str(proj)) == [700]

@@ -29,8 +29,11 @@ generous so it stays SILENT in normal use and only fires on a genuine spike. The
 OPT-IN — advisory is the default, matching the user's word "nudge".
 
 CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; a HARD threshold of 0 disables that hard
-cap — note the output ADVISORY is baseline-relative and independent of `TURN_OUTPUT_HARD`, so
-setting that to 0 disables only the hard tier, not the output signal as a whole):
+cap — but note `TURN_OUTPUT_HARD` ALSO caps the baseline-relative output advisory, whose bar
+is clamped under it (`token_meter._ADVISORY_HARD_CEILING`) so the advisory tier stays
+reachable. So `TURN_OUTPUT_HARD=0` does NOT just disable the hard tier: it also removes that
+clamp, and on a heavy-tailed history the unclamped bar can climb out of reach and silence the
+advisory too. To keep both tiers, RAISE `TURN_OUTPUT_HARD` rather than zeroing it):
   * ENABLED                  — master switch, DEFAULT ON (false/0/no/off disables).
   * TURN_OUTPUT_HARD         — hard output budget (default 40000).
   * TURN_CACHE_CREATION_HARD — hard cache-miss-write budget (default 75000).
@@ -79,8 +82,20 @@ _MAX_OUTPUT_BASELINE_SAMPLES = 200
 # EVERY session, so parsing the WHOLE file (up to `trim_log`'s 1 MB cap — measured 412 KB /
 # 3147 records on this repo) per call is pure waste when only the last
 # `_MAX_OUTPUT_BASELINE_SAMPLES` records are ever used. 64 KB holds ~500 records at the ~130
-# bytes each `as_record` emits, comfortably more than the window.
-_BASELINE_TAIL_BYTES = 64 * 1024
+# bytes each `as_record` emits.
+#
+# But those ~500 are ALL records, and the baseline counts only the INTERACTIVE ones: the log
+# is dominated by the ~5-minute HEARTBEAT turns (measured on this repo's own log: the 64 KB
+# tail = 480 records, of which only 118 are interactive). So a fixed 64 KB window never
+# reaches the 200-sample target even here, and on a project that is armed but worked in only
+# occasionally it can hold FEWER than `token_meter._MIN_OUTPUT_BASELINE_HISTORY` interactive
+# records — which silently kills the advisory tier outright. Hence the window ESCALATES: the
+# cheap 64 KB read is tried first and is the only one paid in the common case; it grows only
+# while the interactive samples are still short of the target and the file has more to give.
+# The second (and last) window is `trim_log`'s own 1 MB cap — i.e. the whole log — so the
+# worst case is ONE extra full read, and only on a log so heartbeat-dominated that the
+# alternative is a permanently dead advisory tier.
+_BASELINE_TAIL_WINDOWS = (64 * 1024, 1_024 * 1024)
 # TRDD-TKNSTP82 A2 — window (seconds) after a compaction during which cache_creation is
 # EXPECTED to spike (the one-time full-prefix re-cache) and is therefore ignored by the
 # classifier. A bit more generous than the ~5-min heartbeat cadence that clears the
@@ -270,7 +285,7 @@ def _load_output_baseline(project_dir: str) -> list[int]:
     guess (same correct-by-omission stance as the rest of this hook), never a
     fallback to a fixed number.
 
-    Reads only the last `_BASELINE_TAIL_BYTES` rather than going through
+    Reads only a bounded TAIL (see `_BASELINE_TAIL_WINDOWS`) rather than going through
     `token_meter.load_log`, for two reasons — both of which that helper fails HERE, on a
     per-tool-call hot path it was never written for:
       * COST — `load_log` parses the entire file on every single tool call to use at most
@@ -286,14 +301,29 @@ def _load_output_baseline(project_dir: str) -> list[int]:
     if not project_dir:
         return []
     p = _token_meter_log_path(project_dir)
-    try:
-        size = p.stat().st_size
-        with p.open("rb") as f:
-            if size > _BASELINE_TAIL_BYTES:
-                f.seek(size - _BASELINE_TAIL_BYTES)
-            raw = f.read()
-    except OSError:
-        return []
+    values: list[int] = []
+    for window in _BASELINE_TAIL_WINDOWS:
+        try:
+            size = p.stat().st_size
+            with p.open("rb") as f:
+                if size > window:
+                    f.seek(size - window)
+                raw = f.read()
+        except OSError:
+            return []
+        values = _parse_output_samples(raw)
+        # Enough interactive samples, or the window already covered the whole file — a
+        # bigger read cannot add anything, so stop paying for it.
+        if len(values) >= _MAX_OUTPUT_BASELINE_SAMPLES or window >= size:
+            break
+    return values[-_MAX_OUTPUT_BASELINE_SAMPLES:]
+
+
+def _parse_output_samples(raw: bytes) -> list[int]:
+    """The `output` counts of the INTERACTIVE (non-heartbeat) records in a meter-log tail,
+    oldest first. Pure. Negative counts are dropped along with unparseable ones: a
+    hand-edited or torn record must never crash the hook, and must never drag the median
+    (the whole baseline) below zero either."""
     values: list[int] = []
     for line in raw.decode("utf-8", errors="replace").splitlines():
         s = line.strip()
@@ -306,10 +336,12 @@ def _load_output_baseline(project_dir: str) -> list[int]:
         if not isinstance(rec, dict) or rec.get("heartbeat", True):
             continue
         try:
-            values.append(int(rec.get("output", 0) or 0))
+            v = int(rec.get("output", 0) or 0)
         except (TypeError, ValueError):
             continue  # a hand-edited / corrupt `output` must not crash the hook
-    return values[-_MAX_OUTPUT_BASELINE_SAMPLES:]
+        if v >= 0:
+            values.append(v)
+    return values
 
 
 def _emit(obj: dict) -> None:
@@ -444,17 +476,23 @@ def main() -> int:
     )
     ignore_cache_creation = _in_compact_grace(project_dir, int(time.time()), grace_s)
 
+    output_hard = _coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"),
+        _DEFAULT_TURN_OUTPUT_HARD,
+    )
+    # Skip the (per-tool-call) meter-log read whenever the history CANNOT change the
+    # verdict: the hard cap already tripped, so `evaluate_turn_budget` never reaches its
+    # baseline branch, or the turn has produced no output at all, which no positive bar can
+    # ever clear. Behavior-identical, one fewer file read on the two commonest paths.
+    baseline_can_matter = 0 < usage.output_tokens and not (output_hard > 0 and usage.output_tokens >= output_hard)
     verdict = token_meter.evaluate_turn_budget(
         usage,
-        output_hard=_coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"),
-            _DEFAULT_TURN_OUTPUT_HARD,
-        ),
+        output_hard=output_hard,
         cache_creation_hard=_coerce_int(
             os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"),
             _DEFAULT_TURN_CACHE_CREATION_HARD,
         ),
-        output_baseline_history=_load_output_baseline(project_dir),
+        output_baseline_history=_load_output_baseline(project_dir) if baseline_can_matter else [],
         ignore_cache_creation=ignore_cache_creation,
     )
     # issue #79 — unconditional per-call tier bookkeeping, BEFORE building the response.
