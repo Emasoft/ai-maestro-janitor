@@ -445,3 +445,62 @@ def test_hard_send_falls_through_to_aimaestro_when_cli_is_the_only_channel() -> 
     channel for a hard intent (an ESC-less enqueue beats UNREACHABLE-then-escalate)."""
     plan = fi.build_command_plan(dict(_AIMAESTRO_TERMINAL), "/janitor-arm", esc_first=True)
     assert plan is not None and plan["channel"] == "aimaestro"
+
+
+# ---------------------------------------------------------------------------
+# `command_plan_field_busy` — the 2026-07-17 approval-dialog guard. A permission
+# prompt is invisible to `awaiting_user` (pure UI state, no transcript line), so a
+# COMMAND-typing plan must be refused whenever the target's own input field reads
+# back non-empty. ESC-only plans are exempt (ESC cannot approve/select anything);
+# an unreadable channel stays permissive (busy-ness cannot be proven there).
+# ---------------------------------------------------------------------------
+
+
+def _pane(field_body: str) -> str:
+    """A minimal real-shaped Claude Code pane capture with `field_body` in the input field."""
+    nbsp = " "
+    return "some earlier output\n" + "─" * 40 + f"\n❯{nbsp}{field_body}\n" + "─" * 40 + "\n"
+
+
+def test_command_plan_field_busy_esc_only_plan_is_never_gated(monkeypatch) -> None:
+    """An ESC-only plan (empty command) must never be gated, even if the field is busy —
+    ESC cannot approve or select anything, it can only dismiss."""
+    monkeypatch.setattr(fi.terminal_trigger, "read_pane_text", lambda rt: _pane("leftover text"))
+    plan = fi.build_esc_plan({"tmux_pane": "%5"})
+    assert plan is not None and plan["command"] == ""
+    assert fi.command_plan_field_busy({"tmux_pane": "%5"}, plan) is False
+
+
+def test_command_plan_field_busy_refuses_on_readable_nonempty_field(monkeypatch) -> None:
+    """A COMMAND-typing plan on a READABLE channel whose field already shows text (e.g. a
+    permission prompt) must be refused — firing would type on top of it."""
+    monkeypatch.setattr(fi.terminal_trigger, "read_pane_text", lambda rt: _pane("Allow this action?"))
+    plan = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm")
+    assert plan is not None
+    assert fi.command_plan_field_busy({"tmux_pane": "%5"}, plan) is True
+
+
+def test_command_plan_field_busy_fires_on_readable_empty_field(monkeypatch) -> None:
+    """A COMMAND-typing plan on a READABLE channel whose field is genuinely empty must fire."""
+    monkeypatch.setattr(fi.terminal_trigger, "read_pane_text", lambda rt: _pane(""))
+    plan = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm")
+    assert plan is not None
+    assert fi.command_plan_field_busy({"tmux_pane": "%5"}, plan) is False
+
+
+def test_command_plan_field_busy_permissive_when_channel_unreadable() -> None:
+    """The aimaestro CLI / Linux GUI channels have no read-back at all — busy-ness can never
+    be proven there, so the guard stays permissive (today's behavior) rather than silently
+    and permanently disabling recovery on every session using them."""
+    plan = fi.build_command_plan(dict(_AIMAESTRO_TERMINAL), "/janitor-arm")
+    assert plan is not None and plan["channel"] == "aimaestro"
+    assert fi.command_plan_field_busy(dict(_AIMAESTRO_TERMINAL), plan) is False
+
+
+def test_command_plan_field_busy_permissive_when_read_fails(monkeypatch) -> None:
+    """A transient read failure (osascript timeout, tmux error) returns None from
+    `read_pane_text` — that must NOT be mistaken for "busy"; stay permissive."""
+    monkeypatch.setattr(fi.terminal_trigger, "read_pane_text", lambda rt: None)
+    plan = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm")
+    assert plan is not None
+    assert fi.command_plan_field_busy({"tmux_pane": "%5"}, plan) is False

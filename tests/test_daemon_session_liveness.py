@@ -113,6 +113,69 @@ def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> Non
     assert fired == []
 
 
+def _pane(field_body: str) -> str:
+    """A minimal real-shaped Claude Code pane capture with `field_body` in the input field."""
+    nbsp = " "
+    return "some earlier output\n" + "─" * 40 + f"\n❯{nbsp}{field_body}\n" + "─" * 40 + "\n"
+
+
+def test_field_busy_guard_gates_command_typing_never_esc(tmp_path, monkeypatch) -> None:
+    """2026-07-17 incident guard, exercised through the REAL daemon call site:
+
+    (a) an ESC-only plan (frozen/esc_nudge) fires even though the pane's field reads back
+        non-empty — ESC cannot approve/select anything, so it is never gated;
+    (b) a COMMAND-typing plan (cron_dead/rearm) on a READABLE channel whose field is
+        non-empty is REFUSED, never fired;
+    (c) the same command plan fires once the field reads back empty;
+    (d) the same command plan fires when the channel cannot be read at all (aimaestro CLI —
+        write-only), so an unreadable channel is never permanently locked out.
+    """
+    import fleet_inject
+
+    fleet = [
+        _inst("frozen", "/p/proj-a", {"tmux_pane": "%5"}),
+        _inst("cron_dead", "/p/proj-b", {"tmux_pane": "%6"}),
+    ]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("Allow?"))
+    daemon.task_session_liveness()
+    # (a) ESC-only still fires despite the busy field.
+    assert any(p["channel"] == "tmux" and p["command"] == "" for p in fired)
+    # (b) the command-typing plan is refused — nothing typed for proj-b this beat.
+    assert not any(p["command"] == "/janitor-arm" for p in fired)
+    assert "INPUT FIELD BUSY" in _log(tmp_path)
+    st_path = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-b")
+    st = json.loads(st_path.read_text(encoding="utf-8"))
+    assert st["last_audit"] == "declined_field_busy:rearm"
+    assert "attempts" not in st  # nothing tried — no budget spent (mirrors _decline)
+
+    # (c) once the field reads back empty, the SAME command plan fires (fresh beat: clear
+    # the per-instance cooldown state files so this isn't blocked by the earlier decision).
+    for f in (tmp_path / "recovery").glob("*.json"):
+        f.unlink()
+    fired.clear()
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane(""))
+    daemon.task_session_liveness()
+    assert any(p["command"] == "/janitor-arm" for p in fired)
+    assert "INPUT FIELD BUSY" not in _log(tmp_path).split("\n")[-1]
+
+    # (d) an unreadable channel (no tmux/iterm identity — aimaestro CLI shape) stays
+    # permissive: the command plan fires even though we cannot prove the field is empty.
+    for f in (tmp_path / "recovery").glob("*.json"):
+        f.unlink()
+    fired.clear()
+    fleet2 = [
+        _inst(
+            "cron_dead", "/p/proj-c",
+            {"aimaestro_session": "agent-foo", "aimaestro_cli": "/usr/bin/aimaestro-agent.sh"},
+        ),
+    ]
+    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", lambda *, now, sweep_stale_rate_limit_s=None: fleet2)
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("Allow?"))
+    daemon.task_session_liveness()
+    assert any(p["command"] == "/janitor-arm" and p["channel"] == "aimaestro" for p in fired)
+
+
 def test_crash_loop_alerts_once_then_stays_silent(tmp_path, monkeypatch) -> None:
     """A spent attempt budget (with an elapsed cooldown) trips the crash-loop guard:
     it never fires, alerts a human exactly ONCE, and stays silent thereafter."""

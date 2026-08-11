@@ -374,6 +374,60 @@ def build_injection(
     return build_command_plan(terminal, command, esc_first=esc_first, delay_s=delay_s)
 
 
+def _readback_identity(terminal: dict, plan: dict) -> dict[str, str] | None:
+    """Map a fired plan's CHANNEL to the `terminal_trigger`-shaped identity dict its
+    read-back primitives expect (`{"kind": "tmux", "pane": ...}` /
+    `{"kind": "iterm", "session_id": ...}`), or None for a channel with no read-back at
+    all (aimaestro CLI, Linux GUI wtype/xdotool — write-only, per `read_pane_text`'s own
+    docstring). `fleet_inject`'s own `terminal` dict uses different keys
+    (`tmux_pane`/`iterm_session_id`) than `terminal_trigger`'s self-trigger shape
+    (`pane`/`session_id`) — this is the one place that translates between them."""
+    channel = plan.get("channel")
+    if channel == "tmux":
+        return {"kind": "tmux", "pane": terminal.get("tmux_pane", "").strip()}
+    if channel == "iterm":
+        sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
+        return {"kind": "iterm", "session_id": sid}
+    return None
+
+
+def command_plan_field_busy(terminal: dict, plan: dict) -> bool:
+    """True iff `plan` TYPES A COMMAND (never an ESC-only plan) and the target pane's own
+    input field is CONFIRMED non-empty right now — i.e. firing would type on top of
+    whatever is already showing there, most dangerously a permission prompt.
+
+    WHY THIS EXISTS (2026-07-17 incident, `session_liveness.awaiting_user` docstring): the
+    fleet guardian typed `/janitor-arm` straight into an open approval dialog. The
+    `awaiting_user` transcript check only catches a pending tool_use that is VISIBLE in the
+    transcript (ExitPlanMode / AskUserQuestion) — a Claude Code PERMISSION prompt is pure UI
+    state and appears in NO transcript line, so a session sitting on one is diagnosed exactly
+    like a genuinely dead/frozen one and reaches the command-typing path uncovered. Reading
+    the field back is the only signal that actually observes UI state, so it is the backstop
+    the transcript check cannot be.
+
+    ESC-only plans (`build_esc_plan`, `plan["command"] == ""`) are NEVER gated here — ESC
+    cannot approve or select anything, only dismiss, so it stays the safe unconditional
+    unblock the frozen/rate-limited recovery relies on.
+
+    Deliberately PERMISSIVE (returns False, i.e. "not busy, go ahead") whenever busy-ness
+    cannot be PROVEN: an unreadable channel (`channel_is_readable` False — aimaestro CLI,
+    wtype/xdotool) or a read that fails (`read_pane_text` returns None — a transient tmux/
+    osascript timeout). This is a REFUSAL gate, not a proof-of-safety gate: it only ever
+    blocks a fire it can affirmatively show is unsafe, so an unreadable channel is never
+    silently and permanently locked out of recovery — trading the covered incident for a
+    worse, blanket one would defeat the point of the fix.
+    """
+    if not plan.get("command"):
+        return False  # ESC-only — never gated
+    rt = _readback_identity(terminal, plan)
+    if rt is None or not terminal_trigger.channel_is_readable(rt):
+        return False  # cannot prove busy on this channel — allow (today's behavior)
+    text = terminal_trigger.read_pane_text(rt)
+    if text is None:
+        return False  # read failed — cannot prove busy — allow
+    return not terminal_trigger.prompt_field_is_empty(text)
+
+
 def fire(plan: dict | None) -> bool:
     """Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
     False otherwise. Safe to call with None (a declined plan) → False.

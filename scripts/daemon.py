@@ -1441,6 +1441,21 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # No injection channel exists (that's WHY it's unreachable), so channel=None.
             _decline("unreachable", action, None)
             continue
+        # FIELD-BUSY GUARD (2026-07-17 incident): a Claude Code PERMISSION prompt is UI
+        # state invisible to any transcript line, so `awaiting_user` above cannot see it —
+        # a session sitting on one is diagnosed exactly like a dead/frozen one and would
+        # otherwise reach the fire below and type a command straight into the dialog, the
+        # exact failure that happened that day. Read the target's OWN input field back
+        # first; refuse ONLY when it is confirmed non-empty on a readable channel — see
+        # `command_plan_field_busy` for why an unreadable channel stays permissive.
+        if fleet_inject.command_plan_field_busy(inst.terminal, plan):
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} INPUT FIELD BUSY on {plan['channel']} — would "
+                f"{action}; skipped (a permission prompt or other text may be showing)",
+            )
+            _decline("declined_field_busy", action, str(plan["channel"]))
+            continue
         if not fire:
             state.log_line(
                 "daemon", f"session-liveness:DRY would {action} → {plan['channel']} for {tag}"
