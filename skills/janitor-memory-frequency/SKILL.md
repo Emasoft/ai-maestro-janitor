@@ -9,8 +9,11 @@ description: Show or change how often the wikimem editorial passes run (consolid
 
 One skill for every wikimem editorial-pass knob (replaces the fourteen
 `/janitor-memory-*-frequency-{get,set}` + `*-maxsize-{get,set}` commands). **Settings are GLOBAL
-(machine-wide), not per-repo.** Every editorial pass is **OFF by default** (`0` — the USER cost
-decision of 2026-06-30); enabling one requires an explicit number.
+(machine-wide), not per-repo.** Every editorial pass defaults to **`1`/day** — ON, but conservative
+(owner directive 2026-08-11 superseded the 2026-06-30 all-OFF default: background curation must
+run unattended). The rate is a CAP, not a floor — a cheap filesystem precheck spawns no agent when
+a pass has nothing to do, so most days a pass runs fewer than its cap. Raise the cap or set `0` to
+disable a pass.
 
 ## When to use
 

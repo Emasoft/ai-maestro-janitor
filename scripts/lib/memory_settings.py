@@ -28,23 +28,35 @@ import global_state
 import memory_scopes
 import state
 
-# Default global settings. The six per-day editorial-pass rates default to 0 = OFF:
-# autonomous wikimem curation is OPT-IN (USER cost decision 2026-06-30). Measured burn
-# before this default: the heartbeat spawned the subconscious curator ~13.5×/day at
-# ~2-12M tokens/pass ≈ 40-50M tokens/day (~$25-40/day), forever. Correctness does NOT
-# depend on the agent's model — the deterministic verify_* gate in memory_edit_verify.py
-# rejects any lossy edit, so the model only PROPOSES — making autonomy pure cost, made
-# opt-in here. Manual curation stays available via the /janitor-memory-* commands; raise
-# a rate via /janitor-memory-frequency <pass> <times-per-day> to re-enable an autonomous pass.
+# Default global settings. The seven per-day editorial-pass rates default to 1 = ON,
+# CONSERVATIVE (owner directive 2026-08-11: background wikimem curation must run
+# unattended, silently correcting and optimizing pages, without alerting the main
+# agent unless something only it can fix). This SUPERSEDES the 2026-06-30 decision
+# that defaulted every pass to 0 = OFF; that measurement is kept below because it is
+# still the evidence for why the new default is a conservative "1" and not unbounded.
+#
+# A per-day figure is a CAP, not a floor: every pass is gated behind a cheap,
+# zero-agent filesystem `*_has_work` precheck (memory_content_precheck.py) that finds
+# no candidates on a clean corpus and spawns nothing — so "1/day" is reached only when
+# the corpus genuinely has one intervention-worth of work; most days it runs zero
+# times. Correctness does NOT depend on the agent's model — the deterministic verify_*
+# gate in memory_edit_verify.py rejects any lossy edit, so the model only PROPOSES.
+#
+# 2026-06-30 measurement (why "1", not higher): before the OFF default, the heartbeat
+# spawned the subconscious curator ~13.5×/day at ~2-12M tokens/pass ≈ 40-50M
+# tokens/day (~$25-40/day), forever, when left unbounded. A default of 1/day per pass
+# (7/day ceiling across all seven passes) keeps that cost bounded while still curating
+# continuously. Raise or re-zero any pass via
+# `/janitor-memory-frequency <pass> <times-per-day>`.
 DEFAULTS: dict = {
-    "consolidation_per_day": 0,     # MERGE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
-    "split_per_day": 0,             # SPLIT pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "consolidation_per_day": 1,     # MERGE pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
+    "split_per_day": 1,             # SPLIT pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
     "split_max_bytes": 36000,       # a page over this is a SPLIT candidate (raised 12k→36k: recall returns a memgrep CHUNK + lessons, not the whole page, so larger pages don't bloat context)
-    "conflict_per_day": 0,          # CONFLICT + fact-verify — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
-    "repair_per_day": 0,            # REPAIR pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
-    "harvest_per_day": 0,           # HARVEST pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
-    "atomize_per_day": 0,           # ATOMIZE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
-    "retro_lesson_per_day": 0,      # RETRO-LESSON pass (TRDD-J3ZH3RSI) — OFF by default, same USER cost decision; opt in via /janitor-memory-frequency
+    "conflict_per_day": 1,          # CONFLICT + fact-verify — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
+    "repair_per_day": 1,            # REPAIR pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
+    "harvest_per_day": 1,           # HARVEST pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
+    "atomize_per_day": 1,           # ATOMIZE pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
+    "retro_lesson_per_day": 1,      # RETRO-LESSON pass (TRDD-J3ZH3RSI) — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
     "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }
