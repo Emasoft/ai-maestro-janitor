@@ -12,8 +12,13 @@ import importlib.util as _u
 import sys
 from pathlib import Path
 
+import pytest
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+import findings_ledger as fl  # type: ignore[import-not-found]  # noqa: E402
+import state as janitor_state  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _load():
@@ -153,3 +158,61 @@ def test_failure_line_sanitizes_marker_mimicry() -> None:
     body = line[len("[ci-status]"):]
     assert "[janitor-resume]" not in body, "untrusted marker mimicry must be defanged"
     assert "⟦janitor-resume⟧" in line
+
+
+# ---------- main(): a CI failure must be recorded AND printed exactly once ----------
+
+
+@pytest.fixture
+def _isolated_project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Pin the CURRENT project to an isolated dir and flush the process-lifetime path
+    caches — same discipline as test_findings_ledger.py::_isolate — so this test can
+    never touch the real repo's findings ledger."""
+    current = tmp_path / "current-project"
+    (current / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(current))
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_FINDINGS_LEDGER_ENABLED", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CI_STATUS_ENABLED", raising=False)
+    for fn in (janitor_state.project_root, janitor_state.janitor_root,
+               janitor_state.state_dir, janitor_state.log_dir):
+        fn.cache_clear()
+    yield current
+    for fn in (janitor_state.project_root, janitor_state.janitor_root,
+               janitor_state.state_dir, janitor_state.log_dir):
+        fn.cache_clear()
+
+
+def test_main_records_a_ci_failure_into_the_ledger_and_prints_once(
+    monkeypatch: pytest.MonkeyPatch, _isolated_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed CI run reaches the AFFECTED project's findings ledger (durable — survives a
+    dead/expired heartbeat cron) AND is printed to the terminal exactly once — never zero
+    (the failure would be lost), never twice (a duplicated drift line)."""
+    import json as _json
+    from types import SimpleNamespace
+
+    def fake_run_subprocess(cmd, **kwargs):
+        if cmd[0] == "git" and "remote" in cmd:
+            return SimpleNamespace(returncode=0, stdout="https://github.com/x/y.git\n")
+        if cmd[0] == "git" and "rev-parse" in cmd:
+            return SimpleNamespace(returncode=0, stdout="abcdef1234567890\n")
+        if cmd[0] == "gh":
+            runs = [_run(workflowName="Test", conclusion="failure")]
+            return SimpleNamespace(returncode=0, stdout=_json.dumps(runs))
+        raise AssertionError(f"unexpected subprocess call: {cmd}")
+
+    monkeypatch.setattr(ci.state, "run_subprocess", fake_run_subprocess)
+
+    rc = ci.main()
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("[ci-status]")]
+    assert len(lines) == 1, f"expected exactly one drift line, got {lines!r}"
+    assert "CI FAILED" in lines[0]
+
+    entries, _size = fl._read_raw(None)
+    assert len(entries) == 1
+    assert entries[0]["code"] == "CI-FAILED"
+    assert entries[0]["sev"] == "HIGH"
+    assert entries[0]["src"] == "ci-status"

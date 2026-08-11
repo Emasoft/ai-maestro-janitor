@@ -37,6 +37,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import findings_ledger  # noqa: E402
 import state  # noqa: E402
 
 # The conclusions that mean "the run did not pass". `skipped`/`neutral`/`success` are NOT
@@ -235,9 +236,28 @@ def main() -> int:
         # emit silently returned None on lock-dir contention, the failure was dropped AND the
         # SHA marked resolved, violating "immediately notify on failure" with no trace. So we
         # print directly and drop the redundant lock (TRDD-AKH7JRAA — /code-review).
+        #
+        # A dead/expired heartbeat cron (or a fire nobody reads) meant this print() was the
+        # ONLY record of the failure — lost forever the moment it scrolled past. Also record
+        # it into the findings ledger (survives via SessionStart re-surfacing) — mirroring
+        # model-fallback.py's pattern: print our own richer line, and separately call
+        # `record()` for its ledger side-effect WITHOUT using its returned `[findings]`
+        # line, so the failure is emitted to the terminal exactly once.
         for r in failed:
             branch = str(r.get("headBranch") or "")
-            print(build_ci_failure_line(pushed_sha, branch, [r]))
+            line = build_ci_failure_line(pushed_sha, branch, [r])
+            print(line)
+            try:
+                findings_ledger.record(
+                    sev="HIGH",
+                    code="CI-FAILED",
+                    src="ci-status",
+                    msg=line,
+                    ref=pushed_sha[:9],
+                    now=now,
+                )
+            except Exception:  # noqa: BLE001 -- the mailbox must never break the alarm
+                pass
 
     # "resolved" or a delivered failure → stamp so a future fire treats this SHA as done (one
     # notification per push; a CI re-run on the SAME SHA is the user's own action).
