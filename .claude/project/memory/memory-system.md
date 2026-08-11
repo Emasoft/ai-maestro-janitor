@@ -309,6 +309,13 @@ search routes through `memgrep find` but it is private: the agent cannot read it
 except via the one `/janitor-memory-user-share <N>` gate. Don't conflate it with
 the agent memory wiki recalled by `/janitor-memory-recall`.
 
+
+^ATOM-Q2PU-PYE0 [desc:"the atom-insertion footer anchor is implemented TWICE (Rust add-atom + Python repair precheck) and the copies must change together", keywords: add-atom_inserts_atom_in_wrong_place atom_inside_link_section footer_anchor atom-after-footer memgrep_and_precheck_disagree repair_chore_never_converges, ocd: 2026-08-11, lmd: 2026-08-11]
+
+The atom-insertion footer anchor exists TWICE and the copies must never drift: the crate's `footer_section_line` (scripts/memgrep/src/memory.rs) decides where `add-atom` splices a new atom, and `_footer_heading_line` (scripts/lib/memory_content_precheck.py) decides where `repair_defect` says an atom is MIS-placed (`atom-after-footer`). If they disagree, one relocates atoms the other then flags as defects, forever — a repair chore that can never converge. Change them in the same commit, by construction.
+
+The family is `## Applies to` / `## Governed by` / `## See also` / `## Notes and lessons learned`, but the RULE is "any trailing footer section that sits above Notes" — encode the rule, not the list. janitor#250 shipped twice for exactly this reason: the first fix (7edbb755) covered the three headings the issue body happened to exemplify, and a page whose only footer was `## See also` stayed broken until 36a416e4. The reporter had stated the general rule in a comment before the first fix was written.
+
 ## See also
 
 - [[claude-md-canonical-form]] — CLAUDE.md is the index over this corpus; what may live in it, and the migration contract.
