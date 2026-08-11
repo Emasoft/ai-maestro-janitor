@@ -178,9 +178,22 @@ _TEST_SUITE_TIMEOUT_SEC = 3600
 # The drift is the actual defect: `run_gate` already used 600 s for the IDENTICAL
 # command while the publish path took the default, so one behaviour had two numbers
 # and the tighter one was never stated anywhere. Both now read this constant.
-# 900 s is ~3.8x the measured run — wider than the suite's ~2x because CPV also
-# fetches from GitHub, so its floor moves with the network.
-_CPV_TIMEOUT_SEC = 900
+# 900 s was ~3.8x that quiet-machine run — and it was still too tight, because the
+# quiet-machine number was the wrong baseline. RE-MEASURED 2026-08-11 under the load
+# this host actually publishes under (loadavg 155, ~20 concurrent Claude sessions and
+# an ai-maestro server): the SAME command took 1772 s and PASSED with 0 blocking
+# issues. Nearly 2x the bound that was killing it. `skillaudit_native` alone took
+# 282 s — more than the entire quiet-machine total — and the parallel validate group
+# spanned 1175 s.
+#
+# That is the whole lesson: a gate calibrated on an idle machine measures a condition
+# the release never runs in. Publish 15 died here and was misread as a hung or flaky
+# upstream, which is the expensive failure — a timeout that fires on load is
+# indistinguishable from a real fault, so it costs a human investigation every time.
+# 3600 s is ~2x the measured LOADED run, matching _TEST_SUITE_TIMEOUT_SEC's reasoning
+# and still bounding a genuinely wedged validate an order of magnitude below anything
+# a human would sit through.
+_CPV_TIMEOUT_SEC = 3600
 
 # The CPV validator pin — ONE literal, in `.cpv-version` at the repo root.
 #
