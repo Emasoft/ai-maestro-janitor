@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.2] — 2026-08-11
+
+### Bug Fixes
+
+- **fleet:** Never type a command over a non-empty input field (2026-07-17, closed) (3931f44)
 ## [3.1.1] — 2026-08-11
 
 ### Bug Fixes
@@ -14,6 +19,10 @@ All notable changes to this project will be documented in this file.
 - TRDD-G4BCRUP7 STATE — released as v3.1.0, CLI-verified, two owner decisions left (88994ef)
 - Correct TRDD-G4BCRUP7 — a permission-blocked session is ALREADY ESC'd (79489cb)
 - **memory:** Record the twin footer-anchor invariant (ATOM-Q2PU-PYE0) (b72fd5e)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.1.1 (32c1573)
 ## [3.1.0] — 2026-08-11
 
 ### Bug Fixes
