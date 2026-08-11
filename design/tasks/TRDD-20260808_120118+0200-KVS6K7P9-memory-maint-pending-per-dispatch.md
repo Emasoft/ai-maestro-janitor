@@ -43,6 +43,16 @@ nothing in the protocol asks for that).
    the ORPHANED case — TRDD-2112XCKO's detector consumes it (these two cards compose: 2112XCKO
    detects the never-consumed file; this card guarantees the file it reads is per-dispatch and
    trustworthy).
+4. **The per-dispatch state carries SCOPE and ROOT, not just the chore** — added after a
+   SECOND live reproduction on the janitor's own host (2026-08-11, 515 s apart): a
+   `consolidate/USER` dispatch was clobbered by a `conflict/LOCAL` marker while the first
+   agent was still running, so the clobber changed the CORPUS as well as the verb. Mode 2 did
+   not bite only because the two roots differed — luck, not design.
+5. **Reword the agent-facing contract**: the heartbeat-protocol rule currently says the
+   pending file IS the authority, which is exactly what makes a conscientious agent RE-READ it
+   mid-run and adopt a foreign assignment. It must say: *your (intervention, scope, root) were
+   fixed at launch; the pending file is not a live authority to poll* — with the dispatch-id
+   check (item 1) as the only sanctioned re-read, and STOP-on-mismatch as the only response.
 
 ## Acceptance
 
