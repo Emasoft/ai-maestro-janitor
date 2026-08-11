@@ -19,16 +19,31 @@ external-refs: [TRDD-TUIBWHT7, TRDD-BRHJHWW0, janitor#246, janitor#248, janitor#
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-11
 
-**This card is an AUDIT-AND-CLOSE, not a build.** The strong prior — to be confirmed or killed
-by the audit, never assumed — is that most of the 16 capabilities below are already implemented
-and are simply DEFAULT-OFF, unreachable on a fresh install, or dependent on a manual
-bootstrap step. The deliverable is therefore mostly: flip defaults, remove manual gates, close
-the genuine holes, prove each with a test.
+**AUDIT DONE (5 reports in `reports/janitor-autonomy-audit/`). The prior HELD, and sharpened:
+the recurring defect is not missing code — it is code that exists, is tested, is documented,
+and NEVER RUNS.** Three instances in one session: the model fallback shipped dark (default
+False), `fleet_plugin_updates.sweep()` had ZERO callers, and this card's own R9 fix nearly
+shipped dead behind an ImportError swallowed by its `except`. Audit for REACHABILITY, never for
+absence — `grep` finds all three and reports them present.
 
-**NEXT ACTION:** collect the five audit reports under `reports/janitor-autonomy-audit/`, turn
-every `GAP:` line into a row in the table below with a verdict, then fix in priority order
-(R5 blocking-prompt, R6 model switch, R7 rate-limit escape first — those three are what makes a
-session STOP, and a stopped session is the failure the owner is describing).
+**SHIPPED so far:** R3 (sweep wired as a 6h daemon task under the marketplace lock,
+`daemon.py:1869`) · R7 (model fallback default-ON) · R9 (429 fires a detached `rotator auto`
+from the StopFailure hook — the ONLY recovery point a rate limit cannot reach, because a
+heartbeat fire is itself a turn) · R11 · R14 (7 passes at 1/day) · R16 (CI failures into the
+findings ledger, so they outlive a dead cron).
+
+**R8 needs no work HERE: verified live on this host** — 3 accounts, rotation fired 2026-08-11
+10:00:13 (`7d=100% +LOCALLY-EXPIRING -> rotate`). The audit's "default OFF" is a FRESH-INSTALL
+gap only. Do not "fix" what is already running.
+
+**NEXT ACTION:** land R6 (presence-gated ESC), then publish + CLI-verify the install.
+
+**TWO CONSTRAINTS THAT ARE NOT BUGS — do not burn a session trying to code around them:**
+1. A Claude Code PERMISSION prompt is UI state, not a transcript record, so
+   `awaiting_user_decision` cannot see it and widening its tool list achieves nothing. Catching
+   it needs pane-text reading (`terminal_trigger.read_pane_text`). Separate, larger piece.
+2. Rotation requires >= 2 accounts, and registering the second needs a HUMAN one-time browser
+   login. Below that, "rotate before the limit" degrades to "wait for the window" by physics.
 
 **Do NOT** close a row on the strength of a docstring or a grep hit. Every row needs the
 file:line that proves the behaviour, per the claim-verification rule — the janitor has already
