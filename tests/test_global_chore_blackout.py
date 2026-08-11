@@ -86,11 +86,25 @@ def test_absorbed_and_unabsorbed_partition_the_roster_without_overlap() -> None:
     assert absorbed <= set(hb.GLOBAL_CHORES), "an absorbed chore that is not a real chore"
 
 
-def test_unabsorbed_chores_names_the_six_the_server_never_claimed() -> None:
-    """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails."""
+def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
+    """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails.
+
+    `fleet-plugins-update` joined the roster on 2026-08-11 (TRDD-G4BCRUP7 R3) and is the
+    SEVENTH member. It is listed here deliberately, not to make the assertion pass: the
+    tripwire fired correctly and the fact it exposed is that on a host running a live
+    ai-maestro server — which suppresses the daemon — fleet-wide plugin updates do not run
+    at ALL, because the server does not claim that chore and the daemon has yielded.
+
+    So R3 ("keep every project's plugins updated") is satisfied on a standalone host and
+    BLACKED OUT on a server host until ai-maestro claims it. That is a cross-repo ask, not
+    something this repo can close alone, and it is the same shape as ai-maestro#111 and
+    TRDD-6CRC9SQQ's open contract item. The `global-chore-blackout` detector is what makes
+    the blackout visible meanwhile — which is exactly why this set is pinned by name.
+    """
     assert set(hb.unabsorbed_chores()) == {
         "memory-guard", "cache-prune", "rules-cleanup",
         "github-config-audit", "session-liveness", "fleet-stop",
+        "fleet-plugins-update",
     }
 
 
