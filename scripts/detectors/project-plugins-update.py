@@ -11,23 +11,24 @@ This is the only track that may need to commit to git — `.claude/settings.json
 is git-tracked (project scope = team-shared infrastructure). When the worker
 detects that `claude plugin update --scope project` changed settings.json, it
 writes a sentinel file; the parent detector on a subsequent heartbeat reads
-the sentinel and emits a drift line containing the EXACT git commit command
-that Claude should execute, using porcelain `git commit --only -- ...`. Claude
-running the command uses the user's git config naturally:
-  - Signing happens if `commit.gpgsign = true` is set.
-  - Pre-commit / commit-msg hooks fire normally.
-  - Branch protection rules (signed commits, signed tags) are honored
-    because we never bypass git's normal commit infrastructure.
+the sentinel and commits the file ITSELF via porcelain
+`git commit --only -- .claude/settings.json`. Committing a file the janitor
+just wrote is a zero-judgment mechanical action — it does not need the main
+Claude turn (owner directive 2026-08-11). The commit is refused (never
+forced) whenever the repo is mid-merge/mid-rebase/mid-cherry-pick or HEAD is
+detached, since an unexpected commit in that state could do real harm; the
+janitor never pushes.
 
 No flock coordination, no hook installation, no signing detection logic —
-the AI agent in the heartbeat turn is the writer, and it shares the user's
-git config + branch protection rules transparently.
+each commit runs with `GIT_OPTIONAL_LOCKS=0` (janitor#245) and only ever
+touches the one whitelisted path.
 
 Architecture:
   - Detector parent (every heartbeat):
     1. If commit-pending sentinel exists AND settings.json is dirty
-       → emit drift line + delete sentinel + return (don't spawn another
-       worker until this commit lands).
+       → refuse-check the repo state; if safe, commit `.claude/settings.json`
+       directly (silent on success); if unsafe, print one drift line and
+       leave the file uncommitted → delete sentinel → return.
     2. If sentinel exists but settings.json clean (commit already done)
        → delete sentinel + return.
     3. If prior worker still alive → log skip + return.
@@ -40,13 +41,13 @@ Architecture:
        If dirty: write commit-pending sentinel + plugin-list file.
     4. Exit.
 
-  - Whitelist: ONLY `.claude/settings.json` is ever named in the drift
-    line. The user's other staged/unstaged files are untouched.
+  - Whitelist: ONLY `.claude/settings.json` is ever committed. The user's
+    other staged/unstaged files are untouched. The janitor never pushes.
 
 Output:
-  Silent except when commit-pending sentinel resolves to a real
-  drift line. Logs every spawn/skip/sentinel-event to
-  `.janitor/logs/project-plugins-update.log`.
+  Silent on a successful commit. Prints exactly one drift line only when
+  the commit was refused (unsafe repo state). Logs every spawn/skip/
+  sentinel/commit event to `.janitor/logs/project-plugins-update.log`.
 """
 
 from __future__ import annotations
@@ -211,28 +212,82 @@ def _run_worker() -> int:
     return 0
 
 
-def _emit_commit_drift(plugin_ids: list[str]) -> None:
-    """Write the drift line to stdout so the heartbeat surfaces it to
-    Claude, who will then run the exact git commit command."""
-    plugin_list_inline = ", ".join(plugin_ids) if plugin_ids else "(unknown)"
-    # Single-line drift line for parseability + the exact command on its
-    # own line below so Claude can copy-paste-execute. Stay within the
-    # convention of other janitor drift lines ([detector] message).
-    summary = (
-        f"[project-plugins-commit-needed] {len(plugin_ids)} project-scope plugin(s) "
-        f"updated: {plugin_list_inline}. Commit `.claude/settings.json` now with the "
-        f"formulaic message. Run exactly:"
-    )
+def _resolve_git_dir(project_root: Path) -> Path | None:
+    """The repo's `.git` dir (resolved through worktrees), or None on
+    any failure to ask git. Read-only; used only to inspect state files
+    (MERGE_HEAD, rebase-merge/, ...), never written to."""
+    try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
+        proc = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
+            capture_output=True, text=True, timeout=15, check=False,
+            env=git_env,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.strip()
+    if not raw:
+        return None
+    git_dir = Path(raw)
+    if not git_dir.is_absolute():
+        git_dir = project_root / git_dir
+    return git_dir
+
+
+def _commit_blocked_reason(project_root: Path) -> str | None:
+    """None iff it is safe to commit right now. Otherwise a short,
+    human-readable reason the commit must be refused (mid-merge,
+    mid-rebase, mid-cherry-pick, or a detached HEAD) — fail safe toward
+    NOT committing when repo state can't be established cleanly."""
+    git_dir = _resolve_git_dir(project_root)
+    if git_dir is None:
+        return "could not resolve git dir"
+    if (git_dir / "MERGE_HEAD").exists():
+        return "a merge is in progress"
+    if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+        return "a rebase is in progress"
+    if (git_dir / "CHERRY_PICK_HEAD").exists():
+        return "a cherry-pick is in progress"
+    try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
+        proc = subprocess.run(
+            ["git", "-C", str(project_root), "symbolic-ref", "-q", "HEAD"],
+            capture_output=True, text=True, timeout=15, check=False,
+            env=git_env,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return f"could not determine HEAD state ({exc})"
+    if proc.returncode != 0:
+        return "HEAD is detached"
+    return None
+
+
+def _commit_settings(project_root: Path, plugin_ids: list[str]) -> tuple[bool, str]:
+    """Commit ONLY `.claude/settings.json`, scoped via `--only --`, with
+    the formulaic message. Never pushes. `(ok, detail)` — detail is a
+    log-friendly reason on failure, or "committed" on success."""
     msg_body = "janitor chore: commit the updated plugins"
     if plugin_ids:
         msg_body += "\n\nplugins updated:\n" + "\n".join(f"  - {p}" for p in plugin_ids)
-    # Use $'...' bash quoting so embedded newlines survive the shell.
-    msg_bash = msg_body.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-    command = (
-        f"git commit --only -- {SETTINGS_REL_PATH} -m $'{msg_bash}'"
-    )
-    print(summary)
-    print(command)
+    try:
+        git_env = dict(os.environ)
+        git_env["GIT_OPTIONAL_LOCKS"] = "0"
+        proc = subprocess.run(
+            ["git", "-C", str(project_root), "commit", "--only", "-m", msg_body,
+             "--", SETTINGS_REL_PATH],
+            capture_output=True, text=True, timeout=30, check=False,
+            env=git_env,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"git commit failed to run: {exc}"
+    if proc.returncode != 0:
+        detail = (proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}")
+        return False, f"git commit exited {proc.returncode}: {detail}"
+    return True, "committed"
 
 
 def main() -> int:
@@ -261,14 +316,31 @@ def main() -> int:
                 plugin_ids = [line for line in raw.splitlines() if line.strip()]
             except OSError:
                 plugin_ids = []
-            _emit_commit_drift(plugin_ids)
-            state.log_line(
-                "project-plugins-update",
-                f"surfaced commit-needed drift for {len(plugin_ids)} plugin(s)",
-            )
-            # Remove sentinel; if Claude doesn't commit before next
-            # heartbeat (e.g. user rejected the command), the next
-            # worker run will re-detect and re-emit if still dirty.
+            blocked = _commit_blocked_reason(project_root)
+            if blocked is not None:
+                # Fail safe toward NOT committing — surface it so a human
+                # can resolve the repo state, then leave the file dirty.
+                print(
+                    f"[project-plugins-commit-skipped] .claude/settings.json left "
+                    f"uncommitted — {blocked}"
+                )
+                state.log_line("project-plugins-update", f"commit refused: {blocked}")
+            else:
+                ok, detail = _commit_settings(project_root, plugin_ids)
+                if ok:
+                    state.log_line(
+                        "project-plugins-update",
+                        f"committed settings.json for {len(plugin_ids)} plugin(s)",
+                    )
+                else:
+                    print(
+                        f"[project-plugins-commit-failed] could not commit "
+                        f".claude/settings.json — {detail}"
+                    )
+                    state.log_line("project-plugins-update", f"commit failed: {detail}")
+            # Remove sentinel either way; if the file is still dirty (refused
+            # or failed), the next worker run will re-detect it and write a
+            # fresh sentinel, so nothing is silently dropped.
             try:
                 sentinel_path.unlink()
             except OSError:
