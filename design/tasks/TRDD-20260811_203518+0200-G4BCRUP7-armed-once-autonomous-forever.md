@@ -58,9 +58,19 @@ ai-maestro to claim the chore (cross-repo, same shape as ai-maestro#111 / TRDD-6
 `global-chore-blackout` detector is what makes it visible meanwhile.
 
 **TWO CONSTRAINTS THAT ARE NOT BUGS — do not burn a session trying to code around them:**
-1. A Claude Code PERMISSION prompt is UI state, not a transcript record, so
-   `awaiting_user_decision` cannot see it and widening its tool list achieves nothing. Catching
-   it needs pane-text reading (`terminal_trigger.read_pane_text`). Separate, larger piece.
+1. ~~A permission prompt needs pane-text detection.~~ **CORRECTED 2026-08-11 by measurement.**
+   The premise holds — a Claude Code PERMISSION prompt is UI state, not a transcript record, so
+   `awaiting_user_decision` genuinely cannot see it — but the conclusion drawn from it was
+   WRONG. Such a session's transcript goes STALE, so it is diagnosed `frozen`, and
+   `fleet_recovery.action_for("frozen", …)` already returns `esc_nudge, esc_nudge, esc_nudge,
+   force_restart`. It is already ESC'd today. Coverage comes from STALL detection, not from
+   recognising the dialog, and building a pane-text recogniser would have duplicated a working
+   path while adding a false-positive surface that could ESC a healthy session.
+   The genuine residual is much narrower: DIAGNOSIS PRECEDENCE. If such a session's cron also
+   looks dead it is classified `cron_dead`, whose action is `rearm` — which TYPES A COMMAND
+   into whatever is on screen, i.e. the 2026-07-17 failure re-run for a case
+   `awaiting_user_decision` cannot flag. That is a precedence question (prefer `frozen` when the
+   transcript is stale AND a dialog may be up), not a detection project.
 2. Rotation requires >= 2 accounts, and registering the second needs a HUMAN one-time browser
    login. Below that, "rotate before the limit" degrades to "wait for the window" by physics.
 
