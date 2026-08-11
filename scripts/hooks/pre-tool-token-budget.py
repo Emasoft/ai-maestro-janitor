@@ -421,7 +421,7 @@ def _response(
         if enforce and tool_name in _SPAWNER_TOOLS:
             return _deny(f"[token-guard] STOP — token runaway ({signals}). Do NOT spawn another subagent (the biggest token multiplier). End this step, TaskStop any background subagents, and /compact before continuing. (Disable: CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)")
         if has_output:
-            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest."
+            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest. If bounded work remains, delegate it to a lean-worker subagent instead of continuing in this expensive turn."
             if has_cache_miss:
                 msg += f" {_CACHE_MISS_NOTE}"
             return _context(msg)
@@ -437,7 +437,7 @@ def _response(
     # miss write is a sunk cost the moment this hook fires, so an advisory-tier nudge
     # about it is unactionable telemetry, not a gate). The HARD tier above still fires
     # on a SUSTAINED cache-miss pattern, which is worth interrupting for.
-    return _context(f"⚠ Token spike: this turn {signals}. Be terse, wrap up the step, or compact — long output is billed at full price.")
+    return _context(f"⚠ Token spike: this turn {signals}. Be terse, wrap up the step, or compact — long output is billed at full price. Consider delegating remaining bounded work to a lean-worker subagent.")
 
 
 def main() -> int:

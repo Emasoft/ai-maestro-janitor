@@ -143,7 +143,8 @@ def main() -> int:
         f"{mult:.1f}x the session median ({int(verdict.median)}), robust-z {verdict.score:.1f} "
         f"over {verdict.n_history} buckets (a SUDDEN spike vs your normal). If this is a "
         f"runaway (many agents / long replies), stop background subagents with TaskStop and "
-        f"/compact; run /janitor-token-report for the 5h/7d window view."
+        f"/compact; run /janitor-token-report for the 5h/7d window view. If bounded work "
+        f"remains, delegate it to a lean-worker subagent instead of the expensive main context."
         # agentlensPro CROSS-CHECK (TRDD-HL8H3XCV): only reached AFTER the local baseline
         # decided to alarm, so the expensive investigate_burn is never speculative. "" without
         # the CLI → this line is byte-identical to before.
