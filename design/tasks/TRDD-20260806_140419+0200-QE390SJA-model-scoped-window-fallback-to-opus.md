@@ -3,7 +3,7 @@ trdd-id: QE390SJA
 title: A model-scoped window limit stops the session while the account has headroom — fall back to another model instead of rotating or stalling
 column: testing
 created: 2026-08-06T14:04:19+0200
-updated: 2026-08-06T16:47:00+0200
+updated: 2026-08-11T20:43:35+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -21,8 +21,10 @@ owner at the pane — nothing else on this card can progress unattended.**
 
 - **The detector half** (switch model instead of stalling) landed dark: gate `d7d8e9c9` +
   freshness `b08c2d64`, injector fixes `dd72291c`/`70afff57`, 3-state confirm `491a2c3a`,
-  planner `251056e8`, detector + roster `ab00a40e`. `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED`
-  defaults OFF.
+  planner `251056e8`, detector + roster `ab00a40e`. **UPDATE 2026-08-11:** flipped to
+  DEFAULT ON — `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED` now defaults true (still
+  disableable with a false spelling), because an idle session on a spent model window cannot
+  self-heal any other way. See `scripts/lib/model_fallback.py::enabled`.
 - **The rotator half** (item 6, our MIRROR gap) landed 2026-08-06 in `674fe785`:
   `token_burn.models_in_use` + `scoped_rotation_veto`, wired into `cmd_auto` as a DEMOTION to a
   second-choice pool plus a new tier 1b, so a scoped-spent target is deprioritized but never

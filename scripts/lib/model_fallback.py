@@ -20,9 +20,12 @@ THE TWO RULES THAT ARE NOT OBVIOUS, both learned from the ai-maestro side's para
    dynamic (it re-tiers between */5 and */15 on its own), so a faster beat would otherwise
    fire a burst of switches — the exact rate-limit ban the interval exists to avoid.
 
-Ships DARK by default: the flag must be set explicitly. No test can prove the confirming
-keystroke dismissed a real dialog — only that it was sent — so the first live switch is
-watched by a human.
+DEFAULT ON: a session parked on a spent model window cannot self-heal — nothing else will
+unstick it before the window resets, and an idle session is the one failure mode the janitor
+exists to prevent. The keystroke-typing caution still stands (a switch whose confirming
+keystroke never lands is worse than doing nothing), which is exactly why the module is this
+disciplined about cooldowns and confirmed state rather than why it stays disabled. Set
+`CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED=false` (or 0/no/off) to opt back out.
 """
 
 from __future__ import annotations
@@ -50,10 +53,12 @@ SKIP_COOLDOWN = "cooldown"
 
 
 def enabled() -> bool:
-    """Master opt-in. DEFAULT OFF — this types into the user's own pane, and the failure mode
-    of getting it wrong is a session parked on an unanswered dialog, which is worse than the
-    exhausted window it was trying to fix."""
-    return state.is_truthy_env(_ENABLED_ENV, False)
+    """Master opt-in. DEFAULT ON — a spent model window otherwise STALLS the session until the
+    window resets, and an idle session is the one failure mode that cannot self-heal. This
+    still types into the user's own pane, so the module keeps its confirmed-switch discipline
+    (see module docstring); opt out with a false spelling on `_ENABLED_ENV` if that risk is
+    unwanted for a given project."""
+    return state.is_truthy_env(_ENABLED_ENV, True)
 
 
 def fallback_target() -> str:

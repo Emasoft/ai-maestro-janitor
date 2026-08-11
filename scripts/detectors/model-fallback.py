@@ -19,10 +19,12 @@ ratified empty-field / 8s-retry / verify-before-Enter rules), and the confirmati
 `terminal_trigger.confirm_model_switch` (three-state). This file is the glue that gathers
 the inputs and records the outcome.
 
-SHIPS DARK — `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED` defaults OFF. No test can prove
-the confirming keystroke dismissed a real dialog, only that it was sent, so the first live
-switch is watched by a human. FAIL-OPEN throughout: a probe, pane read, or injection failure
-is a silent skip — a detector crash must never break the heartbeat.
+DEFAULT ON — `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED` defaults true; a spent model window
+otherwise stalls the session until the window resets, and that idle session cannot self-heal.
+No test can prove the confirming keystroke dismissed a real dialog, only that it was sent, so
+the module still holds its confirmed-switch discipline (see `model_fallback` module docstring).
+FAIL-OPEN throughout: a probe, pane read, or injection failure is a silent skip — a detector
+crash must never break the heartbeat.
 """
 
 from __future__ import annotations
@@ -90,7 +92,7 @@ def _live_account() -> dict | None:
 def main() -> int:
     state.init_state()
     if not mfb.enabled():
-        return 0  # ships dark
+        return 0  # explicitly disabled via CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED=false
 
     now = int(time.time())
     acct = _live_account()

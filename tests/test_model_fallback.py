@@ -39,11 +39,24 @@ def test_the_measured_case_switches() -> None:
     assert p["act"] is True and p["command"] == "/model opus" and p["reason"] == "switch"
 
 
-def test_ships_dark() -> None:
-    """DEFAULT OFF, and the planner refuses regardless of how compelling the case is: the
-    failure mode of a wrong switch is a session parked on an unanswered dialog, which is
-    worse than the exhausted window it was fixing."""
-    assert mf.enabled() is False, "the flag must default OFF"
+def test_default_is_enabled_with_the_env_var_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEFAULT ON: a spent model window otherwise stalls the session until the window resets,
+    and an idle session cannot self-heal any other way — so with nothing set, the switch is
+    live by default."""
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED", raising=False)
+    assert mf.enabled() is True, "the flag must default ON"
+
+
+@pytest.mark.parametrize("spelling", ["false", "0", "no", "off", "False", "OFF"])
+def test_explicit_false_spellings_still_disable_it(
+    monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    """The opt-out escape hatch: any of the usual false spellings turns it back off, and the
+    planner refuses regardless of how compelling the case is — the failure mode of a wrong
+    switch is a session parked on an unanswered dialog, which is worse than the exhausted
+    window it was fixing."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED", spelling)
+    assert mf.enabled() is False, f"{spelling!r} must disable the flag"
     p = _plan(is_enabled=False)
     assert p["act"] is False and p["reason"] == mf.SKIP_DISABLED
 
@@ -129,19 +142,23 @@ def test_detector_file_exists_and_is_executable() -> None:
     assert os.access(det, os.X_OK), "detector must be executable (the roster runs it directly)"
 
 
-def test_detector_exits_silently_while_the_flag_is_unset(tmp_path: Path) -> None:
-    """SHIPS DARK, proven by running the real thing: with the flag unset it must print
+def test_detector_exits_silently_when_explicitly_disabled(tmp_path: Path) -> None:
+    """Proven by running the real thing: with the flag explicitly turned off it must print
     NOTHING and touch no pane. This is the test the ai-maestro side pins on their side too —
-    the failure mode of a wrong switch is a session parked on an unanswered dialog."""
+    the failure mode of a wrong switch is a session parked on an unanswered dialog. (The flag
+    now defaults ON when unset — see `test_default_is_enabled_with_the_env_var_unset` above —
+    so this test pins the explicit opt-out rather than the old dark default; it stays
+    hermetic in `tmp_path` by forcing the disabled path instead of depending on whatever
+    rotator state happens to be configured on the machine running the suite.)"""
     env = {
         **os.environ,
         "CLAUDE_PROJECT_DIR": str(tmp_path),
         "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"),
+        "CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED": "false",
     }
-    env.pop("CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED", None)
     proc = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "detectors" / "model-fallback.py")],
         env=env, capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "", f"dark detector must be silent, got: {proc.stdout!r}"
+    assert proc.stdout.strip() == "", f"disabled detector must be silent, got: {proc.stdout!r}"
