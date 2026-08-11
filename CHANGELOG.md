@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] — 2026-08-11
+
+### Bug Fixes
+
+- **hooks:** The token advisory must be actionable and anomalous (janitor#246, TRDD-KI6OWCZT) (3890d7b)
+- **hooks:** Make the baseline advisory REACHABLE, and stop the hook crashing on its own log (6410277)
+- **hooks:** Make the output advisory reachable on a heartbeat-dominated log (TRDD-KI6OWCZT) (03253c6)
+- **hooks:** Stop the SessionStart re-plumb nudge from firing mid-session (TRDD-BRHJHWW0) (d104081)
+- **publish:** Raise the CPV gate bound to 2x the LOADED run, not 3.8x an idle one (42add9e)
+- **ci-status:** A CI failure must outlive the heartbeat that found it (R16) (27b190c)
+- **agents:** Stop agents COMPOSING report paths, and fix a space-unsafe root (janitor#248) (24ed51a)
+
+### Documentation
+
+- Add TRDD-KI6OWCZT — token-spike advisory must clear the noise bar (janitor#246) (afec741)
+- TRDD-KVS6K7P9 — the clobber can change SCOPE+ROOT, and the contract invites the re-read (f0581f0)
+- Add TRDD-G4BCRUP7 — armed once means autonomous forever (owner directive 2026-08-11) (129c53d)
+- Add TRDD-JPL0JU86 — an unmaintainable page must not abstain silently (janitor#249) (0b27122)
+- TRDD-G4BCRUP7 STATE — audit done, 6 of 16 shipped, two hard constraints named (99bf7b7)
+
+### Features
+
+- **model:** Switch models automatically when a window is spent (TRDD-G4BCRUP7 R7) (04065cb)
+- **alerts:** Tell the reader what to DO about a token spike (R11) (cb182b6)
+- **rate-limit:** Rotate on a 429 instead of waiting out the window (R9) (04a8fdf)
+- **memory:** Background wikimem curation is ON again, at 1/day (R14) (dd26f27)
+- **daemon:** Actually run the fleet-wide plugin updater (R3) (fddbbe2)
+- **plugins:** Commit the settings file in the script, not via the model (C2) (4037b1f)
+- **fleet:** Dismiss a blocked session when nobody is there to answer (R6) (870cddb)
+
+### Testing
+
+- **chores:** Fleet-plugins-update is the SEVENTH unabsorbed chore — and that is a finding (5631950)
 ## [3.0.0] — 2026-08-08
 
 ### Bug Fixes
@@ -24,6 +57,10 @@ All notable changes to this project will be documented in this file.
 
 - **cadence:** One arm per session — tier-driven renews deleted (USER directive, TRDD-BRHJHWW0) (af499ee)
 - **arm:** Arm once, armed forever — persistent machine claim + silent re-plumb (USER directive, TRDD-TUIBWHT7) (65e537d)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.0.0 (62143b2)
 
 ### Testing
 

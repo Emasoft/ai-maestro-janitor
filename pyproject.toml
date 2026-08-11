@@ -1,6 +1,6 @@
 [project]
 name = "ai-maestro-janitor"
-version = "3.0.0"
+version = "3.1.0"
 description = "Session-scoped janitor for Claude Code"
 # Project tooling (ruff, mypy, the publish.py pipeline) needs ≥3.11
 # because cliff config + tomllib usage. The standalone PEP 723 scripts
