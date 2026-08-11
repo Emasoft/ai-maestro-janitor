@@ -36,7 +36,26 @@ findings ledger, so they outlive a dead cron).
 10:00:13 (`7d=100% +LOCALLY-EXPIRING -> rotate`). The audit's "default OFF" is a FRESH-INSTALL
 gap only. Do not "fix" what is already running.
 
-**NEXT ACTION:** land R6 (presence-gated ESC), then publish + CLI-verify the install.
+**RELEASED as v3.1.0 and CLI-VERIFIED** (2026-08-11): 1531/1531 tracked files present in the
+installed cache, and all six behaviour markers confirmed IN THE CACHE (not merely in the tag) —
+`ACTIVE 429 RECOVERY`, `task_fleet_plugins_update`, `FLEET_AWAITING_ESC_IDLE_S`, the 1/day
+wikimem defaults, the model-fallback knob, and the `--porcelain` worktree parse with the broken
+`| head | awk` form gone. R6 (presence-gated ESC) landed in that release.
+
+**NEXT ACTION:** two OWNER decisions, both deliberately parked at the SAFE setting, neither
+blocking anything else:
+  1. hard-restart rungs — still OFF. They kill a wedged pid, losing that session's in-memory
+     conversation. Enabling is the only way a dead pid self-heals unattended.
+  2. PROJECT-domain ticket approval gate — still ON. Background agents fix janitor-INTERNAL
+     tickets freely; code/security changes to the owner's repos still wait for a human.
+After those: R6 residual (permission-prompt detection via pane text) and the R3 server-host
+blackout below.
+
+**R3 CAVEAT, caught by the roster tripwire and NOT closable here:** on a host running a live
+ai-maestro server the daemon is suppressed and nothing claims `fleet-plugins-update`, so
+fleet-wide plugin updates are BLACKED OUT there. Standalone hosts are fine. Closing it needs
+ai-maestro to claim the chore (cross-repo, same shape as ai-maestro#111 / TRDD-6CRC9SQQ); the
+`global-chore-blackout` detector is what makes it visible meanwhile.
 
 **TWO CONSTRAINTS THAT ARE NOT BUGS — do not burn a session trying to code around them:**
 1. A Claude Code PERMISSION prompt is UI state, not a transcript record, so
