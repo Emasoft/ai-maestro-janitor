@@ -693,6 +693,37 @@ def test_repair_has_work_false_on_superseded_atom_below_delimiter(tmp_path):
     assert mcp.repair_has_work(tmp_path) is False
 
 
+def test_repair_defect_atom_after_footer_when_atom_lands_in_link_section(tmp_path):
+    """janitor#250: an atom marker spliced AFTER `## Governed by` (a `component`
+    tier's own link section, the old `add-atom` bug's exact shape) is flagged
+    `atom-after-footer` — the same fence-aware footer boundary `memgrep`'s
+    `footer_section_line` now anchors on."""
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        body=(
+            "A live fact line.\n\n"
+            "## Governed by\n- [[y]]\n\n"
+            "^stray-fact [desc: stray, keywords: stray fact]\nStray body."
+        ),
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == "atom-after-footer"
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_defect_clean_when_atom_precedes_all_footer_sections(tmp_path):
+    """The correctly-shaped page — atom(s) ABOVE every footer section — is not flagged
+    `atom-after-footer` (a marker-shaped bullet inside the link section is not itself
+    an atom marker, so it must not false-positive either)."""
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        marker=True,
+        body="A live fact line.\n\n## Governed by\n- [[y]]",
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
+
+
 def test_retro_lesson_has_work_true_for_pointerless_superseded_atom(tmp_path):
     """A curated page with a status:superseded atom marker and NO superseded-by:
     pointer is the retro skill's exact candidate -> work."""

@@ -2222,6 +2222,41 @@ fn notes_section_line(text: &str) -> Option<usize> {
     None
 }
 
+/// The 0-based line index of the EARLIEST footer-section heading — `## Applies to`, `## Governed
+/// by`, or `## Notes and lessons learned` (any spelling `notes_section_line` accepts) — fence-aware,
+/// or `None` when the page carries none of them. This is `add-atom`'s insertion boundary
+/// (janitor#250): the link law (`markdown-memory-recall.md`) puts `## Applies to` / `## Governed
+/// by` sections BEFORE `## Notes and lessons learned`, so anchoring only on Notes let a new atom
+/// land INSIDE the last link section — where `--in "Governed by"` then misread it as belonging to
+/// that section. Treating all three as one FOOTER family keeps the documented "before Notes"
+/// behaviour true on the common case (a page with only Notes) while never splicing past a link
+/// section that comes first.
+fn footer_section_line(text: &str) -> Option<usize> {
+    let mut in_fence = false;
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if t.starts_with('#') {
+            let low = t.to_ascii_lowercase();
+            let heading_text = low.trim_start_matches('#').trim();
+            if heading_text == "applies to"
+                || heading_text == "governed by"
+                || low.contains("notes and lessons learned")
+                || low.contains("lessons learned")
+            {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 /// The 1-based line of the page's canonical `## Superseded` delimiter heading (TRDD-57WJL5L2),
 /// fence-aware, or `None` when the page carries no such heading. Exact spelling only, matched
 /// case-insensitively on the heading TEXT (the `##` level is fixed) — this is the ONE canonical
@@ -2370,8 +2405,9 @@ fn read_body_from_stdin() -> Result<String> {
 )]
 struct AddAtomArgs {
     /// The wikimem page (`.md`) to append the atom to — it must already exist (create one with
-    /// `memgrep new-page`). The atom is inserted before the trailing `## Notes and lessons learned`
-    /// section when present, else at EOF.
+    /// `memgrep new-page`). The atom is inserted before the trailing footer section — the
+    /// EARLIEST of `## Applies to` / `## Governed by` / `## Notes and lessons learned` — when
+    /// present, else at EOF.
     #[arg(long = "page")]
     page: PathBuf,
     /// The atom's RECALL SURFACE — a comma-separated key-phrase list (`"rate limit, resume, 429"`).
@@ -2398,7 +2434,8 @@ struct AddAtomArgs {
 /// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …] [--base-sha256 …]` (body on
 /// stdin). Synthesise a corpus-unique id + today's dates, emit the exact `^id [desc:"…",
 /// keywords: …, type: …, ocd:…, lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the page
-/// (before the lessons section if any), write atomically, reindex the scope. Prints
+/// (before the earliest footer section — `## Applies to` / `## Governed by` / `## Notes and
+/// lessons learned` — if any), write atomically, reindex the scope. Prints
 /// `<id>\t<page>`.
 ///
 /// Holds the page's scope write-lock (TRDD-7YHT3FNK) from BEFORE the read through the write, so
@@ -2452,16 +2489,17 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
 /// exercises the real insertion, not a copy). Emits a blank separator, the marker, a blank line, then
 /// the body (task shape: "marker then a blank line then the body"); the leading blank keeps the marker
 /// off the previous paragraph and `resolve_atoms_from_text` trims it back off when rebuilding the
-/// body. Placed BEFORE the `## Notes …` heading when present (so the atom's body — which the parser
-/// ends at the next heading — is bounded and never bleeds into the lessons section), else at EOF. The
-/// result always ends in exactly one newline.
+/// body. Placed BEFORE the earliest footer heading (`## Applies to` / `## Governed by` / `## Notes
+/// and lessons learned` — see `footer_section_line`) when present (so the atom's body — which the
+/// parser ends at the next heading — is bounded and never bleeds into a footer section), else at
+/// EOF. The result always ends in exactly one newline.
 fn insert_atom_block(text: &str, marker: &str, body: &str) -> String {
     let mut atom_lines: Vec<String> = vec![String::new(), marker.to_string(), String::new()];
     atom_lines.extend(body.lines().map(str::to_string));
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    match notes_section_line(text) {
+    match footer_section_line(text) {
         Some(idx) => {
-            atom_lines.push(String::new()); // blank between the atom body and the notes heading
+            atom_lines.push(String::new()); // blank between the atom body and the footer heading
             let tail = lines.split_off(idx);
             lines.extend(atom_lines);
             lines.extend(tail);
@@ -8477,6 +8515,55 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // The first (fenced) heading is code, not the section; the real heading is line index 4.
         assert_eq!(notes_section_line(text), Some(4));
         assert_eq!(notes_section_line("# p\nno section here\n"), None);
+    }
+
+    // janitor#250 — `add-atom` must never splice INSIDE a `## Applies to` / `## Governed by`
+    // section that precedes `## Notes and lessons learned`. Four shapes, matching the link law's
+    // real page layout plus the two degenerate cases.
+
+    #[test]
+    fn footer_section_line_finds_earliest_of_all_three_footers() {
+        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n## Notes and lessons learned\n";
+        // `## Applies to` at line 2 is the earliest footer heading, not Notes at line 6.
+        assert_eq!(footer_section_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_line_finds_notes_only() {
+        let text = "# p\nbody\n## Notes and lessons learned\n";
+        assert_eq!(footer_section_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_line_finds_link_sections_only_no_notes() {
+        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n";
+        assert_eq!(footer_section_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_line_none_when_no_footer_at_all() {
+        assert_eq!(footer_section_line("# p\nno footer here\n"), None);
+    }
+
+    #[test]
+    fn insert_atom_block_lands_before_applies_to_not_inside_governed_by() {
+        // The exact janitor#250 shape: Applies to, then Governed by, then Notes. The new atom
+        // must land BEFORE `## Applies to` — never inside `## Governed by`, which is what the old
+        // Notes-only anchor produced.
+        let page = "---\nname: p\ndescription: \"d\"\n---\n\n# p\nsome prose\n## Applies to\n- [[x]]\n## Governed by\n- [[y]]\n## Notes and lessons learned\n";
+        let out = insert_atom_block(
+            page,
+            "^ATOM-9999-0001 [keywords: kw, ocd: 2026-08-11, lmd: 2026-08-11]",
+            "the fact",
+        );
+        let applies_at = out.find("## Applies to").expect("Applies to present");
+        let atom_at = out.find("^ATOM-9999-0001").expect("atom present");
+        let governed_at = out.find("## Governed by").expect("Governed by present");
+        assert!(
+            atom_at < applies_at,
+            "atom must be spliced BEFORE `## Applies to`, not between it and `## Governed by`: {out:?}"
+        );
+        assert!(atom_at < governed_at);
     }
 
     #[test]

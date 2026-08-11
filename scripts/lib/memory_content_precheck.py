@@ -477,6 +477,33 @@ def _split_page(text: str) -> tuple[str | None, str]:
     return None, text  # unclosed fence → treat as no frontmatter (malformed)
 
 
+def _footer_heading_line(text: str) -> int | None:
+    """0-based line index of the EARLIEST footer heading — `## Applies to`, `## Governed
+    by`, or the Notes heading (any spelling `memory_edit_verify._LESSONS_HEADING`'s own
+    match accepts) — fence-aware, or None when the page carries none of them. Mirrors the
+    memgrep crate's `footer_section_line` (janitor#250) so this precheck and `add-atom`'s
+    insertion boundary can never disagree about where the footer starts."""
+    in_fence = False
+    for i, line in enumerate(text.splitlines()):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped.startswith("#"):
+            low = stripped.lower()
+            heading_text = low.lstrip("#").strip()
+            if (
+                heading_text == "applies to"
+                or heading_text == "governed by"
+                or "notes and lessons learned" in low
+                or "lessons learned" in low
+            ):
+                return i
+    return None
+
+
 def repair_defect(text: str) -> str:
     """The SINGLE-SOURCE repair-candidacy predicate (janitor#227): return the SHORT,
     stable reason slug for the FIRST structurally-detectable defect this page exhibits
@@ -493,7 +520,8 @@ def repair_defect(text: str) -> str:
     enforces, via the same SSOT constants — so the precheck and the commit-time
     verifier can never drift. Slugs are printed (by the CLI) and so MUST stay stable:
     `no-frontmatter`, `missing-key:<key>`, `illegal-tier`, `no-notes-heading`,
-    `nested-only-dates`, `inverted-tier-shape`, `atom-desc`, `superseded-misplaced`."""
+    `nested-only-dates`, `inverted-tier-shape`, `atom-desc`, `superseded-misplaced`,
+    `atom-after-footer`."""
     fm_block, _body = _split_page(text)
     if fm_block is None:
         return "no-frontmatter"  # no/unclosed frontmatter → invisible to ranked recall
@@ -520,11 +548,22 @@ def repair_defect(text: str) -> str:
         # (TRDD-3SOO1RWE: extending the precheck is safe ONLY because the repair skill
         # now backfills descs — the WN7M829Y scope note forbade flagging defects the
         # pass cannot fix; this one it can, via the same SSOT check.)
+    lines = text.splitlines()
+    # An atom marker that landed AT OR AFTER the earliest footer heading (`## Applies
+    # to` / `## Governed by` / Notes) — janitor#250: the OLD `add-atom` anchor spliced
+    # only before Notes, so a page with link sections ahead of Notes got the new atom
+    # stuck INSIDE the last link section, where `--in "Governed by"` misreads it as part
+    # of that section. Flag it so the repair skill can move it back above the footer.
+    footer_idx = _footer_heading_line(text)
+    if footer_idx is not None and any(
+        i >= footer_idx and memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln)
+        for i, ln in enumerate(lines)
+    ):
+        return "atom-after-footer"
     # Mis-placed superseded atoms (TRDD-QKWU26ZG — mirrors memgrep's two lint WARNs,
     # `superseded-atom-no-delimiter-heading` / `superseded-atom-above-delimiter`).
     # Safe to flag for the same TRDD-3SOO1RWE reason: the repair skill now performs
     # the verbatim move-below-the-delimiter fix, landing in the same change as this.
-    lines = text.splitlines()
     sup_idx = [
         i for i, ln in enumerate(lines)
         if (m := memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln))
