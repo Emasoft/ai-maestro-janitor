@@ -25,7 +25,9 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
 3. **Scan with zizmor.** Capture text + SARIF:
 
    ```bash
-   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+   # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
+   # at its first space and the report lands where nobody looks, reporting success.
+   MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
    REPORT_DIR="$MAIN_ROOT/reports/janitor-github-workflow-doctor"
    mkdir -p "$REPORT_DIR"
    TS="$(date +%Y%m%d_%H%M%S%z)"

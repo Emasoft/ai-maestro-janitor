@@ -54,7 +54,9 @@ Parse `$ARGUMENTS` for any of (all optional):
    ```bash
    # Resolve project root (worktree-safe).
    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-     PROJECT_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+     # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
+     # at its first space and the report lands where nobody looks, reporting success.
+     PROJECT_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
    else
      PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
    fi

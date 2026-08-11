@@ -98,16 +98,35 @@ over volume; the cadence and the next launch cover the rest.
 
 ## Output contract (you are a background agent)
 
-Do the WHOLE pass in your own context. Write the detailed report to
-`$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-<pass>-<slug>.md`
-(resolve `$MAIN_ROOT` via `git worktree list | head -n1 | awk '{print $1}'`). Return to
-your caller ONLY one line plus that report path — never page bodies, never the corpus.
+Do the WHOLE pass in your own context. Write the detailed report under
+`$MAIN_ROOT/reports/janitor-memory-subconscious-agent/`. Return to your caller ONLY one
+line plus that report path — never page bodies, never the corpus.
+
+Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PASS`,
+`SLUG`); you never type the timestamp:
 
 ```bash
-MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
-REPORT_DIR="$MAIN_ROOT/reports/memory-subconscious-agent"; mkdir -p "$REPORT_DIR"
-REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-<pass>-<slug>.md"
+PASS=consolidate            # the pass you were launched for
+SLUG=local                  # scope / short subject
+MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+REPORT_DIR="$MAIN_ROOT/reports/janitor-memory-subconscious-agent"; mkdir -p "$REPORT_DIR"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
+printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
+echo "$REPORT_FILE"
 ```
+
+**Never compose that filename yourself** (janitor#248). A report was written with a
+`-0700` offset on a `+0200` host — 1 of 31, wall-clock digits right, offset 9 h wrong,
+crossing midnight in UTC so the DATE was wrong too. Nothing was misconfigured: the
+recipe used to end in placeholders, so the path had to be BUILT, and a built string
+gets a plausible offset recalled instead of a real one read. Copying the printed path
+removes the opportunity. The seeded `generated:` line exists for the same incident —
+the body carried no timestamp at all, so the filename was the only temporal record and
+nothing could contradict it.
+
+`--porcelain` is likewise not optional: plain `git worktree list` is column output, so
+`awk '{print $1}'` truncates any path containing a space at the first space and the
+report lands in a directory nobody will ever look in — while reporting success.
 
 ## The quality bar — rival Wikipedia
 

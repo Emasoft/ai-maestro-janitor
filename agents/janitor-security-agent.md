@@ -94,14 +94,18 @@ or one full-sweep, the skills' caps. Quality over volume; the next dispatch cove
 
 Do the WHOLE pass in your own context. Write the detailed report to
 `$MAIN_ROOT/reports/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md`
-(resolve `$MAIN_ROOT` via `git worktree list | head -n1 | awk '{print $1}'`). Return to your
+(resolve `$MAIN_ROOT` via `git worktree list --porcelain | sed -n '1s/^worktree //p'`). Return to your
 caller ONLY one line plus that report path — never raw findings, never file bodies, never a
 secret value.
 
 ```bash
-MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+DOMAIN=workflow             # the domain you were launched for — a WORD, not digits
+SLUG=audit                  # short subject
+MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
 REPORT_DIR="$MAIN_ROOT/reports/janitor-security-agent"; mkdir -p "$REPORT_DIR"
-REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-<domain>-<slug>.md"
+REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$DOMAIN-$SLUG.md"
+printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
+echo "$REPORT_FILE"         # use THIS path verbatim; never retype the timestamp
 ```
 
 The one-line return states: domain, counts `fixed=N flagged=M` (and `(autofix-off: proposed)`

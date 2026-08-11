@@ -27,7 +27,10 @@ Repo-side detail in references/repo-side-checks.md. Env-name regexes in referenc
 1. Resolve report path:
 
    ```bash
-   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+   # --porcelain, NOT plain + awk: plain output is columns, so `awk '{print $1}'`
+   # truncates any repo path containing a space and the report is written somewhere
+   # nobody will look — while reporting success. Paths with spaces are routine on macOS.
+   MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
    REPORT_DIR="$MAIN_ROOT/reports/janitor-credential-window-audit"
    mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"

@@ -21,7 +21,9 @@ Protects against the published-then-discovered-malicious shape (Shai-Hulud npm/P
 1. Resolve paths:
 
    ```bash
-   MAIN_ROOT="$(git worktree list | head -n1 | awk '{print $1}')"
+   # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
+   # at its first space and the report lands where nobody looks, reporting success.
+   MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
    REPORT_DIR="$MAIN_ROOT/reports/janitor-supply-chain-watcher"; mkdir -p "$REPORT_DIR"
    TIMESTAMP="$(date +%Y%m%d_%H%M%S%z)"
    STATE_DIR="$MAIN_ROOT/.janitor/state"; mkdir -p "$STATE_DIR"
