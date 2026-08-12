@@ -257,6 +257,30 @@ _CROSS_SKILL_SHADOW = _re(
 # Direct or template references to known data-exfiltration sinks in a
 # skill/agent body. The list is short on purpose — these are the actual
 # names that appear in disclosed attacks, not every webhook service.
+#
+# STILL FALSIFIED AT 0/8, AND LEFT THAT WAY DELIBERATELY (janitor#226).
+# This is a DENYLIST of sink domains; the benchmark's class is behavioural
+# ("collected data is posted to an external endpoint"), and every seeded
+# sample posts to a host the attacker chose freely —
+# `analytics.example.com`, `telemetry-collect.example.net`,
+# `asset-registry.corp.internal`. No denylist can ever contain an arbitrary
+# hostname, so the 0/8 is a SCOPE MISMATCH, not a weak regex, and adding
+# domains would not move it by one sample.
+#
+# The behavioural rule that WOULD reach them — a send verb plus a URL plus a
+# context-bearing payload — was drafted and rejected on measurement: the
+# seeded attacks are shaped exactly like a legitimate corporate telemetry
+# policy (MUST forward diff/test-results/environment to an internal
+# collector), because that is the disguise the attack wears. Separating the
+# two needs to know whether the destination is authorised, which is
+# deployment knowledge this module does not have. Firing on the shape would
+# flag every real CI-telemetry document in the fleet, and a detector people
+# learn to ignore protects nothing.
+#
+# So the honest state is: this rule catches KNOWN sinks, which is worth
+# having and is what its name should be read to mean. It does not detect
+# exfiltration in general, and COVERAGE.md says so rather than papering
+# over it.
 _EXFIL_WEBHOOK = _re(
     r"\b(?:webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com"
     r"|smee\.io|ngrok\.io|trycloudflare\.com|loca\.lt|tunnel\.dev"
