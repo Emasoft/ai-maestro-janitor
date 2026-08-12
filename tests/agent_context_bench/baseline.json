@@ -1,10 +1,10 @@
 {
   "totals": {
-    "samples": 187,
+    "samples": 194,
     "benign": 40,
-    "attack_claimed": 130,
-    "recall_intended": 0.2308,
-    "recall_any": 0.2692,
+    "attack_claimed": 137,
+    "recall_intended": 0.219,
+    "recall_any": 0.2555,
     "false_positive_rate": 0.075
   },
   "per_population": {
@@ -222,6 +222,21 @@
         "process_vm_readv credential harvesting"
       ]
     },
+    "dns-exfil-long-subdomain": {
+      "claimed": true,
+      "n": 7,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "DNS data exfiltration via encoded subdomains",
+        "DNS tunneling with base64 encoded payloads",
+        "DNS exfiltration embedded in policy examples",
+        "DNS exfiltration via long subdomain",
+        "DNS exfiltration via long subdomain",
+        "DNS exfiltration via long subdomain",
+        "config file encodes secrets in DNS queries"
+      ]
+    },
     "chat-template-delimiters": {
       "claimed": true,
       "n": 9,
@@ -293,7 +308,6 @@
     }
   ],
   "unclaimed_rules": [
-    "dns-exfil-long-subdomain",
     "dynamic-exec-in-body",
     "git-protocol-only-dependency",
     "mcp-schema-in-annotations",

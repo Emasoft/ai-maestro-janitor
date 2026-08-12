@@ -14,7 +14,7 @@ not the same as passing.
 | `concealment-directive` | 1/9 | weak |
 | `cross-skill-shadowing` | 0/9 | **FALSIFIED** — seeded and caught nothing |
 | `crypto-clipper-triad` | 0/9 | **FALSIFIED** — seeded and caught nothing |
-| `dns-exfil-long-subdomain` | — | UNMEASURED — not evidence of working |
+| `dns-exfil-long-subdomain` | 0/7 | **FALSIFIED** — seeded and caught nothing |
 | `dynamic-exec-in-body` | — | UNMEASURED — not evidence of working |
 | `exfil-webhook-sink` | 0/8 | **FALSIFIED** — seeded and caught nothing |
 | `git-hook-install-from-body` | 5/9 | partial |
@@ -30,8 +30,8 @@ not the same as passing.
 | `whole-env-exfil` | — | UNMEASURED — not evidence of working |
 | `worm-self-propagation` | 5/9 | partial |
 
-**6 claimed rules are FALSIFIED**: seeded with 52 blind-authored
+**7 claimed rules are FALSIFIED**: seeded with 59 blind-authored
 samples of their own class, they caught zero. That is stronger than untested — the
 defect was planted, the rule was watched, and it did not fire.
 
-**Unmeasured**: `dns-exfil-long-subdomain`, `dynamic-exec-in-body`, `git-protocol-only-dependency`, `mcp-schema-in-annotations`, `two-step-code-injection`, `whole-env-exfil`.
+**Unmeasured**: `dynamic-exec-in-body`, `git-protocol-only-dependency`, `mcp-schema-in-annotations`, `two-step-code-injection`, `whole-env-exfil`.
