@@ -1,6 +1,6 @@
 ---
 name: janitor-two-runtime-backends
-description: "does the janitor run a daemon inside an ai-maestro agent / why no daemon spawn inside the harness / what is #N standalone vs #J harness mode / where does resume rate-limit compact survival come from inside ai-maestro / can the janitor call the ai-maestro HTTP API directly / why was contextPoisoned blocked / the ai-maestro boundary is the scripts never the API"
+description: "does the janitor run a daemon inside an ai-maestro agent / why no daemon spawn inside the harness / what is #N standalone vs #J harness mode / where does resume rate-limit compact survival come from inside ai-maestro / can the janitor call the ai-maestro HTTP API directly / why was contextPoisoned blocked / the ai-maestro boundary is the scripts never the API / the feature works standalone but not on a server host / our stamp file is never written / a chore the server claims broke a downstream trigger / rotation happened but nothing reacted / why is this dead only on the ai-maestro host"
 ocd: 2026-08-02
 lmd: 2026-08-02
 metadata:
@@ -44,6 +44,23 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
   instance: setting `contextPoisoned` (janitor#167) is blocked precisely here, because
   `cmd_update`'s option allow-list has no such flag — reported to ai-maestro rather than
   worked around.
+
+
+^ATOM-4GQU-0C9J [desc:"A claimed chore transfers the ACT to the server but not the BREADCRUMB — every janitor feature triggered by our own stamp goes dark on a server-owned host, invisibly", keywords: the_feature_works_standalone_but_not_on_a_server_host our_stamp_file_is_never_written a_chore_the_server_claims_broke_a_downstream_trigger rotation_happened_but_nothing_reacted why_is_this_dead_only_on_the_ai-maestro_host breadcrumb_absent_looks_like_the_event_never_happened, type: project, ocd: 2026-08-12, lmd: 2026-08-12]
+
+When a live ai-maestro server CLAIMS a chore, the janitor stops PERFORMING the act but keeps
+owning everything downstream of it — and any breadcrumb our code writes to signal that act is
+then never written. The feature goes dark exactly on the host where the act still happens, and
+NOTHING NOTICES, because a missing breadcrumb is indistinguishable from "the event did not
+occur". Measured 2026-08-12 on TRDD-UA4FAX67: `rotation-success.ts` (only writer:
+`rotator._switch_blob`) was absent while a rotation had demonstrably landed 08-11 10:00:13 —
+the server holds `oauth-rotator-tick` here — so the post-rotation pane wake could never fire.
+Tests cannot catch this class: they verify both ends, and what breaks is that on this host the
+ends are not connected. Same shape as G4BCRUP7's R3 (`fleet-plugins-update` unowned). THE FIX
+PATTERN: key off an OBSERVABLE STATE CHANGE both runtimes produce, never off our own
+event-stamp — for rotation that is a changed live IDENTITY in the shared beacon, and never its
+`ts`, which also advances on age and on a fail-open unknown mtime. Ask of any chore the server
+can claim: *what else did we hang off our own doing of it?*
 
 ## See also
 
