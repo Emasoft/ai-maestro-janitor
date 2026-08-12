@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import socket
 import sys
 import time
@@ -204,9 +205,38 @@ def _uncovered_modules(changed: dict[str, int], scope_dirs: list[tuple[str, Path
             except OSError:
                 continue
     blob = "\n".join(corpus)
-    uncovered = [name for name in changed if name not in blob]
+    uncovered = [name for name in changed if not _is_mentioned(name, blob)]
     uncovered.sort(key=lambda s: (-changed[s], s))
     return uncovered
+
+
+def _is_mentioned(filename: str, blob: str) -> bool:
+    """True iff `blob` names this module in a form only code-ish text produces.
+
+    TWO accepted forms, and the second one is janitor#256's fix:
+
+      * `state.py` — the filename, extension included.
+      * `state.<identifier>` — the module named in DOTTED form, as prose about code actually
+        writes it (`prrd_lib.prrd_lock mirrors ai-maestro withJsonLock byte-for-byte`). The peer
+        report that found this was precise about the cost: a real PROJECT-scope atom named the
+        symbol literally, the nudge missed it, and the detector reported memorized code as
+        unmemorized — its visible-sample precision on that repo was 0 of 6, not the 1 of 6 first
+        reported.
+
+    Measured on this repo's LOCAL+PROJECT corpus (717k chars, 87 lib modules) before shipping:
+    `<stem>.py` alone covers 31; adding the dotted form covers 48 (+17, every one a module named
+    in dotted form); accepting the BARE word would cover 56. Those last 8 are exactly the class
+    the extension requirement exists to exclude — a bare stem that is also ordinary English
+    silences the nudge forever, and false SILENCE is invisible in a way a false nudge is not.
+    The dotted form buys most of the missing coverage without reopening that hole: prose has no
+    reason to write `posture.grade`, while a page discussing the module does.
+    """
+    if filename in blob:
+        return True
+    stem = filename.rsplit(".", 1)[0]
+    if not stem:
+        return False
+    return re.search(rf"\b{re.escape(stem)}\.[A-Za-z_]", blob) is not None
 
 
 def _changed_modules(root: Path, secs: int) -> dict[str, int]:

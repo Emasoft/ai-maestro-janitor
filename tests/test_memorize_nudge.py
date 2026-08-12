@@ -293,3 +293,41 @@ def test_a_live_file_is_still_nudged(tmp_path):
     p.parent.mkdir(parents=True)
     p.write_text("x = 1\n", encoding="utf-8")
     assert not mod._is_gone_or_staged_for_deletion(tmp_path, "scripts/alive.py")
+
+
+# --- janitor#256, second half: the "no note mentions it" predicate itself ---------
+
+
+def test_a_DOTTED_module_mention_counts_as_coverage() -> None:
+    """The defect the peer report measured: an atom that names the symbol literally, in the
+    dotted form prose about code actually uses, did not count — so the detector reported
+    memorized code as unmemorized (their visible-sample precision was 0 of 6, not 1 of 6)."""
+    mod = _import()
+    blob = ("ATOM-JONB-6FIU  prrd_lib.prrd_lock mirrors ai-maestro withJsonLock byte-for-byte "
+            "(<file>.lock mkdir-dir, 30s/20s/50ms) and must span each edit's whole parse-to-write")
+    assert mod._is_mentioned("prrd_lib.py", blob), \
+        "a dotted module reference names the module as plainly as the filename does"
+
+
+def test_the_FILENAME_form_still_counts() -> None:
+    """The original form must keep working — this is an ADDED acceptance, not a replacement."""
+    mod = _import()
+    assert mod._is_mentioned("state.py", "the guard lives in scripts/lib/state.py near the top")
+
+
+def test_a_BARE_english_word_is_still_not_coverage() -> None:
+    """The hole the extension requirement exists to close, and the reason the fix is the DOTTED
+    form rather than the bare stem: `state`/`posture` are ordinary words, and accepting them
+    silences the nudge for those modules forever. False SILENCE is invisible; a false nudge is
+    not, so the predicate must keep failing in the noisy direction."""
+    mod = _import()
+    prose = "the session state was unclear and our security posture improved after the audit"
+    assert not mod._is_mentioned("state.py", prose)
+    assert not mod._is_mentioned("posture.py", prose)
+
+
+def test_a_dotted_match_needs_an_IDENTIFIER_after_the_dot() -> None:
+    """`posture.` at the end of a sentence is prose, not a module reference. Requiring an
+    identifier character after the dot is what keeps the dotted form code-shaped."""
+    mod = _import()
+    assert not mod._is_mentioned("posture.py", "we reviewed our security posture. It improved.")
