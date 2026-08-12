@@ -13,11 +13,20 @@ so it loads in every PEP 723 script block without third-party deps.
 
 ⚠ A RULE'S PRESENCE HERE IS NOT EVIDENCE THAT IT WORKS.
 Measured per-rule recall lives in `tests/agent_context_bench/COVERAGE.md`
-(janitor#226). As of 2026-08-12, SIX of these rules are FALSIFIED — seeded
-with 52 blind-authored samples of their own class, they caught zero — and
-six more are unmeasured. Read that table before assuming a class is
-guarded, and re-run `scripts/agent_context_bench.py` after touching a
-pattern.
+(janitor#226) — read that table before assuming a class is guarded, and
+re-run `scripts/agent_context_bench.py` after touching a pattern. Seven
+rules were FALSIFIED on 2026-08-12 (seeded with blind-authored samples of
+their own class, they caught zero) and have since been repaired; several
+remain PARTIAL, and several are still UNMEASURED, which is not the same as
+passing.
+
+The repairs share one diagnosis, worth knowing before writing the next
+rule: each falsified pattern had been written from a REMEMBERED SAMPLE
+rather than from the attack's shape. It named one library's clipboard API,
+one JSON key ordering, one jailbreak-forum idiom, one length threshold. All
+of them matched the example their author had in mind and nothing else — and
+because a rule that never fires is indistinguishable from a clean repo, the
+`id=` went on reading as coverage for as long as nobody measured it.
 
 Why the warning sits here rather than only in the bench: an `id=` reads as
 coverage. `authority-override` LOOKS like authority-override is handled, so
@@ -726,9 +735,11 @@ RULES: tuple[Rule, ...] = (
         name="Authority / role override directive",
         severity="HIGH",
         description=(
-            "Body attempts to switch the agent's role ('you are now', "
-            "'act as admin', 'developer mode enabled') — agent-goal-"
-            "hijacking shape."
+            "Body attempts to replace the agent's operating identity or its "
+            "standing instructions — a role/persona re-assignment, a claim "
+            "that prior directives are superseded, an identity-assigning "
+            "config key, a file declaring itself the sole authority, or a "
+            "human-confirmation gate switched off."
         ),
         pattern=_AUTHORITY_OVERRIDE,
         owasp_asi="ASI-07",
@@ -750,9 +761,11 @@ RULES: tuple[Rule, ...] = (
         name="Skill shadowing — mandate referencing another skill",
         severity="HIGH",
         description=(
-            "Skill description issues a behavioural mandate (must/shall/"
-            "always/never) and names another skill — typical shape of a "
-            "shadow-attack that hijacks invocation chains."
+            "A skill's own text issues a behavioural mandate that reaches "
+            "beyond it — either naming ANOTHER skill (hijacking its "
+            "invocation chain) or claiming authority over every task via a "
+            "scope-override clause ('regardless of source', 'apply to all "
+            "skills'), so installing the skill changes global behaviour."
         ),
         pattern=_CROSS_SKILL_SHADOW,
         owasp_asi="ASI-03",
