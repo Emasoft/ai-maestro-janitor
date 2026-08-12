@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.5] — 2026-08-12
+
+### Bug Fixes
+
+- **rotator:** A live-identity change IS a rotation, whoever performed it (TRDD-UA4FAX67) (674c960)
+
+### Documentation
+
+- TRDD-631fa3de asserted the branch-protection auto-apply RUNS; it does not (default off) (18b4edd)
+- Archive TRDD-VXFNDHXT → superseded — the TTL probe it is about no longer exists (d981051)
+- Add TRDD-FDV1RQEB — detect a STATE block citing a symbol the tree no longer has (f4e1f65)
+- Prototype TRDD-FDV1RQEB's dead-symbol check — 1 new find, 0 false positives (1d60e36)
+- Add TRDD-B07VPT2G — IDLE_TTL_EXPIRY (47% of one session's cache waste) finally gets a card (99b57dc)
+- TRDD-I6ZZWVDN testing -> backburner; its incidental finding finally has a card (4806ef3)
+- Correct TRDD-B07VPT2G's own premise — EUWIHP0G did own this, and is complete (281203d)
+- TRDD-B07VPT2G title said "never had a card" while its own body refutes that (21ca705)
+- TRDD-UA4FAX67 — the post-rotation wake trigger cannot fire on a server-owned host (bdcf895)
 ## [3.1.4] — 2026-08-12
 
 ### Bug Fixes
@@ -21,6 +38,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Regenerate the fenced project map (465 files, 1630 lines) (3d5d968)
+- Bump version to 3.1.4 (7d4b439)
 
 ### Styling
 
