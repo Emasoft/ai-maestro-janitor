@@ -15,6 +15,29 @@ makes it terminate. Shipped in **v0.49.0** (2026-07-17; TRDD-D3PROACT; the loop 
 release-bump `b5c298a`). The buggy loop-prone form was NEVER published — it was caught in the
 pre-publish batch, so no release ever shipped the size-only gate.
 
+
+^ATOM-QF32-QZW4 [desc:"The first turn after a compaction has no fresh usage line, so a transcript-based context reading is the PRE-compaction one — omit it, never soften it", keywords: context_reading_is_wrong_right_after_a_compaction hook_says_compact_but_I_just_compacted prepare_for_auto-compact_with_0k_headroom_is_false resolve_context_transcript_fallback context_percent_disagrees_with_reality first_turn_after_compaction_reads_the_old_context, ocd: 2026-08-12, lmd: 2026-08-12]
+
+**The first turn after a compaction cannot measure its own context from the transcript.**
+`token_meter.latest_context_size` returns the newest usage-bearing assistant entry — and on that
+first turn the newest one is the PRE-compaction turn, because this turn has not written a usage
+line yet. Any reading taken then describes a context that no longer exists.
+
+Measured live 2026-08-13 on this repo: the `pre-tool-context-usage` hook injected *"~65% used,
+⚠ PREPARE for auto-compact: ~0k until the auto-compact point (~660k)"* when the truth was
+**273,670 tokens with 386,330 of headroom** — it was reporting the pre-compaction 661,367. Acting
+on it would have discarded a context compacted seconds earlier and paid a full re-cache.
+
+Fixed in TRDD-G043V3V0 (commit 2ec63fec): `resolve_context` takes an injected `last_compact_ts`
+(the `last-compact.ts` high-water stamp the PostCompact hook writes) and OMITS the reading —
+returns `(None, None, None, False)` — when the entry predates it. Omission, not the `stale` flag:
+`_format_line` only appends *"(snapshot may lag)"*, which softens a number that is not soft.
+
+**Diagnose it by asking which BRANCH ran.** `resolve_context` prefers the statusline snapshot at
+`<project>/.claude/janitor/context-usage.<session_id>.json` and only falls back to the transcript
+when that file is ABSENT — the fallback was the branch that could not report staleness. Check for
+that file before theorising; a session with a snapshot never had this bug.
+
 ## Governed by
 
 - [[debugging-methodology]] — the general discipline this incident fed back into (a claim asserted
