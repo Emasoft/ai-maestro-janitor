@@ -11,6 +11,19 @@ This module is the RULE-PATTERN catalog. Detectors + the skill-bundle
 scanner import these and run them. Pure-stdlib (re, frozenset, NamedTuple)
 so it loads in every PEP 723 script block without third-party deps.
 
+⚠ A RULE'S PRESENCE HERE IS NOT EVIDENCE THAT IT WORKS.
+Measured per-rule recall lives in `tests/agent_context_bench/COVERAGE.md`
+(janitor#226). As of 2026-08-12, SIX of these rules are FALSIFIED — seeded
+with 52 blind-authored samples of their own class, they caught zero — and
+six more are unmeasured. Read that table before assuming a class is
+guarded, and re-run `scripts/agent_context_bench.py` after touching a
+pattern.
+
+Why the warning sits here rather than only in the bench: an `id=` reads as
+coverage. `authority-override` LOOKS like authority-override is handled, so
+nobody audits it — which makes a dead rule worse than a missing one, because
+an absent rule invites the question and a named one forecloses it.
+
 The patterns deliberately favour FP-tolerance over precision — the
 caller does the contextual triage (location, severity, file type). What
 this module guarantees: every published "I want to compromise your agent"
