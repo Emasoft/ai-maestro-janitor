@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Extract the JSONL corpus from llm-externalizer report files.
+
+Defensive by design: the reports are written by free-pool models, so the payload may be
+fenced, prefixed with prose, or partially truncated. Anything that is not a well-formed
+object carrying {label, content} is dropped and counted, never guessed at — a repaired
+sample would be MY authorship leaking into a corpus whose whole value is that I did not
+write it.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+SOURCE = {
+    "mcp-annotation-lying", "mcp-schema-in-annotations", "whole-env-exfil",
+    "worm-self-propagation", "crypto-clipper-triad", "procmem-credential-extraction",
+    "git-protocol-only-dependency", "dns-exfil-long-subdomain", "two-step-code-injection",
+}
+
+
+def objects_in(text: str):
+    """Yield every top-level {...} that parses as JSON, brace-matched outside strings."""
+    depth, start, in_str, esc = 0, None, False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                chunk = text[start:i + 1]
+                try:
+                    yield json.loads(chunk)
+                except json.JSONDecodeError:
+                    pass
+                start = None
+            depth = max(depth, 0)
+
+
+def main() -> int:
+    # Resolve the report list HERE rather than relying on the shell to word-split a
+    # variable: this session's shell is zsh, which does not split unquoted expansions, so
+    # ten paths arrived as one impossible filename.
+    inputs: list[Path] = []
+    for arg in sys.argv[1:-1]:
+        p = Path(arg)
+        if p.is_dir():
+            for pointer in sorted(p.glob("*.path")):
+                inputs += [Path(x) for x in pointer.read_text().split() if x.endswith(".md")]
+        else:
+            inputs.append(p)
+
+    out, seen, dropped = [], set(), 0
+    for path in inputs:
+        if not path.exists():
+            continue
+        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+        for rec in objects_in(raw):
+            label, content = rec.get("label"), rec.get("content")
+            if not isinstance(label, str) or not isinstance(content, str) or len(content) < 40:
+                dropped += 1
+                continue
+            # TEMPLATE-ECHO GUARD. Some free-pool models return the output SPEC verbatim
+            # instead of filling it in ("content": "<the complete sample file body...>").
+            # Such a sample fires no rule, so it silently scores as a MISS and DEFLATES
+            # recall — a contaminated corpus that makes the detector look worse than it is
+            # is just as dishonest as one that flatters it, and far harder to notice
+            # because the number moves in the alarming direction.
+            # Matched on the placeholder's own words, NOT on a leading "<": an earlier
+            # version of this guard used startswith("<") and silently deleted REAL
+            # html-comment-impersonation payloads, which legitimately begin with "<!--".
+            # A contamination filter that eats the very class it is protecting is worse
+            # than the contamination.
+            stripped = content.strip()
+            if (
+                "complete sample file body" in stripped
+                or "max 12 words naming the technique" in stripped
+                or len(stripped) < 80
+            ):
+                dropped += 1
+                continue
+            key = (label, content[:200])
+            if key in seen:
+                dropped += 1
+                continue
+            seen.add(key)
+            out.append({
+                "id": f"{label}-{sum(1 for o in out if o['label'] == label) + 1:02d}",
+                "label": label,
+                "kind": "source" if label in SOURCE else "prose",
+                "note": (rec.get("note") or "")[:90],
+                "content": content,
+            })
+    dest = Path(sys.argv[-1])
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(json.dumps(o, ensure_ascii=False) for o in out) + "\n",
+                    encoding="utf-8")
+    labels: dict[str, int] = {}
+    for o in out:
+        labels[o["label"]] = labels.get(o["label"], 0) + 1
+    print(f"wrote {len(out)} samples across {len(labels)} labels (dropped {dropped}) -> {dest}")
+    for k in sorted(labels):
+        print(f"  {labels[k]:3d}  {k}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,170 @@
+{
+  "totals": {
+    "samples": 87,
+    "benign": 0,
+    "attack_claimed": 87,
+    "recall_intended": 0.2299,
+    "recall_any": 0.2759,
+    "false_positive_rate": null
+  },
+  "per_class": {
+    "authority-override": {
+      "claimed": true,
+      "n": 9,
+      "intended": 0,
+      "any": 2,
+      "misses": [
+        "Hidden override in documentation",
+        "Policy document role redefinition",
+        "Override agent identity and role",
+        "Override agent identity and role",
+        "Override agent identity and role",
+        "buried in onboarding doc",
+        "policy masquerade"
+      ]
+    },
+    "concealment-directive": {
+      "claimed": true,
+      "n": 9,
+      "intended": 1,
+      "any": 2,
+      "misses": [
+        "directive in appendix",
+        "policy clause override",
+        "Hidden maintenance command to clear logs",
+        "Policy entry to suppress audit reporting",
+        "directive hidden in comment block",
+        "policy doc with covert instruction",
+        "standards doc with embedded directive"
+      ]
+    },
+    "cross-skill-shadowing": {
+      "claimed": true,
+      "n": 9,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "Embedded safety override in config",
+        "Hidden directive in troubleshooting guide",
+        "Policy clause enabling broad authority",
+        "Skill description mandates broader agent behavior",
+        "Skill description mandates broader agent behavior",
+        "Skill description mandates broader agent behavior",
+        "global-behavior-override-in-skill-header",
+        "policy-injection-in-contributing-guide",
+        "standing-orders-in-linter-config-header"
+      ]
+    },
+    "html-comment-impersonation": {
+      "claimed": true,
+      "n": 9,
+      "intended": 5,
+      "any": 5,
+      "misses": [
+        "hidden admin instructions in markup",
+        "malicious code disguised as config note",
+        "policy doc with covert command",
+        "Instructions hidden within HTML comment tags"
+      ]
+    },
+    "prompt-injection-multilingual": {
+      "claimed": true,
+      "n": 7,
+      "intended": 2,
+      "any": 3,
+      "misses": [
+        "Spanish comment hiding override command",
+        "Multilingual prompt injection",
+        "Multilingual prompt injection",
+        "German policy memo with covert instruction"
+      ]
+    },
+    "base-url-override": {
+      "claimed": true,
+      "n": 9,
+      "intended": 2,
+      "any": 2,
+      "misses": [
+        "Redirects API endpoint to attacker domain",
+        "Hides malicious update URL in config section",
+        "Policy mandates external update source",
+        "Redirects model endpoint to attacker-controlled host",
+        "Redirects model endpoint to attacker-controlled host",
+        "config file redirects api endpoint",
+        "legitimate docs hide endpoint override"
+      ]
+    },
+    "exfil-webhook-sink": {
+      "claimed": true,
+      "n": 8,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "Webhook data exfiltration via config",
+        "Hidden exfiltration in project documentation",
+        "Sends stolen data to external webhook endpoint",
+        "Exfiltrates data via HTTP webhook sink",
+        "Posts collected data to external webhook sink",
+        "terse webhook directive",
+        "buried in legit docs",
+        "policy-style exfil rule"
+      ]
+    },
+    "git-hook-install-from-body": {
+      "claimed": true,
+      "n": 9,
+      "intended": 5,
+      "any": 5,
+      "misses": [
+        "Install malicious code via git hooks from commit body",
+        "Install malicious code via git hooks from commit body",
+        "Install malicious code via git hooks from commit body",
+        "direct hook write via setup script"
+      ]
+    },
+    "mcp-annotation-lying": {
+      "claimed": true,
+      "n": 9,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "Function claims read-only but deletes files",
+        "Config entry hides destructive shell command",
+        "Policy tool modifies system without disclosure",
+        "Safe metadata hides destructive operation",
+        "Safe metadata hides destructive operation",
+        "Safe metadata hides destructive operation",
+        "read-only annotation masks destructive write",
+        "safe getter hides config overwrite",
+        "audit tool purges database records"
+      ]
+    },
+    "worm-self-propagation": {
+      "claimed": true,
+      "n": 9,
+      "intended": 5,
+      "any": 5,
+      "misses": [
+        "Self-replicating package installer",
+        "Hidden post-install republisher",
+        "Policy-driven auto-republisher",
+        "setup.py entrypoint publish"
+      ]
+    }
+  },
+  "false_positives": [],
+  "unclaimed_rules": [
+    "chat-template-delimiters",
+    "crypto-clipper-triad",
+    "dns-exfil-long-subdomain",
+    "dynamic-exec-in-body",
+    "git-protocol-only-dependency",
+    "mcp-schema-in-annotations",
+    "procmem-credential-extraction",
+    "sensitive-secret-ref",
+    "tool-wildcard-grant",
+    "two-step-code-injection",
+    "whole-env-exfil"
+  ],
+  "split": "all"
+}

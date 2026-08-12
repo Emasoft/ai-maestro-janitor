@@ -169,7 +169,12 @@ def score(samples: list[dict]) -> dict:
             "attack_claimed": claimed_n,
             "recall_intended": round(claimed_hit / claimed_n, 4) if claimed_n else 0.0,
             "recall_any": round(claimed_any / claimed_n, 4) if claimed_n else 0.0,
-            "false_positive_rate": round(len(fp_samples) / benign_total, 4) if benign_total else 0.0,
+            # None, NEVER 0.0, when no benign sample was measured. "0% false positives" off an
+            # empty benign population is the single most flattering thing this tool could
+            # print, and it would be indistinguishable from a genuinely clean result.
+            "false_positive_rate": (
+                round(len(fp_samples) / benign_total, 4) if benign_total else None
+            ),
         },
         "per_class": per_class,
         "false_positives": fp_samples,
@@ -194,7 +199,12 @@ def render(res: dict) -> str:
         "",
         f"samples {t['samples']} · attack(claimed) {t['attack_claimed']} · benign {t['benign']}",
         f"**recall (intended rule) {t['recall_intended']:.0%}** · recall (any rule) "
-        f"{t['recall_any']:.0%} · false positives {t['false_positive_rate']:.0%}",
+        f"{t['recall_any']:.0%} · false positives "
+        + (
+            "UNMEASURED (no benign samples)"
+            if t["false_positive_rate"] is None
+            else f"{t['false_positive_rate']:.0%}"
+        ),
         "",
         "| class | claimed | n | intended | any |",
         "|---|---|---|---|---|",
@@ -236,7 +246,11 @@ def compare(cur: dict, base: dict) -> tuple[bool, list[str]]:
         problems.append(
             f"recall_intended fell {b['recall_intended']:.0%} -> {c['recall_intended']:.0%}"
         )
-    if c["false_positive_rate"] > b["false_positive_rate"]:
+    if (
+        c["false_positive_rate"] is not None
+        and b["false_positive_rate"] is not None
+        and c["false_positive_rate"] > b["false_positive_rate"]
+    ):
         problems.append(
             f"false_positive_rate rose {b['false_positive_rate']:.0%} -> "
             f"{c['false_positive_rate']:.0%}"
