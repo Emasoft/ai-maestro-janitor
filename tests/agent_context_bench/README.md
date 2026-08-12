@@ -67,6 +67,25 @@ strings in one `corpus.jsonl` means nothing on disk is shaped like an agent-cont
 This is not hypothetical: a detector was already blinded once this way, by its own test fixture
 sitting inside the corpus it searched.
 
+## The two channels are NOT equally blind — never swap them
+
+| population | authored by | blindness |
+|---|---|---|
+| attack samples | llm-externalizer (free pool) | **strong** — it cannot see this repo at all |
+| benign controls | a subagent told not to read the patterns, which reported that it didn't | **weaker** — it could have looked |
+
+**Attack samples must keep the strong channel.** Recall is the number an author's knowledge of
+the regexes inflates most directly: someone who has seen the patterns writes samples that trip
+them, and the resulting recall figure measures the author, not the rule set. So when generation
+fails for a class — and for six code-heavy classes it does, repeatedly — the class stays
+**UNMEASURED**. That is a worse-looking report and a more honest one; a recall number produced
+through the weaker channel would be indistinguishable from a real one and permanently
+uncorrectable, because nobody could tell later which classes it applied to.
+
+Benign controls tolerate the weaker channel because the failure it risks runs the other way
+(an author avoiding trigger words would *understate* FPs), and it is disclosed per-population
+in the committed baseline.
+
 ## Regenerating
 
 ```bash
