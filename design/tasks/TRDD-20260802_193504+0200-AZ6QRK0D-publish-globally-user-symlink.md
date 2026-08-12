@@ -47,9 +47,32 @@ symlink is not a git push, and the page is already committed at PROJECT scope, w
 so this is not urgent — but publishing is still the moment to run `memory-scope-leak`'s check, and
 today it is not run.
 
-**NEXT ACTION:** wire the privacy scan into the publish path — a page carrying machine-private
-content (absolute `$HOME` path, username, hostname) must REFUSE to gain a symlink and say why.
-Then re-verify the card's round-trip line.
+**NEXT ACTION — corrected 2026-08-13, ~1h after it was first written. My earlier wording,
+*"wire the privacy scan into the publish path"*, was wrong in a way that would have cost the
+next session real work:** it reads as mechanical, and it is not. The publish path is **Rust**
+(`memory.rs::apply_publish_globally_fix`); the privacy scan is **Python**
+(`lib/memory_migrate.py::privacy_scan`), and it is not a regex — it composes FOUR pattern
+catalogues plus an entropy gate, sharing them with the `memory-scope-leak` detector. Verified:
+the engine has no privacy predicate at all (`grep -n "fn .*leak\|fn .*privacy" src/*.rs` finds
+only a test name).
+
+So "wire it in" means choosing where the check LIVES, and the options are genuinely different:
+
+  1. **Port the catalogues to Rust** — fastest at publish time, but forks the detection logic
+     into two languages. The classes would then drift silently, and a privacy scanner that is
+     accurate in one language and stale in the other is worse than one scanner, because both
+     look authoritative.
+  2. **Engine shells out to the Python scan** — one source of truth, at the cost of a process
+     spawn inside a page write, and a new failure mode (what does a write do when the scanner
+     is missing? refusing breaks writes; proceeding defeats the gate).
+  3. **Keep the gate in the Python layer** — the linter/detector already scans PROJECT pages;
+     make an unpublishable page fail there, and let the engine keep doing the mechanical part.
+     Weakest coupling, but the symlink exists for a while before anything objects.
+
+**This is a design decision with more than one defensible answer, so it escalates rather than
+being picked here** (the decision-margin rule). The exposure is small — a USER-scope symlink is
+not a git push, and PROJECT scope, which IS pushed, already holds the page — so there is no
+urgency forcing a rushed pick.
 
 ---
 
