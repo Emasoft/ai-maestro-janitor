@@ -58,13 +58,27 @@ neglect — do not "revive" it as drift): autonomous EDITING of workflow YAML / 
 the ratified `baseline-*` rulesets. Applying the ratified pair as-is is already exempt+shipped;
 the open pick is whether the janitor may REWRITE a vulnerable workflow on detection.
 
-**UNVERIFIED, verify before asserting a contradiction:** `branch_protection_lib.guard_mode_enabled()`
-returns False by default ("the user must explicitly enable per-project"). That LOOKS like the
-shipped-dark pattern contradicting act-dont-ask — but it plausibly gates only BEYOND-baseline
-remediation, which manager-approval-defaults correctly makes Tier-2. Read what it actually gates
-before claiming the default defies a standing directive. Two paths exist and must not be
-conflated: DETECTION→immediate-fix (act-dont-ask governs) vs the TICKET channel
-(`tickets.py:463` refuses a PROJECT-domain kind with no approved TRDD).
+**VERIFIED 2026-08-12 — it IS the shipped-dark pattern, and it contradicts a standing owner
+directive. Fourth instance this week.** `apply_baseline_rulesets` has exactly TWO callers:
+  * `scripts/github_config_fix.py` — the ON-DEMAND `/janitor-github-config-fix` command (a human
+    must run it), and
+  * `scripts/guard/branch_protection_apply.py` — the only AUTOMATIC path, whose gate 1 is
+    `guard_mode_enabled()`, default False, returning `0  # silent — the user has not opted in`.
+It applies the RATIFIED baselines (its own docstring), not beyond-baseline deviations — so the
+Tier-2 approval reasoning does NOT justify the default. Applying the ratified pair as-is is
+EXEMPT per manager-approval-defaults §F, and `act-dont-ask-security` explicitly names
+branch-protection rulesets as fix-on-detection.
+
+So on a default install the janitor **never** auto-applies branch protection; it only flags
+(`detectors/branch-protection.py`). TRDD-631fa3de's STATE claims "the janitor now auto-applies
+the ratified pair" — that claim is FALSE on a default install and should be corrected there too.
+
+**NEXT ACTION for this slice:** flip `guard_mode_enabled()` to default-ON. It is already
+belt-and-braces guarded — `/janitor-autofix-off` vetoes it, the repo slug must resolve, `gh`
+must be present, the viewer must be admin, and an unfetchable ruleset list means don't act. The
+DEFAULT is the only thing standing between a detected unprotected branch and the owner's "every
+minute is a window for supply-chain compromise". Do NOT widen it beyond the ratified pair —
+beyond-baseline rewriting stays the genuinely open pick.
 After those: R6 residual (permission-prompt detection via pane text) and the R3 server-host
 blackout below.
 
