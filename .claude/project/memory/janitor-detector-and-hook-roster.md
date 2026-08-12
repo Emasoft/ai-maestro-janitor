@@ -106,6 +106,27 @@ Plus `scripts/gh_issues_monitor/gh_register_hook.py` (PostToolUse `Bash`) — se
 GH-REPLY MONITOR below; it lives outside `scripts/hooks/` because it belongs to that
 subsystem, not to the heartbeat.
 
+
+^ATOM-8ANO-T80F [desc:"agent-context-integrity's 21 rules catch ~28% of realistic poisoned context files — measured 2026-08-12 against a blind corpus, not assumed", keywords: does_agent-context-integrity_actually_catch_poisoning detector_recall_unknown how_good_are_the_scan_text_rules measuring_a_security_detector's_coverage blind_corpus_red_team poisoned_CLAUDE.md_not_detected, type: project, ocd: 2026-08-12, lmd: 2026-08-12]
+
+The `agent_config_patterns.scan_text` rules that guard auto-loaded context files were never
+measured until 2026-08-12; the answer is **~28% recall** (any rule firing) on 87 blind-authored
+samples across 10 of the 21 claimed classes — so roughly seven in ten realistic poisoned files
+produce NO finding, and the best single class reaches 56%. Bench: `scripts/agent_context_bench.py`,
+corpus + baseline under `tests/agent_context_bench/` (janitor#226, commit `c06a44b9`).
+The measurement is only meaningful because the corpus was authored BLIND — an external model got
+the attack classes BY INTENT ONLY and never saw the regexes; a corpus derived from the patterns
+measures the author's consistency with themselves and scores near 100%. Two failure shapes are
+concrete and recurring in these rules: a CLOSED VERB ENUMERATION (`concealment-directive` knows
+`tell/inform/notify/mention/show` but not `report`/`omit`/`suppress`), and RIGID ADJACENCY to a
+literal (it wants the verb next to `the user`, so "do not mention this in any output visible to
+the user" evades it by ~45 characters of ordinary prose). A domain BLOCKLIST like
+`exfil-webhook-sink` cannot catch a novel domain at all, which is a scope limit no tuning fixes —
+say so in the docs rather than shipping a rule that gestures at the broader class.
+Do NOT tune a pattern against the samples that exposed it: that converts recall from
+generalisation into fit. `split_of()` splits the corpus dev/holdout for exactly this.
+See [[janitor-findings-pipeline]] for where these findings land.
+
 ## Governed by
 
 - [[janitor-architecture]] — the architecture hub; this page is the detailed roster
