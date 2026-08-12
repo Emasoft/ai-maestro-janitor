@@ -210,10 +210,35 @@ _BASE_URL_OVERRIDE = _re(
 _MANDATE_VERB = r"(?:must|shall|always|never|required\s+to|forbidden\s+from|prohibited)"
 _SKILL_NAME = r"(?:[a-z][a-z0-9-]{2,40})"  # kebab-case skill name shape
 
+
+# The shadow attack has TWO shapes and the rule implemented one, which is why
+# it measured 0/9: the seeded samples are all the OTHER shape. Shape 1 (kept)
+# names another skill and hijacks its invocation chain. Shape 2 never names
+# anything — one skill's own description claims authority over EVERY task, so
+# merely installing it changes global behaviour even when it is never invoked.
+#
+# The detectable part of shape 2 is NOT the mandate. Every honest skill says
+# "must" about its own job, and firing on that would flag every CONTRIBUTING.md
+# in existence. It is the explicit SCOPE-OVERRIDE clause — the clause whose
+# only work is to widen the mandate past the skill's own remit.
+_GLOBAL_SCOPE_OVERRIDE = (
+    r"(?:regardless\s+of|irrespective\s+of|no\s+matter\s+(?:what|the)"
+    r"|whether\s+or\s+not|without\s+exception|under\s+any\s+circumstances?"
+    r"|even\s+(?:those|ones)\b|not\s+(?:explicitly\s+)?(?:configured|registered|enabled))"
+)
 _CROSS_SKILL_SHADOW = _re(
     r"\b" + _MANDATE_VERB + r"\b[^.\n]{0,200}\b"
     r"(?:skill|agent|sub-?agent|command|slash[_-]?command)\b[^.\n]{0,30}"
     r"(?:`/?" + _SKILL_NAME + r"`|`" + _SKILL_NAME + r"`)"
+    # Shape 2 — a mandate carrying a clause that voids its own scope.
+    + r"|\b" + _MANDATE_VERB + r"\b[^.\n]{0,200}\b" + _GLOBAL_SCOPE_OVERRIDE
+    # Shape 2b — conduct declared to bind the agent's whole surface rather
+    # than this skill's task. The noun list is the AGENT's units of work
+    # (skills/tasks/tools/commands/sessions), never the organisational ones
+    # ("applies to all team members" is what a real policy says).
+    + r"|\b(?:applies|apply|applicable|binding)\s+(?:to\s+)?(?:all|every)\s+"
+    r"(?:skills?|tasks?|tools?|commands?|sessions?|prompts?|conversations?|requests?)\b"
+    r"|\bscope\s*[:=]\s*(?:system[-_ ]?wide|global|universal)\b"
 )
 
 
