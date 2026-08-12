@@ -74,6 +74,12 @@ one, so a truly-needed reload always wins.
    Read the one-word result:
    - `RELOAD_SKILLS_FIRED` → the reload is queued at your pane (iTerm or tmux);
      proceed to step 2.
+   - `USER_PRESENT` → the user is AT the keyboard and did not ask for this, so
+     NOTHING was typed (typing into a pane someone is using clobbers what they are
+     writing). A refusal, not a failure: the script rolled the skills-reload ack
+     back, so a later heartbeat re-emits `[janitor-reload-skills]` once they step
+     away. Say one line — *"A standalone skill changed; deferring the reload while
+     you're typing (run `/reload-skills` yourself to do it now)."* — then stop.
    - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
      so self-trigger isn't available. Tell the user: *"A standalone skill/command
      changed — please run `/reload-skills` now (auto-trigger works in iTerm and
@@ -100,11 +106,18 @@ ONE of these holds:
 
 - [ ] **RELOAD_SKILLS_FIRED** — `reload_skills_trigger.py` queued the detached
   reload at this pane: emit one short line and END THE TURN IMMEDIATELY. STOP.
+- [ ] **USER_PRESENT** — the user is typing, so nothing was sent and the ack was
+  rolled back for a later fire: say so in one line, offer the manual command, then
+  STOP. Do NOT retry, do NOT switch to `--hard` — that is exactly the
+  keystroke-clobbering the gate exists to prevent.
 - [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`
   unavailable: tell the user to run `/reload-skills` manually, then STOP.
 
 ## Error handling
 
+- `USER_PRESENT` → not an error. Nothing was typed because the user is at the
+  keyboard; the signal is preserved (ack rolled back) so a later heartbeat
+  re-emits `[janitor-reload-skills]`. Never re-run the script to "get past" this.
 - `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run
   `/reload-skills` manually.
 - The script never blocks: it returns immediately and the keystrokes fire detached.

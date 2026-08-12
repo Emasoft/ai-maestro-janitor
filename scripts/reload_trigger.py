@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import state  # noqa: E402  -- the reload-ack rollback (janitor#257)
 import terminal_trigger  # noqa: E402
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
@@ -141,6 +142,26 @@ def main() -> int:
     # it would clobber whatever they are writing. Handled before the iTerm fallback below,
     # which does its own osascript send and would otherwise bypass the gate entirely.
     if sent == terminal_trigger.USER_PRESENT:
+        # janitor#257: NOT typing is correct — but the marker that sent us here was
+        # once-per-reload-generation, and `dispatch` advanced its ack at EMISSION time, before
+        # delivery could possibly be known. So declining here used to CONSUME the only signal
+        # that a reload was needed: it never happened, never retried, and the session kept
+        # running stale plugin code with nothing left to say so.
+        #
+        # Roll the ack back so the next fire re-emits. `dispatch`'s own reload-guard already
+        # uses exactly this discipline for the high-context case ("ack left unadvanced;
+        # re-checked on the next fire") — this applies it to an outcome that can only be
+        # discovered AFTER the marker is out, which is why it has to be undone rather than
+        # withheld.
+        #
+        # The rollback semantics (why 0, why an absent stamp stays absent) live in
+        # `state.rollback_marker_ack` — shared with the skills trigger, which has the same
+        # emission-time ack and the same presence gate.
+        state.rollback_marker_ack(
+            "reload-acked.ts",
+            actor="reload-trigger",
+            why="USER_PRESENT: declined to type into a pane the user is using",
+        )
         print("USER_PRESENT")
         return 0
 

@@ -19,6 +19,9 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "reload_trigger.py"
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+import state  # noqa: E402  # for the per-pane presence key (user directive 2026-07-16)
 
 
 def _import():
@@ -29,7 +32,31 @@ def _import():
     return mod
 
 
-def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subprocess.CompletedProcess:
+def _stamp_pane_presence(home: Path, pane_id: str) -> None:
+    """Also stamp THIS pane's own breadcrumb — presence is PER-PANE.
+
+    conftest's `present_home` writes only the machine-global breadcrumb. The gate reads the
+    per-pane file, so a "present" test built from the global stamp alone reads as UNATTENDED and
+    silently exercises the injection path it meant to prove is refused.
+    """
+    key = state.terminal_pane_key({"ITERM_SESSION_ID": pane_id})
+    assert key is not None
+    pane_path = state.per_pane_presence_path(key, home)
+    pane_path.parent.mkdir(parents=True, exist_ok=True)
+    pane_path.write_text(
+        (home / ".aimaestro" / "state" / "user-presence.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
+def _run(
+    args: list[str],
+    *,
+    iterm: str | None,
+    present: bool = False,
+    project: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     import tempfile
 
     from conftest import away_home, present_home  # type: ignore[import-not-found]
@@ -43,9 +70,18 @@ def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subpro
     # actively using, and `user_is_present` fails CLOSED. Without a pinned HOME these tests inherit the
     # developer's real breadcrumb and pass or fail depending on whether they were typing.
     tmp = Path(tempfile.mkdtemp())
-    env["HOME"] = str(present_home(tmp) if present else away_home(tmp))
+    home = present_home(tmp) if present else away_home(tmp)
+    if present and iterm is not None:
+        _stamp_pane_presence(home, iterm)
+    env["HOME"] = str(home)
+    # Pin the project too when a test asserts on state files — otherwise `state.state_dir()`
+    # resolves to the DEVELOPER'S OWN repo and the test would write to its live .janitor/state.
+    if project is not None:
+        env["CLAUDE_PROJECT_DIR"] = str(project)
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args],
         capture_output=True,
@@ -142,3 +178,60 @@ def test_malformed_iterm_id_refuses_to_fire() -> None:
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "RELOAD_FIRED" not in proc.stdout
+
+
+# ---------- the presence decline must not CONSUME the reload signal (janitor#257) ----
+
+_PANE = "w0t0p0:11111111-2222-3333-4444-555555555555"
+
+
+def _present_run(proj: Path) -> subprocess.CompletedProcess:
+    """A real run with the user AT the keyboard and a zero deferral budget.
+
+    `PRESENCE_WAIT_S=0` pins the give-up so this stays a test of what happens AFTER the gate
+    refuses, not a test of how long it polls first.
+    """
+    return _run(
+        [],
+        iterm=_PANE,
+        present=True,
+        project=proj,
+        extra_env={"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": "0"},
+    )
+
+
+def test_user_present_rolls_the_reload_ack_back(tmp_path: Path) -> None:
+    """janitor#257: declining to type must not swallow the reload signal.
+
+    `dispatch` emits `[janitor-reload]` once per reload generation and advances its ack at
+    EMISSION time — before delivery can be known. So a decline here used to be the end of it: the
+    reload never happened, never retried, and the session kept running stale plugin code with
+    nothing left to say so. The ack must go back so the next fire re-emits.
+    """
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    acked = proj / ".janitor" / "state" / "reload-acked.ts"
+    acked.write_text("1755000000\n", encoding="utf-8")
+
+    proc = _present_run(proj)
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "USER_PRESENT", proc.stdout + proc.stderr
+    assert acked.read_text().strip() == "0", (
+        "the ack must be rolled back to 0 — ANY current generation then compares as newer and "
+        "re-emits; storing the PREVIOUS generation would work only until the daemon bumped it"
+    )
+
+
+def test_user_present_does_not_invent_an_ack_file(tmp_path: Path) -> None:
+    """No ack on disk means no reload was ever acked — creating one would be the exact bug
+    inverted (a fabricated ack that a later comparison could read as 'already handled')."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    acked = proj / ".janitor" / "state" / "reload-acked.ts"
+
+    proc = _present_run(proj)
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "USER_PRESENT"
+    assert not acked.exists(), "the rollback must not CREATE an ack that never existed"

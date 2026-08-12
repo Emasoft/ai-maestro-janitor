@@ -380,6 +380,44 @@ def read_int_state(path: Path | str, default: int = 0) -> int:
     return default
 
 
+def rollback_marker_ack(filename: str, *, actor: str, why: str) -> bool:
+    """Undo a once-per-generation marker ack so the NEXT heartbeat re-emits it (janitor#257).
+
+    A `[janitor-*]` marker whose ack advances at EMISSION time is consumed even when the receiver
+    declines — dispatch cannot know whether the action it asked for actually happened, so the
+    stamp says "handled" the moment the marker is printed. Rolling the stamp back restores the
+    signal; without it a declined reload never happens, never retries, and the session keeps
+    running stale code with nothing left to say so.
+
+    Rolls back to 0, not to the previous generation: 0 means "no generation acked", so ANY current
+    generation compares as newer and re-emits. A stored previous generation would work only until
+    the daemon bumped it, and would then be indistinguishable from a real ack.
+
+    An ABSENT stamp is left absent — creating one would invent an ack that never happened, which
+    is this same bug inverted. Returns True iff a stamp existed and was rolled back; never raises,
+    because bookkeeping must not break the decline it is recording.
+    """
+
+    def _note(message: str) -> None:
+        # The LOG is bookkeeping about bookkeeping: on an unwritable .janitor tree it must not be
+        # the thing that turns a clean refusal into a traceback for the user.
+        try:
+            log_line(actor, message)
+        except OSError:
+            pass
+
+    try:
+        path = state_dir() / filename
+        if not path.is_file():
+            return False
+        atomic_write(path, "0")
+    except OSError as exc:
+        _note(f"could not roll back {filename}: {exc}")
+        return False
+    _note(f"rolled {filename} back so the next heartbeat re-emits — {why}")
+    return True
+
+
 def is_truthy_env(name: str, default: bool) -> bool:
     """Read a yes/no env var with friendly false-spellings.
 

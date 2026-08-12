@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import state  # noqa: E402  -- the skills-reload ack rollback (janitor#257)
 import terminal_trigger  # noqa: E402
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
@@ -137,6 +138,14 @@ def main() -> int:
     )
     # The user is AT the keyboard and did not ask for this — do not type into their pane.
     if sent == terminal_trigger.USER_PRESENT:
+        # janitor#257 (same defect as the plugin-reload trigger): `[janitor-reload-skills]` is
+        # emitted once per skills-reload generation and its ack advances at EMISSION time, so
+        # declining here would consume the only signal that a reload was needed. Roll it back.
+        state.rollback_marker_ack(
+            "skills-reload-acked.ts",
+            actor="reload-skills-trigger",
+            why="USER_PRESENT: declined to type into a pane the user is using",
+        )
         print("USER_PRESENT")
         return 0
 

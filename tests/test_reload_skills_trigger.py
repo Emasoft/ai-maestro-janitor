@@ -30,10 +30,18 @@ def _import():
     return mod
 
 
-def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subprocess.CompletedProcess:
+def _run(
+    args: list[str],
+    *,
+    iterm: str | None,
+    present: bool = False,
+    project: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     import tempfile
 
     from conftest import away_home, present_home  # type: ignore[import-not-found]
+    from test_reload_trigger import _stamp_pane_presence  # type: ignore[import-not-found]
 
     env = {"PATH": os.environ.get("PATH", "")}
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
@@ -44,9 +52,18 @@ def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subpro
     # `user_is_present` fails CLOSED — so an unpinned HOME makes the result depend on whether the
     # developer running the suite happened to be typing.
     tmp = Path(tempfile.mkdtemp())
-    env["HOME"] = str(present_home(tmp) if present else away_home(tmp))
+    home = present_home(tmp) if present else away_home(tmp)
+    if present and iterm is not None:
+        _stamp_pane_presence(home, iterm)  # presence is PER-PANE — the global stamp is not enough
+    env["HOME"] = str(home)
+    # Pin the project when a test asserts on state files, so `state.state_dir()` cannot resolve to
+    # the developer's own repo and write to its live .janitor/state.
+    if project is not None:
+        env["CLAUDE_PROJECT_DIR"] = str(project)
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args],
         capture_output=True,
@@ -54,6 +71,27 @@ def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subpro
         env=env,
         timeout=30,
     )
+
+
+def test_user_present_rolls_the_skills_reload_ack_back(tmp_path: Path) -> None:
+    """janitor#257's sibling: `[janitor-reload-skills]` has the same emission-time ack, so a
+    presence decline must not consume it either."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    acked = proj / ".janitor" / "state" / "skills-reload-acked.ts"
+    acked.write_text("1755000000\n", encoding="utf-8")
+
+    proc = _run(
+        [],
+        iterm="w0t0p0:11111111-2222-3333-4444-555555555555",
+        present=True,
+        project=proj,
+        extra_env={"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": "0"},
+    )
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "USER_PRESENT", proc.stdout + proc.stderr
+    assert acked.read_text().strip() == "0"
 
 
 # ---------- pure helper -----------------------------------------------------
