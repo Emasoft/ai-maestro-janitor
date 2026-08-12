@@ -3,7 +3,7 @@ trdd-id: 631fa3de-77a6-400f-841c-c745a33637d4
 title: Janitor security guard mode — evaluate autonomous remediation of high-risk findings
 column: backburner
 created: 2026-05-25T15:22:13+0200
-updated: 2026-06-10T09:50:00+0200
+updated: 2026-08-12T10:35:00+0200
 current-owner: janitor-dev-session
 priority: 5
 severity: MEDIUM
@@ -24,11 +24,25 @@ release-via: none
    `feedback_security_act_dont_ask`, standing): *for rulesets / workflows /
    publish hooks, fix immediately, skip the ask-gate.* That is a de-facto §9
    answer for the GitHub-hardening slice of guard mode.
-2. **A real autonomous-acting slice SHIPPED + was RATIFIED:** the tri-party
-   `baseline-*` rulesets (janitor#14, owner-ratified Tier-3) — the janitor now
-   auto-applies the ratified pair + `baseline-tag-protect` as-is (exempt per
-   manager-approval-defaults §F), with deviations still gated. The
-   `/janitor-autofix-on|off` mode switch also exists.
+2. **A real autonomous-acting slice was RATIFIED and BUILT — but it does not
+   RUN on a default install.** ~~the janitor now auto-applies the ratified
+   pair~~ **CORRECTED 2026-08-12, verified in SHIPPED 3.1.4:** applying the
+   tri-party `baseline-*` pair + `baseline-tag-protect` as-is is *authorized*
+   (Tier-0, exempt per manager-approval-defaults §F) and the code exists, but
+   `apply_baseline_rulesets` has exactly TWO callers —
+   `scripts/github_config_fix.py` (the ON-DEMAND `/janitor-github-config-fix`,
+   a human must run it) and `scripts/guard/branch_protection_apply.py`, whose
+   gate 1 is `branch_protection_lib.guard_mode_enabled()`, returning False
+   unless `CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED` is explicitly truthy. So a
+   default install only FLAGS (`detectors/branch-protection.py`).
+
+   **This card already said so and still asserted the opposite:** §7 states the
+   auto path runs "ONLY when the user has flipped `guard_mode_enabled: true`"
+   and the spec lists it as "default **false**". Item 2 was written about the
+   ratification and read as if ratifying were shipping. AUTHORIZED, BUILT, and
+   RUNNING are three different claims, and a card can hold all three at once
+   without noticing it contradicts itself. The `/janitor-autofix-on|off` mode
+   switch does exist and is separate from this gate.
 3. **What remains genuinely OPEN** (the part still needing a deliberate user
    pick): autonomous EDITING of workflow YAML / repo files beyond the ratified
    baselines — i.e. the full "guard mode" where the janitor rewrites a
