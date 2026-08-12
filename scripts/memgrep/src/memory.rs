@@ -2319,6 +2319,11 @@ fn read_page_for_write(page: &Path) -> Result<String> {
         );
     }
     let bytes = std::fs::read(page).with_context(|| format!("read {}", page.display()))?;
+    // NOTE: this is a pure read — `publish-globally:` normalization happens ONLY at the actual
+    // WRITE primitive (`atomic_write_page`'s convergence loop, below), never here in memory. A
+    // caller that computes its edit diff from this text and then writes via `atomic_write_page`
+    // gets a normalized result regardless: `atomic_write_page`'s AFTER loop certifies whatever
+    // lands on disk, including a brand-new page this function was never called for (`new-page`).
     String::from_utf8(bytes).map_err(|e| {
         anyhow::anyhow!(
             "{} is not valid UTF-8 (first invalid byte at offset {}) — refusing to rewrite it, \
@@ -2330,11 +2335,13 @@ fn read_page_for_write(page: &Path) -> Result<String> {
     })
 }
 
-/// Atomic page write (unique tmp in the SAME dir, then rename) — the tmp-then-rename discipline the
+/// Raw tmp-then-rename write (unique tmp in the SAME dir, then rename) — the discipline the
 /// index-markdown writer (memory.rs) and the SQLite ledger (index.rs) already use, so a concurrent
 /// `recall`/reader never observes a half-written page. The tmp name carries the pid so parallel test
-/// threads / concurrent writers never collide on it.
-fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
+/// threads / concurrent writers never collide on it. Never call this directly for a page write —
+/// go through `atomic_write_page`, which brackets it with the `publish-globally:` normalization
+/// pass.
+fn write_page_bytes(dest: &Path, content: &str) -> Result<()> {
     let tmp = dest.with_extension(format!("md.tmp{}", std::process::id()));
     std::fs::write(&tmp, content).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -2344,6 +2351,93 @@ fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
         let _ = std::fs::remove_file(&tmp);
         anyhow::anyhow!("rename into {}: {e}", dest.display())
     })?;
+    Ok(())
+}
+
+/// Hard cap on `normalize_page_until_clean`'s fixed-point loop. A normalizer that cannot converge
+/// within this many steps is a BUG in the normalizer (not a page problem) — the cap turns that bug
+/// into a loud, immediate error instead of an infinite loop / hang (owner directive).
+const PUBLISH_GLOBALLY_MAX_ITERATIONS: u32 = 5;
+
+/// Drive `dest`'s `publish-globally:` state to a FIXED POINT: detect (read-only) → apply ONE fix →
+/// re-detect → repeat, until either a detect pass finds nothing left to fix or the iteration cap is
+/// hit. Returns the number of DETECT PASSES actually run (>= 1 for any page this check applies to,
+/// 0 when the page doesn't exist yet or the check doesn't apply at all) — this is the "N fixes run
+/// N+1 lint phases" contract made literally countable: an already-clean page converges in exactly
+/// **1** pass (one detect, nothing to fix); a page needing exactly one fix converges in exactly
+/// **2** (the fixing pass, then the confirming pass that observes the fix worked).
+///
+/// This is the "lint phase" the owner's correction describes, made real: a single application can
+/// leave the page still non-conformant (e.g. a fix that creates the USER-root symlink changes
+/// nothing in the page TEXT, so the loop's own re-detection pass is what recognises the page is now
+/// clean, rather than assuming one pass sufficed). `false` + an existing symlink is the ONE
+/// terminal, never-auto-resolved finding (see `classify_publish_globally`) — reaching it ends the
+/// loop immediately as CONVERGED (the detect pass that found it still counts), not as a remaining
+/// problem the cap should complain about.
+///
+/// Idempotent by construction: a page that is already clean converges on pass 1 with zero disk
+/// writes — no mtime churn for the chore schedulers that stat these files.
+fn normalize_page_until_clean(dest: &Path) -> Result<u32> {
+    for pass in 1..=PUBLISH_GLOBALLY_MAX_ITERATIONS {
+        let Some(text) = md::read_text(dest) else {
+            return Ok(pass - 1); // not on disk yet (e.g. new-page's BEFORE pass), or unreadable
+        };
+        let Some(state) = publish_globally_state(dest, &text) else {
+            return Ok(pass - 1); // not a PROJECT page, or no frontmatter block — out of scope
+        };
+        let issue = match classify_publish_globally(state.has_field, state.is_true, state.has_symlink) {
+            None => return Ok(pass), // this detect pass found nothing — converged
+            // Terminal, never auto-fixed — this detect pass still counts as convergence, not a
+            // remaining problem for the cap below to complain about.
+            Some(PublishGloballyIssue::ConflictFalseWithSymlink) => return Ok(pass),
+            Some(issue) => issue,
+        };
+        let fixed = apply_publish_globally_fix(&text, &state, issue);
+        if fixed != text {
+            write_page_bytes(dest, &fixed)?;
+        }
+        // Loop around for the CONFIRMING detect pass — never assume this fix was sufficient
+        // (`TrueNoSymlink`'s fix is a pure side effect: `fixed == text`, so the ONLY way to learn
+        // the page is now clean is to re-detect).
+    }
+    // Cap exhausted with a finding still present on every pass: this is NOT a page problem (every
+    // real rule converges within 2 passes) — it is a BUG in the normalizer, so fail loudly instead
+    // of silently looping forever. Re-detect once more purely to name the stuck state in the error.
+    let remaining = md::read_text(dest)
+        .and_then(|t| publish_globally_state(dest, &t).map(|s| (t, s)))
+        .and_then(|(t, s)| classify_publish_globally(s.has_field, s.is_true, s.has_symlink).map(|i| (i, t.len())));
+    anyhow::bail!(
+        "publish-globally normalization did not converge on {} within {} iteration(s) \
+         (remaining: {remaining:?}) — this is a bug in the normalizer, not a page problem",
+        dest.display(),
+        PUBLISH_GLOBALLY_MAX_ITERATIONS
+    );
+}
+
+/// Atomic page write — the SOLE choke point every `memgrep` write verb (`edit`, `add-atom`,
+/// `add-lesson`, `migrate`, `new-page`) funnels through to actually put bytes on disk.
+///
+/// Brackets the real write with the `publish-globally:` reconciliation LOOP, unconditionally, on
+/// EVERY call — no `--fix`-style flag, never opt-in (owner directive): a page missing that field is
+/// itself malformed, and a write verb must neither operate on nor produce a malformed page. Per the
+/// owner's correction, the loop lives HERE, around this SINGLE-page-write primitive — never around
+/// a batch of writes. A caller that writes N pages (e.g. `migrate`, two `atomic_write_page` calls)
+/// gets N independent before/after convergences, one per page, never one loop shared across pages.
+///
+///   1. BEFORE — converge whatever currently sits at `dest` (a no-op when `dest` doesn't exist yet,
+///      e.g. `new-page`, or is already clean).
+///   2. THE write — `content` lands on disk, exactly as the caller asked.
+///   3. AFTER — converge the artifact THIS write just produced. A brand-new page never carried the
+///      field to begin with; this pass is what actually gives it one.
+///
+/// A sequence of N `atomic_write_page` calls on the SAME page therefore runs N+1 *effective* clean
+/// checkpoints (before-call-1, after-call-1/before-call-2, …, after-call-N): each call's BEFORE
+/// loop finds the PRIOR call's AFTER loop already left the page clean and converges on iteration 1
+/// with zero writes, exactly the "no mtime churn on an already-normal page" contract.
+fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
+    normalize_page_until_clean(dest)?;
+    write_page_bytes(dest, content)?;
+    normalize_page_until_clean(dest)?;
     Ok(())
 }
 
@@ -3956,6 +4050,236 @@ fn downward_reason(to: ScopeLayer) -> &'static str {
     }
 }
 
+// ─────────────────────── `publish-globally:` reconciliation ───────────────────────
+//
+// A PROJECT-scope page may flag `publish-globally: true` to be recalled from every project on the
+// machine: a symlink at `<USER_MEM>/<page-name>.md` (mirroring the four existing hand-made ones
+// under `claude-code-continuity-*`) makes the page reachable from USER-scope recall too. Default
+// is FALSE, deliberately opt-in — PROJECT memory is git-PUSHED while USER scope is machine-private,
+// so auto-publishing every page would be a privacy decision made silently on the author's behalf.
+//
+// This block is the SINGLE SOURCE OF TRUTH both `memgrep lint` (read-only reporting) and every
+// write verb's `atomic_write_page` (the actual reconciliation, unconditional, no `--fix` flag) route
+// through — `classify_publish_globally` is the one place the four rules are stated; a lint finding
+// and a normalization fix can never diverge because they are the SAME decision.
+
+/// Which one of the four `publish-globally:` states a page is in — at most one applies at a time
+/// (the match in `classify_publish_globally` is exhaustive and mutually exclusive).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublishGloballyIssue {
+    /// No `publish-globally:` field, no symlink — the ordinary unpublished case.
+    MissingDefaultFalse,
+    /// No `publish-globally:` field, but a symlink already exists — evidence of intent.
+    MissingSymlinkImpliesTrue,
+    /// `publish-globally: true`, but no symlink has been created yet.
+    TrueNoSymlink,
+    /// `publish-globally: false`, but a symlink exists anyway — CONFLICT. Two defensible fixes
+    /// (drop the symlink vs flip the flag) means a human decides; NEVER auto-resolved.
+    ConflictFalseWithSymlink,
+}
+
+impl PublishGloballyIssue {
+    /// `(severity, code, message)` — `memgrep lint`'s rendering of this issue. Kept beside the
+    /// issue itself so a new variant cannot be added without also giving it a lint rendering.
+    fn lint_line(self) -> (Severity, &'static str, &'static str) {
+        match self {
+            PublishGloballyIssue::MissingDefaultFalse => (
+                Severity::Warn,
+                "publish-globally-missing",
+                "missing `publish-globally:` field — normalization defaults it to `false` \
+                 (opt-in publishing; no symlink exists, so there is no evidence of intent)",
+            ),
+            PublishGloballyIssue::MissingSymlinkImpliesTrue => (
+                Severity::Warn,
+                "publish-globally-missing",
+                "missing `publish-globally:` field, but a USER-scope symlink to this page \
+                 already exists — normalization defaults it to `true`",
+            ),
+            PublishGloballyIssue::TrueNoSymlink => (
+                Severity::Error,
+                "publish-globally-not-symlinked",
+                "`publish-globally: true` but no symlink exists at the USER memory root — \
+                 the page is not actually reachable from USER-scope recall as it claims",
+            ),
+            PublishGloballyIssue::ConflictFalseWithSymlink => (
+                Severity::Error,
+                "publish-globally-conflict",
+                "`publish-globally: false` but a USER-scope symlink to this page still exists — \
+                 conflicting state, never auto-resolved (drop the symlink or flip the flag by hand)",
+            ),
+        }
+    }
+}
+
+/// Classify a page's `publish-globally:` state into (at most) one issue. Returns `None` when the
+/// page is already conformant: `(true, true)` — published and symlinked — or `(false, false)` —
+/// unpublished and unsymlinked, the ordinary default. PURE — no I/O, so lint and normalization can
+/// never see a different answer from the same inputs.
+fn classify_publish_globally(has_field: bool, is_true: bool, has_symlink: bool) -> Option<PublishGloballyIssue> {
+    match (has_field, has_symlink) {
+        (false, true) => Some(PublishGloballyIssue::MissingSymlinkImpliesTrue),
+        (false, false) => Some(PublishGloballyIssue::MissingDefaultFalse),
+        (true, has_symlink) => {
+            if is_true && !has_symlink {
+                Some(PublishGloballyIssue::TrueNoSymlink)
+            } else if !is_true && has_symlink {
+                Some(PublishGloballyIssue::ConflictFalseWithSymlink)
+            } else {
+                None // true && has_symlink, or false && !has_symlink — both conformant
+            }
+        }
+    }
+}
+
+/// Everything `classify_publish_globally` needs about ONE page, gathered by a single read-only
+/// pass (`publish_globally_state`) — kept separate from the classification itself so lint's
+/// read-only reporting and the write-path's convergence loop gather facts identically.
+struct PublishGloballyState {
+    has_field: bool,
+    is_true: bool,
+    has_symlink: bool,
+    /// Canonicalized absolute path of the page itself — the symlink TARGET.
+    page_abs: PathBuf,
+    /// Where the USER-scope symlink for this page belongs (whether or not it exists yet).
+    link_path: PathBuf,
+}
+
+/// Gather a PROJECT-scope page's `publish-globally:` facts from its (already-read) `text`, or
+/// `None` when the check does not apply: not a PROJECT-scope page (`scope_layer`), no frontmatter
+/// block at all (nothing safe to insert a field into — `page-no-*` already covers that defect), or
+/// a page not yet on disk (canonicalize fails). Fail-safe: a dangling/broken symlink at the target
+/// USER path is read via `symlink_resolves_to`, which never panics and reports `has_symlink = false`
+/// on any I/O failure rather than guessing.
+fn publish_globally_state(page_path: &Path, text: &str) -> Option<PublishGloballyState> {
+    let page_abs = page_path.canonicalize().ok()?;
+    if scope_layer(&page_abs) != Some(SCOPE_PROJECT) {
+        return None;
+    }
+    if text.lines().next().map(|l| l.trim_end()) != Some("---") {
+        return None; // no frontmatter block — out of scope, nothing safe to insert into
+    }
+    let file_name = page_abs.file_name()?.to_owned();
+    let fm = md::parse_frontmatter(text);
+    let has_field = fm.contains_key("publish-globally");
+    let is_true = fm
+        .get("publish-globally")
+        .map(|v| v.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let link_path = resolve_user_mem_root().join(&file_name);
+    let has_symlink = symlink_resolves_to(&link_path, &page_abs);
+    Some(PublishGloballyState { has_field, is_true, has_symlink, page_abs, link_path })
+}
+
+/// Apply ONE fix for `issue` and return the new page text (unchanged when the fix is a pure
+/// filesystem side effect, e.g. `TrueNoSymlink`'s symlink creation). Never called for
+/// `ConflictFalseWithSymlink` (the caller must intercept that case — it is never auto-resolved).
+fn apply_publish_globally_fix(text: &str, state: &PublishGloballyState, issue: PublishGloballyIssue) -> String {
+    match issue {
+        PublishGloballyIssue::MissingDefaultFalse => {
+            insert_frontmatter_field(text, "publish-globally", "false").unwrap_or_else(|| text.to_string())
+        }
+        PublishGloballyIssue::MissingSymlinkImpliesTrue => {
+            insert_frontmatter_field(text, "publish-globally", "true").unwrap_or_else(|| text.to_string())
+        }
+        PublishGloballyIssue::TrueNoSymlink => {
+            // Best-effort: a symlink-creation failure (e.g. an unwritable USER root) must never
+            // corrupt or block the page's own write — it is reported again by the NEXT lint/write
+            // pass, since `has_symlink` will still read false.
+            let _ = create_user_symlink(&state.link_path, &state.page_abs);
+            text.to_string()
+        }
+        PublishGloballyIssue::ConflictFalseWithSymlink => text.to_string(), // never reached; see doc comment
+    }
+}
+
+/// The USER-scope wikimem root a PROJECT page's `publish-globally: true` symlink publishes into —
+/// byte-for-byte the same fixed path as `scripts/lib/memory_scopes.py::resolve_user_dir()`: the
+/// janitor's plugin-DATA memory dir, resolved via `$HOME`, NEVER `$CLAUDE_PLUGIN_DATA` (that names
+/// whichever plugin owns the CURRENT turn, not the janitor specifically — see that function's own
+/// doc comment for why). `$MEMGREP_USER_MEM_ROOT` is a test-only override, mirroring
+/// `$JANITOR_GLOBAL_STATE_DIR` in `write_gate.rs`, so tests never touch a real `~/.claude`.
+fn resolve_user_mem_root() -> PathBuf {
+    if let Ok(over) = std::env::var("MEMGREP_USER_MEM_ROOT")
+        && !over.is_empty()
+    {
+        return PathBuf::from(over);
+    }
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/"));
+    home.join(".claude")
+        .join("plugins")
+        .join("data")
+        .join("ai-maestro-janitor-ai-maestro-plugins")
+        .join("memory")
+}
+
+/// True iff `link_path` is a symlink that resolves to exactly `target_abs`. Fail-safe: a missing
+/// path, a non-symlink, or a DANGLING symlink (whose target no longer exists, so
+/// `fs::canonicalize` fails) all resolve to `false` rather than panicking or guessing — a broken
+/// symlink pointed at some OTHER page simply does not implicate `target_abs`.
+fn symlink_resolves_to(link_path: &Path, target_abs: &Path) -> bool {
+    match std::fs::symlink_metadata(link_path) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::canonicalize(link_path)
+            .map(|resolved| resolved == target_abs)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Create the USER-root symlink at `link_path` pointing at `target_abs`, creating the USER root
+/// itself if it does not exist yet. Unix-only (mirrors the rest of the crate's symlink handling —
+/// see the `lint_does_not_report_one_file_twice…` test, which is `#[cfg(unix)]` for the same
+/// reason): a no-op `Ok(())` on non-unix platforms rather than attempting a privileged Windows
+/// symlink.
+#[cfg(unix)]
+fn create_user_symlink(link_path: &Path, target_abs: &Path) -> std::io::Result<()> {
+    if let Some(parent) = link_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Idempotent: if a symlink already resolves correctly here, `symlink_resolves_to` would have
+    // reported `has_symlink = true` and this function would never have been called — but a STALE
+    // or WRONG entry at this exact path (dangling, or pointing elsewhere) must not make `symlink`
+    // fail with "file exists"; remove it first so the fresh link can be created.
+    if std::fs::symlink_metadata(link_path).is_ok() {
+        std::fs::remove_file(link_path)?;
+    }
+    std::os::unix::fs::symlink(target_abs, link_path)
+}
+
+#[cfg(not(unix))]
+fn create_user_symlink(_link_path: &Path, _target_abs: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Insert `key: value` as a new line at the END of `text`'s YAML frontmatter block (immediately
+/// before the closing `---`/`...`), returning the new text — or `None` when `text` has no
+/// frontmatter block at all (nothing safe to insert into). Preserves every other byte of the file
+/// verbatim: this fixes exactly ONE missing metadata field on an otherwise-untouched page, never a
+/// general rewrite.
+fn insert_frontmatter_field(text: &str, key: &str, value: &str) -> Option<String> {
+    let raw_lines: Vec<&str> = text.lines().collect();
+    if raw_lines.first().map(|l| l.trim_end()) != Some("---") {
+        return None;
+    }
+    let mut close_idx = None;
+    for (i, l) in raw_lines.iter().enumerate().skip(1) {
+        let t = l.trim_end();
+        if t == "---" || t == "..." {
+            close_idx = Some(i);
+            break;
+        }
+    }
+    let close_idx = close_idx?;
+    let mut new_lines: Vec<String> = raw_lines.iter().map(|s| s.to_string()).collect();
+    new_lines.insert(close_idx, format!("{key}: {value}"));
+    let mut out = new_lines.join("\n");
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    Some(out)
+}
+
 fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
     // A NON-PAGE is not a lint target, however the path arrived. `collect_md` filters the
     // index/report family on a directory WALK, but an EXPLICITLY named file bypasses that ("the
@@ -4042,6 +4366,17 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 "missing required frontmatter field `description`".into(),
                 "page-no-description",
             ));
+        }
+
+        // Check — `publish-globally:` reconciliation state (read-only report; the fix itself is
+        // unconditional at every write's `atomic_write_page`, never performed by lint). Shares
+        // `classify_publish_globally` with the write path so a finding here and a normalization
+        // there can never disagree.
+        if let Some(state) = publish_globally_state(&path, &text)
+            && let Some(issue) = classify_publish_globally(state.has_field, state.is_true, state.has_symlink)
+        {
+            let (sev, code, msg) = issue.lint_line();
+            violations.push((sev, p.clone(), 0, msg.to_string(), code));
         }
 
         let lines: Vec<&str> = text.lines().collect();
@@ -9025,5 +9360,426 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "must not wildly overshoot the 1s MEMGREP_LOCK_TIMEOUT_S"
         );
         assert_eq!(content_after, "hello world\n", "page byte-identical after a lock-timeout refusal");
+    }
+
+    // ── `publish-globally:` reconciliation ──────────────────────────────────────────────────
+    //
+    // `EDIT_ENV_MUTEX` is reused here (not a new mutex) because these tests ALSO set process-wide
+    // env vars (`MEMGREP_USER_MEM_ROOT`, sometimes alongside `JANITOR_GLOBAL_STATE_DIR`) and must
+    // never race a concurrently-running `cmd_edit_cli` test over the same vars.
+
+    /// A `<tmp>/.claude/project/memory/p.md` page — the literal substring `scope_layer` matches
+    /// on for `SCOPE_PROJECT` — plus its enclosing scratch dir. Distinct from `edit_test_scope`
+    /// (which builds a bare `<tmp>/memory/p.md`, PROJECT-scope-agnostic) because every check here
+    /// is gated on `scope_layer(&abs) == Some(SCOPE_PROJECT)`.
+    fn pubglobal_project_page(label: &str, body: &str) -> (PathBuf, PathBuf) {
+        let scope = edit_test_tmpdir(label);
+        let memory_dir = scope.join(".claude").join("project").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        std::fs::write(&page, body).unwrap();
+        (scope, page)
+    }
+
+    const PUBGLOBAL_PAGE_MISSING: &str =
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\nbody\n\n## Notes and lessons learned\n";
+    const PUBGLOBAL_PAGE_TRUE: &str =
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\npublish-globally: true\n---\nbody\n\n## Notes and lessons learned\n";
+    const PUBGLOBAL_PAGE_FALSE: &str =
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\npublish-globally: false\n---\nbody\n\n## Notes and lessons learned\n";
+
+    /// Create the USER-root symlink `<user_root>/<page file name>` -> `page` (canonicalized), as
+    /// if a prior normalization (or the 4 real hand-made ones on this host) had already run.
+    fn pubglobal_make_symlink(user_root: &Path, page: &Path) {
+        std::fs::create_dir_all(user_root).unwrap();
+        let target = page.canonicalize().unwrap();
+        let link = user_root.join(page.file_name().unwrap());
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+    }
+
+    // ── classify_publish_globally: the pure decision table ──────────────────────────────────
+
+    #[test]
+    fn classify_publish_globally_covers_all_four_states_and_the_two_conformant_ones() {
+        assert_eq!(
+            classify_publish_globally(false, false, false),
+            Some(PublishGloballyIssue::MissingDefaultFalse)
+        );
+        assert_eq!(
+            classify_publish_globally(false, false, true),
+            Some(PublishGloballyIssue::MissingSymlinkImpliesTrue)
+        );
+        assert_eq!(
+            classify_publish_globally(true, true, false),
+            Some(PublishGloballyIssue::TrueNoSymlink)
+        );
+        assert_eq!(
+            classify_publish_globally(true, false, true),
+            Some(PublishGloballyIssue::ConflictFalseWithSymlink)
+        );
+        // Conformant: true+symlinked, false+unsymlinked.
+        assert_eq!(classify_publish_globally(true, true, true), None);
+        assert_eq!(classify_publish_globally(true, false, false), None);
+    }
+
+    // ── `memgrep lint`: read-only reporting, never mutates ───────────────────────────────────
+
+    #[test]
+    fn lint_reports_missing_field_as_warn_and_never_writes_to_disk() {
+        let (scope, page) = pubglobal_project_page("lint-missing", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("lint-missing-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let before = std::fs::read_to_string(&page).unwrap();
+        let v = lint_paths(std::slice::from_ref(&page), false);
+        let after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(before, after, "lint must never mutate the page");
+        assert!(!user_root.join("p.md").exists(), "lint must never create the symlink either");
+        let hit = v.iter().find(|(.., c)| *c == "publish-globally-missing");
+        assert!(hit.is_some(), "expected a publish-globally-missing finding; got: {v:?}");
+        assert_eq!(hit.unwrap().0, Severity::Warn);
+    }
+
+    #[test]
+    fn lint_reports_true_without_symlink_as_error() {
+        let (scope, page) = pubglobal_project_page("lint-true-nosym", PUBGLOBAL_PAGE_TRUE);
+        let user_root = edit_test_tmpdir("lint-true-nosym-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let v = lint_paths(std::slice::from_ref(&page), false);
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        let hit = v.iter().find(|(.., c)| *c == "publish-globally-not-symlinked");
+        assert!(hit.is_some(), "expected a publish-globally-not-symlinked finding; got: {v:?}");
+        assert_eq!(hit.unwrap().0, Severity::Error);
+    }
+
+    #[test]
+    fn lint_reports_false_with_symlink_as_a_conflict_error_and_leaves_it_alone() {
+        let (scope, page) = pubglobal_project_page("lint-conflict", PUBGLOBAL_PAGE_FALSE);
+        let user_root = edit_test_tmpdir("lint-conflict-user");
+        pubglobal_make_symlink(&user_root, &page);
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let v = lint_paths(std::slice::from_ref(&page), false);
+        let link_survives = user_root.join("p.md").symlink_metadata().is_ok();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        let hit = v.iter().find(|(.., c)| *c == "publish-globally-conflict");
+        assert!(hit.is_some(), "expected a publish-globally-conflict finding; got: {v:?}");
+        assert_eq!(hit.unwrap().0, Severity::Error);
+        assert!(link_survives, "lint must never delete the conflicting symlink");
+    }
+
+    // ── `normalize_page_until_clean`: the four fixes ─────────────────────────────────────────
+
+    #[test]
+    fn normalize_inserts_false_when_no_field_and_no_symlink() {
+        let (scope, page) = pubglobal_project_page("norm-missing", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("norm-missing-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let passes = normalize_page_until_clean(&page).unwrap();
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(passes, 2, "one fixing pass + one confirming pass");
+        assert_eq!(
+            content,
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\npublish-globally: false\n---\nbody\n\n## Notes and lessons learned\n",
+            "byte-identical apart from the ONE inserted line"
+        );
+    }
+
+    #[test]
+    fn normalize_inserts_true_when_no_field_but_symlink_already_exists() {
+        let (scope, page) = pubglobal_project_page("norm-missing-sym", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("norm-missing-sym-user");
+        pubglobal_make_symlink(&user_root, &page);
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let passes = normalize_page_until_clean(&page).unwrap();
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(passes, 2);
+        assert!(content.contains("publish-globally: true"), "got: {content}");
+    }
+
+    #[test]
+    fn normalize_creates_the_symlink_when_true_and_missing() {
+        let (scope, page) = pubglobal_project_page("norm-true-nosym", PUBGLOBAL_PAGE_TRUE);
+        let user_root = edit_test_tmpdir("norm-true-nosym-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let before = std::fs::read_to_string(&page).unwrap();
+        let passes = normalize_page_until_clean(&page).unwrap();
+        let after = std::fs::read_to_string(&page).unwrap();
+        let link = user_root.join("p.md");
+        let link_resolves = std::fs::canonicalize(&link).ok() == page.canonicalize().ok();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(passes, 2, "one fixing pass (create the symlink) + one confirming pass");
+        assert_eq!(before, after, "the page's OWN text is untouched — the fix is a pure side effect");
+        assert!(link_resolves, "the USER-root symlink must now resolve to this exact page");
+    }
+
+    #[test]
+    fn normalize_never_auto_resolves_the_false_plus_symlink_conflict() {
+        let (scope, page) = pubglobal_project_page("norm-conflict", PUBGLOBAL_PAGE_FALSE);
+        let user_root = edit_test_tmpdir("norm-conflict-user");
+        pubglobal_make_symlink(&user_root, &page);
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let before = std::fs::read_to_string(&page).unwrap();
+        let passes = normalize_page_until_clean(&page).unwrap();
+        let after = std::fs::read_to_string(&page).unwrap();
+        let link_survives = user_root.join("p.md").symlink_metadata().is_ok();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(passes, 1, "the conflict is detected and left alone in a SINGLE pass — never iterated on");
+        assert_eq!(before, after, "a conflict page is never rewritten");
+        assert!(link_survives, "a conflict's symlink is never deleted either");
+    }
+
+    // ── idempotency: no mtime churn on an already-normal page ───────────────────────────────
+
+    #[test]
+    fn normalize_is_idempotent_second_call_on_a_clean_page_writes_nothing() {
+        let (scope, page) = pubglobal_project_page("norm-idem", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("norm-idem-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let first_passes = normalize_page_until_clean(&page).unwrap();
+        let content_after_first = std::fs::read_to_string(&page).unwrap();
+        let mtime_after_first = std::fs::metadata(&page).unwrap().modified().unwrap();
+
+        // Filesystem mtime resolution can be coarse (whole seconds on some setups) — sleep past
+        // it so an ACCIDENTAL second write would be observable as a real mtime change, never
+        // masked by two writes landing in the same tick.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let second_passes = normalize_page_until_clean(&page).unwrap();
+        let content_after_second = std::fs::read_to_string(&page).unwrap();
+        let mtime_after_second = std::fs::metadata(&page).unwrap().modified().unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(first_passes, 2, "the page started missing the field — one real fix");
+        assert_eq!(second_passes, 1, "the page is now clean — a single confirming pass, no fix");
+        assert_eq!(content_after_first, content_after_second, "content must not change on the second call");
+        assert_eq!(mtime_after_first, mtime_after_second, "an already-normal page must not be rewritten");
+    }
+
+    // ── boundedness: fail loudly instead of hanging ──────────────────────────────────────────
+
+    #[test]
+    fn normalize_fails_loudly_instead_of_looping_forever_on_unfixable_frontmatter() {
+        // A frontmatter block with NO closing `---` at all: `publish_globally_state` still sees
+        // the opening `---` (so the check applies) but `insert_frontmatter_field` can never find
+        // a safe insertion point, so its fix is forever a no-op — the page is IDENTICAL on every
+        // detect pass, and a correct normalizer must give up loudly rather than spin forever.
+        let (scope, page) = pubglobal_project_page("norm-unfixable", "---\nname: p\nno closing delimiter here\n");
+        let user_root = edit_test_tmpdir("norm-unfixable-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let res = normalize_page_until_clean(&page);
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        let err = res.expect_err("a normalizer that cannot converge must fail, never hang");
+        let msg = err.to_string();
+        assert!(msg.contains("did not converge"), "{msg}");
+        assert!(
+            msg.contains(&PUBLISH_GLOBALLY_MAX_ITERATIONS.to_string()),
+            "the error must name the cap it hit: {msg}"
+        );
+    }
+
+    // ── wired into the real write path (`atomic_write_page` / `cmd_edit_cli`), not just lint ──
+
+    #[test]
+    fn atomic_write_page_normalizes_a_brand_new_page() {
+        // `new-page`'s shape: `atomic_write_page` is called for a `dest` that does not exist yet,
+        // so the BEFORE pass is a no-op and the AFTER pass is what actually gives it the field.
+        let scope = edit_test_tmpdir("atomic-new");
+        let memory_dir = scope.join(".claude").join("project").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        let user_root = edit_test_tmpdir("atomic-new-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let res = atomic_write_page(&page, PUBGLOBAL_PAGE_MISSING);
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert!(res.is_ok(), "{res:?}");
+        assert!(content.contains("publish-globally: false"), "got: {content}");
+    }
+
+    #[test]
+    fn edit_normalizes_a_page_missing_publish_globally_on_a_real_write() {
+        // Proves the reconciliation runs on the ACTUAL write path (`cmd_edit_cli` -> `atomic_write_page`),
+        // not merely from `memgrep lint`, and that the edit itself still lands correctly alongside
+        // the ONE inserted line — byte-identical otherwise.
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("edit-pubglobal-state");
+        let user_root = edit_test_tmpdir("edit-pubglobal-user");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let scope = edit_test_tmpdir("edit-pubglobal-scope");
+        let memory_dir = scope.join(".claude").join("project").join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        let original = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\nhello world\n\n## Notes and lessons learned\n";
+        std::fs::write(&page, original).unwrap();
+
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "goodbye world");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "edit must succeed: {res:?}");
+        let expected = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\npublish-globally: false\n---\ngoodbye world\n\n## Notes and lessons learned\n";
+        assert_eq!(content, expected, "the edit AND the normalization must both land, nothing else changed");
+    }
+
+    // ── the owner's exact contract: N changes run N+1 convergence phases, never a batched pair ──
+
+    #[test]
+    fn n_changes_run_n_plus_1_convergence_phases_never_a_batched_pair() {
+        // {lint-loop} change1 {lint-loop} change2 {lint-loop} change3 {lint-loop} — NOT
+        // {lint-loop} change1 change2 change3 {lint-loop}. Simulates 3 sequential single-page
+        // writes exactly as `atomic_write_page` performs them (its own convergence loop bracketing
+        // ONE write), with the convergence pass-count exposed at each step.
+        let (scope, page) = pubglobal_project_page("nplus1", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("nplus1-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        // Phase 0 — BEFORE change 1: the page starts missing the field (one fix + one confirm).
+        let mut phases = vec![normalize_page_until_clean(&page).unwrap()];
+        let mut prev = "body";
+        for next in ["v1", "v2", "v3"] {
+            let current = std::fs::read_to_string(&page).unwrap();
+            let mutated = current.replace(prev, next);
+            write_page_bytes(&page, &mutated).unwrap(); // THE write itself — one "change"
+            phases.push(normalize_page_until_clean(&page).unwrap()); // the phase AFTER this change
+            prev = next;
+        }
+        let final_content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(phases.len(), 4, "3 changes must run 3+1 = 4 convergence phases");
+        assert_eq!(phases[0], 2, "phase 0 does real work: fix the missing field, then confirm");
+        assert_eq!(
+            &phases[1..],
+            &[1, 1, 1],
+            "every phase AFTER an already-clean page converges in ONE pass — nothing left to \
+             re-fix, because the PRIOR phase already normalized it"
+        );
+        assert!(final_content.contains("v3"), "the last change must have actually landed: {final_content}");
+        assert!(final_content.contains("publish-globally: false"), "got: {final_content}");
     }
 }
