@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=470ffa191922 digest=159886f940dd generated=2026-08-12T09:30:34+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ccc33c65c314 digest=f68813ca1ece generated=2026-08-12T14:06:14+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1337,6 +1337,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · check2_has_remaining_work(record) -> bool — Check 2 — the remaining-work gate that suppresses Check-1 over-claims.
   · check3_prose_frontmatter_mismatch(record) -> bool — Check 3 — STATE prose claims a block the machine fields do not encode.
   · check4_stale_blockers(record, column_of) -> list[str] — Check 4 — blockers (frontmatter OR prose-named) that are now terminal.
+  · DeadSymbolCitation — One backtick-quoted token in a STATE block that the tree no longer has.
+  · extract_state_block(body) -> str — Return the TRDD's `## ⏵ STATE` block substring of `body`, or `""` if absent.
+  · check5_dead_symbol_citations(record, token_is_dead) -> list[DeadSymbolCitation] — Check 5 — a STATE block cites a code symbol the tree no longer has (TRDD-FDV1RQEB).
   · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
   · ReconcileVerdict.fires(self) -> bool
   · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
@@ -1652,7 +1655,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=ca98bbe4ce20 generated=2026-08-12T00:49:03+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=3a990cb645f7 generated=2026-08-12T14:06:16+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
