@@ -42,12 +42,29 @@ installed cache, and all six behaviour markers confirmed IN THE CACHE (not merel
 wikimem defaults, the model-fallback knob, and the `--porcelain` worktree parse with the broken
 `| head | awk` form gone. R6 (presence-gated ESC) landed in that release.
 
-**NEXT ACTION:** two OWNER decisions, both deliberately parked at the SAFE setting, neither
-blocking anything else:
+**NEXT ACTION:** ONE owner decision, plus one QUESTION I ASKED WRONGLY — correct it before
+re-asking (2026-08-12):
   1. hard-restart rungs — still OFF. They kill a wedged pid, losing that session's in-memory
-     conversation. Enabling is the only way a dead pid self-heals unattended.
-  2. PROJECT-domain ticket approval gate — still ON. Background agents fix janitor-INTERNAL
-     tickets freely; code/security changes to the owner's repos still wait for a human.
+     conversation. Enabling is the only way a dead pid self-heals unattended. Genuinely open.
+  2. **"PROJECT-domain ticket approval gate" WAS TOO COARSE — do not re-ask it as posed.** The
+     owner has ALREADY given a standing class-level direction, verified in USER memory
+     `feedback_security_act_dont_ask#act-dont-ask-security`: for branch-protection rulesets,
+     GitHub workflow YAML, publish pipelines and push hooks — do NOT use AskUserQuestion, fix
+     everything detected, commit, report after; no push. It explicitly overrides RULE 1.4 for
+     that work-class. Asking again re-litigates a settled question.
+
+**The genuinely open slice** (per TRDD-631fa3de's own STATE, which is a DELIBERATE park, not
+neglect — do not "revive" it as drift): autonomous EDITING of workflow YAML / repo files BEYOND
+the ratified `baseline-*` rulesets. Applying the ratified pair as-is is already exempt+shipped;
+the open pick is whether the janitor may REWRITE a vulnerable workflow on detection.
+
+**UNVERIFIED, verify before asserting a contradiction:** `branch_protection_lib.guard_mode_enabled()`
+returns False by default ("the user must explicitly enable per-project"). That LOOKS like the
+shipped-dark pattern contradicting act-dont-ask — but it plausibly gates only BEYOND-baseline
+remediation, which manager-approval-defaults correctly makes Tier-2. Read what it actually gates
+before claiming the default defies a standing directive. Two paths exist and must not be
+conflated: DETECTION→immediate-fix (act-dont-ask governs) vs the TICKET channel
+(`tickets.py:463` refuses a PROJECT-domain kind with no approved TRDD).
 After those: R6 residual (permission-prompt detection via pane text) and the R3 server-host
 blackout below.
 
