@@ -3,7 +3,7 @@ trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
 column: dev
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-11T20:35:18+0200
+updated: 2026-08-12T12:50:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -17,7 +17,48 @@ external-refs: [TRDD-TUIBWHT7, TRDD-BRHJHWW0, janitor#246, janitor#248, janitor#
 
 # Armed once ⇒ autonomous forever
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-11
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+
+### 2026-08-12 session — released v3.1.4 + v3.1.5, and drained the WORK columns to ZERO
+
+**Shipped and CLI-verified installed** (tag-vs-cache diff, 0 missing, markers confirmed IN
+THE CACHE): v3.1.4 (librarian `globs:` inversion janitor#252; orphaned-resume ledger flood)
+and v3.1.5 (a live-identity change is a rotation, whoever performed it).
+
+**`dev` went 7 → 0 and `testing` 7 → 5 — almost none of it by finishing work.** Six cards
+were asserting activity that could not happen. The recurring cause, now carded and FIXED:
+`af499ee3` (the cadence deletion) orphaned the premises of three cards at once, and **nothing
+re-checks a STATE block against the tree**. That is now **check 5** of
+`trdd-state-reconciliation` (TRDD-FDV1RQEB, `9a9bf0fa`) — a backticked identifier absent at
+HEAD but present in `git log -S` history, severity by placement.
+
+| card | was | now | why |
+|---|---|---|---|
+| AR9IUGIJ | dev | backburner | option C tuned a knob `af499ee3` deleted |
+| 50V256RH | dev | backburner | root cause FALSIFIED — `/reload-plugins --force` DOES re-point live skills |
+| VXFNDHXT | dev | archived/superseded | its TTL probe no longer exists; part 2 closed by `DEFAULT_TTL_MINUTES = 5` |
+| I6ZZWVDN | testing | backburner | blocked on a real 429 — none in 26 days, which is the rotator working |
+| UA4FAX67 | testing | todo | its trigger is BLACKED OUT on a server-owned host (fixed in v3.1.5) |
+| QE390SJA | testing | backburner | every implementable box closed; only a field observation left |
+
+**THE FINDING WORTH CARRYING FORWARD** (now in PROJECT memory, `ATOM-4GQU-0C9J`): when a live
+ai-maestro server CLAIMS a chore, the janitor stops PERFORMING the act but keeps owning
+everything downstream — so any breadcrumb our code writes goes unwritten, and the feature dies
+exactly where the act still happens. Nothing notices, because a missing breadcrumb is
+identical to "the event never occurred". Fix pattern: key off state BOTH runtimes produce
+(a changed live IDENTITY), never off our own event-stamp. **Ask this of every chore the server
+can claim.**
+
+**FOUR CARDS ARE IN THE OWNER'S QUEUE and I had not been reporting them:** YBOZW3ES and
+DO6X4ZF8 (both shipped, gates green, "awaiting the owner's call only"), KQ9WM4TZ (bless the
+breadcrumb design), 6CRC9SQQ (a cross-project negotiation only the owner can initiate).
+
+**NEXT ACTION:** keep draining `todo` (20 cards); the WORK columns are honest now. Do NOT
+re-audit the six cards above — each carries its own dated correction.
+
+---
+
+### The 2026-08-11 head (kept)
 
 **AUDIT DONE (5 reports in `reports/janitor-autonomy-audit/`). The prior HELD, and sharpened:
 the recurring defect is not missing code — it is code that exists, is tested, is documented,
