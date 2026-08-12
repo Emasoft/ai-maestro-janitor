@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "b933d8708696074e865065cbca1b955d418cd83d8761e41e9d3c2787dd690b70",
-    "README.md": "5acb15f16db67f450f460507e16b6b97ba2fe6342de057ae8280955d8f72e763",
+    "CLAUDE.md": "caa26cf411b040996a13dba4331d15ad36d71eafdb7a34356ecc1ba8521e08d9",
+    "README.md": "f09a61e02f303c9c96e1db4663c677e8cb0bc9f789804250a40d510c230c3c08",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",

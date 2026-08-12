@@ -2,11 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.4] — 2026-08-12
+
+### Bug Fixes
+
+- **memory-librarian:** A block-sequence globs: is a PRESENT globs: (janitor#252) (3fc40eb)
+- **orphaned-resume-flag:** Day-bucket the LEDGER write, not just the drift line (ac741b6)
+
+### Documentation
+
+- Close TRDD-MADJ00KA and TRDD-842PBES7 — shipped 28 days ago, never closed (8d73535)
+- TRDD-G4BCRUP7 — I re-asked a question the owner had already answered (3d2d0c8)
+- TRDD-G4BCRUP7 — branch-protection auto-apply is shipped dark (verified) (9e89ad8)
+- TRDD-JPL0JU86 — record the report-to-trdd false positive so it stops costing investigations (629866f)
+- TRDD-AR9IUGIJ option C is void — af499ee3 deleted the machinery it would tune (2206bff)
+- TRDD-50V256RH root cause falsified — /reload-plugins --force DOES re-point live skills (5ee1172)
+
+### Miscellaneous Tasks
+
+- Regenerate the fenced project map (465 files, 1630 lines) (3d5d968)
+
+### Styling
+
+- **trdd:** One list marker per file — my `*` bullets blocked the 3.1.4 publish (d8a6dfa)
+
+### Testing
+
+- **qe390sja:** Prove the ESC+/model trace on iTerm, not just tmux (TRDD-QE390SJA) (ce9eb88)
 ## [3.1.3] — 2026-08-12
 
 ### Miscellaneous Tasks
 
 - Refresh the CLAUDE.md project map and wikimem index (72f89c0)
+- Bump version to 3.1.3 (786573d)
 
 ### Performance
 
