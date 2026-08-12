@@ -3,7 +3,7 @@ trdd-id: F4IBIDB6
 title: Nothing detects a WORK column that nobody is working — the sweep has been done by hand twice in one day
 column: todo
 created: 2026-08-13T00:58:36+0200
-updated: 2026-08-13T00:58:36+0200
+updated: 2026-08-13T01:07:00+0200
 current-owner: unassigned
 task-type: feature
 approval-tier: 0
@@ -13,6 +13,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-WP7TCRME]
+implementation-commits: [3f15a8ee]
 ---
 
 # The board-honesty sweep has no owner but a human
@@ -66,7 +67,13 @@ cost is one predicate) rather than adding a detector:
 
 ## Acceptance
 
-- [ ] The empty-`blocked-by:` check ships first — it is exact, needs no threshold, and caught a
+- [x] The empty-`blocked-by:` check ships first — **SHIPPED `3f15a8ee`** as Check 6.
+      Writing its test found a bigger defect: `blocked_by_ids` extracts TRDD-shaped ids only,
+      so the 5-of-9 cards naming a non-TRDD blocker (`ai-maestro#102`, `publish-of-7ceab3f`)
+      would all have fired — the exact false-positive storm the last box warns about. The
+      predicate is now `has_blocked_by_value`, and the same defect was fixed in
+      `has_stated_precondition`, where it had been making trdd-drift nag correctly-parked cards.
+      Superseded box text — it is exact, needs no threshold, and caught a
       real case the same night it was noticed
 - [ ] The stale-WORK-column check names candidates and their idle age, and states the invariant
       rather than proposing a destination
