@@ -241,11 +241,27 @@ def compare(cur: dict, base: dict) -> tuple[bool, list[str]]:
             f"split mismatch: run is {cur.get('split', 'all')!r}, "
             f"baseline is {base.get('split', 'all')!r} — regenerate the baseline for this split"
         ]
+    # PER-CLASS, not aggregate. The aggregate rate moves whenever the corpus GAINS a class,
+    # because a new class has its own difficulty — so comparing totals reports "recall fell"
+    # for a corpus that merely got harder, with no code change at all. That happened on the
+    # first extension (25% -> 23% purely from adding two low-scoring classes). A gate that
+    # cries regression when someone improves the corpus is a gate people learn to override,
+    # which costs every real regression it would ever have caught.
+    #
+    # So: compare only classes present in BOTH runs, where a drop CAN only mean the rules got
+    # worse. Classes new to this run are reported as information, never as failure.
+    cur_classes, base_classes = cur.get("per_class", {}), base.get("per_class", {})
+    for name, cb in sorted(base_classes.items()):
+        cc = cur_classes.get(name)
+        if not cc or not cb["n"] or not cc["n"]:
+            continue
+        was, now = cb["intended"] / cb["n"], cc["intended"] / cc["n"]
+        if now < was:
+            problems.append(f"{name}: recall fell {was:.0%} -> {now:.0%}")
+    # The FP rate stays an AGGREGATE comparison: unlike recall, its denominator is the benign
+    # population alone, which does not change when an attack class is added — so a rise here
+    # really is a rise.
     c, b = cur["totals"], base["totals"]
-    if c["recall_intended"] < b["recall_intended"]:
-        problems.append(
-            f"recall_intended fell {b['recall_intended']:.0%} -> {c['recall_intended']:.0%}"
-        )
     if (
         c["false_positive_rate"] is not None
         and b["false_positive_rate"] is not None

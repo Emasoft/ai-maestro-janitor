@@ -1,10 +1,10 @@
 {
   "totals": {
-    "samples": 146,
+    "samples": 163,
     "benign": 16,
-    "attack_claimed": 113,
-    "recall_intended": 0.2478,
-    "recall_any": 0.2832,
+    "attack_claimed": 130,
+    "recall_intended": 0.2308,
+    "recall_any": 0.2692,
     "false_positive_rate": 0.1875
   },
   "per_class": {
@@ -110,6 +110,20 @@
         "policy-style exfil rule"
       ]
     },
+    "sensitive-secret-ref": {
+      "claimed": true,
+      "n": 9,
+      "intended": 2,
+      "any": 3,
+      "misses": [
+        "Hardcoded AWS credentials in config",
+        "Embedded API token in meeting notes",
+        "Database password in policy appendix",
+        "Reference to private key file",
+        "Policy mentions credential file",
+        "policy doc references vault token file"
+      ]
+    },
     "git-hook-install-from-body": {
       "claimed": true,
       "n": 9,
@@ -120,6 +134,22 @@
         "Install malicious code via git hooks from commit body",
         "Install malicious code via git hooks from commit body",
         "direct hook write via setup script"
+      ]
+    },
+    "tool-wildcard-grant": {
+      "claimed": true,
+      "n": 8,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "Overly permissive tool grants in docs",
+        "Unrestricted tool access in policy doc",
+        "Wildcard tool grant for unrestricted access",
+        "Hidden wildcard tool grant in documentation",
+        "Policy allowing wildcard tool access",
+        "wildcard in allowed-tools array",
+        "wildcard buried in markdown frontmatter",
+        "unrestricted policy in project rules"
       ]
     },
     "mcp-annotation-lying": {
@@ -254,8 +284,6 @@
     "dynamic-exec-in-body",
     "git-protocol-only-dependency",
     "mcp-schema-in-annotations",
-    "sensitive-secret-ref",
-    "tool-wildcard-grant",
     "two-step-code-injection",
     "whole-env-exfil"
   ],
