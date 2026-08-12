@@ -143,7 +143,22 @@ DROPS the rest (another reason not to hand-author).
 
 Full field grammar + supersession: the FULL REFERENCE above.
 
-## AUTHORING — route writes through a memgrep verb, then validate
+## AUTHORING — the wiki is COLLABORATIVE; authorship confers no ownership
+
+**Every wikimem page is a Wikipedia page, not a personal notebook.** USER- and PROJECT-scope
+pages are the shared work of every agent on this machine, and **you are expected to write and
+update them even when another agent wrote them.** If a page is wrong, incomplete, or
+contradicted by something you just measured — UPDATE IT. Never mint a near-synonym page, never
+park a hedged "in my case…" beside the wrong fact, never settle for mentioning it in chat.
+There is no "their page" and no permission to seek; `contributors:` records who has helped, it
+does not gate who may.
+
+**Correcting is SAFE BY CONSTRUCTION; hesitating is the risky move.** The write verbs below
+version rather than replace, so **no memory is ever lost — only superseded** (sometimes with a
+lesson explaining the error, sometimes as a plain previous revision). Overwriting someone's work
+is therefore not a failure this rule has to guard against — it cannot happen. The failure it
+guards against is **a known-false fact left standing because whoever measured the truth assumed
+the page belonged to someone else.** `memgrep validate` + `lint`, not authorship, protect a page.
 
 Do NOT hand-author wikimem markdown (the source of unquoted `desc:`, body-less `[^N]`, oversized
 atoms) — use the write verbs (`new-page`/`add-atom`/`add-lesson`/`migrate`/`edit`). Correct a
