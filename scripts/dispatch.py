@@ -309,6 +309,19 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # short (300s = every heartbeat) to give the due-check a chance each fire; an
     # idle fire is essentially free.
     ("memory-maintenance", 300, "CLAUDE_PLUGIN_OPTION_MEMORY_MAINTENANCE_INTERVAL"),
+    # orphaned-memory-maint closes memory-maintenance's own SILENT failure mode
+    # (issue #238, TRDD-2112XCKO): a pending dispatch whose cron-turn agent spawn
+    # failed (a partial-install registry, #232's shape — skills present, zero
+    # ai-maestro-janitor:* agents enumerable) leaves memory-maint-pending.json
+    # sitting unconsumed, indistinguishable from a healthy one. Self-contained —
+    # reads only THIS project's own pending file (no fleet scan), because the same
+    # broken-registry session that drops a pass still runs its own python
+    # detectors fine. LOCAL scope gets a tighter staleness bound than USER/PROJECT
+    # (LOCAL has no other session that can ever recover it — #238's core finding).
+    # Findings route through findings_ledger (HIGH, MEMPASS-ORPHANED /
+    # MEMPASS-MALFORMED). Cheap (one small JSON read + two stat-backed lookups),
+    # so it rides the same short cadence as the scheduler it watches.
+    ("orphaned-memory-maint", 300, "CLAUDE_PLUGIN_OPTION_ORPHANED_MEMORY_MAINT_INTERVAL"),
     # ticket-dispatch is the support-ticket SCHEDULER (TRDD-CGYMUKO6) — the same
     # DETECT→SCHEDULE→EXECUTE shape as memory-maintenance above, and for the same
     # reason: a python detector CANNOT spawn an agent, only the cron turn can. It
