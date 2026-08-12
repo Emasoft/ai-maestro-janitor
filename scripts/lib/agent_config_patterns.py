@@ -137,6 +137,53 @@ _AUTHORITY_OVERRIDE = _re(
     r"|\bdeveloper\s+mode\s+(?:enabled|activated|on)\b"
     r"|\bjailbroken?\s+(?:mode|state)\b"
     r"|\b(?:no|without)\s+(?:permission|consent|approval)\s+(?:needed|required|necessary)?\b"
+    # Everything above is a jailbreak-forum idiom, which is why the rule
+    # measured 0/9 against blind-authored samples: a document poisoning a real
+    # repo does not say "jailbroken mode". It re-assigns the agent's identity in
+    # the register of the file it is hiding in — a policy manual, a config key,
+    # an onboarding guide. The branches below are those registers.
+    #
+    # (a) "you are now" continues with a VERB at least as often as with an
+    #     article ("you are now operating as ..."), and requiring the article
+    #     dropped the whole verb family.
+    r"|\byou\s+are\s+now\s+(?:operating|acting|running|functioning|working)\s+as\b"
+    # (b) role RE-ASSIGNMENT: a verb of assumption + the identity noun.
+    #     `role` is deliberately EXCLUDED here — "assume the role" is ordinary
+    #     IAM/STS English and would fire on every cloud runbook.
+    r"|\b(?:assume|adopt|take\s+on|switch\s+to|operate\s+under)\b[^.\n]{0,60}"
+    r"\b(?:identity|persona)\b"
+    # (c) SUPERSESSION of the standing instructions, in either direction. The
+    #     object list is restricted to agent-instruction nouns so that
+    #     "this policy supersedes the 2023 policy" — a sentence every real
+    #     document contains — cannot reach it.
+    r"|\b(?:supersed|nullif|revok|invalidat|suppress|deprecat)\w*\b[^.\n]{0,60}"
+    r"\b(?:(?:system\s+)?(?:prompts?|instructions?|directives?)"
+    r"|role\s+definitions?|operational\s+parameters?|personas?"
+    r"|(?:assistant|agent|default)\s+(?:\w+\s+){0,2}behaviou?rs?)\b"
+    r"|\b(?:prior|previous|earlier|default|existing|standing|system|external)\s+"
+    r"(?:\w+\s+){0,2}(?:prompts?|instructions?|directives?|personas?"
+    r"|operational\s+parameters?)\b"
+    r"[^.\n]{0,40}\b(?:are|is|shall\s+be|will\s+be)\s+"
+    r"(?:supersed|overrid|nullif|revok|invalidat|deprecat|suppress|void|ignor)\w*"
+    # (d) a config KEY that assigns or overrides the agent's identity. The
+    #     directive does not have to be a sentence; half the disclosed samples
+    #     carry it as an env-var or YAML key appended below legitimate content.
+    r"|\b(?:new[_-]?identity|role[_-]?(?:assignment|override)|identity[_-]?override"
+    r"|override[_-]?agent[_-]?\w+|agent[_-]?override)\s*[:=]"
+    r"|\bsystem\s+override\b"
+    # (e) EXCLUSIVE-AUTHORITY claim — the file declaring itself the only
+    #     authority the agent may consult. `exclusively` is required because
+    #     "follow the guide only" is ordinary prose and "exclusively" is not.
+    r"|\b(?:comply\s+with|obey|follow|reference|consult|use)\s+(?:only\s+)?"
+    r"th(?:is|e)\s+(?:file|document|manual|configuration|config|policy|guide"
+    r"|specification|instructions?)\s+exclusively\b"
+    # (f) the human confirmation GATE switched off by an auto-loaded config.
+    #     Escalating the envelope is the same attack as re-assigning the role,
+    #     reached by deleting the check instead of claiming the authority.
+    r"|\b(?:confirm[-_ ]?destructive|require[-_ ]?(?:approval|confirmation|review"
+    r"|human)|human[-_ ]?(?:approval|review)|human[-_ ]in[-_ ]the[-_ ]loop"
+    r"|safety[-_ ]?(?:checks?|gates?|filters?))"
+    r"\s*[:=]\s*(?:false|off|no|0|disabled?)\b"
 )
 
 
