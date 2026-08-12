@@ -81,6 +81,7 @@ import errno
 import fcntl
 import json
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -162,6 +163,63 @@ def _read_cursor() -> int:
 def _write_cursor(value: int) -> None:
     state.init_state()
     state.atomic_write(_cursor_path(), str(int(value)))
+
+
+# --------------------------------------------------------------------------- #
+# per-dispatch pending state (janitor#242): the single-slot `memory-maint-
+# pending.json` was clobbered by the NEXT dispatch while the previous one's
+# spawned agent had not yet consumed it — measured live, twice, on two hosts —
+# so an agent could start on the WRONG (intervention, scope, root) or a
+# conscientious mid-run re-read could see a foreign assignment switched in
+# underneath it. Every dispatch now ALSO gets its own immutable filename
+# (never overwritten by a later dispatch), so a consumer that keys off its
+# own `dispatch_id` can never be handed someone else's assignment. The
+# LEGACY fixed path is still written, byte-compatible (same fields, plus
+# `dispatch_id`), so every existing reader — the heartbeat-protocol rule
+# text, the split/retro-lesson skills, the test suite — keeps working
+# unchanged; it is simply no longer the ONLY record of a given dispatch.
+# --------------------------------------------------------------------------- #
+
+PENDING_LEGACY_NAME = "memory-maint-pending.json"
+_PENDING_PREFIX = "memory-maint-pending-"
+_PENDING_KEEP = 20  # bounded append site: prune older per-dispatch files past this cap
+
+
+def _new_dispatch_id(now: int) -> str:
+    return f"{now}-{secrets.token_hex(4)}"
+
+
+def _pending_path(dispatch_id: str) -> Path:
+    return state.state_dir() / f"{_PENDING_PREFIX}{dispatch_id}.json"
+
+
+def _legacy_pending_path() -> Path:
+    return state.state_dir() / PENDING_LEGACY_NAME
+
+
+def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
+    """Keep only the newest `keep` per-dispatch pending files. Best-effort — a
+    pruning failure must never break the dispatch it rides on."""
+    try:
+        files = sorted(
+            state.state_dir().glob(f"{_PENDING_PREFIX}*.json"),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for stale in files[:-keep] if len(files) > keep else []:
+            stale.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_pending(payload: dict) -> None:
+    """Persist one dispatch's pending state to BOTH its own immutable
+    per-dispatch file and the legacy fixed-path sidecar. Order matters: the
+    per-dispatch (never-clobbered) copy lands first, so a reader racing this
+    write always finds at least one complete, correctly-attributed record."""
+    text = json.dumps(payload)
+    state.atomic_write(_pending_path(payload["dispatch_id"]), text)
+    _prune_old_pending()
+    state.atomic_write(_legacy_pending_path(), text)
 
 
 # --------------------------------------------------------------------------- #
@@ -416,18 +474,22 @@ def _run() -> int:
         # scope A was stamped (A then skips a full cadence). This sidecar pins
         # the pick; the chore skills read it and process exactly this scope.
         # Written BEFORE the marker prints so the agent can never race it.
-        state.atomic_write(
-            state.state_dir() / "memory-maint-pending.json",
-            json.dumps(
-                {
-                    "marker": marker,
-                    "intervention": intervention,
-                    "scope": scope_label,
-                    "root": str(root),
-                    "stamped_at": now,
-                }
-            ),
-        )
+        #
+        # janitor#242: the fixed-path sidecar alone is a single slot the NEXT
+        # dispatch overwrites unconditionally, even while a previous dispatch's
+        # agent has not yet consumed it — measured live, clobbering an in-flight
+        # repair with a consolidate marker on the SAME root. `_write_pending`
+        # also persists this dispatch under its own immutable `dispatch_id`
+        # filename, so a record of exactly what THIS dispatch stamped survives
+        # any later dispatch's overwrite of the legacy path.
+        _write_pending({
+            "marker": marker,
+            "intervention": intervention,
+            "scope": scope_label,
+            "root": str(root),
+            "stamped_at": now,
+            "dispatch_id": _new_dispatch_id(now),
+        })
         # The marker MUST be bare/exact on its own line (the cron clause keys on
         # that). NEVER routed through sanitize_for_drift_line — that is for UNTRUSTED
         # text; this is our own trusted, constant marker, and defanging it would

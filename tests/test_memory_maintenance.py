@@ -595,6 +595,68 @@ def test_emit_writes_pending_sidecar(fixture):
     assert isinstance(data["stamped_at"], int) and data["stamped_at"] > 0
 
 
+def test_pending_writes_a_per_dispatch_file_alongside_the_legacy_sidecar(fixture):
+    """janitor#242: every dispatch now ALSO gets its own immutable
+    `memory-maint-pending-<dispatch_id>.json`, carrying the same fields as the
+    legacy sidecar plus `dispatch_id` — and the legacy sidecar's `dispatch_id`
+    names exactly that file, so a per-dispatch-aware reader can follow it."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    state_dir = fixture["project"] / ".janitor" / "state"
+    legacy = json.loads((state_dir / "memory-maint-pending.json").read_text(encoding="utf-8"))
+    assert "dispatch_id" in legacy and legacy["dispatch_id"]
+    per_dispatch = state_dir / f"memory-maint-pending-{legacy['dispatch_id']}.json"
+    assert per_dispatch.is_file(), "the legacy sidecar's dispatch_id must name a real file"
+    data = json.loads(per_dispatch.read_text(encoding="utf-8"))
+    assert data == legacy, "per-dispatch file and legacy sidecar must agree for a fresh dispatch"
+
+
+def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture):
+    """The measured janitor#242 failure: a repair dispatch's authority was
+    overwritten by a LATER consolidate marker while the repair agent was still
+    running. Two consecutive fires (repair, then split) must each get their OWN
+    immutable per-dispatch file — the first dispatch's file must be BYTE-IDENTICAL
+    after the second fire, even though the legacy (single-slot) sidecar now
+    reflects the second dispatch."""
+    _write_settings(
+        fixture["settings"],
+        split_per_day=0.0, repair_per_day=1000.0, consolidation_per_day=0.0,
+        conflict_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+    _write_malformed_page(fixture["local"])
+    out1 = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out1.strip() == "[janitor-memory-repair]"
+    state_dir = fixture["project"] / ".janitor" / "state"
+    first_legacy = json.loads((state_dir / "memory-maint-pending.json").read_text(encoding="utf-8"))
+    first_file = state_dir / f"memory-maint-pending-{first_legacy['dispatch_id']}.json"
+    first_content_before = first_file.read_text(encoding="utf-8")
+
+    # A second, DIFFERENT chore becomes due (repair is no longer due — just
+    # stamped — so switch settings to make split due instead, mirroring a
+    # later heartbeat firing a different intervention).
+    _write_settings(
+        fixture["settings"],
+        split_per_day=1000.0, repair_per_day=0.0, consolidation_per_day=0.0,
+        conflict_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+    _write_oversized_page(fixture["local"])
+    out2 = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out2.strip() == "[janitor-memory-split]"
+
+    # The FIRST dispatch's own file must be untouched — this is the fix.
+    assert first_file.is_file(), "the first dispatch's own file must survive the second dispatch"
+    assert first_file.read_text(encoding="utf-8") == first_content_before
+    assert json.loads(first_content_before)["intervention"] == "repair"
+
+    # The legacy sidecar now reflects the SECOND dispatch (documented, expected
+    # single-slot behavior for byte-compatible legacy readers) — a distinct
+    # dispatch_id from the first.
+    second_legacy = json.loads((state_dir / "memory-maint-pending.json").read_text(encoding="utf-8"))
+    assert second_legacy["intervention"] == "split"
+    assert second_legacy["dispatch_id"] != first_legacy["dispatch_id"]
+
+
 def test_no_emit_no_sidecar(fixture):
     """A silent fire (nothing due) never writes the pending-pick sidecar."""
     _write_settings(
