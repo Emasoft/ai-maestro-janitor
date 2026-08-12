@@ -3,7 +3,7 @@ trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
 column: dev
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-12T20:13:28+0200
+updated: 2026-08-12T20:36:57+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -74,6 +74,43 @@ defensible options, e.g.:
 
 The test is not "is it risky" but "is there more than one defensible answer". A single
 defensible answer means the janitor should already have done it.
+
+## The measurement that sizes this card (2026-08-12, this host's own token meter)
+
+Read from `.janitor/state/token-meter.jsonl`, not estimated:
+
+| quantity | value |
+|---|---|
+| heartbeat fires logged | 1999 |
+| mean weighted tokens per fire, all-time | 199,929 |
+| **mean per fire, last 50** | **398,459** |
+| janitor heartbeat, rolling 7d | 110.7M weighted — **~68% of the window's 163.6M** |
+| turns logged | 3349 — of which **2717 are heartbeat**, 632 interactive |
+
+**A quiet fire is not cheap; it is the most expensive thing on the machine.** At `*/5` that is
+288 fires/day × ~398k = **~115M weighted per day**, and the per-fire figure has DOUBLED against
+the all-time mean purely because this session's context grew — the cost scales with context,
+not with what the fire finds.
+
+**This is why the quiet-heartbeat work (`adcd8af1`) does not, by itself, fix anything.** It cut
+what a fire PRINTS. The cost is the TURN — the transcript re-read at the cache-read rate — and
+printing nothing still pays it in full. Three variables (`turns × per-turn-context × output`)
+and that change touched only the smallest one.
+
+The three real levers, measured rather than guessed:
+
+1. **Context size — ~23×.** A fire against this session (3.5M cached) costs ~398k weighted; a
+   fire against a freshly-cleared session (~166k floor) costs ~17k. This is the dominant term
+   and the reason TRDD-1QJIZFFW is a cost card, not a convenience card.
+2. **Cadence — 3×.** `*/5` → `*/15` is 288 → 96 fires/day. Has a real trade (responsiveness),
+   so it is a USER decision, not an autofix.
+3. **Not waking the model at all — the structural one, and this card's actual subject.** A cron
+   fire IS a model turn by construction, so no amount of filtering makes a quiet fire free. The
+   only way to stop paying for a fire with nothing to say is for the DAEMON (free, no model) to
+   run the detectors and for the model to be woken only when something needs it. The injection
+   machinery for that already exists (`fleet_inject` / `terminal_trigger` can type into a pane);
+   what does not exist is the inversion — today the model wakes on a schedule and asks "is there
+   anything?", when it should sleep until the daemon says "there is".
 
 ## Why (the cost being paid today)
 
