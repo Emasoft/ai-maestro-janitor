@@ -1,9 +1,9 @@
 ---
 trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
-column: dev
+column: blocked
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-12T23:41:07+0200
+updated: 2026-08-13T00:00:14+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -49,11 +49,37 @@ command; building it would have cost a day and changed nothing.
     GAP SET (an unchanged set dedupes forever; a NEW gap is not swallowed by the stale marker),
     5 filings per beat with the deferred count LOGGED.
 
-**NEXT ACTION:** continue Rule 3 with the approved categories — workflow hardening (SHA-pin
-actions, add job timeouts / least-privilege permissions) and dependency bumps (bump, run the
-suite, keep only if green). Both are FLEET-shaped, so they follow the same lesson the Rule 4
-wiring just established: the fix belongs wherever the repo can actually be changed, and the
-per-session surface stays silent about repos that are not this one.
+**NEXT ACTION — BLOCKED ON A USER DECISION, and the block is the finding.** I went to build
+Rule 3's last two categories and found them already built, as PROPOSE → user approves → agent
+fixes. Verified in the source, 2026-08-13:
+
+  - **Workflow hardening** — `detectors/workflow-security.py:246` raises one proposal per finding
+    CLASS (`by_code`), and the code states the reason it does not just fix: *"These are the
+    USER's workflows, so the janitor may only offer… the user may well want the injection fixed
+    and the permissions left alone — approval is per class, so it has to be a real choice."*
+  - **Dependency bumps** — `DEP-001/002/003` in `lib/issue_catalog.py:313-338` already encode the
+    exact policy the directive asks for: bump to the fixed version and run the full suite; if no
+    fixed version exists FLAG it, never silently pin; and for a KNOWN-MALICIOUS version, *"Report
+    to the user IMMEDIATELY — do not quietly bump"*.
+  - Both route to `janitor-security-agent`, and `lib/tickets.py:478` REFUSES to open either
+    without an approved TRDD, because *"the janitor is a guest in the user's repo"*.
+
+**So the remaining work is not code — it is one governance question.** `branch-protection`
+already has a guarded auto-applier (`scripts/guard/branch_protection_apply.py`, default-ON,
+vetoed by `/janitor-autofix-off`) that applies the ratified baseline with NO ticket and NO
+approval, because `manager-approval-defaults.md` §F classes applying that baseline as-is as
+EXEMPT. SHA-pinning third-party actions is listed as EXEMPT in the same table — but it has no
+such applier, so it goes through the approval gate anyway.
+
+**THE DECISION (USER's):** should the EXEMPT subset — SHA-pin actions, add job timeouts, tighten
+`permissions:` to least-privilege — get a guarded applier like branch-protection's, bypassing
+per-finding approval? It is defensible either way and the difference is not technical:
+  - **YES** — the governance rules already call it exempt, and Rule 3 says an obvious fix should
+    not wait on a human.
+  - **NO** — a CI file is the user's, a wrong pin breaks every build in the repo, and the
+    existing per-class approval is one keystroke.
+Do NOT decide this by inferring it from Rule 3; the two rules genuinely point different ways,
+which is what makes it a decision rather than an oversight.
 
 **Do it in a SMALL context.** This card's own measurement: a fire costs ~398k weighted against
 a 3.5M session versus ~17k against a fresh one. Building the cost fix inside the expensive
@@ -166,8 +192,15 @@ the most expensive resource in the system to avoid using the cheapest.
       model tokens: the daemon files it, no session is interrupted.
 - [ ] The auto-fixable findings are enumerated, and each is fixed by a script or a background
       agent rather than surfaced. Each carries a test proving the fix runs.
-- [ ] Decision-margin findings are enumerated and still escalate — with the reason they
+- [x] Decision-margin findings are enumerated and still escalate — with the reason they
       cannot be automated stated in the code, so nobody later "helpfully" automates them.
+      **Already true, verified 2026-08-13 rather than rebuilt.** The enumeration is
+      `KIND_REGISTRY`'s PROJECT-domain rows (`lib/tickets.py:71-76`); the reason is at the gate
+      (`:478` — "the janitor is a guest in the user's repo") and per-finding in the catalog
+      (DEP-002: *"Report to the user IMMEDIATELY — do not quietly bump the version"*;
+      `workflow-security.py:246`: approval is per CLASS so the user can fix the injection and
+      leave the permissions alone). Writing a fifth statement of it would have ticked the box
+      without changing anything.
 - [ ] Measured: the number of stdout lines a quiet fire emits, before and after.
 
 ## Approval log
