@@ -179,14 +179,18 @@ def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVer
         pass
 
     idle_s, _enq, _await = fleet_scan.transcript_activity(str(root), now)
+    # Resolved ONCE and carried in `facts`, because the composer needs the same transcript the
+    # verdict was computed from. Without it there `_compose` had no path to hand llm-ext, and
+    # the summary branch would have degraded to template-only on every run — shipping the
+    # feature dark in the same commit that exists to un-dark it (TRDD-1QJIZFFW).
+    newest = cold_cache_compact.newest_transcript(root)
     facts = {
         "idle_seconds": idle_s,
         "last_turn_age_s": _last_turn_age(root, now),
         "ttl_minutes": ec.read_ttl_minutes(sd),
         "seconds_to_next_fire": ec.seconds_until_next_fire(cron, now),
-        "context_tokens": cold_cache_compact.context_tokens_for(
-            cold_cache_compact.newest_transcript(root)
-        ),
+        "transcript": str(newest) if newest else "",
+        "context_tokens": cold_cache_compact.context_tokens_for(newest),
         "min_context": ec.min_context_tokens(),
         "min_idle_s": cold_cache_compact.clear_min_idle_seconds(),
         "headroom_s": ec.headroom_seconds(),
@@ -223,7 +227,24 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
         idle_seconds=facts.get("idle_seconds"),
         context_tokens=facts.get("context_tokens"),
     )
-    text = ec.compose_template_handoff(inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    transcript = str(facts.get("transcript") or "")
+
+    # THE WIRING (TRDD-1QJIZFFW). `use_llm_ext()` shipped exported, defaulting True, with ZERO
+    # callers — a switch whose default was a promise the code did not keep. This is the caller.
+    #
+    # Both branches produce a handoff; neither can produce none. `run_llm_ext_summary` answers
+    # None for every failure mode of a young CLI (absent binary, unresolvable data dir, non-zero
+    # exit, timeout, empty output), and `compose_handoff` then emits the scriptable facts and
+    # the message tail alone. Degrading to a smaller handoff is survivable; degrading to no
+    # handoff is not, because the `/clear` it precedes is unrecoverable.
+    summary = ec.run_llm_ext_summary(transcript) if (ec.use_llm_ext() and transcript) else None
+    text = ec.compose_handoff(
+        inputs,
+        now_iso=now_iso,
+        summary=summary,
+        tail=ec.recent_messages(transcript) if transcript else (),
+    )
     _ok, reasons = clear_trigger.check_handoff_concise(text)
     return text, reasons
 
