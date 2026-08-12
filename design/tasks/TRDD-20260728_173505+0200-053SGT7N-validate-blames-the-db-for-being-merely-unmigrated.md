@@ -1,9 +1,9 @@
 ---
 trdd-id: 053SGT7N
 title: memgrep validate blames the database for being merely unmigrated
-column: backburner
+column: complete
 created: 2026-07-28T17:35:05+0200
-updated: 2026-07-28T17:35:05+0200
+updated: 2026-08-12T14:35:55+0200
 current-owner: janitor-repair-agent
 task-type: bugfix
 approval-tier: 0
@@ -74,3 +74,16 @@ correct for a root that may sit behind for hours.
   (`scripts/lib/issue_catalog.py` header).
 - Reproducer, verbatim: build the index with a current binary, `PRAGMA user_version = 5`, then
   `memgrep validate <root>`.
+
+## Approval log
+
+- 2026-08-12T14:35:55+0200 — COMPLETE by janitor-main-session. Closed on evidence, not implemented:
+  **the design decision this card was waiting on has been made and shipped.** The card asked what a
+  "behind but undamaged" index should report, and rejected migrate-first; the code now takes its
+  option 2 (a distinct non-damage code). Verified reachable, not merely defined —
+  `BEHIND_LADDER_CODE = "[MEMGREP-011]"` (`index.rs:729`) is EMITTED at `index.rs:877` on the
+  `ver < expect_version` branch of `first_shape_defect`, with the wording "nothing failed and
+  nothing is damaged; opening or reindexing this root runs the ladder. Do NOT rebuild it",
+  consumed at `index.rs:320`, and asserted by a test at `index.rs:2122`. Checked the emission
+  site specifically because a constant that exists but is never raised looks identical to a
+  shipped feature.

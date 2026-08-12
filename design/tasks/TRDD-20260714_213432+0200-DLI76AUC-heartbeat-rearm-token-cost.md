@@ -1,9 +1,9 @@
 ---
 trdd-id: DLI76AUC
 title: The heartbeat re-arm is a model turn, so the dynamic cadence can cost more than it saves
-column: backburner
+column: complete
 created: 2026-07-14T21:34:32+0200
-updated: 2026-08-02T06:35:00+0200
+updated: 2026-08-12T14:35:55+0200
 current-owner: janitor-session
 task-type: refactor
 scope: project
@@ -212,3 +212,15 @@ one, so this mechanism is worth MORE than its own docs claimed. Shipped as TRDD-
   whether the failing code can even REACH it. And when a test harness prints a diagnosis, read it
   before theorising. (The under-load flakiness of these subprocess/global-state tests is real and
   unfixed — it deserves its own TRDD, and it is not this one.)
+
+## Approval log
+
+- 2026-08-12T14:35:55+0200 — COMPLETE by janitor-main-session. Closed on evidence, not implemented:
+  **its NEXT ACTION targets a module that no longer exists.** The card's next step was to retune
+  `heartbeat_cadence_demote_fires` from 2 to ~9; `scripts/lib/heartbeat_cadence.py` was deleted
+  wholesale by `af499ee3` ("one arm per session — tier-driven renews deleted", TRDD-BRHJHWW0),
+  which also removed the dynamic-cadence subsystem this card's parent TRDD-0QQX9H0G designed.
+  `git grep` finds the knob nowhere in `scripts/` at HEAD. Superseded by that breaking change,
+  not by any work on this card. (Sibling TRDD-AR9IUGIJ recorded the same deletion independently
+  for its own NEXT ACTION; this one never did — which is precisely how the card kept asserting a
+  plan against code that was gone.)

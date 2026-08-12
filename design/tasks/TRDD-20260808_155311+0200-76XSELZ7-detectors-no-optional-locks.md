@@ -1,9 +1,9 @@
 ---
 trdd-id: 76XSELZ7
 title: Read-only detector git calls must not take index.lock — GIT_OPTIONAL_LOCKS=0
-column: todo
+column: complete
 created: 2026-08-08T15:53:11+0200
-updated: 2026-08-08T15:53:11+0200
+updated: 2026-08-12T14:35:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -47,3 +47,13 @@ hits under scripts/.
 - [ ] Env-assembly test pinned
 - [ ] Writer paths (publish.py commit/tag) unchanged
 - [ ] #245 answered when it ships
+
+## Approval log
+
+- 2026-08-12T14:35:55+0200 — COMPLETE by janitor-main-session. Closed on evidence, not implemented:
+  **the card's central claim is false at HEAD.** It asserted zero `GIT_OPTIONAL_LOCKS` /
+  `--no-optional-locks` hits under `scripts/`; there are now 26 files carrying it, including all
+  three sites the card named as violators (`detectors/dirty-tree.py`,
+  `detectors/worktree-janitor.py`, `detectors/project-plugins-update.py`), several with comments
+  citing janitor#245 — the very issue this card cites. The work was done incrementally by other
+  changes and nothing closed the card.
