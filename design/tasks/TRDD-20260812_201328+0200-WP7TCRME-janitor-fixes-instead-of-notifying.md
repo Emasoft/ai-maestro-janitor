@@ -3,7 +3,7 @@ trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
 column: dev
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-12T21:25:16+0200
+updated: 2026-08-12T23:41:07+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -38,17 +38,22 @@ command; building it would have cost a day and changed nothing.
   - `adcd8af1` quiet heartbeat (the FILTER half — see the measurement section: it fixes none of
     the COST, only the noise)
   - `b8dbc254` Rule 3 #1 — a non-executable detector is chmod'd, not reported
-  - `da249936` Rule 4 — `cross_project_issue.py`, the owned-repo issue filer. **LIBRARY, STILL
-    UNWIRED** — no detector calls it.
+  - `da249936` Rule 4 — `cross_project_issue.py`, the owned-repo issue filer.
   - `7ad7c0ee` + `254df25f` Rule 3 #2 — the `reports/` gitignore guard, library AND wired as a
     daily detector. Verified live.
+  - `d4d9f726` Rule 4 **WIRED** — the daemon's fleet GitHub-config audit files each repo's gaps
+    on that repo's own tracker. The caller is the DAEMON, not a detector, and that is the
+    load-bearing part: a project session is forbidden to speak about another repo at all, so the
+    only component allowed to file cross-repo is the one that is not a project session. Owning
+    repo is the finding's own slug — never inferred from a path. One issue per repo, keyed on the
+    GAP SET (an unchanged set dedupes forever; a NEW gap is not swallowed by the stale marker),
+    5 filings per beat with the deferred count LOGGED.
 
-**NEXT ACTION:** wire `cross_project_issue.file_finding` to its first detector — one at a time,
-never a sweep, because a mis-attributed finding opens a real issue on a real repo. Start with a
-finding whose owning repo is unambiguous (a fleet plugin's own slug), not one inferred from a
-path. Then continue Rule 3: the remaining candidates are the approved categories — workflow
-hardening (SHA-pin actions, add job timeouts / least-privilege permissions) and dependency
-bumps (bump, run the suite, keep only if green).
+**NEXT ACTION:** continue Rule 3 with the approved categories — workflow hardening (SHA-pin
+actions, add job timeouts / least-privilege permissions) and dependency bumps (bump, run the
+suite, keep only if green). Both are FLEET-shaped, so they follow the same lesson the Rule 4
+wiring just established: the fix belongs wherever the repo can actually be changed, and the
+per-session surface stays silent about repos that are not this one.
 
 **Do it in a SMALL context.** This card's own measurement: a fire costs ~398k weighted against
 a 3.5M session versus ~17k against a fresh one. Building the cost fix inside the expensive
@@ -153,8 +158,12 @@ the most expensive resource in the system to avoid using the cheapest.
       contract in `test_findings_ledger.py`. Adding a fourth test would have ticked this box
       without changing any behaviour — the box was already earned by
       `janitor-per-project-channeling`'s lesson, which is why that page exists.
-- [ ] A finding for another OWNED repo is filed as an issue on that repo by a script, with
-      dedupe so a recurring detector cannot open the same issue every fire.
+- [x] A finding for another OWNED repo is filed as an issue on that repo by a script, with
+      dedupe so a recurring detector cannot open the same issue every fire. **Landed
+      `d4d9f726`** — the daemon's fleet GitHub-config audit is the first caller. Dedupe is a
+      hidden marker keyed on `(code, gap set)` and searched BEFORE filing; a failed search
+      refuses to file, because "the search broke" is not evidence that nothing was filed. Zero
+      model tokens: the daemon files it, no session is interrupted.
 - [ ] The auto-fixable findings are enumerated, and each is fixed by a script or a background
       agent rather than surfaced. Each carries a test proving the fix runs.
 - [ ] Decision-margin findings are enumerated and still escalate — with the reason they
