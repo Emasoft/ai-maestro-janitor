@@ -88,6 +88,34 @@ def test_redirecting_is_idempotent_so_a_stable_corpus_produces_no_churn(
     assert lib._redirect_orphaned_proposals(scopes, local) == [], "second run must be a no-op"
 
 
+def test_the_notice_never_carries_an_absolute_machine_local_path(lib, tmp_path: Path) -> None:
+    """TRDD-YWMKNKVT / janitor#243 — the notice is written into a scope EVERY project reads,
+    so a literal path is correct for the one project that wrote it and wrong for every other
+    reader. It must carry the RESOLUTION RULE (`<your-project-slug>`) instead.
+
+    Measured live 2026-08-13, which is why this is pinned: the canonical USER copy on this host
+    read `/Users/<me>/.claude/projects/-Users-<me>-Code-EMASOFT-ORCHESTRATOR-AGENT/memory/...`
+    — a DIFFERENT project's corpus — sending every reader of the shared scope into a foreign
+    store. That text can only come from an older writer, and this test is what stops OUR side
+    from ever reintroducing it.
+    """
+    local, user = tmp_path / "local", tmp_path / "user"
+    local.mkdir()
+    user.mkdir()
+    (user / lib.PROPOSAL_NAME).write_text("# old\n", encoding="utf-8")
+
+    assert len(lib._redirect_orphaned_proposals([("LOCAL", local), ("USER", user)], local)) == 1
+    notice = (user / lib.PROPOSAL_NAME).read_text(encoding="utf-8")
+
+    # No absolute path of any shape — POSIX home, Linux home, or Windows profile.
+    for needle in ("/Users/", "/home/", ":\\Users\\", str(local), str(tmp_path)):
+        assert needle not in notice, f"notice leaked an absolute path: {needle!r}"
+    # ...and it must still tell the reader HOW to resolve their own copy, or the redirect is
+    # merely silent rather than correct.
+    assert "<your-project-slug>" in notice
+    assert lib.PROPOSAL_NAME in notice
+
+
 def test_absent_orphans_are_a_silent_no_op(lib, tmp_path: Path) -> None:
     local, user = tmp_path / "local", tmp_path / "user"
     local.mkdir()
