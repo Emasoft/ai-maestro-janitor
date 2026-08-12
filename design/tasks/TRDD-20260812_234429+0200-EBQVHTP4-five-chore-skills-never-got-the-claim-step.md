@@ -1,10 +1,10 @@
 ---
 trdd-id: EBQVHTP4
 title: Five of the seven memory chore skills never got the claim step — they still tell the agent to pick its own scope
-column: todo
+column: complete
 created: 2026-08-12T23:44:29+0200
-updated: 2026-08-12T23:44:29+0200
-current-owner: unassigned
+updated: 2026-08-12T23:57:44+0200
+current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 scope: project
@@ -74,20 +74,34 @@ done carelessly it either breaks the publish gate or drops a prohibition on the 
 is precisely what happened during the trim that surfaced this (the split skill lost its
 "do NOT read the legacy `memory-maint-pending.json` slot" line and had to be restored).
 
-## Acceptance
+## Acceptance — ALL MET, landed `9b885599`
 
-- [ ] All seven chore skills carry the claim step, verbatim-patterned on `split`'s, including
+- [x] All seven chore skills carry the claim step, verbatim-patterned on `split`'s, including
       the STOP-and-report branch for exit 2 / unreadable / wrong-chore, and the explicit ban on
       the legacy `memory-maint-pending.json` slot
-- [ ] No skill self-selects a scope any more — `grep -n 'or \$USER_MEM' skills/janitor-memory-*/SKILL.md`
-      returns nothing that decides an assignment (an illustrative example is fine, a decision is not)
-- [ ] Every one of the seven is still under the 5000-token cap, by MOVING prose out, never by
-      dropping a step or a prohibition
-- [ ] A test asserts the invariant for all seven at once, so skill #8 cannot be added without it
-      — the loss this card documents was found by hand, and the next one will not be
+- [x] No skill self-selects a scope any more — pinned by
+      `test_skill_does_not_hand_the_agent_a_scope_to_pick`, which greps for the INVITATION
+      (`or $USER_MEM`, `--scope <LOCAL|PROJECT|USER>`), not just for the script's absence: a
+      claim step is worthless while a menu still sits next to it
+- [x] Every one of the seven is still under the 5000-token cap, by MOVING prose out (measured
+      with the same o200k_base×1.3 the gate uses: consolidate 4908, conflict 4818, repair 4864,
+      atomize 4541, harvest 4723). Verified no step, command or prohibition left: the
+      `is_due`/TRDD-VJ8L465M double-gate ban, `is_legal_merge`'s refusal catalog and harvest's
+      DORMANT note all still resolve inside their skill's tree
+- [x] A test asserts the invariant for all seven at once — `tests/test_memory_chore_claim_step.py`
+
+**The guard test needed hardening before it was worth anything, and that is the lesson here.**
+As delivered it asserted only that the slot is NAMED; a skill still telling the agent to READ
+it would have passed. Both replacement assertions then FAILED to catch their own defect on the
+first falsification attempt — the prohibition window was an open-ended slice to EOF (so any
+stray "never" later in the file satisfied it), and the scope-menu probe was aimed at a line
+spelling these skills do not use. Both fail correctly now. A test that cannot fail is not
+evidence; the only way to know which kind you wrote is to attack it.
 
 ## Approval log
 
 - 2026-08-12T23:44:29+0200 — FILED at `todo` by janitor-main-session (tier 0, own scope).
   Found while VERIFYING a lean-worker's skill trim rather than trusting its report; the trim
   itself is unrelated and already landed (`ec28365d`).
+- 2026-08-12T23:57:44+0200 — COMPLETED by janitor-main-session. All five skills carry the claim step; the
+  seven-skill guard test landed with both new assertions falsified. Shipped in `9b885599`.
