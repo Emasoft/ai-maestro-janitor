@@ -308,6 +308,32 @@ def test_close_invalid_REFUSES_without_the_proof(project: Path) -> None:
     assert _reload(t.id).status == tickets.IN_PROGRESS, "a refused close must not mutate the ticket"
 
 
+def test_close_needs_human_is_terminal_without_burning_attempts(project: Path) -> None:
+    """The missing option (#213). Before this, the only honest exit for a real finding whose fix
+    is owned by another repo cost two wasted `failed` dispatches to burn `max_attempts`."""
+    t = _ticket(status=tickets.IN_PROGRESS)
+
+    rc, out = _cli(project, "close", t.id, "--status", "needs_human",
+                   "--resolution", "root cause confirmed; fix belongs to a different repo")
+
+    assert rc == 0
+    assert "needs_human" in out and "NOT re-queue" in out
+    after = _reload(t.id)
+    assert after.status == tickets.NEEDS_HUMAN
+    assert after.attempts == 0, "a direct needs_human close is not a failed attempt"
+
+
+def test_close_needs_human_REFUSES_without_the_proof(project: Path) -> None:
+    """Same discipline as `invalid`: an unexplained hand-off to a human is indistinguishable from
+    giving up."""
+    t = _ticket(status=tickets.IN_PROGRESS)
+
+    rc, out = _cli(project, "close", t.id, "--status", "needs_human", "--resolution", "   ")
+
+    assert rc == 2 and "REFUSED" in out
+    assert _reload(t.id).status == tickets.IN_PROGRESS, "a refused close must not mutate the ticket"
+
+
 def test_close_failed_says_RE_QUEUED_not_closed(project: Path) -> None:
     """The silent half of #128: an agent reported a ticket 'closed' that was still in the pool.
 

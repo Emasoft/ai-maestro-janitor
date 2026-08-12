@@ -16,6 +16,7 @@ the injection boundary are enforced.
     ticket_cli.py start   T-7QK2M4XZ        # an agent claims it (open/dispatched → in_progress)
     ticket_cli.py close   T-7QK2M4XZ --status resolved --resolution "…" [--report PATH]
     ticket_cli.py close   T-7QK2M4XZ --status invalid  --resolution "…"   # PROVEN not a defect
+    ticket_cli.py close   T-7QK2M4XZ --status needs_human --resolution "…"  # real, but fix is elsewhere
     ticket_cli.py cancel  T-7QK2M4XZ [--why …]
     ticket_cli.py retry   T-7QK2M4XZ        # re-open a needs_human/invalid ticket for another attempt
     ticket_cli.py stats
@@ -73,12 +74,13 @@ def main() -> int:
     p.add_argument("ticket")
     p.add_argument(
         "--status",
-        choices=[tickets.RESOLVED, tickets.INVALID, tickets.FAILED],
+        choices=[tickets.RESOLVED, tickets.INVALID, tickets.NEEDS_HUMAN, tickets.FAILED],
         required=True,
         help=(
             "resolved = you FIXED it | invalid = you PROVED it is not a defect (terminal, "
-            "non-retrying; --resolution carries the proof) | failed = the attempt failed and the "
-            "ticket is RE-QUEUED for another try"
+            "non-retrying; --resolution carries the proof) | needs_human = the finding is real but "
+            "you cannot fix it here (e.g. the fix is owned by another repo); terminal, non-retrying, "
+            "a human must act | failed = the attempt failed and the ticket is RE-QUEUED for another try"
         ),
     )
     p.add_argument("--resolution", default="")
@@ -182,6 +184,18 @@ def main() -> int:
             tickets.record_refusal(t, now=now)
             print(f"{t.id} invalid — closed, will NOT re-queue ({t.resolution})")
             print(f"  the same finding with unchanged evidence is now suppressed; `retry {t.id}` to re-examine")
+            return 0
+        elif args.status == tickets.NEEDS_HUMAN:
+            # Reached directly, not via burning `max_attempts` retries (issue #213): the finding is
+            # real and correctly diagnosed, but the fix belongs elsewhere (e.g. another repo). This
+            # must NOT bump attempts — it is a terminal close, not a failed retry.
+            if not args.resolution.strip():
+                print("REFUSED: --status needs_human requires --resolution (state why a human must act)")
+                return 2
+            tickets.mark_needs_human(t, now=now, why=args.resolution)
+            tickets.save(t)
+            print(f"{t.id} needs_human — closed, will NOT re-queue ({t.resolution})")
+            print(f"  `retry {t.id}` to re-open if this was mis-classified")
             return 0
         else:
             tickets.mark_failed(t, now=now, backoff_s=int(tickets.config("TICKET_BACKOFF_S")), why=args.resolution)

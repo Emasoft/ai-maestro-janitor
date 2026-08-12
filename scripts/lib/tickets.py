@@ -278,6 +278,21 @@ def mark_invalid(t: Ticket, *, now: int, why: str) -> Ticket:
     return t
 
 
+def mark_needs_human(t: Ticket, *, now: int, why: str) -> Ticket:
+    """The finding is REAL but out of reach here: close it, terminally, for a human to act on.
+
+    Unlike `mark_failed` this does NOT increment attempts and does NOT re-queue — the whole point
+    (issue #213). `needs_human` reached via `mark_failed` only after burning `max_attempts` retries
+    to re-derive a diagnosis already known on attempt 1 (e.g. the fix is owned by another repo, per
+    the cross-project rule). This lets the caller assert the correct terminal state directly, at
+    zero extra dispatch cost. `retry` already re-opens a `needs_human` ticket if the call was wrong.
+    """
+    t.status = NEEDS_HUMAN
+    t.updated_at = now
+    t.resolution = _clean(why, 200)
+    return t
+
+
 def evidence_fingerprint(evidence: list[str] | None) -> str:
     """A stable digest of a finding's INPUTS — what a refusal is conditioned on.
 
