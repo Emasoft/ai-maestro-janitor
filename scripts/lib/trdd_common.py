@@ -825,6 +825,18 @@ _TOP_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 # rejected outright rather than partially matched.
 _BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{4,})`")
 
+# A deletion verb that, on the SAME LINE as a cited token, means the card is
+# RECORDING the death rather than relying on the symbol still existing
+# (TRDD-Q4AMWYCY). Deliberately narrow (the exact vocabulary the spec named) —
+# widening this risks swallowing a genuine "should be removed" instruction.
+_OBITUARY_VERB_RE = re.compile(
+    r"\b(?:deleted|removed|retired|gutted|gone)\b|no longer exists?",
+    re.IGNORECASE,
+)
+# A commit SHA (7-40 hex chars) on the token's own line — citing the commit
+# that removed a symbol is, by construction, already "done the homework".
+_COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
+
 
 @dataclass
 class DeadSymbolCitation:
@@ -852,6 +864,33 @@ def extract_state_block(body: str) -> str:
     nxt = _TOP_HEADING_RE.search(body, start)
     end = nxt.start() if nxt else len(body)
     return body[start:end]
+
+
+def _line_span(text: str, pos: int) -> tuple[int, int]:
+    """The `(start, end)` offsets of the single line in `text` that contains `pos`.
+
+    `end` excludes the trailing newline (if any) — the line's own text only.
+    Used to check a citation for an obituary marker LINE-SCOPED, not
+    paragraph-scoped (TRDD-Q4AMWYCY): widening the window to the paragraph
+    would silence a genuine stale NEXT ACTION that merely sits near an
+    unrelated obituary.
+    """
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    if end == -1:
+        end = len(text)
+    return (start, end)
+
+
+def _is_obituary_line(line: str) -> bool:
+    """True iff `line` already RECORDS a deletion rather than citing live code.
+
+    A deletion verb (`deleted`, `removed`, `retired`, `gutted`, `gone`, "no
+    longer exists") or a commit SHA (7-40 hex chars) on the token's own line
+    means the card has already done the finding's job — repeating "cites an
+    absent symbol" is noise, not signal (TRDD-Q4AMWYCY).
+    """
+    return bool(_OBITUARY_VERB_RE.search(line) or _COMMIT_SHA_RE.search(line))
 
 
 def _next_action_span(state_block: str) -> tuple[int, int] | None:
@@ -888,6 +927,14 @@ def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[Dead
     (e.g. a worked-example illustration) only misleads (`low`). A token cited more
     than once takes the HIGHEST severity of any of its occurrences.
 
+    An occurrence whose OWN LINE is an obituary — it already names a deletion
+    verb or a commit SHA — is excluded entirely (TRDD-Q4AMWYCY): the card has
+    already said the thing this check exists to tell it, so counting that
+    occurrence would only produce dismissible noise. This is line-scoped, not
+    paragraph-scoped, on purpose: a genuine stale NEXT ACTION a few lines below
+    an unrelated obituary must still fire. A token with SOME genuine (non-
+    obituary) occurrence still fires normally on those occurrences.
+
     Returns [] for a terminal TRDD (mirrors every other check's terminal guard) or
     a TRDD whose body carries no STATE block at all.
     """
@@ -902,6 +949,9 @@ def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[Dead
     in_next_action: dict[str, bool] = {}
     for m in _BACKTICK_TOKEN_RE.finditer(state_block):
         token = m.group(1)
+        line_lo, line_hi = _line_span(state_block, m.start())
+        if _is_obituary_line(state_block[line_lo:line_hi]):
+            continue
         hit_in_na = bool(na_span and na_span[0] <= m.start() < na_span[1])
         if token not in in_next_action:
             order.append(token)

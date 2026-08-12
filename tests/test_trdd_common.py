@@ -713,6 +713,41 @@ def test_check5_no_state_block_yields_nothing():
     assert findings == []
 
 
+def test_check5_obituary_line_suppresses_the_finding():
+    """A citation on a line that already RECORDS the deletion (a deletion verb
+    plus the commit SHA that did it) is not "cites an absent symbol" — it is
+    the card doing the finding's job itself. No finding (TRDD-Q4AMWYCY)."""
+    body = (
+        "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+        "NEXT ACTION: nothing runnable here.\n\n"
+        "SUPERSEDED — do NOT carry forward: the exemplar this line used to name,\n"
+        "`_phase_self_budget`, was deleted 2026-08-12-verified by `d9a7189d feat!: remove\n"
+        "MAINTENANCE MODE and the self-budget actuation`.\n"
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("_phase_self_budget"))
+    assert findings == []
+
+
+def test_check5_obituary_elsewhere_does_not_shield_a_genuine_stale_next_action():
+    """A NEXT-ACTION citation with NO obituary marker on its own line must
+    still fire HIGH, even when the SAME token has an unrelated obituary
+    elsewhere in the STATE block — suppression is line-scoped, not
+    paragraph- or token-scoped (TRDD-Q4AMWYCY)."""
+    # The obituary sentence and the NEXT ACTION share ONE paragraph (no blank
+    # line between them) — a paragraph-scoped suppression would wrongly
+    # silence the genuine citation two lines below; only a line-scoped one
+    # tells them apart.
+    body = (
+        "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+        "Historical note: `should_emit_renew` was removed by `af499ee3`.\n"
+        "NEXT ACTION: raise `should_emit_renew`'s `dwell_s` threshold once measured.\n"
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert [(f.token, f.severity) for f in findings] == [("should_emit_renew", "high")]
+
+
 def test_extract_state_block_stops_at_next_top_heading():
     """The STATE block ends at the next top-level '## ' heading, not at EOF."""
     body = (
