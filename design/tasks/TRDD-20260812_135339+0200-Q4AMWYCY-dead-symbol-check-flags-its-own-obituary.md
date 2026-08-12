@@ -1,9 +1,9 @@
 ---
 trdd-id: Q4AMWYCY
 title: The dead-symbol check flags a card that DOCUMENTS a deletion — an obituary is not a stale citation
-column: todo
+column: complete
 created: 2026-08-12T13:53:39+0200
-updated: 2026-08-12T13:53:39+0200
+updated: 2026-08-12T14:21:34+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -58,10 +58,10 @@ citation) must keep firing. A change that silences both is a regression wearing 
 
 ## Acceptance
 
-- [ ] A token on a line carrying a deletion marker produces NO finding
-- [ ] A genuine stale NEXT ACTION on a card that ALSO contains an obituary elsewhere still fires
-- [ ] Pinned by tests that fail before the change (both directions, not just the suppression)
-- [ ] The whole-board run is re-measured after: FP count down, true-positive count unchanged
+- [x] A token on a line carrying a deletion marker produces NO finding
+- [x] A genuine stale NEXT ACTION on a card that ALSO contains an obituary elsewhere still fires
+- [x] Pinned by tests that fail before the change (both directions, not just the suppression)
+- [x] The whole-board run is re-measured after: FP count down, true-positive count unchanged
 
 ## Approval log
 
@@ -71,3 +71,14 @@ citation) must keep firing. A change that silences both is a regression wearing 
   Not fixed inline: each detector change costs a full publish to reach production, and the
   finding is LOW-harm (dismissible noise), so it belongs in the queue rather than in a rushed
   edit at the end of a long session.
+- 2026-08-12T14:21:34+0200 — COMPLETE by janitor-main-session. Implemented by a delegated
+  lean-worker (`29acfb2c`) and VERIFIED first-hand, both directions, against the real board:
+  **GZXTSJSR now yields 0 dead-symbol findings; AR9IUGIJ still yields 7** (whole-board 12 -> 10).
+  93 tests pass, ruff clean, `mypy scripts` Success.
+  Checked the thing most likely to be quietly wrong: the suppression is **line-scoped**, keyed on
+  a deletion verb or a commit SHA on the token's OWN line. Paragraph scope would have re-opened
+  the false negatives fixed hours earlier the same day, and would have passed a naive review —
+  the two named tests (`..._obituary_line_suppresses_the_finding`,
+  `..._obituary_elsewhere_does_not_shield_a_genuine_stale_next_action`) pin exactly that boundary.
+  A Pyright `_root is not accessed` note on this file is PRE-EXISTING (`50e07a01`) and not a
+  defect: the leading underscore is the intentionally-unused convention.
