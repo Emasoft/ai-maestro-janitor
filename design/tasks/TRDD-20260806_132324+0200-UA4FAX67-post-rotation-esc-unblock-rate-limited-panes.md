@@ -3,13 +3,13 @@ trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
 column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-12T11:45:00+0200
+updated: 2026-08-13T00:37:09+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: [f3f664de]
+implementation-commits: [f3f664de, 624c63a4]
 ---
 
 # Post-rotation ESC unblock (owner failure report 2026-08-06, item 4)
@@ -45,17 +45,35 @@ chore the server claims — **the daemon standing down transfers the ACT but not
 BREADCRUMB, and nothing notices, because the breadcrumb's absence looks exactly like "no
 rotation happened".**
 
-**NEXT ACTION** (pullable, and cheaper than it looks — pick one, then say which):
+### 2026-08-13 — (a) IS DONE, and reviewing it found a fail-OPEN hole in its own gate
 
-- **(a) Detect their rotation instead of being told about it.** The server writes the same
-  `state.json` the janitor's rotator does; a live-identity change there is the same causal
-  evidence as our own stamp, and needs no cross-repo agreement. Fail-CLOSED and expiring, as
-  the existing gate already is.
-- **(b) Ask ai-maestro to stamp it** — cross-repo, correct in principle, and gated on someone
-  else's schedule. Same shape as R3, which is still open for that reason.
+**Option (a) shipped and is in the tree**, at the one place that already computes the signal:
+`rotator.refresh_beacon_if_stale` compares the live-identity beacon before/after a re-stamp, and
+on a real change now calls `gs.record_rotation_success(...)` — the same breadcrumb the daemon
+already consumes. No new evidence type, no new consumer, no cross-repo dependency, and it fires
+whoever rotated, which is the whole point on a server-owned host. Verified live on this machine:
+the beacon exists, carries an email + fp, and is 0.2 h old (the 300 s `oauth-beacon-refresh`
+detector maintains it, and it IS in the roster and enabled).
 
-(a) is strictly available to us and does not block on (b); prefer it unless the identity read
-turns out to be unreliable.
+**Reviewing it found a real defect (fixed, `624c63a4`).** The gate read `old != new`, and BOTH
+sides can be None without meaning "changed":
+  - `read_live_identity_beacon` returns None when the beacon has never been written AND when it
+    is older than the 24 h window — so `old` is None on a machine's first stamp and on the first
+    stamp after an idle day, and `None != "a@x"` is true. **Reproduced**: the log line reads
+    `beacon: live account changed (unknown) -> a@x` and the rotation stamp lands, so the daemon
+    would type into panes with no rotation behind it.
+  - `new` is None when the email ladder ends at an unreachable `/roles` — a degraded READ.
+Both sides must now be KNOWN. The comment above the gate had claimed it "cannot fire without an
+observed change of live account"; the claim was the give-away, since an absent observation is not
+an observation.
+
+**NEXT ACTION:** the remaining acceptance box is one LIVE observation (429 → rotate → the pane
+continues with no human keystroke). That cannot be manufactured honestly — it needs a real rate
+limit — so this card waits for one rather than being closed on the strength of its tests, which
+is what its own STATE block already warned against.
+
+**(b) remains open and remains optional:** asking ai-maestro to stamp the breadcrumb is still
+correct in principle, but (a) removed the dependency, so it is no longer on this card's path.
 
 **Do NOT close this card on the strength of its tests.** They pass, they are falsified, and
 they prove the wiring — between two ends that are not connected on the host that matters.
