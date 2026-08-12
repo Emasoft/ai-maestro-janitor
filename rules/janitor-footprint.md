@@ -2,13 +2,11 @@
      delete once that plugin is gone; a rule file, never a MEMORY store. -->
 
 > [!IMPORTANT]
-> **ai-maestro-janitor rule — INERT unless the janitor is active.** Check (cheap `$HOME` stats),
-> where `DATA` = `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`:
-> **UNINSTALLED** (`DATA` absent) → this file is an orphan the plugin could not remove: treat as
-> INERT and tell the user they may delete it — but NEVER any MEMORY store, only this rule file, and
-> only with their ok. **DISARMED** (`DATA/global-state/kill-switch.flag` or legacy
-> `~/.claude/janitor-global-state/kill-switch.flag` exists) → the janitor is intentionally stopped:
-> INERT this session. **ACTIVE** (otherwise) → apply the rule below.
+> **ai-maestro-janitor rule — INERT unless the janitor is active** (`DATA` =
+> `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`): no `DATA` ⇒ orphan — INERT,
+> and the user may delete THIS FILE only, never a memory store; `DATA/global-state/kill-switch.flag`
+> (or legacy `~/.claude/janitor-global-state/kill-switch.flag`) ⇒ deliberately stopped, INERT this
+> session; else ACTIVE.
 
 # ai-maestro-janitor — what it creates on this machine
 
