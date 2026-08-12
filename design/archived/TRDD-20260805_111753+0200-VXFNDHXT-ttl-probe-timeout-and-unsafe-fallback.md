@@ -1,9 +1,10 @@
 ---
 trdd-id: VXFNDHXT
 title: The cache-TTL probe times out intermittently and its fallback fabricates the one value that disables the guard
-column: dev
+column: superseded
+superseded-by: [BRHJHWW0]
 created: 2026-08-05T11:17:53+0200
-updated: 2026-08-05T11:52:00+0200
+updated: 2026-08-12T10:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -15,8 +16,49 @@ implementation-commits: [869a0144]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**PART 1 SHIPPED (`869a0144`). Parts 2 and 3 remain open, and part 2's answer depends on a
-prior I have not measured — see the break-even below before implementing it.**
+### CLOSED 2026-08-12 — SUPERSEDED by TRDD-BRHJHWW0: **there is no TTL probe any more**
+
+All three parts concern a prompt-cache TTL probe that no longer exists. `af499ee3
+feat(cadence)!: one arm per session — tier-driven renews deleted (USER directive,
+TRDD-BRHJHWW0)` removed the dynamic-cadence phase, and the TTL probe existed only to feed
+its tier decision. Verified at HEAD: `resolve_ttl_minutes` and `stale-probe` appear in NO
+tracked file except TRDD prose, and `tests/test_ttl_stale_probe.py` — the 10-test suite
+part 1 shipped with — is gone. Part 1's commit `869a0144` is real; its code was deleted
+three weeks later by a different card's directive.
+
+**The surviving code states it outright**, which is why this needed no inference —
+`external_clear.read_ttl_minutes`:
+
+> `ttl-regime.json` was written by the dynamic-cadence phase's TTL probe, retired by
+> TRDD-BRHJHWW0 — **nothing writes this file any more**, so this reader now always falls
+> back to `DEFAULT_TTL_MINUTES`.
+
+Part by part:
+
+- **Part 1** (a failed probe must not overwrite a measurement with a guess) — no probe
+  exists to fail. Shipped, then deleted with its subsystem.
+- **Part 2** (with no probe ever successful, resolve to the SHORT regime) — **already the
+  effective behaviour, by deletion rather than by decision.** `DEFAULT_TTL_MINUTES = 5` is
+  the short regime, and the sole surviving consumer always returns it. The break-even prior
+  this card was blocked on (`p ≈ 0.208`, the share of never-probed machines on a short TTL)
+  is **no longer needed** — every machine is now the never-probed case, and the default is
+  already the one the analysis argued for.
+- **Part 3** (separate TIMEOUT from FAILURE in the probe's timeout budget) — no probe, no
+  timeout budget. The `usage_probe.py` timeout is a DIFFERENT thing (the `/api/oauth/usage`
+  account probe) and is not what this card is about; do not "revive" part 3 against it.
+
+**The lesson worth carrying, because it cost this card ten days in `dev`:** its NEXT ACTION
+was *"measure the share of never-probed machines running a short TTL"* — a genuinely
+careful, well-reasoned step, gated on evidence rather than effort, and completely
+unnecessary the moment the subsystem was removed. A card blocked on a measurement will sit
+there indefinitely without ever re-asking whether the thing being measured still exists.
+**Re-verify the subject before paying for the evidence.** Third instance today, after
+TRDD-AR9IUGIJ (option C tuned a deleted knob) and TRDD-50V256RH (root cause falsified).
+
+**SUPERSEDED — do NOT carry forward:** the entire analysis below, including the corrected
+cost table and the break-even derivation. It is sound reasoning about a subsystem that no
+longer ships. Kept because the ratio-vs-absolute correction in it is a good general lesson
+about defaults, not because any of it is actionable.
 
 ### 2026-08-05 — part 1 landed: a stale measurement now outranks a fresh guess
 
@@ -150,3 +192,13 @@ Their first ask (make the TTL a first-class term in the tier decision) was alrea
 they withdrew it; their corrected ask is parts 2-3 above. Their framing is worth preserving:
 `source: "fallback"` is *"an unmeasured value wearing the shape of a measurement"* — the same
 pattern as a rule citing an enforcer that does not exist, or a version string that never changes.
+
+## Approval log
+
+- 2026-08-12T10:55:00+0200 — SUPERSEDED by janitor-main-session. TRDD-BRHJHWW0's
+  tier-driven-cadence deletion (`af499ee3`) removed the TTL probe this card is entirely
+  about; verified at HEAD that `resolve_ttl_minutes`, `stale-probe` and
+  `tests/test_ttl_stale_probe.py` are absent, and that the sole surviving consumer
+  (`external_clear.read_ttl_minutes`) documents the retirement itself and always returns
+  the SHORT default. Part 2's open acceptance box is satisfied by that default; parts 1
+  and 3 have no subject left.
