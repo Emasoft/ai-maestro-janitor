@@ -127,6 +127,28 @@ Do NOT tune a pattern against the samples that exposed it: that converts recall 
 generalisation into fit. `split_of()` splits the corpus dev/holdout for exactly this.
 See [[janitor-findings-pipeline]] for where these findings land.
 
+
+^ATOM-T1UU-0DNF [desc:"agent-context-integrity false-positives at 19% and every case is a doc DESCRIBING an attack to prohibit it — measured 2026-08-12, tracked in janitor#254", keywords: detector_flagged_my_security_policy false_positive_on_prohibition_text agent-context-integrity_fires_on_a_doc_describing_an_attack post-mortem_flagged_as_injection test_fixture_flagged_as_poisoning, type: project, ocd: 2026-08-12, lmd: 2026-08-12]
+
+Measured 2026-08-12 alongside the recall figure: `scan_text`'s false-positive rate is **19%**
+(3 of 16 blind-authored benign controls), and all three are the SAME shape — a file that
+describes an attack in order to prohibit, narrate, or fixture it. Concretely: a security policy
+documenting prompt injection fired `prompt-injection-multilingual`; an incident post-mortem
+fired `sensitive-secret-ref`; a clearly-labelled test fixture fired
+`prompt-injection-multilingual`. janitor#167 landed FP hardening for prohibition text and
+negation context, so whatever that covers, it does NOT cover prose ABOUT the attack, past-tense
+narrative, or a file that declares itself a fixture. Tracked in janitor#254 (FP half) — kept out
+of janitor#226 by that issue's own scope rule (coverage only).
+**Why this matters more than ordinary noise:** paired with ~28% recall it means the channel
+misses most real attacks while flagging the documentation that warns about them, which is how a
+reader learns to dismiss the one channel guarding auto-loaded context. It is self-referential —
+THIS repo's own security docs trip it, as would any project that documents these attack classes.
+The discriminating feature to gate on is that the attack string appears as the OBJECT OF
+DISCUSSION ("this document describes", "we observed", "example", "fixture"), not as an imperative
+addressed to the agent; a document-level frame is a cheaper signal than per-line negation.
+Do NOT tune against those three samples alone — that fixes the samples, not the class; use the
+bench's dev/holdout split.
+
 ## Governed by
 
 - [[janitor-architecture]] — the architecture hub; this page is the detailed roster
