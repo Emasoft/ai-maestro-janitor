@@ -1,9 +1,9 @@
 ---
 trdd-id: IAJS6M9Z
 title: The 5000-token SKILL.md budget has no local gate — every breach costs a full publish to discover
-column: todo
+column: complete
 created: 2026-08-12T13:35:50+0200
-updated: 2026-08-12T13:35:50+0200
+updated: 2026-08-12T14:13:41+0200
 current-owner: janitor-main-session
 task-type: infra
 approval-tier: 0
@@ -65,12 +65,12 @@ a passing one, which is the exact failure mode this card exists to remove.
 
 ## Acceptance
 
-- [ ] Every `skills/*/SKILL.md` body is asserted ≤5000 Claude tokens by a LOCAL test
-- [ ] The computed number matches CPV's reported number for at least one known-over file
+- [x] Every `skills/*/SKILL.md` body is asserted ≤5000 Claude tokens by a LOCAL test
+- [x] The computed number matches CPV's reported number for at least one known-over file
       (falsify it: a deliberately oversized fixture must FAIL the test)
-- [ ] The failure message names the offending skill and points at `references/` as the fix,
+- [x] The failure message names the offending skill and points at `references/` as the fix,
       mirroring the rules-floor test's wording
-- [ ] The test does not silently skip when its dependency is missing
+- [x] The test does not silently skip when its dependency is missing
 
 ## Approval log
 
@@ -78,3 +78,17 @@ a passing one, which is the exact failure mode this card exists to remove.
   task: filed while unblocking a publish that this gate would have made unnecessary. Not
   built inline, because adding a dependency mid-unblock is a decision that deserves its own
   change rather than a rider on someone else's.
+- 2026-08-12T14:13:41+0200 — COMPLETE by janitor-main-session. Implemented by a delegated
+  lean-worker (`d31fd809`), then VERIFIED first-hand rather than on the worker's report:
+  * the gate is real — an oversized body makes it FAIL and the message names the offending
+    skill (re-falsified independently here, not just taken from the worker's claim, then the
+    filler reverted and the tree confirmed clean);
+  * Option A was taken — `tiktoken` as a dev dep, exact parity with CPV (4999 / 4985 match
+    its reported numbers), no char-count proxy, no skip-when-missing;
+  * the editor's `Import "tiktoken" could not be resolved` (Pyright) is NOT a publish
+    blocker: publish lints `scripts/` only, with `--ignore-missing-imports`, and
+    `uv run mypy scripts` reports Success across 465 files. Checked because a type error in
+    the lint gate would have blocked the next release — the diagnostic looked alarming and
+    was, on inspection, an editor-env artifact.
+  One nit fixed on review: the comprehension encoded every skill TWICE (once in the value,
+  once in the predicate), doubling the BPE work each run.

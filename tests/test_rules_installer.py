@@ -708,11 +708,10 @@ def test_every_skill_body_stays_under_the_context_token_cap():
     at publish stage 4/11 — locally, so a breach fails in seconds instead of costing a full
     publish run (lint + the whole test suite) to discover it (TRDD-IAJS6M9Z)."""
     skills = sorted((_PROJECT_ROOT / "skills").glob("*/SKILL.md"))
-    over = [
-        (p.parent.name, _skill_body_claude_tokens(p))
-        for p in skills
-        if _skill_body_claude_tokens(p) > _SKILL_TOKEN_CAP
-    ]
+    # Measure once per skill: the comprehension's condition and its value would otherwise
+    # each encode the same body, doubling the BPE work on every run of the suite.
+    measured = [(p.parent.name, _skill_body_claude_tokens(p)) for p in skills]
+    over = [(name, tokens) for name, tokens in measured if tokens > _SKILL_TOKEN_CAP]
     assert not over, (
         f"skills over the per-skill token cap ({_SKILL_TOKEN_CAP}): {over}. "
         "Move detail to that skill's references/ dir, do not grow the cap."
