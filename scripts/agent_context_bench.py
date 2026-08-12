@@ -55,17 +55,52 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS / "lib"))
+sys.path.insert(0, str(_SCRIPTS.parent / "tests"))
 
+import _fake_secrets as fake  # noqa: E402
 import agent_config_patterns as acp  # noqa: E402
 
 _REPO = _SCRIPTS.parent
 DEFAULT_CORPUS = _REPO / "tests" / "agent_context_bench" / "corpus.jsonl"
 DEFAULT_BASELINE = _REPO / "tests" / "agent_context_bench" / "baseline.json"
+
+# Runtime placeholders for the credential-shaped fixtures that used to sit as literals in
+# corpus.jsonl (tests/test_secret_fixture_hygiene.py forbids a real-format credential at rest
+# anywhere in tracked source — a JSONL fixture corpus is no exception). The corpus carries only
+# these markers; the realistic value is generated here, in memory, from tests/_fake_secrets.py,
+# so the SHAPE a detector would see (prefix + high-entropy body, or a `scheme://user:pass@host`
+# connection string) is preserved without a real secret ever landing on disk.
+#   {{FAKESECRET:<prefix>:<seed>:<body_len>}}                        -> fake.secret(...)
+#   {{FAKEDSN:<scheme>:<seed>:<host>:<port>:<db>}}                   -> fake.dsn(...)
+_FAKESECRET_RE = re.compile(r"\{\{FAKESECRET:([a-zA-Z0-9_]+_):([a-zA-Z0-9._-]+):(\d+)\}\}")
+_FAKEDSN_RE = re.compile(
+    r"\{\{FAKEDSN:([a-zA-Z0-9+.:-]+):([a-zA-Z0-9._-]+):([a-zA-Z0-9_.-]+):(\d+):([a-zA-Z0-9_-]+)\}\}"
+)
+
+
+def expand_fake_secrets(text: str) -> str:
+    """Materialize `{{FAKESECRET:...}}` / `{{FAKEDSN:...}}` corpus placeholders.
+
+    Pure string substitution — called on every sample's `content` right after it is parsed, so
+    every downstream consumer (`split_of`, `score`) sees the same expanded text a real poisoned
+    file would carry. Unmatched text passes through unchanged, so a sample with no placeholder
+    (the overwhelming majority of the corpus) costs nothing.
+    """
+    text = _FAKESECRET_RE.sub(
+        lambda m: fake.secret(m.group(1), m.group(2), int(m.group(3))), text
+    )
+    text = _FAKEDSN_RE.sub(
+        lambda m: fake.dsn(m.group(1), m.group(2), host=m.group(3),
+                            port=int(m.group(4)), db=m.group(5)),
+        text,
+    )
+    return text
 
 
 def claimed_rule_ids() -> set[str]:
@@ -97,6 +132,7 @@ def load_corpus(path: Path) -> list[dict]:
             dropped += 1
             continue
         if isinstance(rec, dict) and rec.get("content") and rec.get("label"):
+            rec["content"] = expand_fake_secrets(rec["content"])
             samples.append(rec)
         else:
             dropped += 1
