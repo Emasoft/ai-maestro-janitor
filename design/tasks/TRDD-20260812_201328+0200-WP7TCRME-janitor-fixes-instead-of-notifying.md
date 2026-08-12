@@ -3,7 +3,7 @@ trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
 column: dev
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-12T20:41:48+0200
+updated: 2026-08-12T21:25:16+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -31,18 +31,28 @@ invisible, it does not make the work get done.
 
 **NOT STARTED:** everything in "The four rules" below.
 
-**Rule 2 turned out to be ALREADY DONE** (see Acceptance) — I had assumed a leak and found
-none. Verifying first cost one command; building it would have cost a day and changed nothing.
+**Rule 2 was ALREADY DONE** (see Acceptance) — assumed a leak, found none. Verifying cost one
+command; building it would have cost a day and changed nothing.
 
-**NEXT ACTION:** Rule 4 (cross-project issue filing) — a script that files a finding as an
-issue on the OWNED repo it belongs to, deduped so a recurring detector cannot reopen it every
-fire. USER approved this category (2026-08-12) along with repo hygiene, workflow hardening, and
-dependency bumps. Then Rule 3 proper: enumerate the auto-fixable findings and make each one FIX
-rather than surface.
+**LANDED so far on this card:**
+  - `adcd8af1` quiet heartbeat (the FILTER half — see the measurement section: it fixes none of
+    the COST, only the noise)
+  - `b8dbc254` Rule 3 #1 — a non-executable detector is chmod'd, not reported
+  - `da249936` Rule 4 — `cross_project_issue.py`, the owned-repo issue filer. **LIBRARY, STILL
+    UNWIRED** — no detector calls it.
+  - `7ad7c0ee` + `254df25f` Rule 3 #2 — the `reports/` gitignore guard, library AND wired as a
+    daily detector. Verified live.
 
-**Do it in a SMALL context.** Rule 3 is broad, and this card's own measurement shows a fire
-costs ~398k weighted against a 3.5M session versus ~17k against a fresh one. Building the
-cost fix inside the expensive session is the one way to make it not worth having.
+**NEXT ACTION:** wire `cross_project_issue.file_finding` to its first detector — one at a time,
+never a sweep, because a mis-attributed finding opens a real issue on a real repo. Start with a
+finding whose owning repo is unambiguous (a fleet plugin's own slug), not one inferred from a
+path. Then continue Rule 3: the remaining candidates are the approved categories — workflow
+hardening (SHA-pin actions, add job timeouts / least-privilege permissions) and dependency
+bumps (bump, run the suite, keep only if green).
+
+**Do it in a SMALL context.** This card's own measurement: a fire costs ~398k weighted against
+a 3.5M session versus ~17k against a fresh one. Building the cost fix inside the expensive
+session is the one way to make it not worth having.
 
 ## The four rules (USER, verbatim intent)
 
