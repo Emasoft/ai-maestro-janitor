@@ -349,3 +349,20 @@ def test_the_arm_NEVER_tells_an_agent_to_re_enable_maintenance(project: Path) ->
     lowered = out.lower()
     for forbidden in ("maintenance-on", "global-maintenance-on", "enable maintenance", "re-enable"):
         assert forbidden not in lowered, f"the arm must never point at an on-switch: {out!r}"
+
+
+def test_skill_falls_back_to_a_full_sweep_when_the_targeted_delete_fails(project: Path) -> None:
+    """A stale `heartbeat-cron-id.txt` must not make the skill trust `sweep=no` blindly (janitor#239).
+
+    `sweep=no` only means "the stamp names an id" — it cannot tell a harmlessly-stale id (the cron
+    died with the session, the stamp survived on disk) apart from a live cron under a DIFFERENT,
+    unrecorded id (an arm interrupted between `CronCreate` and `arm_record.py`). A `CronDelete`
+    that fails on the stamped id is consistent with the dangerous case, so the skill must instruct
+    a fallback to the full `CronList` sweep on that failure — not "proceed, it's fine"."""
+    text = (ROOT / "skills" / "janitor-arm" / "SKILL.md").read_text(encoding="utf-8")
+    lowered = text.lower()
+    assert "janitor#239" in text, "the fix must be traceable to the issue it closes"
+    assert "fall back to the full sweep" in lowered
+    assert "cronlist" in lowered.split("## 2. delete the old cron")[1].split("## 3.")[0], (
+        "step 2 must actually instruct a CronList fallback, not just mention the concept elsewhere"
+    )

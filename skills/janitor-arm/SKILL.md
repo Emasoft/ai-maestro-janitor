@@ -54,8 +54,20 @@ sweep=no                   # yes ⇒ CronList and delete EVERY janitor heartbeat
 
 ## 2. Delete the old cron
 
-`CronDelete` the `prior-cron-id` (or every id the sweep found). A delete that fails because the id
-is already gone is fine — proceed.
+`CronDelete` the `prior-cron-id` (or every id the sweep found).
+
+- **`sweep=no` and the delete FAILS** (id not found) → do not just shrug and proceed. The stamped
+  id survives a restart on disk while the cron it names is session-only, so a stale id is
+  expected — but a failed delete is also exactly what you'd see if a *different*, still-live
+  heartbeat is running under an id the stamp never recorded (a `CronCreate` that succeeded after
+  `arm_record.py` failed, or an arm interrupted between the two). `sweep=no` cannot tell those two
+  cases apart, so on failure fall back to the full sweep: run `CronList` and `CronDelete` every
+  job whose prompt starts with `[janitor-heartbeat]`. This costs one extra call only on the runs
+  that actually hit it, which is the point — the common case (a clean restart, no live cron to
+  find) stays cheap, and the dangerous case (a live cron under an unrecorded id) self-heals
+  instead of silently leaking a second heartbeat (janitor#239).
+- **`sweep=no` and the delete SUCCEEDS**, or **`sweep=yes`** (full sweep already ran) → proceed to
+  step 3.
 
 ## 3. Create the new cron
 
