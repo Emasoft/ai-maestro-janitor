@@ -75,6 +75,35 @@ Two further cautions for the wiring:
   a stalled generation hung forever). Treat the version as young: wrap the call in a real
   timeout of our own and degrade to `compose_template_handoff` on any non-zero exit.
 
+## The injected payload — USER spec, 2026-08-12
+
+**It is a HOOK that injects the handoff, not a skill or a command** (USER correction, 2026-08-12).
+The hook layer already exists and runs: `PreCompact -> pre-compact-handoff.py`,
+`PostCompact -> post-compact-resume.py`, `Stop -> on-stop-proactive-compact.py`. Build on those.
+PXP08ZQC's "wire a task into `daemon.py`" NEXT ACTION is therefore NOT the shape to copy.
+
+The new handoff injects THREE parts:
+
+1. **The `llm-ext session-summary` output** — the CLI writes it to a file; inject that file.
+2. **Scriptable facts about the pending TRDD(s)** — id, title, column, and the STATE block's NEXT
+   ACTION. All of it is greppable from frontmatter, so it costs ZERO model tokens to assemble and
+   is exactly the part that must never be paraphrased.
+3. **The latest messages — TRUNCATED.** The tail of the conversation, capped.
+
+**THE HARD CONSTRAINT: the injection must not refill the context it was built to empty.** A
+handoff that restores a large payload at session start defeats the entire feature — we would pay
+the cache-write we just avoided, one turn later. So the payload carries a byte/token BUDGET, and
+the message tail is the part that gets cut (parts 1 and 2 are small and load-bearing; part 3 is
+the elastic one). Truncate from the OLDEST end — the most recent exchanges are what a resuming
+session needs.
+
+Design notes for when this is built:
+- Budget the whole injection, not each part separately, or three "small" parts add up.
+- Say WHEN truncation happened ("N earlier messages dropped") — a silently clipped tail reads as
+  a complete record, which is worse than an explicitly short one.
+- Parts 2 and 3 must survive an llm-ext failure: if the CLI errors, inject 2 + 3 alone rather than
+  nothing (degrade, never lose the handoff).
+
 ## Why (the USER's framing)
 
 Two costs this removes, both paid today for nothing:
