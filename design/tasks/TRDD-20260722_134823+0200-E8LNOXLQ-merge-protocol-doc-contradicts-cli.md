@@ -1,9 +1,9 @@
 ---
 trdd-id: E8LNOXLQ
 title: merge-protocol.md tells the agent to do what memory_txn_cli.py unconditionally rejects
-column: backburner
+column: complete
 created: 2026-07-22T13:48:23+0200
-updated: 2026-07-22T13:48:23+0200
+updated: 2026-08-12T14:26:05+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: medium
@@ -75,3 +75,30 @@ holder's new content.
   agent following it burns a rejected commit on the most common merge shape. DO read the
   enforcing code's check (`_verify_merge`) before following prose that describes a
   tool's accepted input.
+
+## Approval log
+
+- 2026-08-12T14:26:05+0200 — COMPLETE by janitor-main-session. Surfaced by `trdd-drift`
+  (backburner, 21d untouched) and closed on evidence, NOT implemented: **the defect no longer
+  exists.** Option 1 was taken by some later change to the reference doc, so the contradiction
+  this card describes is gone. Verified at HEAD, both halves:
+  * `merge-protocol.md` now states "**a backlink holder canNOT ride along in the merge
+    transaction**", prescribes TWO transactions holder-FIRST, and explicitly retracts the old
+    claim ("an earlier revision of this paragraph claimed holder rewrites were 'fine and
+    expected'; that was never true of the code");
+  * the CLI check it contradicted is unchanged and still there
+    (`memory_txn_cli.py`: "merge expects exactly ONE surviving page").
+  Doc and code now agree, in the CLI's favour.
+
+  **Option 2 (relax the CLI so a merge + its redirects are ONE atomic txn) is deliberately NOT
+  carded.** It was the better invariant on the merits, but with option 1 applied it is an
+  enhancement, not a defect: the only cost left is a transient window between the holder-repair
+  commit and the merge commit, inside a single chore run. Buying that back means loosening the
+  shape check on the memory-transaction safety substrate — a poor trade for a window nothing has
+  been observed to lose data in. Revisit only if a real failure is seen.
+
+  **The finding worth carrying:** this card had sat 21 days describing a defect that had already
+  been fixed elsewhere, and its own line numbers had drifted (`memory_txn_cli.py:169-171` is now
+  a different function). Nothing re-checks whether a parked card's PREMISE still holds — the
+  drift detector measures AGE, which says "old", not "wrong". Checking the premise cost two greps
+  and replaced an afternoon of implementing a fix for a problem that no longer existed.
