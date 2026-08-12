@@ -61,19 +61,22 @@ and the agent prompts live in the references (Resources).
 1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward an interrupted txn). If kill-switched /
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
-2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare
-   `[janitor-memory-conflict]` marker IS your cadence authorization: `memory-maintenance.py`
-   checked `is_due` and stamped the cadence at emit, so re-checking `memory_settings.is_due`
-   here reads that fresh stamp and makes you abstain on the very scope it scheduled — the
-   double-gate removed by TRDD-VJ8L465M (scheduler owns cadence, agent owns content). Pick the
-   scope (cadence `conflict_per_day`, off by default (opt-in), paced by the scheduler when enabled). Scope roots (as in
-   every wikimem skill): LOCAL `$HOME/.claude/projects/<dashed-cwd>/memory`; USER the
-   janitor's **hard-coded** `…/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory`
-   (NOT `${CLAUDE_PLUGIN_DATA}`); PROJECT `<git-root>/.claude/project/memory` **only if
-   `memory_settings.get("edit_project_scope")`** (default False). **Default LOCAL+USER
-   only** — PROJECT is in-repo + pre-push-hook-blocked, so a PROJECT edit is
-   staged-not-pushed (rides the next `publish.py`), never pushed. Process **one scope per
-   pass** (round-robin, oldest last-run); nothing due → stop.
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+
+   ```bash
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+   ```
+
+   It prints the `(intervention, scope, root)` the scheduler stamped for you
+   (absolute path — your cwd as a spawned agent is not the project root); the
+   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
+   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
+   owns cadence, agent owns content). **Exit 2, an unreadable result, or a chore
+   name other than `conflict`: STOP and report that** — never pick a scope
+   yourself, never re-derive what is due, and **never read the legacy
+   `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+   human naming a scope IS the assignment). Process **one scope per pass**;
+   nothing due → stop.
 3. **Candidate set.** From the chosen scope's `memory-reorg-proposed.md`, take its
    `### Conflict candidates` (`- topic \`<tag>\`: <a> vs <b>`); bound to the **top-K
    oldest/most-conflicted** (K≈5). Empty/absent → stop.
@@ -107,7 +110,7 @@ you keep to yourself costs a full dispatch to re-derive next pass — the same "
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention conflict --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --intervention conflict --scope "$SCOPE" --root "$SCOPE_ROOT" \
   --page <a.md> --page <b.md> --reason "<why these two are NOT in conflict>"
 ```
 

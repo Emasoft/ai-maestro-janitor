@@ -43,15 +43,23 @@ full additive-vs-editorial distinction.
 1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare
-   `[janitor-memory-repair]` marker IS your cadence authorization: `memory-maintenance.py`
-   checked `is_due` and stamped the cadence at emit, so re-checking
-   `memory_settings.is_due` here reads that fresh stamp and makes you abstain on the very
-   scope it scheduled — the double-gate removed by TRDD-VJ8L465M (scheduler owns cadence,
-   agent owns content). Process **one scope per pass** (LOCAL + USER by default; PROJECT only if
-   `edit_project_scope` is True — a PROJECT repair is staged-not-pushed, rides the
-   next `publish.py`). Scope roots resolve exactly as in every wikimem skill. (Cadence is
-   `repair_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+
+   ```bash
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+   ```
+
+   It prints the `(intervention, scope, root)` the scheduler stamped for you
+   (absolute path — your cwd as a spawned agent is not the project root); the
+   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
+   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
+   owns cadence, agent owns content). **Exit 2, an unreadable result, or a chore
+   name other than `repair`: STOP and report that** — never pick a scope
+   yourself, never re-derive what is due, and **never read the legacy
+   `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+   human naming a scope IS the assignment). Process **one scope per pass** (PROJECT
+   only if `edit_project_scope` is True — a PROJECT repair is staged-not-pushed,
+   rides the next `publish.py`).
 3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep lint`.**
    `memgrep lint` and the scheduler's precheck used to disagree (a page the
    scheduler flagged could return zero lint findings), so lint-driven discovery
@@ -60,7 +68,7 @@ full additive-vs-editorial distinction.
 
    ```bash
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
-     --intervention repair --scope <LOCAL|PROJECT|USER> --root <memdir>
+     --intervention repair --scope "$SCOPE" --root "$SCOPE_ROOT"
    #   → one line per candidate: <page-relative-path>\t<reason-slug>
    ```
 
@@ -136,7 +144,7 @@ the fixable ones. Record the refusal before moving on:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention repair --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --intervention repair --scope "$SCOPE" --root "$SCOPE_ROOT" \
   --page <slug>.md --reason "<why this defect cannot be durably fixed>"
 ```
 

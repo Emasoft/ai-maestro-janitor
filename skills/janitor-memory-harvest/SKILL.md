@@ -13,30 +13,20 @@ description: HARVEST executor — the daily NON-DESTRUCTIVE chore that MIRRORS n
 
 ## What this is (the COEXISTENCE model — TRDD-ab232dbd)
 
-Two memory systems live in PARALLEL in every scope and cooperate:
-
-- **The BUFFER** — `MEMORY.md` + the raw `*.md` notes at the scope ROOT. This is
-  Anthropic/harness-owned (the harness `# Memory` directive writes it and auto-loads it
-  every session; Claude Code keeps evolving it). It is an unorganized, freely-growing
-  buffer. **The janitor NEVER stubs, trims, or modifies it.**
-- **The WIKI** — the curated pages under `memory/wikimem/`: rich frontmatter (`ocd`/`lmd`/
-  `tier`), `[^N]` lessons, bidirectional links, git-versioned, memgrep-indexed.
-
-HARVEST is the BRIDGE: it incrementally finds NEWLY-created buffer memories and **MIRRORS**
-each into the wiki as a SEPARATE curated page. The same fact lives in BOTH files
-(duplication is accepted, by USER decision — "separate parallel copies"). A per-scope
-watermark tracks what has been mirrored so the pass is idempotent.
+Two memory systems live in PARALLEL in every scope: the harness-owned **BUFFER**
+(`MEMORY.md` + raw `*.md` notes — never stubbed/trimmed/modified) and the curated
+**WIKI** (`memory/wikimem/`). HARVEST is the BRIDGE: it MIRRORS each newly-created
+buffer memory into the wiki as a separate curated page (duplication accepted, by
+USER decision), watermarked so the pass is idempotent. Full model:
+[harvest-background.md](references/harvest-background.md#the-two-memory-systems-in-full).
 
 **THE IRON RULE: never lose a memory, and never touch the buffer.** Harvest is purely
 ADDITIVE — it only ever creates/updates wiki pages. When unsure, mirror nothing, leave the
 buffer intact, and surface a finding. A missed mirror is recoverable next run.
 
-> **DORMANT today:** every existing top-level `memory/*.md` already carries full wikimem
-> frontmatter (it was curated in-place under the old model), and `MEMORY.md` carries only the
-> harness's content plus the janitor's one bridge line to the wiki overview. So on the CURRENT
-> corpus the discriminator finds ZERO raw buffer notes and harvest is a clean no-op. It
-> ACTIVATES the moment the harness next writes a minimal-frontmatter note. No bulk move is
-> needed.
+> **DORMANT today** on the current corpus (clean no-op; activates on the harness's
+> next minimal-frontmatter note). Why:
+> [harvest-background.md](references/harvest-background.md#current-corpus-status--dormant-today).
 
 ## Preconditions (cheap gate, run first)
 
@@ -50,15 +40,24 @@ sys.exit(0 if memory_txn.editor_enabled() else 1)
 PY
 ```
 
-The `[janitor-memory-harvest]` marker already chose ONE scope for this heartbeat. Do **one
-scope per pass**.
+Process exactly **ONE scope this run**, and CLAIM it before touching anything —
+never self-select:
+
+```bash
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+```
+
+It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
+path — your cwd as a spawned agent is not the project root). **Exit 2, an unreadable
+result, or a chore name other than `harvest`: STOP and report that** — never pick a
+scope yourself, never re-derive what is due, and **never read the legacy
+`memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+human naming a scope IS the assignment).
 
 ## Scope (LOCAL + USER default; PROJECT opt-in)
 
 ```bash
-LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # FIXED data dir, NOT ${CLAUDE_PLUGIN_DATA}
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"   # in-repo; opt-in only (|| pwd: L4 — without it a non-git cwd expands to the filesystem-root path)
+MEMDIR="$SCOPE_ROOT"   # the root memory_dispatch_claim.py printed — never hand-picked
 ```
 
 PROJECT is edited only when `edit_project_scope` is on, and then **staged-not-pushed**
@@ -82,7 +81,7 @@ Then drop every candidate already mirrored, via the watermark:
 uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_scopes as msc, memory_settings as ms, pathlib
-scope, root = "LOCAL", pathlib.Path("$LOCAL_MEM")   # one scope/root per pass
+scope, root = "$SCOPE", pathlib.Path("$MEMDIR")   # claimed scope/root — never hand-picked
 wiki = msc.resolve_wiki_dir(root)
 todo = []
 for p in sorted(root.glob("*.md")):
@@ -201,7 +200,7 @@ For each note that is now provably mirrored, record it so the next run skips it:
 uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_settings as ms, pathlib
-scope, root = "LOCAL", pathlib.Path("$MEMDIR")
+scope, root = "$SCOPE", pathlib.Path("$MEMDIR")
 for name in """<the mirrored note names, one per line>""".split():
     text = (root / name).read_text(encoding="utf-8")
     ms.harvest_mark_mirrored(scope, str(root), name, text)

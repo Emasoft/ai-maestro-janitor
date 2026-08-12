@@ -38,17 +38,13 @@ emit one `[janitor-memory] merge-candidate: <A> + <B> (abstained: <reason>)`
 line for a human):
 
 - **Same subject.** Both pages are about the *same element/aspect* — not merely
-  sharing keywords. (`reference` "keychain location" and `project` "rotator 429"
-  share words but are different subjects → abstain.)
-- **Same type AND tier.** `is_legal_merge` passes (same `metadata.tier`, both in
-  {aspect, component}, same `metadata.type`). Cross-tier, two-hub, and cross-type
-  pairs are **refused** — see step 3.
-- **Same scope.** Both pages live under the *same* scope root. Cross-scope merges
-  are never done (the transaction is per-scope; a LOCAL note and a USER note stay
-  separate — promotion is a deliberate human act).
+  sharing keywords (example: [merge-protocol.md](references/merge-protocol.md)).
+- **Same type AND tier.** `is_legal_merge` passes — cross-tier, two-hub, and
+  cross-type pairs are **refused**, see step 3.
+- **Same scope.** Both pages live under the *same* scope root — cross-scope
+  merges are never done (promotion is a deliberate human act).
 - **No third page.** No OTHER live page in the scope is also about this subject
-  (the "no-third-page" check, step 4). If a third exists, the merge would leave a
-  fragment behind → abstain and surface all three for a human.
+  (step 4) — a third would leave a fragment behind → abstain and surface it.
 
 When uncertain about subject sameness, **abstain**. Over-merging is worse than a
 missed merge.
@@ -71,16 +67,25 @@ PY
 > `<<'PY'` breaks the import, so this gate false-abstains EVEN WHEN THE EDITOR IS ENABLED
 > (H5, wikimem audit 2026-07-07). Applies to every block below.
 
-If a `[janitor-memory-consolidate]` marker drove this turn, the scheduler already chose
-ONE scope for this heartbeat and holds nothing you need — you pick the scope from
-the marker context (LOCAL or USER). Do **one** scope, **one** merge per pass
+Process exactly **ONE scope this run**, and CLAIM it before touching anything —
+never self-select:
+
+```bash
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+```
+
+It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
+path — your cwd as a spawned agent is not the project root). **Exit 2, an unreadable
+result, or a chore name other than `consolidate`: STOP and report that** — never
+pick a scope yourself, never re-derive what is due, and **never read the legacy
+`memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+human naming a scope IS the assignment). Do **one** scope, **one** merge per pass
 (bounded; the next cycle handles the rest).
 
 ## Scope roots — and the PROJECT gate (default OFF)
 
 ```bash
-LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # janitor's FIXED data dir (hard-coded, NOT ${CLAUDE_PLUGIN_DATA})
+MEMDIR="$SCOPE_ROOT"   # the root memory_dispatch_claim.py printed — never hand-picked
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # in-repo, PUSHED
 ```
 
@@ -109,9 +114,8 @@ query, so scanning independently risks abstaining on the very group it was dispa
 the real candidate GROUPS from the same code the scheduler gates on:
 
 ```bash
-MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
-  --intervention consolidate --scope <LOCAL|PROJECT|USER> --root "$MEMDIR"
+  --intervention consolidate --scope "$SCOPE" --root "$MEMDIR"
 #   → one line per candidate GROUP: <comma-joined-page-paths>\t<reason-slug (same-tier-type)>
 # Omit --max-bytes: the CLI resolves the same split_max_bytes the scheduler gated under.
 ```
@@ -169,9 +173,8 @@ sys.exit(0 if ok else 1)
 PY
 ```
 
-`is_legal_merge` refuses: cross-tier (`aspect` vs `component`), two `hub`s (a hub
-is a functionality's overview, not a mergeable leaf), and cross-type (`project` vs
-`reference`, etc.). On a refusal, abstain and surface a one-line note.
+On a refusal, abstain and surface a one-line note. Full refusal catalog:
+[merge-protocol.md § What is_legal_merge checks](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-clis).
 
 ### 4. No-third-page check (pre-merge)
 

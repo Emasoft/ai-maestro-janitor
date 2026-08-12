@@ -161,6 +161,10 @@ A page's slug is its frontmatter `name:`, falling back to its filename stem
 - If you must rename the survivor's `name:`, you also break every `[[A]]` holder —
   redirect those too. Prefer not to rename during a merge.
 
+**Non-subject example (moved from the SKILL body):** `reference` "keychain
+location" and `project` "rotator 429" share the word "keychain"/"429" but are
+different SUBJECTS → abstain. Same-word overlap is not same-subject.
+
 ## Worked walkthrough (LOCAL scope, two `project` `component` notes)
 
 Suppose the most-recent LOCAL notes include

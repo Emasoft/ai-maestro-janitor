@@ -38,15 +38,23 @@ split / consolidate / conflict / repair / harvest.
 1. **Editor enabled + roll forward.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** The
-   `memory-maintenance.py` scheduler checked `is_due` and stamped the cadence at emit, so a
-   bare `[janitor-memory-atomize]` marker IS your cadence authorization. Re-checking
-   `memory_settings.is_due` here would read the stamp the scheduler just wrote and make you
-   abstain on the very scope it scheduled — the double-gate removed by TRDD-VJ8L465M (the
-   scheduler OWNS the cadence; the agent owns the content). Process **one scope per pass**
-   (LOCAL + USER by default; PROJECT only if `edit_project_scope` is True — a PROJECT atomize
-   is staged-not-pushed, rides the next `publish.py`). Scope roots resolve as in every wikimem
-   skill. (Cadence is `atomize_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+
+   ```bash
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+   ```
+
+   It prints the `(intervention, scope, root)` the scheduler stamped for you
+   (absolute path — your cwd as a spawned agent is not the project root); the
+   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
+   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
+   owns cadence, agent owns content). **Exit 2, an unreadable result, or a chore
+   name other than `atomize`: STOP and report that** — never pick a scope
+   yourself, never re-derive what is due, and **never read the legacy
+   `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+   human naming a scope IS the assignment). Process **one scope per pass** (PROJECT
+   only if `edit_project_scope` is True — a PROJECT atomize is staged-not-pushed,
+   rides the next `publish.py`).
 3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`.** A `memgrep`-driven
    marker scan can disagree with the scheduler's own precheck (the same janitor#227 class of bug
    `memory-repair` hit: a page the scheduler flagged could look "already atomized" to a
@@ -55,7 +63,7 @@ split / consolidate / conflict / repair / harvest.
 
    ```bash
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
-     --intervention atomize --scope <LOCAL|PROJECT|USER> --root <memdir>
+     --intervention atomize --scope "$SCOPE" --root "$SCOPE_ROOT"
    #   → one line per candidate: <page-relative-path>\t<reason-slug (free-prose)>
    ```
 
@@ -117,7 +125,7 @@ no-distinct-facts)` output line:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
-  --intervention atomize --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --intervention atomize --scope "$SCOPE" --root "$SCOPE_ROOT" \
   --page <slug>.md --reason "<why this page has no distinct atomizable fact>"
 ```
 
