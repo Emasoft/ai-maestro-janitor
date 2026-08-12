@@ -20,13 +20,17 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
-**BLOCKED ON AN EXTERNAL DELIVERABLE. Do not start.** The USER directed (2026-08-12, verbatim)
-"just wait": a new **llm-externalizer CLI command that compacts a session at ZERO token cost**
-is *almost done* but has not shipped. Every step below is unimplementable until it exists.
+**PARKED ON THE OWNER'S GO-AHEAD — not on any task. Do not start.** No `blocked-by:` is set
+because nothing on this board blocks it: `column: backburner` is the honest resting state, and
+the wait is a human decision.
 
-**UNBLOCKS WHEN:** the llm-externalizer CLI exposes a compact/summarize verb that writes the
-summary to a FILE and costs no Claude tokens. Verify with `llm-ext --help` (its command list is
-generated from the tool catalog, so it cannot drift) before assuming it landed.
+The USER directed (2026-08-12, verbatim) "just wait": the llm-externalizer CLI that compacts a
+session at ZERO token cost was *almost done*. **It has since SHIPPED** — see the dated section
+below. So the original technical precondition is MET and the only remaining question is whether
+the owner considers v12.0.0 settled enough to build against (its own issue thread is a fix to
+that very command).
+
+**STARTS WHEN:** the owner says go. Nothing else is outstanding.
 
 **NEXT ACTION when unblocked:** give `external_clear.use_llm_ext()` an actual caller — see
 "The socket already exists" below. Do NOT design a new subsystem; the scaffold is built.
