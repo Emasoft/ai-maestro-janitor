@@ -251,3 +251,45 @@ def test_dedupe_second_run_in_same_interval_silent(tmp_path, home):
         _commit(repo, f"src/f{i}.py", f"x={i}\n", f"feat: thing {i}")
     assert "[memorize-nudge]" in _run(repo, home)
     assert _run(repo, home) == ""
+
+
+def _import():
+    """Load the detector as a module so its pure helpers can be unit-tested."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("memorize_nudge_under_test", _DETECTOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# --- janitor#256: nudging about code that no longer exists -----------------------
+
+
+def test_a_trashcan_path_is_never_nudged(tmp_path):
+    """`.trashcan/` is safe-delete's own staging area, so nudging about code in it asks the
+    reader to memorize what they just deleted."""
+    mod = _import()
+    p = tmp_path / ".trashcan" / "20260802_030918+0200" / "scripts" / "main.rs"
+    p.parent.mkdir(parents=True)
+    p.write_text("fn main() {}\n", encoding="utf-8")
+    rel = str(p.relative_to(tmp_path))
+    assert mod._is_gone_or_staged_for_deletion(tmp_path, rel), "trash must not be nudged"
+
+
+def test_a_deleted_file_is_never_nudged(tmp_path):
+    """The general defect the report exposed: the detector reads `git log --name-only` and
+    never asked whether the file is still THERE, so EVERY deletion nudged for the full 14-day
+    window — naming a file the reader cannot open. A nudge you cannot act on teaches you to
+    ignore the next one, which is the only thing this detector has."""
+    mod = _import()
+    assert mod._is_gone_or_staged_for_deletion(tmp_path, "scripts/deleted_yesterday.py")
+
+
+def test_a_live_file_is_still_nudged(tmp_path):
+    """The fix must not buy precision by silencing the detector — the failure mode this repo
+    keeps hitting."""
+    mod = _import()
+    p = tmp_path / "scripts" / "alive.py"
+    p.parent.mkdir(parents=True)
+    p.write_text("x = 1\n", encoding="utf-8")
+    assert not mod._is_gone_or_staged_for_deletion(tmp_path, "scripts/alive.py")

@@ -221,10 +221,38 @@ def _changed_modules(root: Path, secs: int) -> dict[str, int]:
         for f in files:
             if not f.endswith((".py", ".rs", ".ts", ".js", ".sh")):
                 continue
+            if _is_gone_or_staged_for_deletion(root, f):
+                continue
             name = Path(f).name
             if name and not Path(f).stem.startswith("test_"):
                 out[name] = out.get(name, 0) + 1
     return out
+
+
+def _is_gone_or_staged_for_deletion(root: Path, rel: str) -> bool:
+    """True iff `rel` should not be nudged about: it no longer exists, or it is trash.
+
+    janitor#256 reported the visible half — `.trashcan/` is safe-delete's own staging area, so
+    nudging about code sitting in it asks the reader to memorize what they just deleted. But
+    the path exclusion alone would have fixed one symptom of a general defect: this detector
+    reads `git log --name-only` and never asked whether the file is still THERE. Every deletion
+    therefore produced a nudge for the whole 14-day window, naming a file the reader cannot
+    open — and a nudge you cannot act on teaches you to ignore the next one, which is the only
+    thing this detector has.
+
+    Existence at HEAD is the honest test, and it subsumes the reported case: a safe-deleted
+    file is gone from its original path whether or not `.trashcan/` is also excluded. The
+    explicit `.trashcan/` check stays anyway, cheaply, because a path INSIDE the trashcan does
+    exist on disk — it is the copy — and would otherwise pass the existence test on its way to
+    being purged in 90 days.
+
+    A rename lands here too, correctly: the old path is gone, and the new one is its own entry
+    in the same log.
+    """
+    parts = Path(rel).parts
+    if ".trashcan" in parts:
+        return True
+    return not (root / rel).exists()
 
 
 def _substantive_commits_since(root: Path, secs: int) -> list[str]:
