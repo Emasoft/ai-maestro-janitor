@@ -3,7 +3,7 @@ trdd-id: R3D5YRQJ
 title: The fleet scan counts non-REPL claude subcommands as recoverable sessions
 column: todo
 created: 2026-08-13T00:45:51+0200
-updated: 2026-08-13T00:45:51+0200
+updated: 2026-08-13T00:48:52+0200
 current-owner: unassigned
 task-type: bugfix
 approval-tier: 0
@@ -64,6 +64,28 @@ command lines recorded above.
 
 **Do not filter on tty being empty** — that would ALSO drop real headless/harness sessions, which
 is the opposite mistake and a much worse one.
+
+### TWO TRAPS, both found 2026-08-13 while starting the fix — this is why it is still a sketch
+
+**1. `daemon` is a HIDDEN subcommand.** `claude --help` lists exactly: `agents auth auto-mode
+doctor gateway import install mcp plugin|plugins project setup-token ultrareview
+update|upgrade`. **`daemon` is not among them**, yet pid 46727 runs `claude daemon run`. So an
+allowlist derived from the help text — the obvious way to build one, and the way that looks
+rigorous — misses the single case that motivated this card, and misses it silently. Any
+allowlist must add `daemon` explicitly AND carry a comment that hidden subcommands exist, or the
+next hidden one repeats this exactly.
+
+**2. The transcript age is PER-PROJECT, so a non-session inherits a real session's.** `claude
+daemon run` reported `transcript_age_s: 1,406,803` — it has no transcript of its own. The scan
+resolves a project root from the process's cwd and reads that project's NEWEST `*.jsonl`, which
+belongs to whatever session last worked there. That is approximately right for a REPL and
+meaningless for a CLI invocation, and it means the staleness signal cannot be used to
+discriminate: a non-session in a busy project can look perfectly healthy, and one in an idle
+project looks long dead. **The filter has to be argv-shaped; there is no cheap transcript-shaped
+alternative** (a pid→session-id map would need the process env, which `ps` does not expose).
+
+Correct failure direction, given both traps: an UNKNOWN first token is treated as a SESSION.
+Including a non-session costs a no-op recovery; excluding a real session costs a lost one.
 
 ## Acceptance
 
