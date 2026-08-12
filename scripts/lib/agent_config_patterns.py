@@ -541,12 +541,31 @@ _CONCEALMENT_DIRECTIVE = _re(
 # (Bash(*), Write(*), MCP wildcard). Common attacker shape — they
 # don't need to write code, they just escalate the agent's permission
 # envelope.
+#
+# The first cut was JSON-only and enumerated Claude-Code tool spellings
+# (`Bash(*)`), so it measured 0/8: the commonest real shape is a YAML or
+# frontmatter key whose VALUE is a bare star, and it walked straight past
+# `allowed-tools: ['*']`. What defines the class is the value, not the tool
+# vocabulary — an enumerated grant lists tools, an unrestricted one is a
+# wildcard — so the key spelling is now quote/case/separator-agnostic and the
+# wildcard is matched as a value in its own right.
+_TOOL_GRANT_KEY = (
+    r"(?:allowed[-_ ]?tools|permitted[-_ ]?tools|permissions|tools)"
+)
 _TOOL_WILDCARD_GRANT = _re(
-    r'"(?:allowedTools|permissions|tools)"\s*:\s*\[?'
+    # (1) Claude-Code tool spellings inside a grant list.
+    _TOOL_GRANT_KEY + r'"?\s*[:=]\s*\[?'
     r'[^\]\}]{0,200}?'
     r'"(?:Bash\(\*\)|Bash\("?\*"?\)|Write\(\*\)|Edit\(\*\)|'
     r'mcp__\*|mcp__[^"]*\*[^"]*|'
     r'\*\s*Bash|\*\s*Write|All\s+tools?)"'
+    # (2) the grant's VALUE is the wildcard: `allowed-tools: ['*']`,
+    #     `allowed_tools: '*'`, `"tools": ["**"]`, `tools = *`.
+    r"|" + _TOOL_GRANT_KEY + r"[\"']?\s*[:=]\s*\[?\s*[\"']?\*{1,2}[\"']?\s*[,\]]?"
+    # (3) the wildcard is a LIST ITEM under a grant key — the YAML shape,
+    #     where the star sits several lines below the key it belongs to.
+    r"|" + _TOOL_GRANT_KEY + r"\b[^\n]{0,40}:[\s\S]{0,300}?"
+    r"^[^\S\n]*-[^\S\n]*[\"']?\*{1,2}[\"']?[^\S\n]*$"
 )
 
 
