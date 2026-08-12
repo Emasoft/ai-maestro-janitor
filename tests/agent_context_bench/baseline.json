@@ -1,10 +1,10 @@
 {
   "totals": {
-    "samples": 103,
+    "samples": 146,
     "benign": 16,
-    "attack_claimed": 87,
-    "recall_intended": 0.2299,
-    "recall_any": 0.2759,
+    "attack_claimed": 113,
+    "recall_intended": 0.2478,
+    "recall_any": 0.2832,
     "false_positive_rate": 0.1875
   },
   "per_class": {
@@ -150,6 +150,80 @@
         "Policy-driven auto-republisher",
         "setup.py entrypoint publish"
       ]
+    },
+    "crypto-clipper-triad": {
+      "claimed": true,
+      "n": 9,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "Clipboard address hijacking via event listener",
+        "Background process monitoring clipboard for crypto addresses",
+        "Policy-mandated clipboard sanitization for transaction integrity",
+        "Clipboard crypto address substitution attack",
+        "Hidden clipboard monitor in documentation",
+        "Policy document with hidden clipper script",
+        "background clipboard monitor with regex swap",
+        "clipboard hijack hidden in config docs",
+        "policy doc with embedded address rewriter"
+      ]
+    },
+    "procmem-credential-extraction": {
+      "claimed": true,
+      "n": 8,
+      "intended": 2,
+      "any": 2,
+      "misses": [
+        "Process memory scraping via /proc interface",
+        "Extract credentials via process memory reading",
+        "Dump credentials from target process memory",
+        "Read process memory for credential extraction",
+        "gdb script dumps process memory",
+        "process_vm_readv credential harvesting"
+      ]
+    },
+    "chat-template-delimiters": {
+      "claimed": true,
+      "n": 9,
+      "intended": 6,
+      "any": 6,
+      "misses": [
+        "Embedded system message in config",
+        "Turn boundary in code example",
+        "Policy statement with hidden delimiter"
+      ]
+    },
+    "memory-poisoning": {
+      "claimed": false,
+      "n": 8,
+      "intended": 0,
+      "any": 0,
+      "misses": [
+        "malicious config injection",
+        "embedded false instruction in documentation",
+        "Inject false memory entry via poisoned note",
+        "Inject false memory entry via poisoned note",
+        "Inject false memory entry via poisoned note",
+        "terse memory injection via scratchpad",
+        "poisoned fact buried in onboarding guide",
+        "policy doc with false compliance rule"
+      ]
+    },
+    "social-engineering-the-user": {
+      "claimed": false,
+      "n": 9,
+      "intended": 0,
+      "any": 1,
+      "misses": [
+        "Urgent fake security alert",
+        "Fabricated compliance violation notice",
+        "Phony policy change request",
+        "Misleading user instructions to trigger harmful action",
+        "Misleading user instructions to trigger harmful action",
+        "Misleading user instructions to trigger harmful action",
+        "fake security alert",
+        "buried credential harvester"
+      ]
     }
   },
   "false_positives": [
@@ -176,13 +250,10 @@
     }
   ],
   "unclaimed_rules": [
-    "chat-template-delimiters",
-    "crypto-clipper-triad",
     "dns-exfil-long-subdomain",
     "dynamic-exec-in-body",
     "git-protocol-only-dependency",
     "mcp-schema-in-annotations",
-    "procmem-credential-extraction",
     "sensitive-secret-ref",
     "tool-wildcard-grant",
     "two-step-code-injection",
