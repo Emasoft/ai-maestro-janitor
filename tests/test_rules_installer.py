@@ -11,9 +11,12 @@ residue. HOME + CLAUDE_PROJECT_DIR are redirected to tmp dirs so the real
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 from pathlib import Path
+
+import tiktoken
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
@@ -684,3 +687,33 @@ def test_every_full_reference_pointer_resolves_to_a_shipped_file():
         if name not in shipped
     ]
     assert not dangling, f"rules point at references that are not shipped: {dangling}"
+
+
+_SKILL_TOKEN_CAP = 5000
+
+
+def _skill_body_claude_tokens(path: Path) -> int:
+    """Reproduce CPV's own per-skill measure exactly (validated 2026-08-12 against CPV's
+    reported number, byte for byte): strip the YAML frontmatter, encode the remainder with
+    o200k_base, multiply by 1.3, round up. A char-count proxy would drift from the authority
+    it stands in for, so a green run here would stop being evidence (TRDD-IAJS6M9Z)."""
+    src = path.read_text(encoding="utf-8")
+    body = re.sub(r"\A---\n.*?\n---\n", "", src, flags=re.S)
+    enc = tiktoken.get_encoding("o200k_base")
+    return math.ceil(len(enc.encode(body)) * 1.3)
+
+
+def test_every_skill_body_stays_under_the_context_token_cap():
+    """Every skills/*/SKILL.md body must stay under the 5000-Claude-token cap CPV enforces
+    at publish stage 4/11 — locally, so a breach fails in seconds instead of costing a full
+    publish run (lint + the whole test suite) to discover it (TRDD-IAJS6M9Z)."""
+    skills = sorted((_PROJECT_ROOT / "skills").glob("*/SKILL.md"))
+    over = [
+        (p.parent.name, _skill_body_claude_tokens(p))
+        for p in skills
+        if _skill_body_claude_tokens(p) > _SKILL_TOKEN_CAP
+    ]
+    assert not over, (
+        f"skills over the per-skill token cap ({_SKILL_TOKEN_CAP}): {over}. "
+        "Move detail to that skill's references/ dir, do not grow the cap."
+    )

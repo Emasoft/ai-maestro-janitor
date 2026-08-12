@@ -57,4 +57,9 @@ dev = [
     # own test step died on collection (ModuleNotFoundError: yaml) and the pipeline could only
     # run on a machine where pyyaml happened to be installed already.
     "pyyaml",
+    # tests/test_rules_installer.py's per-skill token-budget gate reproduces CPV's own
+    # SKILL.md measure exactly (o200k_base encode * 1.3) rather than a char-count proxy —
+    # a gate that only approximates the authority it stands in for is worse than none
+    # (TRDD-IAJS6M9Z).
+    "tiktoken",
 ]
