@@ -1,15 +1,18 @@
 ---
 trdd-id: 9MCGBPR7
 title: janitor-arm — a failed CronDelete of the prior id must trigger the sweep
-column: todo
+column: blocked
+pre-block-column: todo
 created: 2026-08-08T10:34:14+0200
-updated: 2026-08-08T10:34:14+0200
+updated: 2026-08-13T00:31:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
+blocked-by: [publish-of-7c933b18]
+implementation-commits: [7c933b18]
 external-refs: [janitor#239]
 ---
 
@@ -41,8 +44,26 @@ leaked Y. In case 1: the sweep runs once per fresh session and finds nothing.
 
 ## Acceptance
 
-- [ ] SKILL.md step 2 carries the not-found→sweep fallback with the WHY
-- [ ] arm_prepare.py docstring/output notes the contract (id presence ≠ cron liveness)
-- [ ] The interrupted-arm scenario (record fails after create) is described in the skill's
-      error-handling section as self-healing via the fallback
-- [ ] janitor#239 answered when it ships
+- [x] SKILL.md step 2 carries the not-found→sweep fallback with the WHY — **shipped `7c933b18`**,
+      verbatim including the janitor#239 citation and the "cannot tell those two cases apart"
+      reasoning
+- [x] arm_prepare.py docstring/output notes the contract (id presence ≠ cron liveness) — the
+      docstring's CRASH-SAFETY PROPERTY paragraph states it in its strongest form: the id is
+      cleared BEFORE any cron is touched, so a half-finished arm fails toward "sweep everything",
+      never toward "leak a heartbeat"
+- [x] The interrupted-arm scenario (record fails after create) is described in the skill's
+      error-handling section as self-healing via the fallback — **this was the only gap.** Step 2
+      already covered the mechanism, but a reader hitting a crashed arm looks in Error handling,
+      not in the step that did not run. Added there with the cost named (two live heartbeats,
+      both firing forever, each a full model turn)
+- [ ] janitor#239 answered when it ships — the only remaining item, and it cannot be done before
+      the publish: telling the reporter it is fixed while the fix ships in no released version
+      would be false
+
+## What this card actually needed on 2026-08-13
+
+Three of the four boxes were ALREADY EARNED by `7c933b18` and were never ticked — the card sat
+in `todo` describing work that was in the tree. That is the same shipped-but-open shape the
+reconciliation detector exists for, and it is why the card was worth OPENING rather than
+trusting: the remaining gap was one paragraph in the wrong section, which no amount of reading
+the card would have revealed.

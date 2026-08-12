@@ -132,6 +132,13 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
 - `CronList` fails → skip the sweep; duplicates are cleaned up by the next sweep.
 - `CronCreate` fails → surface verbatim, do not retry automatically, and do not run step 4. With
   no id stored the next arm sweeps, which is the correct recovery.
+- **The arm dies AFTER `CronCreate` but BEFORE step 4** (a crash, a rate limit, an interrupted
+  turn) → nothing to do: this self-heals, and knowing that is what stops a later session from
+  "helpfully" re-recording an id it cannot verify. A live cron now exists under an id nothing
+  stored, so the next arm's targeted `CronDelete` fails not-found and step 2 falls back to the
+  full sweep, which finds and removes it before creating the replacement. The failure mode this
+  avoids is silent and permanent: two live heartbeats, both firing forever, each costing a full
+  model turn (janitor#239).
 
 ## Resources
 
