@@ -36,6 +36,12 @@ def _tag_rs() -> dict:
     return {"target": "tag", "enforcement": "active", "rules": [{"type": "deletion"}]}
 
 
+def _unresolved_branch_rs() -> dict:
+    """A branch ruleset whose per-ruleset DETAIL fetch failed (janitor#244) — kept as a
+    rules-less summary shell, tagged so the classifier knows not to trust its emptiness."""
+    return {"target": "branch", "enforcement": "active", "_detail_unresolved": True}
+
+
 _BASELINE_BRANCH = [
     _branch_rs("deletion", "non_fast_forward"),
     _branch_rs("pull_request", "required_status_checks"),
@@ -183,6 +189,56 @@ def test_non_admin_is_silent() -> None:
 def test_indeterminate_rulesets_is_silent() -> None:
     """rulesets=None (probe failed) → cannot prove any gap → zero findings."""
     assert classify_repo(RepoFacts(slug="o/r", admin=True, rulesets=None)) == []
+
+
+def test_unresolved_ruleset_detail_does_not_claim_review_and_check_gaps() -> None:
+    """janitor#244: a transient per-ruleset detail-fetch failure kept as a rules-less
+    summary must NOT be read as evidence of absence. The ONE ruleset that actually carries
+    pull_request + required_status_checks failed to resolve → the classifier must stay
+    silent on NO_PR_REVIEW/NO_REQUIRED_CHECKS rather than false-flag a compliant repo."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"), _unresolved_branch_rs(), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+    )
+    codes = _codes(facts)
+    assert "NO_PR_REVIEW" not in codes, "cannot claim a gap in a ruleset we failed to read"
+    assert "NO_REQUIRED_CHECKS" not in codes, "cannot claim a gap in a ruleset we failed to read"
+
+
+def test_unresolved_ruleset_detail_falsified_when_resolved() -> None:
+    """FALSIFY: with the SAME ruleset actually resolved (carrying the rules), the gaps
+    disappear entirely — proving the silence above is about unresolvability, not content."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"),
+                  _branch_rs("pull_request", "required_status_checks"), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+    )
+    assert _codes(facts) == set()
+
+
+def test_unresolved_ruleset_still_counts_as_branch_protection() -> None:
+    """An unresolved ruleset still carries `target`/`enforcement` (readable from the list
+    endpoint), so it must still count toward branch protection existing — UNPROTECTED must
+    not fire just because one ruleset's detail could not be resolved."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_unresolved_branch_rs()], classic_protected=False, has_workflows=True,
+    )
+    assert "UNPROTECTED" not in _codes(facts)
+
+
+def test_resolved_ruleset_findings_survive_a_sibling_being_unresolved() -> None:
+    """A rule type genuinely FOUND on a RESOLVED ruleset is still trustworthy evidence even
+    when a sibling ruleset's detail is unresolved — LINEAR_HISTORY must still fire."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward", "required_linear_history"),
+                  _unresolved_branch_rs(), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+    )
+    assert "LINEAR_HISTORY" in _codes(facts)
 
 
 def test_unprotected_repo_does_not_double_count_pr_and_checks() -> None:

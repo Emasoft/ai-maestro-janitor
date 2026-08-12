@@ -128,12 +128,24 @@ def _rule_types(ruleset: dict) -> set[str]:
     return out
 
 
+def _detail_unresolved(ruleset: dict) -> bool:
+    """True iff `_full_rulesets` could not resolve this ruleset's per-ruleset DETAIL (a
+    transient fetch failure — timeout / 5xx / secondary rate limit), so its `_rule_types()`
+    is an EMPTY summary shell, not proof the ruleset carries no rules (janitor#244)."""
+    return bool(isinstance(ruleset, dict) and ruleset.get("_detail_unresolved"))
+
+
 def classify_repo(facts: RepoFacts) -> list[Finding]:
     """PURE, total classifier: RepoFacts → the list of Findings for that repo.
 
     Silence rules (never-nag-on-unverifiable):
       * admin is False           → [] (the viewer cannot fix it — nagging is pure noise)
       * rulesets is None         → [] (we could not read the rulesets — cannot prove any gap)
+      * a branch ruleset's detail fetch failed → NO_PR_REVIEW / NO_REQUIRED_CHECKS stay
+        silent (janitor#244): an unresolved ruleset's rule-type set is an empty SUMMARY
+        shell, not proof it carries no rules, so treating it as evidence of absence would
+        false-flag a compliant repo on a transient network blip. A rule type FOUND on a
+        resolved ruleset is still trusted (presence is provable regardless of siblings).
     Everything else is a definite negative we can act on.
     """
     if facts.admin is False:
@@ -174,7 +186,13 @@ def classify_repo(facts: RepoFacts) -> list[Finding]:
     # breaks this module's own never-nag-on-unverifiable rule, so the gate is `branch_rs`:
     # we only reason about rules we can actually READ. (An UNPROTECTED repo has no
     # rulesets either, so it is silent here too — the headline finding subsumes it.)
-    if branch_rs:
+    # A branch ruleset whose per-ruleset DETAIL fetch failed cannot prove an absence of
+    # pull_request/required_status_checks — its rule-type set is an unresolved summary
+    # shell, not evidence the rules are missing (janitor#244). Stay silent on both gaps
+    # when ANY active branch ruleset is unresolved; a rule type genuinely FOUND above
+    # still counts (that union already includes resolved rulesets' real rules).
+    any_unresolved = any(_detail_unresolved(rs) for rs in branch_rs)
+    if branch_rs and not any_unresolved:
         if "pull_request" not in all_branch_rule_types:
             findings.append(Finding(facts.slug, "NO_PR_REVIEW", FINDING_BLURB["NO_PR_REVIEW"]))
         # NO_REQUIRED_CHECKS only when CI actually exists (has_workflows True); if there is
@@ -336,8 +354,15 @@ def _full_rulesets(slug: str) -> list[dict] | None:
     The list endpoint (`repos/{slug}/rulesets`) returns summaries WITHOUT the rules, so we
     fetch each ruleset's detail (`repos/{slug}/rulesets/{id}`) to see required_linear_history
     / pull_request / required_status_checks. Returns None if the list probe itself failed
-    (indeterminate → the classifier stays silent); a per-ruleset detail failure drops just
-    that ruleset (best-effort).
+    (indeterminate → the classifier stays silent).
+
+    A per-ruleset detail failure does NOT drop the ruleset (janitor#244: a transient
+    fetch failure — timeout / 5xx / secondary rate limit, no retry — used to be kept as
+    the bare SUMMARY, which `classify_repo` then read as a definitive "carries no rules",
+    false-flagging NO_PR_REVIEW/NO_REQUIRED_CHECKS on a compliant repo). Instead the
+    summary is kept but tagged `_detail_unresolved: True`, so `target`/`enforcement`
+    still count it toward branch protection while `classify_repo` treats its (empty,
+    unresolved) rule-type set as indeterminate rather than evidence of absence.
     """
     summaries = bpl.list_existing_rulesets(slug)
     if summaries is None:
@@ -348,11 +373,15 @@ def _full_rulesets(slug: str) -> list[dict] | None:
             continue
         rid = rs.get("id")
         if not isinstance(rid, int):
-            # No id to resolve detail — keep the summary (target/enforcement still usable).
-            detailed.append(rs)
+            # No id to resolve detail — keep the summary (target/enforcement still usable),
+            # but its rule types are just as unresolved as a failed fetch.
+            detailed.append({**rs, "_detail_unresolved": True})
             continue
         rc, detail = _gh_json(["api", f"repos/{slug}/rulesets/{rid}"])
-        detailed.append(detail if rc == 0 and isinstance(detail, dict) else rs)
+        if rc == 0 and isinstance(detail, dict):
+            detailed.append(detail)
+        else:
+            detailed.append({**rs, "_detail_unresolved": True})
     return detailed
 
 
