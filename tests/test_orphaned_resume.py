@@ -178,3 +178,98 @@ def test_project_slug_keeps_the_user_name_out_of_logs():
     """Logs are read by humans AND agents; an absolute path leaks the machine's user."""
     assert orf.project_slug("/Users/someone/Code/AI-MAESTRO/thing") == "thing"
     assert orf.project_slug("/Users/someone/Code/thing/") == "thing"
+
+
+# ── end-to-end: the ledger write is day-bucketed, like the drift line ─────────
+
+_DETECTOR = _HERE.parent / "scripts" / "detectors" / "orphaned-resume-flag.py"
+
+
+def _run_detector(home: Path, project: Path) -> str:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env["CLAUDE_PROJECT_DIR"] = str(project)
+    env["CLAUDE_SESSION_ID"] = "orphansess"
+    env.pop("CLAUDE_PLUGIN_OPTION_ORPHANED_RESUME_INTERVAL", None)
+    res = subprocess.run(
+        [sys.executable, str(_DETECTOR)],
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    # A detector that exits non-zero is logged by dispatch as a failure — never acceptable
+    # on the heartbeat path, so surface it loudly instead of asserting on stdout alone.
+    if res.returncode != 0:
+        raise AssertionError(f"detector exited {res.returncode}; stderr:\n{res.stderr}")
+    return res.stdout
+
+
+def _age_from_real_now(root: Path, age_s: int) -> Path:
+    """Re-stamp a fixture flag against the REAL clock.
+
+    `_project` writes its `.ts` relative to the frozen `_NOW`, which the pure tests inject.
+    The DETECTOR reads `time.time()` instead, and `_NOW` (2027) is in the future — so a
+    fixture built for the pure tests yields a NEGATIVE age end-to-end and nothing is ever
+    orphaned. That silence is indistinguishable from a working dedupe, which is exactly how
+    a test like this passes while proving nothing.
+    """
+    import time as _t
+
+    (root / ".janitor" / "state" / "resume-after-compact.ts").write_text(
+        str(int(_t.time()) - age_s), encoding="utf-8"
+    )
+    return root
+
+
+def _ledger_lines(project: Path) -> list[str]:
+    p = project / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    return [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()] if p.exists() else []
+
+
+def test_repeated_fires_write_the_ledger_ONCE_per_day_bucket(tmp_path):
+    """Regression (measured 2026-08-12): the ledger write used to be unconditional while
+    only the stdout drift line was deduped, so ONE stuck flag wrote a HIGH entry on EVERY
+    fire — 6 entries in 10 minutes on 2026-08-07.
+
+    The harm is not disk (the ledger is ring-trimmed at 500 lines) but SIGNAL: ~288
+    entries/day evicts every other finding within ~2 days, and the SessionStart surface
+    (capped at 10 lines) degenerates into ten copies of one message. Worse, the affected
+    project is BY DEFINITION the dark one, so nobody is there to notice or ack it.
+    """
+    home = tmp_path / "home"
+    projects = home / ".claude" / "projects"
+    code = tmp_path / "code"
+    observer = _project(code, "observer", flag_age_s=None, cron="*/5 * * * *")
+    dead = _age_from_real_now(_project(code, "dead-one", flag_age_s=6 * 86400, cron="*/5 * * * *"), 6 * 86400)
+    for p in (observer, dead):
+        _harness_dir(projects, p.name, str(p))
+
+    for _ in range(4):
+        _run_detector(home, observer)
+
+    lines = _ledger_lines(dead)
+    assert len(lines) == 1, f"4 fires must write ONE entry, got {len(lines)}:\n" + "\n".join(lines)
+    assert '"RESUME-ORPHANED"' in lines[0]
+    # The finding belongs to the AFFECTED project, never the observer's own ledger.
+    assert _ledger_lines(observer) == []
+
+
+def test_two_orphaned_projects_do_not_suppress_each_other(tmp_path):
+    """The dedupe key is per affected project. A single shared key would mean the first
+    orphan found silences every other one for the rest of the day — the failure mode that
+    makes a fleet-wide detector report exactly one victim no matter how many there are."""
+    home = tmp_path / "home"
+    projects = home / ".claude" / "projects"
+    code = tmp_path / "code"
+    observer = _project(code, "observer", flag_age_s=None, cron="*/5 * * * *")
+    a = _age_from_real_now(_project(code, "dead-a", flag_age_s=6 * 86400, cron="*/5 * * * *"), 6 * 86400)
+    b = _age_from_real_now(_project(code, "dead-b", flag_age_s=7 * 86400, cron="*/5 * * * *"), 7 * 86400)
+    for p in (observer, a, b):
+        _harness_dir(projects, p.name, str(p))
+
+    _run_detector(home, observer)
+    _run_detector(home, observer)
+
+    assert len(_ledger_lines(a)) == 1
+    assert len(_ledger_lines(b)) == 1

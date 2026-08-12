@@ -79,23 +79,47 @@ def main() -> int:
         # Record into the AFFECTED project's ledger — not this one's. `record` resolves the
         # target state dir from `project_dir`, which is the whole reason that parameter
         # exists: the session that can OBSERVE the failure is never the session that has it.
-        try:
-            findings_ledger.record(
-                sev="HIGH",
-                code="RESUME-ORPHANED",
-                src="orphaned-resume-flag",
-                msg=msg,
-                project_dir=root,
-                now=now,
-            )
-        except Exception as exc:  # noqa: BLE001 - one bad ledger must not stop the rest
-            state.log_line("orphaned-resume-flag", f"ledger write failed for {root}: {exc}")
+        #
+        # DAY-BUCKETED, exactly like the drift line below (measured 2026-08-12). The ledger
+        # write used to be unconditional while only the stdout line was deduped — so ONE
+        # stuck flag wrote a HIGH entry on EVERY fire: 6 entries in 10 minutes on 2026-08-07,
+        # 11 total for at most 3 distinct incidents. The ledger is ring-trimmed at 500 lines,
+        # so that is not a disk problem, it is a SIGNAL problem: ~288 entries/day evicts every
+        # other finding the project ever recorded inside ~2 days, and the SessionStart surface
+        # (capped at 10 lines) becomes ten copies of one message with everything else folded
+        # away. Worse, the affected project is BY DEFINITION the dark one — nobody is there to
+        # notice or `ack` — so the flood lands precisely where it cannot be seen until someone
+        # returns, and what greets them is the least informative view the ledger can produce.
+        # Keyed by affected project so two orphaned projects cannot suppress each other.
+        # Gates the LEDGER WRITE ONLY — not `continue` — because the local log line below is
+        # the per-fire forensic trail that shows how long the condition persisted, and the
+        # drift line already owns its own key.
+        ledger_due = dedupe.emit_once(
+            seen, f"ledger@{orphaned_resume.project_slug(root)}@{age_s // 86400}", "due"
+        ) is not None
+        if ledger_due:
+            try:
+                findings_ledger.record(
+                    sev="HIGH",
+                    code="RESUME-ORPHANED",
+                    src="orphaned-resume-flag",
+                    msg=msg,
+                    project_dir=root,
+                    now=now,
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad ledger must not stop the rest
+                state.log_line("orphaned-resume-flag", f"ledger write failed for {root}: {exc}")
 
         # Log the SLUG, never the absolute path — it carries the machine's user name, and
         # this log is read by humans and agents alike.
+        # Says which of the two happened. It used to say "recorded" unconditionally, which was
+        # true when every fire recorded; now that the ledger is day-bucketed, an unconditional
+        # "recorded" would be a false forensic trail — the log is where someone reconstructs
+        # how long a condition persisted, so it must not claim writes that did not happen.
         state.log_line(
             "orphaned-resume-flag",
-            f"recorded RESUME-ORPHANED for {orphaned_resume.project_slug(root)} ({age_s}s)",
+            f"{'recorded' if ledger_due else 'still orphaned (ledger deduped)'} "
+            f"RESUME-ORPHANED for {orphaned_resume.project_slug(root)} ({age_s}s)",
         )
 
         # Surface a drift line ONLY for our own project. Bucketed by day so a genuinely
