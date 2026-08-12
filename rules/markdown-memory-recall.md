@@ -123,10 +123,39 @@ with the SECOND HOP — take the hop on the note you chose.
 
 Frontmatter (the write verbs emit it — you rarely type it): `name` == filename stem ·
 `description:` **QUOTED** (the load-bearing recall field) · `ocd`/`lmd` dates ·
+`publish-globally:` **on every PROJECT page** (see below) ·
 `metadata: {node_type: memory, type, tier}`. Body = the one fact (feedback/project add
 `**Why:**` / `**How to apply:**`). `## Notes and lessons learned` is **MANDATORY on every page,
 even when empty** — the standing landing zone for a correction lesson. Full frontmatter grammar +
 a worked atom/lesson example: the FULL REFERENCE above.
+
+### `publish-globally:` — how ONE project's knowledge becomes visible to ALL of them
+
+**Every PROJECT-scope page carries `publish-globally: true|false`.** It is not optional and not
+inferred: a page without it is a lint finding, and `memgrep lint --fix` inserts it.
+
+`true` means this page is ALSO reachable from every other project on the machine, via a
+**symlink** in the USER memory root pointing at the PROJECT page. That symlink IS the mechanism —
+there is no copy, so there is no second version to drift. Without it, a project's features and
+APIs are unknowable to any other project's agent, which is the gap the field exists to close.
+
+Two invariants, both reconciled by `memgrep lint --fix`:
+
+| state | meaning | fix |
+|---|---|---|
+| `true`, no symlink | published in name only | CREATE the symlink |
+| symlink exists, no field | the symlink is the intent | ADD `publish-globally: true` |
+| `false` + a symlink | a contradiction | **reported, never auto-resolved** — dropping the symlink and flipping the flag are both defensible, so it is a human's call |
+
+**The default is `false`.** Publishing is opt-in because PROJECT memory is git-tracked and
+**pushed** while USER scope is machine-private: a default of `true` would be an opt-OUT privacy
+decision made on the user's behalf. Set it `true` deliberately, for the pages that describe what
+OTHER projects need to know about this one — its public surface, not its internals.
+
+**Maintain the page at its PROJECT home, never through the alias.** The symlink escapes the USER
+scope root, so that scope's transaction guard refuses to write it (correctly), and the chore
+candidate lister skips it for the same reason (janitor#249). One element, one page, one place it
+is edited.
 
 ### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
 
