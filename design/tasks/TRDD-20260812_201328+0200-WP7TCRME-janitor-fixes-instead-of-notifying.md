@@ -3,7 +3,7 @@ trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
 column: dev
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-12T20:36:57+0200
+updated: 2026-08-12T20:41:48+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -31,10 +31,18 @@ invisible, it does not make the work get done.
 
 **NOT STARTED:** everything in "The four rules" below.
 
-**NEXT ACTION:** implement Rule 2 (own-project-only) first — it is the smallest, it is
-purely subtractive, and it is the one currently leaking other repos' problems into this
-project's conversation. Then Rule 4 (cross-project issue filing), which is what makes Rule 2
-safe: without it, "don't tell this Claude" would silently drop a real finding.
+**Rule 2 turned out to be ALREADY DONE** (see Acceptance) — I had assumed a leak and found
+none. Verifying first cost one command; building it would have cost a day and changed nothing.
+
+**NEXT ACTION:** Rule 4 (cross-project issue filing) — a script that files a finding as an
+issue on the OWNED repo it belongs to, deduped so a recurring detector cannot reopen it every
+fire. USER approved this category (2026-08-12) along with repo hygiene, workflow hardening, and
+dependency bumps. Then Rule 3 proper: enumerate the auto-fixable findings and make each one FIX
+rather than surface.
+
+**Do it in a SMALL context.** Rule 3 is broad, and this card's own measurement shows a fire
+costs ~398k weighted against a 3.5M session versus ~17k against a fresh one. Building the
+cost fix inside the expensive session is the one way to make it not worth having.
 
 ## The four rules (USER, verbatim intent)
 
@@ -125,8 +133,16 @@ the most expensive resource in the system to avoid using the cheapest.
 
 - [ ] A detector's output is classified LOUD only against Rule 1's three-part test, and the
       classification is greppable (not per-detector prose).
-- [ ] No finding about a project other than `CLAUDE_PROJECT_DIR` reaches this session's
-      stdout. Pinned by a test.
+- [x] No finding about a project other than `CLAUDE_PROJECT_DIR` reaches this session's
+      stdout. **Already true, and already pinned — verified 2026-08-12 rather than rebuilt.**
+      Of the 7 detectors that scan fleet-wide, only 3 print at all, and all 3 gate on the
+      current project; `orphaned-resume-flag` (the one whose findings looked cross-project)
+      prints only for its own root and routes other projects' findings into THEIR ledgers.
+      Pinned by `test_format_finding_names_no_other_project`,
+      `test_two_orphaned_projects_do_not_suppress_each_other`, and the ledger isolation
+      contract in `test_findings_ledger.py`. Adding a fourth test would have ticked this box
+      without changing any behaviour — the box was already earned by
+      `janitor-per-project-channeling`'s lesson, which is why that page exists.
 - [ ] A finding for another OWNED repo is filed as an issue on that repo by a script, with
       dedupe so a recurring detector cannot open the same issue every fire.
 - [ ] The auto-fixable findings are enumerated, and each is fixed by a script or a background
