@@ -133,6 +133,7 @@ def score(samples: list[dict]) -> dict:
     claimed = claimed_rule_ids()
     per_class: dict[str, dict] = {}
     fp_samples: list[dict] = []
+    per_population: dict[str, dict] = {}
     benign_total = 0
 
     for s in samples:
@@ -140,11 +141,20 @@ def score(samples: list[dict]) -> dict:
         kind = s.get("kind") or ("source" if label in _SOURCE_CLASSES else "prose")
         fired = {f.rule_id for f in acp.scan_text(s["content"], file_kind=kind, filename="")}
 
-        if label == "benign":
+        # Any `benign*` label is a control. They are kept as SEPARATE populations because a
+        # single blended rate hides the actual finding: `benign` samples were deliberately
+        # chosen to sit near the danger zone (security policies, post-mortems, fixtures) and
+        # measure the WORST CASE, while `benign-ordinary` is everyday project code and
+        # measures what a typical repo would see. Averaging them would produce a number that
+        # describes neither, and which population you sampled would silently set the result.
+        if label.startswith("benign"):
             benign_total += 1
+            by_pop = per_population.setdefault(label, {"n": 0, "fp": 0})
+            by_pop["n"] += 1
             if fired:
+                by_pop["fp"] += 1
                 fp_samples.append({"id": s.get("id", ""), "fired": sorted(fired),
-                                   "note": s.get("note", "")})
+                                   "note": s.get("note", ""), "population": label})
             continue
 
         bucket = per_class.setdefault(
@@ -176,6 +186,7 @@ def score(samples: list[dict]) -> dict:
                 round(len(fp_samples) / benign_total, 4) if benign_total else None
             ),
         },
+        "per_population": per_population,
         "per_class": per_class,
         "false_positives": fp_samples,
         "unclaimed_rules": sorted(claimed - set(per_class)),
@@ -203,8 +214,23 @@ def render(res: dict) -> str:
         + (
             "UNMEASURED (no benign samples)"
             if t["false_positive_rate"] is None
+            # With more than one benign population the blended rate is an artefact of how
+            # many of each were authored, not a property of the detector — it would move if
+            # someone simply wrote more ordinary samples. Point at the table instead of
+            # printing a number that describes neither population.
+            else "per population, see below"
+            if len(res.get("per_population") or {}) > 1
             else f"{t['false_positive_rate']:.0%}"
         ),
+        "",
+    ]
+    pops = res.get("per_population") or {}
+    if pops:
+        out += ["", "| benign population | n | flagged | FP |", "|---|---|---|---|"]
+        for name, p in sorted(pops.items()):
+            rate = p["fp"] / p["n"] if p["n"] else 0.0
+            out.append(f"| `{name}` | {p['n']} | {p['fp']} | {rate:.0%} |")
+    out += [
         "",
         "| class | claimed | n | intended | any |",
         "|---|---|---|---|---|",
