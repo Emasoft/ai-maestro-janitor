@@ -757,3 +757,44 @@ def test_extract_state_block_stops_at_next_top_heading():
     block = tc.extract_state_block(body)
     assert "should_emit_renew" in block
     assert "resolve_ttl_minutes" not in block
+
+
+# --- Check 6: `blocked` naming no blocker (TRDD-F4IBIDB6) -------------------------
+
+
+def test_check6_fires_on_blocked_with_no_blocker():
+    """`blocked` is the board's one licence to sit still, and the claim must be TRUE. A card
+    that claims it while naming nothing is indistinguishable from an abandoned one — and worse
+    than an unstarted card, because the column asserts the stall is understood."""
+    assert tc.check6_blocked_without_blocker(_record(column="blocked", blocked_by="[]")) is True
+
+
+def test_check6_silent_when_a_blocker_is_named():
+    """A named blocker is the whole point; naming one must switch the check off, whether it is
+    another card or a non-TRDD condition (this board already uses both: `ai-maestro#102`,
+    `publish-of-7ceab3f`)."""
+    assert tc.check6_blocked_without_blocker(_record(column="blocked", blocked_by="[QQ11WW22]")) is False
+    assert tc.check6_blocked_without_blocker(
+        _record(column="blocked", blocked_by="[publish-of-7ceab3f]")) is False
+
+
+def test_check6_silent_on_every_other_column():
+    """Only `blocked` makes the claim, so only `blocked` can make it falsely. An empty
+    blocked-by is NORMAL everywhere else and firing there would bury the real signal."""
+    for col in ("todo", "dev", "testing", "ai_review", "backburner", "human_review"):
+        assert tc.check6_blocked_without_blocker(_record(column=col, blocked_by="[]")) is False, col
+
+
+def test_check6_silent_on_terminal_columns():
+    """A terminal card's body is frozen and it is never a board-drift candidate — the
+    single-source-of-truth guard `reconcile` applies, restated here so a future caller of the
+    check alone cannot leak one."""
+    for col in ("complete", "superseded", "published", "live", "failed", "cancelled"):
+        assert tc.check6_blocked_without_blocker(_record(column=col, blocked_by="[]")) is False, col
+
+
+def test_reconcile_surfaces_the_unnamed_blocker():
+    """End to end through the aggregator: the verdict fires, is labelled, and carries evidence."""
+    v = tc.reconcile(_record(column="blocked", blocked_by="[]"), lambda _s: False, lambda _u: "")
+    assert v.fires and v.unnamed_blocker
+    assert "blocked-without-blocker" in v.fired

@@ -480,6 +480,27 @@ def blocked_by_ids(raw: str) -> list[str]:
     return ids
 
 
+def has_blocked_by_value(head: str) -> bool:
+    """True iff the frontmatter declares a NON-EMPTY `blocked-by:`, whatever the elements look like.
+
+    Deliberately NOT `blocked_by_ids`, and the difference is the whole reason this exists: that
+    function extracts TRDD-SHAPED ids only, so every non-TRDD blocker this board actually uses —
+    `ai-maestro#102`, `publish-of-7ceab3f`, `user-decision-run-the-clear` — parses to an EMPTY
+    list and reads as "names no blocker". Measured 2026-08-13: 5 of 9 blocked cards name a
+    non-TRDD condition, so any check keyed on the id list fires on a majority of correctly-filled
+    cards, which is how a check gets switched off (TRDD-F4IBIDB6).
+
+    A blocker that is not another card is a legitimate, common shape — an upstream issue, a
+    pending release, a decision only the user can make. What matters for "is the stall
+    EXPLAINED" is that something is named, not that a resolver can chase it.
+    """
+    fm = FRONTMATTER_RE.match(head)
+    if not fm:
+        return False
+    bm = FM_BLOCKED_BY_RE.search(fm.group(1))
+    return bool(bm and parse_flow_list(bm.group(1)))
+
+
 def has_stated_precondition(head: str) -> bool:
     """True iff `head` declares WHY it is stalled — a non-empty `blocked-by:` or `npt:`.
 
@@ -494,8 +515,11 @@ def has_stated_precondition(head: str) -> bool:
     if not fm:
         return False
     block = fm.group(1)
+    # ANY non-empty blocked-by value, not just TRDD-shaped ids (see `has_blocked_by_value`):
+    # keying on the id list made `blocked-by: [ai-maestro#102]` read as "no on-file excuse" and
+    # left a correctly-parked card drift-eligible — the same defect, in the older caller.
     bm = FM_BLOCKED_BY_RE.search(block)
-    if bm and blocked_by_ids(bm.group(1)):
+    if bm and parse_flow_list(bm.group(1)):
         return True
     nm = FM_NPT_RE.search(block)
     if nm and parse_flow_list(nm.group(1)):
@@ -535,6 +559,10 @@ class TrddRecord:
     # The STATE / body text the prose-based checks scan (Check 2's NEXT-ACTION,
     # Check 3's "blocked" prose, Check 4's prose-named blockers).
     body: str = ""
+    # Whether `blocked-by:` carries ANY element — TRDD-shaped or not (`ai-maestro#102`,
+    # `publish-of-7ceab3f`). `blocked_by` above holds only the resolvable TRDD ids, so it is
+    # empty for the majority of this board's real blockers; Check 6 needs the raw fact.
+    declares_blocker: bool = False
 
 
 def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
@@ -542,6 +570,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
     status, column = parse_state_text(text)
     blocked_by: list[str] = []
     impl_commits: list[str] = []
+    declares_blocker = False
     fm = FRONTMATTER_RE.match(text)
     body = text
     if fm:
@@ -550,6 +579,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         bm = FM_BLOCKED_BY_RE.search(block)
         if bm:
             blocked_by = blocked_by_ids(bm.group(1))
+        declares_blocker = bool(bm and parse_flow_list(bm.group(1)))
         im = FM_IMPL_COMMITS_RE.search(block)
         if im:
             impl_commits = impl_commit_shas(im.group(1))
@@ -558,6 +588,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         column=column,
         status=status,
         blocked_by=blocked_by,
+        declares_blocker=declares_blocker,
         impl_commits=impl_commits,
         body=body,
     )
@@ -980,9 +1011,10 @@ class ReconcileVerdict:
     """The reconciliation outcome for ONE TRDD — which checks fired + the label.
 
     `label` is one of: 'closeable-candidate', 'partially-shipped-review',
-    'prose-frontmatter-mismatch', 'stale-blocker', or '' when nothing fired.
-    A TRDD can fire multiple checks; `label` is the single most-actionable one,
-    but `fired` lists them all and the evidence fields carry the details.
+    'prose-frontmatter-mismatch', 'stale-blocker', 'blocked-without-blocker', or
+    '' when nothing fired. A TRDD can fire multiple checks; `label` is the single
+    most-actionable one, but `fired` lists them all and the evidence fields carry
+    the details.
     """
 
     uid: str | None
@@ -993,12 +1025,35 @@ class ReconcileVerdict:
     has_remaining: bool = False
     prose_mismatch: bool = False
     stale_blockers: list[str] = field(default_factory=list)
+    # Check 6: `column: blocked` naming no blocker at all.
+    unnamed_blocker: bool = False
     # Which of the TRDD's commits were found in a released tag (evidence).
     shipped_commits: list[str] = field(default_factory=list)
 
     @property
     def fires(self) -> bool:
         return bool(self.fired)
+
+
+def check6_blocked_without_blocker(record: TrddRecord) -> bool:
+    """Check 6 — `column: blocked` while naming NO blocker (TRDD-F4IBIDB6).
+
+    `blocked` is the board's one licence to sit still, and the pipeline rule states the price of
+    it: the claim must be TRUE — a non-empty `blocked-by:` naming something that is itself still
+    open. A blocked card that names nothing is indistinguishable from an abandoned one, and it is
+    worse than an unstarted card, because the column asserts that the stall is understood.
+
+    Exact, and needs no threshold — which is why it ships ahead of the staleness half of that
+    card. Measured on this corpus 2026-08-13: 2 of 9 blocked cards failed it, one of them written
+    an hour earlier by the session that then had to notice it by hand.
+
+    Prose is deliberately NOT consulted. Check 3 already reads prose-declared blocks, and a card
+    whose BODY explains the hold while its frontmatter stays empty is exactly the case this
+    exists to surface: the board is greppable, the prose is not.
+    """
+    if is_terminal_column(record.column):
+        return False
+    return norm_state(record.column) == "blocked" and not record.declares_blocker
 
 
 def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> ReconcileVerdict:
@@ -1042,6 +1097,9 @@ def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> Reconcil
         fired.append("prose-frontmatter-mismatch")
     if stale_blockers:
         fired.append("stale-blocker")
+    unnamed_blocker = check6_blocked_without_blocker(record)
+    if unnamed_blocker:
+        fired.append("blocked-without-blocker")
 
     label = fired[0] if fired else ""
     return ReconcileVerdict(
@@ -1054,4 +1112,5 @@ def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> Reconcil
         prose_mismatch=prose_mismatch,
         stale_blockers=stale_blockers,
         shipped_commits=shipped_commits,
+        unnamed_blocker=unnamed_blocker,
     )

@@ -319,6 +319,11 @@ def _write_report(main_root: Path, rows: list[dict]) -> Path | None:
             evidence_bits.append("prose says blocked; frontmatter column != blocked & blocked-by: []")
         if r["stale_blockers"]:
             evidence_bits.append("stale blocker(s): " + ", ".join(r["stale_blockers"]))
+        if r.get("unnamed_blocker"):
+            evidence_bits.append(
+                "column: blocked but blocked-by is empty — the one licence to sit still "
+                "must NAME what it waits on"
+            )
         evidence = "; ".join(evidence_bits) or "—"
         lines.append(
             f"| TRDD-{uid} | {r.get('scope', trdd_common.PROJECT)} | {r['column'] or '?'} | "
@@ -484,6 +489,7 @@ def main() -> int:
                 "shipped_tags": shipped_tags,
                 "prose_mismatch": verdict.prose_mismatch,
                 "stale_blockers": verdict.stale_blockers,
+                "unnamed_blocker": verdict.unnamed_blocker,
             }
         )
 
