@@ -1,9 +1,9 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: testing
+column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T17:26:00+0200
+updated: 2026-08-12T11:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -14,7 +14,55 @@ implementation-commits: [f3f664de]
 
 # Post-rotation ESC unblock (owner failure report 2026-08-06, item 4)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+
+### 2026-08-12 — THE TRIGGER IS BLACKED OUT ON A SERVER-OWNED HOST. `testing → todo`
+
+The mechanism below is correctly built and correctly tested, and **on this machine it can
+never fire**. Verified in this order, each step from the artifact rather than by inference:
+
+1. `global-state/rotation-success.ts` is **absent** — from BOTH the canonical
+   `plugins/data/.../global-state/` and the legacy `~/.claude/janitor-global-state/`.
+2. That absence is proof it was never written, not that it aged out: `_ROTATION_SUCCESS_NAME`
+   appears in exactly three places in the whole tree — the constant, one WRITE (`global_state.py:977`)
+   and one READ (`:990`). **Nothing deletes it.** The "evidence expires" design in this STATE
+   block is a staleness comparison in the CONSUMER, not a file deletion.
+3. The only writer of the stamp is `rotator._switch_blob` (`rotator.py:1516`) — OUR rotator's
+   switch path.
+4. A rotation demonstrably happened (2026-08-11 10:00:13, 3 accounts — recorded and verified
+   on TRDD-G4BCRUP7).
+5. On this host `harness_backend.server_is_alive() == True`, `server_runs_chores() == True`,
+   and `claimed_chores()` includes **`oauth-rotator-tick`**.
+
+So the ai-maestro server performed that rotation, and the server does not write our
+breadcrumb. **The causal link is dead exactly where rotation actually happens.** A perfect
+rotation still ends with a human pressing a key — the precise failure this card exists to fix.
+
+**This is the same blackout shape as TRDD-G4BCRUP7's R3** (fleet-plugins-update has no owner
+on a server host): a feature whose trigger the janitor owns, on a host where the janitor no
+longer performs the triggering act. Worth naming as a class, because it will recur for every
+chore the server claims — **the daemon standing down transfers the ACT but not the
+BREADCRUMB, and nothing notices, because the breadcrumb's absence looks exactly like "no
+rotation happened".**
+
+**NEXT ACTION** (pullable, and cheaper than it looks — pick one, then say which):
+
+- **(a) Detect their rotation instead of being told about it.** The server writes the same
+  `state.json` the janitor's rotator does; a live-identity change there is the same causal
+  evidence as our own stamp, and needs no cross-repo agreement. Fail-CLOSED and expiring, as
+  the existing gate already is.
+- **(b) Ask ai-maestro to stamp it** — cross-repo, correct in principle, and gated on someone
+  else's schedule. Same shape as R3, which is still open for that reason.
+
+(a) is strictly available to us and does not block on (b); prefer it unless the identity read
+turns out to be unreliable.
+
+**Do NOT close this card on the strength of its tests.** They pass, they are falsified, and
+they prove the wiring — between two ends that are not connected on the host that matters.
+
+---
+
+## Superseded STATE (2026-08-06) — the build, still accurate as a description of the code
 
 **Tasks 1 and 2 are DONE (`f3f664de`); task 3 is preserved and pinned by a test; task 4 is
 not ours. `todo → testing` — what remains is one live observation.**
