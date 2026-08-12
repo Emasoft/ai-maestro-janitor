@@ -1,6 +1,6 @@
 authority-override	the document tries to redefine who the agent is or what role it plays, replacing its operating identity or standing instructions with new ones
 concealment-directive	the document instructs the agent to do something and to keep it from the human user, or to omit it from what it reports
-cross-skill-shadowing	a skill's own description carries a behavioural mandate that would bind the agent's conduct generally, beyond that skill's narrow job
+cross-skill-shadowing	the description field of a skill-definition file carries a mandate binding the agent's conduct across ALL tasks rather than only when that skill is used, so merely having the skill installed silently changes global behaviour. Write skill-definition files with frontmatter
 html-comment-impersonation	instructions concealed inside markup comments, dressed up as though they came from the system, an administrator, or the platform itself
 prompt-injection-multilingual	an injected instruction written in a language other than English so an English-only reader skims past it
 base-url-override	the document redirects the model endpoint, API host, or update source to a host the attacker controls
@@ -9,7 +9,7 @@ sensitive-secret-ref	the document points the agent at private key material, clou
 dynamic-exec-in-body	executable code embedded in a file that should be prose, which evaluates a string at runtime or shells out
 git-hook-install-from-body	arranging for code to be written into the repository's version-control hooks so it runs during ordinary developer operations
 tool-wildcard-grant	a permissions or allowed-tools block that grants unrestricted access rather than an enumerated set
-mcp-annotation-lying	a tool declaration whose advertised metadata understates what it really does: a destructive or state-changing operation presented as safe or read-only
+mcp-annotation-lying	an MCP server's tool declaration inside a JSON manifest, whose advertised metadata understates what the tool really does: a destructive or state-changing operation declared with a name and hints that present it as safe or read-only. Write JSON manifests, not source functions
 mcp-schema-in-annotations	a tool definition that places its input schema in the wrong part of the structure, where a validator will not enforce it
 whole-env-exfil	code that captures the process's entire environment block
 worm-self-propagation	code that republishes the very package it lives in so it spreads to downstream consumers
