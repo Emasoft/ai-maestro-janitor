@@ -3,7 +3,7 @@ trdd-id: FDV1RQEB
 title: A STATE block citing a symbol the tree no longer has is undetectable — three cards stalled on it in one day
 column: complete
 created: 2026-08-12T10:39:24+0200
-updated: 2026-08-12T12:35:00+0200
+updated: 2026-08-12T13:20:55+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -109,3 +109,20 @@ card that cannot proceed — and equal weighting is how a useful channel becomes
   restore, 7 pass). One defect fixed on review: the detector set GIT_OPTIONAL_LOCKS on none of
   its six git calls while five siblings set it per-call — pre-existing, but load-bearing once
   this check began running two git calls per token per card.
+- 2026-08-12T13:20:55+0200 — CORRECTION appended by janitor-main-session (log is append-only;
+  the card stays `complete`). **"One hit across the whole board, zero false positives observed"
+  was measured on a THROWAWAY prototype and did not survive the shipped version.** Within hours
+  the live check produced both error classes, because the two probes that jointly express
+  "existed once, gone now" did not agree:
+  1. **False positive** — HEAD used `git grep -w` while history used a substring `-S`, so any
+     token surviving as a SUFFIX was flagged dead by construction (`FLEET_AWAITING_ESC_IDLE_S`
+     vs the code's `CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S` — `_` is a word character).
+     It fired on TRDD-G4BCRUP7, which was correct all along.
+  2. **False negatives** — HEAD searched `scripts`+`tests` while history searched `scripts`, so
+     THIS card's own test fixture, which quotes `should_emit_renew`/`dwell_s` in a synthetic
+     STATE block, made the check blind to the exact symbols it was built to catch. The proof
+     that it worked is what stopped it working.
+  Fixed by making both probes share corpus AND matching (substring over `scripts`): 4 of 10
+  verdicts corrected, 0 regressions, pinned by two real-git tests falsified against the old
+  code. The prototype's zero-FP claim was true of the prototype and never re-measured after
+  the fixture landed — **a measurement is only valid for the artifact it was taken on.**

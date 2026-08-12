@@ -168,15 +168,32 @@ def _commit_touches_impl(sha: str, root: Path, trdd_prefix: str) -> bool:
 
 
 def _symbol_absent_at_head(token: str, root: Path) -> bool:
-    """True iff `token` is NOT a whole-word match anywhere in `scripts/`+`tests/` at HEAD.
+    """True iff `token` appears NOWHERE in `scripts/` at HEAD, as a plain substring.
 
-    `git grep -w` searches the committed HEAD tree (not the working copy), so a
+    `git grep` searches the committed HEAD tree (not the working copy), so a
     dirty tree mid-refactor never produces a false "still there". Exit code 0 =
     found (not absent), 1 = no match (absent); any other code (bad pathspec,
     corrupt repo) is UNKNOWN and fails open — never flag on an inconclusive read.
+
+    The corpus and the matching MUST mirror `_symbol_in_history` exactly (same
+    `scripts` pathspec, same substring semantics), because the two together form
+    ONE predicate: "existed once, gone now". Two probes that disagree measure
+    nothing, and both original spellings were individually defensible — which is
+    why the asymmetry survived review and only surfaced as inexplicable findings
+    (measured 2026-08-12; the corrected pair fixes 4 of 10 verdicts, 0 regressions):
+
+    * `-w` here vs a substring `-S` there flagged as DEAD any token surviving only
+      as a SUFFIX of a longer identifier — e.g. a knob documented in prose as
+      `FLEET_AWAITING_ESC_IDLE_S` while the code holds
+      `CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S`. `_` is a word character,
+      so `-w` can never match it. That was a false alarm on a live card.
+    * `tests` in the corpus here vs `scripts` there made this check BLIND to the
+      very symbols it was built to catch: its own fixture quotes them in a
+      synthetic STATE block, so the proof that it works is what stopped it
+      working. A fixture is evidence of the bug, never evidence the symbol lives.
     """
     proc = state.run_subprocess(
-        ["git", "-C", str(root), "grep", "-q", "-w", "-e", token, "HEAD", "--", "scripts", "tests"],
+        ["git", "-C", str(root), "grep", "-q", "-e", token, "HEAD", "--", "scripts"],
         timeout=8,
         detector_name="trdd-state-reconciliation",
     )

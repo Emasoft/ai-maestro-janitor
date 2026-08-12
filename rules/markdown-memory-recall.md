@@ -143,29 +143,16 @@ DROPS the rest (another reason not to hand-author).
 
 Full field grammar + supersession: the FULL REFERENCE above.
 
-## AUTHORING — the wiki is COLLABORATIVE; authorship confers no ownership
+## AUTHORING — COLLABORATIVE; write through a memgrep verb, then validate
 
-**Every wikimem page is a Wikipedia page, not a personal notebook.** USER- and PROJECT-scope
-pages are the shared work of every agent on this machine, and **you are expected to write and
-update them even when another agent wrote them.** If a page is wrong, incomplete, or
-contradicted by something you just measured — UPDATE IT. Never mint a near-synonym page, never
-park a hedged "in my case…" beside the wrong fact, never settle for mentioning it in chat.
-There is no "their page" and no permission to seek; `contributors:` records who has helped, it
-does not gate who may.
+**Authorship confers NO ownership.** UPDATE another agent's USER/PROJECT page rather than fork a
+near-synonym or hedge beside a wrong fact — safe: verbs SUPERSEDE, never overwrite. The real
+failure is a known-false fact nobody corrected.
 
-**Correcting is SAFE BY CONSTRUCTION; hesitating is the risky move.** The write verbs below
-version rather than replace, so **no memory is ever lost — only superseded** (sometimes with a
-lesson explaining the error, sometimes as a plain previous revision). Overwriting someone's work
-is therefore not a failure this rule has to guard against — it cannot happen. The failure it
-guards against is **a known-false fact left standing because whoever measured the truth assumed
-the page belonged to someone else.** `memgrep validate` + `lint`, not authorship, protect a page.
-
-Do NOT hand-author wikimem markdown (the source of unquoted `desc:`, body-less `[^N]`, oversized
-atoms) — use the write verbs (`new-page`/`add-atom`/`add-lesson`/`migrate`/`edit`). Correct a
-wrong fact by SUPERSESSION, never a delete/overwrite: `add-lesson --supersedes` embeds the
-verbatim `SUPERSEDED BODY:` and keeps the SAME id (a `-v2` duplicate is the anti-pattern). Run
-`memgrep validate <page> && memgrep lint <page>` after EVERY edit. Verb flags + the
-supersession/travel protocol: the FULL REFERENCE above.
+Never hand-author wikimem markdown — use the write verbs (`new-page`/`add-atom`/`add-lesson`/
+`migrate`/`edit`); correct a wrong fact with `add-lesson --supersedes`, SAME id. Run `memgrep
+validate <page> && memgrep lint <page>` after EVERY edit. Verb flags, supersession/travel, and
+why collaboration is safe: the FULL REFERENCE above.
 
 **CONCURRENT EDITING (TRDD-7YHT3FNK).** Write verbs are scope-LOCKED + `--base-sha256` CAS;
 `memgrep edit` = exact-unique-match replace. Edit pages ONLY via memgrep verbs or the Edit tool —

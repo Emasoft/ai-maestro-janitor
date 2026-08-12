@@ -389,6 +389,85 @@ def test_symbol_still_at_head_is_not_flagged(repo: Path):
     assert "TRDD-DEAD-SYMBOL" not in out
 
 
+# ── the two probes form ONE predicate: they must agree on corpus + matching ───
+# Both cases below FAILED before 2026-08-12: the HEAD probe used `git grep -w`
+# over `scripts`+`tests` while the history probe used a substring `git log -S`
+# over `scripts` alone. Each spelling was defensible on its own, which is why the
+# asymmetry survived review — it only ever showed up as inexplicable findings.
+
+
+def test_symbol_surviving_only_as_a_suffix_is_not_flagged(repo: Path):
+    """A knob cited in prose by its unprefixed name, while the code holds the
+    prefixed spelling, is ALIVE — flagging it is a false alarm.
+
+    `_` is a word character, so a word-bounded HEAD probe can never match
+    `FLEET_…` inside `CLAUDE_PLUGIN_OPTION_FLEET_…` — yet the substring history
+    probe finds it, so the pair reported 'existed once, gone now' for a symbol
+    that never went anywhere. Real instance: TRDD-G4BCRUP7, 2026-08-12."""
+    uid = "15151515"
+    scripts_dir = repo / "scripts"
+    scripts_dir.mkdir(exist_ok=True)
+    # History carries the BARE token, so `git log -S` says "existed once" — this
+    # is what makes the test sharp: only the HEAD probe can save us here.
+    (scripts_dir / "knobs.py").write_text('FLEET_AWAITING_ESC_IDLE_S = 5\n', encoding="utf-8")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "feat: add the knob"], repo)
+    # ...then it is RENAMED to the prefixed spelling — still live, new name.
+    (scripts_dir / "knobs.py").write_text(
+        'CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S = 5\n', encoding="utf-8"
+    )
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "refactor: prefix the knob"], repo)
+
+    _write_trdd(
+        repo,
+        uid,
+        column="dev",
+        body=(
+            "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+            "NEXT ACTION: raise `FLEET_AWAITING_ESC_IDLE_S` once measured.\n"
+        ),
+    )
+    _commit_all(repo, f"wip (TRDD-{uid})")
+
+    out = _run(repo)
+    assert "TRDD-DEAD-SYMBOL" not in out
+
+
+def test_dead_symbol_quoted_in_a_test_fixture_is_still_flagged(repo: Path):
+    """A symbol deleted from `scripts/` stays DEAD even though a fixture in
+    `tests/` quotes it — a fixture is evidence of the bug, never evidence the
+    symbol lives.
+
+    With `tests/` inside the searched corpus this check went blind to exactly the
+    symbols it was built to catch: its own fixtures name them, so the proof that
+    it works was what stopped it working."""
+    uid = "16161616"
+    _write_and_delete_symbol(repo, "masked_by_fixture")
+    tests_dir = repo / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_fixture.py").write_text(
+        'STATE_BLOCK = "NEXT ACTION: raise `masked_by_fixture` threshold."\n', encoding="utf-8"
+    )
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "test: pin the dead-symbol check"], repo)
+
+    _write_trdd(
+        repo,
+        uid,
+        column="dev",
+        body=(
+            "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+            "NEXT ACTION: raise `masked_by_fixture` once measured.\n"
+        ),
+    )
+    _commit_all(repo, f"wip (TRDD-{uid})")
+
+    out = _run(repo)
+    assert "TRDD-DEAD-SYMBOL" in out
+    assert "masked_by_fixture" in out
+
+
 def test_stale_blocker_surfaces(repo: Path):
     """Check 4: a `blocked` TRDD whose blocker is now `published` surfaces as a
     stale-blocker candidate (re-evaluate / unblock)."""
