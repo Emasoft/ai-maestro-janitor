@@ -1,9 +1,9 @@
 ---
 trdd-id: 9MQ25PNH
 title: memory-consolidate re-dispatches already-refused candidates because its refusal ledger is written but never read back
-column: ai_review
+column: todo
 created: 2026-08-05T13:09:35+0200
-updated: 2026-08-06T15:12:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -274,3 +274,9 @@ one and leaves the mechanism intact.
       regression guards that pass either way, and the test file now SAYS so rather than
       implying 5-test coverage (ATOM-DM04-VACUOUS-HARNESS). — `03b09b7a`
 - [ ] Measured before/after dispatch counts over a fixed window, both taken the same way.
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED ai_review → todo by janitor-main-session. A WORK
+  column asserts active work; nobody was working this (idle 6d). 4/5 acceptance,
+  `blocked-by: []` — nobody is reviewing it. No scope or acceptance changed.

@@ -1,9 +1,9 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: testing
+column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-02T15:55:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -181,3 +181,9 @@ into a pane it does not own)?
 - [ ] A test proving a session blocked on `ExitPlanMode` is NEVER cleared.
 - [ ] A test proving `/clear` is not typed unless a verified handoff exists on disk.
 - [ ] Default-OFF until observed working on a real idle session, then flipped deliberately.
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → todo by janitor-main-session. A WORK column
+  asserts active work; nobody was working this (idle 10d). 0/5 acceptance, `blocked-by: []`, no
+  external wait — just unstarted. No scope or acceptance changed.

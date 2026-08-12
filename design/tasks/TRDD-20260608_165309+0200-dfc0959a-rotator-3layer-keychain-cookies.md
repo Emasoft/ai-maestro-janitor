@@ -1,10 +1,10 @@
 ---
 trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
-column: testing
+column: backburner
 implementation-commits: [3316e44, a852cb8, f4cba4f, a7506d3, 9986f7e, def438f, 21da98c, 0028c1e]
 created: 2026-06-08T16:53:09+0200
-updated: 2026-08-05T18:32:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -326,3 +326,9 @@ The USER expanded the pre-push consistency check into a rotator redesign (cascad
 keychain-encrypted cross-platform cookies). This is multi-session XL work that must survive
 compaction + the 429. This TRDD is the authoritative spec + the consolidated audit so the
 work is not lost and is not crammed into one maxed session.
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → backburner by janitor-main-session. A WORK
+  column asserts active work; nobody was working this (idle 7d). "both need conditions I cannot
+  manufacture" — same class as TRDD-32acd15f. No scope or acceptance changed.

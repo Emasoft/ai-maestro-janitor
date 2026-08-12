@@ -1,9 +1,9 @@
 ---
 trdd-id: 5C42VCUX
 title: Idle session never auto handoff-and-clears — the cron beats a huge context for hours and only ever RECOMMENDS /clear to the user
-column: testing
+column: backburner
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T17:55:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -121,3 +121,10 @@ of the system doing it. The owner's verdict: a whole skill and script wasted.
 - Machinery: `scripts/lib/cold_cache_compact.py`, `scripts/hooks/on-stop-proactive-compact.py`.
 - Sibling: TRDD-PXP08ZQC (cache-expiry-aware EXTERNAL clear, zero model turns).
 - Version-skew amplifier: the session ran 2.3.0 all day with 2.4.1 cached-pending-restart.
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → backburner by janitor-main-session. A WORK
+  column asserts active work; nobody was working this (idle 6d). Needs "a session idle ≥1 h
+  with the user absent — presence is a hard veto"; cannot be forced. No scope or acceptance
+  changed.

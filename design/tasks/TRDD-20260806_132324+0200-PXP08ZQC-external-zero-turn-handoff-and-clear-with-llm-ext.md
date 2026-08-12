@@ -1,9 +1,9 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: dev
+column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-06T18:35:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -33,6 +33,14 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 Shipped **DEFAULT OFF** (`CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED`, default false).
 
 ### NEXT ACTION (one step, runnable)
+
+**Correction (USER, 2026-08-12): the "wire into `scripts/daemon.py`" shape below is WRONG.** The
+handoff is invoked by a HOOK, not a skill/command/daemon task. The hook layer already exists and
+runs: `PreCompact → pre-compact-handoff.py`, `PostCompact → post-compact-resume.py`,
+`Stop → on-stop-proactive-compact.py`. See TRDD-1QJIZFFW for the USER's payload spec (llm-ext
+summary file + scriptable TRDD facts + a TRUNCATED message tail, budgeted so the injection never
+refills the context it was built to empty). The daemon-wiring text below is SUPERSEDED — do not
+carry it forward.
 
 Wire the watcher into `scripts/daemon.py`: add `_INTERVAL_EXTERNAL_CLEAR` (600 s — an idle
 session stays idle; this need not be responsive) + `task_external_handoff_clear()` that walks
@@ -170,3 +178,9 @@ the right moment (before the next turn executes).
   (the chain child), `lib/token_meter.resolve_context`, `lib/user_intent`.
 - llm-ext rule: ~/.claude/rules/use-llm-externalizer.md (paths not content; --estimate
   on paid profiles; auto-free on low balance).
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED dev → todo by janitor-main-session. A WORK column
+  asserts active work; nobody was working this (idle 6d). 0/5 acceptance; NEXT ACTION is known
+  and concrete (wire the watcher). No scope or acceptance changed.

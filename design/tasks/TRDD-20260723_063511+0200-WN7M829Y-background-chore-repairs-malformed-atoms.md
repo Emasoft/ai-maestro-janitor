@@ -1,9 +1,9 @@
 ---
 trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
-column: dev
+column: todo
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-02T19:35:00+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -120,3 +120,10 @@ janitor reorganises + surfaces, the agent corrects content).
   green.
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED dev → todo by janitor-main-session. A WORK column
+  asserts active work; nobody was working this (idle 10d). Its "blocker" is a stale in-session
+  note ("HELD by the burn throttle… resume after the ~22:40 reset") from 2026-08-02 — that
+  window closed 10 days ago. No scope or acceptance changed.

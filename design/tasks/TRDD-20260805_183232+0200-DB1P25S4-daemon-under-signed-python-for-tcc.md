@@ -1,9 +1,9 @@
 ---
 trdd-id: DB1P25S4
 title: Run the daemon under the signed python.org 3.12 so the existing iTerm Automation grant applies
-column: dev
+column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-06T07:38:08+0200
+updated: 2026-08-12T15:39:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -130,3 +130,9 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
 - [ ] observe the fleet scan enumerate iTerm sessions (the VQ4LX7ND alarm clears itself) — the
       end-to-end proof the grant actually applies
 - [ ] publish; then GH#92 + TRDD-VQ4LX7ND get the resolution note
+
+## Approval log
+
+- 2026-08-12T15:39:16+0200 — RE-COLUMNED dev → todo by janitor-main-session. A WORK column
+  asserts active work; nobody was working this (idle 6d). 5/7 acceptance, two remaining OPEN
+  items, no external wait. No scope or acceptance changed.
