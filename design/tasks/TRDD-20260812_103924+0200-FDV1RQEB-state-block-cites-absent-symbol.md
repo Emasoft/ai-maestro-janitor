@@ -59,6 +59,33 @@ notes, not yet decisions:
   of which this check is for.
 - SURFACE only, never mutate. Same discipline as its four siblings.
 
+## PROTOTYPE MEASURED 2026-08-12 — the design holds, with one refinement
+
+Ran a throwaway implementation of exactly the predicate above (identifier-shaped backticked
+token, absent from `scripts`/`tests` at HEAD, present in `git log -S` history) over the STATE
+block of every non-terminal card on the board.
+
+| token | at HEAD | deleted by | verdict |
+|---|---|---|---|
+| `should_emit_renew` (TRDD-AR9IUGIJ) | no | `af499ee3` | FLAGGED — reproduces today's instance |
+| `resolve_ttl_minutes` (TRDD-VXFNDHXT) | no | `af499ee3` | FLAGGED — reproduces today's instance |
+| `_phase_self_budget` (TRDD-GZXTSJSR) | no | `d9a7189d` | FLAGGED — a NEW find |
+| `findings_ledger` (control) | yes | — | not flagged |
+
+**One hit across the whole board, zero false positives observed.** The "existed once in
+history" condition is carrying the weight, exactly as designed — a token that never existed
+is a typo or an external name and is silently skipped.
+
+**The refinement the prototype surfaced:** the new find is an ANALOGY, not a dependency —
+*"a login-nudge phase must be LATE and fail-open, like `_phase_self_budget`"*. The invariant
+survives; only the worked example rotted. A dead symbol in a NEXT ACTION blocks the card; a
+dead symbol in an illustration merely misleads. **Severity must depend on WHERE in the STATE
+block the token sits**, or the check reports a one-word doc repair with the same weight as a
+card that cannot proceed — and equal weighting is how a useful channel becomes noise.
+
+(TRDD-GZXTSJSR's line is already repaired, re-pointed at `_phase_self_cost_alarm` /
+`_phase_user_presence_breadcrumb`.)
+
 ## Acceptance
 
 - [ ] The check reproduces all three 2026-08-12 instances from their pre-fix state

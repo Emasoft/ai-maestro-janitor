@@ -3,7 +3,7 @@ trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
 column: planned
 created: 2026-07-23T18:11:48+0200
-updated: 2026-07-23T18:11:48+0200
+updated: 2026-08-12T11:05:00+0200
 current-owner: main-session
 task-type: feature
 scope: project
@@ -41,8 +41,15 @@ eht: []
   the plan below. Delegate the multi-file build to ONE bounded agent; keep the orchestrator thin.
 - **LOAD-BEARING FACTS:** `notify.py` is the DAEMON-ONLY human channel (Tier-1 desktop
   notification default-on, Tier-2 opt-in webhook; gates: sev≥HIGH + content-hash dedupe + 24h cap + one-per-day digest). Cardinal survival invariant: NEVER add actuation to an early-returning
-  heartbeat phase — a login-nudge phase must be LATE and fail-open, like `_phase_self_budget`.
-- **SUPERSEDED — do NOT carry forward:** nothing yet.
+  heartbeat phase — a login-nudge phase must be LATE and fail-open, like
+  `_phase_self_cost_alarm` or `_phase_user_presence_breadcrumb` (the current tail of
+  `dispatch.py`).
+- **SUPERSEDED — do NOT carry forward:** the exemplar this line used to name,
+  `_phase_self_budget`, was deleted 2026-08-12-verified by `d9a7189d feat!: remove
+  MAINTENANCE MODE and the self-budget actuation`. The INVARIANT it illustrated is
+  unchanged and still load-bearing; only the worked example had to be re-pointed at a phase
+  that still exists. Found by a prototype of TRDD-FDV1RQEB's dead-symbol check, which
+  flagged this card and nothing else across the whole non-terminal board.
 - **ARTIFACTS TO READ BEFORE ACTING:** `scripts/detectors/oauth-login-needed.py`,
   `scripts/lib/notify.py`, `scripts/oauth_rotator/supervisor.py` (`_slot_facts`, `diagnose`),
   `scripts/oauth_rotator/slot_capture_browser.py`, `scripts/daemon.py`
