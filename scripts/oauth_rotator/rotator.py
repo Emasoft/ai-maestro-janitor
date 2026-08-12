@@ -821,6 +821,22 @@ def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
             "so rotation evaluates the REAL live account (TRDD-6AABK2BG)"
             % (old or "(unknown)", new or "(unknown)")
         )
+        # A CHANGED live identity is a rotation, whoever performed it (TRDD-UA4FAX67).
+        # `_switch_blob` stamps this when WE rotate, but on a host where a live ai-maestro
+        # server owns `oauth-rotator-tick` the server rotates and never writes our
+        # breadcrumb — so the post-rotation pane wake was dead exactly where rotation
+        # actually happens (verified 2026-08-12: a rotation landed 08-11 10:00:13 and
+        # `rotation-success.ts` was absent, with nothing in the tree that deletes it).
+        #
+        # The IDENTITY is the evidence, never the beacon's `ts`: `beacon_needs_restamp`
+        # also re-stamps on age and fails OPEN on an unknown mtime, so a fresh `ts` proves
+        # only that a re-stamp ran. Gating on `old != new` keeps this fail-CLOSED — it
+        # cannot fire without an observed change of live account — which is required,
+        # because the consumer types into the user's pane.
+        try:
+            gs.record_rotation_success(int(now if now is not None else time.time()))
+        except Exception:  # noqa: BLE001 - fail-OPEN: a lost stamp costs one delayed wake
+            pass
     return True
 
 

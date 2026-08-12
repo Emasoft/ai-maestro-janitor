@@ -2138,6 +2138,62 @@ def test_refresh_beacon_restamps_after_a_manual_login(
     assert rotator.refresh_beacon_if_stale(now=2002.0) is False
 
 
+def test_a_rotation_WE_DID_NOT_PERFORM_still_records_the_fleet_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-UA4FAX67: `_switch_blob` stamps `rotation-success.ts` when WE rotate — but on a
+    host where a live ai-maestro server owns `oauth-rotator-tick`, the SERVER rotates and
+    never writes our breadcrumb, so the post-rotation pane wake was dead exactly where
+    rotation actually happens. Measured 2026-08-12: a rotation landed 2026-08-11 10:00:13 and
+    the stamp was absent, with nothing in the tree that deletes it.
+
+    A CHANGED live identity is the evidence, and it is available to us whoever rotated."""
+    gs_dir = tmp_path / "gs"
+    monkeypatch.setattr(rotator.gs, "global_state_dir", lambda: gs_dir)
+    monkeypatch.setattr(rotator.gs, "init_global_state", lambda: gs_dir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a, live_b = _blob("LIVE-A"), _blob("LIVE-B")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}, "b@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a, "b@x": live_b}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+    assert rotator.gs.rotation_succeeded_within(600, now=1000) is False
+
+    # SOMEONE ELSE rotates: the live credential is now B. We never called _switch_blob.
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_b)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 2000.0)
+    assert rotator.refresh_beacon_if_stale(now=2001.0) is True
+
+    assert rotator.gs.rotation_succeeded_within(600, now=2001) is True, \
+        "an identity change is a rotation, whoever performed it"
+
+
+def test_a_mere_RESTAMP_is_not_a_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fail-CLOSED half, and the reason the evidence is the IDENTITY and never the
+    beacon's `ts`: `beacon_needs_restamp` ALSO re-stamps on age and fails OPEN on an unknown
+    primary mtime, so a fresh `ts` proves only that a re-stamp ran. Keying off it would type
+    into a user's pane with no rotation having occurred."""
+    gs_dir = tmp_path / "gs"
+    monkeypatch.setattr(rotator.gs, "global_state_dir", lambda: gs_dir)
+    monkeypatch.setattr(rotator.gs, "init_global_state", lambda: gs_dir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a = _blob("LIVE-A")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+
+    # An unknown primary mtime forces a re-stamp (fail-OPEN) with the SAME account live.
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: None)
+    assert rotator.refresh_beacon_if_stale(now=2001.0) is True, "a re-stamp did happen"
+    assert rotator.gs.rotation_succeeded_within(600, now=2001) is False, \
+        "a re-stamp with the SAME live account must never look like a rotation"
+
+
 def test_a_successful_switch_records_the_rotation_for_the_fleet(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-UA4FAX67 wiring: _switch_blob must leave the machine-wide breadcrumb the daemon's
