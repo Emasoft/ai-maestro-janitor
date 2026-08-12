@@ -1,9 +1,10 @@
 ---
 trdd-id: MADJ00KA
 title: extract_lessons swallows atomized fact content after the last footnote, false-failing verify_split
-column: backburner
+column: completed
 created: 2026-07-15T04:47:24+0200
-updated: 2026-07-15T04:47:24+0200
+updated: 2026-08-12T02:52:00+0200
+implementation-commits: [bf7fc89f]
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -11,6 +12,14 @@ severity: medium
 labels: [memory, wikimem, verify-split, atomize]
 relevant-rules: []
 ---
+
+## Approval log
+
+- 2026-08-12T02:52:00+0200 — COMPLETED. Shipped 2026-07-15 by `bf7fc89f`
+  ("fix(wikimem): stop extract_lessons at an atom marker (TRDD-MADJ00KA)") — the same day this
+  card was written — and then never closed, so it asserted `backburner` for 28 days while the
+  fix was live. Verified behaviourally before closing, not from the commit subject: a `[^N]:`
+  footnote followed by atom content now yields 1 lesson and does NOT swallow the fact text.
 
 # extract_lessons over-captures atomized fact content after the last footnote
 

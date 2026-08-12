@@ -1,9 +1,10 @@
 ---
 trdd-id: 842PBES7
 title: Harden _body_minus_lessons against silent multi-heading truncation (latent false-PASS, unreachable today)
-column: backburner
+column: completed
 created: 2026-07-15T04:47:24+0200
-updated: 2026-07-15T04:47:24+0200
+updated: 2026-08-12T02:52:00+0200
+implementation-commits: [d7acf906]
 current-owner: janitor-session
 task-type: refactor
 scope: project
@@ -11,6 +12,14 @@ severity: low
 labels: [memory, wikimem, verify, defensive-hardening]
 relevant-rules: []
 ---
+
+## Approval log
+
+- 2026-08-12T02:52:00+0200 — COMPLETED. Shipped by `d7acf906` ("fix(wikimem):
+  _body_minus_lessons fails loud on a multi-page concatenation (TRDD-842PBES7)") and then never
+  closed, so it asserted `backburner` for 28 days while the fix was live. Verified
+  behaviourally before closing: text carrying two `## Notes and lessons learned` headings now
+  raises `ValueError` instead of silently truncating at the first.
 
 # Harden _body_minus_lessons against silent multi-heading truncation
 
