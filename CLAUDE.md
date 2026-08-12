@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=46a95bb3085b digest=942c351e32ef generated=2026-08-12T00:49:03+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=470ffa191922 digest=159886f940dd generated=2026-08-12T09:30:34+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -783,7 +783,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · ensure_bridge_line(scope_root) -> str — VERIFY the bridge line is present in this scope's MEMORY.md; RE-ADD if absent.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
   · oversized_mistiered_pages(root, *, max_bytes) -> list[tuple[Path, str]] — Over-cap pages the split skill MUST refuse — `(path, tier)`, cheapest possible check.
-  · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
+  · split_has_work(root, *, max_bytes, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
   · page_stats(root) -> dict[str, list[int]] | None — `{relpath: [size, mtime_ns]}` for every candidate page — the STAMPED form of
   · changed_pages(current, last) -> set[str] — Root-relative paths that were added, removed, or whose stat moved. PURE.
@@ -792,13 +792,13 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · consolidate_has_work(root, *, last_stats, stamp_age_s, recheck_after_s, scope, now, max_bytes) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
   · consolidate_group_defect(pages, *, max_bytes) -> str — The SINGLE-SOURCE reason slug for why a `(tier, type)` GROUP of candidate
   · repair_defect(text) -> str — The SINGLE-SOURCE repair-candidacy predicate (janitor#227): return the SHORT,
-  · repair_has_work(root, *, scope, now) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
-  · retro_lesson_has_work(root) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
+  · repair_has_work(root, *, scope, now, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
+  · retro_lesson_has_work(root, *, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff some CURATED wiki page in `root` carries an atom marker that is
   · atomize_defect(text) -> str — The SINGLE-SOURCE atomize-candidacy predicate (janitor#227 follow-up — mirrors
-  · atomize_has_work(root, *, scope, now) -> bool — True iff some CURATED wiki page in `root` is an atomize candidate per
+  · atomize_has_work(root, *, scope, now, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff some CURATED wiki page in `root` is an atomize candidate per
   · conflict_pairs(root, scope) -> list[tuple[str, str]] — Every surfaced conflict candidate pair in the scope's proposal file, in order.
-  · conflict_has_work(root, *, scope, now) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
-  · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
+  · conflict_has_work(root, *, scope, now, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
+  · harvest_has_work(scope, root, *, last_stats, stamp_age_s, recheck_after_s) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
   · content_has_work(intervention, root, *, split_max_bytes, scope, last_stats, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
   · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
