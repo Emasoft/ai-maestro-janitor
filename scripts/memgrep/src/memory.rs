@@ -4321,12 +4321,17 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
             }
             let (marker_line, body_chars) = (a.line, a.body_chars);
             if atom_budget > 0 && body_chars > atom_budget {
-                // WARN: nothing is lost or unresolvable — the atom works, it is just doing the job
-                // of several. Fixing it needs SEMANTIC decomposition (which facts split where), so
-                // it can never be mechanical, and blocking a write on it would gate an unrelated
-                // edit behind a judgement call the author may not be in a position to make.
+                // INFO (demoted from Warn, janitor#200): nothing is lost or unresolvable — the
+                // atom works, it is just doing the job of several. Fixing it needs SEMANTIC
+                // decomposition (which facts split where), which is never mechanical, and no
+                // memory-editor pass owns it: SPLIT fragments a PAGE into multiple pages (a
+                // different operation), ATOMIZE only adds markers to free prose that has none
+                // yet, and REPAIR's own rules explicitly forbid splitting a fact. A WARN here
+                // asserted actionable work that nothing in the scheduler could ever detect or
+                // dispatch on — an un-actionable finding is, by definition, informational, not
+                // a defect to gate a write on.
                 violations.push((
-                    Severity::Warn,
+                    Severity::Info,
                     p.clone(),
                     marker_line,
                     format!(
@@ -7529,6 +7534,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(has_violation(&v, "decompose it into"), "got: {v:?}");
+        // janitor#200: no scheduler chore gate can ever detect (let alone dispatch on) this
+        // finding — SPLIT fragments a PAGE, ATOMIZE only marks free prose, and REPAIR's own
+        // rules forbid splitting a fact. A finding nothing can action must not be WARN (which
+        // reads as "actionable defect"); it is INFO.
+        assert_eq!(
+            severity_of(&v, "decompose it into"),
+            Some(Severity::Info),
+            "atom-oversized must be INFO, not WARN — no chore gate can ever act on it (janitor#200)"
+        );
     }
 
     #[test]
