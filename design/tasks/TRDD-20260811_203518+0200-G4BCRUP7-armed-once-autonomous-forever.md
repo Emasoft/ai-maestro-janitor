@@ -1,9 +1,9 @@
 ---
 trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
-column: dev
+column: todo
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-12T12:50:00+0200
+updated: 2026-08-13T00:15:36+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0

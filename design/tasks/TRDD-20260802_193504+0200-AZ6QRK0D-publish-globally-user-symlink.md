@@ -1,10 +1,9 @@
 ---
 trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
-column: blocked
-pre-block-column: todo
+column: todo
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-02T23:36:00+0200
+updated: 2026-08-13T00:22:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -21,8 +20,41 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-02
 
-**BLOCKED — do NOT build (the #52 coordination the card mandated was done 2026-08-02
-and it FORBIDS building this here).** The publishing verbs (`publish-sync` / `link`)
+### 2026-08-13 — THE BLOCK BELOW IS SUPERSEDED BY A USER DIRECTIVE, AND MOST OF THIS SHIPPED
+
+**Do not act on the 2026-08-02 block.** The USER directed this build explicitly on 2026-08-12
+(*"make sure … the memgrep will always add the publish-globally field to project scoped wikimem
+pages, and if true, ensure the symlink exist. if not it must create the symlink"*). The owner of
+this repo is also the owner of `ai-maestro-plugin`, so that directive is the authority the older
+block was deferring TO — it does not conflict with `how-to-fix-issues-of-other-projects.md`, it
+answers it.
+
+**What actually shipped** (verified in the tree 2026-08-13, `scripts/memgrep/src/memory.rs`):
+  - `classify_publish_globally` + `apply_publish_globally_fix` + `normalize_page_until_clean`
+    — the field is normalized and the USER-root symlink created/refreshed, **always**, bracketed
+    around every `atomic_write_page` (before AND after each change, iterating to a fixed point).
+    There is deliberately no `--fix` flag: a write that skipped normalization would persist a
+    malformed page.
+  - `memgrep lint` renders every inconsistent state.
+  - `ConflictFalseWithSymlink` (flag `false` but a symlink exists) is **never auto-resolved** —
+    two defensible fixes means a human decides. That is the decision-margin discipline, correct.
+  - ~70 references/tests in the engine.
+
+**WHAT IS STILL MISSING — the privacy gate.** This card's own Verification says *"A page with an
+absolute `$HOME` path refuses to publish"*, and no such refusal exists: `apply_publish_globally_fix`
+consults no privacy scan. The exposure is smaller than the 2026-08-02 card assumed (a USER-scope
+symlink is not a git push, and the page is already committed at PROJECT scope, which IS pushed),
+so this is not urgent — but publishing is still the moment to run `memory-scope-leak`'s check, and
+today it is not run.
+
+**NEXT ACTION:** wire the privacy scan into the publish path — a page carrying machine-private
+content (absolute `$HOME` path, username, hostname) must REFUSE to gain a symlink and say why.
+Then re-verify the card's round-trip line.
+
+---
+
+**SUPERSEDED 2026-08-13 — historical, do NOT act on:** ~~BLOCKED — do NOT build (the #52
+coordination the card mandated was done 2026-08-02 and it FORBIDS building this here).~~ The publishing verbs (`publish-sync` / `link`)
 belong to the UPSTREAM memgrep engine roadmap — ai-maestro-plugin **TRDD-202ccfa2**,
 tracked as **ai-maestro-plugin#18** — and the engine owner has not shipped them
 (re-verified in #52's thread: memgrep 0.1.0, verbs absent; design-text-only upstream).
