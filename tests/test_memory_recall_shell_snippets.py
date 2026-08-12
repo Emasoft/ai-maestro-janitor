@@ -70,7 +70,16 @@ def test_no_unquoted_dollar_roots_usage(doc: Path) -> None:
         f"{doc.name}:{i}: {ln.strip()}"
         for i, ln in enumerate(text.splitlines(), 1)
         if re.search(r"\$ROOTS\b", ln)
-        # allowed only inside the explanatory comment (prose), not as a command arg
-        and not ("word-split" in ln or "ARRAY" in ln or 'unquoted "$ROOTS"' in ln)
+        # Allowed only in the prose that WARNS about the trap, never as a command arg. The
+        # "unquoted …$ROOTS" form is matched by regex, not by a literal: the rule is edited by
+        # hand and the warning legitimately wraps its variable in backticks or quotes
+        # (`unquoted `"$ROOTS"` string`). A literal comparison made this guard fail on a pure
+        # rewording of the very sentence it wants to exist, which teaches the next editor to
+        # delete the warning to get green — the exact opposite of the point.
+        and not (
+            "word-split" in ln
+            or "ARRAY" in ln
+            or re.search(r"unquoted\s+\W*\$ROOTS", ln)
+        )
     ]
     assert not bad, 'bare unquoted `$ROOTS` usage remains (use "${ROOTS[@]}"):\n' + "\n".join(bad)
