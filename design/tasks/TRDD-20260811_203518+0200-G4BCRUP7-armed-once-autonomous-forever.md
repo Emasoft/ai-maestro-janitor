@@ -114,12 +114,27 @@ So on a default install the janitor **never** auto-applies branch protection; it
 (`detectors/branch-protection.py`). TRDD-631fa3de's STATE claims "the janitor now auto-applies
 the ratified pair" — that claim is FALSE on a default install and should be corrected there too.
 
-**NEXT ACTION for this slice:** flip `guard_mode_enabled()` to default-ON. It is already
-belt-and-braces guarded — `/janitor-autofix-off` vetoes it, the repo slug must resolve, `gh`
-must be present, the viewer must be admin, and an unfetchable ruleset list means don't act. The
-DEFAULT is the only thing standing between a detected unprotected branch and the owner's "every
-minute is a window for supply-chain compromise". Do NOT widen it beyond the ratified pair —
-beyond-baseline rewriting stays the genuinely open pick.
+**~~NEXT ACTION for this slice:~~ DONE 2026-08-12 — `guard_mode_enabled()` is now default-ON.**
+Unset means ENABLED; only an explicit false spelling (`0/false/no/off`) opts out, so a typo in
+the config value can no longer silently disable a security guard. The six remaining gates are
+unchanged and all fail-closed, and the applier still reaches ONLY the ratified pair — the
+beyond-baseline rewriting question stays the genuinely open pick, untouched.
+
+Verified before flipping, because it was the one thing that could have made this harmful: the
+guard resolves its repo slug from `CLAUDE_PLUGIN_ROOT` → `CLAUDE_PROJECT_DIR` → `Path(".")`.
+Both env vars are UNSET in the cron-fire context and neither the stub nor `dispatch.py` sets
+them, so it falls through to the cwd — i.e. THIS project's own `.claude-plugin/plugin.json`.
+A non-plugin project resolves no slug and is skipped outright. Had either var been set to the
+janitor's cache dir, a default-ON guard would have re-applied rulesets to the JANITOR's repo
+from every project on the machine and never protected the user's own — running, but on the
+wrong target.
+
+Tests: `test_guard_mode_enabled_default_is_true` replaces the old default-is-false assertion,
+plus `test_guard_mode_unset_or_unrecognised_stays_on` (`""`, `"garbage"`, `"of"`, `"flase"` must
+all stay ON — under the old opt-in semantics those meant OFF). 47 pass, ruff + mypy clean.
+The USER-scope memory that asserted default-OFF as verified reality was superseded, not
+overwritten (`^7` on `baseline-branch-rulesets`), and README's two statements of the old default
+were corrected.
 After those: R6 residual (permission-prompt detection via pane text) and the R3 server-host
 blackout below.
 

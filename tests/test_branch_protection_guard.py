@@ -532,23 +532,53 @@ def test_guard_mode_enabled_parses_truthy_values(
         assert bpl.guard_mode_enabled() is True, f"failed for {v!r}"
 
 
-def test_guard_mode_enabled_default_is_false(
+def test_guard_mode_enabled_default_is_true(
     project_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The guard is OPT-OUT (flipped 2026-08-12).
+
+    This assertion is the whole feature. While the default was False the applier was
+    unreachable on every default install, so the janitor could only ever FLAG an
+    unprotected default branch and never fix one — and the USER's standing security
+    directive (`act-dont-ask-security`) names branch-protection rulesets as
+    fix-on-detection precisely because "asking permission turns the janitor from a
+    guard into a clipboard".
+
+    If someone flips this back, they are re-disabling the feature for everyone, so the
+    test is written to fail loudly rather than to describe whatever the code does.
+    """
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", raising=False)
-    assert bpl.guard_mode_enabled() is False
+    assert bpl.guard_mode_enabled() is True
 
 
 def test_guard_mode_enabled_falsy_values(
     project_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Only an EXPLICIT false spelling opts out."""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    for v in ("0", "false", "no", "off", "", "garbage"):
+    for v in ("0", "false", "FALSE", "no", "off", "Off"):
         monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", v)
         assert bpl.guard_mode_enabled() is False, f"failed for {v!r}"
+
+
+def test_guard_mode_unset_or_unrecognised_stays_on(
+    project_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty and unrecognised values must NOT silently disable the guard.
+
+    Under the old opt-in semantics `""` and `"garbage"` both meant OFF. Under opt-out
+    they must mean ON: a typo in a config value ("of", "flase") must not quietly
+    switch a security guard off — that is the same silent-disable shape this flip
+    exists to remove.
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    for v in ("", "   ", "garbage", "of", "flase"):
+        monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", v)
+        assert bpl.guard_mode_enabled() is True, f"failed for {v!r}"
 
 
 # ---------- branch_protection_apply (Tier 2 script) gates -----------------

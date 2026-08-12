@@ -596,7 +596,34 @@ def apply_baseline_rulesets(
 
 
 def guard_mode_enabled() -> bool:
-    """Master gate for the Tier 2 auto path. Default is False — the
-    user must explicitly enable per-project."""
-    val = os.environ.get("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", "")
-    return val.strip().lower() in ("1", "true", "yes", "on")
+    """Master gate for the guarded auto-apply path. Default is **True** — opt-OUT.
+
+    Flipped from default-False on 2026-08-12. The old default made this an opt-in
+    feature that nobody opted into, so on every default install the janitor only ever
+    FLAGGED an unprotected default branch and never fixed one — code that exists, is
+    tested, is documented, and never runs.
+
+    The USER's standing security directive (2026-06-30, `act-dont-ask-security`) names
+    branch-protection rulesets explicitly: fix everything detected, commit, report
+    after, do not ask — because "every minute a project sits with missing branch
+    protection is a window for supply-chain compromise" and "asking permission turns
+    the janitor from a guard into a clipboard". A guard that ships OFF is that
+    clipboard, one step earlier. Applying the ratified `baseline-*` pair AS-IS is
+    Tier-0 (manager-approval-defaults §F), so no approval gates it; any DEVIATION from
+    the pair remains Tier-2 and is not reachable from this path at all.
+
+    Turning it on is safe because the default does not widen what the applier may do —
+    six further gates still bind, every one fail-closed: the per-project
+    `/janitor-autofix-off` veto, a repo slug that must resolve from THIS project's
+    `.claude-plugin/plugin.json` (so a non-plugin project is skipped outright), `gh` on
+    PATH, a discoverable default branch, an admin viewer, and an unfetchable ruleset
+    list meaning "uncertain → do not act".
+
+    Spelled inline rather than via `state.is_truthy_env` on purpose: the module NOTE above
+    keeps this file importable by the lightweight `uv run --script` detectors that reach it
+    transitively, and adding a module-level import for one boolean would trade that away.
+    """
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_GUARD_MODE_ENABLED", "").strip().lower()
+    if not raw:
+        return True
+    return raw not in ("0", "false", "no", "off")

@@ -21,8 +21,16 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ccc33c65c314 digest=f68813ca1ece generated=2026-08-12T14:06:14+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e7bffba4eb79 digest=d86b8a5fef2f generated=2026-08-12T17:13:31+0200
 ## Project map (auto-generated — do not edit between the fences)
+`scripts/agent_context_bench.py` — agent_context_bench — measure what `agent_config_patterns.scan_text` actually CATCHES.
+  · claimed_rule_ids() -> set[str] — The classes the rule set CLAIMS to cover — derived from the code, never a copy of it.
+  · load_corpus(path) -> list[dict] — Parse the JSONL corpus, skipping unparseable lines rather than dying.
+  · split_of(sample) -> str — Deterministic `dev` / `holdout` assignment, keyed on the sample's own content.
+  · score(samples) -> dict — Run every sample through `scan_text` and tally recall / false positives.
+  · render(res) -> str
+  · compare(cur, base) -> tuple[bool, list[str]] — Regression gate: recall may never fall and false positives may never rise.
+  · main() -> int
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
   · resolve_cron(state_dir, env) -> str — The cadence to arm: an explicit `desired-cadence.cron` override, else the user's config
@@ -385,7 +393,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · detect_required_status_checks(project_root) -> list[dict] — Discover the repo's CI check contexts from its WORKFLOW FILES.
   · delete_ruleset_by_name(slug, name) -> tuple[bool, str] — Delete the ruleset named `name` if present. Returns (success, msg).
   · apply_baseline_rulesets(slug, default_branch, project_root) -> tuple[bool, list[tuple[str, bool, str]], list[dict]] — Apply ALL THREE ratified rulesets idempotent-by-name (branch pair +
-  · guard_mode_enabled() -> bool — Master gate for the Tier 2 auto path. Default is False — the
+  · guard_mode_enabled() -> bool — Master gate for the guarded auto-apply path. Default is **True** — opt-OUT.
 `scripts/lib/cache_prune.py` — Plugin-cache pruning primitives (TRDD-a6d2fdaf, Fix A).
   · oldest_claude_session_start(sessions, now) -> int | None — Return the START epoch of the OLDEST live Claude session, or None if none
   · prune_cutoff(*, now, min_age_s, oldest_session_start, session_margin_s) -> int — Versions whose dir mtime is STRICTLY OLDER than the returned epoch are old
@@ -1225,6 +1233,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · select_due(tickets, *, now, per_fire, budget_left, inflight) -> list[Ticket] — Pick the tickets to dispatch on THIS fire. PURE.
   · mark_failed(t, *, now, backoff_s, why) -> Ticket — A failed attempt: back off and retry, or give up EXPLICITLY.
   · mark_invalid(t, *, now, why) -> Ticket — The finding was PROVEN not to be a defect: close it, terminally, with the disproof.
+  · mark_needs_human(t, *, now, why) -> Ticket — The finding is REAL but out of reach here: close it, terminally, for a human to act on.
   · evidence_fingerprint(evidence) -> str — A stable digest of a finding's INPUTS — what a refusal is conditioned on.
   · budget_left(ledger, *, now, per_day) -> int — Dispatches still allowed in the rolling 24h window.
   · tickets_dir(state_dir) -> Path
