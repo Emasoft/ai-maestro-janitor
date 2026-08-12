@@ -1116,6 +1116,25 @@ def test_cmd_auto_all_maxed_line_names_every_alternate_verdict(
     assert "dead@x:locally-expired-no-refresh" in stuck[0]
 
 
+def test_cmd_auto_no_alternates_is_distinct_from_all_maxed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """janitor#221: 'every alternate was measured and is maxed' and 'there was nothing to
+    measure at all' used to share one decision string ('all paid accounts maxed'), which read
+    as a claim that alternates were probed and rejected even when NONE existed to probe. With
+    zero configured slots the outcome must be a DIFFERENT string and must NOT claim anything
+    was measured as maxed."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={}, usage={"LIVE": (401, None)})
+    decided: list[str] = []
+    monkeypatch.setattr(rotator, "_decide", lambda msg: decided.append(msg))
+    rotator.cmd_auto()
+    assert switches == []
+    assert not any("all paid accounts maxed" in m for m in decided)
+    unmeasured = [m for m in decided if "no alternate accounts to measure" in m]
+    assert len(unmeasured) == 1
+
+
 def test_cmd_auto_degraded_rotate_when_in_tick_refresh_fails(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-a6d2fdaf fix for the 2026-06-20 deadlock: when the only alternate's stored token is

@@ -2100,9 +2100,18 @@ def cmd_auto() -> int:
         return 0
     # 3) Genuinely stuck — nothing rotatable in either path. Name EVERY alternate's verdict
     # (TRDD-WBYFTU2L D2) so the next incident is diagnosable from this one line.
+    #
+    # janitor#221: `verdicts` empty and `verdicts` non-empty used to share ONE decision string
+    # ("all paid accounts maxed"), but they are different situations — non-empty means every
+    # alternate was actually MEASURED and rejected, while empty means there was nothing to
+    # measure at all (no slots configured). Collapsing them made "maxed" a lie in the empty
+    # case and hid that no alternate was ever probed, so split them into distinct outcomes.
     if network_up:
-        detail = ("; ".join(verdicts)) if verdicts else "no alternate slots"
-        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold and none is structurally renewable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, detail))
+        if verdicts:
+            detail = "; ".join(verdicts)
+            _decide("auto: live %s exhausted (%s) but every alternate was measured and none is usable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, detail))
+        else:
+            _decide("auto: live %s exhausted (%s) but there are no alternate accounts to measure — cannot rotate; add another paid account" % (live_email or "(live)", live_desc))
     else:
         _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate with a known future expiry exists — cannot rotate; manual re-auth needed" % (live_email or "(live)"))
     return 0
