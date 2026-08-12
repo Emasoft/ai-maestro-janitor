@@ -56,7 +56,12 @@ def test_an_orphan_in_a_non_local_root_is_replaced_with_a_redirect(
     assert done == [stale]
     body = stale.read_text(encoding="utf-8")
     assert "ORPHAN" in body and "links [[" not in body, "the stale findings must be gone"
-    assert str(local / lib.PROPOSAL_NAME) in body, "and it must point at the live file"
+    assert lib.PROPOSAL_NAME in body, "and it must name the file to read instead"
+    assert str(local) not in body, (
+        "janitor#243: a USER-scope file is read by EVERY project's session — embedding "
+        "ONE project's absolute LOCAL path is correct for only that one reader and "
+        "misleading for all the others"
+    )
 
 
 def test_the_LIVE_proposal_is_never_touched(lib, tmp_path: Path) -> None:

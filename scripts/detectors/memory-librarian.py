@@ -172,6 +172,12 @@ _FM_TIER_RE = re.compile(r"(?:^|[{,])\s*['\"]?tier['\"]?\s*:\s*['\"]?(?P<tier>[\
 # simulation S10a added to see the flow spelling, so it must stay. Presence of the KEY
 # is the whole test; an empty value already passed before this change and still does.
 _FM_GLOBS_RE = re.compile(r"(?:^|[{,])\s*['\"]?globs['\"]?\s*:")
+# `type:` (nested under `metadata:`, same block/flow duality as tier/globs above) —
+# needed to exempt a `type: overview` scope-entry page from the hub globs check
+# (janitor#243): an overview indexes a memory SCOPE, not a functionality, so it owns
+# no file set and inventing a `globs:` value to satisfy the check would be a false
+# ownership claim, strictly worse than the missing field it silences.
+_FM_TYPE_RE = re.compile(r"(?:^|[{,])\s*['\"]?type['\"]?\s*:\s*['\"]?(?P<type>[\w-]+)")
 # The radiating ray-list heading — legal on hub/aspect pages ONLY.
 _APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
 # Code-fence delimiters — the body shape scans MUST ignore fenced content (a
@@ -620,9 +626,14 @@ def _parse_links_directed(stdout: str, memdir: Path) -> set[tuple[str, str]]:
 _ORPHAN_STUB = """# Memory reorg proposal — MOVED
 
 This file is an ORPHAN from an older ai-maestro-janitor, which wrote one proposal into EVERY
-memory scope root. The librarian now writes a SINGLE proposal, into the LOCAL scope root:
+memory scope root. The librarian now writes a SINGLE proposal, into **your own reading session's
+LOCAL scope root** — not this file, and not any single absolute path recorded here: this notice
+is shared verbatim by every project that reads this scope, so a literal path would be correct for
+only the one project that happened to write it and wrong for every other reader (janitor#243).
 
-    {live}
+Read your own LOCAL scope root's `{name}` instead:
+
+    ~/.claude/projects/<your-project-slug>/memory/{name}
 
 **Nothing updates this copy**, so whatever it used to contain described the corpus as it was on
 the day that older version last ran — findings long since fixed still read as current. That is
@@ -635,7 +646,6 @@ been reciprocated in the 22 days since it was written.
 
 Its content has been replaced by this notice rather than deleted, so nothing is lost: the
 proposal is a GENERATED artifact (regenerated on the next librarian run), never a memory note.
-Read the live file above.
 """
 
 
@@ -664,7 +674,7 @@ def _redirect_orphaned_proposals(
         path = memdir / PROPOSAL_NAME
         if not path.is_file():
             continue
-        stub = _ORPHAN_STUB.format(live=local_memdir / PROPOSAL_NAME)
+        stub = _ORPHAN_STUB.format(name=PROPOSAL_NAME)
         try:
             if path.read_text(encoding="utf-8", errors="replace") == stub:
                 continue  # already redirected — no churn on a stable corpus
@@ -1078,7 +1088,10 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
       (d) missing `ocd`/`lmd` per-element dates (ADVISORY — older notes predate
           the convention; flagged `(advisory)` so it is visibly lower-severity);
       (e) wikimem (TRDD-bc16d602): a `tier: hub` page missing `globs:` — the
-          file→functionality map RECALL Entry A depends on;
+          file→functionality map RECALL Entry A depends on. Exempt: a
+          `type: overview` hub (the SessionStart-seeded scope entry point,
+          janitor#129) indexes a memory SCOPE, not a functionality, so it has
+          no file set to name (janitor#243);
       (f) wikimem: a `tier: component` page carrying `## Applies to` — components
           RECEIVE only; the radiating ray-list is general-page-only. A page with
           NO tier is a plain flat note and is exempt from (e)/(f).
@@ -1198,7 +1211,15 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
         (m.group("tier") for ln in fm_lines for m in [_FM_TIER_RE.search(ln)] if m),
         None,
     )
-    if tier == "hub" and not any(_FM_GLOBS_RE.search(ln) for ln in fm_lines):
+    page_type = next(
+        (m.group("type") for ln in fm_lines for m in [_FM_TYPE_RE.search(ln)] if m),
+        None,
+    )
+    if (
+        tier == "hub"
+        and page_type != "overview"
+        and not any(_FM_GLOBS_RE.search(ln) for ln in fm_lines)
+    ):
         issues.append(
             f"{note}: hub page missing `globs:` (the file→functionality map — wikimem)"
         )

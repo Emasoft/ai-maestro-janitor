@@ -724,6 +724,25 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("myhub.md", shape)
             self.assertIn("globs", shape)
 
+    def test_overview_hub_without_globs_not_flagged(self):
+        """Janitor#243: a `tier: hub, type: overview` scope-entry page (the
+        SessionStart-seeded scope index, janitor#129) indexes a memory SCOPE, not a
+        functionality — it owns no file set, so it must NOT be flagged for a missing
+        `globs:`. Inventing one would be a false ownership claim, worse than the
+        empty field it would silence."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "myproj-local-overview.md").write_text(
+                '---\nname: myproj-local-overview\ndescription: "scope entry point"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  type: overview\n  tier: hub\n"
+                "---\nOverview.\n\n## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("myproj-local-overview.md", shape,
+                             "a type: overview hub must be exempt from the globs: check")
+
     def test_component_with_applies_to_flagged_and_clean_wiki_pages_silent(self):
         """Wikimem: a component that RADIATES (`## Applies to`) is flagged;
         a well-formed hub (globs) + component (Governed by) are NOT flagged."""
