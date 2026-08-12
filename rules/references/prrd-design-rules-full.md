@@ -453,3 +453,17 @@ The refusals are the reason an agent that believes a golden rule is wrong files 
 waits, rather than editing and explaining afterwards: the edit does not land, so there is nothing
 to explain. An agent that cannot reach `prrd-edit.py` must still behave as if these refusals
 applied — the tool enforces the rule, it is not the source of it.
+
+## G1.1 — the recommended self-identification line, in full
+
+Relocated from the base rule (2026-08-12) to keep the shipped corpus under its floor cap. The
+base rule states the requirement and the security reason; this is the recommended wording:
+
+`_Posted by the Claude developing **<plugin-or-role>** (via the shared owner gh auth)._`
+
+Commits SHOULD carry an `Agent: <plugin-slug>` trailer. The line carries no `@` deliberately —
+it is meant to be pasted verbatim as finished prose, and a bare `@handle` in that position
+PAGES a real account the moment it is posted (this happened repeatedly — janitor#198). A
+template is only safe to hand out when its LITERAL form is harmless; templates that need the
+author to remember to strip something before posting get pasted unedited often enough that the
+template itself must be the safe form.

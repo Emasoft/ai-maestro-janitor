@@ -324,8 +324,26 @@ project's agent can find it — no copy, so no drift; the symlink is the only me
 `false`: PROJECT memory is git-tracked and pushed while USER scope is machine-private, so
 publishing a page beyond its own project must be opt-in, never assumed. Set it `true` only for
 pages describing this project's public surface (features, APIs) that other projects need to
-know about — not its internals. Full grammar + the lint-reconciliation table (the `true`/symlink
-mismatch cases): `markdown-memory-recall.md` §`publish-globally:`.
+know about — not its internals.
+
+That normalization timing (before AND after every write, never a separate cleanup pass) is a
+correctness requirement: a page missing the field is malformed, and a write onto a malformed
+structure corrupts it. It is idempotent — an already-normal page is not rewritten (the chore
+schedulers stat these files, so a no-op must not touch the mtime).
+
+Two invariants, both reconciled by that same always-on normalization (`memgrep lint` still
+REPORTS them so a human can see the state, but lint is not what performs the repair):
+
+| state | meaning | fix |
+|---|---|---|
+| `true`, no symlink | published in name only | CREATE the symlink |
+| symlink exists, no field | the symlink is the intent | ADD `publish-globally: true` |
+| `false` + a symlink | a contradiction | **reported, never auto-resolved** — dropping the symlink and flipping the flag are both defensible, so it is a human's call |
+
+**Maintain the page at its PROJECT home, never through the symlink alias.** The symlink escapes
+the USER scope root, so that scope's transaction guard refuses to write it (correctly), and the
+chore candidate lister skips it for the same reason (janitor#249). One element, one page, one
+place it is edited.
 
 The `## Notes and lessons learned` section is MANDATORY on every page, even
 when empty — it is the standing landing zone for a `[^N]` correction lesson and
@@ -419,7 +437,11 @@ The bracketed metadata block is the lesson's **ADDRESS**. `id`, `status`, `keywo
   memory does not exist.** A **comma** splits FIELDS, **quotes** delimit the keywords VALUE, a
   **space** splits the KEY-PHRASES inside it — so each is `underscore_joined`, never shredded.
   A phrase written `a phrase, another phrase` loses everything after the first comma, silently:
-  the parser drops the segment and the page still looks correct.
+  the parser drops the segment and the page still looks correct. **Two distinct syntaxes exist:**
+  the write VERB's `--keywords` flag is COMMA-separated (spaces inside a phrase are fine — it
+  underscore-joins each phrase); the STORED props block on disk is SPACE-separated instead — a
+  hand-written comma there silently drops everything after it, one more reason never to
+  hand-author a props block directly.
 - **`status:`** `valid` (holds) | `superseded` (history — NEVER apply it; follow
   `superseded-by`). **`id:`** is stable and unique corpus-wide; `[^N]` is page-local and
   renumbers, so only `id` is a durable reference — and corpus-uniqueness is what makes a bare
@@ -596,6 +618,16 @@ the anti-pattern). An atom's dated superseded-lessons ARE its changelog and TRAV
 deterministic + FP-free — it catches an unquoted desc, a body-less lesson, an oversized atom, a
 supersession missing its `SUPERSEDED BODY:`, a dangling footnote, and a one-sided `[[link]]`. A
 non-zero exit is a defect to fix NOW, before moving on.
+
+### Concurrent editing (TRDD-7YHT3FNK)
+
+The write verbs are scope-LOCKED and use `--base-sha256` compare-and-swap: a verb refuses to
+land if the page changed since you last read it, rather than silently clobbering a concurrent
+agent's edit. `memgrep edit` itself is an exact-unique-match replace — it fails loudly on a
+stale or ambiguous match instead of guessing. Edit wikimem pages ONLY through the memgrep verbs
+or the Edit tool — never raw shell (`sed`/`echo >>`/etc.), which bypasses both the lock and the
+syntax guarantees the verbs exist to provide. On a "changed since enqueued" refusal: re-read the
+page, recompute your edit against the new content, and retry — never force past the refusal.
 
 ## THE RECALL LAW — illustration + the two corollaries (moved out of the rule, 2026-07-26)
 

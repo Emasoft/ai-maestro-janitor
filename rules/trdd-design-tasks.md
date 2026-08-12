@@ -105,13 +105,11 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
     into a TRDD — a new one, or an existing TRDD's STATE block.
 12. **Terminal columns are frozen — AFTER the transition that made them terminal.** No body
     edits on `complete`/`failed`/`superseded`/`published`/`live`; new work = new TRDD. Only
-    `updated:` (and, when superseding, `superseded-by:`) may change. Narrow exceptions
-    (rationale + the janitor#139 worked example: the reference): the closing edit itself is
-    permitted; `## Approval log` is append-only and EXEMPT; `published`/`live` archive AS
+    `updated:` (and, when superseding, `superseded-by:`) may change. Narrow exceptions: the
+    closing edit itself; `## Approval log` (append-only, EXEMPT); `published`/`live` archive AS
     THEMSELVES (archive-eligible = `completed|cancelled|superseded|published|live`; absent
-    `release-via:` defaults to `none`); and a body line that FALSELY, MACHINE-VERIFIABLY
-    contradicts the terminal `column:` MAY be removed — narrowly, never a line that merely
-    disagrees in wording or adds context.
+    `release-via:` defaults to `none`); and a body line FALSELY, MACHINE-VERIFIABLY contradicting
+    the terminal `column:` MAY be removed. Worked example + why so narrow: the reference.
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions
@@ -142,11 +140,10 @@ Route the scope (1) → mint id + timestamps (2) → minimal frontmatter → `co
 name** and committed (`docs: add TRDD-<id8> — <summary>`); report the id + commit. A **LOCAL**
 one is in no repo — report the id + path.
 
-Resuming later: look the id up in every scope root with `find` (never an `ls` glob — step 2):
-`find design ~/.claude/projects/<slug>/design ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design -iname 'TRDD-*-<id8>-*.md'` → read the **STATE
-block first**. (**`-iname`, NOT `-name`** — legacy lowercase ids stay permanently valid; why:
-the reference.) On disagreement the STATE block wins (hand-edits beat stale fields) — then fix
-the frontmatter.
+Resuming later: `find` the id across every scope root with `-iname` (never `-name`, never an
+`ls` glob — step 2) → read the **STATE block first**; on disagreement it wins over the
+frontmatter (hand-edits beat stale fields) — then fix the frontmatter. Exact command + why
+`-iname`: the reference.
 
 ## Does NOT apply to
 

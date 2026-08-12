@@ -17,8 +17,8 @@ missing half: how to **RECALL** them, and the discipline that makes recall work.
 
 > **FULL REFERENCE (read on demand — do NOT paste it here):**
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/rules-reference/markdown-memory-recall-full.md`
-> It holds the disk inventory, the full `memgrep` flag surface, the wikimem data model, and
-> the rationale — read on demand. Everything here is normative on its own.
+> Disk inventory, the full `memgrep` flag surface, the wikimem data model, and the rationale —
+> read on demand. Everything here is normative on its own.
 
 ## THE PROACTIVE-USE CONTRACT (do this UNPROMPTED — the whole point of memory)
 
@@ -63,28 +63,17 @@ Recall is two-hop: a symptom query lands you on the note; the note's BODY gives 
 
 ## Recall BEFORE acting — the protocol
 
-```bash
-LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"                          # machine-private
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory" # git-tracked, shared
-USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; HARD-CODED —
-        # never ${CLAUDE_PLUGIN_DATA}, that is the RUNNING plugin's dir, not the janitor's
-ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done
-        # ARRAY — zsh passes an unquoted string "$ROOTS" as ONE bogus path (silent 0 results).
-SYMPTOM="the user's words / the error / the symptom"   # NOT the answer's jargon
-
-if command -v memgrep >/dev/null 2>&1; then
-  memgrep recall "$SYMPTOM" "${ROOTS[@]}"   # ranked: path — description (+ its lessons)
-else
-  grep -rliE "$SYMPTOM" "${ROOTS[@]}"       # fallback: degrade, never break
-fi
-```
+Compose the three scope roots (LOCAL/PROJECT/USER — table below) into a **bash ARRAY** (zsh
+passes an unquoted `"$ROOTS"` string as ONE bogus path — silent 0 results, so `ROOTS=(); …
+ROOTS+=("$d"); … "${ROOTS[@]}"`, never a joined string), then `memgrep recall "$SYMPTOM"
+"${ROOTS[@]}"` (fallback: `grep -rliE`). Exact script: the FULL REFERENCE above.
 
 Read the top 1–3 notes. On conflict the MORE SPECIFIC scope wins: **LOCAL > PROJECT > USER**.
 Nothing returned ⇒ the memory doesn't exist yet — write one after solving the problem. No
 `memgrep`? `cargo install --path <…>/ai-maestro-janitor/scripts/memgrep`.
 
-Other commands: `memgrep find` (keyword DSL; `--only-notes` = lessons), `overview` (the
-entry-point page), `reindex` (refresh the SQLite sidecar).
+Other commands: `memgrep find` (keyword DSL; `--only-notes` = lessons), `overview` (entry-point
+page), `reindex` (refresh the SQLite sidecar).
 
 **Recall is TWO HOPS.** Hop 1 prints a lean triage row per hit —
 `<lmd>⇥<id-or-path>⇥<description>`, TAB columns so `cut -f2` is exact. The description is a
@@ -106,13 +95,10 @@ REFERENCE).
 | **USER** | the janitor's fixed plugin-DATA memory dir (above) | never in a repo | knowledge true across ALL projects |
 
 **THE WRITE GATE — ask before writing to PROJECT:** *"Would this be TRUE and USEFUL for a
-stranger who clones this repo on a DIFFERENT machine?"* If no → **LOCAL**. Red flags that
-each force LOCAL: an absolute home path (`/Users/…`, `/home/…`, `C:\Users\…`), a username /
-hostname / email / secret, a private project name, the phrasing "on THIS machine" / "the
-owner decided", or one box's install state. PROJECT memory is **pushed to GitHub**, so one
-machine's private config written there is inherited by every future cloner — a real leak.
-Split a note if needed: machine-agnostic fact → PROJECT, per-machine state → LOCAL,
-cross-linked. **UNSURE → LOCAL.**
+stranger who clones this repo on a DIFFERENT machine?"* If no → **LOCAL** (red flags: a home
+path, username/hostname/email/secret, "on THIS machine", one box's install state — PROJECT is
+**pushed**, so private config written there leaks to every cloner). Split a note if needed,
+cross-linked. **UNSURE → LOCAL.** Full red-flag list + rationale: the FULL REFERENCE above.
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
@@ -131,39 +117,11 @@ a worked atom/lesson example: the FULL REFERENCE above.
 
 ### `publish-globally:` — how ONE project's knowledge becomes visible to ALL of them
 
-**Every PROJECT-scope page carries `publish-globally: true|false`.** It is not optional and not
-inferred: memgrep NORMALIZES the field into place — always, with no flag to enable it — both
-BEFORE and AFTER every write it makes to a page.
-
-That timing is a correctness requirement, not tidiness. A page missing the field is
-**malformed**, and a write onto a malformed structure corrupts it. So normalization is a
-precondition and a postcondition of every mutation, never an optional cleanup pass someone
-remembers to run. It is idempotent: an already-normal page is not rewritten at all (the chore
-schedulers stat these files, so a no-op must not touch the mtime).
-
-`true` means this page is ALSO reachable from every other project on the machine, via a
-**symlink** in the USER memory root pointing at the PROJECT page. That symlink IS the mechanism —
-there is no copy, so there is no second version to drift. Without it, a project's features and
-APIs are unknowable to any other project's agent, which is the gap the field exists to close.
-
-Two invariants, both reconciled by that same always-on normalization (`memgrep lint` still
-REPORTS them so a human can see the state, but lint is not what performs the repair):
-
-| state | meaning | fix |
-|---|---|---|
-| `true`, no symlink | published in name only | CREATE the symlink |
-| symlink exists, no field | the symlink is the intent | ADD `publish-globally: true` |
-| `false` + a symlink | a contradiction | **reported, never auto-resolved** — dropping the symlink and flipping the flag are both defensible, so it is a human's call |
-
-**The default is `false`.** Publishing is opt-in because PROJECT memory is git-tracked and
-**pushed** while USER scope is machine-private: a default of `true` would be an opt-OUT privacy
-decision made on the user's behalf. Set it `true` deliberately, for the pages that describe what
-OTHER projects need to know about this one — its public surface, not its internals.
-
-**Maintain the page at its PROJECT home, never through the alias.** The symlink escapes the USER
-scope root, so that scope's transaction guard refuses to write it (correctly), and the chore
-candidate lister skips it for the same reason (janitor#249). One element, one page, one place it
-is edited.
+**Every PROJECT-scope page carries `publish-globally: true|false`** (default `false` —
+opt-in). `true` means the page is ALSO reachable from every other project via a **symlink**
+in the USER memory root — no copy, no drift. memgrep NORMALIZES the field + symlink ALWAYS,
+before AND after every write. **Maintain the page at its PROJECT home, never through the
+symlink alias.** Full mechanics + the reconciliation table: the FULL REFERENCE above.
 
 ### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
 
@@ -172,13 +130,9 @@ A `[^N]:` footnote whose bracketed block is the lesson's ADDRESS
 instead.` ONE lesson = ONE mistake, ≤3 lines, all three parts.
 
 **`keywords:` is the RECALL SURFACE** — the SYMPTOM phrases a future session will search with,
-not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.**
-
-**Two syntaxes.** The VERB's `--keywords` is **COMMA-separated** (spaces ok; it underscore-joins
-each phrase). The **STORED** props block is space-separated — a hand-written comma there silently
-DROPS the rest (another reason not to hand-author).
-
-Full field grammar + supersession: the FULL REFERENCE above.
+not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.** The
+VERB's `--keywords` is comma-separated; the STORED props block is space-separated (another
+reason not to hand-author). Full field grammar + supersession: the FULL REFERENCE above.
 
 ## AUTHORING — COLLABORATIVE; write through a memgrep verb, then validate
 
@@ -191,21 +145,17 @@ Never hand-author wikimem markdown — use the write verbs (`new-page`/`add-atom
 validate <page> && memgrep lint <page>` after EVERY edit. Verb flags, supersession/travel, and
 why collaboration is safe: the FULL REFERENCE above.
 
-**CONCURRENT EDITING (TRDD-7YHT3FNK).** Write verbs are scope-LOCKED + `--base-sha256` CAS;
-`memgrep edit` = exact-unique-match replace. Edit pages ONLY via memgrep verbs or the Edit tool —
-never raw shell. On the "changed since enqueued" refusal: re-read, recompute, retry.
+**CONCURRENT EDITING.** Write verbs are scope-LOCKED + CAS-guarded; edit pages ONLY via memgrep
+verbs or the Edit tool, never raw shell. On a "changed since enqueued" refusal: re-read,
+recompute, retry. Full mechanics (TRDD-7YHT3FNK): the FULL REFERENCE above.
 
 ## The wiki layer (wikimem)
 
-The corpus is a navigable WIKI, not a pile. A **hub** is one functionality's overview
-(carries `globs:` — the files it owns). An **aspect** is a general rule shared by many
-elements (it RADIATES an `## Applies to` list down). A **component** is ONE element's page
-(it RECEIVES, carrying `## Governed by` up-links, and never re-copies a governing rule).
-**One element = one page.**
-
-**THE LINK LAW: every link is bidirectional.** If A links to B, B links to A — `Applies to`
-↔ `Governed by` across tiers, `See also` ↔ `See also` laterally. Wire both ends in the same
-edit.
+The corpus is a navigable WIKI, not a pile: a `hub` (functionality overview, carries
+`globs:`), an `aspect` (general rule that RADIATES `## Applies to` down), or a `component`
+(ONE element's page, RECEIVES `## Governed by` up). **One element = one page.** **THE LINK
+LAW: every link is bidirectional** — wire both ends in the same edit. Full pyramid model:
+the FULL REFERENCE above.
 
 ## MEMORY.md — the two systems COEXIST; the janitor maintains ONE line
 

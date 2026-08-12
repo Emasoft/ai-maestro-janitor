@@ -98,15 +98,11 @@ possible but uncommon — verify it is genuine and not an oversight.
 ## Recommended baseline golden rule G1.1 — GitHub authorship self-identification
 
 Every AI Maestro project's PRRD SHOULD carry this as its first golden rule: every agent
-that writes to GitHub (issue, comment, PR, review, discussion, release note) MUST begin the
-body with a one-line self-identification of which agent/role/plugin authored it, because
-all AI Maestro agents share the single human-owner GitHub identity. Recommended line:
-`_Posted by the Claude developing **<plugin-or-role>** (via the shared owner gh auth)._`
-Commits SHOULD carry an `Agent: <plugin-slug>` trailer. It is GOLDEN because it is an
-anti-impersonation convention the MANAGER must not be able to weaken. The line carries NO
-`@` — a template is pasted verbatim as finished prose, where a bare handle PAGES a real
-account (it did, repeatedly — janitor#198). A template is only safe if its LITERAL form
-is harmless.
+that writes to GitHub MUST begin the body with a one-line self-identification of which
+agent/role/plugin authored it (all agents share one human-owner GitHub identity), and the
+line carries NO `@` — a pasted template with a bare handle PAGES a real account. GOLDEN
+because it is an anti-impersonation convention the MANAGER must not weaken. Recommended
+line text + the janitor#198 incident: the FULL REFERENCE above.
 
 ## Does NOT apply to
 

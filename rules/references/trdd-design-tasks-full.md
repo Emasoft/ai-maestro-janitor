@@ -579,10 +579,13 @@ installed.
 
 ### Resuming work on a TRDD in a later session
 
-1. Grep `design/tasks/` for the `TRDD-<id8>` id from the todo list:
+1. Find the id across EVERY scope root (never `ls <glob>` — an unmatched glob passes through
+   literally and silently lists the CWD; `-iname`, never `-name` — legacy lowercase ids stay
+   permanently valid):
 
    ```bash
-   ls design/tasks/TRDD-*-K3QX9P2W-*
+   find design ~/.claude/projects/<slug>/design ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design \
+     -iname 'TRDD-*-<id8>-*.md'
    ```
 
 2. Read the TRDD top-to-bottom — STATE block FIRST.
