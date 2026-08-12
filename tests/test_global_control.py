@@ -260,7 +260,7 @@ def test_arm_sweeps_the_retired_flags_but_not_a_real_stop(tmp_path, monkeypatch,
     assert gs.kill_switch_present() is False
 
 
-def test_global_arm_skill_doc_is_explicit_it_is_flag_only(tmp_path, monkeypatch, capsys) -> None:
+def test_global_arm_skill_doc_is_explicit_it_is_flag_only() -> None:
     """janitor#77: the CLI's own printed output already says this arms no per-project cron —
     the skill doc that surfaces to a reader/agent BEFORE the CLI ever runs must say the same
     thing, prominently, not just in a buried Scope section. Also: the doc must not still
