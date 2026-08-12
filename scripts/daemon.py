@@ -63,6 +63,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
+import cross_project_issue as cpi  # noqa: E402  # file a finding on the repo it belongs to (Rule 4)
 import daemon_path  # noqa: E402  # restore a usable tool PATH under launchd (TRDD-VQ4LX7ND)
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TRDD-1T53EKTN)
@@ -1106,6 +1107,73 @@ def task_github_config_audit() -> None:
             state.log_line("daemon", f"  notify[GHCFG-FLEET]: {outcome}")
         except Exception:  # noqa: BLE001 -- the push must never break the audit beat
             pass
+        _file_github_config_issues(audit)
+
+
+# How many `gh issue create` calls one audit beat may make. The first beat on a fleet that has
+# never been audited can find gaps on every repo at once; filing them all in one burst is how an
+# automated reporter gets rate-limited and how a human wakes up to a wall of notifications. The
+# rest are filed on the following beats — the dedupe marker makes that safe, and the skip is
+# LOGGED rather than silent (a cap nobody can see reads as "everything was filed").
+_GHCFG_ISSUES_PER_BEAT = 5
+
+
+def _file_github_config_issues(audit) -> None:
+    """Rule 4 (TRDD-WP7TCRME): put each repo's config gap on THAT repo's tracker.
+
+    Most fleet repos have no live session for weeks, so today a gap on one of them reaches
+    nobody who can act: the per-session detector only ever speaks about the project it runs in
+    (deliberately — cross-repo chatter is an exfiltration surface and the wrong session cannot
+    act on it anyway), and the human push is one digest line that is easy to lose. The repo's own
+    issue tracker is where the finding is still there tomorrow, next to the code it is about.
+
+    Everything that makes this safe lives in `cross_project_issue`: it files ONLY on repos the
+    authenticated `gh` login owns, refuses to file when the duplicate-search itself failed (a
+    failed search is not evidence that nothing was filed), and carries no `@` anywhere. This
+    function only decides WHICH findings to hand it, and bounds the burst.
+
+    Never raises — a tracker being unreachable must not break the audit beat that produced the
+    findings. Opt out with CLAUDE_PLUGIN_OPTION_CROSS_PROJECT_ISSUES_ENABLED=0.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_CROSS_PROJECT_ISSUES_ENABLED", True):
+        return
+    try:
+        by_slug: dict[str, list] = {}
+        for f in audit.findings:
+            by_slug.setdefault(f.slug, []).append(f)
+
+        filed = 0
+        slugs = sorted(by_slug)
+        for i, slug in enumerate(slugs):
+            if filed >= _GHCFG_ISSUES_PER_BEAT:
+                # `len(slugs) - i`, not `- filed`: duplicates and not-owned repos are iterated
+                # without consuming the cap, so counting filings here would understate what was
+                # actually left untouched.
+                state.log_line(
+                    "daemon",
+                    f"  ghcfg-issues: cap {_GHCFG_ISSUES_PER_BEAT} reached — "
+                    f"{len(slugs) - i} repo(s) deferred to the next beat",
+                )
+                break
+            findings = by_slug[slug]
+            codes = sorted({f.code for f in findings})
+            outcome, detail = cpi.file_finding(
+                slug=slug,
+                code="GHCFG",
+                # The key is the GAP SET, not just the repo: an unchanged set dedupes forever,
+                # while a repo that develops a NEW gap gets a new issue instead of silence
+                # behind the old marker.
+                key=f"{slug}:{'+'.join(codes)}",
+                title=f"GitHub config: {len(findings)} gap(s) on {slug}",
+                detail="\n".join(f"- `{f.code}` — {f.detail}" for f in findings),
+                detector="github-config-audit",
+                observed_in="the machine-wide janitor daemon's fleet audit",
+            )
+            state.log_line("daemon", f"  ghcfg-issues[{slug}]: {outcome} {detail}".rstrip())
+            if outcome == "filed":
+                filed += 1
+    except Exception as exc:  # noqa: BLE001 -- filing must never break the audit beat
+        state.log_line("daemon", f"  ghcfg-issues: skipped ({exc})")
 
 
 def task_session_liveness(fleet: list | None = None) -> None:
