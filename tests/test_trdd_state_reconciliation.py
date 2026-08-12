@@ -613,3 +613,46 @@ def test_casual_hash_citation_in_commit_subject_is_attributed(repo: Path):
     out = _run(repo)
     assert f"TRDD-{uid}" in out
     assert "closeable-candidate" in out
+
+
+# --- janitor#255: the deadness predicate was "substring appeared in a diff" --------
+
+
+def _sym_in_history():
+    """The detector's real predicate, loaded the way the module does."""
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "trdd-state-reconciliation.py"
+    spec = importlib.util.spec_from_file_location("tsr_under_test", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_ordinary_words_are_not_symbols(tmp_path):
+    """The reported failure: `queue` (another system's AMP verb) and `modified` (a memory
+    frontmatter field) were both flagged as deleted symbols, because `git log -S` matches a
+    substring anywhere in any changed line. Governance TRDDs quote other systems' vocabulary
+    constantly, so the check fired hardest on the cards it understands least."""
+    mod = _sym_in_history()
+    root = Path(__file__).resolve().parent.parent
+    for word in ("queue", "modified", "context", "result", "data", "value"):
+        assert not mod._symbol_in_history(word, root), f"{word!r} is prose, not a symbol"
+
+
+def test_real_deleted_symbols_are_still_found(tmp_path):
+    """The fix must not buy a zero FP rate by making the check never fire — the failure mode
+    this repo keeps hitting. These are real definitions in this repo's own history."""
+    mod = _sym_in_history()
+    root = Path(__file__).resolve().parent.parent
+    for sym in ("_phase_self_budget", "_symbol_in_history", "emit_once"):
+        assert mod._symbol_in_history(sym, root), f"{sym!r} was defined here and must be found"
+
+
+def test_the_regex_uses_no_construct_git_silently_ignores():
+    """`\\b` and `\\s` are unsupported in git's POSIX ERE: they match NOTHING and exit 0, so a
+    regex using them makes the check silently dead rather than loudly broken. Pinned because
+    that is invisible in every test that only asserts 'no findings'."""
+    mod = _sym_in_history()
+    assert "\\b" not in mod._DEFINITION_RE
+    assert "\\s" not in mod._DEFINITION_RE

@@ -202,15 +202,55 @@ def _symbol_absent_at_head(token: str, root: Path) -> bool:
     return proc.returncode == 1
 
 
-def _symbol_in_history(token: str, root: Path) -> bool:
-    """True iff `token` was ever introduced/touched in `scripts/` history (`git log -S`).
+# A token was a SYMBOL here only if it was once DEFINED in `scripts/`: a `def`/`class` at any
+# indent (so methods count), or an assignment at COLUMN 0 (module level).
+#
+# The asymmetry is deliberate and measured. An INDENTED assignment (`^[[:space:]]*foo:`) is
+# indistinguishable from a YAML/frontmatter line quoted inside a docstring — which is exactly
+# what produced the reported `modified` false positive. `def`/`class` carry their own keyword,
+# so they cannot collide with prose and are safe to accept at any indent. The cost is an
+# indented dataclass FIELD (`last_rearm_ts: int = 0`), which this no longer sees: one stale
+# citation occasionally, versus a false finding that costs trust in every other finding the
+# detector makes. That trade runs the same direction as the fail-silent rule below.
+#
+# POSIX ERE ONLY — git's `-G` does NOT support `\b` or `\s`. They do not error; they match
+# NOTHING and exit 0, so a regex using them turns the whole check silently dead. Measured
+# (janitor#255): `-G^(def |class )tok\b` returned zero hits on a symbol that plainly exists.
+# Hence `[^A-Za-z0-9_]` for the trailing boundary and `[[:space:]]` for whitespace.
+_DEFINITION_RE = r"^[[:space:]]*(def |class |async def ){0}[^A-Za-z0-9_]|^{0}[[:space:]]*[:=]"
 
-    This is the condition that holds the false-positive rate at zero (measured
-    2026-08-12 prototype): a token that never existed anywhere is a typo or an
-    external name, not a deleted symbol, and is silently skipped.
+
+def _symbol_in_history(token: str, root: Path) -> bool:
+    """True iff `token` was once DEFINED as a module-level symbol in `scripts/` history.
+
+    janitor#255: this used `git log -S<token>`, which is a SUBSTRING search over diffs — it
+    matches the token anywhere in any changed line, including prose in a comment, a fragment
+    of a longer identifier, a dict key, or a docstring. Combined with "absent from the tree at
+    HEAD", that makes almost any ordinary English word a "deleted symbol": the reporter got
+    TRDD-DEAD-SYMBOL for `queue` (an AMP verb name belonging to another system's API) and
+    `modified` (a memory-frontmatter field). Both citations were correct prose, and governance
+    TRDDs quote other systems' vocabulary constantly, so the check fired hardest on exactly the
+    cards it understands least.
+
+    `-G` with a definition-anchored regex asks the question the check actually means: was this
+    ever a symbol HERE. A word that only ever appeared inside a line is no longer evidence of
+    anything, which is the whole defect.
+
+    Still deliberately conservative in the same direction as before — an unknown answer (git
+    missing, timeout, non-zero exit) returns False, so the check stays silent rather than
+    inventing a finding. A missed dead symbol costs a stale citation; a false one costs the
+    reader's trust in every other finding the detector makes.
     """
+    # NO `--pickaxe-regex`: that flag belongs to `-S`, and passing it alongside `-G` makes git
+    # exit 128. This function returns False on a non-zero exit, so the combination did not
+    # error loudly — it turned the entire check permanently silent. Caught only by running it
+    # against a symbol known to be dead; `-G` is always a regex and needs no flag.
     proc = state.run_subprocess(
-        ["git", "-C", str(root), "log", "--oneline", "-1", f"-S{token}", "--", "scripts"],
+        [
+            "git", "-C", str(root), "log", "--oneline", "-1",
+            f"-G{_DEFINITION_RE.format(re.escape(token))}",
+            "--", "scripts",
+        ],
         timeout=8,
         detector_name="trdd-state-reconciliation",
     )
