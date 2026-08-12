@@ -100,8 +100,9 @@ card that cannot proceed — and equal weighting is how a useful channel becomes
 ## Approval log
 
 - 2026-08-12T12:35:00+0200 — COMPLETE by janitor-main-session. Implemented as check 5 in
-   + wired through the findings ledger in
-   (). Verified beyond the worker's report:
+  `trdd_common.check5_dead_symbol_citations`, wired through the findings ledger in
+  `scripts/detectors/trdd-state-reconciliation.py` (`9a9bf0fa`). Verified beyond the worker's
+  report:
   the check was proven to FIRE on a synthetic record (low for an illustration, high for a NEXT
   ACTION, nothing for a live symbol) because a clean run and an unwired check are
   indistinguishable; and falsified independently by neutering the severity split (2 fail,
