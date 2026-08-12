@@ -1021,6 +1021,18 @@ def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> lis
         # patterns that should NOT fire in regular source code because
         # they'd false-positive on the janitor's own rule definitions.
         "tool-wildcard-grant",
+        # The two MCP rules were absent here, which made them structurally
+        # DEAD on the only file they were written for. Both are anchored on
+        # JSON/YAML manifest keys (`"readOnlyHint": true`, `"annotations": {
+        # ... "inputSchema"`), and a manifest is `.mcp.json` — which every
+        # caller's `file_kind` router classifies as `source`, since the split
+        # is by suffix and only `.md`/extensionless counts as prose. So a rule
+        # named for MCP manifests could never see one. It is also why
+        # `mcp-annotation-lying` measured 0/9: the bench scans that class as
+        # `source` (correctly — they ARE manifests) and the rule never ran.
+        # Neither pattern has the prose-FP problem that justifies this list:
+        # each needs two structural JSON/YAML keys to co-occur.
+        "mcp-annotation-lying", "mcp-schema-in-annotations",
     }
     # FP-hardening (round 3): the path-based discriminator for the
     # exfil-webhook-sink rule. A red-team / fixture / IOC catalogue
