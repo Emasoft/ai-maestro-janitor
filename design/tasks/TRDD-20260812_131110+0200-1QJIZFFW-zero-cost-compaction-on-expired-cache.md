@@ -3,7 +3,7 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: dev
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-12T18:58:36+0200
+updated: 2026-08-12T19:26:11+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -36,17 +36,29 @@ in the commit meant to un-dark it); the unbounded summary ate the tail's room, p
 handoff with no recent turns; a constant +38-byte overrun from appending the truncation notice
 outside the accounting; and a test of mine that could not fail (`"m0" in "m100"`).
 
-**STILL OPEN — this is why the column is `dev`, not `complete`:**
-  1. the agentlensPro CERTAIN-expiry trigger (reactive) is NOT wired; only the predictive
-     `next_fire_misses_cache` path exists, so an unplanned expiry (API error, blocked prompt,
-     network gap) still does not trigger a clear;
-  2. no cross-`/clear` run through the existing `handoff_clear_verify.py` harness — the
-     acceptance oracle this card names is unexercised;
-  3. the zero-Claude-token claim is REASONED (no model turn on the clear path, $0 summary) but
-     not MEASURED end-to-end.
+**THE REACTIVE TRIGGER IS NOW WIRED** (`169d967d`, `295c1243`). `agentlenspro cache-expired`
+is the measurement; it is OR'd in AHEAD of the prediction so a fire is attributed to the
+measurement when both agree. Two things it cost, both of which the code would have hidden:
 
-**NEXT ACTION:** wire the agentlens reactive trigger beside the predictive one, then run
-`handoff_clear_verify.py --phase before/after` across a real `/clear`.
+  - **The watcher had been crashing on every run since `df7d4cb3`** —`_decide` passed a
+    composer-only `transcript` key into the pure gate, which raised `unexpected keyword
+    argument`, and the `# type: ignore[arg-type]` on that call is what kept mypy quiet. The
+    feature was dead on arrival for the whole window in which it looked shipped.
+  - **The probe's first timeout made the new trigger dead too.** At the burn probes' shared
+    5 s it returned `None` on 2 of 3 real calls (measured CLI latency: 0.15 s, 11.5 s, 19.7 s)
+    — and `None` fails open, so a too-short bound is INDISTINGUISHABLE from "agentlensPro is
+    not installed". Its own 30 s constant now, pinned by a test that carries the measurement.
+
+**STILL OPEN — this is why the column is `dev`, not `complete`:**
+  1. no cross-`/clear` run through the existing `handoff_clear_verify.py` harness. This one is
+     deliberately NOT self-serve: exercising it means clearing a live session's context, so it
+     is run at a chosen safe point, not folded into unrelated work;
+  2. the zero-Claude-token claim is REASONED (no model turn on the clear path, $0 summary) but
+     not MEASURED end-to-end. Do it in the same sitting as (1) — the same run answers both.
+
+**NEXT ACTION:** at a deliberate stopping point, run `handoff_clear_verify.py --phase before`,
+`/clear`, then `--phase after`, and record BOTH the PASS/FAIL table and the turn's token
+accounting on the clear path.
 
 **SUPERSEDED — do NOT carry forward:**
   - *"STARTS WHEN: the owner says go"* / *"NEXT ACTION when unblocked: give
@@ -182,9 +194,10 @@ deliberately, because today it means nothing either way.
 
 ## Acceptance (to be firmed up when unblocked)
 
-- [ ] The llm-ext compact verb exists and is invoked ONLY through `use_llm_ext()`
-- [ ] A CLI or probe failure degrades to `compose_template_handoff`, never to a lost handoff
-- [ ] agentlensPro-certain expiry triggers the same path as the predictive miss
+- [x] The llm-ext compact verb exists and is invoked ONLY through `use_llm_ext()` — `df7d4cb3`
+- [x] A CLI or probe failure degrades to `compose_template_handoff`, never to a lost handoff
+- [x] agentlensPro-certain expiry triggers the same path as the predictive miss — `169d967d`,
+      `295c1243`. Live: `cache_certainly_expired` returns a real `False` on this project.
 - [ ] Measured: the whole cycle costs zero Claude tokens (no model turn on the clear path)
 - [ ] Cross-`/clear` verification via the existing `handoff_clear_verify.py` harness
 
