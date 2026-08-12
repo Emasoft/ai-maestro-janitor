@@ -68,12 +68,10 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project
 ```
 
 - **LOCAL and USER** roots are mutated and applied (atomic-write through the txn).
-- **PROJECT** memory is in-repo and the pre-push hook blocks every pusher except
-  `publish.py`, so editing it standalone would drift from origin. PROJECT SPLIT is
-  therefore **OFF by default** (`edit_project_scope` defaults OFF); only when
-  explicitly enabled do you stage+commit into the PROJECT root, and even then the
-  change rides the next `publish.py` — you never push it yourself. Unless PROJECT
-  editing is on, restrict the candidate scan to LOCAL + USER.
+- **PROJECT** memory is in-repo and pushed only via `publish.py`, so PROJECT SPLIT is
+  **OFF by default** (`edit_project_scope`); only when explicitly enabled do you
+  stage+commit into the PROJECT root (rides the next `publish.py`, never pushed by
+  you). Unless PROJECT editing is on, restrict the candidate scan to LOCAL + USER.
 
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
 
@@ -82,27 +80,18 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
-marker, and atomically hands that dispatch to you alone — the record is renamed out of the
-pool, so a dispatch that lands while you work cannot re-point you (janitor#242: a
-`consolidate` overwrote an in-flight `repair`'s authority 367 s later on the same root).
-`$SCOPE_ROOT` below is the `root` it printed.
+marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is the
+`root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
+is not guaranteed to be the project root.
 
-Exit 2 (no claimable dispatch) → **STOP and report that.** Do not read the legacy
-`memory-maint-pending.json` slot, and do not re-derive what is "due": the stamp already
-advanced when the marker was emitted (F1), so acting on a scope you chose yourself skips the
-stamped one for a full cadence. If the claim's `intervention` is not `split`, stop as well —
-you were spawned for the wrong chore, and that is worth reporting rather than absorbing.
-
-The path is **ABSOLUTE on purpose**: you are a spawned agent and your cwd is not guaranteed to be
-the project root, so the relative spelling resolves somewhere else and the file reads as missing.
-
-**If the file is absent, unreadable, or names another chore: STOP and report that** — do not pick
-a scope yourself. Guessing is what the paragraph above warns about, and it is not hypothetical:
-on 2026-07-30 a dispatched `conflict` pass could not read this file, re-derived cadence, ran USER,
-and left the stamped LOCAL scope marked run-without-running for a full cadence — 378k tokens, zero
-mutations (#150). An abstain that says *"dispatched but could not read my assignment"* is cheap and
-actionable; a confident run on the wrong scope is neither. A USER-named scope is the one exception:
-a human asking for a specific scope IS the assignment.
+**Exit 2, an unreadable file, or a chore name other than `split`: STOP and report
+that** — do not pick a scope yourself, do not re-derive what is due (the stamp
+already advanced when the marker was emitted), and **do not read the legacy
+`memory-maint-pending.json` slot**: it is still on disk, so ceasing to point at it
+is not the same as forbidding it. A USER-named scope is the one exception (a human
+naming a scope IS the assignment). Why guessing here is
+dangerous, not just untidy:
+[split-plan-details.md#why-never-guess-the-scope](references/split-plan-details.md#why-never-guess-the-scope).
 
 ## The algorithm
 
@@ -181,15 +170,11 @@ For each backlink really about a sub-topic, plan to rewrite `[[source-slug]]` �
 slug (it is NOT retired), so a backlink about the page as a whole stays correct
 unchanged — you only redirect the ones that point at moved detail.
 
-> **A split transaction has exactly ONE source — the page being split.** Backlink
-> holders are NOT listed as sources to `begin` (the split verifier requires
-> `len(sources) == 1` and aborts otherwise). Instead you redirect a holder by
-> writing its rewritten content as a STAGED FILE at the holder's own rel-path
-> (step 5): the commit reconstructs that as a write overwriting the live holder.
-> So `begin` takes only `$REL`; the holder edits ride along as extra staged writes.
-> The verify gate `no_dangling_refs` only fails on links to a RETIRED slug, and
-> keeping the source slug as the overview retires nothing — but redirecting
-> moved-detail backlinks is still the correct editorial act, so do it.
+> A split transaction has exactly ONE source (`begin` takes only `$REL`); a
+> backlink holder is redirected as an extra STAGED WRITE at its own rel-path in
+> step 5, never listed as a source. Why `len(sources) == 1` and why redirecting
+> still matters even though the overview keeps the source slug (retiring
+> nothing): [split-plan-details.md#backlink-redirect-mechanics](references/split-plan-details.md#backlink-redirect-mechanics).
 
 ### 5. Execute THROUGH the transaction core (begin → edit staging → commit)
 

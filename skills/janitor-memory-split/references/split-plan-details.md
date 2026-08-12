@@ -54,6 +54,29 @@ sub-page. Then design the outputs:
   fine for THIS run — the next heartbeat splits it further. Convergence only
   requires real progress this level.
 
+## Why never guess the scope
+
+Two documented incidents: janitor#242 — a `consolidate` overwrote an in-flight
+`repair`'s authority 367 s later on the same root, which is why the dispatch claim
+renames the record out of the pool atomically. And #150 — on 2026-07-30 a
+dispatched `conflict` pass could not read its assignment file, re-derived cadence
+on its own, ran USER instead, and left the stamped LOCAL scope marked
+run-without-running for a full cadence: 378k tokens, zero mutations. An abstain
+that says *"dispatched but could not read my assignment"* is cheap and
+actionable; a confident run on the wrong scope is neither.
+
+## Backlink-redirect mechanics
+
+**A split transaction has exactly ONE source — the page being split.** Backlink
+holders are NOT listed as sources to `begin` (the split verifier requires
+`len(sources) == 1` and aborts otherwise). Instead you redirect a holder by
+writing its rewritten content as a STAGED FILE at the holder's own rel-path
+(step 5): the commit reconstructs that as a write overwriting the live holder.
+So `begin` takes only `$REL`; the holder edits ride along as extra staged writes.
+The verify gate `no_dangling_refs` only fails on links to a RETIRED slug, and
+keeping the source slug as the overview retires nothing — but redirecting
+moved-detail backlinks is still the correct editorial act, so do it.
+
 ## Hard invariants (every SPLIT pass enforces)
 
 - **Transactional** — stage → verify → atomic-swap; crash-resumable; idempotent.
