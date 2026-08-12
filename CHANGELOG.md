@@ -2,11 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.3] — 2026-08-12
+
+### Miscellaneous Tasks
+
+- Refresh the CLAUDE.md project map and wikimem index (72f89c0)
+
+### Performance
+
+- **memory:** Don't pay 200k to re-derive that nothing changed (janitor#140) (7f44d95)
 ## [3.1.2] — 2026-08-11
 
 ### Bug Fixes
 
 - **fleet:** Never type a command over a non-empty input field (2026-07-17, closed) (3931f44)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.1.2 (0ccae82)
 ## [3.1.1] — 2026-08-11
 
 ### Bug Fixes
