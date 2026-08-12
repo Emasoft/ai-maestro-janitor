@@ -396,14 +396,35 @@ _WORM_SELF_PROPAGATION = _re(
 # ---- Crypto-clipper triad (skill-protego, sweep-C) ----------------------
 
 
-# The disclosed clipboard-hijack pattern: a clipboard-monitor module
-# (`clipboardy.read*`, `navigator.clipboard.readText`,
-# `pyperclip.paste`) PLUS a hardcoded wallet-address PLUS a `.replace`
-# call within the same body. Used by event-stream 2018, Solana web3.js
-# 2024-12, TanStack 2026-05.
+# The disclosed clipboard-hijack shape is a TRIAD: read the clipboard,
+# RECOGNISE a wallet address in it, write a different address back. Used by
+# event-stream 2018, Solana web3.js 2024-12, TanStack 2026-05.
+#
+# Each leg used to be spelled as one library's API (`clipboardy`, a literal
+# address, `.replace(`), which made the rule a detector for that library
+# rather than for the behaviour: a clipper written against `pbpaste`,
+# `pyperclip`, the DOM `clipboardData` API or PowerShell's `Clipboard` class
+# performs exactly the same substitution and matched none of them.
 _CLIPBOARD_READ = (
-    r"(?:clipboardy\.read|navigator\.clipboard\.readText|"
-    r"pyperclip\.paste|require\s*\(\s*['\"]clipboardy['\"]\s*\))"
+    r"(?:clipboardy\.read"
+    r"|(?:navigator\.)?clipboard\.readText"
+    r"|clipboardData\.getData"
+    r"|Clipboard\]::GetText|Get-Clipboard"
+    r"|pyperclip\.paste|win32clipboard\.GetClipboardData"
+    r"|\bpbpaste\b|\bxclip\s+-o\b|\bxsel\s+(?:-o|--output)\b"
+    r"|require\s*\(\s*['\"]clipboardy['\"]\s*\))"
+)
+# The substitution itself. `.replace(` is only ONE spelling of writing back:
+# `pyperclip.copy(attacker)` / `clipboard.writeText(x)` / `| pbcopy` swap the
+# address without ever calling replace.
+_CLIPBOARD_WRITE = (
+    r"(?:\.replace\s*\("
+    r"|(?:navigator\.)?clipboard\.writeText\s*\("
+    r"|clipboardData\.setData\s*\("
+    r"|Clipboard\]::SetText|Set-Clipboard"
+    r"|pyperclip\.copy\s*\("
+    r"|win32clipboard\.SetClipboardText\s*\("
+    r"|\bpbcopy\b|\bxclip\s+-i\b|\bclip\.exe\b)"
 )
 # Bitcoin / Ethereum / Solana / Tron wallet-address shapes; deliberately
 # narrow on the prefix so we don't FP on long base64.
@@ -414,9 +435,28 @@ _WALLET_ADDRESS = (
     r"|T[a-zA-Z0-9]{33}"                                  # Tron
     r"|[1-9A-HJ-NP-Za-km-z]{32,44})"                      # Solana / generic
 )
+# A clipper does not need a WELL-FORMED address to be a clipper. The attacker
+# constant is often a placeholder no address grammar accepts, so keying the
+# middle leg on address SYNTAX loses the sample that is otherwise textbook.
+# What every clipper must carry instead is the RECOGNISER — the expression
+# that decides whether the copied text is a wallet at all. `a-km-z` /
+# `A-HJ-NP-Z` inside a character class is base58 with the four look-alike
+# glyphs (0 O I l) removed; outside cryptocurrency address validation it has
+# essentially no other use, which makes it a high-precision fingerprint.
+_WALLET_RECOGNISER = (
+    r"(?:\[[^\]\n]{0,24}(?:a-km-z|A-HJ-NP-Z)[^\]\n]{0,24}\]"
+    r"|\(\s*bc1\s*\||\bbc1\*"
+    r"|0x\[a-fA-F0-9\]\{40\})"
+)
+_WALLET_TOKEN = r"(?:" + _WALLET_ADDRESS + r"|" + _WALLET_RECOGNISER + r")"
+# Both orderings, because whether the attacker address is declared above the
+# handler or substituted inside it is a style choice, not a property of the
+# attack — and requiring one order silently halved the rule.
 _CRYPTO_CLIPPER = _re(
-    _CLIPBOARD_READ + r"[\s\S]{0,400}?" + _WALLET_ADDRESS
-    + r"[\s\S]{0,400}?\.replace\s*\("
+    r"(?:" + _CLIPBOARD_READ + r"[\s\S]{0,600}?" + _WALLET_TOKEN
+    + r"[\s\S]{0,600}?" + _CLIPBOARD_WRITE
+    + r"|" + _WALLET_TOKEN + r"[\s\S]{0,600}?" + _CLIPBOARD_READ
+    + r"[\s\S]{0,600}?" + _CLIPBOARD_WRITE + r")"
 )
 
 
