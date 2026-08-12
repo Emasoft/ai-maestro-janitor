@@ -3,7 +3,7 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-05T18:15:56+0200
+updated: 2026-08-12T12:10:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -32,8 +32,20 @@ one of the dark chores (the ai-maestro#102 circularity, made concrete):
 
 Item 2 is DONE. Still open: item 3 only (move the four movable chores to per-repo crons; its
 stated blocker QK7M2B0X is now `complete`/released, so it is unblocked work, not a block).
-EHT KQ9WM4TZ and blocked AWXK0RFT likely have dead premises now (the publish they wait on
-shipped) — each needs its own STATE read before closing.
+~~EHT KQ9WM4TZ and blocked AWXK0RFT likely have dead premises now (the publish they wait on
+shipped) — each needs its own STATE read before closing.~~ **CHECKED 2026-08-12, and the guess
+was wrong in both directions — neither had a dead premise:**
+
+- **AWXK0RFT was already `complete`** and had been since 2026-08-05, closed the same evening
+  this line was written. It was never "blocked"; the line was stale on arrival.
+- **KQ9WM4TZ is `column: human_review`** — it passed ai_review on 2026-08-06 and is sitting in
+  the OWNER's queue awaiting their verdict. Not a dead premise, and **not mine to close**.
+
+Worth recording rather than just fixing: a card that speculates about ANOTHER card's state
+(*"likely have dead premises"*) ages badly in a way its own STATE block cannot, because nothing
+re-reads it when the other card moves. Both guesses cost one `grep` each to falsify. If a line
+is worth writing about another card, it is worth opening that card first — otherwise it is a
+prediction dressed as a finding.
 
 ### The 2026-07-21 head (kept; its "live right now" warning is superseded above)
 
