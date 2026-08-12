@@ -3,9 +3,12 @@
 This module hoists the TRDD frontmatter/filename parsing that was duplicated
 inline in `scripts/detectors/trdd-drift.py` and `trdd-reminder.py`, so all the
 TRDD detectors share ONE source of truth for "what is a TRDD's column" and "what
-is its id". It also implements the FOUR pure checks of the state-reconciliation
-detector (TRDD-15ECPBSA) — each a pure function over a parsed `TrddRecord` plus
-an injectable `commit -> {tags}` map, so they are unit-testable with zero git.
+is its id". It also implements the FIVE pure checks of the state-reconciliation
+detector: the original FOUR (TRDD-15ECPBSA) — each a pure function over a parsed
+`TrddRecord` plus an injectable `commit -> {tags}` map — plus Check 5
+(TRDD-FDV1RQEB), which flags a STATE block citing a code symbol the tree no
+longer has, via an injectable `token -> bool` seam. All are unit-testable with
+zero git.
 
 No I/O beyond reading the head of a TRDD file (`parse_trdd_state`); everything
 else operates on already-read text + parsed structures.
@@ -802,6 +805,121 @@ def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:
         if column_of(uid) in BLOCKER_CLEARED_COLUMNS:
             stale.append(uid)
     return stale
+
+
+# ── Check 5 — STATE block cites a symbol the tree no longer has ─────────────
+#
+# STATE header per trdd-design-tasks.md rule 10: '## ⏵ STATE — READ THIS FIRST
+# ON RESUME ...'. The ⏵ is optional in the match (some authored TRDDs predate the
+# glyph convention or lose it to encoding) — the load-bearing anchor is
+# 'STATE' immediately after a top-level '##' heading.
+_STATE_HEADER_RE = re.compile(r"^##[ \t]+\S*[ \t]*STATE\b.*$", re.MULTILINE)
+# Any top-level '## ' heading — used to find where the STATE block ENDS (the
+# next top-level heading after the STATE header itself, or EOF).
+_TOP_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
+# A backtick-fenced token that is EXACTLY identifier-shaped: starts with a
+# letter/underscore, then 4+ more letters/digits/underscores (min length 5, per
+# the TRDD spec) — no dots, slashes, or spaces, so a file path (`scripts/x.py`)
+# or a quoted prose phrase (`the old behavior`) never matches. The backticks
+# must wrap the token EXACTLY (no trailing junk) so `foo()` or `foo.bar` are
+# rejected outright rather than partially matched.
+_BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{4,})`")
+
+
+@dataclass
+class DeadSymbolCitation:
+    """One backtick-quoted token in a STATE block that the tree no longer has.
+
+    `severity` is `'high'` when the citation sits inside the STATE block's
+    NEXT-ACTION paragraph (it blocks the card), `'low'` otherwise (it only
+    misleads — e.g. a worked-example illustration).
+    """
+
+    token: str
+    severity: str
+
+
+def extract_state_block(body: str) -> str:
+    """Return the TRDD's `## ⏵ STATE` block substring of `body`, or `""` if absent.
+
+    Runs from just after the STATE header line to the next top-level `## `
+    heading (or EOF) — i.e. the whole STATE section, NEXT-ACTION included.
+    """
+    m = _STATE_HEADER_RE.search(body)
+    if not m:
+        return ""
+    start = m.end()
+    nxt = _TOP_HEADING_RE.search(body, start)
+    end = nxt.start() if nxt else len(body)
+    return body[start:end]
+
+
+def _next_action_span(state_block: str) -> tuple[int, int] | None:
+    """The paragraph span (within `state_block`) that carries a NEXT-ACTION line.
+
+    Paragraph-scoped (like Check 4's blocker paragraph) so a token cited in the
+    SAME paragraph as "NEXT ACTION" — not merely anywhere in the STATE block —
+    earns the higher severity. Returns None when the STATE block names no
+    NEXT-ACTION line at all.
+    """
+    m = _NEXT_ACTION_RE.search(state_block)
+    if not m:
+        return None
+    for lo, hi in _paragraph_spans(state_block):
+        if lo <= m.start() < hi:
+            return (lo, hi)
+    return None
+
+
+def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[DeadSymbolCitation]:
+    """Check 5 — a STATE block cites a code symbol the tree no longer has (TRDD-FDV1RQEB).
+
+    `token_is_dead(token) -> bool` is the injectable git seam (in production: the
+    token is ABSENT from `scripts/`+`tests/` at HEAD, AND was found once via
+    `git log -S<token>` — i.e. deleted, not a typo or an external name; see the
+    detector for the real implementation). Only backtick-quoted, identifier-shaped
+    tokens (`[A-Za-z_][A-Za-z0-9_]{4,}` — no dots/slashes/spaces, so a path or a
+    prose phrase never qualifies) inside the TRDD's own STATE block are considered;
+    a TRDD with no STATE block yields nothing.
+
+    Severity depends on WHERE the token sits (the prototype's refinement, measured
+    2026-08-12): a dead symbol inside the STATE block's NEXT-ACTION paragraph
+    blocks the card outright (`high`) — a dead symbol elsewhere in the STATE block
+    (e.g. a worked-example illustration) only misleads (`low`). A token cited more
+    than once takes the HIGHEST severity of any of its occurrences.
+
+    Returns [] for a terminal TRDD (mirrors every other check's terminal guard) or
+    a TRDD whose body carries no STATE block at all.
+    """
+    if is_terminal_column(record.column):
+        return []
+    state_block = extract_state_block(record.body)
+    if not state_block:
+        return []
+    na_span = _next_action_span(state_block)
+
+    order: list[str] = []
+    in_next_action: dict[str, bool] = {}
+    for m in _BACKTICK_TOKEN_RE.finditer(state_block):
+        token = m.group(1)
+        hit_in_na = bool(na_span and na_span[0] <= m.start() < na_span[1])
+        if token not in in_next_action:
+            order.append(token)
+            in_next_action[token] = hit_in_na
+        elif hit_in_na:
+            in_next_action[token] = True
+
+    findings: list[DeadSymbolCitation] = []
+    for token in order:
+        if not token_is_dead(token):
+            continue
+        findings.append(
+            DeadSymbolCitation(
+                token=token,
+                severity="high" if in_next_action[token] else "low",
+            )
+        )
+    return findings
 
 
 # ── Verdict orchestration ────────────────────────────────────────────────────

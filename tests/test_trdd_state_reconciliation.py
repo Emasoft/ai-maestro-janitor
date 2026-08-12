@@ -297,6 +297,98 @@ def test_prose_frontmatter_mismatch_surfaces(repo: Path):
     assert "prose-frontmatter-mismatch" in out
 
 
+# ── Check 5 — STATE block cites a symbol the tree no longer has (TRDD-FDV1RQEB) ──
+#
+# Real git end-to-end (the pure predicate itself is exhaustively covered in
+# test_trdd_common.py with a fake `token_is_dead`): a symbol that existed in
+# `scripts/` history but was DELETED before the current HEAD must surface
+# through the findings ledger, at HIGH severity when cited in the NEXT-ACTION
+# paragraph, at LOW elsewhere.
+
+
+def _write_and_delete_symbol(repo: Path, name: str) -> None:
+    """Commit `scripts/impl.py` DEFINING `name`, then a second commit REMOVING it —
+    the exact 'existed once, gone at HEAD' shape Check 5's history condition needs.
+    """
+    scripts_dir = repo / "scripts"
+    scripts_dir.mkdir(exist_ok=True)
+    (scripts_dir / "state_check5.py").write_text(f"def {name}():\n    pass\n", encoding="utf-8")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", f"feat: add {name}"], repo)
+    (scripts_dir / "state_check5.py").write_text("# removed\n", encoding="utf-8")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", f"refactor: delete {name}"], repo)
+
+
+def test_dead_symbol_in_next_action_is_high_severity(repo: Path):
+    """A STATE block whose NEXT ACTION cites a symbol `git log -S` proves was
+    deleted must surface as a HIGH-severity finding through the findings ledger."""
+    uid = "12121212"
+    _write_and_delete_symbol(repo, "should_emit_renew")
+    _write_trdd(
+        repo,
+        uid,
+        column="dev",
+        body=(
+            "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+            "Progress so far.\n\n"
+            "NEXT ACTION: raise `should_emit_renew`'s threshold once measured.\n"
+        ),
+    )
+    _commit_all(repo, f"wip (TRDD-{uid})")
+
+    out = _run(repo)
+    assert "TRDD-DEAD-SYMBOL" in out
+    assert "HIGH" in out
+    assert "should_emit_renew" in out
+    assert f"TRDD-{uid}" in out
+
+
+def test_dead_symbol_outside_next_action_is_low_severity(repo: Path):
+    """The same dead symbol cited OUTSIDE the NEXT-ACTION paragraph is LOW
+    severity — it misleads a reader but does not block the card."""
+    uid = "13131313"
+    _write_and_delete_symbol(repo, "resolve_ttl_minutes")
+    _write_trdd(
+        repo,
+        uid,
+        column="dev",
+        body=(
+            "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+            "Historical note: like `resolve_ttl_minutes` used to do.\n\n"
+            "NEXT ACTION: write the missing unit test.\n"
+        ),
+    )
+    _commit_all(repo, f"wip (TRDD-{uid})")
+
+    out = _run(repo)
+    assert "TRDD-DEAD-SYMBOL" in out
+    assert "LOW" in out
+    assert "resolve_ttl_minutes" in out
+
+
+def test_symbol_still_at_head_is_not_flagged(repo: Path):
+    """A symbol that is STILL present in scripts/ at HEAD must never be flagged —
+    citing live code in a STATE block is normal, not drift."""
+    uid = "14141414"
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "state_check5.py").write_text("def still_here_symbol():\n    pass\n",
+                                                     encoding="utf-8")
+    _write_trdd(
+        repo,
+        uid,
+        column="dev",
+        body=(
+            "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+            "NEXT ACTION: extend `still_here_symbol` with a new branch.\n"
+        ),
+    )
+    _commit_all(repo, f"wip (TRDD-{uid})")
+
+    out = _run(repo)
+    assert "TRDD-DEAD-SYMBOL" not in out
+
+
 def test_stale_blocker_surfaces(repo: Path):
     """Check 4: a `blocked` TRDD whose blocker is now `published` surfaces as a
     stale-blocker candidate (re-evaluate / unblock)."""

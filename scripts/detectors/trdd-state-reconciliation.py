@@ -30,14 +30,24 @@ candidate is not re-nagged every heartbeat.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
+# This detector is READ-ONLY over git, and every one of its six git invocations goes through
+# `state.run_subprocess`, which takes no env argument — so set the flag process-wide, once,
+# rather than wrapping each call. A plain git takes `.git/index.lock` and can kill a
+# concurrent writer (janitor#245); five sibling detectors already set this per-call, and this
+# one set it nowhere. Check 5 made that materially worse: it runs TWO git calls per candidate
+# TOKEN per card, where the pre-existing checks ran a handful per card.
+os.environ["GIT_OPTIONAL_LOCKS"] = "0"
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import findings_ledger  # noqa: E402  # per-project mailbox for Check 5's dead-symbol findings
 import state  # noqa: E402
 import trdd_common  # noqa: E402
 
@@ -155,6 +165,41 @@ def _commit_touches_impl(sha: str, root: Path, trdd_prefix: str) -> bool:
     if not files:
         return True
     return any(not f.startswith(trdd_prefix) for f in files)
+
+
+def _symbol_absent_at_head(token: str, root: Path) -> bool:
+    """True iff `token` is NOT a whole-word match anywhere in `scripts/`+`tests/` at HEAD.
+
+    `git grep -w` searches the committed HEAD tree (not the working copy), so a
+    dirty tree mid-refactor never produces a false "still there". Exit code 0 =
+    found (not absent), 1 = no match (absent); any other code (bad pathspec,
+    corrupt repo) is UNKNOWN and fails open — never flag on an inconclusive read.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "grep", "-q", "-w", "-e", token, "HEAD", "--", "scripts", "tests"],
+        timeout=8,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None or proc.returncode not in (0, 1):
+        return False
+    return proc.returncode == 1
+
+
+def _symbol_in_history(token: str, root: Path) -> bool:
+    """True iff `token` was ever introduced/touched in `scripts/` history (`git log -S`).
+
+    This is the condition that holds the false-positive rate at zero (measured
+    2026-08-12 prototype): a token that never existed anywhere is a typo or an
+    external name, not a deleted symbol, and is silently skipped.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "log", "--oneline", "-1", f"-S{token}", "--", "scripts"],
+        timeout=8,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None or proc.returncode != 0:
+        return False
+    return bool(proc.stdout.strip())
 
 
 def _main_root(root: Path) -> Path:
@@ -284,6 +329,40 @@ def main() -> int:
 
     def column_of(uid: str) -> str:
         return column_by_uid.get(uid, "")
+
+    # ── Check 5 — STATE block cites a symbol the tree no longer has (TRDD-FDV1RQEB) ──
+    # Independent of checks 1-4: reported straight through the findings ledger
+    # (per-project mailbox + this session's drift line), NOT folded into the
+    # candidate-board rows/report those checks share.
+    dead_symbol_cache: dict[str, bool] = {}
+
+    def token_is_dead(token: str) -> bool:
+        if token not in dead_symbol_cache:
+            dead_symbol_cache[token] = _symbol_absent_at_head(token, root) and _symbol_in_history(
+                token, root
+            )
+        return dead_symbol_cache[token]
+
+    for rec in records:
+        if rec.uid is None:
+            continue
+        for finding in trdd_common.check5_dead_symbol_citations(rec, token_is_dead):
+            key = f"deadsym@{rec.uid}@{finding.token}@{finding.severity}"
+            if dedupe.emit_once(seen, key, "x") is None:
+                continue
+            where = "NEXT ACTION" if finding.severity == "high" else "STATE block"
+            line = findings_ledger.record(
+                sev="HIGH" if finding.severity == "high" else "LOW",
+                code="TRDD-DEAD-SYMBOL",
+                src="trdd-state-reconciliation",
+                msg=(
+                    f"TRDD-{rec.uid} {where} cites `{finding.token}` — absent from "
+                    f"scripts/tests at HEAD, deleted per git history"
+                ),
+                ref=f"TRDD-{rec.uid}",
+            )
+            if line:
+                print(line)
 
     # The git seams — loaded lazily so a project with no candidate TRDDs (the
     # common case) pays nothing. `git log` is read once; `git tag --contains`

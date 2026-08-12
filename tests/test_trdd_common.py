@@ -624,3 +624,101 @@ def test_has_stated_precondition_false_when_fields_are_empty_lists():
     """An explicit `[]` is 'no precondition', not a stated one — must not silence the card."""
     head = "---\ncolumn: backburner\nblocked-by: []\nnpt: []\n---\n"
     assert tc.has_stated_precondition(head) is False
+
+
+# ── Check 5 — STATE block cites a symbol the tree no longer has (TRDD-FDV1RQEB) ─
+#
+# `token_is_dead` is the injectable git seam (production: absent from
+# scripts/tests at HEAD AND present in `git log -S` history — real git is
+# exercised separately in the detector's own integration tests). Here it's a
+# plain fake: True for exactly the tokens the test wants to reproduce, so the
+# predicate over the STATE block is proven with zero I/O.
+
+_STATE_WITH_NEXT_ACTION = (
+    "\n## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-12\n\n"
+    "Progress so far: most of the cadence rework landed.\n\n"
+    "NEXT ACTION: raise `should_emit_renew`'s `dwell_s` threshold once measured.\n\n"
+    "See also `findings_ledger` for the ledger contract, and `resolve_ttl_minutes` used to\n"
+    "compute the old TTL window (historical reference).\n\n"
+    "## Approval log\n"
+    "nothing here yet\n"
+)
+
+
+def _dead(*tokens: str):
+    dead = set(tokens)
+    return lambda t: t in dead
+
+
+def test_check5_dead_symbol_in_next_action_is_high_severity():
+    """A dead symbol cited in the NEXT-ACTION paragraph blocks the card — HIGH."""
+    rec = _record(column="dev", body=_STATE_WITH_NEXT_ACTION)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert [(f.token, f.severity) for f in findings] == [("should_emit_renew", "high")]
+
+
+def test_check5_dead_symbol_outside_next_action_is_low_severity():
+    """A dead symbol cited ELSEWHERE in the STATE block only misleads — LOW."""
+    rec = _record(column="dev", body=_STATE_WITH_NEXT_ACTION)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("resolve_ttl_minutes"))
+    assert [(f.token, f.severity) for f in findings] == [("resolve_ttl_minutes", "low")]
+
+
+def test_check5_multiple_dead_symbols_ranked_independently():
+    """Both the NEXT-ACTION token and an elsewhere token fire, each at its own
+    severity, and a live token (`findings_ledger`) never fires."""
+    rec = _record(column="dev", body=_STATE_WITH_NEXT_ACTION)
+    findings = tc.check5_dead_symbol_citations(
+        rec, _dead("should_emit_renew", "resolve_ttl_minutes")
+    )
+    by_token = {f.token: f.severity for f in findings}
+    assert by_token == {"should_emit_renew": "high", "resolve_ttl_minutes": "low"}
+    assert "findings_ledger" not in by_token
+
+
+def test_check5_symbol_present_at_head_is_not_flagged():
+    """A token still resolvable at HEAD (`token_is_dead` says False) is silent —
+    citing live code in a STATE block is normal, not drift."""
+    rec = _record(column="dev", body=_STATE_WITH_NEXT_ACTION)
+    findings = tc.check5_dead_symbol_citations(rec, _dead())  # nothing is "dead"
+    assert findings == []
+
+
+def test_check5_token_never_existed_produces_no_finding():
+    """A token that never existed anywhere is a typo or an external name, not a
+    deleted symbol — `token_is_dead` returning False for it means silence."""
+    body = (
+        "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+        "NEXT ACTION: check `totallyMadeUpToken` once the probe lands.\n"
+    )
+    rec = _record(column="dev", body=body)
+    # token_is_dead is production-faithful here: False unless BOTH conditions
+    # hold, and a token that never existed can never satisfy "present in history".
+    findings = tc.check5_dead_symbol_citations(rec, lambda t: False)
+    assert findings == []
+
+
+def test_check5_terminal_column_is_skipped():
+    """A terminal (published) TRDD is frozen — Check 5 must not touch it even
+    though its STATE block still cites a provably-dead symbol."""
+    rec = _record(column="published", body=_STATE_WITH_NEXT_ACTION)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert findings == []
+
+
+def test_check5_no_state_block_yields_nothing():
+    """A body with no `## STATE` header at all has nothing for Check 5 to scan."""
+    rec = _record(column="dev", body="\n## Plan\nDo `should_emit_renew` later.\n")
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert findings == []
+
+
+def test_extract_state_block_stops_at_next_top_heading():
+    """The STATE block ends at the next top-level '## ' heading, not at EOF."""
+    body = (
+        "\n## STATE\ninside the state block `should_emit_renew`\n\n"
+        "## Approval log\noutside `resolve_ttl_minutes`\n"
+    )
+    block = tc.extract_state_block(body)
+    assert "should_emit_renew" in block
+    assert "resolve_ttl_minutes" not in block
