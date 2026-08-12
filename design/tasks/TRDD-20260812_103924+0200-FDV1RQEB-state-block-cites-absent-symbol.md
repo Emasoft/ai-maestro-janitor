@@ -1,9 +1,9 @@
 ---
 trdd-id: FDV1RQEB
 title: A STATE block citing a symbol the tree no longer has is undetectable — three cards stalled on it in one day
-column: todo
+column: complete
 created: 2026-08-12T10:39:24+0200
-updated: 2026-08-12T10:39:24+0200
+updated: 2026-08-12T12:35:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -88,7 +88,23 @@ card that cannot proceed — and equal weighting is how a useful channel becomes
 
 ## Acceptance
 
-- [ ] The check reproduces all three 2026-08-12 instances from their pre-fix state
-- [ ] Runs clean on the current board (zero findings after today's corrections)
-- [ ] A token that never existed anywhere in history produces NO finding
-- [ ] Findings go through the findings ledger, not a bare drift line
+- [x] The check reproduces the 2026-08-12 instances — with one correction: only TWO were
+      symbol-class (`should_emit_renew`, `resolve_ttl_minutes`). The third (TRDD-50V256RH) was
+      a falsified ROOT CAUSE, not a dead symbol, and this check neither can nor should catch it
+- [x] Runs clean on the current board — live run exits 0 with no findings, which is correct
+      now that the three real instances are repaired
+- [x] A token that never existed anywhere in history produces NO finding — the condition that
+      holds the FP rate at zero, and the one to keep if this is ever simplified
+- [x] Findings go through the findings ledger, not a bare drift line
+
+## Approval log
+
+- 2026-08-12T12:35:00+0200 — COMPLETE by janitor-main-session. Implemented as check 5 in
+   + wired through the findings ledger in
+   (). Verified beyond the worker's report:
+  the check was proven to FIRE on a synthetic record (low for an illustration, high for a NEXT
+  ACTION, nothing for a live symbol) because a clean run and an unwired check are
+  indistinguishable; and falsified independently by neutering the severity split (2 fail,
+  restore, 7 pass). One defect fixed on review: the detector set GIT_OPTIONAL_LOCKS on none of
+  its six git calls while five siblings set it per-call — pre-existing, but load-bearing once
+  this check began running two git calls per token per card.
