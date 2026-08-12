@@ -12,7 +12,7 @@ severity: high
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [TRDD-I6ZZWVDN, TRDD-SLFMG704, TRDD-K1RJUYGK]
+external-refs: [TRDD-I6ZZWVDN, TRDD-SLFMG704, TRDD-K1RJUYGK, TRDD-EUWIHP0G]
 ---
 
 # The janitor's own largest measured cost has no card
@@ -24,7 +24,32 @@ $32.45 total): **`IDLE_TTL_EXPIRY` alone accounted for 81 occurrences / 2,676,70
 $15.39 — 47% of that one session's entire cache waste.** That is larger than the subject of
 the card that measured it, and larger than anything else on the janitor's cost ledger.
 
-**It has been correctly diagnosed twice and carded zero times:**
+### CORRECTION 2026-08-12, minutes after filing — this card's own premise was overstated
+
+I filed this claiming the finding "has never had a card", from a `git grep IDLE_TTL_EXPIRY`
+over `design/` that returned only two hits. **TRDD-I6ZZWVDN names an owner two lines above the
+section I read**: *"That is TRDD-EUWIHP0G's subject (cold-cache compact), measured live."* The
+grep missed it because EUWIHP0G's card never spells the constant. I concluded from one string
+search what one more line of reading would have refuted — precisely the failure the corpus
+already warns about, committed while writing a card about findings that get lost.
+
+**The relationship, stated correctly:**
+
+- **TRDD-EUWIHP0G** (`column: complete`) owned the **REMEDY** — auto-compact a large context on
+  resume after a cold-cache gap — and shipped it, with its own honest correction recorded (a
+  `/compact` cannot avoid the immediate cold write; it makes every FUTURE resume cheap).
+- The 47% measurement is dated **2026-08-02**, *after* that remedy shipped.
+
+So this card is **not** a duplicate and **not** an orphan: it is the question EUWIHP0G's
+completion leaves open — *the remedy shipped, and `IDLE_TTL_EXPIRY` was still 47% of a
+session's waste; does the remedy not cover this case, or is the cost irreducible?* That is a
+sharper question than the one I filed, and it only exists because EUWIHP0G is done.
+
+What survives of the original framing is narrower and still true: **no OPEN card carried it.**
+EUWIHP0G is terminal and cannot be worked, so the follow-up had nowhere to live on the board —
+which is why it sat in a section for ten days. Add EUWIHP0G to the reading list before starting.
+
+**Diagnosed twice, and left without an OPEN card each time:**
 
 1. It began as an inline "NPT" **bullet** on TRDD-SLFMG704, whose own scope (hand the
    cache-thrash finding to OTHER plugins) then finished — leaving the bullet attached to a
@@ -60,6 +85,8 @@ RETRACTED").
 
 ## Acceptance
 
+- [ ] TRDD-EUWIHP0G (complete) is read first — it shipped the remedy, and this card exists
+      because the 47% was measured AFTER it
 - [ ] The 47% figure is reproduced or refuted on a second session, with the measurement command recorded
 - [ ] WHO pays `IDLE_TTL_EXPIRY` is established from a control, not inferred from plausibility
 - [ ] An explicit verdict: avoidable (with a named lever) or the unavoidable price of an idle armed session
