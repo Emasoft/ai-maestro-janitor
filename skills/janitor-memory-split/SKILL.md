@@ -75,12 +75,23 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project
   change rides the next `publish.py` — you never push it yourself. Unless PROJECT
   editing is on, restrict the candidate scan to LOCAL + USER.
 
-Process exactly **ONE scope this run**: first read
-**`$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json`** — the scheduler records there
-the exact `(intervention, scope, root)` it stamped when it emitted the marker (F1: the stamp
-already advanced, so "due" is NOT re-derivable here; acting on a different scope
-skips the stamped one for a full cadence). Use that root when the file exists and
-its `intervention` is `split`. `$SCOPE_ROOT` below is that one root.
+Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
+
+```bash
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+```
+
+It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
+marker, and atomically hands that dispatch to you alone — the record is renamed out of the
+pool, so a dispatch that lands while you work cannot re-point you (janitor#242: a
+`consolidate` overwrote an in-flight `repair`'s authority 367 s later on the same root).
+`$SCOPE_ROOT` below is the `root` it printed.
+
+Exit 2 (no claimable dispatch) → **STOP and report that.** Do not read the legacy
+`memory-maint-pending.json` slot, and do not re-derive what is "due": the stamp already
+advanced when the marker was emitted (F1), so acting on a scope you chose yourself skips the
+stamped one for a full cadence. If the claim's `intervention` is not `split`, stop as well —
+you were spawned for the wrong chore, and that is worth reporting rather than absorbing.
 
 The path is **ABSOLUTE on purpose**: you are a spawned agent and your cwd is not guaranteed to be
 the project root, so the relative spelling resolves somewhere else and the file reads as missing.

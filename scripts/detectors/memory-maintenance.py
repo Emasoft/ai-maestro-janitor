@@ -182,6 +182,8 @@ def _write_cursor(value: int) -> None:
 
 PENDING_LEGACY_NAME = "memory-maint-pending.json"
 _PENDING_PREFIX = "memory-maint-pending-"
+# The claim prefix `memory_dispatch_claim.py` renames a consumed dispatch to.
+_CLAIMED_PREFIX = "memory-maint-claimed-"
 _PENDING_KEEP = 20  # bounded append site: prune older per-dispatch files past this cap
 
 
@@ -198,17 +200,26 @@ def _legacy_pending_path() -> Path:
 
 
 def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
-    """Keep only the newest `keep` per-dispatch pending files. Best-effort — a
-    pruning failure must never break the dispatch it rides on."""
-    try:
-        files = sorted(
-            state.state_dir().glob(f"{_PENDING_PREFIX}*.json"),
-            key=lambda p: p.stat().st_mtime,
-        )
-        for stale in files[:-keep] if len(files) > keep else []:
-            stale.unlink(missing_ok=True)
-    except OSError:
-        pass
+    """Keep only the newest `keep` per-dispatch records. Best-effort — a pruning
+    failure must never break the dispatch it rides on.
+
+    BOTH prefixes are pruned, independently. `memory_dispatch_claim.py` consumes a
+    dispatch by RENAMING `…-pending-<id>.json` to `…-claimed-<id>.json` (the atomic
+    hand-over, janitor#242), which moves it out of this glob — so pruning only the
+    pending prefix would let every claimed record accumulate forever in a directory
+    nothing else sweeps. Separate caps rather than one over the union, because a burst
+    of claims must not evict the unclaimed backlog it is draining.
+    """
+    for prefix in (_PENDING_PREFIX, _CLAIMED_PREFIX):
+        try:
+            files = sorted(
+                state.state_dir().glob(f"{prefix}*.json"),
+                key=lambda p: p.stat().st_mtime,
+            )
+            for stale in files[:-keep] if len(files) > keep else []:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _write_pending(payload: dict) -> None:

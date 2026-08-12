@@ -54,9 +54,12 @@ already in lesson form; only body ATOM markers count.
 
 ## Procedure
 
-0. **Scope.** Read `$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json` (the
-   scheduler's pinned pick — absolute path; your cwd is not the project root). Absent or
-   unreadable → STOP and report that (never fall back to "whichever is due", #150).
+0. **Scope.** CLAIM your dispatch — never read a shared file for it:
+   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"`. It prints the
+   scheduler's pinned `(intervention, scope, root)` (absolute — your cwd is not the project
+   root) and hands it to you alone, so a later dispatch cannot re-point work in flight
+   (janitor#242). Exit 2 → STOP and report that; never fall back to the legacy
+   `memory-maint-pending.json` slot or to "whichever is due" (#150).
    Then `uv run scripts/memory_txn_cli.py resume <scope-root>`.
 1. **Scan.** Walk the scope's curated pages for the candidate signature above. No
    candidate → return `NOTHING DUE` (one line, no report).
