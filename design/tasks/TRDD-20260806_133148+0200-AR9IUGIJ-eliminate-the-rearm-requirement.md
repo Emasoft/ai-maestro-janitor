@@ -1,9 +1,9 @@
 ---
 trdd-id: AR9IUGIJ
 title: Eliminate the re-arm requirement — no session should need /janitor-arm on every start, update, or tier change
-column: dev
+column: backburner
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T18:12:00+0200
+updated: 2026-08-12T09:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 scope: project
@@ -14,9 +14,36 @@ implementation-commits: []
 
 # Eliminate the re-arm requirement (owner failure report 2026-08-06, item 6)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
-**Spike DECIDED. Verdict: A + C. B was already shipped — and cannot do what the card asks of it.**
+### CORRECTION 2026-08-12 — **option C is MOOT: the machinery it would tune was DELETED**
+
+Everything below about C is written against code that no longer exists. Verified at HEAD:
+`should_emit_renew`, `commit_tier`, `stable_count`, `raw_tier`, `committed_tier` and
+`last_rearm_ts` return **zero hits** anywhere under `scripts/`. They were removed by
+`af499ee3 feat(cadence)!: one arm per session — tier-driven renews deleted (USER directive,
+TRDD-BRHJHWW0)`. The only surviving `[janitor-renew]` emitter is
+`dispatch.py::_phase_heartbeat_renew` (`:1687`), which fires on the cron's **7-day expiry**,
+not on a tier change. There is no oscillation left to dampen, so "raise `dwell_s`" is not a
+smaller version of the task — it is a task about a deleted feature.
+
+**What made this survive six days as a plausible NEXT ACTION:** `.janitor/state/cadence-state.json`
+is still on disk (`{"raw_tier": "mid", "stable_count": 1, "committed_tier": "fast",
+"last_rearm_ts": …}`, last written 2026-08-08). Nothing reads it and nothing writes it — grep for
+`cadence-state` across `scripts/` and `skills/` returns nothing. An orphan state file is a
+convincing witness for a feature that is gone; it is what a resuming agent finds first and it
+agrees with the card. **Verify a cited symbol exists at HEAD before planning against it** — a
+STATE block is a claim about the tree, and this one had gone stale without any edit to it.
+
+So the spike's verdict collapses from **A + C** to **A alone**, and A is owner-gated. That is
+why this card leaves `dev`: with C gone there is no step here anyone can pull, and `dev` was
+asserting work that not only nobody was doing but nobody *could* do. Parked in `backburner`
+(explicitly deferred), not `blocked` — nothing on the board blocks it; a human decision does.
+
+---
+
+**Spike DECIDED (2026-08-06). Verdict AS WRITTEN THEN: A + C — see the correction above; C is
+now void. B was already shipped — and cannot do what the card asks of it.**
 
 ### THE LOAD-BEARING FINDING — B fixes RELIABILITY, not COST
 
@@ -55,13 +82,18 @@ after a background agent finished, i.e. the exact flap TRDD-CI6ZTNB9 names. The 
 **3 round-trips**, not 4, when `sweep=no` and the delete+create are batched into one response
 (prepare → delete+create → record). That is already below the skill's documented 4-call contract.
 
-### NEXT ACTION (one step, runnable) — needs an owner decision first
+### NEXT ACTION — ONE step, and it is entirely the owner's
 
-Two proposals, both awaiting sign-off:
-1. **A:** file the durable-cron ask upstream. **Not filed** — outward-facing publication is not
-   something to do unprompted.
-2. **C:** raise `should_emit_renew`'s `dwell_s` so a demotion cannot pay for a re-arm more than
-   once per N minutes. Needs a value chosen against real flap data, not a guess.
+**A:** file the durable-cron ask upstream (the CronCreate tool's own docs already concede
+`durable:true` "has no effect… every scheduled job is session-only by platform design", so the
+ask writes itself). **Not filed** — outward-facing publication is not something to do
+unprompted. Nothing else on this card is runnable.
+
+~~**C:** raise `should_emit_renew`'s `dwell_s`…~~ **VOID** — see the correction at the top of
+this STATE block: `af499ee3` deleted the tier-driven cadence on a USER directive, so there is
+no `dwell_s`, no `should_emit_renew`, and no flap to measure. Do not go looking for real flap
+data; there is none to find, and `.janitor/state/cadence-state.json` will make it look like
+there is.
 
 ### SUPERSEDED — do NOT carry forward
 
