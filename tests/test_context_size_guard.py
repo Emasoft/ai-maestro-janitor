@@ -203,6 +203,66 @@ def test_resolve_context_none_when_no_source(tmp_path: Path) -> None:
     assert mod._resolve_context(str(tmp_path), "x", "", 1_000_000, now=0) == (None, None, None, False)
 
 
+# ---------- TRDD-G043V3V0: a reading that PREDATES the compaction ------------
+
+
+def _iso(epoch: int) -> str:
+    """The `2026-08-13T01:15:00.000Z` spelling Claude Code writes on transcript entries."""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _stamp_compaction(root: Path, epoch: int) -> None:
+    sd = root / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "last-compact.ts").write_text(str(epoch), encoding="utf-8")
+
+
+def test_resolve_context_omits_a_reading_written_before_the_last_compaction(tmp_path: Path) -> None:
+    """The bug: on the first turn after a compaction the newest usage entry is the PRE-compaction
+    turn, so the fallback reported a context that no longer exists (measured: ~660k claimed vs
+    273,670 real). It must be OMITTED, not merely flagged — `main()` then stays silent."""
+    mod = _import_hook()
+    entry = {**_assistant(inp=10_000, cache_read=650_000), "timestamp": _iso(1_000)}
+    tp = _write_transcript(tmp_path / "t.jsonl", [entry])
+    _stamp_compaction(tmp_path, 2_000)  # compaction landed AFTER that entry
+    assert mod._resolve_context(str(tmp_path), "no-snap", tp, 1_000_000, now=2_100) == (None, None, None, False)
+
+
+def test_resolve_context_keeps_a_quiet_but_valid_reading(tmp_path: Path) -> None:
+    """The anti-regression pin for the REJECTED age-based predicate: a session that simply has
+    not spoken in a long while still holds a VALID reading. Only a LATER compaction invalidates
+    it — age alone never does."""
+    mod = _import_hook()
+    entry = {**_assistant(inp=10_000, cache_read=650_000), "timestamp": _iso(50_000)}
+    tp = _write_transcript(tmp_path / "t.jsonl", [entry])
+    _stamp_compaction(tmp_path, 2_000)  # the compaction is OLD; the entry came long after it
+    pct, tokens, _window, _stale = mod._resolve_context(str(tmp_path), "no-snap", tp, 1_000_000, now=999_999)
+    assert (pct, tokens) == (66, 660_000)
+
+
+def test_resolve_context_fails_open_without_a_compaction_stamp(tmp_path: Path) -> None:
+    """No stamp on disk -> unknown -> report the reading unchanged. Never invent staleness: a
+    false positive silences the watchdog, which is the worse failure."""
+    mod = _import_hook()
+    entry = {**_assistant(inp=10_000, cache_read=650_000), "timestamp": _iso(1_000)}
+    tp = _write_transcript(tmp_path / "t.jsonl", [entry])
+    pct, tokens, _window, _stale = mod._resolve_context(str(tmp_path), "no-snap", tp, 1_000_000, now=2_100)
+    assert (pct, tokens) == (66, 660_000)
+
+
+def test_reading_predates_compaction_predicate() -> None:
+    """The pure predicate, including both fail-open directions."""
+    import token_meter
+
+    assert token_meter.reading_predates_compaction(1_000, 2_000) is True
+    assert token_meter.reading_predates_compaction(2_000, 1_000) is False
+    assert token_meter.reading_predates_compaction(2_000, 2_000) is False  # equal is not "after"
+    assert token_meter.reading_predates_compaction(None, 2_000) is False  # unknown entry ts
+    assert token_meter.reading_predates_compaction(1_000, 0) is False  # no stamp
+
+
 # ---------- _format_line ----------------------------------------------------
 
 

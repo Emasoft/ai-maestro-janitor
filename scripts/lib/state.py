@@ -362,6 +362,14 @@ def refresh_user_presence_written_at(home: Path | None = None, now: int | None =
         pass
 
 
+# The compaction high-water stamp, written by the PostCompact hook via
+# `cold_cache_compact.mark_compacted`. It lives HERE rather than beside its writer because both
+# that module AND `pre-tool-context-usage.py` need the name, and the hook runs before EVERY tool
+# call — importing `cold_cache_compact` there just to reach a filename would put its whole import
+# closure on that hot path. One constant, one home, no hot-path cost (TRDD-G043V3V0).
+LAST_COMPACT_STAMP = "last-compact.ts"
+
+
 def read_int_state(path: Path | str, default: int = 0) -> int:
     """Read a non-negative int from a state file.
 

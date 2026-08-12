@@ -150,8 +150,12 @@ def _bucket_pct(p: int) -> str:
 def _resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int) -> tuple[int | None, int | None, int | None, bool]:
     """Thin wrapper — the implementation lives in token_meter.resolve_context (TRDD-TKNSTP82
     A4), shared with `/janitor-token-report --live`. This hook's OWN behavior is UNCHANGED;
-    only the implementation moved, so it can never silently drift from the report's view."""
-    return token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now)
+    only the implementation moved, so it can never silently drift from the report's view.
+
+    Passes the compaction high-water stamp so a transcript reading that PREDATES the last
+    compaction is omitted rather than reported as live (TRDD-G043V3V0)."""
+    last_compact_ts = state.read_int_state(Path(project_dir) / ".janitor" / "state" / state.LAST_COMPACT_STAMP, 0) if project_dir else 0
+    return token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now, last_compact_ts=last_compact_ts)
 
 
 def _format_line(pct: int, tokens, window, stale: bool, suggest_pct: int) -> str:

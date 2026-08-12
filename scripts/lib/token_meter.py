@@ -37,6 +37,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import token_baseline  # noqa: E402  -- sibling lib: weighted-cost + rolling-window primitives
+import token_history  # noqa: E402  -- sibling lib: parse_ts (ISO-8601 with `Z` or a numeric offset)
 
 _HEARTBEAT_MARKER = "[janitor-heartbeat]"
 # 512 KB tail comfortably covers one heartbeat turn (a few short messages). If a
@@ -223,6 +224,18 @@ def latest_context_size(transcript_path: str | os.PathLike[str]) -> Optional[int
     Returns None when the file is absent/unreadable or no assistant `usage` sits in the
     tail window (correct-by-omission: the watchdog then stays silent rather than guess).
     """
+    entry = latest_context_entry(transcript_path)
+    return None if entry is None else entry[0]
+
+
+def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tuple[int, Optional[int]]]:
+    """`(tokens, entry_epoch)` for the newest usage-bearing assistant message, or None.
+
+    The sibling of `latest_context_size` that ALSO reports WHEN the reading was written, so a
+    caller can distinguish a live reading from one a later compaction has already invalidated
+    (TRDD-G043V3V0). `entry_epoch` is None when the entry carries no parseable timestamp —
+    callers must read that as "unknown", never as "stale".
+    """
     p = Path(transcript_path)
     if not p.is_file():
         return None
@@ -248,7 +261,7 @@ def latest_context_size(transcript_path: str | os.PathLike[str]) -> Optional[int
             continue
         total = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
         if total > 0:
-            return total
+            return total, token_history.parse_ts(str(obj.get("timestamp") or ""))
     return None
 
 
@@ -273,7 +286,24 @@ def read_context_snapshot(project_dir: str, session_id: str) -> Optional[dict]:
     return snap if isinstance(snap, dict) else None
 
 
-def resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int) -> tuple[Optional[int], Optional[int], Optional[int], bool]:
+def reading_predates_compaction(entry_ts: Optional[int], last_compact_ts: int) -> bool:
+    """True iff a reading taken at `entry_ts` was invalidated by a compaction at
+    `last_compact_ts`. PURE (TRDD-G043V3V0).
+
+    Deliberately NOT age-based. An age threshold is wrong in BOTH directions: it would call a
+    quiet-but-valid session's reading stale, and it would miss a compaction that lands inside
+    the threshold. The only question that matters is whether a compaction landed AFTER the
+    reading was written.
+
+    Fail-open: an unknown entry timestamp, or no stamp at all (0), yields False. Never invent
+    staleness — a false positive silences the watchdog, which is the worse failure.
+    """
+    if not entry_ts or last_compact_ts <= 0:
+        return False
+    return last_compact_ts > entry_ts
+
+
+def resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int, last_compact_ts: int = 0) -> tuple[Optional[int], Optional[int], Optional[int], bool]:
     """Return (pct, tokens, window, stale) — the live context-window occupancy.
 
     Prefers the statusline snapshot (it carries the real window → an accurate %); falls
@@ -306,8 +336,19 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
             return int(round(100 * tokens / window_default)), tokens, window_default, stale
         return snap["pct"], tokens, window, stale
     if transcript and window_default > 0:
-        tokens = latest_context_size(transcript)
-        if tokens is not None:
+        entry = latest_context_entry(transcript)
+        if entry is not None:
+            tokens, entry_ts = entry
+            # A reading written BEFORE the most recent compaction describes a context that no
+            # longer exists. That is not "stale" (which `_format_line` would soften to a
+            # "(snapshot may lag)" note beside a number the agent still acts on) — it is WRONG,
+            # by as much as the compaction freed. Measured on this repo 2026-08-13: the hook
+            # reported ~660k / "~0k headroom" when the truth was 273,670 / 386k, and the advice
+            # it produced was to discard a context compacted seconds earlier. So OMIT it — the
+            # caller's `if pct is None` keeps the watchdog silent for the one turn until a real
+            # reading lands, which is this file's own stated principle (TRDD-G043V3V0).
+            if reading_predates_compaction(entry_ts, last_compact_ts):
+                return None, None, None, False
             pct = int(round(100 * tokens / window_default))
             return pct, tokens, window_default, False
     return None, None, None, False

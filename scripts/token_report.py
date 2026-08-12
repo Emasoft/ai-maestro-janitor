@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # flagged relative to the run's own p95. Env-overridable.
 import memory_scopes  # noqa: E402
 import rotator_usage  # noqa: E402
+import state  # noqa: E402  -- read_int_state + LAST_COMPACT_STAMP (the compaction high-water stamp)
 import token_attribution_cache as tac  # noqa: E402
 import token_baseline as tb  # noqa: E402
 import token_burn  # noqa: E402
@@ -186,7 +187,11 @@ def _render_live(as_json: bool) -> int:
     transcript, session_id = discovered
     now = int(time.time())
     window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _CONTEXT_WINDOW_DEFAULT)
-    pct, tokens, window, stale = token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now)
+    # Same compaction stamp the context-watchdog hook passes — without it `--live` would print a
+    # PRE-compaction reading as the live one on the first turn after a compaction, reintroducing
+    # exactly the hook/report drift this shared function exists to prevent (TRDD-G043V3V0).
+    last_compact_ts = state.read_int_state(Path(project_dir) / ".janitor" / "state" / state.LAST_COMPACT_STAMP, 0) if project_dir else 0
+    pct, tokens, window, stale = token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now, last_compact_ts=last_compact_ts)
     usage = token_meter.tail_turn_usage(transcript)
     # TRDD-TKNSTP82 C2 — the exact predicted auto-compact point, shared with the
     # context-watchdog hook via token_meter.predict_auto_compact (None when

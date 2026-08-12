@@ -91,7 +91,7 @@ DEFAULT_MIN_GAIN_TOKENS = 150_000     # reclaimable tokens below which a lossy c
 
 _FIRED_STAMP = "cold-compact-fired.ts"
 _FLOOR_STAMP = "compact-floor.json"
-_LAST_COMPACT_STAMP = "last-compact.ts"  # high-water mark, written by the PostCompact hook
+_LAST_COMPACT_STAMP = state.LAST_COMPACT_STAMP  # high-water mark, written by the PostCompact hook
 
 # --- long-idle CLEAR (owner directive 2026-08-02, stated twice) --------------------------
 #
