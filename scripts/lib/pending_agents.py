@@ -61,6 +61,19 @@ _LOCK_NAME = "pending-agents.lock"
 # << unbounded growth (boundedness invariant, TRDD-7IUTRX29).
 MAX_AGE_S = 7 * 24 * 3600
 
+# Shorter wall-clock eviction for an entry that has NEVER been nudged
+# (janitor#253). Nudge-based eviction (MAX_NUDGES, below) can only age an
+# entry that is actually LISTED by directive_lines() — an agent that died
+# before ever registering, or that never existed as a live agent at all,
+# is surfaced by no directive path, so it is never nudged and would
+# otherwise ride the full MAX_AGE_S=7-day backstop, costing a turn per
+# heartbeat fire the whole time. A never-nudged entry older than an hour is
+# evidence the agent never came up: a live agent that IS being surfaced by
+# directive_lines() would have spent at least one nudge within an hour of
+# heartbeat fires. An agent that IS progressing (nudges >= 1) keeps the
+# full 7-day budget via MAX_AGE_S, unaffected by this shorter window.
+UNNUDGED_MAX_AGE_S = 60 * 60
+
 # Hard cap — a runaway spawner cannot grow the file unbounded. Newest win.
 MAX_ENTRIES = 50
 
@@ -128,7 +141,10 @@ def _normalize(entry: object, now: int) -> dict | None:
     """One raw manifest record → a clean entry, or None if it must be swept.
 
     Swept when: not a mapping, no agentId, older than MAX_AGE_S (the guaranteed
-    cleanup for a Stop that never fired), or its nudge budget is spent (#75).
+    cleanup for a Stop that never fired), never-nudged and older than
+    UNNUDGED_MAX_AGE_S (janitor#253 — a ghost that no directive path ever
+    surfaced, so nudge-based eviction below could never reach it), or its
+    nudge budget is spent (#75).
     An absent/corrupt `nudges` restarts the budget — pre-#75 manifests have no
     such key, and a fresh budget over-nudges by at most MAX_NUDGES, which is the
     safe direction (under-listing loses a real agent).
@@ -146,6 +162,8 @@ def _normalize(entry: object, now: int) -> dict | None:
     nudges = entry.get("nudges", 0)
     if not isinstance(nudges, int) or nudges < 0:
         nudges = 0
+    if nudges == 0 and now - ts > UNNUDGED_MAX_AGE_S:
+        return None
     if nudges >= MAX_NUDGES:
         return None
     return {

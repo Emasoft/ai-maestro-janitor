@@ -211,6 +211,46 @@ def test_respawned_agent_id_gets_a_fresh_nudge_budget(iso) -> None:
     assert len(lines) == 1
 
 
+def test_never_nudged_ghost_swept_after_unnudged_max_age(iso) -> None:
+    """REGRESSION (janitor#253). Nudge-based eviction (MAX_NUDGES) can only age an
+    entry that is actually LISTED by directive_lines() — an agent that died before
+    ever being surfaced is never nudged, so before this fix it rode the full 7-day
+    MAX_AGE_S backstop, costing a turn per heartbeat fire the whole time. A
+    never-nudged entry older than UNNUDGED_MAX_AGE_S must be swept.
+
+    Before the fix (nudges==0 gated only by MAX_AGE_S) this assertion fails: the
+    entry survives all the way to MAX_AGE_S."""
+    pa = iso["pa"]
+    pa.add("ghost", "never surfaced", now=1000)
+    got = pa.pending(now=1000 + pa.UNNUDGED_MAX_AGE_S + 1)
+    assert got == []
+
+
+def test_never_nudged_ghost_survives_within_unnudged_max_age(iso) -> None:
+    """The other half of #253: a just-spawned agent must NOT be evicted before it has
+    ever had a chance to be nudged — the short window applies only once it is
+    actually old enough to be suspicious, not to a real, recent spawn."""
+    pa = iso["pa"]
+    pa.add("newborn", "just spawned", now=1000)
+    got = pa.pending(now=1000 + pa.UNNUDGED_MAX_AGE_S - 1)
+    assert [e["agentId"] for e in got] == ["newborn"]
+
+
+def test_nudged_entry_survives_past_unnudged_max_age(iso) -> None:
+    """An entry that WAS nudged at least once is progressing (it was listed by
+    directive_lines(), i.e. a real resume attempt was made for it) and keeps its
+    full MAX_AGE_S budget — the short UNNUDGED_MAX_AGE_S window applies only to
+    entries that were never surfaced at all."""
+    pa = iso["pa"]
+    pa.add("progressing", "surfaced at least once", now=1000)
+    pa.directive_lines(now=1000)  # spends the first nudge -> nudges == 1
+    got = pa.pending(now=1000 + pa.UNNUDGED_MAX_AGE_S + 1)
+    assert [e["agentId"] for e in got] == ["progressing"]
+    assert got[0]["nudges"] == 1
+    # Still bounded by MAX_AGE_S, unaffected by the short window.
+    assert pa.pending(now=1000 + pa.MAX_AGE_S + 1) == []
+
+
 def test_pre_issue75_manifest_without_nudges_key_is_readable(iso) -> None:
     """Backward compatibility: an entry written before #75 has no `nudges` key and
     must load with a fresh budget rather than being swept or crashing."""
@@ -626,8 +666,15 @@ def test_cadence_probe_ignores_a_long_dead_agent(iso) -> None:
     Measured 2026-08-04: 12 workflow-subagents spawned two days earlier kept this session
     FAST for 111 consecutive fires (~12 no-op wake-ups/hour re-reading a 180k context)
     until the window-burn-rate alarm named the host as the fleet's top consumer at 2.6x
-    linear pace. The resume path still lists the entry — only its claim to mean 'actively
-    waiting RIGHT NOW' expires."""
+    linear pace.
+
+    UPDATED (janitor#253): a `dead-fork` this old has also NEVER been nudged (only
+    `directive_lines()` — the rate-limit/compact resume phases — spends a nudge; the
+    `_pending_agent_count()` probe used by the cadence controller never does). Before
+    #253 that meant a never-surfaced ghost rode the full 7-day MAX_AGE_S backstop,
+    costing a turn per heartbeat fire the whole time — the exact defect #253 fixes. It
+    is now correctly swept by UNNUDGED_MAX_AGE_S well before this test's 2-day mark, so
+    the resume path no longer lists it either."""
     state, pa = iso["state"], iso["pa"]
     now = int(time.time())
     pa.add("dead-fork", "a background task that died", now=now - 2 * 24 * 3600)
@@ -636,8 +683,8 @@ def test_cadence_probe_ignores_a_long_dead_agent(iso) -> None:
     assert dispatch._cadence_active_waiting(state.state_dir(), now) is False, (
         "a two-day-dead agent still pins FAST — the idle-burn defect is back"
     )
-    # ...and it is still LISTED, because a corpse must remain resumable/nameable.
-    assert dispatch._pending_agent_count() == 1
+    # ...and it is no longer listed: a never-nudged ghost this old is swept (#253).
+    assert dispatch._pending_agent_count() == 0
     # Boundary, so the window cannot be silently widened.
     pa.add("fresh-fork", "a live background task", now=now - (dispatch._RESUME_RECENCY_WINDOW_S - 60))
     assert dispatch._fresh_external_agent_count(now) == 1
