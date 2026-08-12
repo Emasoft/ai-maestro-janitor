@@ -1,9 +1,9 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: backburner
+column: dev
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-12T13:49:13+0200
+updated: 2026-08-12T18:58:36+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -20,20 +20,43 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
-**PARKED ON THE OWNER'S GO-AHEAD — not on any task. Do not start.** No `blocked-by:` is set
-because nothing on this board blocks it: `column: backburner` is the honest resting state, and
-the wait is a human decision.
+**~~PARKED ON THE OWNER'S GO-AHEAD~~ — GO-AHEAD GIVEN 2026-08-12, and the core is BUILT
+(`df7d4cb3`).** The owner's words were "before publishing you must implement the zero tokens
+compacting via llm-externalizer", which also makes this a gate on the pending release.
 
-The USER directed (2026-08-12, verbatim) "just wait": the llm-externalizer CLI that compacts a
-session at ZERO token cost was *almost done*. **It has since SHIPPED** — see the dated section
-below. So the original technical precondition is MET and the only remaining question is whether
-the owner considers v12.0.0 settled enough to build against (its own issue thread is a fix to
-that very command).
+**DONE:** `use_llm_ext()` has a caller at last — `external_handoff_clear._compose` runs
+`llm-ext session-summary` and composes the owner's three-part payload (scriptable facts +
+summary + TRUNCATED tail) under ONE budget. Verified end-to-end on a real 464 KB transcript
+(~1 s warm), payload inside budget at 8192/6000/4000/2500 with all three parts present, 10
+tests.
 
-**STARTS WHEN:** the owner says go. Nothing else is outstanding.
+**Four defects found by measuring, each of which would have shipped silently:** `facts` had no
+`transcript` key (the summary branch would have degraded to template-only forever — dark code
+in the commit meant to un-dark it); the unbounded summary ate the tail's room, producing a
+handoff with no recent turns; a constant +38-byte overrun from appending the truncation notice
+outside the accounting; and a test of mine that could not fail (`"m0" in "m100"`).
 
-**NEXT ACTION when unblocked:** give `external_clear.use_llm_ext()` an actual caller — see
-"The socket already exists" below. Do NOT design a new subsystem; the scaffold is built.
+**STILL OPEN — this is why the column is `dev`, not `complete`:**
+  1. the agentlensPro CERTAIN-expiry trigger (reactive) is NOT wired; only the predictive
+     `next_fire_misses_cache` path exists, so an unplanned expiry (API error, blocked prompt,
+     network gap) still does not trigger a clear;
+  2. no cross-`/clear` run through the existing `handoff_clear_verify.py` harness — the
+     acceptance oracle this card names is unexercised;
+  3. the zero-Claude-token claim is REASONED (no model turn on the clear path, $0 summary) but
+     not MEASURED end-to-end.
+
+**NEXT ACTION:** wire the agentlens reactive trigger beside the predictive one, then run
+`handoff_clear_verify.py --phase before/after` across a real `/clear`.
+
+**SUPERSEDED — do NOT carry forward:**
+  - *"STARTS WHEN: the owner says go"* / *"NEXT ACTION when unblocked: give
+    `external_clear.use_llm_ext()` an actual caller"* — both discharged. The go-ahead came
+    2026-08-12 and the caller landed in `df7d4cb3`.
+  - *"the only remaining question is whether the owner considers v12.0.0 settled enough"* —
+    answered by building against it with a hard timeout + degrade-to-template, so a young CLI
+    cannot break the clear path.
+  - the table row marking `use_llm_ext` **DARK** — it has a caller now
+    (`external_handoff_clear._compose`).
 
 ### 2026-08-12 13:49 — the CLI has LANDED; the block is now only the owner's go-ahead
 
@@ -171,3 +194,8 @@ deliberately, because today it means nothing either way.
   `backburner` rather than `todo` because it is blocked on an external deliverable, not on
   capacity — a WORK column would assert activity that cannot happen. The USER said "just wait";
   this card is the wait, made visible.
+- 2026-08-12T18:58:36+0200 — `backburner` → `dev` by janitor-main-session (tier 0). The USER
+  gave the go-ahead ("before publishing you must implement the zero tokens compacting via
+  llm-externalizer"), which both unblocks the card and makes it a gate on the pending release.
+  The core landed in `df7d4cb3`; three acceptance boxes remain, so the column asserts WORK
+  rather than `complete`.
