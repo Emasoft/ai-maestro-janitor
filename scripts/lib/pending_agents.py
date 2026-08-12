@@ -72,6 +72,17 @@ MAX_AGE_S = 7 * 24 * 3600
 # directive_lines() would have spent at least one nudge within an hour of
 # heartbeat fires. An agent that IS progressing (nudges >= 1) keeps the
 # full 7-day budget via MAX_AGE_S, unaffected by this shorter window.
+#
+# ACCEPTED COST, stated so nobody has to rediscover it: `directive_lines()` only runs on
+# RESUME paths, so a healthy session that never compacts and never hits a rate limit may
+# not list anything for hours. A genuinely long-running agent (>1 h) can therefore still
+# be sitting at nudges == 0 and WILL be swept here — after which a later compaction would
+# not cue its resume. That is tolerable because this manifest already presumes an agent
+# gone after MAX_NUDGES (3) unheeded listings, i.e. the design accepts dropping a live
+# agent rather than nagging forever; this only extends the same judgement to the agent
+# that no path ever listed. An empty `transcript` is NOT usable as the ghost signal
+# instead — `on-subagent-start` deliberately blanks it for workflow-spawned subagents
+# (their payload carries the PARENT session's path), so real agents have "" too.
 UNNUDGED_MAX_AGE_S = 60 * 60
 
 # Hard cap — a runaway spawner cannot grow the file unbounded. Newest win.
