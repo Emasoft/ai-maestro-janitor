@@ -29,3 +29,5 @@ Rules for building the merged survivor page `C` in step 7 of the consolidation p
 ## Frontmatter and link web
 
 Keep the frontmatter shape (`name`, `description`, `ocd`, `lmd`, `metadata.{tier,type,…}`); `name` stays the survivor's slug. Merge `## See also` / `## Governed by` / `## Applies to` edges from both (deduped) so the link web stays intact.
+
+**`publish-globally:` (PROJECT pages only):** the survivor is `true` if EITHER A or B was `true` — publishing is a claim about the knowledge, and a merge must never silently un-publish a fact another project already relies on. memgrep's always-on normalization then reconciles the USER-root symlink to match (`markdown-memory-recall.md` §`publish-globally:`).

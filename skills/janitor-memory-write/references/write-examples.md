@@ -80,7 +80,11 @@ Full page schema, tier semantics, and atom grammar (to READ, never to hand-write
 
 The frontmatter `new-page` writes carries `name`, `description` (symptom-indexed),
 `ocd`, `lmd`, `metadata.{node_type: memory, type, tier}` (+ `functionality`; +
-`globs` on hubs). The tier's edge sections — `## Applies to` on hub/aspect
+`globs` on hubs). **A PROJECT-scope page also needs `publish-globally: true|false`**
+(default `false` — publishing beyond this project is opt-in, never assumed); `new-page`
+does not set it; memgrep normalizes it in on the next write it makes, and you may state it explicitly, then
+flip it to `true` only for pages describing this project's public surface (`markdown-memory-recall.md`
+§`publish-globally:`). The tier's edge sections — `## Applies to` on hub/aspect
 (radiating), `## Governed by` on component (receiving); `## See also` optional on
 any tier — you add in step 5 when you WIRE the context. The standing
 `## Notes and lessons learned` section is always present (`new-page` emits it even

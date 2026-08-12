@@ -132,14 +132,22 @@ a worked atom/lesson example: the FULL REFERENCE above.
 ### `publish-globally:` — how ONE project's knowledge becomes visible to ALL of them
 
 **Every PROJECT-scope page carries `publish-globally: true|false`.** It is not optional and not
-inferred: a page without it is a lint finding, and `memgrep lint --fix` inserts it.
+inferred: memgrep NORMALIZES the field into place — always, with no flag to enable it — both
+BEFORE and AFTER every write it makes to a page.
+
+That timing is a correctness requirement, not tidiness. A page missing the field is
+**malformed**, and a write onto a malformed structure corrupts it. So normalization is a
+precondition and a postcondition of every mutation, never an optional cleanup pass someone
+remembers to run. It is idempotent: an already-normal page is not rewritten at all (the chore
+schedulers stat these files, so a no-op must not touch the mtime).
 
 `true` means this page is ALSO reachable from every other project on the machine, via a
 **symlink** in the USER memory root pointing at the PROJECT page. That symlink IS the mechanism —
 there is no copy, so there is no second version to drift. Without it, a project's features and
 APIs are unknowable to any other project's agent, which is the gap the field exists to close.
 
-Two invariants, both reconciled by `memgrep lint --fix`:
+Two invariants, both reconciled by that same always-on normalization (`memgrep lint` still
+REPORTS them so a human can see the state, but lint is not what performs the repair):
 
 | state | meaning | fix |
 |---|---|---|

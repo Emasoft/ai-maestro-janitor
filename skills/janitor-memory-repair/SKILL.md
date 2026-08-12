@@ -87,7 +87,11 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 
 - **No frontmatter at all** → add the full block: `name` (= filename stem),
   `description` (the page's topic as a SYMPTOM/question — derived from the body),
-  `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}`.
+  `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}` (+ `publish-globally: false`
+  when `type: project`).
+- **PROJECT page missing `publish-globally`** → add it as `false` (the default —
+  publishing beyond this project must be opt-in, never assumed on a page's behalf).
+  Never set it `true` on repair; that is an editorial call, not a shape fix.
 - **Missing `ocd`/`lmd`** → `lmd` = today (`date +%F`); `ocd` = the page's earliest
   known date (an existing `lmd`, else today). Never lower an existing `ocd`.
 - **Nested `metadata.ocd` / `metadata.lmd`** → MOVE them to the TOP level (the

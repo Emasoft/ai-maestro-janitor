@@ -311,11 +311,21 @@ metadata:
   node_type: memory
   type: user | feedback | project | reference
   originSessionId: <uuid>
+publish-globally: true | false   # PROJECT pages only — see below
 ---
 <body: the one fact; for feedback/project add **Why:** and **How to apply:**>
 
 ## Notes and lessons learned
 ```
+
+**`publish-globally:` is mandatory on every PROJECT-scope page** (absent it is a lint finding
+memgrep normalizes it in, always, around every write). `true` symlinks the page into the USER memory root so every other
+project's agent can find it — no copy, so no drift; the symlink is the only mechanism. Default
+`false`: PROJECT memory is git-tracked and pushed while USER scope is machine-private, so
+publishing a page beyond its own project must be opt-in, never assumed. Set it `true` only for
+pages describing this project's public surface (features, APIs) that other projects need to
+know about — not its internals. Full grammar + the lint-reconciliation table (the `true`/symlink
+mismatch cases): `markdown-memory-recall.md` §`publish-globally:`.
 
 The `## Notes and lessons learned` section is MANDATORY on every page, even
 when empty — it is the standing landing zone for a `[^N]` correction lesson and

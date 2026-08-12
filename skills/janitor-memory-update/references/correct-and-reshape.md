@@ -85,7 +85,10 @@ move + relink, NOT a silent copy):
   the single `component` page (`login-panel`), make the subjects SECTIONS within
   it, repoint every inbound `[[link]]` to the survivor, and delete the duplicate
   ONLY after it is committed (RULE 0). Prefer handing large merges to the janitor
-  librarian, which deduplicates corpus-wide.
+  librarian, which deduplicates corpus-wide. On PROJECT pages the survivor's
+  `publish-globally:` is `true` if EITHER source was `true` — merging must never
+  silently un-publish a fact another project already relies on; `memgrep lint
+  normalization then reconciles the symlink.
 - **RENAME (inbound links FIRST):** renaming a page breaks EVERY inbound
   `[[link]]` at once. Order: (1) list who points at it —
   `memgrep links --from <old-name> <memdir>`; (2) repoint every inbound

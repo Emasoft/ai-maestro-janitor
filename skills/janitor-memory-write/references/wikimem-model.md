@@ -208,6 +208,10 @@ metadata:
   globs: ["src/frontend/**", ...]  # files this page's subject OWNS (REQUIRED on hubs)
   commits: ["<sha>", ...]          # PROVENANCE (code-change memories): the commit(s) the fact came from
   trdd: TRDD-<8hex>                # the TRDD that designed that change (corroborated by its implementation-commits:)
+publish-globally: true | false     # PROJECT pages only — default false; true symlinks the page into
+                                    # the USER root so every other project's agent can find it. Opt-in
+                                    # because PROJECT memory is pushed while USER scope is
+                                    # machine-private (markdown-memory-recall.md §publish-globally:).
 ---
 
 <THE MEMORIES — the durable decisions for this page's subject, kept LEAN. A hub:

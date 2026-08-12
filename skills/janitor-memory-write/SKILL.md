@@ -73,6 +73,12 @@ mkdir -p "$MEMDIR"
 The janitor's `memory-scope-leak` detector polices secrets/local paths in
 PROJECT/USER scope — keep machine-specific detail in LOCAL.
 
+Every PROJECT page also carries `publish-globally: true|false` (default `false`) —
+`true` symlinks it into the USER root so every other project's agent can find it, opt-in
+because PROJECT memory is pushed while USER scope is machine-private. `new-page` doesn't
+set it; memgrep inserts the default and reconciles the symlink around every write. Full
+mechanism: `~/.claude/rules/markdown-memory-recall.md` §`publish-globally:`.
+
 ### 2. FIND the home first — never duplicate
 
 Run RECALL (or memgrep directly) for the subject AND its functionality, so you
