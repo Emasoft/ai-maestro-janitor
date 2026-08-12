@@ -1,15 +1,16 @@
 ---
 trdd-id: DB1P25S4
 title: Run the daemon under the signed python.org 3.12 so the existing iTerm Automation grant applies
-column: todo
+column: blocked
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-12T15:39:16+0200
+updated: 2026-08-13T00:44:30+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 parent-trdd: VQ4LX7ND
 relevant-rules: []
+blocked-by: [publish-of-75332ba0]
 implementation-commits: [75332ba0]
 ---
 
@@ -127,8 +128,17 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
       reason — a session-spawned daemon must not silently reintroduce the adhoc identity (2026-08-06)
 - [x] tests: managed-python resolution (present/absent/non-executable), plist rendering both
       ways (hermetic fake-uv), never-evict guards, quarantine symmetry (2026-08-06)
-- [ ] observe the fleet scan enumerate iTerm sessions (the VQ4LX7ND alarm clears itself) — the
-      end-to-end proof the grant actually applies
+- [x] observe the fleet scan enumerate iTerm sessions (the VQ4LX7ND alarm clears itself) — the
+      end-to-end proof the grant actually applies. **OBSERVED 2026-08-13**: a live
+      `fleet_scan.gather_fleet` returned 23 instances with `iterm_session_id` resolved on the
+      iTerm-hosted ones, and `iterm-automation-blocked.flag` is **absent**.
+      **Attributed to the DAEMON, not to the session that ran the probe** — that distinction is
+      the whole card, since a TCC grant is per-binary and my own interpreter enumerating proves
+      nothing about the daemon's: daemon pid 90235, heartbeat 8 s old, and its `session-liveness`
+      task (the caller of `gather_fleet` → `record_iterm_automation_state`) last ran **98 s ago**.
+      The flag is CLEARED on success as well as set on failure (`record_iterm_automation_state`
+      docstring: *"an alarm you have to remember to silence is one you learn to ignore"*), so an
+      absent flag after a fresh daemon scan is an observation, not merely an absence of one.
 - [ ] publish; then GH#92 + TRDD-VQ4LX7ND get the resolution note
 
 ## Approval log
@@ -136,3 +146,6 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED dev → todo by janitor-main-session. A WORK column
   asserts active work; nobody was working this (idle 6d). 5/7 acceptance, two remaining OPEN
   items, no external wait. No scope or acceptance changed.
+- 2026-08-13T00:44:30+0200 — 6/7 acceptance. The end-to-end observation LANDED (see the box); the only remaining
+  item is publish-gated, so the card is `blocked` on it rather than sitting in `todo` claiming
+  workable.
