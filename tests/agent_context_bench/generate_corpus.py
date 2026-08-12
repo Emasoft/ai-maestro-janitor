@@ -65,7 +65,11 @@ def main() -> int:
         else:
             jobs.append((f"c{i:02d}", cls, intent, 3))
     print(f"{len(jobs)} jobs", flush=True)
-    with cf.ThreadPoolExecutor(max_workers=4) as ex:
+    # Concurrency 2, not 4: at 4 the rate-limited free pool pushed nearly every call
+    # past its own timeout (10 failures, 0 progress in the last half hour), while a
+    # SINGLE call completed in ~270 s. Throughput here is bounded by the pool, so more
+    # workers buys nothing and costs every in-flight call.
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
         for msg in ex.map(run, jobs):
             print(msg, flush=True)
     done = len(list(OUT.glob("*.path")))
