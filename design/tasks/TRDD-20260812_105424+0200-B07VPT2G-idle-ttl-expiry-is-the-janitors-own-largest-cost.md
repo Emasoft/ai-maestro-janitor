@@ -1,9 +1,9 @@
 ---
 trdd-id: B07VPT2G
-title: IDLE_TTL_EXPIRY was 47 percent of one session's cache waste and has never had a card
+title: IDLE_TTL_EXPIRY was 47 percent of one session's cache waste and no OPEN card carries it
 column: todo
 created: 2026-08-12T10:54:24+0200
-updated: 2026-08-12T10:54:24+0200
+updated: 2026-08-12T11:30:00+0200
 current-owner: janitor-main-session
 task-type: spike
 approval-tier: 0
@@ -15,9 +15,9 @@ eht: []
 external-refs: [TRDD-I6ZZWVDN, TRDD-SLFMG704, TRDD-K1RJUYGK, TRDD-EUWIHP0G]
 ---
 
-# The janitor's own largest measured cost has no card
+# The janitor's own largest measured cost has no OPEN card
 
-## Why — the finding, and the two hand-offs it survived without ever landing
+## Why — the finding, and the two hand-offs that left it with no workable home
 
 Measured 2026-08-02 in session `e804d2c9` (opus-5, 221 cache breaks, 5,643,196 wasted tokens,
 $32.45 total): **`IDLE_TTL_EXPIRY` alone accounted for 81 occurrences / 2,676,704 tokens /
