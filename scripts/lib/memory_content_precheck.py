@@ -66,6 +66,13 @@ import memory_settings  # sibling in scripts/lib/ — the harvest watermark SSOT
 # enough that no real merge waits more than a week on a corpus nobody is touching.
 _DEFAULT_CONSOLIDATE_RECHECK_S = 7 * 86400.0
 
+# Same "unchanged corpus" reasoning as consolidate's gate 2 above, generalized (janitor#140)
+# to every other precheckable chore whose real gate is per-page structural: split, repair,
+# retro-lesson, atomize, conflict, harvest. Defined here (not beside `_unchanged_since_dispatch`
+# below) because `split_has_work`'s default parameter value is evaluated at DEF time, before
+# that helper is reached in file order.
+_DEFAULT_RECHECK_S = _DEFAULT_CONSOLIDATE_RECHECK_S
+
 
 def _candidate_pages(root: Path) -> list[Path]:
     """Every real committed NOTE under `root` — the exact candidate set the
@@ -124,10 +131,22 @@ def oversized_mistiered_pages(root: Path, *, max_bytes: int) -> list[tuple[Path,
     return out
 
 
-def split_has_work(root: Path, *, max_bytes: int) -> bool:
+def split_has_work(
+    root: Path,
+    *,
+    max_bytes: int,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff some committed page in `root` is strictly larger than `max_bytes`
     (the split cap). Mirrors the split skill's `find -size +<cap>c` size gate with
     the SAME cap source (memory_settings split_max_bytes).
+
+    UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
+    recorded at the last split dispatch, and that dispatch is still within its recheck
+    window, suppress — see `_unchanged_since_dispatch`. `last_stats`/`stamp_age_s` default
+    to None (no stamp) which fails open (dispatch), matching every other caller here.
 
     The size gate is EXACTLY the right condition — the once-planned refinement to
     "over-cap AND splittable" is OBSOLETE (re-derived 2026-07-11, TRDD-3XS3PDCF) and must
@@ -150,6 +169,10 @@ def split_has_work(root: Path, *, max_bytes: int) -> bool:
     reserved for pages it can actually split.
 
     The caller guarantees max_bytes > 0 (see content_has_work fail-open)."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     mistiered = {p for p, _t in oversized_mistiered_pages(root, max_bytes=max_bytes)}
     for p in _candidate_pages(root):
         if p in mistiered:
@@ -213,6 +236,38 @@ def changed_pages(current: dict[str, list[int]], last: dict[str, list[int]]) -> 
     changed = {rel for rel, st in current.items() if last.get(rel) != st}
     changed.update(rel for rel in last if rel not in current)
     return changed
+
+
+def _unchanged_since_dispatch(
+    root: Path,
+    *,
+    last_stats: dict[str, list[int]] | None,
+    stamp_age_s: float | None,
+    recheck_after_s: float,
+) -> bool:
+    """True iff the corpus under `root` is byte-identical to `last_stats` (the stat map
+    recorded at this chore's LAST dispatch) AND that dispatch is still within its
+    `recheck_after_s` recheck window — i.e. an agent already examined exactly this content
+    and reached whatever verdict it reached, so re-spawning on the same bytes cannot yield a
+    different answer (issue #140; generalizes consolidate's gate 2, TRDD-3XS3PDCF).
+
+    Measured motivation: a peer's atomize chore abstained 10 consecutive times on a
+    byte-identical corpus (~200k tokens each) before the corpus actually changed and the
+    11th dispatch returned DONE — a dispatch whose candidate set is unchanged from the one
+    that last abstained cannot produce a different answer.
+
+    FAIL-OPEN (libs audit L-11): a missing stamp (`last_stats` empty or `stamp_age_s` is
+    None), a stamp past its recheck window, or an unreadable corpus all return False — never
+    suppress on uncertain input; only a PROVEN-unchanged, PROVEN-fresh stamp suppresses. The
+    recheck-window escape hatch bounds the two cases an unchanged corpus could still hide
+    real work: an agent that crashed before finishing, and LLM non-determinism (a pass one
+    run would have acted on and another missed)."""
+    if not last_stats or stamp_age_s is None or stamp_age_s >= recheck_after_s:
+        return False
+    current = page_stats(root)
+    if current is None:
+        return False  # unreadable corpus — not provably unchanged
+    return not changed_pages(current, last_stats)
 
 
 def refusal_covered_pages(
@@ -595,9 +650,25 @@ def _page_needs_repair(text: str) -> bool:
     return bool(repair_defect(text))
 
 
-def repair_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
+def repair_has_work(
+    root: Path,
+    *,
+    scope: str | None = None,
+    now: int | None = None,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff some candidate page in `root` is STRUCTURALLY malformed per the
     janitor-memory-repair checklist (TRDD-3XS3PDCF follow-up).
+
+    UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
+    recorded at the last repair dispatch, and that dispatch is still within its recheck
+    window, suppress before even reading a page — see `_unchanged_since_dispatch`. This is
+    on top of, not instead of, the per-page REFUSAL FILTER below (which handles a page whose
+    defect this pass provably cannot fix); the corpus gate additionally covers a defect that
+    simply was not reached/fixed on the last dispatch, so an identical corpus need not be
+    re-diagnosed until it moves or the recheck window elapses.
 
     STRUCTURAL-only, like consolidate's gate: it detects the machine-checkable
     subset of the repair checklist (missing/partial frontmatter — including RAW
@@ -619,6 +690,10 @@ def repair_has_work(root: Path, *, scope: str | None = None, now: int | None = N
     until its own bytes change — which is exactly when the question is worth re-asking, including
     when the external writer rewrites it. `scope` is required to read the ledger; without it the
     filter is not applied, never a suppression."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
@@ -654,7 +729,13 @@ _SUPERSEDED_STATUS_RE = re.compile(r"status\s*:\s*supers?e+ded")
 _SUPERSEDED_HEADING = "## Superseded"
 
 
-def retro_lesson_has_work(root: Path) -> bool:
+def retro_lesson_has_work(
+    root: Path,
+    *,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff some CURATED wiki page in `root` carries an atom marker that is
     `status:superseded` but has NO `superseded-by:` forward pointer — the exact
     structural signature of "superseded-but-not-yet-lesson-form" (TRDD-J3ZH3RSI,
@@ -669,7 +750,17 @@ def retro_lesson_has_work(root: Path) -> bool:
     this precheck CONVERGE instead of re-firing forever on a converted atom.
     Misspelling tolerance mirrors memgrep's own parser (`superseeded` accepted on
     both the status value and the pointer key). Unreadable pages fail OPEN; RAW
-    buffer notes are never candidates (coexistence discriminator)."""
+    buffer notes are never candidates (coexistence discriminator).
+
+    UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
+    recorded at the last retro-lesson dispatch, and that dispatch is still within its
+    recheck window, suppress — see `_unchanged_since_dispatch`. This chore has no per-page
+    refusal ledger of its own, so this gate is its ONLY protection against re-dispatching
+    on an atom the skill already converted/left alone last time."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
@@ -720,9 +811,23 @@ def atomize_defect(text: str) -> str:
     return "free-prose"
 
 
-def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
+def atomize_has_work(
+    root: Path,
+    *,
+    scope: str | None = None,
+    now: int | None = None,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff some CURATED wiki page in `root` is an atomize candidate per
     `atomize_defect` (TRDD-3XS3PDCF follow-up). Unreadable pages fail OPEN.
+
+    UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
+    recorded at the last atomize dispatch, and that dispatch is still within its recheck
+    window, suppress before reading a single page — see `_unchanged_since_dispatch`. This is
+    the fix for the measured incident that motivated this gate: a corpus unchanged since the
+    last abstain cannot yield a different verdict on a re-spawn.
 
     REFUSAL FILTER (janitor#212 — the same TRDD-9MQ25PNH/#124 mechanism `repair_has_work`
     already carries). A page can look markable to `atomize_defect`'s STRUCTURAL check
@@ -735,6 +840,10 @@ def atomize_has_work(root: Path, *, scope: str | None = None, now: int | None = 
     refusal is recorded for that exact page, it stops being a candidate until its own
     bytes change. `scope` is required to read the ledger; without it the filter is simply
     not applied — never a suppression (same fail-open contract as repair's)."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
@@ -815,9 +924,25 @@ def conflict_pairs(root: Path, scope: str | None = None) -> list[tuple[str, str]
     return out
 
 
-def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
+def conflict_has_work(
+    root: Path,
+    *,
+    scope: str | None = None,
+    now: int | None = None,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
     conflict candidate (TRDD-3XS3PDCF follow-up — the last precheckable chore).
+
+    UNCHANGED-CORPUS gate (issue #140): if the NOTE corpus is byte-identical to the stat
+    map recorded at the last conflict dispatch, and that dispatch is still within its
+    recheck window, suppress — see `_unchanged_since_dispatch`. Sound because conflict
+    candidates are DERIVED from note content: the librarian re-lists the same pair on
+    every run of an unchanged corpus (the exact noise the REFUSAL FILTER below already
+    targets), and a genuinely new conflict can only appear when a note is added or edited
+    — which moves the corpus fingerprint and re-arms this gate immediately.
 
     The conflict PASS is not self-discovering: its sole candidate source is the
     librarian's proposal file — the skill's own precondition 3 reads the
@@ -846,6 +971,10 @@ def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None =
     work. A pair carrying a live refusal (same two pages, byte-identical, inside the TTL) is skipped;
     the chore is idle only when EVERY surfaced pair is refused. `scope` is required to read the
     ledger, so without it the filter is simply not applied — never a suppression."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     proposal = root / "memory-reorg-proposed.md"
     if not proposal.is_file():
         return False  # "Empty/absent → stop" — absence is the skill's own idle case
@@ -863,10 +992,24 @@ def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None =
     return False
 
 
-def harvest_has_work(scope: str, root: Path) -> bool:
+def harvest_has_work(
+    scope: str,
+    root: Path,
+    *,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
     """True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
     into the curated wiki (TRDD-3XS3PDCF follow-up — UNBLOCKED 2026-07-08 once the
     coexistence-mirror harvest model shipped in v0.33.0 and ran live).
+
+    UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
+    recorded at the last harvest dispatch, and that dispatch is still within its recheck
+    window, suppress before reading any note — see `_unchanged_since_dispatch`. Cheaper
+    than the per-note watermark check below (a `stat`-only compare vs a full read + hash),
+    and sound for the same reason: an unchanged corpus has no new/edited buffer note to
+    mirror since the watermark was last updated.
 
     Mirrors the janitor-memory-harvest skill's candidate scan EXACTLY (step 1 of
     the skill): TOP-LEVEL `<root>/*.md` only (NOT recursive — the skill uses
@@ -882,6 +1025,10 @@ def harvest_has_work(scope: str, root: Path) -> bool:
     Live evidence for the gate: two heartbeat harvest passes on 2026-07-08
     abstained "nothing due" at 257,826 + 266,125 tokens — the exact no-op class
     this module exists to kill."""
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
     try:
         candidates = sorted(root.glob("*.md"))
     except OSError:
@@ -914,13 +1061,24 @@ def content_has_work(
     FAIL-OPEN: returns True for every chore WITHOUT a cheap, exact precheck, for
     SPLIT when the cap is non-positive, for HARVEST when the caller supplied no
     `scope` (the watermark ledger is keyed per (scope, root) — without the scope we
-    can't read it, so we never suppress), and for CONSOLIDATE when the caller supplied
-    no dispatch stamp. A chore is suppressed ONLY when its idleness is cheaply PROVEN;
-    otherwise the scheduler keeps its existing cadence-only behavior."""
+    can't read it, so we never suppress), and for every intervention when the caller
+    supplied no dispatch stamp (`last_stats`/`stamp_age_s` default to None). A chore is
+    suppressed ONLY when its idleness is cheaply PROVEN; otherwise the scheduler keeps
+    its existing cadence-only behavior.
+
+    UNCHANGED-CORPUS gate (issue #140): EVERY intervention below is forwarded
+    `last_stats`/`stamp_age_s` — a corpus byte-identical to the one already examined at
+    the chore's last dispatch, within its recheck window, is provably idle (see
+    `_unchanged_since_dispatch`). Originally only CONSOLIDATE carried this gate; a
+    peer's atomize chore was measured abstaining 10 consecutive times on an unchanged
+    corpus before it moved on the 11th, so the gate is now generalized to every
+    precheckable chore rather than duplicated ad hoc per caller."""
     if intervention == "split":
         if split_max_bytes <= 0:
             return True  # cap unreadable/disabled → fail-open (do not suppress)
-        return split_has_work(root, max_bytes=split_max_bytes)
+        return split_has_work(
+            root, max_bytes=split_max_bytes, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
     if intervention == "consolidate":
         # STRUCTURAL gate (subject-sameness stays agent-discovered) + the UNCHANGED-CORPUS
         # gate: a byte-identical corpus was already examined, so re-spawning cannot yield a
@@ -936,29 +1094,42 @@ def content_has_work(
     if intervention == "repair":
         # STRUCTURAL page-shape gate (semantic residual documented on the function).
         # `scope` also unlocks the per-page refusal filter, so a defect proven unfixable
-        # stops out-ranking the fixable ones (#124).
-        return repair_has_work(root, scope=scope)
+        # stops out-ranking the fixable ones (#124). UNCHANGED-CORPUS gate (#140) is the
+        # additional, cheaper fast path.
+        return repair_has_work(
+            root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
     if intervention == "atomize":
         # Free-prose curated pages without atom markers (the skill's own candidate scan).
         # `scope` unlocks the per-page refusal filter (#212), so a page judged genuinely
         # un-atomizable (e.g. a boilerplate bootstrap stub) stops re-qualifying forever.
-        return atomize_has_work(root, scope=scope)
+        # UNCHANGED-CORPUS gate (#140) is the additional, cheaper fast path.
+        return atomize_has_work(
+            root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
     if intervention == "harvest":
         # Un-mirrored raw buffer notes (the skill's own step-1 scan). Needs the
-        # scope to key the watermark ledger; scope unknown → fail-open.
+        # scope to key the watermark ledger; scope unknown → fail-open. UNCHANGED-CORPUS
+        # gate (#140) is the additional, cheaper fast path.
         if scope is None:
             return True
-        return harvest_has_work(scope, root)
+        return harvest_has_work(
+            scope, root, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
     if intervention == "retro-lesson":
         # STRUCTURAL gate (TRDD-J3ZH3RSI): a superseded-status atom marker with no
         # superseded-by: pointer — the not-yet-converted signature. No such atom
         # anywhere → the retro pass can only abstain → suppress (PROVEN idle).
-        return retro_lesson_has_work(root)
+        # UNCHANGED-CORPUS gate (#140) is this chore's ONLY refusal-ledger-free fast path.
+        return retro_lesson_has_work(root, last_stats=last_stats, stamp_age_s=stamp_age_s)
     if intervention == "conflict":
         # The pass consumes the librarian's surfaced candidates ("Empty/absent →
         # stop" is the skill's own precondition); discovery stays semantic and
         # stays the librarian's job. `scope` also unlocks the per-candidate refusal
         # filter — without it the gate keeps its old bullet-count behavior (#131).
-        return conflict_has_work(root, scope=scope)
+        # UNCHANGED-CORPUS gate (#140) is the additional, cheaper fast path.
+        return conflict_has_work(
+            root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
     # Unknown chores: fail-open by default.
     return True

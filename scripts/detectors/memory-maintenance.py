@@ -252,17 +252,16 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     for intervention, _marker in _MARKERS:
         if not memory_settings.is_due(intervention, scope, root, now):
             continue
-        # CONSOLIDATE also carries the UNCHANGED-CORPUS gate (TRDD-3XS3PDCF): the corpus
-        # fingerprint + the age of the stamp recorded at its last dispatch. A byte-identical
-        # corpus was already examined by the agent, so re-spawning it (~260k tokens) cannot
-        # produce a different verdict. Absent stamp → both args None → fail-open.
-        last_fp: dict | None = None
+        # UNCHANGED-CORPUS gate (issue #140, generalized from CONSOLIDATE's original
+        # TRDD-3XS3PDCF gate to all seven interventions): the corpus fingerprint + the age
+        # of the stamp recorded at THIS intervention's last dispatch. A byte-identical
+        # corpus was already examined by the agent, so re-spawning it (~200-260k tokens)
+        # cannot produce a different verdict. Absent stamp → both args None → fail-open.
+        last_fp = memory_settings.read_dispatch_fingerprint(intervention, scope, root)
         stamp_age: float | None = None
-        if intervention == "consolidate":
-            last_fp = memory_settings.read_dispatch_fingerprint(intervention, scope, root)
-            last_run = memory_settings.read_last_run(intervention, scope, root)
-            if last_run > 0:
-                stamp_age = float(now - last_run)
+        last_run = memory_settings.read_last_run(intervention, scope, root)
+        if last_run > 0:
+            stamp_age = float(now - last_run)
         if memory_content_precheck.content_has_work(
             intervention, root, split_max_bytes=split_cap, scope=scope,
             last_stats=last_fp, stamp_age_s=stamp_age,
@@ -393,16 +392,16 @@ def _run() -> int:
         # which could let a peer also emit. Only the fired intervention is stamped,
         # so the other due interventions stay due for a later heartbeat (fairness).
         memory_settings.mark_ran(intervention, scope_label, root, now)
-        if intervention == "consolidate":
-            # Record WHAT the agent is about to look at (TRDD-3XS3PDCF). If the corpus is
-            # byte-identical next cadence, it already reached its verdict on exactly this
-            # content and re-spawning cannot change it → suppressed. Any edit/add/delete
-            # moves the fingerprint and re-arms the chore immediately. Stamped here, beside
-            # mark_ran, so the "when" and the "what" can never disagree.
-            memory_settings.mark_dispatch_fingerprint(
-                intervention, scope_label, root,
-                memory_content_precheck.page_stats(root),
-            )
+        # Record WHAT the agent is about to look at (issue #140, generalized from
+        # CONSOLIDATE's original TRDD-3XS3PDCF stamp to all seven interventions). If the
+        # corpus is byte-identical next cadence, the agent already reached its verdict on
+        # exactly this content and re-spawning cannot change it → suppressed. Any
+        # edit/add/delete moves the fingerprint and re-arms the chore immediately. Stamped
+        # here, beside mark_ran, so the "when" and the "what" can never disagree.
+        memory_settings.mark_dispatch_fingerprint(
+            intervention, scope_label, root,
+            memory_content_precheck.page_stats(root),
+        )
         _write_cursor(next_cursor)
 
         marker = dict(_MARKERS)[intervention]

@@ -107,6 +107,51 @@ def test_split_has_work_finds_oversized_page_in_a_subdir(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# split_has_work — UNCHANGED-CORPUS gate (issue #140, generalized from
+# CONSOLIDATE's TRDD-3XS3PDCF gate)
+# --------------------------------------------------------------------------- #
+
+def test_split_has_work_unchanged_corpus_is_suppressed(tmp_path):
+    """An over-cap page already examined at the last dispatch (byte-identical) is
+    not re-flagged — re-spawning cannot yield a different answer."""
+    _page(tmp_path, "big.md", _CAP + 1)
+    assert mcp.split_has_work(tmp_path, max_bytes=_CAP) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.split_has_work(tmp_path, max_bytes=_CAP, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_split_has_work_changed_page_re_arms(tmp_path):
+    """A newly-added over-cap page must dispatch on the very next cadence."""
+    _page(tmp_path, "small.md", 10)
+    stale = mcp.page_stats(tmp_path)
+    _page(tmp_path, "big.md", _CAP + 1)
+    assert mcp.split_has_work(
+        tmp_path, max_bytes=_CAP, last_stats=stale, stamp_age_s=60.0
+    ) is True
+
+
+def test_split_has_work_no_stamp_fails_open(tmp_path):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _page(tmp_path, "big.md", _CAP + 1)
+    assert mcp.split_has_work(tmp_path, max_bytes=_CAP, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.split_has_work(
+        tmp_path, max_bytes=_CAP, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_split_has_work_stale_stamp_re_arms(tmp_path):
+    """Past the recheck window an unchanged corpus dispatches anyway (bounds a crashed
+    agent or LLM non-determinism, mirroring consolidate's own escape hatch)."""
+    _page(tmp_path, "big.md", _CAP + 1)
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.split_has_work(tmp_path, max_bytes=_CAP, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.split_has_work(
+        tmp_path, max_bytes=_CAP, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
+
+
+# --------------------------------------------------------------------------- #
 # content_has_work — the dispatcher + the FAIL-OPEN safety rule
 # --------------------------------------------------------------------------- #
 
@@ -517,6 +562,47 @@ def test_content_has_work_repair_delegates(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# repair_has_work — UNCHANGED-CORPUS gate (issue #140)
+# --------------------------------------------------------------------------- #
+
+def test_repair_has_work_unchanged_corpus_is_suppressed(tmp_path):
+    """A defect already seen at the last dispatch (byte-identical corpus) is not
+    re-flagged before its recheck window elapses."""
+    _shaped(tmp_path, "a.md", notes=False)
+    assert mcp.repair_has_work(tmp_path) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.repair_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_repair_has_work_changed_page_re_arms(tmp_path):
+    """Editing the defective page must dispatch on the very next cadence."""
+    p = _shaped(tmp_path, "a.md", notes=False)
+    stale = mcp.page_stats(tmp_path)
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.repair_has_work(tmp_path, last_stats=stale, stamp_age_s=60.0) is True
+
+
+def test_repair_has_work_no_stamp_fails_open(tmp_path):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _shaped(tmp_path, "a.md", notes=False)
+    assert mcp.repair_has_work(tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.repair_has_work(
+        tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_repair_has_work_stale_stamp_re_arms(tmp_path):
+    """Past the recheck window an unchanged corpus dispatches anyway."""
+    _shaped(tmp_path, "a.md", notes=False)
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.repair_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.repair_has_work(
+        tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
+
+
+# --------------------------------------------------------------------------- #
 # atomize_has_work — free-prose curated pages without atom markers
 # --------------------------------------------------------------------------- #
 
@@ -560,6 +646,47 @@ def test_content_has_work_atomize_delegates(tmp_path):
     assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is False
     _shaped(tmp_path, "a.md")
     assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# atomize_has_work — UNCHANGED-CORPUS gate (issue #140)
+# --------------------------------------------------------------------------- #
+
+def test_atomize_has_work_unchanged_corpus_is_suppressed(tmp_path):
+    """A free-prose candidate already seen at the last dispatch (byte-identical
+    corpus) is not re-flagged before its recheck window elapses."""
+    _shaped(tmp_path, "a.md")
+    assert mcp.atomize_has_work(tmp_path) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.atomize_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_atomize_has_work_changed_page_re_arms(tmp_path):
+    """Editing the candidate page must dispatch on the very next cadence."""
+    p = _shaped(tmp_path, "a.md")
+    stale = mcp.page_stats(tmp_path)
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.atomize_has_work(tmp_path, last_stats=stale, stamp_age_s=60.0) is True
+
+
+def test_atomize_has_work_no_stamp_fails_open(tmp_path):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _shaped(tmp_path, "a.md")
+    assert mcp.atomize_has_work(tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.atomize_has_work(
+        tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_atomize_has_work_stale_stamp_re_arms(tmp_path):
+    """Past the recheck window an unchanged corpus dispatches anyway."""
+    _shaped(tmp_path, "a.md")
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.atomize_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.atomize_has_work(
+        tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
 
 
 # --------------------------------------------------------------------------- #
@@ -794,6 +921,48 @@ def test_content_has_work_retro_lesson_delegates(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# retro_lesson_has_work — UNCHANGED-CORPUS gate (issue #140). This chore has no
+# per-page refusal ledger of its own, so this gate is its ONLY protection.
+# --------------------------------------------------------------------------- #
+
+def test_retro_lesson_has_work_unchanged_corpus_is_suppressed(tmp_path):
+    """A pointer-less superseded atom already seen at the last dispatch (byte-identical
+    corpus) is not re-flagged before its recheck window elapses."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    assert mcp.retro_lesson_has_work(tmp_path) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.retro_lesson_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_retro_lesson_has_work_changed_page_re_arms(tmp_path):
+    """Editing the candidate page must dispatch on the very next cadence."""
+    p = _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    stale = mcp.page_stats(tmp_path)
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.retro_lesson_has_work(tmp_path, last_stats=stale, stamp_age_s=60.0) is True
+
+
+def test_retro_lesson_has_work_no_stamp_fails_open(tmp_path):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    assert mcp.retro_lesson_has_work(tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.retro_lesson_has_work(
+        tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_retro_lesson_has_work_stale_stamp_re_arms(tmp_path):
+    """Past the recheck window an unchanged corpus dispatches anyway."""
+    _shaped(tmp_path, "a.md", body=_RETRO_CANDIDATE)
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.retro_lesson_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.retro_lesson_has_work(
+        tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
+
+
+# --------------------------------------------------------------------------- #
 # FAIL-OPEN on unreadable pages (libs audit L-11)
 # --------------------------------------------------------------------------- #
 
@@ -910,6 +1079,51 @@ def test_content_has_work_harvest_delegates_with_scope(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# harvest_has_work — UNCHANGED-CORPUS gate (issue #140)
+# --------------------------------------------------------------------------- #
+
+def test_harvest_has_work_unchanged_corpus_is_suppressed(tmp_path, monkeypatch):
+    """An un-mirrored raw note already seen at the last dispatch (byte-identical
+    corpus) is not re-flagged before its recheck window elapses."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.harvest_has_work("LOCAL", tmp_path, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_harvest_has_work_changed_page_re_arms(tmp_path, monkeypatch):
+    """Editing the raw note must dispatch on the very next cadence."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    stale = mcp.page_stats(tmp_path)
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.harvest_has_work("LOCAL", tmp_path, last_stats=stale, stamp_age_s=60.0) is True
+
+
+def test_harvest_has_work_no_stamp_fails_open(tmp_path, monkeypatch):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    assert mcp.harvest_has_work("LOCAL", tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.harvest_has_work(
+        "LOCAL", tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_harvest_has_work_stale_stamp_re_arms(tmp_path, monkeypatch):
+    """Past the recheck window an unchanged corpus dispatches anyway."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.harvest_has_work("LOCAL", tmp_path, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.harvest_has_work(
+        "LOCAL", tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
+
+
+# --------------------------------------------------------------------------- #
 # conflict_has_work — the librarian's surfaced candidates ("Empty/absent → stop"
 # is the skill's own precondition; TRDD-3XS3PDCF follow-up)
 # --------------------------------------------------------------------------- #
@@ -973,6 +1187,55 @@ def test_content_has_work_conflict_delegates(tmp_path):
     assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is False
     _proposal(tmp_path, ["- topic `t`: a vs b"])
     assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# conflict_has_work — UNCHANGED-CORPUS gate (issue #140). The fingerprint tracks
+# the NOTE corpus (conflict candidates are derived from note content), not the
+# librarian's `memory-reorg-proposed.md` output — so each test carries at least
+# one real note page for the fingerprint to be non-empty.
+# --------------------------------------------------------------------------- #
+
+def test_conflict_has_work_unchanged_corpus_is_suppressed(tmp_path):
+    """A surfaced pair already seen at the last dispatch (byte-identical note corpus)
+    is not re-flagged before its recheck window elapses."""
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _proposal(tmp_path, ["- topic `t`: a vs b"])
+    assert mcp.conflict_has_work(tmp_path) is True, "no stamp -> fail-open"
+    fp = mcp.page_stats(tmp_path)
+    assert mcp.conflict_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0) is False
+
+
+def test_conflict_has_work_changed_page_re_arms(tmp_path):
+    """Editing/adding a note must dispatch on the very next cadence — a genuinely
+    new conflict can only appear when a note is added or edited."""
+    p = _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _proposal(tmp_path, ["- topic `t`: a vs b"])
+    stale = mcp.page_stats(tmp_path)
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.conflict_has_work(tmp_path, last_stats=stale, stamp_age_s=60.0) is True
+
+
+def test_conflict_has_work_no_stamp_fails_open(tmp_path):
+    """A missing fingerprint or missing stamp age never suppresses."""
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _proposal(tmp_path, ["- topic `t`: a vs b"])
+    assert mcp.conflict_has_work(tmp_path, last_stats=None, stamp_age_s=60.0) is True
+    assert mcp.conflict_has_work(
+        tmp_path, last_stats=mcp.page_stats(tmp_path), stamp_age_s=None
+    ) is True
+
+
+def test_conflict_has_work_stale_stamp_re_arms(tmp_path):
+    """Past the recheck window an unchanged corpus dispatches anyway."""
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _proposal(tmp_path, ["- topic `t`: a vs b"])
+    fp = mcp.page_stats(tmp_path)
+    fresh = mcp.conflict_has_work(tmp_path, last_stats=fp, stamp_age_s=60.0)
+    expired = mcp.conflict_has_work(
+        tmp_path, last_stats=fp, stamp_age_s=mcp._DEFAULT_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
 
 
 # ---------------------------------------------------------------------------
