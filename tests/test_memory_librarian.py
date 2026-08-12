@@ -784,6 +784,44 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("flowhub.md", shape)
             self.assertIn("globs", shape)
 
+    def test_block_sequence_globs_is_not_reported_missing(self):
+        """Issue #252 regression: a hub whose `globs:` is a populated YAML BLOCK
+        sequence must NOT be flagged. The old pattern demanded a non-space on the
+        SAME line after the colon, so block form — items on the FOLLOWING lines —
+        read as absent, and the check inverted: the more complete the page, the
+        more likely it was flagged, while `globs: []` sailed through."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "blockhub.md").write_text(
+                '---\nname: blockhub\ndescription: "area overview"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  tier: hub\n"
+                "  globs:\n    - src/widgets/**\n    - src/panels/**\n"
+                "---\nOverview.\n\n## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("blockhub.md", shape,
+                             "a populated block-sequence globs: is a PRESENT globs:")
+
+    def test_flow_style_globs_still_detected_after_the_252_fix(self):
+        """Guard on the OTHER axis (S10a). The reported fix for #252 was to reuse
+        `fm_keys_any_depth`, which is `^`-anchored — a flow-style hub records only
+        `metadata`, so EVERY flow hub would have been reported globs-less. This
+        pins the flow spelling as satisfying the check, so that trade cannot be
+        made silently later."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "flowglobs.md").write_text(
+                '---\nname: flowglobs\ndescription: "area overview"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                'metadata: {node_type: memory, tier: hub, globs: ["src/**"]}\n'
+                "---\nOverview.\n\n## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("flowglobs.md", shape)
+
     def test_lessons_section_case_insensitive_and_ampersand_accepted(self):
         """`## Notes & Lessons Learned` (historical spelling, any case) satisfies the section check."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:

@@ -161,7 +161,17 @@ _FM_KEY_ANY_DEPTH_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][\w-]*)\s*:")
 # silently invisible to the tier checks (found by simulation S10a: a flow-style
 # `tier: component` skipped both checks entirely).
 _FM_TIER_RE = re.compile(r"(?:^|[{,])\s*['\"]?tier['\"]?\s*:\s*['\"]?(?P<tier>[\w-]+)")
-_FM_GLOBS_RE = re.compile(r"(?:^|[{,])\s*['\"]?globs['\"]?\s*:\s*\S")
+# NO trailing `\S` (issue #252). Requiring a non-space AFTER the colon makes this a
+# SAME-LINE value scan, so a YAML BLOCK sequence — whose items live on the FOLLOWING
+# lines — reads as "no globs at all". The check then inverted: `globs: []` (empty,
+# inline) passed while five real entries in block form were flagged, teaching an agent
+# that the correct spelling is unsupported and that emptying the field silences it.
+# The reported fix — reuse `fm_keys_any_depth` — would REGRESS the other axis: that set
+# is built with a `^`-anchored `.match`, so a FLOW-style `metadata: {…, globs: [...]}`
+# registers only `metadata`. The `(?:^|[{,])` alternation below is exactly what
+# simulation S10a added to see the flow spelling, so it must stay. Presence of the KEY
+# is the whole test; an empty value already passed before this change and still does.
+_FM_GLOBS_RE = re.compile(r"(?:^|[{,])\s*['\"]?globs['\"]?\s*:")
 # The radiating ray-list heading — legal on hub/aspect pages ONLY.
 _APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
 # Code-fence delimiters — the body shape scans MUST ignore fenced content (a
