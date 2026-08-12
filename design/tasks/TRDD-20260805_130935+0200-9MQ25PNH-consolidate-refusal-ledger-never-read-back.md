@@ -1,9 +1,9 @@
 ---
 trdd-id: 9MQ25PNH
 title: memory-consolidate re-dispatches already-refused candidates because its refusal ledger is written but never read back
-column: todo
+column: complete
 created: 2026-08-05T13:09:35+0200
-updated: 2026-08-12T15:39:16+0200
+updated: 2026-08-13T02:18:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -273,10 +273,38 @@ one and leaves the mechanism intact.
 - [x] Falsified. Deleting the filter fails exactly ONE of the 5 new tests; the other four are
       regression guards that pass either way, and the test file now SAYS so rather than
       implying 5-test coverage (ATOM-DM04-VACUOUS-HARNESS). — `03b09b7a`
-- [ ] Measured before/after dispatch counts over a fixed window, both taken the same way.
+- [x] Measured before/after dispatch counts over a fixed window, both taken the same way.
+      **Done 2026-08-13 — and the honest reading is that it proves nothing on its own.**
+
+      Source: `.janitor/logs/memory-maintenance.log` (unrotated, 2026-06-19 → 2026-08-11, 130
+      dispatches), counting `due: <chore> @ <scope> — emitting [janitor-memory-<chore>]` lines.
+      `da36c68d` landed 2026-08-05T13:55:37+0200. AFTER = fix → log end (6.39 d); BEFORE = the
+      equal 6.39 d span immediately prior. Same file, same regex, same window length.
+
+      | window | consolidate | per day | all chores | per day | consolidate share |
+      |---|---|---|---|---|---|
+      | BEFORE | 4 | 0.63 | 9 | 1.41 | 44.4% |
+      | AFTER | 3 | 0.47 | 12 | 1.88 | 25.0% |
+
+      **n = 4 vs 3. A difference of ONE dispatch cannot distinguish this fix from noise**, and
+      the share column is worse than it looks: AFTER contains a burst of 6 `repair` dispatches
+      that inflate the denominator, so 44%→25% is mostly the repair burst, not consolidate
+      falling. The only clean comparison is 0.63/d → 0.47/d, and at these counts that is noise.
+
+      What the number is good for is the negative: overall chore activity ROSE (1.41 → 1.88/d)
+      while consolidate did not, so there is no sign of a re-dispatch loop. **The mechanism is
+      proven by the direct production observation in the STATE block** (the 05:22 pass where
+      `is_refused` was consulted and the content-hash re-arm fired on a real edit) — that is the
+      evidence, not this table. Recorded so nobody later cites a rate win that was never
+      measured at a volume capable of showing one.
 
 ## Approval log
 
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED ai_review → todo by janitor-main-session. A WORK
   column asserts active work; nobody was working this (idle 6d). 4/5 acceptance,
   `blocked-by: []` — nobody is reviewing it. No scope or acceptance changed.
+- 2026-08-13T02:18:00+0200 — todo → complete. The last box (the before/after measurement) is
+  done and recorded WITH its own refutation: n=4 vs 3 is too small to show an effect, and the
+  share column is confounded by a repair burst. Closed on the production observation that
+  already proved the mechanism, not on the table. No code changed today; the card had been
+  code-complete since `03b09b7a` and was only missing the measurement it now carries.
