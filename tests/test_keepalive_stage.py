@@ -53,11 +53,16 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
     when `oauth_rotator/burn_gate.py` did the same (TRDD-FQXBURNR, 2026-08-02) — the
     burn-aware rotation gate is genuinely daemon-imported, so the cap was simply stale
     and the suite had been red since. Headroom widened to 45 rather than nudged to 41
-    so the NEXT legitimate module does not re-break the build; a leap past 45 is the
+    so the NEXT legitimate module does not re-break the build; a leap past 50 is the
     signal this bound exists to catch.
+
+    45 -> 50 when `cross_project_issue.py` joined (TRDD-WP7TCRME Rule 4, 2026-08-12): the
+    daemon files fleet findings on the repos that own them, and the module MUST be staged —
+    a lazy import would keep this number small by making the feature fail under launchd,
+    where the daemon runs from the staged copy and nothing else is importable.
     """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 45, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= 50, f"closure unexpectedly large: {len(closure)}"
     leaked = [p.name for p in closure if p.name.endswith("_patterns.py")]
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 

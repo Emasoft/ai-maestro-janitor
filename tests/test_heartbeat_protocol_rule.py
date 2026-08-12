@@ -199,12 +199,23 @@ def test_issue150_the_sidecar_path_is_absolute_and_has_no_silent_fallback():
     Two ways it could not read it, both fixed here: the rule named a RELATIVE path (a spawned
     agent's cwd is not the project root), and it authorised a fallback ("use whichever is due")
     that turns a lookup failure into a confident run on the wrong scope.
+
+    RE-ANCHORED (janitor#242): the shared sidecar the agent used to READ was replaced by a CLAIM
+    step — two dispatches could otherwise point at the same slot and the second silently retarget
+    work already in flight (measured: a `consolidate` overwrote an in-flight `repair` 367 s
+    later). #150's two properties survive that change unaltered and are what this still pins:
+    the assignment is named in ABSOLUTE terms, and an unreadable one HALTS instead of guessing.
+    They are asserted against the claim step because that is where the assignment now comes from.
     """
     text = _rule_text()
-    assert "$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json" in text, (
-        "the sidecar must be named ABSOLUTELY — a spawned agent's cwd is not the project root"
+    row = next(ln for ln in text.splitlines() if "memory_dispatch_claim.py" in ln)
+    assert "ABSOLUTE" in row, (
+        "the assignment must be named ABSOLUTELY — a spawned agent's cwd is not the project root"
     )
-    row = next(ln for ln in text.splitlines() if "memory-maint-pending.json" in ln)
+    assert "do NOT read the legacy `memory-maint-pending.json`" in row, (
+        "the retired shared slot must be forbidden explicitly: it still exists on disk, so an "
+        "agent that merely stopped being told to read it can still fall back to it"
+    )
     # Assert the semantics POSITIVELY. An "absence of `whichever is due`" check looks right and is
     # not: the phrase legitimately appears inside the prohibition that fixes this, so it failed on
     # the corrected rule and would have passed on any wording that merely dropped the words.
