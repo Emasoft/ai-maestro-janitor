@@ -24,21 +24,21 @@ active work nobody was doing.**
 
 **SUPERSEDED — do NOT carry forward:** the two claims below, both written when the feature
 shipped dark, are now FALSE and were self-contradictory even before that:
-  * *"it ships dark, which is why this box is still open"* — it has been DEFAULT ON since
+  - *"it ships dark, which is why this box is still open"* — it has been DEFAULT ON since
     2026-08-11 (`scripts/lib/model_fallback.py::enabled`). The observation box stayed open
     because the event has not happened yet, NOT because a human must enable anything.
-  * *"exactly ONE acceptance box is open"* — FOUR were unchecked when that sentence was
+  - *"exactly ONE acceptance box is open"* — FOUR were unchecked when that sentence was
     written. Three of them were already satisfied by code and tests that existed at the time;
     the sentence was measuring intent, not the file.
 
 **Verified first-hand 2026-08-12 (file:line, per the claim-verification rule):**
-  * **Gate truth table — CLOSED.** Eight named tests in `tests/test_window_burn_rate.py`,
+  - **Gate truth table — CLOSED.** Eight named tests in `tests/test_window_burn_rate.py`,
     including the load-bearing NEGATIVE one: `test_model_fallback_silent_when_the_account_is_
     the_constraint` (account 7d=95% ⇒ verdict None, so account pressure can never trigger a
     model switch), plus `..._requires_PROVEN_account_headroom`, `..._refuses_a_STALE_snapshot`
     and `..._refuses_an_UNKNOWN_snapshot_age` — the fail-open discipline the design constraint
     below demands.
-  * **Actuation on BOTH readable channels — CLOSED today.** The tmux order trace already
+  - **Actuation on BOTH readable channels — CLOSED today.** The tmux order trace already
     existed (`test_send_verified_escs_then_types_then_submits_in_order`); iTerm was proven
     only at the BUILDER level, which cannot catch a channel wired up in the wrong order. Added
     `test_send_verified_escs_types_and_submits_on_ITERM_too` — same trace through the
@@ -46,9 +46,9 @@ shipped dark, are now FALSE and were self-contradictory even before that:
     Enter = an EMPTY `write text ""`). `build_type_only_steps` / `build_submit_steps` /
     `build_esc_only_steps` each handle exactly `tmux` and `iterm`; every other channel is
     REFUSED with a reason rather than silently reported sent.
-  * **Harness agents out of scope — CLOSED.** `scripts/dispatch.py:461` denies `model-fallback`
+  - **Harness agents out of scope — CLOSED.** `scripts/dispatch.py:461` denies `model-fallback`
     to harness agents, guarded by `test_detector_is_on_the_roster_and_denied_to_harness_agents`.
-  * **The detector RUNS** (the shipped-dark trap): it is on the roster at
+  - **The detector RUNS** (the shipped-dark trap): it is on the roster at
     `scripts/dispatch.py:431` with a 60s interval, not merely present on disk.
 
 **NEXT ACTION:** none that can be pulled. At the next real scoped-window wall the detector

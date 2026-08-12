@@ -60,9 +60,9 @@ the open pick is whether the janitor may REWRITE a vulnerable workflow on detect
 
 **VERIFIED 2026-08-12 — it IS the shipped-dark pattern, and it contradicts a standing owner
 directive. Fourth instance this week.** `apply_baseline_rulesets` has exactly TWO callers:
-  * `scripts/github_config_fix.py` — the ON-DEMAND `/janitor-github-config-fix` command (a human
+  - `scripts/github_config_fix.py` — the ON-DEMAND `/janitor-github-config-fix` command (a human
     must run it), and
-  * `scripts/guard/branch_protection_apply.py` — the only AUTOMATIC path, whose gate 1 is
+  - `scripts/guard/branch_protection_apply.py` — the only AUTOMATIC path, whose gate 1 is
     `guard_mode_enabled()`, default False, returning `0  # silent — the user has not opted in`.
 It applies the RATIFIED baselines (its own docstring), not beyond-baseline deviations — so the
 Tier-2 approval reasoning does NOT justify the default. Applying the ratified pair as-is is
