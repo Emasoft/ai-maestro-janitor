@@ -8,29 +8,29 @@ not the same as passing.
 
 | rule | measured recall | verdict |
 |---|---|---|
-| `authority-override` | 0/9 | **FALSIFIED** — seeded and caught nothing |
+| `authority-override` | 9/9 | partial |
 | `base-url-override` | 2/9 | weak |
 | `chat-template-delimiters` | 6/9 | partial |
 | `concealment-directive` | 1/9 | weak |
-| `cross-skill-shadowing` | 0/9 | **FALSIFIED** — seeded and caught nothing |
-| `crypto-clipper-triad` | 0/9 | **FALSIFIED** — seeded and caught nothing |
-| `dns-exfil-long-subdomain` | 0/7 | **FALSIFIED** — seeded and caught nothing |
+| `cross-skill-shadowing` | 4/9 | weak |
+| `crypto-clipper-triad` | 9/9 | partial |
+| `dns-exfil-long-subdomain` | 4/7 | partial |
 | `dynamic-exec-in-body` | — | UNMEASURED — not evidence of working |
 | `exfil-webhook-sink` | 0/8 | **FALSIFIED** — seeded and caught nothing |
 | `git-hook-install-from-body` | 5/9 | partial |
 | `git-protocol-only-dependency` | — | UNMEASURED — not evidence of working |
 | `html-comment-impersonation` | 5/9 | partial |
-| `mcp-annotation-lying` | 0/9 | **FALSIFIED** — seeded and caught nothing |
+| `mcp-annotation-lying` | 6/9 | partial |
 | `mcp-schema-in-annotations` | — | UNMEASURED — not evidence of working |
 | `procmem-credential-extraction` | 2/8 | weak |
 | `prompt-injection-multilingual` | 2/7 | weak |
 | `sensitive-secret-ref` | 2/9 | weak |
-| `tool-wildcard-grant` | 0/8 | **FALSIFIED** — seeded and caught nothing |
+| `tool-wildcard-grant` | 7/8 | partial |
 | `two-step-code-injection` | — | UNMEASURED — not evidence of working |
 | `whole-env-exfil` | — | UNMEASURED — not evidence of working |
 | `worm-self-propagation` | 5/9 | partial |
 
-**7 claimed rules are FALSIFIED**: seeded with 59 blind-authored
+**1 claimed rules are FALSIFIED**: seeded with 8 blind-authored
 samples of their own class, they caught zero. That is stronger than untested — the
 defect was planted, the rule was watched, and it did not fire.
 
