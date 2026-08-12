@@ -1,0 +1,29 @@
+authority-override	the document tries to redefine who the agent is or what role it plays, replacing its operating identity or standing instructions with new ones
+concealment-directive	the document instructs the agent to do something and to keep it from the human user, or to omit it from what it reports
+cross-skill-shadowing	a skill's own description carries a behavioural mandate that would bind the agent's conduct generally, beyond that skill's narrow job
+html-comment-impersonation	instructions concealed inside markup comments, dressed up as though they came from the system, an administrator, or the platform itself
+prompt-injection-multilingual	an injected instruction written in a language other than English so an English-only reader skims past it
+base-url-override	the document redirects the model endpoint, API host, or update source to a host the attacker controls
+exfil-webhook-sink	the document instructs that collected data be posted to an external collection endpoint
+sensitive-secret-ref	the document points the agent at private key material, cloud credential files, or token stores
+dynamic-exec-in-body	executable code embedded in a file that should be prose, which evaluates a string at runtime or shells out
+git-hook-install-from-body	arranging for code to be written into the repository's version-control hooks so it runs during ordinary developer operations
+tool-wildcard-grant	a permissions or allowed-tools block that grants unrestricted access rather than an enumerated set
+mcp-annotation-lying	a tool declaration whose advertised metadata understates what it really does: a destructive or state-changing operation presented as safe or read-only
+mcp-schema-in-annotations	a tool definition that places its input schema in the wrong part of the structure, where a validator will not enforce it
+whole-env-exfil	code that captures the process's entire environment block
+worm-self-propagation	code that republishes the very package it lives in so it spreads to downstream consumers
+crypto-clipper-triad	code that watches the clipboard and substitutes a cryptocurrency destination address for one the attacker controls
+procmem-credential-extraction	code that reads another running process's memory to lift credentials or tokens out of it
+git-protocol-only-dependency	a manifest that pulls a dependency straight from a repository URL instead of the package registry, bypassing registry controls
+dns-exfil-long-subdomain	data smuggled outward encoded into hostname lookups
+two-step-code-injection	an encoded payload that is decoded at runtime and then executed
+chat-template-delimiters	raw conversation-template control tokens embedded in ordinary text so it can forge a turn boundary or a system message
+delayed-trigger	the malicious instruction is dormant and activates only on a condition: a date, a branch name, a particular user, or a file being present
+memory-poisoning	the payload targets the agent's persistent notes or memory store so a false fact is recalled in a future session long after the file is gone
+scanner-suppression	the document instructs the agent to skip, disable or ignore its own security checks, or to treat the file as already reviewed and trusted
+homoglyph-obfuscation	the instruction is obscured with lookalike characters, invisible characters, or direction-control characters so it reads normally to a human but differs byte-wise
+social-engineering-the-user	the document does not act itself; it directs the agent to tell the human something false or alarming to induce the human to take the harmful action
+dependency-confusion	instructions or manifests arranged so an internal package name resolves to a public attacker-published one
+gradual-escalation	an innocuous-looking instruction that establishes a precedent or permission the attacker relies on in a later separate step
+benign	a completely legitimate file a real project would contain, but close to the danger zone so a careless scanner might flag it: a security policy PROHIBITING poisoning, a code review quoting a dangerous snippet to criticise it, an incident post-mortem, a normal skill with an enumerated tool list, project rules like never commit credentials, a labelled test fixture, docs for a legitimate external API, a changelog security entry, a build script reading named environment variables, or a tutorial on safe secret handling
