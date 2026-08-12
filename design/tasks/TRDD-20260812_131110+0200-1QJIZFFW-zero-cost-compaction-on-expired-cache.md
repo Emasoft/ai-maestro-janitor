@@ -3,7 +3,7 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: backburner
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-12T13:11:10+0200
+updated: 2026-08-12T13:49:13+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -30,6 +30,46 @@ generated from the tool catalog, so it cannot drift) before assuming it landed.
 
 **NEXT ACTION when unblocked:** give `external_clear.use_llm_ext()` an actual caller — see
 "The socket already exists" below. Do NOT design a new subsystem; the scaffold is built.
+
+### 2026-08-12 13:49 — the CLI has LANDED; the block is now only the owner's go-ahead
+
+`llm-ext session-summary` ships in **llm-externalizer v12.0.0** (janitor#251). VERIFIED by
+invoking it, not by reading the issue:
+
+- Self-describes as **"$0 by construction"** — always the biggest free, text-emitting
+  OpenRouter model, falling down a ranked list if one is delisted / stops being free /
+  exhausts its daily cap mid-run.
+- **Streams** the JSONL via map-reduce (never loads the transcript into memory) and
+  **checkpoints after every chunk**, so an interrupted run RESUMES on re-invocation rather
+  than restarting — re-running the same command is safe, which is what makes it usable from
+  a hook that may itself be interrupted.
+- `--stdout` prints the text; otherwise stdout is the report PATH, with banner/progress/errors
+  on stderr — so `SUMMARY=$(llm-ext session-summary …)` is hook-safe by design.
+- Relevant knobs: `--transcript` / `--session_id` (defaults to the project's most recent
+  transcript), `--output`, `--prune`, `--max_chunk_tokens`, `--checkpoint`, `--resume`.
+
+**THE INTEGRATION TRAP, measured — `CLAUDE_PLUGIN_DATA` MUST be set explicitly.** With it
+unset the binary dies before doing any work:
+
+```
+[llm-externalizer] FATAL: native module 'better-sqlite3' is missing AND CLAUDE_PLUGIN_DATA
+is unset. The launcher cannot self-install without a persistent data directory.
+```
+
+A janitor hook / detached child is EXACTLY that context. Worse, the value is **another
+plugin's** data dir, and there are two candidates on this host
+(`llm-externalizer-emasoft-plugins` and `llm-externalizer-inline`) — so it cannot be guessed
+at call time and must be resolved and passed deliberately. With it set, the launcher
+self-installs its native dep and runs.
+
+Two further cautions for the wiring:
+
+- **Do not read the exit code through a pipe.** `llm-ext … | head` reports `head`'s status;
+  the launcher's own failure is invisible. Capture to a file, then inspect.
+- The v12.0.0 issue thread is a FIX to this very command (an unbounded body-read hang: the
+  abort was disarmed when headers arrived, so the timeout bounded time-to-first-byte only and
+  a stalled generation hung forever). Treat the version as young: wrap the call in a real
+  timeout of our own and degrade to `compose_template_handoff` on any non-zero exit.
 
 ## Why (the USER's framing)
 
