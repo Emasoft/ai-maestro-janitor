@@ -129,6 +129,18 @@ janitor's cache dir, a default-ON guard would have re-applied rulesets to the JA
 from every project on the machine and never protected the user's own — running, but on the
 wrong target.
 
+**VERIFIED END-TO-END on the real path, not only by unit test** (2026-08-12 17:55): running
+`scripts/guard/branch_protection_apply.py` with NO env var set now reaches gate 6 and writes
+`Emasoft/ai-maestro-janitor  main  already-present` to `.janitor/state/branch-protection-acted.txt`.
+Before the flip the same invocation returned at gate 1 and wrote nothing, so the ledger line IS
+the behaviour change: gate 1 opens by default, gates 2-5 pass (autofix on, slug resolved, `gh`
+present, default branch `main`), and gate 6 correctly short-circuits because the ratified pair is
+already in place.
+**Still unproven, and say so rather than imply otherwise:** the APPLY branch (POST/PATCH of the
+rulesets) did not execute, because this repo is already compliant — nothing needed applying. What
+is demonstrated is that the guard is now REACHED; that it applies correctly on a repo lacking
+protection is covered only by tests, and would need an unprotected repo to prove for real.
+
 Tests: `test_guard_mode_enabled_default_is_true` replaces the old default-is-false assertion,
 plus `test_guard_mode_unset_or_unrecognised_stays_on` (`""`, `"garbage"`, `"of"`, `"flase"` must
 all stay ON — under the old opt-in semantics those meant OFF). 47 pass, ruff + mypy clean.
