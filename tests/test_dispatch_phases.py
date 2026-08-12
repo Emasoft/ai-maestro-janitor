@@ -2546,3 +2546,33 @@ def test_clear_resume_also_consumes_the_shared_resume_directive(env_isolation: d
     assert not (sd / "resume-directive.txt").exists(), (
         "deleting the pointer while keeping what it points at was never a coherent half"
     )
+
+
+def test_a_non_executable_detector_is_FIXED_not_reported(tmp_path, monkeypatch):
+    """TRDD-WP7TCRME Rule 3, on the quietest failure this system has: a detector that lost its
+    executable bit is skipped on EVERY fire forever, and the old log called it "missing" — so a
+    reader went looking for a deleted file that was sitting right there. There is no second
+    reading of "should exist but must not run", so the janitor takes the single defensible
+    action instead of narrating it."""
+    dispatch = _import_dispatch()
+    det = tmp_path / "detectors"
+    det.mkdir()
+    script = det / "probe-only.py"
+    script.write_text("#!/usr/bin/env python3\nprint('ran')\n", encoding="utf-8")
+    script.chmod(0o644)
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+    monkeypatch.setattr(dispatch, "_detector_is_due", lambda *a, **k: False)
+
+    dispatch._run_detector("probe-only", 300)
+
+    import os as _os
+    assert _os.access(script, _os.X_OK), "the bit must be restored, not merely complained about"
+
+
+def test_a_genuinely_missing_detector_is_still_reported(tmp_path, monkeypatch):
+    """The autofix must not swallow the case it was split away from: an absent file is a real
+    fault and has no single defensible repair."""
+    dispatch = _import_dispatch()
+    (tmp_path / "detectors").mkdir()
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+    dispatch._run_detector("does-not-exist", 300)  # must not raise

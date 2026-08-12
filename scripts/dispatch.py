@@ -680,9 +680,29 @@ def _emit_quiet_if_idle() -> None:
 
 def _run_detector(name: str, interval: int) -> None:
     script = _HERE / "detectors" / f"{name}.py"
-    if not script.is_file() or not os.access(script, os.X_OK):
+    if not script.is_file():
         state.log_line("dispatch", f"detector '{name}' missing at {script}")
         return
+    if not os.access(script, os.X_OK):
+        # FIX IT, do not report it (TRDD-WP7TCRME Rule 3). A detector that exists but lost its
+        # executable bit is the quietest failure this system has: it is skipped on every fire
+        # forever, and the old message called it "missing" — so anyone reading the log went
+        # looking for a deleted file that was sitting right there. Whatever it was meant to
+        # detect simply stops being detected, and nothing says so.
+        #
+        # Single defensible answer, so the janitor takes it: a file in `detectors/` that
+        # dispatch is iterating IS meant to be run. There is no second reading of a detector
+        # that should exist but must not execute — that would be a deletion, not a mode.
+        #
+        # This happens for real: `orphaned-memory-maint.py` landed at 100644 in 9e75a7d9 and
+        # was dark until a TEST caught it (2026-08-12) — a test that only runs in CI, on a repo
+        # checkout, and so says nothing about an INSTALLED plugin whose cache lost the bit.
+        try:
+            script.chmod(script.stat().st_mode | 0o111)
+            state.log_line("dispatch", f"detector '{name}' was not executable — fixed (chmod +x)")
+        except OSError as exc:
+            state.log_line("dispatch", f"detector '{name}' not executable and chmod failed: {exc}")
+            return
     if not _detector_is_due(name, interval):
         return
     # stdout passes through to the cron prompt as drift findings; stderr
