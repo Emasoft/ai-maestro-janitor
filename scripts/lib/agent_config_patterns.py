@@ -415,11 +415,43 @@ _GIT_HOOK_INSTALL = _re(
 # static_checks.py. The pattern matches the canonical JSON shape where
 # a tool object has BOTH `name`-with-destructive-verb AND
 # `readOnlyHint: true` within the same JSON block.
+#
+# The first cut required the lie to be told in exactly one place — a
+# destructive verb inside `"name"`, followed by `"readOnlyHint": true` — and
+# measured 0/9, because a manifest can tell the same lie in any of three
+# places and in YAML as readily as JSON. What the class actually is: a
+# READ-ONLY CLAIM anywhere in the declaration, contradicted by DESTRUCTIVE
+# EVIDENCE anywhere in the same declaration. Splitting it that way also makes
+# the rule order-agnostic, since which of the two comes first in the file is
+# an authoring accident.
+_MCP_READONLY_CLAIM = (
+    r'(?:"?readOnly(?:Hint)?"?\s*:\s*true'
+    # `"permissions": ["read"]` is the same claim written as a scope.
+    r'|"?permissions"?\s*:\s*\[\s*"read"\s*\]'
+    # ...and prose manifests say it in a Safety / Category field.
+    r'|"?(?:safety|category|classification)"?\s*:\s*"?[^"\n]{0,60}read[-\s]?only)'
+)
+_MCP_DESTRUCTIVE_EVIDENCE = (
+    # the tool's own name
+    r'(?:"?(?:name|tool|operationId)"?\s*:\s*"[A-Za-z_]*(?:delete|remove|drop|'
+    r'destroy|truncate|erase|rm|wipe|kill|terminate|purge|write|modify|update|'
+    r'push|publish|deploy|install|uninstall|exec|run|clear|clean(?:up)?|'
+    r'rotate|reset)[A-Za-z_]*"'
+    # the route it calls: a read-only tool does not POST to /delete
+    r'|"?(?:endpoint|path|url|route)"?\s*:\s*"[^"\n]{0,80}/(?:delete|erase|remove|'
+    r'destroy|purge|drop|wipe|cleanup|clean)'
+    r'|"?method"?\s*:\s*"(?:DELETE|PUT|PATCH)"'
+    # or its implementation, sitting right there in the same file
+    r'|\bDELETE\s+FROM\b|\bDROP\s+TABLE\b|\bTRUNCATE\s+TABLE\b'
+    r'|\bos\.remove\s*\(|\bshutil\.rmtree\s*\(|\bfs\.(?:unlink|rm|writeFile)\w*\s*\('
+    r'|\bexecSync\s*\(|\brm\s+-rf\b)'
+)
+# 800 chars because a manifest's declaration and its implementation are
+# routinely separated by a parameter schema and a paragraph of documentation
+# — the lie and its refutation are in one file, not one object literal.
 _MCP_ANNOTATION_LIE = _re(
-    r'"name"\s*:\s*"[A-Za-z_]*(?:delete|remove|drop|destroy|truncate|'
-    r'erase|rm|wipe|kill|terminate|write|modify|update|push|publish|'
-    r'deploy|install|uninstall|exec|run)[A-Za-z_]*"'
-    r'[\s\S]{0,500}?"readOnlyHint"\s*:\s*true'
+    _MCP_READONLY_CLAIM + r"[\s\S]{0,800}?" + _MCP_DESTRUCTIVE_EVIDENCE
+    + r"|" + _MCP_DESTRUCTIVE_EVIDENCE + r"[\s\S]{0,800}?" + _MCP_READONLY_CLAIM
 )
 
 
