@@ -55,6 +55,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.parent.parent))
 
 import dedupe  # noqa: E402
+import findings_ledger  # noqa: E402  -- the quiet heartbeat's pull-model sink
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
@@ -524,6 +525,82 @@ _MARKER_OWNERS: dict[str, re.Pattern[str]] = {
 }
 
 
+# --------------------------------------------------------------------------- #
+# QUIET HEARTBEAT (owner directive 2026-08-12: "it should simply print 'janitor
+# heartbeat' followed by the occasional urgent warning ... no useless paths").
+#
+# The janitor already HAS a pull model for findings — the per-project ledger
+# behind `/janitor-findings` (ARCHITECTURE.md §4: findings are pulled, never
+# pushed). The advisory detectors bypassed it and wrote straight to stdout, so
+# every fire that happened to land on several long cadences at once dumped a
+# screenful of reminders and paths into the conversation. Quiet mode routes those
+# to the ledger instead: nothing is lost, it is just READ on demand.
+#
+# THE DEFAULT IS LOUD, AND THAT DIRECTION IS DELIBERATE. A detector is silenced
+# only by appearing in the list below. The inverse design — "loud only if you
+# declare yourself loud" — reads tidier and fails the wrong way: a security
+# detector added next year would be silent by omission, and nobody would notice,
+# because silence is exactly what a clean run looks like. Here, forgetting to
+# classify a new detector costs one noisy line; there, it costs a missed breach.
+# --------------------------------------------------------------------------- #
+
+# ADVISORY: a finding means "consider doing this sometime" — reminders, drift
+# nudges, hygiene, informational counts. Nothing here is broken, unsafe, or
+# stalled, so none of it earns an interruption.
+_ADVISORY_DETECTORS = frozenset({
+    "trdd-reminder", "trdd-drift", "trdd-state-reconciliation", "report-to-trdd-drift",
+    "memorize-nudge", "memory-librarian", "project-map-drift", "wikimem-syntax",
+    "why-in-commits", "subagent-report", "stale-task", "stale-stash", "dirty-tree",
+    "worktree-janitor", "trashcan-purge", "reports-purge", "screenshot-purge",
+    "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
+    "oauth-cookie-reminder", "oauth-beacon-refresh",
+})
+
+# Even an advisory detector is surfaced when its own line says it is serious.
+# Detectors tag severity themselves (the `[findings] HIGH …` ledger shape); this
+# is the override that stops the list above from muzzling a real alarm.
+_URGENT_LINE_RE = re.compile(r"\b(CRITICAL|HIGH|ERROR|FAIL(?:ED|URE)?|INSECURE|LEAK)\b")
+
+
+def _heartbeat_is_quiet() -> bool:
+    """Quiet by default; `CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE` restores the firehose."""
+    return not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", False)
+
+
+def _quiet_filter(detector: str, text: str) -> str:
+    """Drop this detector's advisory lines from stdout, recording them in the ledger.
+
+    Kept on stdout: everything from a non-advisory detector, any bare `[janitor-…]`
+    marker (those are ACTIONS — suppressing one silently stops work, which is the
+    one failure this must never have), and any line that tags itself urgent.
+
+    Suppressed lines are RECORDED, not discarded — a line the user never sees and
+    that was never written down is just a lost finding, and this whole change would
+    then be trading noise for blindness.
+    """
+    if not text or not _heartbeat_is_quiet() or detector not in _ADVISORY_DETECTORS:
+        return text
+    kept: list[str] = []
+    dropped: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _RESERVED_MARKER_RE.fullmatch(stripped) or _URGENT_LINE_RE.search(stripped):
+            kept.append(line)
+        else:
+            dropped.append(stripped)
+    for msg in dropped:
+        try:
+            findings_ledger.record(
+                sev="LOW", code=f"ADVISORY-{detector.upper()}", src=detector,
+                msg=msg, ref="",
+            )
+        except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
+            state.log_line("dispatch", f"quiet-filter could not record advisory from '{detector}'")
+    return "\n".join(kept) + "\n" if kept else ""
+
+
 def _defang_foreign_markers(detector: str, text: str) -> str:
     """Defang reserved `[janitor-…]` markers a detector is not entitled to emit.
 
@@ -644,7 +721,7 @@ def _run_detector(name: str, interval: int) -> None:
         else:
             partial = partial_raw
         if partial:
-            sys.stdout.write(_defang_foreign_markers(name, partial))
+            sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, partial)))
             sys.stdout.flush()
         # Stamp last-run even on timeout so a chronically-slow detector backs
         # off to its cadence instead of re-firing (and re-hanging) every fire.
@@ -654,7 +731,7 @@ def _run_detector(name: str, interval: int) -> None:
         state.log_line("dispatch", f"detector '{name}' spawn failed: {exc}")
         return
     if proc.stdout:
-        sys.stdout.write(_defang_foreign_markers(name, proc.stdout))
+        sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, proc.stdout)))
         sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")

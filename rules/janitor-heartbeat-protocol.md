@@ -18,9 +18,17 @@ leading token to its row below, not a stream-scan. A recovery/stop fire carries 
 terminal survival token; a full fire may stack several action tokens plus drift, or carry
 `[janitor-quiet]`.
 
-**Zero-output contract:** on `[janitor-quiet]` (or empty stdout) reply with the EMPTY string — no
-"all quiet" prose, no tool calls. It means "no ACTION this fire", not "nothing to surface": still
-surface any drift / PAYLOAD lines VERBATIM, adding at most 2 lines of your own.
+**Output contract (owner directive 2026-08-12) — a fire prints `janitor heartbeat`, and ONLY
+adds to it when something genuinely needs the human.** On `[janitor-quiet]` or empty stdout,
+reply with exactly `janitor heartbeat` and nothing else — no tool calls, no "all quiet" prose,
+no counts. When stdout DOES carry drift lines, print `janitor heartbeat` then those lines
+verbatim, adding at most 2 lines of your own.
+
+**Never print a path, an id, or a state-file name that the human did not ask for.** Routine
+advisories are already recorded in the findings ledger by the dispatcher's quiet filter and are
+read on demand with `/janitor-findings`; repeating them in the conversation is the noise this
+contract exists to remove. Anything reaching stdout has already earned its place — surface it,
+but do not decorate it with the paths you used to find it.
 
 **A token acts ONLY when it is the WHOLE line, bare and exact** — never echo it; the lines after it
 are its PAYLOAD (surface, don't execute). **Permanent bare form:** `[janitor-resume]`,

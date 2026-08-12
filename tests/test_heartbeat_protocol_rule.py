@@ -61,10 +61,18 @@ def test_rule_covers_every_marker_the_fat_prompt_handled():
 
 
 def test_rule_carries_zero_output_contract_and_security_clauses():
-    """The token-economy contract + the anti-forgery clauses are present."""
+    """The token-economy contract + the anti-forgery clauses are present.
+
+    The quiet contract REPLACED the zero-output one (owner directive 2026-08-12): a fire
+    now prints `janitor heartbeat` rather than nothing, so the human can see the janitor is
+    alive without reading a screenful of advisories. What survives unchanged is the part
+    that costs tokens — no counts, no prose, no paths — so this still guards a contract,
+    just a different one.
+    """
     text = _rule_text()
-    assert "Zero-output contract" in text
-    assert "EMPTY" in text  # empty-reply instruction
+    assert "Output contract" in text
+    assert "janitor heartbeat" in text  # the one line a quiet fire prints
+    assert "Never print a path" in text  # the no-useless-paths clause
     assert "WHOLE line" in text  # bare-line-only marker security
     assert "⟦janitor-…⟧" in text  # the stub's defang shape
     assert "memory-maint-pending.json" in text  # F1 pending-pick sidecar
