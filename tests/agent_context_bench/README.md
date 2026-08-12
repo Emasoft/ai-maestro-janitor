@@ -32,6 +32,31 @@ hash of its own content. **Tune patterns against `--split dev`; quote the number
 recall from a measure of generalisation into a measure of fit — the same error this benchmark
 exists to prevent, committed one step later.
 
+### ⚠ THE SPLIT IS NOT YET BIG ENOUGH TO TUNE AGAINST (measured 2026-08-12)
+
+At the current corpus size the two halves disagree badly, so a holdout number quoted today
+would be noise wearing a decimal point:
+
+| | dev | holdout |
+|---|---|---|
+| recall (any rule) | 33% | 18% |
+| benign samples | 10 | **6** |
+| false positives | 20% | 17% |
+
+Two consequences, both of which would produce a confident wrong answer:
+
+- **A 15-point recall gap between halves** means neither number describes the rule set; it
+  describes which samples landed where. Per-class `n` is only 7–9, so a 50/50 hash split leaves
+  3–5 samples per class per half.
+- **The holdout FP rate rests on SIX samples — one sample is 17 percentage points.** Anyone
+  fixing janitor#254 could drive holdout FP from 17% to 0% by satisfying a single file and
+  declare the class solved.
+
+So: grow the corpus (especially the benign half) before using the split to accept or reject a
+pattern change. Until then, tune on `dev` if you like, but report the WHOLE-corpus number and
+say the holdout is too small to confirm it. A benchmark that reports a number it cannot support
+is worse than one that reports none, because the number gets quoted.
+
 ## Why the corpus is JSONL, not files on disk
 
 The samples are realistic poisoned `CLAUDE.md` / skill / manifest bodies. As loose files they
