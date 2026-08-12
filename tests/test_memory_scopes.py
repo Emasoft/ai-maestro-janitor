@@ -494,3 +494,43 @@ def test_this_repos_slug_stays_clear_of_the_truncation_regime() -> None:
         "real dir name. Implement resolve-don't-rederive (TRDD-DFKEXO79 component 2) "
         "BEFORE trusting any derived-slug consumer here."
     )
+
+
+# --- janitor#249: symlinks that escape their scope root --------------------------
+
+
+def test_a_symlink_escaping_the_scope_root_is_not_a_candidate(tmp_path):
+    """The measured state: USER-scope pages symlinked into another repo's PROJECT memory.
+    `memory_txn`'s M-10 guard refuses to WRITE them (rightly), but the path-only
+    `is_note_file` still counted them as candidates — so the scheduler dispatched an agent
+    every cadence for a page that could never be written from there."""
+    root = tmp_path / "user-memory"
+    root.mkdir()
+    outside = tmp_path / "other-repo" / "memory"
+    outside.mkdir(parents=True)
+    (outside / "shared.md").write_text("---\nname: shared\n---\n\nfact\n", encoding="utf-8")
+    (root / "shared.md").symlink_to(outside / "shared.md")
+    (root / "own.md").write_text("---\nname: own\n---\n\nfact\n", encoding="utf-8")
+
+    names = [p.name for p in msc.iter_note_files(root)]
+    assert names == ["own.md"], f"escaping symlink must not be a candidate, got {names}"
+
+
+def test_an_in_scope_symlink_is_still_a_candidate(tmp_path):
+    """The exclusion is about ESCAPING, not about symlinks. One that stays inside the root
+    is writable by the scope's own transaction, so refusing it would lose a real page."""
+    root = tmp_path / "mem"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "real.md").write_text("---\nname: real\n---\n\nfact\n", encoding="utf-8")
+    (root / "alias.md").symlink_to(root / "sub" / "real.md")
+    names = sorted(p.name for p in msc.iter_note_files(root))
+    assert names == ["alias.md", "real.md"]
+
+
+def test_an_unresolvable_path_counts_as_escaping(tmp_path):
+    """A broken symlink cannot be pinned to a scope, so it must not be handed to a chore —
+    fail toward excluding, never toward writing somewhere unknown."""
+    root = tmp_path / "mem"
+    root.mkdir()
+    (root / "dangling.md").symlink_to(tmp_path / "gone" / "nowhere.md")
+    assert msc.iter_note_files(root) == []

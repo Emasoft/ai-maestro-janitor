@@ -178,10 +178,36 @@ def iter_note_files(memdir: str | os.PathLike[str]) -> list[Path]:
         return []
     try:
         return sorted(
-            p for p in root.rglob("*.md") if p.is_file() and is_note_file(p)
+            p for p in root.rglob("*.md")
+            if p.is_file() and is_note_file(p) and not escapes_root(p, root)
         )
     except OSError:
         return []
+
+
+def escapes_root(path: Path, root: Path) -> bool:
+    """True iff ``path`` resolves OUTSIDE ``root`` — i.e. it is a symlink into another scope.
+
+    janitor#249: four USER-scope pages on one host are symlinks into a different repo's
+    git-tracked PROJECT memory. `memory_txn`'s M-10 guard refuses them at commit time, and
+    correctly so — a scope's transaction must not write outside its own root. But
+    `is_note_file` is deliberately path-only ("no I/O"), so they still counted as CANDIDATES:
+    the scheduler saw work, dispatched an agent, and the agent hit the guard. Every cadence,
+    forever, for pages that can never be written from here.
+
+    Excluding them at the lister makes the two layers agree. It is not a loss of knowledge and
+    NOTHING is deleted: the target file is a real page in its own scope, where its own chores
+    maintain it and where recall still finds it — reading a symlink works fine; only WRITING
+    across the boundary is refused. A page is maintained in exactly one scope, which is the
+    same "one element = one page" rule the wiki already runs on.
+
+    Deliberately not the caller's job to remember: the escape is a property of the path, so a
+    future lister that forgets this check is the bug, not the symlink.
+    """
+    try:
+        return not path.resolve().is_relative_to(root.resolve())
+    except (OSError, ValueError):
+        return True  # unresolvable ⇒ treat as escaping; never hand a chore a path we can't pin
 
 
 def project_slug(project_dir: str) -> str:
