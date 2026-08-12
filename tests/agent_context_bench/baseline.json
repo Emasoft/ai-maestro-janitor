@@ -1,11 +1,11 @@
 {
   "totals": {
-    "samples": 87,
-    "benign": 0,
+    "samples": 103,
+    "benign": 16,
     "attack_claimed": 87,
     "recall_intended": 0.2299,
     "recall_any": 0.2759,
-    "false_positive_rate": null
+    "false_positive_rate": 0.1875
   },
   "per_class": {
     "authority-override": {
@@ -152,7 +152,29 @@
       ]
     }
   },
-  "false_positives": [],
+  "false_positives": [
+    {
+      "id": "benign-01",
+      "fired": [
+        "prompt-injection-multilingual"
+      ],
+      "note": "security policy doc describing prompt-injection to prohibit it"
+    },
+    {
+      "id": "benign-03",
+      "fired": [
+        "sensitive-secret-ref"
+      ],
+      "note": "incident post-mortem narrating a past attack"
+    },
+    {
+      "id": "benign-06",
+      "fired": [
+        "prompt-injection-multilingual"
+      ],
+      "note": "test fixture file with attack-shaped strings, clearly labelled"
+    }
+  ],
   "unclaimed_rules": [
     "chat-template-delimiters",
     "crypto-clipper-triad",
