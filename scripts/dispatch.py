@@ -1194,6 +1194,15 @@ def _phase_clear_resume() -> bool:
             p.unlink()
         except FileNotFoundError:
             pass
+    # janitor#224 defect 2. Evidence that SURVIVES the clear. The verify harness used to
+    # infer "the flag was consumed" by diffing a before-snapshot against an after-snapshot,
+    # but on the common CLEAR_CHAIN_SPAWNED path the flag is written by a detached child
+    # immediately before the /clear keystroke — reliably AFTER the before-snapshot (measured:
+    # snapshot 23:29:10, flag 23:29:12). So the check was structurally unreachable, and its
+    # SKIP text asserted as fact that no flag had been set, on a run where one had been set
+    # AND consumed. A verdict that cannot observe its subject must not narrate it; this stamp
+    # is the observation, written by the only code that knows the consumption happened.
+    state.atomic_write(sd / "resume-consumed.ts", str(now))
     # Same reason as in _phase_rate_limit_recovery: this fire returns early, so the
     # cadence phase can only learn about the resume from this stamp. TRDD-0QQX9H0G.
     _stamp_resume(sd, now)

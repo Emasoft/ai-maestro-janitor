@@ -66,6 +66,11 @@ _HANDOFF_FILENAME = "agent-handoff.md"
 _CRON_ID_FILENAME = "heartbeat-cron-id.txt"
 _ARMED_AT_FILENAME = "heartbeat-armed-at.ts"
 _RESUME_FLAG_FILENAME = "resume-after-clear.flag"
+_RESUME_CONSUMED_FILENAME = "resume-consumed.ts"
+# How far above the install's measured base a fresh session may sit and still count as
+# "collapsed". A clear cannot land BELOW the floor — the base reloads by definition — and the
+# first turn adds a little on top of it, so an exact-equality test would fail every real run.
+_FLOOR_MARGIN = 0.10
 _TOKEN_METER_FILENAME = "token-meter.jsonl"
 
 # A wikilink target: the text inside [[ ]], up to a `|` alias or `#` anchor. Kept
@@ -142,8 +147,34 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     # 2. context collapsed to base-size.
     b_ctx = before.get("context_tokens")
     a_ctx = after.get("context_tokens")
+    # janitor#224 defect 3: a fixed ratio of `before` is the wrong yardstick, and it FAILs
+    # hardest on the sessions that clear soonest. A fresh session reloads the install's base
+    # — system prompt, auto-loaded rules, the skills/agents listing — measured at ~166k on the
+    # reporter's host. A session only ~11k above that floor cannot reach 0.5× no matter how
+    # perfectly /clear works, so the verdict was reporting a property of the INSTALL as a
+    # failure of the CLEAR. dispatch.py already models this correctly for compaction: the
+    # floor is "a property of the install, not a number we get to choose".
+    _raw_floor = after.get("context_floor")
+    floor = _raw_floor if isinstance(_raw_floor, int) and _raw_floor > 0 else 0
+    has_floor = floor > 0
     if not isinstance(b_ctx, int) or not isinstance(a_ctx, int) or b_ctx <= 0:
         v["context_collapsed"] = _verdict("SKIP", f"context size unknown (before={b_ctx}, after={a_ctx})")
+    elif has_floor and a_ctx <= floor * (1.0 + _FLOOR_MARGIN):
+        v["context_collapsed"] = _verdict(
+            "PASS", f"context {b_ctx} → {a_ctx} tokens (at the install's ~{floor} floor)"
+        )
+    elif has_floor:
+        # With a floor known, the ratio is not consulted at all — the floor ANSWERS the
+        # question the ratio was approximating, so consulting both would only let the looser
+        # one win. (A first draft kept a third branch for "before was too close to the floor
+        # for the ratio to be reachable"; the floor test above already passes every case that
+        # branch existed for, so it was unreachable — the same dead-code shape being hunted
+        # elsewhere in this issue. Deleted rather than left as decoration.)
+        v["context_collapsed"] = _verdict(
+            "FAIL",
+            f"context {b_ctx} → {a_ctx} tokens — still {a_ctx - floor} above the install's "
+            f"~{floor} floor, so the context did not collapse",
+        )
     elif a_ctx <= b_ctx * collapse_ratio:
         v["context_collapsed"] = _verdict("PASS", f"context {b_ctx} → {a_ctx} tokens (collapsed)")
     else:
@@ -176,8 +207,27 @@ def compute_verdicts(before: dict, after: dict, *, collapse_ratio: float = 0.5) 
     # 4. the resume-after-clear flag was consumed by _phase_clear_resume.
     b_flag = bool(before.get("resume_flag_present"))
     a_flag = bool(after.get("resume_flag_present"))
-    if not b_flag:
-        v["resume_flag_consumed"] = _verdict("SKIP", "no resume-after-clear flag was set before /clear")
+    # janitor#224 defect 2: the before/after diff cannot see the common path at all. On
+    # CLEAR_CHAIN_SPAWNED the flag is written by a detached child immediately before the
+    # /clear keystroke — after this snapshot — so `b_flag` is False on exactly the runs that
+    # worked, and the old SKIP then stated as FACT that no flag had been set. The consumption
+    # stamp is written by `_phase_post_clear_resume` at unlink time and survives the clear, so
+    # it is checked FIRST: direct evidence beats an inference that structurally cannot hold.
+    consumed_at = after.get("resume_consumed_at")
+    b_ts = before.get("ts")
+    if isinstance(consumed_at, int) and consumed_at > 0 and (
+        not isinstance(b_ts, int) or consumed_at >= b_ts
+    ):
+        v["resume_flag_consumed"] = _verdict(
+            "PASS", f"resume cue emitted and flag consumed at {consumed_at} (post-clear stamp)"
+        )
+    elif not b_flag:
+        v["resume_flag_consumed"] = _verdict(
+            "SKIP",
+            "could not observe a resume-after-clear flag before /clear (on the spawned-chain "
+            "path it is written by the detached child after this snapshot) and no consumption "
+            "stamp was found afterwards",
+        )
     elif a_flag:
         v["resume_flag_consumed"] = _verdict("FAIL", "resume-after-clear flag still present (not consumed)")
     else:
@@ -410,10 +460,33 @@ def gather_after(before: dict, now: int) -> dict:
         "context_tokens": ctx,
         "context_source": ctx_src,
         "resume_flag_present": (sd / _RESUME_FLAG_FILENAME).is_file(),
+        # Direct evidence the resume fired, written at unlink time by the phase that did it
+        # (janitor#224 defect 2) — the before/after diff cannot see the common path.
+        "resume_consumed_at": _read_int(sd / _RESUME_CONSUMED_FILENAME),
+        # The install's own base size, so `context_collapsed` judges against the floor a
+        # fresh session actually reloads rather than a ratio of `before` (defect 3).
+        "context_floor": _context_floor(),
         "armed_at_ts": _read_int(sd / _ARMED_AT_FILENAME),
         "memgrep": bool(memgrep),
         "links_resolved": links_resolved,
     }
+
+
+def _context_floor() -> int:
+    """The context size a FRESH session reloads on this install, or 0 when unmeasured.
+
+    Reuses `cold_cache_compact`'s learned floor rather than measuring a second one: that
+    module already records the size observed right after a compaction, which is the same
+    quantity (base install + auto-loaded rules + the skills/agents listing). A private copy
+    here would drift from it, and the two would disagree about the same install.
+    """
+    try:
+        import cold_cache_compact  # noqa: PLC0415 - local sibling lib
+
+        floor, _measured_at = cold_cache_compact.read_floor(_state_dir())
+        return int(floor) if isinstance(floor, int) and floor > 0 else 0
+    except Exception:  # noqa: BLE001 - best-effort; an unknown floor degrades to the ratio
+        return 0
 
 
 def _verify_path() -> Path:

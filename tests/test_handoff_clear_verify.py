@@ -226,3 +226,80 @@ def test_phase_after_proves_cron_recreated_and_writes_report(tmp_path: Path) -> 
     # The JSON now carries the verdicts too.
     saved = json.loads((sd / "handoff-clear-verify.json").read_text(encoding="utf-8"))
     assert saved["verdicts"]["cron_recreated"]["status"] == "PASS"
+
+
+# --- janitor#224: two verdicts that misreported a healthy clear -------------------
+
+
+def _snap(**over):
+    base = {"ts": 1000, "cron_id": "a", "context_tokens": 177_499,
+            "resume_flag_present": False, "handoff_links": []}
+    return {**base, **over}
+
+
+def test_consumption_stamp_proves_the_resume_even_when_before_never_saw_the_flag():
+    """Defect 2: on the spawned-chain path the flag is written by a detached child AFTER
+    the before-snapshot (measured 23:29:10 vs 23:29:12), so `b_flag` is False on exactly
+    the runs that worked. The stamp is direct evidence and outranks that inference."""
+    v = _import().compute_verdicts(
+        _snap(resume_flag_present=False),
+        _snap(ts=2000, resume_consumed_at=1500, resume_flag_present=False),
+    )
+    assert v["resume_flag_consumed"]["status"] == "PASS"
+
+
+def test_without_a_stamp_the_skip_no_longer_asserts_a_falsehood():
+    """The old text said 'no resume-after-clear flag was set before /clear' — stated as
+    fact, on runs where one had been set AND consumed. A verdict that cannot observe its
+    subject must not narrate it."""
+    v = _import().compute_verdicts(_snap(), _snap(ts=2000))
+    d = v["resume_flag_consumed"]
+    assert d["status"] == "SKIP"
+    assert "could not observe" in d["detail"]
+    assert "no resume-after-clear flag was set" not in d["detail"]
+
+
+def test_a_stale_stamp_from_a_previous_clear_does_not_count():
+    """A stamp older than the before-snapshot belongs to an earlier event; crediting it
+    would let one real resume vouch for every later one."""
+    v = _import().compute_verdicts(_snap(ts=5000), _snap(ts=6000, resume_consumed_at=100))
+    assert v["resume_flag_consumed"]["status"] == "SKIP"
+
+
+def test_context_at_the_install_floor_is_a_PASS_not_a_FAIL():
+    """Defect 3, the reported numbers: 177499 → 166167 against a ~166k floor. The clear was
+    perfect; the ratio was measuring the install."""
+    v = _import().compute_verdicts(
+        _snap(context_tokens=177_499),
+        _snap(ts=2000, context_tokens=166_167, context_floor=166_000),
+    )
+    assert v["context_collapsed"]["status"] == "PASS", v["context_collapsed"]["detail"]
+
+
+def test_a_before_too_close_to_the_floor_still_PASSes():
+    """180k -> 175k against a 166k floor cannot satisfy a 0.5x ratio — but the session DID
+    land at its floor, which is the only thing a clear can achieve. Judged by the ratio this
+    was the reported FAIL; judged by the floor it is what success looks like."""
+    v = _import().compute_verdicts(
+        _snap(context_tokens=180_000),
+        _snap(ts=2000, context_tokens=175_000, context_floor=166_000),
+    )
+    assert v["context_collapsed"]["status"] == "PASS"
+
+
+def test_a_genuinely_uncollapsed_context_still_FAILs():
+    """The floor must not become a blanket excuse: far above it and barely moved is a real
+    failure, and this is what stops defect 3's fix from disabling the check."""
+    v = _import().compute_verdicts(
+        _snap(context_tokens=800_000),
+        _snap(ts=2000, context_tokens=790_000, context_floor=166_000),
+    )
+    assert v["context_collapsed"]["status"] == "FAIL"
+
+
+def test_an_unknown_floor_falls_back_to_the_ratio():
+    """Fail-open: an unmeasured floor degrades to the old behaviour, never to a crash."""
+    v = _import().compute_verdicts(
+        _snap(context_tokens=400_000), _snap(ts=2000, context_tokens=100_000),
+    )
+    assert v["context_collapsed"]["status"] == "PASS"
