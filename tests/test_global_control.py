@@ -18,6 +18,7 @@ dispatch-no-op WIRING is covered by test_daemon.py / the dispatch tests.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -257,3 +258,23 @@ def test_arm_sweeps_the_retired_flags_but_not_a_real_stop(tmp_path, monkeypatch,
     for name in ("maintenance-mode.flag", "global-pause.flag"):
         assert not (tmp_path / name).exists(), f"arm must sweep the retired {name}"
     assert gs.kill_switch_present() is False
+
+
+def test_global_arm_skill_doc_is_explicit_it_is_flag_only(tmp_path, monkeypatch, capsys) -> None:
+    """janitor#77: the CLI's own printed output already says this arms no per-project cron —
+    the skill doc that surfaces to a reader/agent BEFORE the CLI ever runs must say the same
+    thing, prominently, not just in a buried Scope section. Also: the doc must not still
+    instruct a reader to run the RETIRED global-pause/unpause verbs as if they still work
+    (drift from the 2026-07-31 removal) — every mention of `/janitor-global-unpause` must sit
+    in a sentence that says it no longer exists."""
+    skill = (_PROJECT_ROOT / "skills" / "janitor-global-arm" / "SKILL.md").read_text(encoding="utf-8")
+    lowered = skill.lower()
+    assert "flag-only" in lowered, "the doc must say plainly this is a FLAG-only revive"
+    assert "arms nothing" in lowered, "the strongest, least-misreadable phrasing must be present"
+    assert "does not fan out" in lowered or "does not arm any per-project" in lowered, (
+        "the doc must state, unambiguously, that it does not touch per-project crons"
+    )
+    for m in re.finditer(r".{0,80}/janitor-global-unpause.{0,120}", skill, flags=re.DOTALL):
+        assert "no longer exist" in m.group(0), (
+            f"every mention of the retired unpause verb must say it no longer exists: {m.group(0)!r}"
+        )
