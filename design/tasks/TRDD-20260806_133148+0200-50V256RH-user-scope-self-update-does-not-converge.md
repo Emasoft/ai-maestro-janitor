@@ -1,9 +1,9 @@
 ---
 trdd-id: 50V256RH
 title: The janitor does not converge itself to the latest version at user scope — sessions run stale code for a day while the fix sits cached
-column: dev
+column: backburner
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-06T19:20:00+0200
+updated: 2026-08-12T09:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -14,11 +14,50 @@ implementation-commits: []
 
 # User-scope self-update does not converge (owner failure report 2026-08-06, item 5)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
-**Root cause ESTABLISHED on the second attempt, from load markers.** `/reload-plugins` does not
-re-point already-loaded SKILLS; only a NEW session does. My FIRST answer was wrong and is kept
-below as a withdrawal — read it before trusting any claim-state API in this area.
+### ✔ CORRECTION 2026-08-12 — the root cause below is FALSE on the current Claude Code build
+
+**`/reload-plugins --force` DOES re-point already-loaded skills. Only a new session was needed
+on the Aug-6 build; it is not needed now.** Measured in ONE session (`35e1e917`) by the same
+load-marker method the Aug-6 finding used, which is why it is comparable evidence and not a
+contradicting opinion:
+
+| skill | position in the session | resolved to |
+|---|---|---|
+| `janitor-arm` | pre-compaction | 2.7.0 |
+| `janitor-reload-plugins` | **post-compaction, pre-reload** | **3.0.0** (cache already had 3.1.3) |
+| `janitor-findings` (first load) | post-reload | **3.1.3** |
+| `janitor-resume` (**re**-invocation; loaded at 2.4.1 earlier in this same session) | post-reload | **3.1.3** |
+
+The last row is the one that falsifies the claim: the harness itself printed
+*"(Re-invocation … the skill instructions were previously loaded)"* and STILL served the
+**3.1.3** base directory. Same session id, same conversation, no `/clear`.
+
+The third-vs-second row separates the two candidate levers: a skill loaded AFTER the compaction
+but BEFORE the reload still resolved **3.0.0**, so **compaction did not re-point and the reload
+did**. Without that row the result would only have shown "something in the compaction+reload
+composite worked".
+
+**DOWNSTREAM — this reverses a judgement this card asked others to inherit.** The Aug-6 STATE
+told readers of **TRDD-PXP08ZQC** and **TRDD-5C42VCUX** to treat them as *"the only reliable
+version-convergence mechanism the janitor has"* and to weigh their gating decisions on that.
+That elevation is now **withdrawn**: with `--force` re-pointing live skills, both revert to what
+they were designed as — **cost** optimisations. Do not gate either one on a convergence argument.
+
+**Not yet determined (do not over-claim from the above):** whether this changed because of a
+Claude Code release or because Aug-6's reloads ran `/reload-plugins` WITHOUT `--force` from a
+2.3.0-era skill copy. Either way the operational answer is the same and is what the janitor
+already does — `[janitor-reload]` → `/reload-plugins --force`. Both remaining open questions
+below are unaffected.
+
+---
+
+**Root cause AS ESTABLISHED 2026-08-06 (superseded by the correction above — kept, not deleted,
+because its method is sound and its withdrawal record is the more useful lesson):**
+`/reload-plugins` does not re-point already-loaded SKILLS; only a NEW session does. My FIRST
+answer was wrong and is kept below as a withdrawal — read it before trusting any claim-state API
+in this area.
 
 ### The body's hypothesis is DISPROVED
 
