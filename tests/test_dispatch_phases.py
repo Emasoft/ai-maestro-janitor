@@ -2523,3 +2523,26 @@ def test_idle_clear_does_not_refire_during_cooldown(env_isolation: dict, monkeyp
     assert dispatch._phase_idle_clear_nudge() is True
     assert dispatch._phase_idle_clear_nudge() is False, "fired twice inside the cooldown"
     assert len(sent) == 1
+
+
+def test_clear_resume_also_consumes_the_shared_resume_directive(env_isolation: dict) -> None:
+    """janitor#224 defect 1: the phase declared the pending post-compact resume obsolete by
+    deleting its FLAG, but left `resume-directive.txt` — the CONTENT that flag pointed at —
+    on disk. Its only consumer (`post-compact-resume.py`) then never runs for that event, so
+    the directive outlives its resume and is re-served later as "the current target": state
+    older than the handoff that was just saved."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR", age_s=10)
+    sd = state.state_dir()
+    (sd / "resume-directive.txt").write_text("stale target from before the clear\n",
+                                             encoding="utf-8")
+    (sd / "resume-after-compact.flag").write_text("x", encoding="utf-8")
+
+    _capture_stdout(dispatch._phase_clear_resume)
+
+    assert not (sd / "resume-after-compact.flag").exists(), "the flag was already swept"
+    assert not (sd / "resume-directive.txt").exists(), (
+        "deleting the pointer while keeping what it points at was never a coherent half"
+    )

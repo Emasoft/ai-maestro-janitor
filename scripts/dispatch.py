@@ -1174,6 +1174,21 @@ def _phase_clear_resume() -> bool:
         sd / "resume-after-compact.ts",
         sd / "rate-limited.flag",
         sd / "rate-limited-since.ts",
+        # janitor#224 defect 1. The list above already declares the pending post-compact
+        # resume OBSOLETE — a /clear destroyed the context it describes. But it deleted only
+        # the FLAG and left `resume-directive.txt`, the CONTENT that flag pointed at, on
+        # disk. Its single consumer is `post-compact-resume.py`, which now never runs for
+        # that event, so the directive outlived the resume it belonged to and was re-served
+        # later as "the current target" (dispatch.py:2096) — state older than the handoff
+        # that had just been saved. Deleting the pointer while keeping what it points at was
+        # never a coherent half; either both survive a /clear or neither does, and the
+        # settled answer for the flag is "neither".
+        #
+        # SUCCESS PATH ONLY, and that distinction is load-bearing. clear_trigger's failure
+        # path deliberately deletes NOTHING (a directive another flow owns, and the cleared
+        # session's only lifeline). Here the cue has already been composed and is about to be
+        # emitted, so the directive is spent — the same one-shot property the flags have.
+        sd / "resume-directive.txt",
     ):
         try:
             p.unlink()
