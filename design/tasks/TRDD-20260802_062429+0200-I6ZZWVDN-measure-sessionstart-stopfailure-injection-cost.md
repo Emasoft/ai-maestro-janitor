@@ -1,9 +1,10 @@
 ---
 trdd-id: I6ZZWVDN
 title: Measure the janitor's remaining two injected blocks — SessionStart compact and StopFailure rate_limit
-column: testing
+column: backburner
+review-after: 2026-09-11
 created: 2026-08-02T06:24:29+0200
-updated: 2026-08-02T07:12:00+0200
+updated: 2026-08-12T11:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 severity: MEDIUM
@@ -17,6 +18,30 @@ implementation-commits: []
 # Measure the janitor's remaining two injected blocks (SessionStart:compact, StopFailure:rate_limit)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+
+### 2026-08-12 — re-checked; `testing → backburner`, and the incidental is now a real card
+
+**The one open row is unchanged and STILL cannot be forced.** `StopFailure:rate_limit` has not
+fired since **2026-07-17** — re-verified today: `stop-failure.log`'s last four entries are all
+`2026-07-17T20:16–20:20` (session `c8a95d7e`), `window-exhaustion.jsonl` stops at
+`2026-07-17T20:20:25`, no `rate-limited.flag`, and **0 entries dated today**. Twenty-six days.
+
+**That is not a stalled measurement — it is the rotator working.** The hook fires on a
+rate-limit that ends a turn; the OAuth rotator exists to make that not happen, and on this host
+it has (rotation fired 2026-08-11 10:00:13 across 3 accounts). So the blocker on this card is a
+*symptom of another feature succeeding*, which is worth saying plainly: waiting is correct, and
+"still unmeasured after 26 days" is a good outcome wearing the shape of a stalled one.
+
+Moved to `backburner` with `review-after: 2026-09-11` because `testing` asserts someone is
+testing, and nobody can — there is no step to pull until a real rate limit occurs. Everything
+this card CAN answer, it answered on 2026-08-02.
+
+**The incidental finding is now carded — it had never been.** `IDLE_TTL_EXPIRY` (81
+occurrences / 2,676,704 tokens / $15.39, 47% of that session's waste) is **TRDD-B07VPT2G**.
+Note what it took: this card correctly wrote that *"an NPT written as a bullet is a task nobody
+can see on the board"* — and then recorded the extraction as an inline SECTION of itself, where
+it sat for ten days. **A routing decision is not a routing action.** The section below is kept
+as-is for its analysis; B07VPT2G now owns the work.
 
 ### 2026-08-02 — MEASURED. One row answered, one row NOT measurable yet (`todo → testing`)
 
