@@ -383,6 +383,13 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # Daily cadence — .gitignore changes rarely and the probe is one cheap
     # `git check-ignore`, so unchanged fires are near-free.
     ("project-memory-tracked", 86400, "CLAUDE_PLUGIN_OPTION_PROJECT_MEMORY_TRACKED_INTERVAL"),
+    # reports-gitignore is project-memory-tracked's exact mirror image: that one keeps a
+    # directory IN git, this one keeps two OUT. Same daily cadence, same fix-don't-nag posture,
+    # and the same reason for a long interval — the answer only changes when someone edits
+    # `.gitignore`, which is rare, and the cost of noticing an hour later is nil. Not on the
+    # advisory list: when it speaks, it is either reporting that it edited a tracked file or
+    # naming a leak that is already in git, and neither is something to read tomorrow.
+    ("reports-gitignore", 86400, "CLAUDE_PLUGIN_OPTION_REPORTS_GITIGNORE_INTERVAL"),
     # memorize-nudge keeps the wiki POPULATED (TRDD-87935f21, priority #6): when
     # substantive (non-bookkeeping) commits have landed since the last memory note,
     # it reminds the agent to /janitor-memory-write what changed + WHY. Reads git +
