@@ -815,7 +815,13 @@ def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
     # whose absence made this bug invisible for so long.
     old = (before or {}).get("email")
     new = (after or {}).get("email")
-    if after is not None and old != new:
+    # BOTH sides must be KNOWN before an inequality means anything. `old` is None when the
+    # beacon has never been written AND when it aged past the 24h freshness window, so a bare
+    # `old != new` reads "the account changed" out of the very first stamp and out of every
+    # first stamp after an idle day; `new` is None when the email ladder ends at an unreachable
+    # /roles, which is a degraded READ, not a rotation. Either way the consumer TYPES into the
+    # user's pane, so an unknown must never count as a change (TRDD-UA4FAX67).
+    if after is not None and old and new and old != new:
         _decide(
             "beacon: live account changed %s -> %s — re-stamped the session identity beacon "
             "so rotation evaluates the REAL live account (TRDD-6AABK2BG)"

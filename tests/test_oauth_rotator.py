@@ -2213,6 +2213,67 @@ def test_a_mere_RESTAMP_is_not_a_rotation(
         "a re-stamp with the SAME live account must never look like a rotation"
 
 
+def test_the_FIRST_beacon_is_not_a_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No PRIOR observation means no observed CHANGE — so it must not wake anyone.
+
+    `read_live_identity_beacon` returns None both when the beacon has never been written and
+    when it is older than the 24h freshness window. Either way `old` is None, and `None != "a@x"`
+    is true — so a plain inequality test reads "the account changed" out of the very first
+    stamp, and out of every first stamp after an idle day. The consumer of this stamp TYPES
+    into the user's pane, which is why the gate has to mean what it claims.
+    """
+    gs_dir = tmp_path / "gs"
+    monkeypatch.setattr(rotator.gs, "global_state_dir", lambda: gs_dir)
+    monkeypatch.setattr(rotator.gs, "init_global_state", lambda: gs_dir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a = _blob("LIVE-A")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 1000.0)
+
+    # No beacon exists yet — this is the first stamp this machine has ever taken.
+    assert rotator.refresh_beacon_if_stale(now=1001.0) is True, "a first stamp did happen"
+
+    assert rotator.gs.rotation_succeeded_within(600, now=1001) is False, \
+        "a first-ever (or post-staleness) beacon is not evidence that an account rotated"
+
+
+def test_an_UNRESOLVABLE_new_email_is_not_a_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A degraded READ must not read as a rotation.
+
+    The email ladder ends at a network call (/roles), so `new` can be None simply because the
+    network was down. `"a@x" != None` is true, so an inequality test turns an unresolvable
+    identity into a phantom rotation. Missing a REAL rotation here costs one delayed wake, which
+    the code already accepts; inventing one costs keystrokes in a pane the user is using.
+    """
+    gs_dir = tmp_path / "gs"
+    monkeypatch.setattr(rotator.gs, "global_state_dir", lambda: gs_dir)
+    monkeypatch.setattr(rotator.gs, "init_global_state", lambda: gs_dir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a = _blob("LIVE-A")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 1000.0)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+
+    # The SAME credential is still live, but its email no longer resolves (slot lookup misses,
+    # /roles unavailable) — so the new beacon carries an fp and no email.
+    monkeypatch.setattr(rotator, "read_slot", lambda _e: None)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 2000.0)
+    assert rotator.refresh_beacon_if_stale(now=2001.0) is True
+
+    assert rotator.gs.rotation_succeeded_within(600, now=2001) is False, \
+        "an identity that merely became unreadable is not an identity that changed"
+
+
 def test_a_successful_switch_records_the_rotation_for_the_fleet(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """TRDD-UA4FAX67 wiring: _switch_blob must leave the machine-wide breadcrumb the daemon's
