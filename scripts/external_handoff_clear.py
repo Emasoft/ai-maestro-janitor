@@ -184,21 +184,40 @@ def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVer
     # the summary branch would have degraded to template-only on every run — shipping the
     # feature dark in the same commit that exists to un-dark it (TRDD-1QJIZFFW).
     newest = cold_cache_compact.newest_transcript(root)
-    facts = {
+    user_present = user_intent.user_is_present(now=now)
+    active_waiting = dispatch._cadence_active_waiting(sd, now)
+    in_cooldown = cold_cache_compact.clear_in_cooldown(sd, now=now)
+    # The ONE subprocess on this path, so it is skipped whenever a local fact already refuses.
+    # Those three vetoes hold regardless of what the probe would say, and they are true most of
+    # the time (somebody is usually working), so probing first would spend a bounded-but-real
+    # 5 s per fire to compute an input the gate is about to ignore.
+    cache_expired = (
+        None
+        if (user_present or active_waiting or in_cooldown)
+        else ec.cache_certainly_expired(root)
+    )
+    # SPLIT DELIBERATELY: `gate` is exactly the pure decision's parameters, `facts` is the log
+    # record that also carries composer-only fields. They were one dict until `transcript` was
+    # added to it, which made every run raise `unexpected keyword argument 'transcript'` — the
+    # whole watcher was dead on arrival and the `# type: ignore[arg-type]` that used to sit on
+    # the call is what hid it from mypy. Keep them separate: a composer field can never again
+    # reach the gate by being added to the wrong dict.
+    gate = {
         "idle_seconds": idle_s,
         "last_turn_age_s": _last_turn_age(root, now),
         "ttl_minutes": ec.read_ttl_minutes(sd),
         "seconds_to_next_fire": ec.seconds_until_next_fire(cron, now),
-        "transcript": str(newest) if newest else "",
         "context_tokens": cold_cache_compact.context_tokens_for(newest),
         "min_context": ec.min_context_tokens(),
         "min_idle_s": cold_cache_compact.clear_min_idle_seconds(),
         "headroom_s": ec.headroom_seconds(),
-        "user_present": user_intent.user_is_present(now=now),
-        "active_waiting": dispatch._cadence_active_waiting(sd, now),
-        "in_cooldown": cold_cache_compact.clear_in_cooldown(sd, now=now),
+        "user_present": user_present,
+        "active_waiting": active_waiting,
+        "in_cooldown": in_cooldown,
+        "cache_expired": cache_expired,
     }
-    verdict = ec.should_clear_externally(**facts)  # type: ignore[arg-type]
+    facts = {**gate, "transcript": str(newest) if newest else ""}
+    verdict = ec.should_clear_externally(**gate)
     if force and not verdict.fire and verdict.why.startswith(("idle ", "no-headroom")):
         # --force overrides the two TRIGGER terms ONLY (is it idle enough / would the next fire
         # miss). Every SAFETY veto — cooldown, user present, active waiting, unknown idle, tiny

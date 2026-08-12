@@ -297,3 +297,100 @@ def test_template_handoff_reports_unknown_facts_as_unknown():
         _inputs(idle_seconds=None, context_tokens=None), now_iso=NOW_ISO
     )
     assert "idle unknown" in text and "context unknown" in text
+
+
+# --- the REACTIVE trigger: agentlensPro's certain-expiry read (TRDD-1QJIZFFW) ----
+
+
+def test_certain_expiry_fires_and_is_attributed_to_the_measurement():
+    """A measured expiry fires even when the prediction would not — that IS the blind spot."""
+    # Headroom OK (100s >= 60s), prediction quiet (1+100 < 5min TTL), idle short (1 < 3600):
+    # every other reason to fire is absent, so only the measurement can be what fired it.
+    v = verdict(cache_expired=True, last_turn_age_s=1, seconds_to_next_fire=100, idle_seconds=1)
+    assert v.fire and v.trigger == ec.TRIGGER_CACHE_CERTAIN_EXPIRED
+
+
+def test_unknown_expiry_leaves_the_other_triggers_exactly_as_they_were():
+    """`None` is NO SIGNAL. Reading it as False would disable the lever wherever the CLI is absent."""
+    assert verdict(cache_expired=None) == verdict()
+
+
+def test_a_fresh_cache_does_not_veto_the_other_triggers():
+    """False answers only its own question; long-idle and next-fire-miss still decide alone."""
+    v = verdict(cache_expired=False, idle_seconds=99_999, last_turn_age_s=1,
+                seconds_to_next_fire=100)
+    assert v.fire and v.trigger == ec.TRIGGER_LONG_IDLE
+
+
+def test_every_safety_veto_outranks_a_certain_expiry():
+    """`/clear` is unrecoverable; a cache miss is money. Neither buys the right to destroy work."""
+    for veto in ("user_present", "active_waiting", "in_cooldown"):
+        v = verdict(cache_expired=True, **{veto: True})
+        assert not v.fire, f"{veto} must still veto a measured expiry"
+
+
+# --- the probe's contract: the exit code is NOT the answer -----------------------
+
+
+class _P:
+    def __init__(self, rc, out=""):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+def test_probe_reads_the_WORD_not_the_exit_code():
+    """MEASURED on 12.x: the verbose form exits 0 while printing `false`. `rc == 0 ⇒ expired`
+    would report a miss on every healthy session and fire an unrecoverable clear."""
+    import agentlens_probe as alp
+
+    assert alp.probe_cache_expired("x", runner=lambda *a, **k: _P(0, "false\n")) is False
+    assert alp.probe_cache_expired("x", runner=lambda *a, **k: _P(0, "true\n")) is True
+
+
+def test_probe_returns_None_for_cannot_answer_and_for_junk():
+    """Exit 2 with EMPTY stdout is 'could not resolve' — it must never read as a fresh cache."""
+    import agentlens_probe as alp
+
+    assert alp.probe_cache_expired("x", runner=lambda *a, **k: _P(2, "")) is None
+    assert alp.probe_cache_expired("x", runner=lambda *a, **k: _P(0, "maybe")) is None
+    assert alp.probe_cache_expired("", runner=lambda *a, **k: _P(0, "true")) is None
+
+
+def test_probe_never_raises_on_a_broken_cli():
+    """A composer that raises stops the clear from happening at all."""
+    import subprocess
+
+    import agentlens_probe as alp
+
+    def _boom(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="agentlenspro", timeout=1)
+
+    assert alp.probe_cache_expired("x", runner=_boom) is None
+    assert alp.probe_cache_expired("x", runner=lambda *a, **k: (_ for _ in ()).throw(OSError())) is None
+
+
+# --- the regression that was live in HEAD ---------------------------------------
+
+
+def test_the_watchers_gate_dict_matches_the_gates_signature():
+    """`_decide` built ONE dict for both the gate and the log; adding a composer-only
+    `transcript` key to it made every run raise `unexpected keyword argument`, and the
+    `# type: ignore[arg-type]` on the call hid it. Asserting the shape is what makes the
+    split load-bearing instead of stylistic."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "scripts" / "external_handoff_clear.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    keys = {
+        k.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", "") == "gate" for t in node.targets)
+        and isinstance(node.value, ast.Dict)
+        for k in node.value.keys
+        if isinstance(k, ast.Constant)
+    }
+    assert keys, "no `gate = {...}` literal found — did the call site get renamed?"
+    params = set(inspect.signature(ec.should_clear_externally).parameters)
+    assert keys <= params, f"passed but not accepted: {sorted(keys - params)}"

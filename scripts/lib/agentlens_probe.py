@@ -48,8 +48,65 @@ from dataclasses import dataclass
 # a path, mirroring #83's `heartbeat_account_status_command`.
 DEFAULT_BURN_STATUS_COMMAND = "agentlenspro get_burn_status"
 DEFAULT_INVESTIGATE_BURN_COMMAND = "agentlenspro investigate_burn"
+DEFAULT_CACHE_EXPIRED_COMMAND = "agentlenspro cache-expired"
 
 _TIMEOUT_S = 5.0
+
+
+def probe_cache_expired(
+    command: str,
+    *,
+    project: str | None = None,
+    timeout: float = _TIMEOUT_S,
+    runner: object = None,
+) -> bool | None:
+    """TRI-STATE: has this project's conversation outlived its prompt-cache TTL?
+
+    ``True`` = certainly expired, ``False`` = certainly fresh, ``None`` = unknown (the CLI
+    is absent, the probe failed, or it explicitly could not answer). Same fail-open contract
+    as ``probe_json``; the caller must treat ``None`` as "no signal", never as ``False``.
+
+    Unlike the janitor's own ``next_fire_misses_cache``, this is a MEASUREMENT rather than a
+    prediction: agentlensPro knows the session's real last-LLM-call time and the real TTL
+    regime, where the native path infers the TTL from a probed file and defaults to the short
+    5-minute side when it cannot.
+
+    ⚠ THE EXIT CODE DOES NOT MEAN WHAT ``--help`` SAYS IT MEANS IN THIS FORM. The documented
+    "exit 0 = EXPIRED, 1 = fresh" applies to ``-q`` ONLY. Measured on 12.x, the verbose form
+    exits **0 while printing ``false``** — 0 means "I answered", and the answer is the word on
+    stdout. Coding ``rc == 0 ⇒ expired`` here would report a cache miss on every healthy
+    session, and the consumer of this signal fires an unrecoverable ``/clear``. So the ANSWER
+    is the stdout word and the exit code is only a did-it-answer gate. Cannot-answer is exit 2
+    with stdout EMPTY — the CLI never prints ``false`` for a question it could not resolve,
+    which is what makes the empty case safe to read as ``None``.
+    """
+    command = (command or "").strip()
+    if not command:
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if project:
+        argv += ["--project", project]
+    run = runner if callable(runner) else subprocess.run
+    try:
+        proc = run(  # noqa: S603 - argv from config, split with shlex, no shell
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if getattr(proc, "returncode", 1) != 0:
+        return None
+    word = (getattr(proc, "stdout", "") or "").strip().lower()
+    if word == "true":
+        return True
+    if word == "false":
+        return False
+    return None
 
 
 def probe_json(command: str, *, timeout: float = _TIMEOUT_S) -> dict | None:

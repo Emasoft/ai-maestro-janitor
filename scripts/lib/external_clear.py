@@ -48,6 +48,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import agentlens_probe as alp  # noqa: E402  -- sibling lib (the reactive expiry read)
 import state  # noqa: E402  -- sibling lib
 
 # --- config knobs (userConfig → env; read via the shared coercers) ----------
@@ -81,9 +82,15 @@ _TTL_REGIME_FILE = "ttl-regime.json"
 # attributed to the rule that caused it.
 TRIGGER_NEXT_FIRE_MISSES = "next-fire-misses"
 TRIGGER_LONG_IDLE = "long-idle"
+TRIGGER_CACHE_CERTAIN_EXPIRED = "cache-certain-expired"
+
+# The agentlensPro probe's command, overridable per the module's one integration pattern; an
+# empty value disables the reactive trigger entirely and leaves the predictive one alone.
+CACHE_EXPIRED_COMMAND_ENV = "CLAUDE_PLUGIN_OPTION_HEARTBEAT_CACHE_EXPIRED_COMMAND"
 
 __all__ = [
     "ClearVerdict",
+    "cache_certainly_expired",
     "compose_handoff",
     "compose_template_handoff",
     "enabled",
@@ -370,6 +377,25 @@ def next_fire_misses_cache(
     return (last_turn_age_s + seconds_to_next_fire) >= ttl_minutes * 60
 
 
+def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | None:
+    """The REACTIVE trigger's input: is this project's prompt cache ALREADY cold?
+
+    Tri-state, straight through from `agentlens_probe.probe_cache_expired` — `None` means
+    "no signal" (agentlensPro absent, disabled, or unable to answer) and MUST NOT be read as
+    `False`. Impure and injectable-free by design: the decision itself stays pure, and this is
+    the one I/O call feeding it.
+
+    Why this exists next to `next_fire_misses_cache` rather than instead of it: the predictive
+    path can only see expiries the SCHEDULE implies. The card names the ones it cannot — an API
+    error that ended a turn, an AskUser prompt nobody answered, a network gap — where no fire
+    happened at all and the cache died unobserved. Conversely this one cannot pre-empt the
+    restart case, because by the time it says "expired" the miss is already unavoidable on the
+    next turn. Each covers the other's blind spot; either alone is a partial feature.
+    """
+    command = os.environ.get(CACHE_EXPIRED_COMMAND_ENV, alp.DEFAULT_CACHE_EXPIRED_COMMAND)
+    return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
+
+
 @dataclass(frozen=True)
 class ClearVerdict:
     """Whether to clear, which rule decided it, and a human-readable why.
@@ -396,6 +422,7 @@ def should_clear_externally(
     user_present: bool,
     active_waiting: bool,
     in_cooldown: bool,
+    cache_expired: bool | None = None,
 ) -> ClearVerdict:
     """PURE. The whole external-clear decision, with the deciding rule named.
 
@@ -413,7 +440,11 @@ def should_clear_externally(
         headroom (a cron shape we cannot read) does NOT veto — that would make an unreadable
         cron silently disable the lever.
 
-    Then the two triggers, OR'd (see the module docstring for why neither subsumes the other).
+    Then the three triggers, OR'd (see the module docstring for why none subsumes the others).
+    `cache_expired` is the agentlensPro MEASUREMENT and is checked first, ahead of the
+    prediction that models the same cost — when both agree, attributing the fire to the
+    measurement is what makes the log line worth reading. Its `None` is "no signal", never
+    `False`: an absent CLI must leave the other two triggers exactly as they were.
 
     `context_tokens is None` is NOT a veto, and that is a correction, not an oversight: the
     unknown-context veto is exactly what silently disabled `should_clear_when_long_idle` for
@@ -437,6 +468,13 @@ def should_clear_externally(
             False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
         )
 
+    if cache_expired is True:
+        return ClearVerdict(
+            True,
+            TRIGGER_CACHE_CERTAIN_EXPIRED,
+            "agentlensPro reports this session's prompt cache is ALREADY expired — the next "
+            "turn pays a full cache-creation write on the whole context",
+        )
     if next_fire_misses_cache(
         last_turn_age_s=last_turn_age_s,
         seconds_to_next_fire=seconds_to_next_fire,

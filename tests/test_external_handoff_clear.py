@@ -139,11 +139,20 @@ def test_composed_handoff_names_the_trigger_that_fired(tmp_path):
 # --- end to end (real subprocess) --------------------------------------------
 
 
+# The reactive trigger shells out to agentlensPro, an OPTIONAL third-party CLI. These tests are
+# about the watcher, not about that probe (which has its own unit tests against an injected
+# runner), and the suite's sandbox guard rightly refuses to let a unit test spawn arbitrary
+# binaries. An empty command is the probe's documented disable, so this pins the tests to the
+# no-agentlensPro configuration rather than to whatever happens to be installed on the host —
+# which is also the only configuration that is reproducible in CI.
+_NO_AGENTLENS = {ec.CACHE_EXPIRED_COMMAND_ENV: ""}
+
+
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--project-root", str(root), *args],
         capture_output=True, text=True, timeout=180,
-        env={**os.environ, ec.ENABLED_ENV: "1"},
+        env={**os.environ, **_NO_AGENTLENS, ec.ENABLED_ENV: "1"},
     )
 
 
@@ -171,7 +180,7 @@ def test_the_feature_is_off_unless_opted_in(tmp_path):
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--project-root", str(root)],
         capture_output=True, text=True, timeout=180,
-        env={k: v for k, v in os.environ.items() if k != ec.ENABLED_ENV},
+        env={**{k: v for k, v in os.environ.items() if k != ec.ENABLED_ENV}, **_NO_AGENTLENS},
     )
     assert "DISABLED" in proc.stdout
 
@@ -182,7 +191,7 @@ def test_dry_run_runs_even_while_disabled(tmp_path):
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--project-root", str(root), "--dry-run"],
         capture_output=True, text=True, timeout=180,
-        env={k: v for k, v in os.environ.items() if k != ec.ENABLED_ENV},
+        env={**{k: v for k, v in os.environ.items() if k != ec.ENABLED_ENV}, **_NO_AGENTLENS},
     )
     assert "DISABLED" not in proc.stdout
     assert "VERDICT" in proc.stdout
