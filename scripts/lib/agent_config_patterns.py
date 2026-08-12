@@ -594,8 +594,28 @@ _GIT_PROTOCOL_DEP = _re(
 # Disclosed exfil shape: encode the secret as a subdomain and resolve
 # it — the DNS query itself ships the bytes to an attacker-controlled
 # nameserver. Heuristic: > 40-char subdomain on a commodity TLD.
+#
+# Measured 0/7, because the heuristic keys on the wrong half. A 40-char label
+# is what exfiltrating a LOT of data looks like; what exfiltrating ANY data
+# looks like is a RESOLUTION of a name the attacker assembled. Every seeded
+# sample queries a short base64 label (16 chars) or interpolates a variable —
+# both invisible to a length threshold, and lowering the threshold far enough
+# to see them would flag every CDN hostname in existence.
+#
+# So the resolver call becomes the anchor: `dig`/`nslookup` whose queried
+# name's first label is an opaque blob or an interpolated variable, and an
+# encoder inside a command substitution feeding a hostname. Both describe the
+# act (the query IS the exfil) rather than its volume.
 _DNS_EXFIL_SUBDOMAIN = _re(
+    # (1) a long opaque label on a commodity TLD — the high-volume shape.
     r"\b[A-Za-z0-9_-]{40,}\.(?:com|net|io|org|co|me|dev|app|cloud)\b"
+    # (2) a DNS lookup of an assembled name.
+    r"|\b(?:dig|nslookup|drill|kdig)\b[^\n]{0,60}?"
+    r"(?:[A-Za-z0-9+/_=-]{12,}|\$\{?\w+\}?)\.[A-Za-z0-9-]{2,}\.[A-Za-z]{2,}"
+    # (3) an encoder inside a command substitution, spliced into a hostname —
+    #     `$(cat .env | base64 -w0).cdn.internal` ships the file in the query.
+    r"|\$\([^\n)]{0,80}(?:base64|xxd|hexdump|sha256sum)[^\n)]{0,20}\)\s*\."
+    r"[A-Za-z0-9-]{2,}\."
 )
 
 
