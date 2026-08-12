@@ -1,9 +1,10 @@
 ---
 trdd-id: QE390SJA
 title: A model-scoped window limit stops the session while the account has headroom — fall back to another model instead of rotating or stalling
-column: testing
+column: backburner
+review-after: 2026-08-26
 created: 2026-08-06T14:04:19+0200
-updated: 2026-08-11T20:43:35+0200
+updated: 2026-08-12T00:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -14,10 +15,49 @@ implementation-commits: [d7d8e9c9, dd72291c, 70afff57, b08c2d64, 491a2c3a, 25105
 
 # Model-scoped window ⇒ switch model, don't rotate (janitor#222; owner failure report item 8)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
-**Both halves are now CODE-COMPLETE. Exactly ONE acceptance box is open, and it needs the
-owner at the pane — nothing else on this card can progress unattended.**
+**EVERY IMPLEMENTABLE BOX IS CLOSED. The card is parked in `backburner` with
+`review-after: 2026-08-26` because the only residue is a FIELD OBSERVATION that arrives on
+its own — there is no work here to pull, and leaving it in `testing` was a column asserting
+active work nobody was doing.**
+
+**SUPERSEDED — do NOT carry forward:** the two claims below, both written when the feature
+shipped dark, are now FALSE and were self-contradictory even before that:
+  * *"it ships dark, which is why this box is still open"* — it has been DEFAULT ON since
+    2026-08-11 (`scripts/lib/model_fallback.py::enabled`). The observation box stayed open
+    because the event has not happened yet, NOT because a human must enable anything.
+  * *"exactly ONE acceptance box is open"* — FOUR were unchecked when that sentence was
+    written. Three of them were already satisfied by code and tests that existed at the time;
+    the sentence was measuring intent, not the file.
+
+**Verified first-hand 2026-08-12 (file:line, per the claim-verification rule):**
+  * **Gate truth table — CLOSED.** Eight named tests in `tests/test_window_burn_rate.py`,
+    including the load-bearing NEGATIVE one: `test_model_fallback_silent_when_the_account_is_
+    the_constraint` (account 7d=95% ⇒ verdict None, so account pressure can never trigger a
+    model switch), plus `..._requires_PROVEN_account_headroom`, `..._refuses_a_STALE_snapshot`
+    and `..._refuses_an_UNKNOWN_snapshot_age` — the fail-open discipline the design constraint
+    below demands.
+  * **Actuation on BOTH readable channels — CLOSED today.** The tmux order trace already
+    existed (`test_send_verified_escs_then_types_then_submits_in_order`); iTerm was proven
+    only at the BUILDER level, which cannot catch a channel wired up in the wrong order. Added
+    `test_send_verified_escs_types_and_submits_on_ITERM_too` — same trace through the
+    AppleScript spelling (ESC = `character id 27`, typing = `write text "…" without newline`,
+    Enter = an EMPTY `write text ""`). `build_type_only_steps` / `build_submit_steps` /
+    `build_esc_only_steps` each handle exactly `tmux` and `iterm`; every other channel is
+    REFUSED with a reason rather than silently reported sent.
+  * **Harness agents out of scope — CLOSED.** `scripts/dispatch.py:461` denies `model-fallback`
+    to harness agents, guarded by `test_detector_is_on_the_roster_and_denied_to_harness_agents`.
+  * **The detector RUNS** (the shipped-dark trap): it is on the roster at
+    `scripts/dispatch.py:431` with a 60s interval, not merely present on disk.
+
+**NEXT ACTION:** none that can be pulled. At the next real scoped-window wall the detector
+switches the model unattended and writes the decision-log line + a findings-ledger entry;
+tick the last box with that evidence. If `review-after` expires with no wall observed, decide
+then whether an unobserved-but-fully-tested feature should just be closed.
+
+**Do NOT "fix" the remaining box by forcing a synthetic wall** — the box exists to prove the
+confirming keystroke dismissed a REAL dialog, and a synthetic one proves the mock.
 
 - **The detector half** (switch model instead of stalling) landed dark: gate `d7d8e9c9` +
   freshness `b08c2d64`, injector fixes `dd72291c`/`70afff57`, 3-state confirm `491a2c3a`,
@@ -103,15 +143,22 @@ Wire the EXISTING detector to the EXISTING injector.
 
 ## Acceptance
 
-- [ ] gate fires ONLY on scoped-exhausted + account-has-headroom (unit-tested truth table)
-- [ ] ESC + `/model <fallback>` lands via inject_until_sent on iTerm and tmux
+- [x] gate fires ONLY on scoped-exhausted + account-has-headroom (unit-tested truth table)
+      — 8 tests in `tests/test_window_burn_rate.py`, incl. the negative account-pressure case
+- [x] ESC + `/model <fallback>` lands on iTerm and tmux — via `terminal_trigger.send_verified`
+      (the verified-typing entry point of the ratified chain, NOT `inject_until_sent`, which
+      this line originally named; corrected to the function the code actually calls). Order
+      traces for both channels in `tests/test_terminal_trigger_readback.py`
 - [ ] one observed unattended switch at a real scoped-window wall, with the log line
+      — the only open box; it is no longer owner-gated (default ON since 2026-08-11), it is
+      simply waiting for the event. Parked with `review-after: 2026-08-26`
 - [x] janitor's `is_safe_alternate` stops IGNORING scoped windows (our mirror gap — it
       must not rotate ONTO an account whose scoped window is spent); the over-strict
       disqualification is the SERVER's and is reported on janitor#222, not fixed here
       — DONE `674fe785`, as a DEMOTION (tier 1b) so it can never become that over-strict bug
-- [ ] harness agents explicitly out of scope (the server ships `model-opus`/`model-sonnet`
-      on its own allowlist — janitor#222)
+- [x] harness agents explicitly out of scope (the server ships `model-opus`/`model-sonnet`
+      on its own allowlist — janitor#222) — denied at `scripts/dispatch.py:461`, guarded by
+      `test_detector_is_on_the_roster_and_denied_to_harness_agents`
 
 ## Pointers
 

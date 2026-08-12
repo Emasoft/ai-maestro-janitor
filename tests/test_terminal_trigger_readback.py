@@ -840,6 +840,34 @@ def test_send_verified_without_esc_types_no_escape(monkeypatch) -> None:
     assert not any("Escape" in c for c in calls)
 
 
+def test_send_verified_escs_types_and_submits_on_ITERM_too(monkeypatch) -> None:
+    """The same contract on the OTHER readable channel (TRDD-QE390SJA acceptance).
+
+    The tmux trace above proves the ORDER; this proves the order survives the translation
+    into AppleScript, which is a different builder with a different spelling for each of the
+    three acts: ESC is `character id 27`, typing is a `write text "…" without newline`, and
+    Enter is an EMPTY `write text ""` (iTerm appends the newline unless told not to). A
+    builder-level test cannot catch a channel wired up in the wrong order, and the
+    model-fallback switch is claimed to work on iTerm and tmux — so both need the trace.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([_pane(""), _pane("/model opus")])
+    ok, why = tt.send_verified(
+        {"kind": "iterm", "session_id": "ECEF0378-8D5D-4834-A8A9-371F0FDB3720"},
+        "/model opus", esc_first=True, sleeper=lambda _s: None, giveup_s=5.0,
+        reader=lambda t: next(reads, _pane("/model opus")), is_typing=lambda _t: False,
+    )
+    assert ok is True, why
+    joined = " | ".join(calls)
+    assert "character id 27" in calls[0], f"ESC must be first: {calls!r}"
+    assert (
+        joined.index("character id 27")
+        < joined.index('write text "/model opus" without newline')
+        < joined.rindex('write text ""')
+    ), joined
+
+
 def test_a_command_WITH_ARGUMENTS_can_verify() -> None:
     """Regression (TRDD-QE390SJA): the shape guard used to be `/[^\\s/][^\\s]*`, rejecting any
     field containing a space — so a command that TAKES one (`/model opus`,
