@@ -68,6 +68,26 @@ surfaced, and it is the class currently guaranteed to be silent.
 3. **Report through the findings ledger**, not a heartbeat print — same reasoning as R16 in
    TRDD-G4BCRUP7: a finding whose only sink is one drift line dies with the turn that missed it.
 
+## Disposition of a recurring `report-to-trdd` flag (2026-08-12) — do NOT re-investigate
+
+`reports/memory-subconscious-agent/20260811_185204+0200-consolidate-manager-guide-refusal-design-review.md`
+is flagged every fire and is a FALSE POSITIVE of a class worth naming, because it will recur.
+
+The detector matches `consolidat` in the filename and exempts only no-op passes; this pass DID
+merge, so it looks like an unconverted decision. Investigated twice: the merge is complete and
+correct (survivor `manager-is-a-guide-not-a-gate` present, retired page gone, backlinks
+redirected). What was genuinely missing was the merge's RATIONALE — nothing on the survivor told
+a future reader why two pages became one, so the obvious future move is to "helpfully" re-split
+them. That is now `ATOM-VSX6-Q7OC` (a lesson on the survivor), which is a MORE durable home than
+a TRDD: corpus knowledge belongs in the corpus, where recall will surface it to whoever is about
+to re-split.
+
+So the rule's intent ("the decision must survive the report") is satisfied, and no TRDD is owed.
+The residual defect is the detector's: a memory-MERGE report whose decision was captured as a
+lesson is indistinguishable from one that was captured nowhere. If it keeps costing
+investigations, the fix is for the exemption to consider a merge whose survivor gained a lesson
+citing the retired slug — not to file a TRDD nobody will read.
+
 ## Acceptance
 
 - [ ] The four symlinks are gone and the pages are maintainable from their new scope
