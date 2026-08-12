@@ -52,12 +52,21 @@ DEFAULT_CACHE_EXPIRED_COMMAND = "agentlenspro cache-expired"
 
 _TIMEOUT_S = 5.0
 
+# DELIBERATELY NOT `_TIMEOUT_S`. Measured three consecutive `cache-expired` calls on one warm
+# host: 0.15 s, 11.5 s, 19.7 s — the latency is wildly variable and the tail is nowhere near the
+# 5 s the burn probes use. Under 5 s this probe returned None on 2 of 3 runs, which fails OPEN and
+# so looks exactly like "agentlensPro is not installed": the trigger would have shipped dead, the
+# defect class this whole card exists to remove. The asymmetry decides the number — too short
+# silently disables the feature, too long costs wall-clock in a DETACHED one-shot watcher that
+# nobody is waiting on. So: generous, and separate, so tuning the burn probes cannot re-break it.
+_CACHE_EXPIRED_TIMEOUT_S = 30.0
+
 
 def probe_cache_expired(
     command: str,
     *,
     project: str | None = None,
-    timeout: float = _TIMEOUT_S,
+    timeout: float = _CACHE_EXPIRED_TIMEOUT_S,
     runner: object = None,
 ) -> bool | None:
     """TRI-STATE: has this project's conversation outlived its prompt-cache TTL?

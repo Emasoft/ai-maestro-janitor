@@ -394,3 +394,14 @@ def test_the_watchers_gate_dict_matches_the_gates_signature():
     assert keys, "no `gate = {...}` literal found — did the call site get renamed?"
     params = set(inspect.signature(ec.should_clear_externally).parameters)
     assert keys <= params, f"passed but not accepted: {sorted(keys - params)}"
+
+
+def test_the_expiry_probe_gets_its_own_generous_timeout():
+    """MEASURED 0.15s / 11.5s / 19.7s on one warm host. At the burn probes' 5s this returned
+    None on 2 of 3 runs — and None fails open, so a too-short bound is indistinguishable from
+    'agentlensPro is not installed' and ships the trigger dead. Pinned so a later tidy-up that
+    unifies the timeouts has to argue with the measurement first."""
+    import agentlens_probe as alp
+
+    assert alp._CACHE_EXPIRED_TIMEOUT_S >= 20.0
+    assert alp._CACHE_EXPIRED_TIMEOUT_S is not alp._TIMEOUT_S
