@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] — 2026-08-12
+
+### Bug Fixes
+
+- **trdd-drift:** The two dead-symbol probes must share corpus and matching (TRDD-FDV1RQEB) (c23e9e4)
+- **skill:** Keep janitor-memory-write under the 5000-token CPV budget (1183f8b)
+
+### Documentation
+
+- **memory:** A claimed chore transfers the ACT but not the BREADCRUMB (TRDD-UA4FAX67) (14fe80c)
+- TRDD-5ZVS1DDP speculated about two other cards' states; both guesses were wrong (b1731a9)
+- TRDD-FDV1RQEB complete — check 5 shipped at 9a9bf0fa, acceptance verified (900c521)
+- Repair the FDV1RQEB approval log — my heredoc ate three backticked symbol names (5dd259a)
+- TRDD-G4BCRUP7 STATE — 2026-08-12 session outcomes, so a compaction resumes from the card not the summary (9c325a9)
+- **memory-update:** Authorship confers NO ownership — the wiki is collaborative (USER directive) (4ba8d12)
+- **memory:** The wiki is collaborative — authorship confers no ownership (USER directive) (7707a42)
+
+### Features
+
+- **trdd-reconciliation:** Check 5 — a STATE block citing a symbol the tree no longer has (9a9bf0f)
 ## [3.1.5] — 2026-08-12
 
 ### Bug Fixes
@@ -19,6 +39,10 @@ All notable changes to this project will be documented in this file.
 - Correct TRDD-B07VPT2G's own premise — EUWIHP0G did own this, and is complete (281203d)
 - TRDD-B07VPT2G title said "never had a card" while its own body refutes that (21ca705)
 - TRDD-UA4FAX67 — the post-rotation wake trigger cannot fire on a server-owned host (bdcf895)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.1.5 (d79da5e)
 ## [3.1.4] — 2026-08-12
 
 ### Bug Fixes
