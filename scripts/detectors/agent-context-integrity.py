@@ -249,6 +249,13 @@ def _scan(
 ) -> list[tuple[str, acp.Finding]]:
     """`(relative path, Finding)` for every REPORTABLE finding, within `budget` files."""
     out: list[tuple[str, acp.Finding]] = []
+    # TRDD-XOITBRIZ: collect what the per-match discriminators SILENCED, and log it.
+    # `scan_text` accepts this list opt-in (default None), and an opt-in trace that no
+    # production caller passes is decoration — the suppression would be invisible exactly
+    # where it matters, which is the standing failure mode of any silencing rule: it fails
+    # by silencing too much, and nothing about a quiet detector looks wrong. This is the
+    # only place that can tell the difference, so it is the place that must ask.
+    suppressed: list[tuple[str, int, int, str]] = []
     for path in paths[:budget]:
         try:
             if path.stat().st_size > _PER_FILE_BYTE_CAP:
@@ -259,9 +266,20 @@ def _scan(
         rel = str(path.relative_to(project_root))
         # `filename` is the FP-hardening hint: it suppresses rules that would otherwise fire
         # on a security tool's own IOC catalogues and red-team fixtures.
+        before = len(suppressed)
         out.extend(
-            (rel, f) for f in acp.scan_text(text, file_kind=_file_kind(path), filename=rel)
+            (rel, f)
+            for f in acp.scan_text(
+                text, file_kind=_file_kind(path), filename=rel, suppressed_out=suppressed
+            )
         )
+        for rule_id, line, _col, reason in suppressed[before:]:
+            # LOG, never a finding: a suppression is not work for the reader, it is the audit
+            # trail that makes over-suppression arguable. Greppable by rule id + reason.
+            state.log_line(
+                "agent-context-integrity",
+                f"suppressed {rule_id} at {rel}:{line} ({reason})",
+            )
     return out
 
 

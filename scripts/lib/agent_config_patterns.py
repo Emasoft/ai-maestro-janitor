@@ -365,6 +365,49 @@ def has_ioc_context_near(text: str, start: int, end: int, *, window: int = 100) 
     return _IOC_CONTEXT_CUE.search(text[lo:hi]) is not None
 
 
+# TRDD-XOITBRIZ: `dynamic-exec-in-body` negative-context discriminator.
+#
+# The rule used to run against a code-fence-MASKED copy of the text: blank
+# out every markdown fence, then search for eval/exec/shell=True. That is
+# true for a README (fenced code is inert prose to a reader) but FALSE for
+# a SKILL.md, where a fenced block is exactly what the agent is instructed
+# to run — so the mask blinded the rule in the one file type it exists for.
+# Measured on the corpus (see the TRDD): masked = 1/3 recall; unmasked =
+# 3/3 recall but 4/4 FP on legitimate security docs that quote eval/exec as
+# a detection target or an anti-pattern.
+#
+# The fence is not the signal — the PROSE AROUND IT is. A security doc
+# says "report / reject / ban / we removed this"; an attack says "apply /
+# evaluate / run this". So: run the rule UNMASKED, and drop a match whose
+# surrounding ±400 chars name the quoted code as something to FIND or
+# AVOID. This mirrors `has_ioc_context_near` above — same shape, already
+# established in this module for `exfil-webhook-sink`.
+#
+# `checklist` was in this list during prototyping and had to come back
+# out: it suppressed a genuine attack sample titled "Release Checklist
+# Skill". A negative term must mean "this code is being named as bad",
+# never "this document is of a certain kind" — the latter is a title an
+# attacker can simply choose.
+_DYNAMIC_EXEC_NEGATIVE_CONTEXT = re.compile(
+    r"(?is)\b(?:report(?:s|ed|ing)?|flag(?:s|ged|ging)?|detect(?:s|ed|ion)?|scan(?:s|ned|ning)?"
+    r"|reject(?:s|ed|ing)?|ban(?:s|ned|ning)?|forbid(?:s|den)?|prohibit(?:s|ed)?|disallow(?:s|ed)?"
+    r"|never\s+use|do\s+not\s+use|avoid|anti-?pattern|vulnerab\w+|insecure|unsafe|dangerous"
+    r"|remove(?:d|s)?|deprecat\w+|violation|severity|post-?mortem|root\s+cause"
+    r"|lint(?:er|ing)?|rule:|autofix)\b"
+)
+_DYNAMIC_EXEC_NEGATIVE_WINDOW = 400
+
+
+def dynamic_exec_negative_context_near(text: str, start: int, end: int) -> bool:
+    """True if a "this code is bad / we removed it" cue appears within
+    ±400 chars of a `dynamic-exec-in-body` match — i.e. the prose is
+    NAMING the eval/exec call as a threat to find or avoid, not
+    instructing the agent to run it. See the block comment above."""
+    lo = max(0, start - _DYNAMIC_EXEC_NEGATIVE_WINDOW)
+    hi = min(len(text), end + _DYNAMIC_EXEC_NEGATIVE_WINDOW)
+    return _DYNAMIC_EXEC_NEGATIVE_CONTEXT.search(text[lo:hi]) is not None
+
+
 # ---- Multi-line Buffer.from → eval correlation (sentinel-y-4, sweep-C) --
 
 
@@ -1125,7 +1168,13 @@ def _line_col(text: str, offset: int) -> tuple[int, int]:
     return (line, col)
 
 
-def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> list[Finding]:
+def scan_text(
+    text: str,
+    *,
+    file_kind: str = "prose",
+    filename: str = "",
+    suppressed_out: list[tuple[str, int, int, str]] | None = None,
+) -> list[Finding]:
     """Run every applicable RULES pattern against `text` and return findings.
 
     `file_kind` selects which rule subset to apply:
@@ -1143,6 +1192,15 @@ def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> lis
     directory, the exfil-webhook-sink rule is skipped entirely (those
     files LIST webhook URLs as IOCs, they don't ACTIVELY exfiltrate
     to them). FP-hardening (round 3).
+
+    `suppressed_out`, if given, is APPENDED IN PLACE with one
+    `(rule_id, line, col, reason)` tuple per match that fired the rule
+    but was demoted/dropped by a discriminator (negative-context for
+    `dynamic-exec-in-body`, IOC-context for `exfil-webhook-sink`).
+    TRDD-XOITBRIZ: a suppressor is itself a silencing rule and must
+    never be silent about what it silenced — this is the visible
+    trace. Opt-in (default None) so existing callers are unaffected;
+    a caller that cares (an auditor, a test) passes a list and reads it.
 
     Findings are deduped by (rule_id, line, col) — a single line that
     triggers two rules emits two findings, but the same rule firing
@@ -1187,20 +1245,12 @@ def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> lis
     # exfil sinks. Skip the rule entirely on those paths.
     skip_exfil_for_path = bool(filename) and is_exfil_fp_path(filename)
 
-    # FP-hardening (round 3): mask markdown code fences before running
-    # the dynamic-exec-in-body rule on prose files. The intent of the
-    # rule is to catch `eval(...)` directives EMBEDDED in skill prose;
-    # an `eval()` inside a documentation code fence is INERT (the
-    # downstream LLM doesn't execute fenced code). Without this mask,
-    # every security-tool SKILL.md that documents `eval()` / `exec()`
-    # fires HIGH.
-    masked_for_dynamic_exec: str | None = None
-    if file_kind == "prose":
-        try:
-            from ai_context_extras import mask_markdown_code_blocks  # type: ignore[import-not-found]
-            masked_for_dynamic_exec = mask_markdown_code_blocks(text)
-        except ImportError:
-            masked_for_dynamic_exec = None
+    # TRDD-XOITBRIZ: `dynamic-exec-in-body` runs UNMASKED (see
+    # `dynamic_exec_negative_context_near` above for why the fence mask
+    # this replaced was blind on exactly the file type the rule exists
+    # for — a SKILL.md, where a fenced block is the thing the agent is
+    # instructed to run). The discriminator is applied per-match below,
+    # in the same loop as `has_ioc_context_near` for exfil-webhook-sink.
 
     for rule in RULES:
         if file_kind == "source" and rule.id not in source_safe_rules:
@@ -1209,18 +1259,7 @@ def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> lis
         # / red-team paths.
         if rule.id == "exfil-webhook-sink" and skip_exfil_for_path:
             continue
-        # FP-hardening (round 3): for dynamic-exec-in-body in prose
-        # mode, run against the code-fence-masked text so eval/exec
-        # tokens inside fenced documentation become invisible.
-        if (
-            rule.id == "dynamic-exec-in-body"
-            and file_kind == "prose"
-            and masked_for_dynamic_exec is not None
-        ):
-            search_text = masked_for_dynamic_exec
-        else:
-            search_text = text
-        for m in rule.pattern.finditer(search_text):
+        for m in rule.pattern.finditer(text):
             # FP-hardening (round 3): for exfil-webhook-sink, demote /
             # drop matches whose surrounding prose names the URL as an
             # IOC / fixture / red-team example rather than commanding
@@ -1229,6 +1268,27 @@ def scan_text(text: str, *, file_kind: str = "prose", filename: str = "") -> lis
                 rule.id == "exfil-webhook-sink"
                 and has_ioc_context_near(text, m.start(), m.end())
             ):
+                if suppressed_out is not None:
+                    sline, scol = _line_col(text, m.start())
+                    suppressed_out.append(
+                        (rule.id, sline, scol, "ioc-context-near")
+                    )
+                continue
+            # TRDD-XOITBRIZ: for dynamic-exec-in-body in prose mode,
+            # drop matches whose surrounding ±400 chars name the code
+            # as something to find/avoid rather than run. Source mode
+            # is deliberately NOT discriminated — the whole point of
+            # source mode is to catch eval in actual code files.
+            if (
+                rule.id == "dynamic-exec-in-body"
+                and file_kind == "prose"
+                and dynamic_exec_negative_context_near(text, m.start(), m.end())
+            ):
+                if suppressed_out is not None:
+                    sline, scol = _line_col(text, m.start())
+                    suppressed_out.append(
+                        (rule.id, sline, scol, "dynamic-exec-negative-context")
+                    )
                 continue
             line, col = _line_col(text, m.start())
             key = (rule.id, line, col)

@@ -1,11 +1,11 @@
 {
   "totals": {
-    "samples": 237,
-    "benign": 68,
+    "samples": 241,
+    "benign": 72,
     "attack_claimed": 152,
-    "recall_intended": 0.5197,
-    "recall_any": 0.5526,
-    "false_positive_rate": 0.0441
+    "recall_intended": 0.5329,
+    "recall_any": 0.5658,
+    "false_positive_rate": 0.0417
   },
   "per_population": {
     "benign": {
@@ -13,7 +13,7 @@
       "fp": 3
     },
     "benign-ordinary": {
-      "n": 28,
+      "n": 32,
       "fp": 0
     }
   },
@@ -244,12 +244,9 @@
     "dynamic-exec-in-body": {
       "claimed": true,
       "n": 3,
-      "intended": 1,
-      "any": 1,
-      "misses": [
-        "skill body smuggles a python eval step",
-        "os.system in an 'automation' appendix"
-      ]
+      "intended": 3,
+      "any": 3,
+      "misses": []
     },
     "whole-env-exfil": {
       "claimed": true,
