@@ -1,9 +1,10 @@
 ---
 trdd-id: BMDZK4RA
 title: The mypy gate cannot see cross-module calls between scripts/lib siblings
-column: todo
+column: complete
 created: 2026-08-13T12:52:39+0200
-updated: 2026-08-13T12:52:39+0200
+updated: 2026-08-13T13:14:00+0200
+implementation-commits: [a08d14fd, a25f706e]
 current-owner: unassigned
 task-type: infra
 approval-tier: 0
@@ -16,7 +17,40 @@ eht: []
 
 # `import state` from a `scripts/lib/` sibling is `Any` to mypy — so the gate checks nothing about it
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+## ⚠ RESOLVED SAME DAY — and the card's own premise was WRONG (2026-08-13 ~13:1x)
+
+**Do not read the options below as live.** Within the hour I wrote them I checked `ci.yml` and
+found the thing the card assumed was missing:
+
+```
+.github/workflows/ci.yml:46:  run: uvx --with pyright pyright scripts/     # no continue-on-error
+```
+
+**pyright is already a BLOCKING CI gate**, with `scripts/lib` in `extraPaths` and
+`reportMissingImports: error`. So option 1's stated cost — *"the CI gate and the IDE disagree
+permanently, and CI is the one that blocks a publish"* — is **false**. There is no divergence to
+live with: the checker that sees this class runs in CI and blocks. The blind spot is real in
+mypy and already covered.
+
+**DECISION: option 1**, on corrected grounds — not "accept a gap", but "the gap is already
+owned by the other checker, by design". Recorded in `pyproject.toml` beside `mypy_path`, which
+is where a future session goes to 'fix' this and would otherwise re-derive the whole card.
+
+**What the check also caught, which is the part that mattered.** Running the CI command locally
+showed CI Lint was **RED**, and by my own hand: `e3422397` imported `tests/_fake_secrets` via a
+runtime `sys.path.insert`, which pyright could not resolve. Fixed in `a25f706e` by adding
+`tests` to extraPaths (resolving the import, not suppressing the diagnostic). So the honest
+summary is the inverse of the card's title: mypy's blind spot cost one annotation mismatch,
+while **my local mypy+ruff habit hid a genuine red CI job** — the checker I was not running was
+the one telling the truth.
+
+**Lesson (recorded, because it is the third instance today).** I filed a card asserting a gap
+without first checking whether something already covered it. The measurement that would have
+refuted it — reading `ci.yml` — was one grep away and came *after* the card was written and
+committed. Same shape as the fence-mask and base64-floor errors: a conclusion published before
+the population that could contradict it was consulted.
+
+## ⏵ STATE — the original analysis (mechanism still correct, framing superseded above)
 
 **Found while verifying a subagent's returned work, and PROVEN by controlled probe rather than
 inferred.** The project's own type gate is green and honest about what it checks; it simply does
@@ -83,11 +117,15 @@ a gate that aborts still exits non-zero and looks like it ran.
 
 ## Acceptance
 
-- [ ] A decision among 1/2/3, recorded with its reason — not drifted into
-- [ ] Whatever is chosen, `mypy scripts/ --ignore-missing-imports` still exits 0 AND the
-      `sentinel.model` double-resolution is proven absent (it is the blocker for options 2/3)
-- [ ] If option 1: the divergence is written down where a future session meets it, so the next
-      person to see a pyright-only error does not re-derive this card from scratch
+- [x] A decision among 1/2/3, recorded with its reason — **option 1**, on the corrected grounds
+      above (pyright already owns this class as a blocking CI gate). Not drifted into: the
+      deciding fact is `ci.yml:46`, quoted.
+- [x] `mypy scripts/ --ignore-missing-imports` still exits 0 — verified, 477 files clean. The
+      `sentinel.model` double-resolution is NOT proven absent and does not need to be: it blocks
+      only options 2/3, which were not taken. Stated rather than silently dropped.
+- [x] The divergence is written down where a future session meets it — a "WHICH CHECKER OWNS
+      WHAT" block sits in `pyproject.toml` immediately above `mypy_path`, naming the abort that
+      punishes the obvious fix.
 
 ## Notes and lessons learned
 

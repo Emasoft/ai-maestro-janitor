@@ -45,6 +45,21 @@ namespace_packages = true
 # both files declare [tool.pyright]/pyrightconfig.json, pyright IGNORES
 # pyproject.toml — so any [tool.pyright] block here would be dead config.
 # Keep all pyright settings in pyrightconfig.json for a single source of truth.
+#
+# WHICH CHECKER OWNS WHAT (TRDD-BMDZK4RA) — read before "fixing" mypy_path below.
+# mypy does NOT check calls between `scripts/lib/` siblings. Those modules import each
+# other BARE (`import state`) because the hooks put `scripts/lib` on sys.path at runtime;
+# under `mypy_path = "scripts"` that name cannot resolve (state.py is `lib.state`), and
+# `ignore_missing_imports` silently degrades it to `Any`. PYRIGHT owns that class instead
+# — pyrightconfig.json lists `scripts/lib` in extraPaths, and ci.yml's Lint job runs
+# `uvx --with pyright pyright scripts/` with no continue-on-error, so it BLOCKS a merge.
+# That split is deliberate, not an oversight: pyright caught a real `atomic_write(str)`
+# vs `Path` mismatch that mypy passed clean (fixed in a08d14fd).
+# Do NOT "fix" this by adding scripts/lib to mypy_path — it ABORTS mypy entirely:
+#   "Source file found twice under different module names: sentinel.model /
+#    lib.sentinel.model ... errors prevented further checking"
+# A gate that aborts still exits non-zero and looks like it ran — strictly worse than a
+# blind spot pyright already covers.
 
 [project.optional-dependencies]
 dev = [
