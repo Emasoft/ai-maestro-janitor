@@ -945,20 +945,76 @@ def _is_obituary_line(line: str) -> bool:
     return _COMMIT_SHA_RE.search(_TRDD_CITATION_RE.sub(" ", line)) is not None
 
 
-def _next_action_span(state_block: str) -> tuple[int, int] | None:
-    """The paragraph span (within `state_block`) that carries a NEXT-ACTION line.
+# A markdown list marker plus its indent. NO `^` anchor: these are matched with
+# `.match(text, pos)`, which already anchors at `pos`, whereas a `^` in a pattern
+# compiled without re.MULTILINE would only ever match at offset 0 and silently
+# report every line as a non-bullet.
+_BULLET_RE = re.compile(r"([ \t]*)(?:[-*+]|\d+[.)])[ \t]+")
 
-    Paragraph-scoped (like Check 4's blocker paragraph) so a token cited in the
-    SAME paragraph as "NEXT ACTION" — not merely anywhere in the STATE block —
-    earns the higher severity. Returns None when the STATE block names no
-    NEXT-ACTION line at all.
+
+def _bullet_span(text: str, lo: int, hi: int, pos: int) -> tuple[int, int] | None:
+    """Narrow `(lo, hi)` to the single markdown bullet containing `pos`.
+
+    None when `pos` is not inside a bullet — the caller then keeps the paragraph
+    span, so non-list prose behaves exactly as before.
+    """
+    starts: list[int] = []
+    p = lo
+    for line in text[lo:hi].splitlines(keepends=True):
+        starts.append(p)
+        p += len(line)
+    if not starts:
+        return None
+
+    idx = 0
+    for i, s in enumerate(starts):
+        if s > pos:
+            break
+        idx = i
+
+    # The bullet `pos` belongs to is the nearest marker at or above its line: a
+    # continuation line carries no marker of its own.
+    bullet = indent = None
+    for i in range(idx, -1, -1):
+        m = _BULLET_RE.match(text, starts[i], hi)
+        if m:
+            bullet, indent = i, len(m.group(1))
+            break
+    if bullet is None or indent is None:
+        return None
+
+    end = hi
+    for i in range(bullet + 1, len(starts)):
+        m = _BULLET_RE.match(text, starts[i], hi)
+        if m and len(m.group(1)) <= indent:
+            end = starts[i]  # a sibling or shallower bullet ends this one
+            break
+    return (starts[bullet], end)
+
+
+def _next_action_span(state_block: str) -> tuple[int, int] | None:
+    """The span (within `state_block`) that carries a NEXT-ACTION line.
+
+    Scoped to the NEXT-ACTION **bullet** when the block is a markdown list, and to
+    its blank-line paragraph otherwise, so a token cited in the SAME place as
+    "NEXT ACTION" — not merely anywhere in the STATE block — earns the higher
+    severity. Returns None when the STATE block names no NEXT-ACTION line at all.
+
+    The bullet step is load-bearing, not a refinement. Paragraph scope alone
+    (Check 4's rule, inherited here) means blank-line-separated — but a STATE
+    block is written as a TIGHT bullet list, so the whole block is one paragraph.
+    Measured on TRDD-GZXTSJSR: the span came back `(2, 3248)` of a 3249-char
+    block, i.e. everything. Every dead symbol anywhere in such a block was graded
+    `high`, and the `high`/`low` split this function exists to draw silently
+    became a property of whether the author left blank lines between bullets
+    rather than of where the symbol actually sits.
     """
     m = _NEXT_ACTION_RE.search(state_block)
     if not m:
         return None
     for lo, hi in _paragraph_spans(state_block):
         if lo <= m.start() < hi:
-            return (lo, hi)
+            return _bullet_span(state_block, lo, hi, m.start()) or (lo, hi)
     return None
 
 

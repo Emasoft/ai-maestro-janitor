@@ -664,6 +664,76 @@ def test_check5_dead_symbol_outside_next_action_is_low_severity():
     assert [(f.token, f.severity) for f in findings] == [("resolve_ttl_minutes", "low")]
 
 
+# The shape STATE blocks are ACTUALLY written in: a TIGHT bullet list, no blank
+# lines between items. `_STATE_WITH_NEXT_ACTION` above is blank-line-separated
+# prose, which is why every check5 severity test passed while real cards were
+# graded wrong — the fixture never reproduced the formatting the rule meets in
+# production. Continuation lines are indented under their bullet, as authors write
+# them, because the bullet must own them.
+_STATE_TIGHT_BULLETS = (
+    "\n## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-13\n\n"
+    "- **CONTEXT:** most of the cadence rework landed.\n"
+    "- **NEXT ACTION:** implement Phase 1 — see the plan below. Delegate the build to\n"
+    "  ONE bounded agent; keep the orchestrator thin.\n"
+    "- **LOAD-BEARING FACTS:** a nudge phase must be LATE and fail-open, like\n"
+    "  `resolve_ttl_minutes` (the current tail of `dispatch.py`).\n"
+    "- **ARTIFACTS:** `findings_ledger`.\n\n"
+    "## Approval log\n"
+    "nothing here yet\n"
+)
+
+
+def test_check5_severity_is_scoped_to_the_next_action_BULLET_not_the_whole_block():
+    """In a tight bullet list, only the NEXT-ACTION bullet earns HIGH.
+
+    The regression: `_paragraph_spans` splits on blank lines, so a tight list is ONE
+    paragraph and the NEXT-ACTION span covered the entire STATE block — measured at
+    (2, 3248) of 3249 chars on TRDD-GZXTSJSR. Every dead symbol anywhere in such a
+    block was graded `high`, so the high/low split became a property of whether the
+    author left blank lines between bullets rather than of where the symbol sits.
+    """
+    rec = _record(column="dev", body=_STATE_TIGHT_BULLETS)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("resolve_ttl_minutes"))
+    assert [(f.token, f.severity) for f in findings] == [("resolve_ttl_minutes", "low")], (
+        "a symbol in the LOAD-BEARING-FACTS bullet is not in the NEXT ACTION"
+    )
+
+
+def test_check5_next_action_bullet_still_earns_high_in_a_tight_list():
+    """The other direction: narrowing must not cost a genuine NEXT-ACTION hit its HIGH.
+    A fix that graded everything `low` would silence the finding this check exists for."""
+    body = _STATE_TIGHT_BULLETS.replace(
+        "implement Phase 1 — see the plan below.",
+        "finish `should_emit_renew` — see the plan below.",
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert [(f.token, f.severity) for f in findings] == [("should_emit_renew", "high")]
+
+
+def test_check5_next_action_bullet_owns_its_continuation_lines():
+    """A bullet's wrapped continuation lines belong to it — they carry no marker of
+    their own, so scoping must walk BACK to the marker rather than treat the line as
+    unbulleted (which would drop it to `low` and under-report a real blocker)."""
+    body = _STATE_TIGHT_BULLETS.replace(
+        "  ONE bounded agent; keep the orchestrator thin.",
+        "  ONE bounded agent; keep `should_emit_renew` thin.",
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    assert [(f.token, f.severity) for f in findings] == [("should_emit_renew", "high")]
+
+
+def test_check5_blank_line_separated_prose_is_unchanged_by_the_bullet_narrowing():
+    """Non-list prose keeps the original paragraph scope — the narrowing is additive,
+    so the pre-existing behaviour this rule had for prose STATE blocks still holds."""
+    rec = _record(column="dev", body=_STATE_WITH_NEXT_ACTION)
+    assert [
+        (f.token, f.severity)
+        for f in tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew"))
+    ] == [("should_emit_renew", "high")]
+
+
 def test_check5_multiple_dead_symbols_ranked_independently():
     """Both the NEXT-ACTION token and an elsewhere token fire, each at its own
     severity, and a live token (`findings_ledger`) never fires."""

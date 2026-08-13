@@ -730,6 +730,7 @@ def _sym_in_history():
     from pathlib import Path
     p = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "trdd-state-reconciliation.py"
     spec = importlib.util.spec_from_file_location("tsr_under_test", p)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
