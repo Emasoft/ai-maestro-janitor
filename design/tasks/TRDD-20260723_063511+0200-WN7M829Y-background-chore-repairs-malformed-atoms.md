@@ -3,7 +3,7 @@ trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
 column: todo
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-13T12:58:00+0200
+updated: 2026-08-13T13:56:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -24,6 +24,31 @@ below are 11 days stale in BOTH directions:**
 
 USER quietly drained 22 → 10 and nobody updated the card. PROJECT went 0 → 2, so this is **not a
 backlog that empties** — it REFILLS.
+
+### 2026-08-13 13:5x — the pattern is BROADER than this card's four classes
+
+A heartbeat surfaced `memgrep lint: 50 findings, none at or above ERROR`. Broken down first-hand:
+
+| code | PROJECT | USER | tracked by |
+|---|---|---|---|
+| `lesson-uncited` | 8 | 15 | `janitor-memory-update` skill |
+| `link-one-sided` | 0 | 15 | same — and it violates the stated **LINK LAW** (every link bidirectional) |
+| `atom-oversized` | 2 | 10 | **this card** |
+
+**`atom-oversized` is 2 + 10 — byte-identical to the re-measurement above.** Nothing drained it
+in the intervening hour, which is one more confirmation that it does not drain by itself.
+
+**The important part is the other 30 findings.** `lesson-uncited` and `link-one-sided` are NOT
+among this card's four defect classes, yet they exhibit the identical structure: nothing refuses
+them at write time, they are emitted at INFO so no chore gate may act, and only a hand-dispatched
+agent batch clears them. So the closed loop this card documents is not a property of *oversized
+atoms* — it is a property of **the INFO tier itself**. That materially strengthens option 1
+(refuse at write time), because a write-time gate generalises to all three codes while a
+per-class agent batch has to be re-run forever, per class.
+
+Not filed as a separate card: both codes are already defined in
+`design/specs/wikimem-memgrep-spec.md` and acted on by `skills/janitor-memory-update`, so a new
+card would duplicate existing coverage rather than add any.
 
 ### Why it refills, verified in the code rather than assumed
 
