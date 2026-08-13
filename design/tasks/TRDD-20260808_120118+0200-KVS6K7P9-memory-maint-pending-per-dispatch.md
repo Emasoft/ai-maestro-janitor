@@ -3,7 +3,7 @@ trdd-id: KVS6K7P9
 title: memory-maint-pending is a single slot — per-dispatch state plus a per-root in-flight gate
 column: todo
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-13T03:46:02+0200
+updated: 2026-08-13T04:10:05+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -129,10 +129,26 @@ does not ship a per-project gate believing the USER corpus is covered.
 
 ## Acceptance
 
-- [ ] Clobber scenario replayed: second marker on a held root DEFERS, first agent's authority
-      file untouched
-- [ ] Id-mismatch test: agent reading a state whose dispatch id differs STOPS with a report
-- [ ] Heartbeat-protocol rule + memory skills updated to the per-dispatch contract in the
-      same release (no half-migrated window)
+- [x] Clobber scenario replayed — covered by TWO tests, each scoped to one half deliberately:
+      `test_inflight_gate_defers_and_leaves_intervention_still_due` (a live stamp on the picked
+      root ⇒ silent fire, and it proves the cadence was NOT consumed by clearing the stamp and
+      re-firing to see the marker appear), and
+      `test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file` (the first dispatch's
+      per-dispatch file byte-identical after a second fire). Shipped `1051ed85`; falsified by
+      sabotaging the defer path to call `mark_ran`, which fails exactly the first test.
+- [x] Id-mismatch — **STRUCTURALLY IMPOSSIBLE NOW, so the test as specified is moot.** The box
+      assumed the agent READS a shared file and must detect being re-pointed. Item 1's claim
+      model removed that shape: `memory_dispatch_claim.claim_one` hands a dispatch to exactly ONE
+      agent and RENAMES the record out of the pool, so there is no later writer to disagree with
+      and nothing to re-read. A guard against a state that can no longer occur is dead weight.
+      **The residual risk is NOT id mismatch — it is an agent that never claims at all**, which
+      is the next box.
+- [ ] Heartbeat-protocol rule + memory skills on the per-dispatch contract, with **no
+      half-migrated window** — repo side DONE (`rules/janitor-heartbeat-protocol.md:46` orders the
+      claim step and forbids the legacy slot), but the window is **OPEN ON THIS HOST**: the
+      INSTALLED `~/.claude/rules/janitor-heartbeat-protocol.md:39` still names the legacy slot,
+      because installed rules come from the plugin cache. Agents therefore still take the old
+      single-slot path and the #242 clobber remains reachable here. Closes on publish (a USER
+      decision) — do NOT hand-edit the installed copy.
 - [ ] #242 answered when it ships (#140 noted — the deferred dispatch also prevents the
       third ~189k abstain recurrence pattern)
