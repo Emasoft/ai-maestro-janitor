@@ -1533,6 +1533,15 @@ def task_session_liveness(fleet: list | None = None) -> None:
             )
             _decline("dry_run", action, str(plan["channel"]))
             continue
+        if inst.diagnosis == "retry_wedged":
+            # TRDD-WKTD5JTC §1b (empirically measured 2026-08-13): an ESC that breaks a
+            # retry-watchdog wedge fires plain `Stop`, NOT `on-stop-failure` (832/832
+            # turn-ending API errors trip StopFailure; only 1/53 ESC interrupts do — below
+            # the 5.1% chance rate). Nothing else writes rate-limited.flag on this path, so
+            # the daemon writes it itself, BEFORE the ESC below — otherwise the wedge breaks
+            # and the session then just sits idle, strictly worse than the wedge (which at
+            # least made the stall visible).
+            fleet_scan.write_rate_limited_flag(inst.project_root, now)
         ok = fleet_inject.fire(plan)
         _write_recovery_state(
             sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity}

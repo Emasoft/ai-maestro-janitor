@@ -623,3 +623,128 @@ def test_awaiting_user_survives_a_trailing_bookkeeping_record() -> None:
     assert fs.awaiting_user_decision([pending, bookkeeping]) is True
     prose = _json.dumps({"message": {"content": "the user answered in prose"}})
     assert fs.awaiting_user_decision([pending, bookkeeping, prose]) is False
+
+
+# --- TRDD-WKTD5JTC: retry-wedge detection wired into the scanner ------------------
+
+def test_capture_pane_text_declines_iterm_when_automation_blocked(tmp_path, monkeypatch) -> None:
+    """Advisor correction #4: iTerm capture AND inject both ride osascript, so a
+    TCC-denied launchd daemon silently empties BOTH. Decline the read EARLY when
+    `iterm-automation-blocked.flag` is set instead of burning an attempt on a channel
+    proven dead this beat. A tmux channel is unaffected (no osascript involved)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    (tmp_path / fs.ITERM_TCC_FLAG).write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        fs.terminal_trigger, "read_pane_text", lambda rt: "SHOULD NEVER BE CALLED"
+    )
+    assert fs.capture_pane_text({"iterm_session_id": "w0t1p0:ABCDEF12-3456"}) is None
+    # tmux is a different channel — unaffected by the iTerm TCC flag.
+    monkeypatch.setattr(fs.terminal_trigger, "read_pane_text", lambda rt: "tmux frame")
+    assert fs.capture_pane_text({"tmux_pane": "%5"}) == "tmux frame"
+
+
+def test_capture_pane_text_reads_iterm_when_not_blocked(tmp_path, monkeypatch) -> None:
+    """With no TCC-block flag, the iTerm channel reads through normally."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(fs.terminal_trigger, "read_pane_text", lambda rt: "iterm frame")
+    assert fs.capture_pane_text({"iterm_session_id": "w0t1p0:ABCDEF12-3456"}) == "iterm frame"
+
+
+def test_capture_pane_text_no_channel_is_none() -> None:
+    assert fs.capture_pane_text({}) is None
+
+
+def test_diagnose_root_retry_wedged_requires_advance_across_polls(tmp_path: Path) -> None:
+    """End-to-end through `diagnose_root`: the FIRST poll of a wedged pane is only a
+    baseline (not yet wedged); the SECOND poll, with the attempt number advanced, is
+    diagnosed `retry_wedged` — never `frozen`'s 'ladder', and the persisted episode
+    state on disk is what carries the advance requirement across daemon beats."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    now = 1_000_000
+    terminal = {"tmux_pane": "%5"}
+
+    frame = {"text": "429 Rate limited · Retrying in 0s · attempt 5/300"}
+    orig = fs.capture_pane_text
+    try:
+        fs.capture_pane_text = lambda t: frame["text"]  # type: ignore[assignment]
+        diag1 = fs.diagnose_root(str(root), now=now, transcript_age=3600, terminal=terminal)
+        assert diag1[:2] == ("cron_dead", "rearm"), "first sighting is only a baseline"
+        assert (sdir / fs._RETRY_WEDGE_STATE_FILE).exists()
+
+        frame["text"] = "429 Rate limited · Retrying in 5s · attempt 6/300"
+        diag2 = fs.diagnose_root(str(root), now=now, transcript_age=3600, terminal=terminal)
+        assert diag2[:2] == ("retry_wedged", "esc_retry")
+    finally:
+        fs.capture_pane_text = orig  # type: ignore[assignment]
+
+    # A healthy (non-stale) poll afterwards clears the persisted episode.
+    assert fs.diagnose_root(str(root), now=now, transcript_age=60, terminal=terminal)[:2] == (
+        "healthy", None,
+    )
+    assert not (sdir / fs._RETRY_WEDGE_STATE_FILE).exists()
+
+
+def test_diagnose_root_never_polls_a_static_string_into_wedged(tmp_path: Path) -> None:
+    """The self-trigger hazard, exercised through `diagnose_root`: a pane statically
+    showing this TRDD's own quoted wedge line matches the regex every poll, but never
+    advances — so repeated beats never confirm `retry_wedged`."""
+    root = tmp_path / "p"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    now = 1_000_000
+    terminal = {"tmux_pane": "%5"}
+    static_text = "`429 Rate limited · Retrying in 0s · attempt 5/300`"
+    orig = fs.capture_pane_text
+    try:
+        fs.capture_pane_text = lambda t: static_text  # type: ignore[assignment]
+        for _ in range(4):
+            diag = fs.diagnose_root(str(root), now=now, transcript_age=3600, terminal=terminal)
+            assert diag[:2] == ("cron_dead", "rearm"), "must never confirm on a static display"
+    finally:
+        fs.capture_pane_text = orig  # type: ignore[assignment]
+
+
+def test_diagnose_root_skips_pane_poll_for_unarmed_and_server_owned(tmp_path: Path) -> None:
+    """Guardrail: never touch (not even READ) an unarmed or server_owned instance's
+    pane — the poll must not even fire for them."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    (sdir / "disarmed.flag").write_text("")
+    now = 1_000_000
+    called = {"n": 0}
+    orig = fs.capture_pane_text
+
+    def _spy(t):
+        called["n"] += 1
+        return "429 Rate limited · Retrying in 0s · attempt 5/300"
+
+    try:
+        fs.capture_pane_text = _spy  # type: ignore[assignment]
+        assert fs.diagnose_root(
+            str(root), now=now, transcript_age=3600, terminal={"tmux_pane": "%5"}
+        )[:2] == ("unarmed", None)
+        assert called["n"] == 0, "an unarmed instance's pane must never be polled"
+
+        (sdir / "disarmed.flag").unlink()
+        assert fs.diagnose_root(
+            str(root), now=now, transcript_age=3600, terminal={"tmux_pane": "%5"},
+            server_owned=True,
+        )[:2] == ("server_owned", None)
+        assert called["n"] == 0, "a server-owned instance's pane must never be polled"
+    finally:
+        fs.capture_pane_text = orig  # type: ignore[assignment]
+
+
+def test_write_rate_limited_flag_matches_on_stop_failure_shape(tmp_path: Path) -> None:
+    """TRDD-WKTD5JTC §1b — the daemon's own fallback stamps the SAME two files
+    `on-stop-failure.py` writes, so the existing `[janitor-resume]` chain (which reads
+    them) proceeds unchanged downstream."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    now = 1_000_000
+    fs.write_rate_limited_flag(str(root), now)
+    assert (sdir / "rate-limited.flag").is_file()
+    assert (sdir / "rate-limited-since.ts").read_text(encoding="utf-8").strip() == str(now)

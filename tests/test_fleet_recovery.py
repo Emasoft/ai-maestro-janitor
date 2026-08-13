@@ -16,6 +16,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import fleet_recovery as fr  # type: ignore[import-not-found]  # noqa: E402
+import session_liveness as sl  # type: ignore[import-not-found]  # noqa: E402
 
 
 def test_action_for_per_diagnosis() -> None:
@@ -85,12 +86,26 @@ def test_frozen_never_TYPES_a_command_even_when_it_hard_restarts() -> None:
 
 
 def test_injection_is_hard_only_for_frozen() -> None:
-    """Hard/soft injection policy (TRDD-0GPQROC1): ESC-interrupt ONLY a frozen target
-    (its wedged turn never ends, so an enqueued command would never run). Every LIVE
+    """Hard/soft injection policy (TRDD-0GPQROC1): ESC-interrupt ONLY a frozen/retry_wedged
+    target (its wedged turn never ends, so an enqueued command would never run). Every LIVE
     injectable diagnosis gets a soft enqueue that preserves in-flight work — as does
     anything unknown (fail toward not destroying work)."""
     assert fr.injection_is_hard("frozen") is True
+    assert fr.injection_is_hard("retry_wedged") is True
     assert fr.injection_is_hard("cron_dead") is False
     assert fr.injection_is_hard("version_mismatch") is False
     assert fr.injection_is_hard("healthy") is False
     assert fr.injection_is_hard("nonsense") is False
+
+
+def test_action_for_retry_wedged_never_escalates_to_hard_restart() -> None:
+    """TRDD-WKTD5JTC advisor correction #1 — the guardrail this whole feature exists to
+    hold: retry_wedged is ESC-only (esc_nudge) at EVERY attempt count, with OR without
+    include_hard, and never becomes a hard/kill rung. This is the test that would go RED
+    if retry_wedged were (mis)mapped through frozen's 'ladder' escalation, which reaches
+    force_restart at attempts>=_FROZEN_GENTLE_ATTEMPTS under include_hard=True."""
+    for attempt in (0, 1, 2, 3, 4, 99):
+        for include_hard in (False, True):
+            action = fr.action_for("retry_wedged", attempt, include_hard=include_hard)
+            assert action == "esc_nudge", (attempt, include_hard, action)
+            assert not sl.is_hard_rung(action)

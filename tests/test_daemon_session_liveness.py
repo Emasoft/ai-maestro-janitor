@@ -383,6 +383,76 @@ def test_awaiting_user_unattended_esc_dismisses_and_records(tmp_path, monkeypatc
     assert any(e["code"] == "FLEET-AWAITING-DISMISS" for e in entries)
 
 
+# --- TRDD-WKTD5JTC: the retry-wedge ESC rung, exercised through the REAL daemon path ---
+
+def test_retry_wedged_trailing_enqueues_does_not_decline(tmp_path, monkeypatch) -> None:
+    """Advisor correction #2's OTHER half: `injection_is_hard(retry_wedged)` must be True,
+    else the `trailing_enqueues` wedged-target short-circuit (daemon.py) declines the ESC
+    and pages a human instead of injecting — exactly the failure the advisor flagged. A
+    retry-wedged pane commonly HAS trailing enqueues (its own earlier typed nudge queued
+    behind the frozen turn), so this must still fire the ESC."""
+    proj = tmp_path / "proj-rw"
+    fleet = [_inst("retry_wedged", str(proj), {"tmux_pane": "%5"}, trailing=2)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    pushes: list = []
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED")
+    daemon.task_session_liveness()
+    assert len(fired) == 1, "the ESC must fire despite trailing enqueues"
+    assert fired[0]["command"] == "", "retry_wedged is ESC-only, never a typed command"
+    assert "WEDGED" not in _log(tmp_path)
+    assert pushes == [], "no human paging — the ESC itself is the recovery"
+
+
+def test_retry_wedged_writes_rate_limited_flag_before_the_esc(tmp_path, monkeypatch) -> None:
+    """TRDD-WKTD5JTC §1b (empirically measured): an ESC that breaks the retry wedge fires
+    plain `Stop`, not `on-stop-failure` — nothing else writes rate-limited.flag on this
+    path. The daemon must write it itself, BEFORE firing, or the wedge breaks and the
+    session then just sits idle with no resume cue — strictly worse than the wedge."""
+    proj = tmp_path / "proj-flag"
+    proj.mkdir()
+    fleet = [_inst("retry_wedged", str(proj), {"tmux_pane": "%9"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    flag = proj / ".janitor" / "state" / "rate-limited.flag"
+    since = proj / ".janitor" / "state" / "rate-limited-since.ts"
+    assert not flag.exists()
+    daemon.task_session_liveness()
+    assert len(fired) == 1
+    assert flag.is_file(), "rate-limited.flag must exist once the ESC has fired"
+    assert since.read_text(encoding="utf-8").strip().isdigit()
+
+
+def test_retry_wedged_dry_run_writes_no_flag(tmp_path, monkeypatch) -> None:
+    """A dry run (firing OFF) must not write the flag either — nothing was actually
+    injected, so claiming a rate-limit window would be a lie no ESC ever produced."""
+    proj = tmp_path / "proj-dry"
+    proj.mkdir()
+    fleet = [_inst("retry_wedged", str(proj), {"tmux_pane": "%9"})]
+    fired = _setup(monkeypatch, tmp_path, fleet, fire="0")
+    daemon.task_session_liveness()
+    assert fired == []
+    flag = proj / ".janitor" / "state" / "rate-limited.flag"
+    assert not flag.exists()
+
+
+def test_retry_wedged_never_escalates_even_at_max_attempts(tmp_path, monkeypatch) -> None:
+    """Advisor correction #1, end-to-end: a retry-wedged instance walked all the way to
+    a spent attempt budget still gets ESC-only — it must NEVER reach a kill rung the way
+    a `frozen` instance's 'ladder' would at the same attempt count."""
+    fleet = [_inst("retry_wedged", "/p/proj-max", {"tmux_pane": "%3"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    rec = tmp_path / "recovery"
+    rec.mkdir(parents=True)
+    sf = daemon._recovery_state_path(rec, "/p/proj-max")
+    ident = f"{fleet[0].pid}:{fleet[0].tty or ''}"
+    sf.write_text(
+        json.dumps({"attempts": daemon.fr.MAX_ATTEMPTS - 1, "last_ts": 1, "identity": ident}),
+        encoding="utf-8",
+    )
+    daemon.task_session_liveness()
+    assert len(fired) == 1
+    assert fired[0]["command"] == "", "still ESC-only at a high attempt count — never a kill"
+
+
 def test_awaiting_user_unknown_idle_never_esc_dismisses(tmp_path, monkeypatch) -> None:
     """`hid_idle_seconds` returning None means "cannot tell" — fail toward NOT
     touching the pane, same as the typing gate above the loop."""

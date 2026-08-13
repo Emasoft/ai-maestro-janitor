@@ -209,6 +209,112 @@ def test_normalize_tty_variants() -> None:
     assert sl.normalize_tty("") == ""
 
 
+# --- TRDD-WKTD5JTC: retry-watchdog wedge detection --------------------------------
+
+def test_is_retry_wedge_cause_agnostic_not_keyed_on_429() -> None:
+    """Cause-agnostic (owner incident 2026-07-24): keys ONLY on the invariant shape
+    'Retrying in ... attempt N/M', matching BOTH the 429 wedge AND the session-limit
+    wedge (which carries no 429 at all). Rejects text that merely mentions '429' /
+    'rate limit' without the retry+attempt signature — the cause-KEYED substring match
+    this TRDD explicitly supersedes."""
+    assert sl.is_retry_wedge("429 Rate limited · Retrying in 0s · attempt 5/300")
+    assert sl.is_retry_wedge(
+        "✻ Session limit reached · Retrying in 2m 50s (2:10pm) · attempt 1/300"
+    )
+    assert not sl.is_retry_wedge("we hit a 429 rate limit error earlier today")
+    assert not sl.is_retry_wedge("rate limited, please wait")
+    assert not sl.is_retry_wedge("")
+
+
+def test_retry_wedge_attempt_extracts_the_number() -> None:
+    """The attempt counter is the ONLY thing that can prove real progress — extract it."""
+    assert sl.retry_wedge_attempt("429 Rate limited · Retrying in 0s · attempt 5/300") == 5
+    assert sl.retry_wedge_attempt("Retrying in 2m 50s · attempt 12/300") == 12
+    assert sl.retry_wedge_attempt("nothing here") is None
+
+
+def test_retry_wedge_state_advance_decrease_tie_cleared() -> None:
+    """The full episode state machine (advisor correction #3): first sighting is NOT
+    yet wedged (no advance to compare against); a genuine ADVANCE confirms wedged; a
+    DECREASE starts a fresh, again-unconfirmed episode; a TIE is not progress by
+    itself but does not cancel an already-confirmed episode (long backoffs can exceed
+    the beat); no signature clears the state entirely."""
+    # first sighting — baseline only, not yet wedged
+    st1, wedged1 = sl.retry_wedge_state_update(prev=None, current_attempt=5)
+    assert st1 == {"attempt": 5, "confirmed": False}
+    assert wedged1 is False
+    # advance — confirmed wedged
+    st2, wedged2 = sl.retry_wedge_state_update(prev=st1, current_attempt=6)
+    assert st2 == {"attempt": 6, "confirmed": True}
+    assert wedged2 is True
+    # tie on a confirmed episode — stays wedged (backoff exceeded the beat)
+    st3, wedged3 = sl.retry_wedge_state_update(prev=st2, current_attempt=6)
+    assert st3 == {"attempt": 6, "confirmed": True}
+    assert wedged3 is True
+    # decrease — a NEW episode starts, unconfirmed again (never carries the old confirm)
+    st4, wedged4 = sl.retry_wedge_state_update(prev=st3, current_attempt=1)
+    assert st4 == {"attempt": 1, "confirmed": False}
+    assert wedged4 is False
+    # tie on an UNCONFIRMED episode — still not wedged (no advance ever seen)
+    st5, wedged5 = sl.retry_wedge_state_update(prev=st4, current_attempt=1)
+    assert st5 == {"attempt": 1, "confirmed": False}
+    assert wedged5 is False
+    # signature gone — state cleared entirely, regardless of prior confirmation
+    st6, wedged6 = sl.retry_wedge_state_update(prev=st2, current_attempt=None)
+    assert st6 is None
+    assert wedged6 is False
+
+
+def test_retry_wedge_never_self_triggers_on_a_static_display() -> None:
+    """The exact self-trigger hazard this TRDD warns about: this file's own prose
+    quotes the wedge line verbatim. A pane STATICALLY showing that fixed text (e.g.
+    someone `cat`s this very TRDD) matches `is_retry_wedge` every poll — but the
+    attempt number never changes, so `retry_wedge_state_update` never confirms it."""
+    static_text = (
+        "the wedge fires: `429 Rate limited · Retrying in 0s · attempt 5/300`"
+    )
+    assert sl.is_retry_wedge(static_text)  # the regex DOES match static prose
+    state_ = None
+    wedged = False
+    for _ in range(5):  # repeated polls of the SAME static text
+        attempt = sl.retry_wedge_attempt(static_text)
+        state_, wedged = sl.retry_wedge_state_update(prev=state_, current_attempt=attempt)
+        assert wedged is False, "a static display must never confirm as wedged"
+
+
+def test_diagnose_instance_retry_wedged_ranks_above_frozen() -> None:
+    """retry_wedged is checked BEFORE frozen (design §2): a pane that shows BOTH the
+    wedge signature AND a stale rate-limited flag must route through retry_wedged's
+    OWN esc-only entry, never frozen's 'ladder' (which can escalate to a kill)."""
+    assert sl.diagnose_instance(
+        deliberately_unarmed=False, pane_alive=True, transcript_stale=True,
+        rate_limited=True, version_stale=False, retry_wedged=True,
+    ) == "retry_wedged"
+    # without retry_wedged, the same inputs fall through to frozen as before
+    assert sl.diagnose_instance(
+        deliberately_unarmed=False, pane_alive=True, transcript_stale=True,
+        rate_limited=True, version_stale=False, retry_wedged=False,
+    ) == "frozen"
+    # unarmed/server_owned/dead/healthy still outrank it
+    assert sl.diagnose_instance(
+        deliberately_unarmed=True, pane_alive=True, transcript_stale=True,
+        rate_limited=True, version_stale=False, retry_wedged=True,
+    ) == "unarmed"
+    assert sl.diagnose_instance(
+        deliberately_unarmed=False, pane_alive=True, transcript_stale=False,
+        rate_limited=True, version_stale=False, retry_wedged=True,
+    ) == "healthy"
+
+
+def test_retry_wedged_recovery_is_not_ladder() -> None:
+    """Advisor correction #1: retry_wedged gets its OWN entry, never 'ladder' — 'ladder'
+    is frozen's 7-rung escalation and eventually reaches force_restart (a kill), which a
+    retry-wedge (never a crashed process) must never reach."""
+    assert sl.recovery_for_diagnosis("retry_wedged") is not None  # actionable
+    assert sl.recovery_for_diagnosis("retry_wedged") != "ladder"
+    assert sl.recovery_for_diagnosis("retry_wedged") == "esc_retry"
+
+
 def test_resolve_terminal_for_tty() -> None:
     """A process's TTY resolves to its terminal id WITHOUT the session having
     recorded anything — the only path to an old/zombie instance running a janitor

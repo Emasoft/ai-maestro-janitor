@@ -65,6 +65,13 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
       ``include_hard`` NEVER changes this)
     - ``dead``             → ``relaunch`` with ``include_hard`` (no kill — type
       ``claude --continue`` into the surviving pane), else None (A5 unwired view)
+    - ``retry_wedged``     → ``esc_nudge`` UNCONDITIONALLY, at EVERY ``attempts`` value and
+      REGARDLESS of ``include_hard`` (TRDD-WKTD5JTC advisor #1). This is CC's own
+      retry-watchdog wedge (``Retrying in … attempt N/M`` — no ``rate-limited.flag`` involved
+      until the daemon writes one itself, see the caller); it is never a crashed/dead
+      process, so escalating to a kill rung — which ``frozen``'s ``"ladder"`` mapping would
+      eventually reach — is never correct here. Checked BEFORE the ``frozen`` branch so a
+      diagnosis of exactly ``"retry_wedged"`` never falls through to it.
 
     ``include_hard`` (TRDD-56d24c02 increment 2) only NAMES the hard rungs — the DAEMON gates
     execution on ``fleet_restart.hard_restart_enabled()`` (DEFAULT-OFF dry-run) + ``is_killable``,
@@ -74,6 +81,8 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
         return "rearm"
     if diagnosis == "version_mismatch":
         return "reload"
+    if diagnosis == "retry_wedged":
+        return "esc_nudge"  # ESC-only, at EVERY attempt, include_hard or not — never escalates
     if diagnosis == "frozen":
         if include_hard and attempts >= _FROZEN_GENTLE_ATTEMPTS:
             return "force_restart"  # DEFAULT-OFF last resort after ESC is exhausted
@@ -86,14 +95,18 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
 def injection_is_hard(diagnosis: str) -> bool:
     """Hard/soft policy for a gentle recovery injection (TRDD-0GPQROC1). PURE.
 
-    True (ESC-interrupt first) ONLY for ``frozen``: a rate-limited session is stuck in
-    the retry-watchdog wait — the ESC IS the unwedge (``frozen`` now injects ESC and
-    NOTHING else; see ``action_for``). Every other injectable diagnosis (``cron_dead``,
-    ``version_mismatch``) targets a LIVE, possibly mid-work session where only the
-    heartbeat or the plugin code is stale; typing without ESC enqueues the command to
-    run at the turn boundary, so no in-flight work is lost (user directive 2026-07-10).
+    True (ESC-interrupt first) for ``frozen`` and ``retry_wedged``: both are a session stuck
+    in Claude Code's retry-watchdog wait — the ESC IS the unwedge, and typing a command would
+    only buffer on the retry-blocked input line (TRDD-P7WU40G9). ``retry_wedged``
+    (TRDD-WKTD5JTC) must return True here for a second, independent reason: the
+    ``trailing_enqueues`` wedged-target short-circuit in ``daemon.py`` declines every
+    injection for which this is False, so without it the daemon would notify a human instead
+    of ever sending the unwedging ESC. Every other injectable diagnosis (``cron_dead``,
+    ``version_mismatch``) targets a LIVE, possibly mid-work session where only the heartbeat
+    or the plugin code is stale; typing without ESC enqueues the command to run at the turn
+    boundary, so no in-flight work is lost (user directive 2026-07-10).
     """
-    return diagnosis == "frozen"
+    return diagnosis in ("frozen", "retry_wedged")
 
 
 def gate(*, last_ts: int | None, attempts: int, now: int) -> str:

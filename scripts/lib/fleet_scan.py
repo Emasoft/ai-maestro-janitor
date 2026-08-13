@@ -25,6 +25,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 import harness_backend
 import session_liveness
@@ -592,6 +593,89 @@ def sweep_stale_rate_limit(root: str, *, now: int, max_age_s: int) -> bool:
     return True
 
 
+def capture_pane_text(terminal: Mapping[str, str]) -> str | None:
+    """Read the CURRENT RENDERED FRAME of an instance's pane, for retry-wedge detection
+    (TRDD-WKTD5JTC §1) — CC runs on the alternate screen buffer, so this is the only
+    content a daemon-side probe can ever see (no scrollback exists). None when no channel
+    resolves OR the read fails; the caller MUST treat None as "cannot assess", never as
+    "not wedged" — the same fail-open contract every other probe in this module keeps.
+
+    Declines the iTerm channel EARLY when `iterm-automation-blocked.flag` is set
+    (TRDD-WKTD5JTC advisor correction #4): iTerm capture AND inject both ride osascript, so
+    a TCC-denied launchd daemon silently empties BOTH — and `fleet_inject.fire()` would then
+    falsely report the follow-up ESC as "delivered". Declining the read here means no wedge
+    is ever diagnosed on that channel this beat, so no attempt is burned on an injection
+    that could never have landed.
+    """
+    pane = terminal.get("tmux_pane", "").strip()
+    if pane:
+        return terminal_trigger.read_pane_text({"kind": "tmux", "pane": pane})
+    sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
+    if sid:
+        try:
+            import global_state as gs  # local import — mirrors record_iterm_automation_state
+
+            if (gs.global_state_dir() / ITERM_TCC_FLAG).exists():
+                return None  # declined — proven-dead channel this beat (TCC denial)
+        except Exception:  # noqa: BLE001 -- a probe fault must never break the scan
+            pass
+        return terminal_trigger.read_pane_text({"kind": "iterm", "session_id": sid})
+    return None
+
+
+_RETRY_WEDGE_STATE_FILE = "retry-wedge-episode.json"
+
+
+def _read_retry_wedge_state(root: str) -> dict | None:
+    """The persisted retry-wedge episode state for `root`, or None (no episode / unreadable —
+    the two are indistinguishable and both correctly start `retry_wedge_state_update` fresh,
+    i.e. the next poll is treated as a first sighting)."""
+    path = os.path.join(root, ".janitor", "state", _RETRY_WEDGE_STATE_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_retry_wedge_state(root: str, value: dict | None) -> None:
+    """Persist (or clear, on None) the retry-wedge episode state for `root`. Best-effort —
+    a write failure must never break the fleet scan; the next poll simply re-derives it."""
+    path = os.path.join(root, ".janitor", "state", _RETRY_WEDGE_STATE_FILE)
+    try:
+        if value is None:
+            os.unlink(path)
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        state.atomic_write(path, json.dumps(value))
+    except OSError:
+        pass
+
+
+def write_rate_limited_flag(root: str, now: int) -> None:
+    """Stamp `<root>/.janitor/state/rate-limited.flag` (+ `rate-limited-since.ts`) as if
+    `on-stop-failure` had fired — the DAEMON's own fallback (TRDD-WKTD5JTC §1b, empirically
+    measured 2026-08-13): an ESC that breaks CC's retry-watchdog wedge fires plain `Stop`,
+    NOT `on-stop-failure` (832/832 turn-ending API errors trip StopFailure; only 1/53 ESC
+    interrupts do — below the 5.1% chance rate). So nothing else writes this flag on the
+    retry-wedge path, and without it the wedge breaks but the session then just sits idle —
+    strictly worse than the wedge, which at least made the stall visible. Mirrors
+    `on-stop-failure.py`'s write exactly (same two files) so the EXISTING
+    `[janitor-resume]` + OAuth-rotator recovery chain proceeds downstream unchanged.
+
+    Best-effort: a write failure here must never break the recovery beat — the ESC itself
+    is the load-bearing action; this flag is the follow-up that makes it actually resume.
+    """
+    sdir = os.path.join(root, ".janitor", "state")
+    try:
+        os.makedirs(sdir, exist_ok=True)
+        Path(os.path.join(sdir, state.RATE_LIMITED_FLAG)).touch()
+        state.atomic_write(os.path.join(sdir, state.RATE_LIMITED_SINCE_FILE), str(now))
+    except OSError:
+        pass
+
+
 def diagnose_root(
     root: str,
     *,
@@ -599,6 +683,7 @@ def diagnose_root(
     transcript_age: int | None,
     stale_s: int = STALE_S,
     server_owned: bool = False,
+    terminal: Mapping[str, str] | None = None,
 ) -> tuple[str, str | None, int | None]:
     """Read a project's ``.janitor`` state + the session's ``transcript_age`` and
     diagnose its janitor health. Returns ``(diagnosis, recovery, dispatch_age_s)``
@@ -629,7 +714,30 @@ def diagnose_root(
         armed = ""
     effective_stale_s = stale_threshold_for(armed, stale_s)
     transcript_stale = transcript_age is not None and transcript_age >= effective_stale_s
+    # TRDD-WKTD5JTC §1: only poll the pane (a subprocess) when the FP guard the design
+    # requires is already satisfied — a transcript that is NOT stale can never be a
+    # retry-wedge (CC's watchdog keeps the turn alive without appending, so 1a proved
+    # transcript_stale DOES trip during a real wedge). This also keeps a healthy host at
+    # ≈0 captures/beat (advisor correction #4). Any prior episode is cleared the moment
+    # the transcript is fresh again — the wedge already broke (or never existed here).
+    # Guardrail (never touch an unarmed/server_owned instance): skip the pane poll
+    # entirely for those — reading its content is a real Apple Event / tmux call and
+    # the result would be discarded anyway (diagnose_instance returns unarmed/
+    # server_owned before ever consulting retry_wedged).
+    retry_wedged = False
+    if transcript_stale and terminal and not deliberately_unarmed and not server_owned:
+        pane_text = capture_pane_text(terminal)
+        current_attempt = (
+            session_liveness.retry_wedge_attempt(pane_text) if pane_text is not None else None
+        )
+        new_state, retry_wedged = session_liveness.retry_wedge_state_update(
+            prev=_read_retry_wedge_state(root), current_attempt=current_attempt
+        )
+        _write_retry_wedge_state(root, new_state)
+    else:
+        _write_retry_wedge_state(root, None)
     diagnosis = session_liveness.diagnose_instance(
+        retry_wedged=retry_wedged,
         deliberately_unarmed=deliberately_unarmed,
         pane_alive=True,  # the caller only diagnoses processes found alive in ps
         transcript_stale=transcript_stale,
@@ -840,7 +948,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
             under_agents_home=harness_backend.root_under_agents_home(root),
         )
         diagnosis, recovery, dispatch_age = diagnose_root(
-            root, now=now, transcript_age=tr_age, server_owned=server_owned
+            root, now=now, transcript_age=tr_age, server_owned=server_owned, terminal=terminal
         )
         fleet.append(
             Instance(

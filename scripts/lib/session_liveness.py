@@ -29,7 +29,76 @@ recovery path.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+
+# TRDD-WKTD5JTC — the CC retry-watchdog wedge signature. CAUSE-AGNOSTIC on purpose (owner
+# incident 2026-07-24): the wedge fires for a 429 ("429 Rate limited · Retrying in 0s ·
+# attempt 5/300") AND for a session-limit throttle ("Session limit reached · Retrying in
+# 2m 50s (2:10pm) · attempt 1/300") — same UI wedge, different cause. Keying on "429" or
+# "rate limit" MISSES the session-limit wedge, so the only invariant is the shape itself:
+# "Retrying in <duration>" followed somewhere on the same view by "attempt N/M". Cause
+# words are optional context the daemon may log, never part of the match.
+_RETRY_WEDGE_RE = re.compile(r"retrying\s+in\b.*\battempt\s+(\d+)\s*/\s*\d+", re.IGNORECASE | re.DOTALL)
+
+
+def is_retry_wedge(text: str) -> bool:
+    """True iff `text` (a captured pane frame) shows the CC retry-watchdog wedge signature.
+
+    PURE. Keys ONLY on the invariant shape `Retrying in … attempt N/M` — never on `429` /
+    `rate limit`, which a cause-specific regex would miss the session-limit wedge. This
+    alone is NOT sufficient to declare a pane wedged: a STATIC display of this exact text
+    (e.g. this very TRDD file, which quotes the wedge line verbatim, shown in a pane) would
+    match every poll forever. The advance-across-polls guard (`retry_wedge_state_update`)
+    is what turns a signature match into a genuine wedge diagnosis — see there.
+    """
+    return _RETRY_WEDGE_RE.search(text or "") is not None
+
+
+def retry_wedge_attempt(text: str) -> int | None:
+    """The `attempt N` number from a captured pane frame, or None when the wedge signature
+    is absent. PURE. This is the ONLY thing that can distinguish a genuinely-retrying pane
+    from one merely displaying the string: the countdown/spinner/statusline clock all change
+    every poll too, so "nothing else on the frame changes" is not a usable heuristic — only
+    the attempt counter's own trajectory (advancing vs static) tells the two apart."""
+    m = _RETRY_WEDGE_RE.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def retry_wedge_state_update(
+    *, prev: Mapping[str, object] | None, current_attempt: int | None
+) -> tuple[dict[str, object] | None, bool]:
+    """Advance the persisted retry-wedge episode state by ONE poll and decide whether THIS
+    poll counts as wedged. PURE (TRDD-WKTD5JTC, advisor correction #3).
+
+    Returns ``(new_state, wedged)`` — ``new_state`` is what the caller persists for the NEXT
+    poll (``None`` clears it: the signature is gone, the episode is over); ``wedged`` is True
+    only once genuine progress (an attempt-number ADVANCE) has been observed — the ONLY guard
+    against a pane that STATICALLY displays the string (a naive substring/regex-only match
+    would self-trigger on this very TRDD file's own quoted wedge line, which never advances).
+
+    ``current_attempt`` is None when this poll's pane text does not match the wedge signature
+    at all (``is_retry_wedge`` false) — the episode is over, clear state, never wedged.
+
+    A DECREASE vs the persisted attempt starts a NEW episode (the earlier one ended — broke,
+    or the turn resumed and a fresh retry began later) rather than being treated as
+    regression; the new episode's baseline resets ``confirmed`` to False, so IT must advance
+    at least once before it counts either.
+
+    A TIE (same attempt as the last poll) is not progress by itself, but it does not cancel
+    an ALREADY-confirmed episode either: CC's backoffs (observed up to 2m50s) can exceed the
+    ~2 min heartbeat interval, so two consecutive polls legitimately land on the same number
+    while the episode is still genuinely wedged — "keep polling", not "reset to unconfirmed".
+    """
+    if current_attempt is None:
+        return None, False
+    prev_attempt = prev.get("attempt") if prev else None
+    prev_confirmed = bool(prev.get("confirmed")) if prev else False
+    if not isinstance(prev_attempt, int) or current_attempt < prev_attempt:
+        return {"attempt": current_attempt, "confirmed": False}, False
+    if current_attempt > prev_attempt:
+        return {"attempt": current_attempt, "confirmed": True}, True
+    return {"attempt": current_attempt, "confirmed": prev_confirmed}, prev_confirmed
 
 
 def capture_terminal_identity(env: Mapping[str, str]) -> dict[str, str]:
@@ -192,6 +261,7 @@ DIAGNOSES: tuple[str, ...] = (
     "unarmed",           # user opted out — NEVER touch
     "server_owned",      # an ai-maestro harness agent a LIVE server owns — NEVER touch (TRDD-PZLVT2RN)
     "dead",              # process/pane gone — a keystroke can't reach it
+    "retry_wedged",      # CC's own retry-watchdog wedge (no flag) — ESC-only, ranked above frozen
     "frozen",            # rate-limited + no transcript progress — the freeze ladder
     "version_mismatch",  # loaded an older plugin version than cached — reload/update
     "cron_dead",         # armed but the heartbeat stopped firing — re-arm
@@ -203,6 +273,12 @@ _DIAGNOSIS_RECOVERY: dict[str, str | None] = {
     "unarmed": None,
     "server_owned": None,          # the ai-maestro server owns this agent's continuity — hands off
     "healthy": None,
+    "retry_wedged": "esc_retry",   # OWN esc-only recovery (TRDD-WKTD5JTC advisor #1) — NEVER "ladder":
+                                    # "ladder" walks to force_restart (a KILL) at attempts>=3 under
+                                    # include_hard=True, and a retry-wedge must never kill at any
+                                    # attempt count. fleet_recovery.action_for maps this to esc_nudge
+                                    # UNCONDITIONALLY (see there) — this string is only the "is this
+                                    # diagnosis actionable at all" marker, never invoked directly.
     "frozen": "ladder",            # run recovery_action_for() (the 7-rung escalation)
     "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
     "cron_dead": "rearm",          # inject /janitor-arm to restore the heartbeat
@@ -218,6 +294,7 @@ def diagnose_instance(
     rate_limited: bool,
     version_stale: bool,
     server_owned: bool = False,
+    retry_wedged: bool = False,
 ) -> str:
     """Classify ONE armed claude instance's janitor health from pre-gathered
     boolean facts (the daemon computes each from the instance's state-dir +
@@ -255,6 +332,13 @@ def diagnose_instance(
         return "dead"              # gone — keystroke recovery is impossible
     if not transcript_stale:
         return "healthy"           # transcript advancing = working OR heartbeat-firing; never touch
+    if retry_wedged:
+        # Ranked ABOVE frozen (TRDD-WKTD5JTC design §2): a pane can show BOTH the wedge
+        # signature and a stale rate-limited.flag (e.g. a prior window's flag that never got
+        # swept), and the ESC-only recovery is identical in shape either way — but retry_wedged
+        # must win the ROUTING so its OWN esc-only entry is consulted (never "ladder", which
+        # would eventually escalate frozen's hard rung — a kill this diagnosis must never reach).
+        return "retry_wedged"
     if rate_limited:
         return "frozen"            # stuck + a rate-limit flag = the freeze → ladder
     if version_stale:
