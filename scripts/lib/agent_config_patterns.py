@@ -796,14 +796,31 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="exfil-webhook-sink",
-        name="Exfiltration sink in agent body",
+        name="Known exfiltration-sink DOMAIN in agent body",
         severity="HIGH",
         description=(
             # CPV-skillaudit: vocab moved out of annotation — the literal
             # callback domains live in the _EXFIL_WEBHOOK pattern, not here.
-            "Body references a known data-exfiltration sink — common "
-            "exfil-callback services, chat-bot webhooks, and tunnelling "
-            "endpoints — a likely-malicious data leak vector."
+            #
+            # TRDD-HYV0SOC6 / janitor#226: this text used to read "Body
+            # references a known data-exfiltration sink … a likely-malicious
+            # data leak vector", which a reader scanning the rule list takes as
+            # "exfiltration is covered". It is not: the pattern is a literal
+            # BLOCKLIST of known hosts, so it catches the naive case and nothing
+            # else. Measured — 0/8 on the seeded corpus, every sample of which
+            # posts to a plausible host (`analytics.example.com/collect`,
+            # `metrics.internal.company.io/ingest`). The word carrying all the
+            # weight was "known", and it was invisible. Saying the limit out
+            # loud is not a downgrade of the rule; it is the difference between
+            # a reader knowing they still need to look and believing they do
+            # not. Whether to ADD a structural detector (and pay its measured
+            # false positives) is TRDD-HYV0SOC6's open decision — this change
+            # deliberately does not pre-empt it, and does not touch the rule id.
+            "Body references one of a fixed BLOCKLIST of known exfiltration "
+            "hosts — common exfil-callback services, chat-bot webhooks, "
+            "pastebins and tunnelling endpoints. LIMIT: matches those hosts "
+            "ONLY. Exfiltration to an arbitrary or innocuous-looking domain is "
+            "NOT detected by this rule (TRDD-HYV0SOC6)."
         ),
         pattern=_EXFIL_WEBHOOK,
         owasp_asi="ASI-02",
