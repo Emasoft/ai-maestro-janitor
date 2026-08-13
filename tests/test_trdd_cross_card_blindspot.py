@@ -168,6 +168,42 @@ def test_a_shared_trdd_ref_is_not_a_pair(repo: Path):
     assert _run(repo).strip() == ""
 
 
+def test_rg4iuz6i_3qiq2e6j_prelink_state_is_not_caught(repo: Path):
+    """Characterization test (TRDD-4EKZ81MV) — the shared-ref mechanism CANNOT catch this
+    real, confirmed miss, at any point before the two cards were cross-linked.
+
+    Reconstructed from git history of the real cards: TRDD-RG4IUZ6I was created with
+    `external-refs: [janitor#241, janitor#227]`; TRDD-3QIQ2E6J was created with
+    `external-refs: [TRDD-WP7TCRME]` and only gained `janitor#241` in the SAME commit
+    that added the `TRDD-RG4IUZ6I` cross-reference (854259d8). There was never a window
+    where the two shared a ref without also already citing each other — the detector's
+    grouping key never had anything to group on. This is NOT a regression to fix here;
+    it documents why the detector's own docstring calls this a structural blind spot
+    that needs a new (unratified) similarity signal, not a tweak to this detector.
+    """
+    rg4iuz6i, sanqiq = "rg4iuz61", "3qiq2e61"  # 8-char stand-ins for the real ids
+    _write_trdd(repo, rg4iuz6i, external_refs="[janitor#241, janitor#227]")
+    _write_trdd(repo, sanqiq, external_refs="[TRDD-WP7TCRME]")
+
+    assert _run(repo).strip() == ""
+
+
+def test_az6qrk0d_jpl0ju86_never_shared_a_ref(repo: Path):
+    """Characterization test (TRDD-4EKZ81MV) — same structural miss, zero-overlap case.
+
+    Reconstructed from git history of the real cards: TRDD-AZ6QRK0D was created with NO
+    `external-refs:` at all; TRDD-JPL0JU86 was created with
+    `external-refs: [janitor#249, TRDD-G4BCRUP7]`. The two never shared a ref, at
+    creation or since — so the shared-ref grouping this detector implements has no
+    signal to key on, regardless of how strongly the two cards' content overlaps.
+    """
+    az6qrk0d, jpl0ju86 = "az6qrk01", "jpl0ju81"  # 8-char stand-ins for the real ids
+    _write_trdd(repo, az6qrk0d, external_refs="[]")
+    _write_trdd(repo, jpl0ju86, external_refs="[janitor#249, TRDD-G4BCRUP7]")
+
+    assert _run(repo).strip() == ""
+
+
 def test_an_issue_ref_still_pairs_when_a_trdd_ref_is_also_shared(repo: Path):
     """The TRDD-ref exclusion must not swallow a REAL finding that rides alongside it —
     two cards sharing both an umbrella AND a genuine issue still surface on the issue."""

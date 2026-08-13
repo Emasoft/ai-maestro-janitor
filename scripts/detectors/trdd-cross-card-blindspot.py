@@ -25,6 +25,24 @@ SURFACE-ONLY: this detector mutates ZERO TRDD files, ever. Zero model tokens
 and archived/refused cards are excluded (a closed card cannot be re-litigated
 and the archived/refused folders are not scanned at all).
 
+KNOWN BLIND SPOT (TRDD-4EKZ81MV — read before trusting a silent run): this
+detector's ONLY signal is a shared `external-refs:` value. Two cards that
+never shared a ref — because one card cited nothing, or the two named
+different issue numbers for the same underlying defect, or the shared ref
+was only added AT THE SAME TIME the cards were cross-linked — are invisible
+to it, structurally, no matter how much house vocabulary or STATE-block
+overlap they share. Verified against the two real misses that motivated
+this card: at every point before TRDD-RG4IUZ6I and TRDD-3QIQ2E6J were
+cross-linked, their `external-refs:` never overlapped (`janitor#241` was
+added to 3QIQ2E6J in the SAME commit that added the TRDD-RG4IUZ6I
+cross-reference); TRDD-AZ6QRK0D and TRDD-JPL0JU86 never shared an
+`external-refs:` value at all, at creation or since. So an empty run of
+this detector means "no OPEN cards happen to share an untied ref" — it does
+NOT mean "no two cards are blind to each other". Closing that gap needs a
+new signal (content/title similarity, or shared touched-files — see the
+card for the ranked options) and a similarity threshold nobody has ratified
+yet; that is a design decision, not a fix folded into this detector.
+
 Slow-moving board hygiene — daily cadence; per-(ref, pair) seen-file dedupe.
 """
 
