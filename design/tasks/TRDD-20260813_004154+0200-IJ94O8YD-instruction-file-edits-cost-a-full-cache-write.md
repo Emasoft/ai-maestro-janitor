@@ -143,6 +143,35 @@ only has to be sampled before it ages out, the way the first window's rules edit
 
       **ATTEMPT 2 dispatched** with those paths and the two constraints attempt 1 violated: do
       not sub-delegate, and do not touch the live agentlenspro surface.
+
+      **ATTEMPT 2 RESULT (2026-08-13 14:0x) — the pinned incident is UNMEASURABLE; the MECHANISM
+      is now known.** Report:
+      `reports/ij94o8yd/20260813_forensics-unclassified-cache-break.md`.
+
+      *The pinned 453,881 / `msg[363]` incident: CANNOT DETERMINE.* Verified first-hand in
+      SQLite, not taken on the agent's word: `api_calls` holds **5730 rows with 0 non-null
+      `break_cause` and 0 non-null `culprit_fingerprint`** — the classifier's fingerprint string
+      is computed transiently by the agentlensPro server and **never written back**, so it exists
+      nowhere on disk. **Zero rows** carry `cache_creation_tokens = 453881`. `otel-bodies/` is
+      empty. This box therefore closes as unmeasurable exactly as the caveat above anticipated —
+      no estimate substituted.
+
+      *But a REAL, byte-diffed break was localised from the surviving CAS store, and it is the
+      more useful result.* Session `c8a95d7e…`, two consecutive calls 51 s apart: cache_read
+      553,919 → 21,409 while cache_creation went 709 → **535,371** (row verified present).
+      Aligning both bodies' part sequences, **indices 0–815 are byte-identical** (~92% of the
+      body); the first divergence is at `messages[406]`, where the visible text is IDENTICAL and
+      the ONLY difference is that `"cache_control":{"type":"ephemeral","ttl":"1h"}` is present in
+      the prior request and **absent** in the breaking one (762 → 714 bytes, exactly the
+      annotation's length).
+
+      **MECHANISM: sliding ephemeral-cache breakpoint relocation.** Claude Code tags the
+      currently-last message with `cache_control`; appending a new message strips that tag from
+      the old last message. The prompt cache requires an exact byte match of the whole prefix up
+      to and including the marker, so relocating it invalidates the prefix that was cached under
+      it. **This is not the janitor's doing and not a rules-edit** — which reframes the card
+      again: the dominant avoidable cost is a HARNESS behaviour, not instruction-file hygiene.
+      Candidate (a) — a re-rendering `<system-reminder>` — is NOT what this diff shows.
 - [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
       spelled out rather than implied
 - [ ] Whatever the rule is, it is enforced by something that runs — not only written down
