@@ -3,7 +3,7 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: todo
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-13T03:31:49+0200
+updated: 2026-08-13T12:45:00+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -82,6 +82,26 @@ not ship. The real question is WHERE the edit happens:
   - a **session-start** window is free but arrives on someone else's schedule;
   - a **detector/script** edit is free of any model prefix — the best case, and the one the
     janitor already uses for `rules_installer`.
+
+## ⏵ 2026-08-13 12:45 — A THIRD WINDOW WAS AVAILABLE AND COULD NOT BE MEASURED
+
+A natural experiment landed today: `~/.claude/rules/proactive-delegation.md` was edited MID-SESSION
+(the USER revoked the "no subagents unless requested" line and the revocation was recorded in that
+file). That is precisely this card's trigger — an injected instruction file, rewritten inside a
+live session, at a known time — so a third `get_cache_break_causes` window would test the EPISODIC
+claim directly: `CLAUDE_MD_CHANGED` should reappear, and should be roughly the size of one rules
+file's worth of prefix.
+
+**It could not be taken.** `agentlenspro get_cache_break_causes` fails with
+`cannot reach http://localhost:4316/mcp: read ECONNRESET` — the MCP server is not up in this
+session. Recorded rather than worked around: the card's own method note says this measurement must
+run in the MAIN session (a subagent would measure its own prefix), so there is no delegation that
+substitutes for it, and an estimate would be exactly the kind of unmeasured claim the second
+window already refuted once.
+
+**Next time the server is up, this is a free measurement** — the edit is already in git
+(`~/.claude/rules/` is outside the repo, but the session and its timing are known), so the window
+only has to be sampled before it ages out, the way the first window's rules edits did.
 
 ## Acceptance
 
