@@ -160,6 +160,21 @@ def main() -> int:
             key = _normalize_ref(raw)
             if not key:
                 continue
+            # EXTERNAL issue refs ONLY — a shared `TRDD-<id8>` is NOT evidence of two
+            # cards blind to one defect. Pointing at a common parent/umbrella card is
+            # ordinary hub-and-spoke structure: an umbrella like TRDD-G4BCRUP7 is cited
+            # by many unrelated children (one per contract row), so keying on it pairs
+            # up every child with every other and reports cards that have nothing to do
+            # with each other.
+            #
+            # Worse, it is SELF-INFLICTED and unbounded: cross-linking is the remedy this
+            # detector recommends, so every remedy ADDS a shared TRDD-ref and manufactures
+            # the next finding. Measured immediately after shipping — cross-linking the
+            # janitor#246 pair created a brand-new JPL0JU86/KI6OWCZT "pair" whose only
+            # shared ref was the umbrella both had just been linked to. A check whose own
+            # advice re-arms it never converges, and that is how a check gets switched off.
+            if _BARE_OR_PREFIXED_TRDD_RE.match(key):
+                continue
             ref_display.setdefault(key, raw.strip())
             bucket = ref_to_uids.setdefault(key, [])
             if uid not in bucket:

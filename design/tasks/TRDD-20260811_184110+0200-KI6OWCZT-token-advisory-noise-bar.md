@@ -3,14 +3,14 @@ trdd-id: KI6OWCZT
 title: pre-tool-token-budget advisory must clear the actionable-and-anomalous bar
 column: todo
 created: 2026-08-11T18:41:10+0200
-updated: 2026-08-11T18:41:10+0200
+updated: 2026-08-13T04:43:15+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [janitor#246, janitor#230]
+external-refs: [janitor#246, janitor#230, TRDD-G4BCRUP7]
 ---
 
 # The token-spike advisory must clear the noise bar

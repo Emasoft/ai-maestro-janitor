@@ -3,7 +3,7 @@ trdd-id: 88ZVEQY7
 title: Fleet github-config findings served 18 days stale with no age label — sweep silence must alarm
 column: blocked
 created: 2026-08-08T15:53:11+0200
-updated: 2026-08-13T02:55:00+0200
+updated: 2026-08-13T04:43:15+0200
 blocked-by: [publish-and-github-reply-gate]
 pre-block-column: todo
 current-owner: janitor-main-session
@@ -12,7 +12,7 @@ approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [janitor#244, janitor#237]
+external-refs: [janitor#244, janitor#237, TRDD-EZ3PMQYX]
 ---
 
 # Fleet github-config findings: staleness + age label
@@ -35,6 +35,13 @@ entirely. Two defects:
    cannot be checked by the reader (#237's lesson, generalized from the iTerm flag to the
    fleet audit). The peer nearly mutated a compliant repo on an 18-day-old claim — stopped
    only by their own verify-before-acting discipline.
+
+   **SIBLING CARD — TRDD-EZ3PMQYX, surfaced 2026-08-13 by `trdd-cross-card-blindspot`.** Its
+   item 3 implements the SAME #237 ask ("flag carries evidence age") for the iTerm flag, which
+   is the surface this card generalizes FROM. They do not conflict — they are one principle on
+   two surfaces — but whichever ships first should establish the age-label mechanism and the
+   second should REUSE it. Two independently-invented age formats for the same lesson is the
+   avoidable outcome, and neither card could see the other until now.
 
 ## What
 

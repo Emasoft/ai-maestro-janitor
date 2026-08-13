@@ -3,14 +3,14 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-08T10:36:31+0200
+updated: 2026-08-13T04:43:15+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237]
+external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, TRDD-88ZVEQY7]
 ---
 
 # iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence

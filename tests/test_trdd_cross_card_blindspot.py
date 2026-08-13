@@ -145,3 +145,37 @@ def test_three_cards_sharing_ref_report_three_distinct_pairs(repo: Path):
     assert f"TRDD-{uid_b} & TRDD-{uid_a}" not in out
     assert f"TRDD-{uid_c} & TRDD-{uid_a}" not in out
     assert f"TRDD-{uid_c} & TRDD-{uid_b}" not in out
+
+
+def test_a_shared_trdd_ref_is_not_a_pair(repo: Path):
+    """Two cards citing the same PARENT card is hub-and-spoke structure, not blindness.
+
+    An umbrella card is cited by many unrelated children (one per contract row), so keying
+    on a shared `TRDD-<id8>` pairs every child with every other and reports cards that have
+    nothing to do with each other.
+
+    It is also SELF-INFLICTED and unbounded, which is what makes it fatal rather than merely
+    noisy: cross-linking is the remedy this detector RECOMMENDS, so each remedy adds a shared
+    TRDD-ref and manufactures the next finding. Observed live immediately after shipping —
+    cross-linking the janitor#246 pair created a brand-new pair whose only shared ref was the
+    umbrella both had just been linked to. A check whose own advice re-arms it never
+    converges, and a check that never converges gets switched off.
+    """
+    uid_a, uid_b = "11111111", "22222222"
+    _write_trdd(repo, uid_a, external_refs="[TRDD-99999999]")
+    _write_trdd(repo, uid_b, external_refs="[TRDD-99999999]")
+
+    assert _run(repo).strip() == ""
+
+
+def test_an_issue_ref_still_pairs_when_a_trdd_ref_is_also_shared(repo: Path):
+    """The TRDD-ref exclusion must not swallow a REAL finding that rides alongside it —
+    two cards sharing both an umbrella AND a genuine issue still surface on the issue."""
+    uid_a, uid_b = "33333333", "44444444"
+    _write_trdd(repo, uid_a, external_refs="[TRDD-99999999, janitor#777]")
+    _write_trdd(repo, uid_b, external_refs="[TRDD-99999999, janitor#777]")
+
+    out = _run(repo)
+    assert "1 pair(s)" in out
+    assert "janitor#777" in out
+    assert "99999999" not in out
