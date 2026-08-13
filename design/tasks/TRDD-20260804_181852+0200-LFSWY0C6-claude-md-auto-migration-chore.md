@@ -3,8 +3,8 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T07:15:09+0200
-implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea]
+updated: 2026-08-13T08:42:00+0200
+implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836]
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -257,6 +257,108 @@ Nothing in this commit writes anything. Delivery is CM-2 steps 3–5: write the 
 lesson), remove the migrated lines, and prove preservation with `claudemd_slim verify --old` BEFORE
 committing. Its acceptance bar is the same one that caught this: run it on real input, not only on
 fixtures.
+
+## ⏵ 2026-08-13 — DELIVERY, part 1 SHIPPED (`64b82836`): the removal ENGINE, which refuses
+
+`scripts/lib/claudemd_migration_apply.py` + `claudemd_slim apply [--dry-run]`. CM-2 steps **4–5**.
+Step 3 (writing the atom/fold) is the memory agent's, and §"the honest limit" below is explicit that
+it is not built — the engine *enforces* that ordering rather than performing it.
+
+### The one design decision everything else follows from: the apply is PURE
+
+`apply_migration(text, blocks, corpus) -> ApplyResult` takes the current CLAUDE.md text and returns a
+CANDIDATE, so **every gate runs before anything reaches disk**. The pre-existing
+`claudemd_slim verify --old` structurally cannot do this — it compares the ON-DISK file against a
+pre-migration copy, so it can only speak AFTER the removal happened. For an unattended chore that is
+the wrong order: "we deleted it, then checked" leaves a window whose only backstop is a backup nobody
+is watching. A failed gate here means the write never occurs.
+
+### Six gates, and the FIRST one is the one the oracle cannot provide
+
+| gate | refuses when | why it is not redundant |
+|---|---|---|
+| `nothing-requested` | the block list is empty | a no-op reporting success is this card's own twice-hit failure |
+| **`not-excess`** | a requested block is a §CM-1 PERMITTED element, or is not a narrative block of this file at all | **see below** |
+| `not-uniquely-located` | the text occurs 0 or ≥2 times | Edit-tool discipline: a first-match delete cannot tell the intended line from a twin |
+| `fence-altered` | either janitor fence would change | CM-2 step 5; reachable — see the straddle case |
+| `github-url-dropped` | the last narrative repo URL would go | otherwise one contract violation is traded for another |
+| `content-dropped` | the preservation oracle finds a lost fact line or token | risk #1: knowledge shredding |
+
+**`not-excess` is the guard nobody asked for, and it is the important one.** *Preservation and
+correctness are different properties, and the oracle only checks the first* — written on this card in
+June as an argument, observed in the morning as fact, and now enforced. A run that dutifully folded
+this project's own description into a wiki page passes the oracle **completely** and still leaves a
+CLAUDE.md violating the §CM-1 element it REQUIRES. The oracle is structurally blind to that class.
+The gate keys on `classify_blocks` — the planner's own rule, EXTRACTED into a shared pure function
+rather than reimplemented, because a second copy of "is this permitted" drifts, and the drift would
+only ever surface as a permitted element going missing.
+
+`fence-altered` is likewise not defensive padding: a block that STRADDLES a fence has its pre- and
+post-fence lines joined in the narrative, so the joined string never occurs contiguously outside the
+fence — and if the fence body happens to contain that same string, uniqueness sees exactly one match,
+*inside the fence*. There is a fixture for exactly that.
+
+### Falsified per guard — each break predicted its red set BEFORE the run, and hit it exactly
+
+| break | tests that must go red | observed |
+|---|---|---|
+| `_gate_only_excess_blocks` → `[]` | the 3 `not-excess` tests | 3 red / 12 green ✓ |
+| `_gate_preservation` → `[]` | `content-dropped` ×3 (pure, CLI dry-run, live-input) | 3 red / 12 green ✓ |
+| `_gate_fences_untouched` → `[]` | `fence-altered` | 1 red / 14 green ✓ |
+| `_remove_unique` → first-match | `not-uniquely-located` | 1 red / 14 green ✓ |
+
+Predicting the red set first is what makes this falsification rather than fiddling: a break that
+reddens MORE than predicted means the tests are entangled, and one that reddens LESS means the guard
+was never load-bearing. Neither happened. Restored via `git checkout` after each (the work was
+committed first, so RULE 0 held throughout).
+
+### VERIFIED ON REAL INPUT — the whole CM-2 loop, not just the unit under test
+
+The live `CLAUDE.md` + 60 excess notes, in a scratch root (the repo's own file never touched):
+
+| step | result |
+|---|---|
+| `check` before | `narrative is 13689 bytes (cap 8192)` — genuinely over cap, not merely non-conforming |
+| `plan` | **60 migratable / 8 permitted** (1 description + 3 urls + 4 dev-ops) |
+| `apply --dry-run`, no owning page | **REFUSED**, 8 failures, each naming a dropped fact line; file byte-identical |
+| `apply`, owning page present | `removed 60 block(s) — preservation PROVEN, both fences byte-identical` |
+| `check` after | the **cap violation is gone** |
+| `verify --old` (INDEPENDENT path) | `preservation PROVEN — every fact line and token survives` |
+| permitted elements | all 8 present afterwards; both fences byte-identical; 201990 → 189400 bytes |
+
+The dry-run refusal and the post-page success are the same request differing only in whether the
+content had been written first — i.e. the CM-2 step-3-before-step-4 ordering is ENFORCED, not
+documented.
+
+### What part 1 does NOT do — the honest limits, none of them papered over
+
+1. **CM-2 step 3 is unbuilt.** Nothing writes the atom or the fold + `[^N]` lesson; the applier
+   *requires* the corpus to already contain the content and refuses otherwise. That is the correct
+   dependency direction (the engine must exist before an agent can call it), but it means migration
+   is still a MANUAL two-step today.
+2. **CM-2 step 6 is unbuilt.** `apply` does not refresh the index/map fences, so `check` still
+   reports a stale index afterwards. Deliberate — the fences are separate generators with their own
+   locks, and folding them in would make one write span three concerns.
+3. **The scheduler intervention is unbuilt**, so `PRRD G8.1`'s *automatic* is still not satisfied.
+   This card stays open on that alone.
+4. **A decision-half consequence found by these tests, recorded not fixed:** a SINGLE-LINE prose
+   sentence containing a §CM-3 word reads as dev-ops and is PERMITTED — `\bpush\b` matches across the
+   hyphen in "an earlier event-push design…", so that sentence is exempt while the same words wrapped
+   over two lines are migratable. That is the classifier's documented, deliberate bias toward keeping
+   a block, and the same accepted class as `- Note: see https://x.example`. Changing it belongs in a
+   decision-half commit with its own falsification, NOT smuggled into a delivery commit — fixing two
+   things at once is how neither gets falsified.
+
+### Delivery-part-1 acceptance (the chore-level §4 boxes stay open — they need the agent + scheduler)
+
+- [x] Removal is gated on a preservation proof computed BEFORE the write, not after
+- [x] The oracle is OBSERVED REFUSING on real input, not merely observed passing
+- [x] A §CM-1 permitted element cannot be removed even when preservation would pass
+- [x] Both janitor fences byte-identical across a real 60-block migration
+- [x] Each gate falsified individually, with its red set predicted in advance
+- [ ] An agent writes the atom/fold (CM-2 step 3) — unbuilt
+- [ ] The fences are refreshed after migration (CM-2 step 6) — unbuilt
+- [ ] The scheduler runs it unprompted (`PRRD G8.1`) — unbuilt
 
 ## 1. Why (the cost argument, measured)
 
