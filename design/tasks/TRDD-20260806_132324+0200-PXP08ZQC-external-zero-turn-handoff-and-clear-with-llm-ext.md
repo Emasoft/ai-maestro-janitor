@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-12T15:39:16+0200
+updated: 2026-08-13T04:01:12+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -19,6 +19,31 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 **Column `dev` since 2026-08-06.** Design was pre-authored by the owner in the body below, so
 `todo → dev` skipped `design`/`dispatch` (mono-agent self-assignment).
 
+### ⏵ READINESS AUDIT 2026-08-13 — everything is built EXCEPT the invocation
+
+Audited end-to-end because the owner is about to re-attempt free compaction on a fixed
+llm-externalizer. Verified from the tree, not from this card:
+
+- **llm-ext IS live**, not rejected — see the corrected row 2b. `llm-ext` resolves on PATH at
+  **13.1.0**; `use_llm_ext()` defaults True; the composer falls back to the template on failure.
+- **The watcher has NO CALLER.** Exhaustive search (`*.py`/`*.json`/`*.md`/`*.sh`, whole repo):
+  every hit is this card, TRDD-1QJIZFFW, two test files, the auto-generated CLAUDE.md map, a
+  memory page, or its own docstring. **No `dispatch.py` roster entry and no `daemon.py` task** —
+  `dispatch.py:943` still calls it "the future external-clear watcher".
+- **Feature flag is DEFAULT OFF** (`DEFAULT_ENABLED = False`, `external_clear.py:64`).
+
+**Consequence, and it is the whole point of this audit: flipping the knob ON changes NOTHING.**
+Two independent gates stand between built and running — the flag AND a caller — and only the
+flag is discoverable from the config. That is this project's recurring shipped-dark shape
+(G4BCRUP7), here in its most expensive form: a fully-tested feature (43 tests across parts 1+1b)
+that cannot execute.
+
+**So the remaining work is exactly two steps, in this order:** (1) wire the invocation as a
+**HOOK** per the owner's 2026-08-12 correction below — NOT the daemon task this card originally
+specified; (2) flip the default. Step 1 is gated on the `user-decision-run-the-clear` that blocks
+TRDD-1QJIZFFW, because it is the first change that can `/clear` OTHER projects' sessions and a
+clear is unrecoverable. Nothing here is blocked on llm-externalizer.
+
 ### Component state
 
 | Part | State |
@@ -26,7 +51,7 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 | 1. Watcher — pure gate | **DONE** `scripts/lib/external_clear.py` (`def783f5`), 29 tests |
 | 1b. Watcher — gather + fire CLI | **DONE** `scripts/external_handoff_clear.py` (`95a5beda`), 14 tests |
 | 2. Handoff writer — template | **DONE** `compose_template_handoff`, passes `check_handoff_concise` by construction |
-| 2b. Handoff writer — llm-ext upgrade | **TRIED AND REJECTED ON EVIDENCE** — `73a426c4` built it, `07e8d986` removed it. Do NOT re-attempt blind (see below) |
+| 2b. Handoff writer — llm-ext upgrade | **STALE ROW — it was re-attempted and SHIPPED.** `73a426c4` built it, `07e8d986` removed it, then `df7d4cb3` (TRDD-1QJIZFFW) wired it for good: `external_handoff_clear.py:260` calls `ec.run_llm_ext_summary(transcript)` when `use_llm_ext()` (default **True**) and a transcript exists, degrading to the template on any failure — "both branches produce a handoff; neither can produce none". Verified 2026-08-13. Do NOT read the old "REJECTED" wording as current: it would send the next pass to rebuild a live feature, or to refuse a re-attempt the owner has since asked for |
 | 3. Typist | **DONE, ZERO CHANGES** — `clear_trigger._spawn_chain` reused verbatim |
 | 4. Daemon wiring | **NOT STARTED** — the only thing between this and unattended operation |
 
