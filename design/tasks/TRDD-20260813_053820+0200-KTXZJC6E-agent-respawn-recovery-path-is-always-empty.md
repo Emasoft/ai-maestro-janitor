@@ -3,7 +3,7 @@ trdd-id: KTXZJC6E
 title: The background-agent respawn path is always empty so the documented fallback cannot run
 column: todo
 created: 2026-08-13T05:38:20+0200
-updated: 2026-08-13T07:55:00+0200
+updated: 2026-08-13T08:52:00+0200
 implementation-commits: [e81ac464]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -172,10 +172,56 @@ otherwise the mechanism is exactly what this card was filed about, one layer dee
 - [ ] The workflow-subagent case still stores no parent transcript (the guard tested in its own
       right, since widening it is the tempting wrong fix)
 
+## ⏵ 2026-08-13 08:50 — PART B, scoped from the code rather than guessed
+
+Traced the whole consumer chain before designing anything. **No script can be the consumer**, and
+that constraint decides the shape.
+
+### What production actually emits today
+
+`dispatch.py::_pending_agent_directive_lines` → `pending_agents.directive_lines()` → one line per
+in-flight agent:
+
+```
+resume background agent via SendMessage: <agent-id> — <description>
+```
+
+plus ONE shared note (deliberately shared, not per-line, for token economy) warning that a DIED agent
+re-runs the request that killed it. **The respawn fallback is named nowhere in that output.** So the
+main Claude is told to SendMessage-resume and told nothing about what to do when that fails — which
+is precisely the state `add()`'s own docstring claims the transcript handle prevents.
+
+### Why the consumer cannot be a script
+
+Only the main Claude issues the SendMessage and sees it fail. Nothing on disk records "a resume was
+attempted and did not work", and no detector can infer it — a silent agent is indistinguishable from
+a working one. So an autonomous `if resume_failed: respawn()` has no signal to branch on, and writing
+one would be inventing a trigger that does not exist.
+
+**The consumer is therefore the RESUME TURN itself**, and part B is two small pieces:
+
+1. **An agent-facing entry point** that turns an id into the prompt — the thing a human or the main
+   Claude can actually run at the moment a resume fails (`respawn_prompt_for` is a library function
+   today, reachable only from Python).
+2. **A pointer to it in the shared note**, emitted ONLY when at least one listed entry has a
+   resolvable handle — so a project with no recoverable agents pays zero extra tokens, and the line
+   never promises a fallback that would come back empty.
+
+### The trap to avoid, named now
+
+Do NOT put the fallback text on every agent line. The shared note exists because per-line prose is
+paid on every heartbeat resume, and this card's own §"Why this matters more than it looks" is about a
+mechanism that is *documented and inert* — adding inert prose to every resume would be that failure
+with a token bill attached.
+
 ## Acceptance — part B: a consumer exists (correction 3; NOT satisfied by part A)
 
-- [ ] Some production path actually calls the respawn fallback when a resume fails — until then the
-      handle is populated and unread, and this card must not be called complete
+- [ ] An entry point exists that returns an agent's respawn prompt from its id alone (not a Python
+      import), so the fallback is reachable at the moment a resume fails
+- [ ] The resume output names that fallback — in the SHARED note, never per-line
+- [ ] It is emitted ONLY when a handle actually resolves, so the pointer never promises a prompt
+      that would come back empty
+- [ ] Falsified: an entry whose transcript cannot be resolved produces NO pointer
 
 ## Original acceptance (superseded by A and B above)
 
