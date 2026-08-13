@@ -1,9 +1,9 @@
 ---
 trdd-id: F4IBIDB6
 title: Nothing detects a WORK column that nobody is working — the sweep has been done by hand twice in one day
-column: todo
+column: complete
 created: 2026-08-13T00:58:36+0200
-updated: 2026-08-13T01:07:00+0200
+updated: 2026-08-13T05:04:00+0200
 current-owner: unassigned
 task-type: feature
 approval-tier: 0
@@ -13,7 +13,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-WP7TCRME]
-implementation-commits: [3f15a8ee]
+implementation-commits: [3f15a8ee, 6a0066d7]
 ---
 
 # The board-honesty sweep has no owner but a human
@@ -75,8 +75,39 @@ cost is one predicate) rather than adding a detector:
       `has_stated_precondition`, where it had been making trdd-drift nag correctly-parked cards.
       Superseded box text — it is exact, needs no threshold, and caught a
       real case the same night it was noticed
-- [ ] The stale-WORK-column check names candidates and their idle age, and states the invariant
-      rather than proposing a destination
-- [ ] Neither check MUTATES a card
-- [ ] A card that is genuinely being worked right now does not fire (the false-positive that
-      would get the whole thing switched off)
+- [x] The stale-WORK-column check names candidates and their idle age, and states the invariant
+      rather than proposing a destination — `check7_work_column_without_work`, fired as
+      `work-column-without-work`, shipped at 6a0066d7.
+- [x] Neither check MUTATES a card — pinned by
+      `test_reconcile_reports_check7_without_mutating_the_record`, which compares every record
+      field before and after.
+- [x] A card that is genuinely being worked right now does not fire — pinned at 0d AND at the
+      2.99d boundary, plus `test_check7_is_scoped_to_the_columns_that_make_the_claim`.
+
+## ⏵ STATE — 2026-08-13: complete. Shipped at 6a0066d7 (check 6 had shipped earlier at 3f15a8ee).
+
+**The sweep now runs free on every heartbeat.** It had been performed BY HAND three times in
+under a day — the 15:25 report, `451e3f2f` at 00:2x, and again this session on UA4FAX67, which
+sat in `todo` while both its remaining boxes were outside anyone's effort. Every pass found real
+lies. That is the definition of a chore with no owner.
+
+**Two design points, both aimed at the one fatal failure mode** (firing on a card somebody IS
+working, which gets a board detector switched off wholesale):
+
+1. `_idle_days` takes the **freshest** of two signals — frontmatter `updated:` and the file's
+   real mtime. Either alone produces that false positive: an agent mid-work edits the body
+   without bumping `updated:` (mtime fresh, stamp stale), while a mechanical repair bumps
+   neither reliably. The minimum means any recent evidence of activity keeps the card quiet.
+2. Threshold 3d, deliberately generous, with the boundary (2.99d) pinned.
+
+**Age is INJECTED**, like check 1's `commit_in_released_tag` and check 4's `column_of`, so the
+predicate stays pure. `None` ⇒ silent: an unknown age is not evidence of a stall, and inventing
+one would accuse exactly the cards whose metadata is hardest to read.
+
+**Surfaces, never mutates** — the destination genuinely differs per card, and the report that
+motivated this warned that a board-wide scripted pass "would destroy the audit trail this pass
+exists to restore".
+
+**Note for whoever sees the first firing:** the board carries ZERO cards in `dev`/`testing`/
+`ai_review` today, so check 7 is correctly silent right now. Its guards are synthetic by
+necessity; it will speak the first time a WORK card is left untouched for 3 days.
