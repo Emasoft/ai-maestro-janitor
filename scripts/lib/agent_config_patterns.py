@@ -520,6 +520,13 @@ _DYNAMIC_EXEC = _re(
     r"|\bnew\s+Function\s*\("
     r"|\bsetTimeout\s*\(\s*['\"]"
     r"|\bsetInterval\s*\(\s*['\"]"
+    # PowerShell. This rule claims "dynamic code execution" as its domain, and
+    # `Invoke-Expression $decoded` is the canonical PowerShell form of exactly that — yet the
+    # alternation above is entirely JS/Python, so the rule could not fire on a PowerShell skill
+    # at all. The sibling `_EXEC_SINK` (used by two-step-code-injection, ~60 lines up) has
+    # carried this identical sub-pattern all along; it was simply never mirrored here. So this
+    # is REUSE of a token already measured at 0/72 FP on this corpus, not a new guess.
+    r"|Invoke-Expression\b|(?<![.\w])iex\b"
 )
 
 

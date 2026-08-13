@@ -3,7 +3,7 @@ trdd-id: XOITBRIZ
 title: The code-fence mask hides dynamic-exec-in-body's primary threat — the fence is not the signal, the surrounding prose is
 column: testing
 created: 2026-08-13T11:26:39+0200
-updated: 2026-08-13T12:20:00+0200
+updated: 2026-08-13T13:22:00+0200
 current-owner: janitor-main-session
 task-type: security
 approval-tier: 0
@@ -104,8 +104,40 @@ recall 2/3 → 3/3 with no FP change.
       Double the recall at zero false-positive cost, measured on a set where two thirds of the
       attacks were authored AFTER the fix. That is the claim this card supports. "100%" never was.
 
-- [ ] REMAINS OPEN: 3 of 9 are still missed. They are not overfitting artifacts — they are real
-      uncaught shapes, and a follow-up should characterise them rather than assume the rule is
-      done. `two-step-code-injection` is flat at 3/9 (33%) and is the weaker of the two.
+- [x] The misses are CHARACTERISED (2026-08-13). 7 misses across both rules → **5 distinct
+      shapes**; report: `reports/xoitbriz/20260813_120000+0200-missed-shapes.md`. Shapes:
+      **A** literal under the 40-char base64 floor · **B** sink reached by alias/reference
+      (`getattr(os,"system")`, `setTimeout(eval, 0, body)`) · **C** exec surface absent from
+      `_DYNAMIC_EXEC`'s alternation · **D** false suppression from a title word · **E** payload
+      split across concatenated literals.
+
+- [x] **Shape C FIXED** — `dynamic-exec-in-body` **6/9 → 7/9**, benign FP unchanged
+      (`benign-ordinary` 0/32; the corpus's 3 flagged benign belong to other rules). The rule
+      claims "dynamic code execution" as its domain yet its alternation was entirely JS/Python,
+      so `Invoke-Expression $decoded` could not fire at all — while the sibling `_EXEC_SINK` has
+      carried that exact sub-pattern all along. The fix REUSES that already-0/72-FP token rather
+      than inventing one, which is why it is justified independently of the sample that exposed
+      it. Baseline updated so a regression back to 6/9 now FAILS the gate.
+
+- [ ] **THE BLIND SET IS NOW BURNED FOR THIS RULE — do not quote 7/9 as an unbiased number.**
+      Shape C was fixed after seeing which blind sample exposed it. The fix's justification is
+      objective (a documented exec surface missing from a rule whose stated domain covers it),
+      but the SCORE is no longer a clean out-of-sample measurement. A future claim about this
+      rule's recall needs a NEW blind set, authored without reading this card.
+
+- [ ] REMAINS OPEN: 4 shapes (A, B, D, E), and the report is deliberately honest that only
+      **C** was safe to close on existing evidence. A and D are knob-shaped but their FP cost at
+      the new setting is UNMEASURED, not zero — A repeats the exact base64-floor trap this card
+      already recorded once. E needs multi-literal correlation, a different kind of matching
+      than any current branch. `two-step-code-injection` now measures 5/9 intended (8/9 by any
+      rule), NOT the 3/9 written here earlier — that figure predated its own fix and was stale.
+
+- [ ] **Shape D is this card's own recorded lesson, recurring.** A genuine `eval(` is suppressed
+      because the word "Report" appears in the document's H1 (*"# Report Formatter Skill"*),
+      260+ chars away. The card already warns: a negative term must mean "this code is named as
+      bad", never "this document is of a certain kind" — that was the `checklist` removal. The
+      same class slipped back in through the vocabulary rather than the term list, which is
+      evidence the discriminator needs a positional rule (headings are titles, not disclaimers),
+      not more term-pruning.
 
 ## Notes and lessons learned

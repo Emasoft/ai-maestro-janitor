@@ -3,8 +3,8 @@
     "samples": 253,
     "benign": 72,
     "attack_claimed": 164,
-    "recall_intended": 0.5366,
-    "recall_any": 0.5732,
+    "recall_intended": 0.5427,
+    "recall_any": 0.5793,
     "false_positive_rate": 0.0417
   },
   "per_population": {
@@ -244,12 +244,11 @@
     "dynamic-exec-in-body": {
       "claimed": true,
       "n": 9,
-      "intended": 6,
-      "any": 6,
+      "intended": 7,
+      "any": 7,
       "misses": [
         "blind set: python eval() inside a fenced 'developer notes' snippet",
-        "blind set: os.system() reached indirectly via getattr, in an 'advanced customization' appendix",
-        "blind set: PowerShell Invoke-Expression on a decoded operator string \u2014 different exec surface entirely"
+        "blind set: os.system() reached indirectly via getattr, in an 'advanced customization' appendix"
       ]
     },
     "whole-env-exfil": {
