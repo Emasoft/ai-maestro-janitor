@@ -1,9 +1,9 @@
 ---
 trdd-id: 4ZSYW21E
 title: The shipped-but-open keystone goes blind exactly during a publish freeze
-column: todo
+column: complete
 created: 2026-08-13T05:02:29+0200
-updated: 2026-08-13T05:02:29+0200
+updated: 2026-08-13T06:10:00+0200
 current-owner: unassigned
 task-type: bugfix
 approval-tier: 0
@@ -13,6 +13,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-FDV1RQEB, TRDD-F4IBIDB6]
+implementation-commits: [7b2c64eb500ccbf3c45d61aeba522961129f9c8d]
 ---
 
 # Check 1 is keyed on released tags, so a freeze silences it
@@ -81,3 +82,23 @@ it proves noisy, without touching the keystone.
       visibly distinguishable from the tagged keystone's
 
 ## Notes and lessons learned
+
+- 2026-08-13T06:10 — Re-verified against a later dispatch of this card. Found the fix ALREADY
+  SHIPPED in `7b2c64eb` (same night, 18 minutes after this card was filed): `check8_shipped_unreleased`
+  (trdd_common.py:1108) is the second rung exactly as sketched — commits reachable from HEAD
+  (`git merge-base --is-ancestor <sha> HEAD`), no released tag, `check2_has_remaining_work` False,
+  non-terminal column → `shipped-unreleased-review`. Wired into `reconcile()` (only evaluated when
+  Check 1 does NOT fire, so a tagged card keeps the stronger keystone verdict) and into
+  `trdd-state-reconciliation.py` (report + drift line). Check 1 untouched — `check1_shipped_but_open`
+  is byte-identical, its own tests pass unmodified. Re-ran `ruff check`, `mypy scripts`, and
+  `tests/test_trdd_common.py` + `tests/test_trdd_state_reconciliation.py`: 121 passed, clean.
+- **Honest residual, recorded by the implementer in 7b2c64eb, not papered over here**: on the live
+  board the new rung names ZERO cards. All real shipped-but-open cases found that night had
+  remaining work (a GitHub reply pending, a publish pending) so `check2` correctly suppresses them
+  — the true discriminator is "no remaining work AN AGENT CAN DO", not merely "no remaining work"
+  (some open boxes are USER-gated). The rung is kept because untagged-and-genuinely-clean is still
+  a real state worth catching; a further refinement (splitting agent-actionable vs user-gated
+  remaining work) is a new, separate design decision — not filed here to avoid inventing policy
+  this card did not ask for.
+- This card's `column:` was left at `todo` after the fix landed — the board-drain rule flags this
+  exact failure mode (card done, not closed same session). Closed here.
