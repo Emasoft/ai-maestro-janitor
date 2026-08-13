@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-13T04:01:12+0200
+updated: 2026-08-13T12:42:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -16,8 +16,18 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
 
-**Column `dev` since 2026-08-06.** Design was pre-authored by the owner in the body below, so
-`todo → dev` skipped `design`/`dispatch` (mono-agent self-assignment).
+**Column `todo` since 2026-08-12.** Nobody is working this — 0/5 acceptance, and the NEXT ACTION
+(wire the watcher) is known and concrete, so it is pullable rather than in progress.
+
+*History, kept because the reasoning was sound and only the state moved:* this block opened with
+**"Column `dev` since 2026-08-06 … `todo → dev` skipped `design`/`dispatch` (mono-agent
+self-assignment)"** — true when written. The card was RE-COLUMNED `dev → todo` on
+2026-08-12T15:39:16+0200 (see `## Approval log`) because a WORK column asserts active work and
+nobody was working it after 6 idle days. A 2026-08-13 readiness audit was then appended BELOW
+without anyone revisiting this opening sentence, so the line a reader is told to read FIRST
+claimed `dev` while the frontmatter and the card's own audit trail said `todo`. Corrected
+2026-08-13 after a full STATE-vs-column sweep of all 60 non-terminal cards found it — the only
+such contradiction on the board.
 
 ### ⏵ READINESS AUDIT 2026-08-13 — everything is built EXCEPT the invocation
 
