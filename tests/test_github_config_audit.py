@@ -367,3 +367,50 @@ def test_nonbaseline_rulesets_with_linear_history_excludes_baseline_names() -> N
             "rules": [{"type": "required_linear_history"}]}
     got = gca.nonbaseline_rulesets_with_linear_history([baseline, user])
     assert [r["name"] for r in got] == ["my-rules"]
+
+
+# ---------- TRDD-88ZVEQY7: the age gate (janitor#244) -----------------------
+
+
+def test_payload_age_accepts_both_timestamp_shapes() -> None:
+    """The two writers disagree: `_read_findings`'s comment claims ISO-8601, but every payload
+    measured on the host carries an INT epoch. A reader that assumed either alone would crash
+    or mis-age the other, so both must work."""
+    now = 1_000_000
+    assert gca.payload_age_seconds({"generated_at": now - 3600}, now=now) == 3600
+    assert gca.payload_age_seconds({"generated_at": str(now - 3600)}, now=now) == 3600
+    iso = "1970-01-12T13:46:40+00:00"  # == epoch 1_000_000
+    assert gca.payload_age_seconds({"generated_at": iso}, now=now) == 0
+
+
+def test_payload_age_is_none_when_unusable_and_never_negative() -> None:
+    for bad in ({}, {"generated_at": ""}, {"generated_at": "not-a-date"}, {"generated_at": 0},
+                {"generated_at": True}, "not-a-dict", None):
+        assert gca.payload_age_seconds(bad, now=1_000_000) is None, bad
+    # A payload from the future must not read as a huge negative age.
+    assert gca.payload_age_seconds({"generated_at": 2_000_000}, now=1_000_000) == 0
+
+
+def test_stale_gate_withholds_past_the_factor_and_fails_open_on_unknown() -> None:
+    c = gca.AUDIT_CADENCE_S
+    assert gca.payload_is_stale(c * gca.STALE_FACTOR) is False, "exactly at the bar is not past it"
+    assert gca.payload_is_stale(c * gca.STALE_FACTOR + 1) is True
+    # Fail OPEN: an unparseable age must not silence the channel — an age-labelled finding
+    # beats no finding.
+    assert gca.payload_is_stale(None) is False
+
+
+def test_age_label_never_omits_the_clause() -> None:
+    """A MISSING age reads identically to a fresh one for a hurried reader — which is the
+    janitor#244 failure. Unknown must SAY unknown."""
+    assert "unknown" in gca.age_label(None)
+    assert "22.2d" in gca.age_label(int(22.23 * 86400))
+    assert "fresh" in gca.age_label(60)
+
+
+def test_staleness_line_withholds_without_implying_clean() -> None:
+    line = gca.staleness_line(30 * 86400, "Emasoft/ai-maestro-janitor")
+    assert "WITHHELD" in line and "Nothing is claimed" in line
+    assert "Emasoft/ai-maestro-janitor" in line
+    # It must carry the live-probe remedy, not leave the reader stuck with a dead payload.
+    assert "/janitor-github-config-fix" in line

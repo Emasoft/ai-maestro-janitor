@@ -499,6 +499,89 @@ def payload_for_slug(payload: object, slug: str) -> dict:
     return {"findings": [f for f in findings if isinstance(f, dict) and f.get("slug") == slug]}
 
 
+#: How many audit cadences a payload may age before its findings are WITHHELD rather than
+#: surfaced. The audit beat is 6 h, so the default 4x = 24 h: a "your repo is misconfigured"
+#: claim older than a day has had a whole working day to be fixed by someone else, which is
+#: exactly how janitor#244 nearly mutated a compliant repo.
+AUDIT_CADENCE_S = 21600
+STALE_FACTOR = 4
+
+
+def payload_age_seconds(payload: object, *, now: int) -> int | None:
+    """Seconds since this audit was generated, or None when it names no usable time. PURE.
+
+    Accepts BOTH shapes deliberately. `_read_findings`'s comment claims `generated_at` is
+    "ISO-8601 UTC from both writers", but every payload measured on this host (ours AND the
+    server's) carries an INT epoch — so a reader that assumed either one alone would crash or
+    silently mis-age the other. Returning None on anything unparseable keeps an odd payload
+    surfaceable-without-an-age rather than unreadable (TRDD-88ZVEQY7).
+    """
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("generated_at")
+    ts: int | None = None
+    if isinstance(raw, bool):
+        return None  # bool is an int subclass — reject before the int branch claims it
+    if isinstance(raw, (int, float)):
+        ts = int(raw)
+    elif isinstance(raw, str) and raw.strip():
+        s = raw.strip()
+        if s.isdigit():
+            ts = int(s)
+        else:
+            try:
+                from datetime import datetime
+
+                ts = int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+            except ValueError:
+                return None
+    if ts is None or ts <= 0:
+        return None
+    return max(0, now - ts)
+
+
+def age_label(age_s: int | None) -> str:
+    """The parenthetical age suffix appended to every surfaced line, e.g. `(audit 3.2d old)`.
+
+    A verdict served without the age of its evidence cannot be checked by the reader — the
+    janitor#237 lesson, generalized. An unknown age says so rather than omitting the clause:
+    a MISSING age is indistinguishable from a fresh one to a hurried reader, which is the
+    failure this whole card exists to close.
+    """
+    if age_s is None:
+        return " (audit age unknown)"
+    days = age_s / 86400.0
+    return f" (audit {days:.1f}d old)" if days >= 0.1 else " (audit fresh)"
+
+
+def payload_is_stale(age_s: int | None, *, cadence_s: int = AUDIT_CADENCE_S, factor: int = STALE_FACTOR) -> bool:
+    """True iff findings this old must be WITHHELD instead of surfaced. PURE.
+
+    Fail-OPEN on an unknown age (None → False): withholding on "unknown" would silence the
+    channel for any writer whose timestamp we cannot parse, and a surfaced-but-age-labelled
+    finding is strictly better than no finding at all.
+    """
+    if age_s is None:
+        return False
+    return age_s > cadence_s * max(1, factor)
+
+
+def staleness_line(age_s: int | None, slug: str) -> str:
+    """The ONE line that REPLACES withheld findings — it names the staleness itself.
+
+    Deliberately not silent: a stale audit is itself a finding (the sweep owner is not
+    running), and going quiet would present "nobody audited you in days" as "you are clean".
+    """
+    return (
+        f"[fleet-github-config] audit for {slug} is"
+        f"{age_label(age_s)} — findings WITHHELD as unverifiable. "
+        "Nothing is claimed about this repo's config; the sweep owner (the daemon's "
+        "`github-config-audit` beat, or the ai-maestro server when it has absorbed the chore) "
+        "is not producing fresh results. Re-run on demand with `/janitor-github-config-fix "
+        f"--slug {slug}`, which probes live instead of reading this payload."
+    )
+
+
 def summarize_for_slug(payload: object, slug: str) -> str | None:
     """Build THIS repo's one-line drift summary, or None when this repo is clean.
 

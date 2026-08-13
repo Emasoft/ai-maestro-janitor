@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -19,7 +20,7 @@ assert _DETECTOR.is_file(), f"detector not found at {_DETECTOR}"
 
 
 def _run(
-    tmp_path: Path, findings: list[dict] | None, *, disabled: bool = False
+    tmp_path: Path, findings: list[dict] | None, *, disabled: bool = False, age_s: int = 0
 ) -> subprocess.CompletedProcess[str]:
     gsd = tmp_path / "global-state"
     gsd.mkdir(parents=True, exist_ok=True)
@@ -27,7 +28,12 @@ def _run(
     proj.mkdir(parents=True, exist_ok=True)
     if findings is not None:
         (gsd / "github-config-findings.json").write_text(
-            json.dumps({"generated_at": 1, "repos_scanned": 13, "findings": findings}),
+            # A FRESH timestamp. This was `1` (epoch 1970) as a don't-care sentinel, which
+            # stopped being a don't-care when the age gate landed (TRDD-88ZVEQY7): a payload
+            # 56 years old is correctly WITHHELD, so every findings assertion below would be
+            # testing the staleness path instead of the path it names. Staleness has its own
+            # tests; these fixtures must represent a payload a live sweep just wrote.
+            json.dumps({"generated_at": int(time.time()) - age_s, "repos_scanned": 13, "findings": findings}),
             encoding="utf-8",
         )
     env = os.environ.copy()
@@ -52,6 +58,37 @@ def test_silent_when_findings_empty(tmp_path: Path) -> None:
     r = _run(tmp_path, [])
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
+
+
+def test_a_stale_payload_withholds_findings_and_says_so(tmp_path: Path) -> None:
+    """TRDD-88ZVEQY7 / janitor#244 — the peer nearly mutated a COMPLIANT repo acting on an
+    18-day-old claim. Past 4x the 6h cadence the findings are WITHHELD and replaced by one
+    line naming the staleness. Not silence: "nobody audited you in days" must never be
+    presented as "you are clean"."""
+    _with_origin(tmp_path, "o/mine")
+    r = _run(tmp_path, [{"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"}], age_s=30 * 86400)
+    assert r.returncode == 0, r.stderr
+    assert "WITHHELD" in r.stdout and "Nothing is claimed" in r.stdout
+    assert "30.0d old" in r.stdout
+    # The withheld verdict itself must not leak through.
+    assert "UNPROTECTED" not in r.stdout
+
+
+def test_a_fresh_payload_carries_the_evidence_age(tmp_path: Path) -> None:
+    """Every surfaced line states how old its evidence is, so the reader can check the
+    verdict instead of taking it on faith."""
+    _with_origin(tmp_path, "o/mine")
+    r = _run(tmp_path, [{"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"}], age_s=8 * 3600)
+    assert r.returncode == 0, r.stderr
+    assert "UNPROTECTED" in r.stdout and "audit 0.3d old" in r.stdout
+
+    # Below the 0.1d display floor the clause still appears — it reads "fresh" rather than
+    # vanishing, because an ABSENT age is indistinguishable from a recent one to a hurried
+    # reader, which is the failure this card closes.
+    other = tmp_path / "sub"
+    _with_origin(other, "o/mine")
+    r2 = _run(other, [{"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"}], age_s=120)
+    assert "audit fresh" in r2.stdout
 
 
 def test_emits_line_about_this_repo_only(tmp_path: Path) -> None:

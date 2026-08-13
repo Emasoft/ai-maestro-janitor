@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -160,7 +161,35 @@ def main() -> int:
     if not slug:
         return 0
 
+    # AGE GATE (TRDD-88ZVEQY7 / janitor#244). The peer nearly mutated a compliant repo on an
+    # 18-day-old claim, stopped only by their own verify-before-acting habit. Two rules, in
+    # this order:
+    #   1. Too old to trust  -> WITHHOLD the findings and say so. Not silence: "nobody audited
+    #      you in days" must never read as "you are clean".
+    #   2. Otherwise         -> surface, but always carrying the evidence's age, so the reader
+    #      can check the verdict instead of taking it on faith.
+    # Deliberately judged on the PAYLOAD's own `generated_at`, never on the chore's completion
+    # stamp: the stamp says a runner ran, the artifact says what it produced, and only the
+    # second is evidence about this repo.
+    age_s = gca.payload_age_seconds(payload, now=int(time.time()))
     line = gca.summarize_for_slug(payload, slug)
+
+    # The staleness line REPLACES withheld findings — it does not appear where there were
+    # none. Ordering matters: asking "is it stale?" before "does it say anything about us?"
+    # made every project nag whenever the sweep lagged, including repos the audit never
+    # mentioned. Silence about a repo with no findings is the pre-existing, correct behaviour;
+    # the gate's job is only to stop a STALE CLAIM from being acted on.
+    if line is not None and gca.payload_is_stale(age_s):
+        stale = gca.staleness_line(age_s, slug)
+        seen_stale = state.state_dir() / "fleet-github-config-stale-seen.txt"
+        out = dedupe.emit_once(seen_stale, f"stale:{slug}:{(age_s or 0) // 86400}", stale)
+        if out is not None:
+            print(out)
+        state.rotate_log_if_big(_NAME)
+        return 0
+
+    if line is not None:
+        line += gca.age_label(age_s)
     if line is None:
         # THIS repo is clean (whatever the rest of the fleet looks like) — withdraw any
         # standing proposal so the board never carries a problem that has been fixed.
