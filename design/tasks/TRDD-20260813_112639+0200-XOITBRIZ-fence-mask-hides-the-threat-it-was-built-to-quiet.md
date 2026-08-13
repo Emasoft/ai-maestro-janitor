@@ -1,9 +1,9 @@
 ---
 trdd-id: XOITBRIZ
 title: The code-fence mask hides dynamic-exec-in-body's primary threat — the fence is not the signal, the surrounding prose is
-column: todo
+column: testing
 created: 2026-08-13T11:26:39+0200
-updated: 2026-08-13T11:26:39+0200
+updated: 2026-08-13T12:20:00+0200
 current-owner: janitor-main-session
 task-type: security
 approval-tier: 0
@@ -30,6 +30,12 @@ thing the agent is instructed to run — the janitor's own skills are written th
 exactly the file type the rule exists for.
 
 ## Measured, three ways — and the first measurement was WRONG
+
+> **⚠ SUPERSEDED NUMBERS BELOW — kept because the reasoning is still correct, but do NOT quote the
+> `3/3`.** Every figure in this section was measured on a 3-sample attack class that the fix was
+> tuned against. The blind set later put the same rule at **6/9**, and the old mask at **3/9** on
+> that same set. The Acceptance section carries the current, like-for-like numbers; this section is
+> the argument, not the score.
 
 | mode | recall | FP on security-docs | FP on the 68 existing benign |
 |---|---|---|---|
@@ -74,12 +80,32 @@ recall 2/3 → 3/3 with no FP change.
   fails INVISIBLY when it silences too much. Whatever ships must surface what it suppressed, the
   way TRDD-3QIQ2E6J's `split_suppressed` trace does.
 
-## Acceptance
+## Acceptance — SETTLED 2026-08-13, and the honest numbers are lower than the first ones
 
-- [ ] The 4 security-docs samples are added to the benign corpus so the mask's benefit stays priced
-- [ ] `dynamic-exec-in-body` reaches ≥3/3 on its own class with 0 FP on BOTH benign populations,
-      re-measured by `agent_context_bench.py`, and `COVERAGE.md` regenerated
-- [ ] Whatever suppresses a match leaves a visible trace (never silent)
-- [ ] A blind-authored second attack set confirms the recall gain is not overfitting
+- [x] The 4 security-docs samples are in the benign corpus, so the mask's benefit stays priced
+- [x] Whatever suppresses a match leaves a visible trace. NOTE the trace was first delivered as an
+      opt-in `suppressed_out` argument that **no production caller passed** — a facility nobody
+      calls is decoration, and the suppression would have been invisible exactly where it matters.
+      `detectors/agent-context-integrity.py` now passes it and logs every suppressed match.
+- [x] A blind-authored second attack set was measured. **It did NOT confirm the gain; it corrected
+      it.** 6 samples per class, written from the rule descriptions with the regex unread:
+      `dynamic-exec-in-body` 3/3 (100%) → **6/9 (67%)**. The discriminator was partly overfit to
+      the three samples it was tuned against. Nothing was re-tuned to recover 100% — refitting to
+      the new samples would destroy the only unbiased measurement in this card.
+- [ ] ~~`dynamic-exec-in-body` reaches ≥3/3~~ — **this box was written against the biased sample
+      and is retired, not ticked.** The defensible criterion is the LIKE-FOR-LIKE comparison on
+      the full 9-attack / 72-benign set, which is what actually justifies the change:
+
+      | | recall | FP |
+      |---|---|---|
+      | old fence mask | 3/9 | 0/72 |
+      | shipped discriminator | **6/9** | **0/72** |
+
+      Double the recall at zero false-positive cost, measured on a set where two thirds of the
+      attacks were authored AFTER the fix. That is the claim this card supports. "100%" never was.
+
+- [ ] REMAINS OPEN: 3 of 9 are still missed. They are not overfitting artifacts — they are real
+      uncaught shapes, and a follow-up should characterise them rather than assume the rule is
+      done. `two-step-code-injection` is flat at 3/9 (33%) and is the weaker of the two.
 
 ## Notes and lessons learned
