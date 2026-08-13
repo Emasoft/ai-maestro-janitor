@@ -4,7 +4,7 @@ title: Run the daemon under the signed python.org 3.12 so the existing iTerm Aut
 column: human_review
 pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-13T11:52:00+0200
+updated: 2026-08-13T14:14:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -14,6 +14,26 @@ relevant-rules: []
 blocked-by: []
 implementation-commits: [75332ba0]
 ---
+
+## ⏵ 2026-08-13 14:1x — STILL LIVE: the alarm fired again, with the ambiguity RESOLVED
+
+A heartbeat surfaced the iTerm-automation alarm on this host, and this time it carried the
+positive discriminator rather than the old ambiguous form: an independent, grant-free
+enumeration (`claude agents --json`) DID find live sessions in the same scan, while the
+osascript enumeration returned ZERO. So the channel is **BLOCKED (denied grant or hung
+osascript), not an empty host** — the reading the alarm text previously could not justify.
+
+It named the same binary this card is about:
+`~/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12`.
+
+**Consequence, unchanged and ongoing:** the fleet guardian cannot rescue a frozen or
+rate-limited Claude in ANY iTerm pane and has been skipping them silently (tmux panes are
+unaffected). That is the exact failure this card's fix removes, and it is still happening 8 days
+after the code half landed in `75332ba0` — so the card sitting in `human_review` is not a
+formality, it is the live gap.
+
+Nothing here changes the proposal or the acceptance criteria; it is evidence for the pending
+decision, recorded so the card is not judged on 8-day-old symptoms.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-06
 
