@@ -60,7 +60,10 @@ HUMAN_ONLY_DIRECTIVE = (
     "attempt this yourself: "
 )
 
-# Caps. `msg` is truncated so one JSON line stays ≤ ~200 chars (the ratified shape);
+# Caps. `msg` is truncated so one JSON line stays ≤ ~200 chars (the ratified shape).
+# The cap governs the FINDING's own words only: the human-only directive is stored as
+# an `actor` field and applied by `render_line`, so marking a finding human-only can
+# never eat the budget its content needs (see `record`).
 # the file is structurally trimmed so the mailbox of a project unattended for months
 # stays bounded (every append site must rotate or trim — the S3+S4 invariant).
 MAX_MSG_CHARS = 120
@@ -136,6 +139,13 @@ def render_line(entry: dict) -> str:
     src = _clean(entry.get("src", ""), 32)
     ref = _clean(entry.get("ref", "-"), 24)
     msg = _clean(entry.get("msg", ""), MAX_MSG_CHARS)
+    # The human-only directive is applied HERE, at delivery, so it never competes with
+    # the finding for the `msg` cap (see `record`). Sanitizing the stored fields first
+    # and prepending a MODULE CONSTANT after also means a hostile on-disk entry cannot
+    # forge the directive's authority into a position the reader trusts — the marker is
+    # ours, the content is theirs, and the two can no longer be confused.
+    if entry.get("actor") == HUMAN_ONLY_ACTOR:
+        msg = HUMAN_ONLY_DIRECTIVE + msg
     return f"[findings] {sev} {code} ({src}): {msg} — ref {ref}"
 
 
@@ -162,8 +172,12 @@ def record(
     cannot act on — the remedy is a GUI toggle or a credential decision only a human at
     the keyboard can perform. Two effects, both DELIVERY properties (never a change to
     the finding's CONTENT):
-      * `msg` is prefixed with `HUMAN_ONLY_DIRECTIVE` so the reading agent's correct move
-        is explicit — surface it and stop, not investigate or attempt a fix.
+      * the entry carries `actor: "human"`, and `render_line` prepends
+        `HUMAN_ONLY_DIRECTIVE` at delivery so the reading agent's correct move is explicit
+        — surface it and stop, not investigate or attempt a fix. Stored as a field rather
+        than spliced into `msg` precisely so it stays a delivery property: the directive is
+        98 chars against a 120-char `msg` cap, so prefixing the content used to truncate
+        the finding down to 22 characters of itself.
       * the drift line is emitted ONCE per distinct (code, content) observation — the
         `dispatch.py` iTerm-alarm hash-ack pattern, generalized here so every caller gets
         it for free. The ledger ENTRY is still always appended (data is never lost, only
@@ -178,16 +192,25 @@ def record(
     import hashlib  # noqa: PLC0415 -- stdlib, keep module import-light
     import time  # noqa: PLC0415 -- stdlib, keep module import-light
 
+    # The directive is a DELIVERY property, so it is stored as the `actor` FIELD and
+    # applied by `render_line` — NOT concatenated into `msg`. Prefixing the content was
+    # self-defeating: the directive is 98 chars and `_clean` caps `msg` at 120, so a
+    # human-only finding kept 22 characters of itself and silently lost the rest. The
+    # first real caller (dispatch's self-cost alarm) recorded "7d heartbeat cost 5000"
+    # with the budget it was measured against truncated away — a finding reduced to a
+    # number with nothing to compare it to. Nothing caught it before because the feature
+    # shipped (2a6b8edd) with no caller at all, so the cap was never exercised.
     human_only = actor == HUMAN_ONLY_ACTOR
-    raw_msg = (HUMAN_ONLY_DIRECTIVE + msg) if human_only else msg
     entry = {
         "ts": int(time.time()) if now is None else int(now),
         "sev": _clean(sev, 12),
         "code": _clean(code, 24),
         "src": _clean(src, 32),
         "ref": _clean(ref or "-", 24),
-        "msg": _clean(raw_msg, MAX_MSG_CHARS),
+        "msg": _clean(msg, MAX_MSG_CHARS),
     }
+    if human_only:
+        entry["actor"] = HUMAN_ONLY_ACTOR
     if _enabled():
         try:
             path = ledger_path(project_dir)

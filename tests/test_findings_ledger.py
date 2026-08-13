@@ -215,22 +215,53 @@ def test_opt_out_disables_the_ledger_write_but_not_sink_2(
 # ---------- 6. human-only findings class (TRDD-KU3ERYFX, janitor#234) ----------
 
 
-def test_human_only_msg_carries_the_directive_prefix(_isolate: Path) -> None:
-    """`actor='human'` prefixes `msg` with the explicit human-only directive — the
-    reading agent's correct move must be unambiguous: surface it, do not act on it."""
+def test_human_only_directive_reaches_the_reader_at_delivery(_isolate: Path) -> None:
+    """`actor='human'` makes the reading agent's correct move unambiguous — surface it,
+    do not act on it — and does so WITHOUT spending the finding's own character budget.
+
+    Was: the directive was concatenated onto `msg` before the cap. It is 98 chars against
+    a 120-char cap, so a human-only finding kept 22 characters of itself. The first real
+    caller recorded a spend figure with the budget it was measured against truncated off.
+    """
     fl.record(sev="HIGH", code="H-1", src="d", msg="TCC grant needed", actor="human")
     entries = _entries(None)
     assert len(entries) == 1
-    assert entries[0]["msg"].startswith("HUMAN-ONLY")
-    assert "surface this to your human" in entries[0]["msg"]
+    assert entries[0]["actor"] == "human"
+    assert entries[0]["msg"] == "TCC grant needed", "the content is stored intact"
+    assert "surface this to your human" in fl.render_line(entries[0]), (
+        "and the directive still reaches the reader — at delivery, not in storage"
+    )
 
 
-def test_human_only_line_shape_stays_frozen(_isolate: Path) -> None:
-    """The marker lives INSIDE `msg` — it must never add a new ledger key (§4 frozen
-    contract: exactly {ts,sev,code,src,ref,msg})."""
+def test_human_only_costs_the_finding_none_of_its_budget(_isolate: Path) -> None:
+    """A full-length human-only finding survives whole. This is the regression the split
+    exists for, so it is asserted on a message that fills the cap rather than a short one
+    (the old code passed every SHORT-message test while destroying every long one)."""
+    msg = "x" * fl.MAX_MSG_CHARS
+    fl.record(sev="HIGH", code="H-1b", src="d", msg=msg, actor="human")
+    assert _entries(None)[0]["msg"] == msg, "no content lost to the marking"
+
+
+def test_human_only_adds_one_additive_key_and_shortens_the_line(_isolate: Path) -> None:
+    """The marking is a delivery property, so it is a KEY — the §6.5 dashboard feed shape
+    {ts,sev,code,src,ref,msg} plus an OPTIONAL `actor`, present only when human-only.
+
+    Additive by design: a consumer reading named fields is unaffected, and the ≤200-char
+    promise is honoured BETTER than before, because moving the 98-char directive out of
+    `msg` costs only the ~17 chars of the new key. A non-human entry is byte-identical to
+    the old shape, which is what keeps this safe for the accepted feed.
+    """
     fl.record(sev="HIGH", code="H-2", src="d", msg="grant needed", actor="human")
-    data = json.loads(fl.ledger_path(None).read_text(encoding="utf-8").strip())
-    assert set(data) == {"ts", "sev", "code", "src", "ref", "msg"}
+    human = json.loads(fl.ledger_path(None).read_text(encoding="utf-8").strip())
+    assert set(human) == {"ts", "sev", "code", "src", "ref", "msg", "actor"}
+    assert len(json.dumps(human, separators=(",", ":"))) <= 200, "the ≤200 promise holds"
+
+    fl.ledger_path(None).unlink()
+    fl.record(sev="HIGH", code="H-2", src="d", msg="grant needed")
+    agent = json.loads(fl.ledger_path(None).read_text(encoding="utf-8").strip())
+    assert set(agent) == {"ts", "sev", "code", "src", "ref", "msg"}, (
+        "a normal entry keeps the original key set exactly — the new key is opt-in"
+    )
 
 
 def test_human_only_emits_once_per_episode_but_still_records(_isolate: Path) -> None:

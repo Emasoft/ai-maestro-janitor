@@ -255,6 +255,18 @@ read-only. Per-project channeling holds by construction on the server side (thei
 2026-07-17: point-to-point surfaces only; the dashboard is the ONE sanctioned
 human-aggregate view).
 
+**Additive amendment 2026-08-13 — the OPTIONAL `actor` key.** A human-only finding (one
+whose remedy is a GUI toggle or a credential decision an agent structurally cannot
+perform) now carries `"actor":"human"`; the `HUMAN_ONLY_DIRECTIVE` prose it used to be
+spelled with is applied by `render_line` at delivery instead. Rendering a finding the
+janitor marked human-only should carry that marker through, but a consumer that reads
+named fields needs no change: an entry WITHOUT the key is byte-identical to the original
+shape, and a human-only entry is now SHORTER than before (the 98-char directive left
+`msg`; the key costs ~17), so the ≤200-char promise is honoured more comfortably, not
+less. The change was forced: the directive was concatenated onto `msg` ahead of the
+120-char cap, so marking a finding human-only truncated it to 22 characters of itself —
+the feature destroyed the content it was meant to escalate.
+
 ## 7. The fleet control plane — REQUESTED of ai-maestro (round 2, 2026-07-21)
 
 Owner directives, 2026-07-21: *"all global states must be shared via a file-flag. just

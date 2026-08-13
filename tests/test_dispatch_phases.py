@@ -2068,6 +2068,138 @@ def test_an_actively_waiting_session_still_gets_its_cost_named(
     assert "5000" in _run_self_cost(dispatch)
 
 
+def test_every_crossing_is_recorded_to_the_ledger_not_just_printed(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each crossing lands in the findings ledger, marked human-only.
+
+    The audit that produced this test asked one question of every phase that prints a
+    human-facing finding: if the receiving session forgets, can the condition still be
+    reconstructed? Here it cannot — `cost` is a ROLLING 7d window over a log the meter
+    TRIMS, so an overrun that ages out leaves nothing behind. Printing alone made
+    'the cadence was too expensive last week' an unfalsifiable claim, which is exactly
+    the defect fixed in the iTerm alarm (299f775c).
+
+    The `actor="human"` prefix is asserted, not incidental: the message's two remedies
+    are slow-the-cadence and /janitor-disarm, and an agent that applied the second would
+    let cost pressure switch the guard off — the owner's 'never self-disable' ruling.
+    """
+    import json as _json
+
+    dispatch = _import_dispatch()
+    import findings_ledger
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    assert "5000" in _run_self_cost(dispatch), "precondition: the alarm fired"
+
+    entries = [
+        _json.loads(ln)
+        for ln in findings_ledger.ledger_path(None).read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
+    mine = [e for e in entries if e.get("code") == "HEARTBEAT-COST"]
+    assert len(mine) == 1, f"exactly one durable record per crossing, got {mine}"
+    assert "5000" in mine[0]["msg"] and "1000" in mine[0]["msg"], (
+        "the record must carry BOTH numbers — a record that says 'over budget' without "
+        f"the spend and the bar is not evidence: {mine[0]['msg']!r}"
+    )
+    assert mine[0]["actor"] == findings_ledger.HUMAN_ONLY_ACTOR, (
+        "must be marked human-only so a reading agent surfaces it and stops"
+    )
+    assert findings_ledger.HUMAN_ONLY_DIRECTIVE in findings_ledger.render_line(mine[0]), (
+        "and the marking must actually reach the reader at delivery"
+    )
+    assert findings_ledger.HUMAN_ONLY_DIRECTIVE not in mine[0]["msg"], (
+        "but it must NOT be stored inside msg — the directive is 98 chars against a "
+        "120-char cap, so storing it there truncates the finding to 22 chars of itself"
+    )
+    assert mine[0]["sev"] == "LOW", "a budget report the user opted into must never page"
+
+
+def test_the_ledger_records_once_per_reported_crossing_not_once_per_fire(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record sits INSIDE the phase's dedupe gate, so the ledger granularity is one
+    entry per reported crossing (per day, per whole budget multiple) — not per fire.
+
+    That placement is deliberate. At the default cadence a fire happens ~96×/day, and the
+    ledger is a TRIMMED log: recording every fire would evict every other finding within
+    hours to say the same thing 96 times. What the audit needed back was the TIMELINE of
+    crossings, and a growing spend still re-alarms — so the shape that survives is
+    'when did it cross, and at what multiple', which is exactly the evidence a human
+    reading it days later has to have.
+    """
+    import json as _json
+
+    dispatch = _import_dispatch()
+    import findings_ledger
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    assert _run_self_cost(dispatch) != "", "first fire prints"
+    assert _run_self_cost(dispatch) == "", "second fire in the same bucket is silent"
+
+    def _crossings() -> list[dict]:
+        return [
+            e
+            for ln in findings_ledger.ledger_path(None).read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+            for e in [_json.loads(ln)]
+            if e.get("code") == "HEARTBEAT-COST"
+        ]
+
+    assert len(_crossings()) == 1, "the silent repeat fire adds no entry"
+
+    _seed_heartbeat_cost(state, 15000)  # 15x the budget — a materially bigger spend
+    assert "15000" in _run_self_cost(dispatch), "a growing spend re-alarms"
+    assert len(_crossings()) == 2, (
+        "and the NEW crossing is recorded — the dedupe bounds repetition, it must not "
+        "swallow a genuinely worse number"
+    )
+
+
+def test_the_autofix_reminder_is_deliberately_not_recorded(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The autofix nudge prints and records NOTHING — pinned so a later audit does not
+    'fix' it by adding a record call.
+
+    It is the other side of the discriminator: its evidence is a FILE ON DISK the user
+    created, readable by any later turn via `state.autofix_disabled()`. A durable record
+    of a durable fact adds no evidence, only one ledger line per day until the user
+    re-enables autofix.
+    """
+    import json as _json
+
+    dispatch = _import_dispatch()
+    import findings_ledger
+    import state
+
+    state.init_state()
+    state.atomic_write(state.state_dir() / "autofix-mode.txt", "off")
+    assert state.autofix_disabled() is True, "precondition: the nudge's gate is open"
+
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        dispatch._phase_autofix_mode_reminder()
+    finally:
+        sys.stdout = old
+    assert "[autofix-off]" in buf.getvalue(), "precondition: the nudge printed"
+
+    path = findings_ledger.ledger_path(None)
+    entries = (
+        [_json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if path.exists()
+        else []
+    )
+    assert entries == [], f"the nudge must write no ledger entry, got {entries}"
+
+
 def test_a_harness_session_reports_too(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """INVERTED. The throttle refused to actuate inside an ai-maestro agent (#J thin mode),
     because auto-maintenance there would break server-delegated continuity. A phase that only
