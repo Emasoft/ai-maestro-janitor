@@ -123,7 +123,39 @@ _MEMORY_NOOP_RE = re.compile(
     r"|^#[ \t]+[^\n]*\b(?:abstain(?:ed)?|nothing\s+due)\b[^\n]*$)",
     re.IGNORECASE | re.MULTILINE,
 )
-_NOOP_SCAN_BYTES = 4096  # the outcome marker is always in the report's opening lines
+# THE FIX THAT ENDS THE SERIES (janitor#259). The three corrections above — punctuation
+# (2026-07-29), label placement (2026-08-05, #121), vocabulary (2026-08-13, #259: the curator
+# wrote "Nothing merged this pass", and `nothing\s+due` does not match `nothing merged`) —
+# are one failure repeated, and widening the pattern a fourth time would only postpone it.
+#
+# A regex over free prose cannot converge here because the producer is a LANGUAGE MODEL writing
+# English: "nothing merged", "no candidates", "0 mutations", "skipped" and "abstained" all mean
+# the same thing to it, and only some of them are in any pattern. Each fix matched the spellings
+# in the corpus at the time; the next unobserved spelling was already being written.
+#
+# The proof that the mechanism (not the pattern) is at fault is in the same reports: the ONE
+# machine-written line, `<!-- generated: ... -->`, has NEVER drifted — because a shell `printf`
+# with a fixed literal emits it, not the model. That line exists because of janitor#248, whose
+# lesson the curator's own doc states exactly: "a built string gets a plausible offset recalled
+# instead of a real one read". A composed value drifts; an emitted literal does not.
+#
+# So the curator now closes every pass with a second mechanical line carrying its OWN verdict in
+# a two-value vocabulary, and this detector reads THAT exactly. The prose forms below remain as a
+# FALLBACK for the ~59 legacy reports already on disk, and are deliberately NOT widened again.
+#
+# Read authority, in order: an explicit marker WINS outright — `mutation` means NOT exempt even
+# if the prose says "abstained", because the producer's own machine verdict beats an inference
+# drawn from its narration. Only an ABSENT marker falls through to the prose.
+#
+# KNOWN AND ACCEPTED: legacy reports whose prose uses an unlisted spelling still nag. That is the
+# cost of refusing the fourth patch, it is bounded (`_MAX_LISTED`), and it decays as the old
+# reports age out — whereas another regex widening would have re-armed the same trap.
+_MEMORY_OUTCOME_RE = re.compile(
+    r"<!--\s*janitor-outcome:\s*(noop|mutation)\s*-->",
+    re.IGNORECASE,
+)
+_MARKER_SCAN_BYTES = 64 * 1024  # the marker is APPENDED at pass end, so scan the whole report
+_NOOP_SCAN_BYTES = 4096  # prose fallback only: the legacy outcome wording is in the opening lines
 _FRESH_GRACE_S = 90  # skip reports written in the last 90s (may be mid-write)
 _MAX_LISTED = 6      # cap how many unconverted reports we name in one line
 
@@ -165,10 +197,20 @@ def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
     if not _contained(rep, reports_dir):
         return False
     try:
-        head = rep.read_text(encoding="utf-8", errors="replace")[:_NOOP_SCAN_BYTES]
+        text = rep.read_text(encoding="utf-8", errors="replace")[:_MARKER_SCAN_BYTES]
     except OSError:
         return False
-    return _MEMORY_NOOP_RE.search(head) is not None
+    # The curator's own machine verdict, when present, is authoritative in BOTH directions
+    # (janitor#259). Scanned over the whole report because it is APPENDED when the pass ends —
+    # the outcome is not knowable at the moment the file is seeded.
+    marker = _MEMORY_OUTCOME_RE.search(text)
+    if marker is not None:
+        return marker.group(1).lower() == "noop"
+    # No marker: a legacy report (or a curator that skipped the closing block). Fall back to the
+    # prose forms, over the SAME opening window as before so this path's behaviour is unchanged —
+    # widening the window here would let form 3 (a bare `# … abstained` H1) match a heading deep
+    # in a long decision report and silence it.
+    return _MEMORY_NOOP_RE.search(text[:_NOOP_SCAN_BYTES]) is not None
 
 
 def _trdd_corpus(trdd_paths: list[Path]) -> str:

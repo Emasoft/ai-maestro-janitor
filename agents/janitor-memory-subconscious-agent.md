@@ -128,6 +128,29 @@ nothing could contradict it.
 `awk '{print $1}'` truncates any path containing a space at the first space and the
 report lands in a directory nobody will ever look in — while reporting success.
 
+### CLOSE every pass with your machine verdict (MANDATORY, janitor#259)
+
+When the pass is finished, run this as the LAST thing you do to the report. Fill in ONE
+word, and it must be one of exactly two:
+
+```bash
+OUTCOME=noop                # EXACTLY `noop` or `mutation` — never any other word
+printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
+```
+
+- `noop` — you changed NOTHING in the corpus (abstained, nothing due, no qualifying
+  candidate, 0 mutations). Whatever you called it in the prose, it is `noop` here.
+- `mutation` — you merged, split, atomized, repaired, harvested, or otherwise WROTE.
+
+**Do not paraphrase it, and do not put the verdict only in prose.** `report-to-trdd-drift`
+skips your abstain passes by reading this line; a decision report lacking it is flagged for
+TRDD conversion, which is correct. For three separate releases that skip instead parsed your
+English, and it broke three times — on punctuation, then on where you put the bold, then
+because you wrote "Nothing merged this pass" where the pattern wanted "nothing due". Every
+one of those was a real abstain nagged forever. The `generated:` line above has never once
+been wrong for the same reason this one will not be: a `printf` of a fixed literal cannot
+drift, and a sentence you compose always can. Same lesson as janitor#248, one field over.
+
 ## The quality bar — rival Wikipedia
 
 Curate relentlessly: dedupe same-subject pages, keep each page focused on one element,

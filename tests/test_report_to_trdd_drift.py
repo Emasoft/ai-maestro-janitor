@@ -411,6 +411,94 @@ class TestRenamedCuratorDir(unittest.TestCase):
             self.assertIn("[report-to-trdd]", out)
             self.assertIn("merged-security-trio-plan.md", out)
 
+    # --- the machine marker that ends the series (janitor#259) -----------------------
+    #
+    # The two bodies below are the REAL ones from the issue, not synthesized shapes — the
+    # same discipline the 2026-07-29 comment above demands. Both are genuine abstains that
+    # the prose regex cannot exempt, and both are exempted by the marker.
+
+    def test_marker_noop_exempts_a_report_with_no_outcome_section_at_all(self):
+        """janitor#259 cause 1: the curator put its verdict under `## Judgment` and wrote no
+        `## Outcome` section, so NO prose form can match. The marker is not a phrasing — it
+        is the producer stating its own verdict — so it exempts regardless of the prose."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260730_080855+0200-consolidate-local.md")
+            rep.write_text(
+                "<!-- generated: 2026-07-30T08:08:55+0200 -->\n"
+                "# CONSOLIDATE pass — LOCAL scope\n\n"
+                "## Judgment\n\nNo two pages share a subject.\n\n"
+                "<!-- janitor-outcome: noop -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_noop_exempts_the_nothing_merged_wording(self):
+        """janitor#259 cause 2: `- Nothing merged this pass.` — a correctly-structured abstain
+        the vocabulary missed (`nothing\\s+due` does not match `nothing merged`). This is the
+        exact body that triggered the third failure; the marker settles it without the fourth
+        regex widening."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260713_212237+0200-consolidate-local-scope-no-candidate.md")
+            rep.write_text(
+                "<!-- generated: 2026-07-13T21:22:37+0200 -->\n"
+                "# CONSOLIDATE pass\n\n## Outcome\n\n"
+                "- Nothing merged this pass.\n"
+                "- LOCAL scope: 0 candidates found (librarian + manual review agree).\n\n"
+                "<!-- janitor-outcome: noop -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_is_found_when_the_report_is_longer_than_the_prose_window(self):
+        """The marker is APPENDED at pass end, so it can sit far past the 4 KiB prose window.
+        A report whose body exceeds that window must still be exempted — otherwise the fix
+        would work only on short reports and fail silently on exactly the detailed ones."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260801_050000+0200-consolidate-local-plan.md")
+            filler = "\n".join(f"- considered page {i}, no shared subject" for i in range(400))
+            rep.write_text(
+                "<!-- generated: 2026-08-01T05:00:00+0200 -->\n"
+                "# CONSOLIDATE pass\n\n## Judgment\n\n" + filler +
+                "\n\n<!-- janitor-outcome: noop -->\n")
+            self.assertGreater(len(rep.read_text()), 4096, "fixture must exceed the prose window")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_mutation_flags_even_when_the_prose_says_abstained(self):
+        """The marker is authoritative in BOTH directions. A pass that WROTE must stay flagged
+        even if its narration contains an abstain form the prose regex would have matched —
+        the producer's own machine verdict beats an inference drawn from its narration.
+        Without this, the new field could turn a false positive into a false NEGATIVE."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260801_051000+0200-consolidate-merge-plan.md")
+            rep.write_text(
+                "<!-- generated: 2026-08-01T05:10:00+0200 -->\n"
+                "# CONSOLIDATE pass — abstained on two of five candidates\n\n"
+                "## Outcome\n\nABSTAINED on the rest, but MERGED the security trio.\n\n"
+                "<!-- janitor-outcome: mutation -->\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("consolidate-merge-plan.md", out)
+
+    def test_absent_marker_still_uses_the_prose_fallback(self):
+        """Legacy reports predate the marker, so removing the prose forms would re-nag ~59 of
+        them at once. An absent marker must fall through to the unchanged prose path."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-subconscious-agent")
+            rep = (root / "reports/janitor-memory-subconscious-agent"
+                   / "20260715_090000+0200-consolidate-local.md")
+            rep.write_text(
+                "# CONSOLIDATE pass\n\n## Outcome\n\nABSTAINED — nothing mutated.\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main()
