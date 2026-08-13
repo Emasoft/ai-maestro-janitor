@@ -12,7 +12,7 @@ severity: high
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [TRDD-WP7TCRME]
+external-refs: [TRDD-WP7TCRME, TRDD-RG4IUZ6I, janitor#241]
 ---
 
 # Split siblings re-litigate forever
@@ -79,6 +79,20 @@ the field's NAME and whether it names the parent page or a per-split id. Prefer 
 naming the parent breaks when the parent is later renamed or itself split again, whereas an id
 survives both and answers "same split event?" directly. Whatever is chosen must be emitted and
 normalized through the `publish-globally` normalizer (`9ddb3cf7`, `25013e64`), never beside it.
+
+**SIBLING CARD FOUND — TRDD-RG4IUZ6I, and this card did not know it existed.** Filed 4 days
+EARLIER for the same janitor#241 defect with the same 221,612-token measurement; neither card
+cites the other. It agrees with this one on the real fix (sibling suppression) and CONTRADICTS
+it on carrying refusals forward, where this card's argument wins: a refusal carried onto pages
+with different names, bytes and subjects asserts a verdict nobody reached. It also proposed
+deriving lineage from overview links — the approach killed above.
+
+**One thing on it is UNIQUE and must survive any supersession: headroom-aware split sizing** —
+do not emit a sibling within ~10% of the split cap. RG4IUZ6I measured a sibling sitting **279 B**
+under the cap, so the next split re-voids the refusals in question. That is an independent
+reason the refusal-carrying fix was treating a symptom, and it belongs in the split skill
+whichever card ships. Resolution (supersede RG4IUZ6I by this card, item 3 carried across) is a
+USER call — force-supersede is non-exempt.
 
 ## Sketch (decide when picked up — do NOT treat as settled)
 
