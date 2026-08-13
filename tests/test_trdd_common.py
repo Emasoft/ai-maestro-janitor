@@ -848,3 +848,91 @@ def test_reconcile_surfaces_the_unnamed_blocker():
     v = tc.reconcile(_record(column="blocked", blocked_by="[]"), lambda _s: False, lambda _u: "")
     assert v.fires and v.unnamed_blocker
     assert "blocked-without-blocker" in v.fired
+
+
+# ── Check 8: shipped but unreleased — the lower-confidence rung (TRDD-4ZSYW21E) ──
+
+
+def _at_head(*shas: str):
+    """Fake `commit -> reachable from HEAD` seam: every listed sha is at HEAD."""
+    at_head = set(shas)
+    return lambda sha: sha in at_head
+
+
+def test_check8_fires_on_untagged_commit_at_head_with_no_remaining_work():
+    """Between releases, Check 1 goes blind — a card whose commit landed but is not YET tagged
+    still needs to surface. No remaining work (no unchecked box, no pending NEXT ACTION) means
+    Check 8 is the ONLY reason a reader would learn this card shipped."""
+    rec = _record(column="dev", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    assert tc.check8_shipped_unreleased(rec, _at_head("abc1234")) is True
+
+
+def test_check8_silent_when_remaining_work():
+    """Same shipped-at-HEAD commit, but the card still has an open acceptance box — the
+    false-positive storm the tag requirement exists to prevent (F4IBIDB6). Check 8 must stay
+    silent exactly like Check 1 does under the same condition."""
+    rec = _record(
+        column="dev",
+        impl="[abc1234]",
+        body="\n## plan\n- [ ] one more thing\n",
+    )
+    assert tc.check8_shipped_unreleased(rec, _at_head("abc1234")) is False
+
+
+def test_check8_silent_when_terminal_column():
+    """A terminal TRDD is already closed and frozen — never a board-drift candidate, mirroring
+    every other check's terminal guard."""
+    rec = _record(column="published", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    assert tc.check8_shipped_unreleased(rec, _at_head("abc1234")) is False
+
+
+def test_check8_silent_when_no_commit_at_head():
+    """No commit is reachable from HEAD at all (e.g. rebased away, or none recorded) — Check 8
+    has nothing to report."""
+    rec = _record(column="dev", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    assert tc.check8_shipped_unreleased(rec, _at_head()) is False
+
+
+def test_reconcile_check1_wins_over_check8_when_commit_is_tagged():
+    """A commit in a released tag is ALSO reachable from HEAD, so both checks' predicates are
+    individually true — but `reconcile()` must report Check 1's stronger verdict, never the
+    weaker `shipped-unreleased-review`, exactly per the card's acceptance criteria."""
+    rec = _record(column="dev", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    v = tc.reconcile(
+        rec,
+        _in_tag(_tagmap("abc1234")),
+        _column_of({}),
+        commit_at_head=_at_head("abc1234"),
+    )
+    assert v.label == "closeable-candidate"
+    assert "shipped-unreleased-review" not in v.fired
+    assert v.shipped_unreleased is False
+
+
+def test_reconcile_surfaces_shipped_unreleased_when_untagged():
+    """The new rung end to end: an untagged-but-at-HEAD commit with no remaining work surfaces
+    as the distinct, weaker verdict — never the tagged-keystone label."""
+    rec = _record(column="dev", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    v = tc.reconcile(
+        rec,
+        _in_tag(_tagmap()),
+        _column_of({}),
+        commit_at_head=_at_head("abc1234"),
+    )
+    assert v.fires
+    assert v.label == "shipped-unreleased-review"
+    assert v.shipped_unreleased is True
+    assert v.unreleased_commits == ["abc1234"]
+    assert "closeable-candidate" not in v.fired
+    assert "partially-shipped-review" not in v.fired
+
+
+def test_reconcile_defaults_commit_at_head_to_never_fires():
+    """Pre-existing call sites (production and the check-1 tests above) that never pass
+    `commit_at_head` must behave EXACTLY as before Check 8 existed — the default seam never
+    fires it, so an untagged-but-at-HEAD-in-reality commit stays silent when the caller simply
+    never asked the question."""
+    rec = _record(column="dev", impl="[abc1234]", body="\n# body\nall shipped.\n")
+    v = tc.reconcile(rec, _in_tag(_tagmap()), _column_of({}))
+    assert not v.fires
+    assert v.shipped_unreleased is False

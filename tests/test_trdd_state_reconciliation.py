@@ -206,11 +206,52 @@ def test_shipped_but_blocked_is_review_not_closeable(repo: Path):
 
 def test_genuinely_unshipped_in_progress_fires_nothing(repo: Path):
     """A genuinely in-progress TRDD whose commit is NOT in any release tag, with
-    frontmatter & prose in agreement and no stale blocker, fires nothing."""
+    frontmatter & prose in agreement and no stale blocker, fires nothing.
+
+    Body carries an explicit open acceptance box (TRDD-4ZSYW21E, Check 8): since
+    Check 8 (shipped-unreleased-review) fires on ANY untagged commit reachable
+    from HEAD with no remaining-work marker, "genuinely in progress" must now be
+    declared via `check2_has_remaining_work`'s own vocabulary the same way it
+    always gated Check 1 — an unchecked `- [ ]` box IS the remaining work this
+    fixture represents, and the false-positive storm Check 8's own suppression
+    is proven against separately below."""
     uid = "dddddddd"
-    _write_trdd(repo, uid, column="dev", body="\n# body\nstill working.\n")
+    _write_trdd(
+        repo, uid, column="dev",
+        body="\n## plan\n- [ ] still working on this\n",
+    )
     _commit_all(repo, f"wip: in progress (TRDD-{uid})")
     # NO tag created → the commit is in no release.
+
+    out = _run(repo)
+    assert out.strip() == ""
+
+
+def test_shipped_unreleased_review_stays_silent_with_open_acceptance_box(repo: Path):
+    """TRDD-4ZSYW21E watch item: Check 8's remaining-work gate must actually SUPPRESS —
+    an untagged commit reachable from HEAD, but the card still carries an open
+    acceptance box, must not fire the new rung (or anything else)."""
+    uid = "88880001"
+    _write_trdd(
+        repo, uid, column="dev",
+        body="\n## Acceptance\n- [ ] one more thing to verify\n",
+    )
+    _commit_all(repo, f"wip: partial (TRDD-{uid})")
+    # NO tag created → untagged, but the commit IS reachable from HEAD.
+
+    out = _run(repo)
+    assert out.strip() == ""
+
+
+def test_shipped_unreleased_review_stays_silent_with_open_next_action(repo: Path):
+    """Same watch item, the other remaining-work shape: an open NEXT ACTION line
+    with no DONE/SHIPPED marker must also suppress Check 8."""
+    uid = "88880002"
+    _write_trdd(
+        repo, uid, column="dev",
+        body="\n## STATE\n- NEXT ACTION: wire the remaining seam\n",
+    )
+    _commit_all(repo, f"wip: partial (TRDD-{uid})")
 
     out = _run(repo)
     assert out.strip() == ""
@@ -225,6 +266,71 @@ def test_terminal_trdd_never_flagged(repo: Path):
 
     out = _run(repo)
     assert out.strip() == ""
+
+
+# ── Check 8: shipped but unreleased — the publish-freeze rung (TRDD-4ZSYW21E) ──
+
+
+def test_shipped_unreleased_review_surfaces_when_untagged_and_clean(repo: Path):
+    """A commit reachable from HEAD, in NO released tag, with no remaining work —
+    the exact publish-freeze gap the keystone (Check 1) goes blind to. Must
+    surface as the distinct, weaker verdict, never as the tagged keystone's."""
+    uid = "99990001"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+    # NO tag created — the whole point of this rung.
+
+    out = _run(repo)
+    assert f"TRDD-{uid}" in out
+    assert "shipped-unreleased-review" in out
+    assert "closeable-candidate" not in out
+    assert "partially-shipped-review" not in out
+
+
+def test_shipped_unreleased_review_names_weaker_evidence_in_report(repo: Path):
+    """The report evidence must tell the reader this is WEAKER than a tagged
+    release, per the card's acceptance criteria ('visibly distinguishable')."""
+    uid = "99990002"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+
+    _run(repo)
+    report_dir = repo / "reports" / "trdd-reconciliation"
+    reports = list(report_dir.glob("*-board.md"))
+    assert reports, "a candidate report must be written"
+    text = reports[0].read_text()
+    assert f"TRDD-{uid}" in text
+    assert "shipped-unreleased-review" in text
+    assert "WEAKER" in text
+
+
+def test_check1_wins_when_commit_is_both_tagged_and_at_head(repo: Path):
+    """A commit in a released tag is by definition also reachable from HEAD, so
+    Check 8's raw predicate is true too — but Check 1's stronger verdict must
+    win outright; the weaker rung must never appear alongside it."""
+    uid = "99990003"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+    _tag(repo, "v0.10.0")
+
+    out = _run(repo)
+    assert f"TRDD-{uid}" in out
+    assert "closeable-candidate" in out
+    assert "shipped-unreleased-review" not in out
+
+
+def test_shipped_unreleased_review_dedupes_across_runs(repo: Path):
+    """Same per-(TRDD,verdict) seen-file dedupe that covers every other verdict
+    must cover the new one too — a still-untagged candidate is not re-nagged."""
+    uid = "99990004"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+
+    first = _run(repo)
+    assert f"TRDD-{uid}" in first
+    assert "shipped-unreleased-review" in first
+    second = _run(repo)
+    assert second.strip() == "", "same untagged verdict must not re-nag"
 
 
 # ── surface-only safety contract ─────────────────────────────────────────────

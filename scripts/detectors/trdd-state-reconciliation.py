@@ -75,6 +75,25 @@ def _released_tags_for(sha: str, root: Path) -> list[str]:
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("v")]
 
 
+def _commit_at_head(sha: str, root: Path) -> bool:
+    """True iff `sha` is reachable from HEAD (`git merge-base --is-ancestor <sha> HEAD`).
+
+    The Check-8 seam (TRDD-4ZSYW21E): broader than `_released_tags_for` — every tagged commit
+    is also at HEAD, but the reverse is not true between releases. Exit 0 = ancestor (reachable),
+    1 = not an ancestor, anything else (bad sha, corrupt repo) is UNKNOWN and fails CLOSED (never
+    flag on an inconclusive read — the opposite bias from `_commit_touches_impl`, because Check 8
+    is already the weaker rung and a false "shipped" here would out-rank nothing worse to trust).
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", sha, "HEAD"],
+        timeout=8,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None:
+        return False
+    return proc.returncode == 0
+
+
 def _idle_days(path: Path) -> float | None:
     """Days since this card was LAST TOUCHED by any evidence we have, or None when unknown.
 
@@ -356,6 +375,13 @@ def _write_report(main_root: Path, rows: list[dict]) -> Path | None:
                 "column: blocked but blocked-by is empty — the one licence to sit still "
                 "must NAME what it waits on"
             )
+        if r.get("shipped_unreleased"):
+            unreleased = r.get("unreleased_commits") or []
+            example = f" e.g. {unreleased[0][:12]}" if unreleased else ""
+            evidence_bits.append(
+                f"WEAKER evidence than a tagged release: {len(unreleased)} commit(s) reachable "
+                f"from HEAD but in NO released tag yet{example} — verify before acting"
+            )
         evidence = "; ".join(evidence_bits) or "—"
         lines.append(
             f"| TRDD-{uid} | {r.get('scope', trdd_common.PROJECT)} | {r['column'] or '?'} | "
@@ -476,6 +502,15 @@ def main() -> int:
     def commit_in_released_tag(sha: str) -> bool:
         return bool(released_tags(sha))
 
+    # Check 8's seam (TRDD-4ZSYW21E), memoized per SHA like the tag lookup above — the same
+    # commit can be shared across TRDD authoring citations and is cheap to reuse.
+    head_cache: dict[str, bool] = {}
+
+    def commit_at_head(sha: str) -> bool:
+        if sha not in head_cache:
+            head_cache[sha] = _commit_at_head(sha, root)
+        return head_cache[sha]
+
     rows: list[dict] = []
     for rec in records:
         # Only a NON-terminal TRDD can be "shipped but open" or "stale-blocked".
@@ -510,6 +545,7 @@ def main() -> int:
         verdict = trdd_common.reconcile(
             rec, commit_in_released_tag, column_of,
             idle_days=idle_by_uid.get(rec.uid or ""),
+            commit_at_head=commit_at_head,
         )
         if not verdict.fires:
             continue
@@ -529,6 +565,8 @@ def main() -> int:
                 "prose_mismatch": verdict.prose_mismatch,
                 "stale_blockers": verdict.stale_blockers,
                 "unnamed_blocker": verdict.unnamed_blocker,
+                "shipped_unreleased": verdict.shipped_unreleased,
+                "unreleased_commits": verdict.unreleased_commits,
             }
         )
 

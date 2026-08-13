@@ -77,7 +77,40 @@ surfaced, and it is the class currently guaranteed to be silent.
 ## What
 
 1. **Re-scope the four pages** (move to USER scope, delete the symlinks, fix the PROJECT-side
-   index links so nothing dangles). One-time.
+   index links so nothing dangles). One-time. **⚠ ORDER IS LOAD-BEARING — see below; done in the
+   wrong order this step UNDOES ITSELF.**
+
+### ⚠ 2026-08-13 — "One-time" IS WRONG. A LIVE mechanism re-creates these, verified in source
+
+**The cause recorded above — *"someone reached for a symlink"* — is not the whole story, and
+acting on it as written fails.** The symlinks are the exact output shape of a mechanism that
+is ALREADY SHIPPED and runs on every page write (TRDD-AZ6QRK0D, `scripts/memgrep/src/memory.rs`):
+
+- `apply_publish_globally_fix` calls `create_user_symlink(&state.link_path, &state.page_abs)` —
+  a link IN the USER mem root pointing AT the project page: byte-for-byte the shape M-10 refuses.
+- It runs inside `normalize_page_until_clean`, bracketed around EVERY `atomic_write_page`, before
+  and after each change, iterating to a fixed point. There is deliberately no `--fix` opt-in.
+
+**And the trap is sharper than "it re-creates them".** Measured now: all four USER-root entries
+ARE symlinks into this repo's `.claude/project/memory/`, while their PROJECT originals carry NO
+`publish-globally` field at all. The classifier reads that combination as
+`(has_field=false, has_symlink=true) → MissingSymlinkImpliesTrue`, whose documented meaning is
+*"a symlink already exists — evidence of intent"*, and whose fix STAMPS `publish-globally: true`
+onto the page.
+
+So the first engine write to any of these four pages converts an accident into a DECLARED
+intent, after which the symlink is correct by the engine's own rules and maintained forever.
+Deleting the symlinks after that point is not a fix, it is a loop.
+
+**Corrected order for step 1 — do not reorder:**
+1. Delete the four USER-root symlinks FIRST (or set `publish-globally: false` on the project
+   pages first), so the classifier can never see symlink-without-field.
+2. Only then move/re-scope the pages.
+3. Re-run a write and confirm no symlink reappears — the acceptance test is the engine's
+   behaviour, not the filesystem state at one instant.
+
+**This also means acceptance box 1 as written ("the four symlinks are gone") is not sufficient:**
+they can be gone and return on the next write. It must assert they stay gone ACROSS a page write.
 2. **Surface permanent unmaintainability.** Distinguish a TRANSIENT refusal (unchanged content,
    already judged — the ledger's intended use) from a STRUCTURAL one (symlink escape, unparseable
    frontmatter, over-cap with a tier that forbids splitting — conditions no future content change

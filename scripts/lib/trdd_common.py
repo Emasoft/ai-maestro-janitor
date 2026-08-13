@@ -1011,10 +1011,10 @@ class ReconcileVerdict:
     """The reconciliation outcome for ONE TRDD — which checks fired + the label.
 
     `label` is one of: 'closeable-candidate', 'partially-shipped-review',
-    'prose-frontmatter-mismatch', 'stale-blocker', 'blocked-without-blocker', or
-    '' when nothing fired. A TRDD can fire multiple checks; `label` is the single
-    most-actionable one, but `fired` lists them all and the evidence fields carry
-    the details.
+    'prose-frontmatter-mismatch', 'stale-blocker', 'blocked-without-blocker',
+    'shipped-unreleased-review', or '' when nothing fired. A TRDD can fire
+    multiple checks; `label` is the single most-actionable one, but `fired`
+    lists them all and the evidence fields carry the details.
     """
 
     uid: str | None
@@ -1031,6 +1031,11 @@ class ReconcileVerdict:
     idle_work: bool = False
     # Which of the TRDD's commits were found in a released tag (evidence).
     shipped_commits: list[str] = field(default_factory=list)
+    # Check 8: commits reachable from HEAD but not (yet) in ANY released tag — the
+    # lower-confidence rung Check 1 goes blind to between releases (TRDD-4ZSYW21E).
+    shipped_unreleased: bool = False
+    # Which of the TRDD's commits are reachable from HEAD but untagged (evidence).
+    unreleased_commits: list[str] = field(default_factory=list)
 
     @property
     def fires(self) -> bool:
@@ -1100,6 +1105,50 @@ def check6_blocked_without_blocker(record: TrddRecord) -> bool:
     return norm_state(record.column) == "blocked" and not record.declares_blocker
 
 
+def check8_shipped_unreleased(record: TrddRecord, commit_at_head) -> bool:
+    """Check 8 — lower-confidence rung: commits at HEAD, no released tag yet (TRDD-4ZSYW21E).
+
+    Check 1 requires a commit to be CONTAINED IN A RELEASED TAG — necessary so the check does
+    not fire on a card that is legitimately mid-flight (it has commits at HEAD by construction).
+    Between releases that keystone goes BLIND to every card whose work already landed but hasn't
+    been tagged yet — measured on this repo 2026-08-13: 136 commits since the last tag, and four
+    shipped-but-open cards found only by hand that night, none by the detector. A publish freeze
+    is exactly when shipped-but-open cards pile up fastest, which is exactly when Check 1 goes
+    quiet — the correlation that makes this worth a second rung rather than a wider Check 1.
+
+    `commit_at_head(sha) -> bool` is the injectable membership seam (in production:
+    `git merge-base --is-ancestor <sha> HEAD`) — broader than `commit_in_released_tag`, so it is
+    true of every tagged commit too. `reconcile()` only evaluates this check when Check 1 did
+    NOT already fire, so a tagged card still reports Check 1's stronger verdict — this rung only
+    ever surfaces the untagged residue.
+
+    Same remaining-work gate as Check 1 (`check2_has_remaining_work`): a card that still has
+    open in-scope work stays silent. That gate is what stops this firing on every ordinary card
+    mid-flight in `dev` — the exact false-positive storm the tag requirement exists to prevent
+    (F4IBIDB6).
+
+    Returns True iff the column is NON-terminal, at least one of the TRDD's commits is reachable
+    from HEAD, and the TRDD has no remaining in-scope work.
+    """
+    if is_terminal_column(record.column):
+        return False
+    if not record.impl_commits:
+        return False
+    if not any(commit_at_head(sha) for sha in record.impl_commits):
+        return False
+    return not check2_has_remaining_work(record)
+
+
+def _commit_never_at_head(sha: str) -> bool:  # noqa: ARG001 - fixed seam signature
+    """Default `commit_at_head` seam when the caller supplies none: never fires Check 8.
+
+    Keeps every pre-existing `reconcile()` call site (production and tests) that predates Check 8
+    behaviourally UNCHANGED — Check 8 simply stays silent rather than raising a TypeError over a
+    missing argument.
+    """
+    return False
+
+
 def reconcile(
     record: TrddRecord,
     commit_in_released_tag,
@@ -1107,14 +1156,23 @@ def reconcile(
     *,
     idle_days: float | None = None,
     work_idle_threshold_days: float = DEFAULT_WORK_IDLE_DAYS,
+    commit_at_head=None,
 ) -> ReconcileVerdict:
-    """Run all four checks on one record; return the consolidated verdict.
+    """Run every check on one record; return the consolidated verdict.
 
     `commit_in_released_tag(sha) -> bool` and `column_of(uid) -> str` are the
-    two injectable seams (git-backed in production, fakes in tests). The label
-    precedence is: shipped+remaining (partially-shipped-review) and
-    shipped+clean (closeable-candidate) are the keystone outcomes; the prose
-    mismatch and stale-blocker checks are independent signals that also surface.
+    two mandatory injectable seams (git-backed in production, fakes in tests).
+    `commit_at_head(sha) -> bool` is OPTIONAL (default: never-fires — see
+    `_commit_never_at_head`) so every call site written before Check 8 existed
+    keeps behaving exactly as before. The label precedence is: shipped+remaining
+    (partially-shipped-review) and shipped+clean (closeable-candidate) are the
+    keystone outcomes, evaluated first; the prose-mismatch, stale-blocker,
+    unnamed-blocker and idle-work checks are independent signals that surface
+    next; Check 8 (shipped-unreleased-review) is evaluated LAST and only when
+    Check 1 did NOT fire — it is deliberately the lowest-confidence signal (an
+    untagged commit is weaker evidence than every other check here), so it never
+    buries a stronger signal out of the single `label`, and it only ever becomes
+    `label` when nothing else fired.
     """
     # AUTHORITATIVE terminal guard (issue #65 class a): a TRDD in a terminal
     # column (published/complete/live/failed/superseded/cancelled/refused) is
@@ -1157,6 +1215,22 @@ def reconcile(
     if idle_work:
         fired.append("work-column-without-work")
 
+    # Check 8 (TRDD-4ZSYW21E): only evaluated when Check 1 did NOT already fire, so a card
+    # whose commits ARE in a released tag always reports Check 1's stronger verdict, never
+    # this weaker one — "Check 1 wins when both apply" per the card's acceptance criteria.
+    # Appended LAST, after every other check: it is deliberately the lowest-confidence signal
+    # (an untagged commit is much weaker evidence than a tagged one, a prose mismatch, a stale
+    # blocker, or an unnamed/idle claim), so it must never bury a stronger signal out of the
+    # single-label summary — it only ever becomes `label` when nothing else fired.
+    _head_seam = commit_at_head if commit_at_head is not None else _commit_never_at_head
+    shipped_unreleased = False
+    unreleased_commits: list[str] = []
+    if not shipped:
+        shipped_unreleased = check8_shipped_unreleased(record, _head_seam)
+        if shipped_unreleased:
+            unreleased_commits = [sha for sha in record.impl_commits if _head_seam(sha)]
+            fired.append("shipped-unreleased-review")
+
     label = fired[0] if fired else ""
     return ReconcileVerdict(
         uid=record.uid,
@@ -1170,4 +1244,6 @@ def reconcile(
         shipped_commits=shipped_commits,
         unnamed_blocker=unnamed_blocker,
         idle_work=idle_work,
+        shipped_unreleased=shipped_unreleased,
+        unreleased_commits=unreleased_commits,
     )
