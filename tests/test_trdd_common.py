@@ -778,6 +778,56 @@ def test_check6_silent_when_a_blocker_is_named():
         _record(column="blocked", blocked_by="[publish-of-7ceab3f]")) is False
 
 
+def test_check7_fires_on_a_work_column_nobody_has_touched():
+    """A WORK column asserts someone is working the card RIGHT NOW. When that is false the
+    board's most-populated columns become its least honest, and the stall is invisible from the
+    only view anyone consults — worse than an unstarted card, which never claims to be handled.
+    Measured on ai-maestro 2026-08-01: 37 cards in `dev`, exactly one touched that day."""
+    for col in ("dev", "testing", "ai_review"):
+        assert tc.check7_work_column_without_work(
+            _record(column=col), idle_days=9.0, threshold_days=3.0) is True, col
+
+
+def test_check7_is_silent_on_a_card_being_worked_right_now():
+    """THE false positive that would get the whole check switched off. A card touched inside the
+    window is exactly what the column claims, so it must stay silent — including right at the
+    boundary, which is the value most likely to be hit by a card worked daily."""
+    assert tc.check7_work_column_without_work(
+        _record(column="dev"), idle_days=0.0, threshold_days=3.0) is False
+    assert tc.check7_work_column_without_work(
+        _record(column="dev"), idle_days=2.99, threshold_days=3.0) is False
+
+
+def test_check7_is_scoped_to_the_columns_that_make_the_claim():
+    """`todo`/`backburner` assert only that something is QUEUED, and a queued card sitting still
+    is the system working as designed. Firing there would reproduce `trdd-drift` (which reports
+    age on any card) and bury the distinct signal this check exists to give: a contradicted
+    CLAIM, not mere idleness."""
+    for col in ("todo", "backburner", "blocked", "human_review", "complete", "published"):
+        assert tc.check7_work_column_without_work(
+            _record(column=col), idle_days=400.0, threshold_days=3.0) is False, col
+
+
+def test_check7_declines_when_the_age_is_unknown():
+    """An unknown age is not evidence of a stall. Inventing one would fire on exactly the cards
+    whose metadata is hardest to read — the least reliable place to make an accusation."""
+    assert tc.check7_work_column_without_work(
+        _record(column="dev"), idle_days=None, threshold_days=3.0) is False
+
+
+def test_reconcile_reports_check7_without_mutating_the_record():
+    """Acceptance box: neither check MUTATES a card. `reconcile` is a reader — it must surface
+    the untrue claim and leave the destination to whoever reads it, because the right column
+    differs per card (`backburner` for one waiting on a condition nobody can manufacture,
+    `todo` for one simply unstarted, `blocked` only when a blocker can be NAMED)."""
+    rec = _record(column="dev")
+    before = (rec.column, rec.status, list(rec.blocked_by), list(rec.impl_commits), rec.body)
+    verdict = tc.reconcile(rec, lambda _sha: False, lambda _uid: "", idle_days=30.0)
+    assert verdict.idle_work is True
+    assert "work-column-without-work" in verdict.fired
+    assert (rec.column, rec.status, list(rec.blocked_by), list(rec.impl_commits), rec.body) == before
+
+
 def test_check6_silent_on_every_other_column():
     """Only `blocked` makes the claim, so only `blocked` can make it falsely. An empty
     blocked-by is NORMAL everywhere else and firing there would bury the real signal."""

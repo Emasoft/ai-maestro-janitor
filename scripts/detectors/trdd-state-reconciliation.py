@@ -74,6 +74,37 @@ def _released_tags_for(sha: str, root: Path) -> list[str]:
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("v")]
 
 
+def _idle_days(path: Path) -> float | None:
+    """Days since this card was LAST TOUCHED by any evidence we have, or None when unknown.
+
+    Two independent signals, and the FRESHEST wins (TRDD-F4IBIDB6): the frontmatter `updated:`
+    stamp, and the file's real mtime. Either alone produces the false positive that would get
+    check 7 switched off wholesale — an agent mid-work edits the body without bumping `updated:`
+    (mtime is fresh, stamp is old), while a mechanical repair pass bumps neither reliably. Taking
+    the minimum means any recent evidence of activity keeps the card quiet, which is the correct
+    bias: check 7 exists to catch cards nobody is touching AT ALL.
+
+    None (both unreadable) is passed through as None and check 7 declines to fire — an unknown
+    age is not evidence of a stall.
+    """
+    ages: list[float] = []
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:2048]
+        m = re.search(r"^updated:[ \t]*(\S+)", head, re.MULTILINE)
+        if m:
+            stamped = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S%z")
+            ages.append((datetime.now(stamped.tzinfo) - stamped).total_seconds() / 86400.0)
+    except (OSError, ValueError):
+        pass
+    try:
+        ages.append((datetime.now().timestamp() - path.stat().st_mtime) / 86400.0)
+    except OSError:
+        pass
+    if not ages:
+        return None
+    return max(0.0, min(ages))
+
+
 def _citation_re(uid: str) -> re.Pattern[str]:
     """Compile the CANONICAL-citation matcher for `uid` in a commit subject.
 
@@ -382,12 +413,16 @@ def main() -> int:
     records: list[trdd_common.TrddRecord] = []
     scope_by_uid: dict[str, str] = {}
     column_by_uid: dict[str, str] = {}
+    idle_by_uid: dict[str, float | None] = {}
     for scope, f in trdds:
         rec = trdd_common.parse_trdd_record(f)
         records.append(rec)
         if rec.uid is not None:
             column_by_uid[rec.uid] = rec.column
             scope_by_uid[rec.uid] = scope
+            # Computed HERE because this is the only pass that holds the path; check 7 wants
+            # the age, not the file (TRDD-F4IBIDB6).
+            idle_by_uid[rec.uid] = _idle_days(f)
 
     def column_of(uid: str) -> str:
         return column_by_uid.get(uid, "")
@@ -471,7 +506,10 @@ def main() -> int:
                 body=rec.body,
             )
 
-        verdict = trdd_common.reconcile(rec, commit_in_released_tag, column_of)
+        verdict = trdd_common.reconcile(
+            rec, commit_in_released_tag, column_of,
+            idle_days=idle_by_uid.get(rec.uid or ""),
+        )
         if not verdict.fires:
             continue
 

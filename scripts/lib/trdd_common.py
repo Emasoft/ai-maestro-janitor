@@ -1027,12 +1027,56 @@ class ReconcileVerdict:
     stale_blockers: list[str] = field(default_factory=list)
     # Check 6: `column: blocked` naming no blocker at all.
     unnamed_blocker: bool = False
+    # Check 7: a WORK column claiming activity nobody is providing (TRDD-F4IBIDB6).
+    idle_work: bool = False
     # Which of the TRDD's commits were found in a released tag (evidence).
     shipped_commits: list[str] = field(default_factory=list)
 
     @property
     def fires(self) -> bool:
         return bool(self.fired)
+
+
+#: The columns that assert work is happening RIGHT NOW. `todo`/`backburner` assert only that
+#: something is queued, and the terminal columns assert nothing ongoing at all — so idleness is
+#: a lie in exactly these three and nowhere else.
+WORK_COLUMNS = frozenset({"dev", "testing", "ai_review"})
+
+#: Days a WORK card may go untouched before its column is calling itself a liar. Generous on
+#: purpose: check 7's one fatal failure mode is firing on a card somebody IS working, because
+#: that is what gets a board detector switched off wholesale.
+DEFAULT_WORK_IDLE_DAYS = 3.0
+
+
+def check7_work_column_without_work(
+    record: TrddRecord,
+    *,
+    idle_days: float | None,
+    threshold_days: float = DEFAULT_WORK_IDLE_DAYS,
+) -> bool:
+    """Check 7 — a WORK column claiming activity nobody is providing (TRDD-F4IBIDB6).
+
+    `dev`/`testing`/`ai_review` assert that someone is working the card RIGHT NOW. When that is
+    false the board's most-populated columns become its least honest ones, and the stall is
+    invisible from the only view anyone consults — worse than an unstarted card, which at least
+    does not claim to be handled. Measured on ai-maestro 2026-08-01: 37 cards in `dev`, exactly
+    one touched that day.
+
+    `idle_days` is INJECTED rather than derived here, like check 1's `commit_in_released_tag` and
+    check 4's `column_of`: the freshest touch is an I/O question (frontmatter `updated:` vs the
+    file's real mtime) and this layer stays pure and testable at a threshold.
+
+    `None` ⇒ FALSE. An unknown age is not evidence of a stall, and inventing one would fire on
+    exactly the cards whose metadata is hardest to read.
+
+    Distinct from `trdd-drift`, which reports IDLENESS (age) on any card. This reports a
+    contradicted CLAIM, which is why it is scoped to the three columns that make one.
+    """
+    if record.column not in WORK_COLUMNS:
+        return False
+    if idle_days is None:
+        return False
+    return idle_days >= threshold_days
 
 
 def check6_blocked_without_blocker(record: TrddRecord) -> bool:
@@ -1056,7 +1100,14 @@ def check6_blocked_without_blocker(record: TrddRecord) -> bool:
     return norm_state(record.column) == "blocked" and not record.declares_blocker
 
 
-def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> ReconcileVerdict:
+def reconcile(
+    record: TrddRecord,
+    commit_in_released_tag,
+    column_of,
+    *,
+    idle_days: float | None = None,
+    work_idle_threshold_days: float = DEFAULT_WORK_IDLE_DAYS,
+) -> ReconcileVerdict:
     """Run all four checks on one record; return the consolidated verdict.
 
     `commit_in_released_tag(sha) -> bool` and `column_of(uid) -> str` are the
@@ -1100,6 +1151,11 @@ def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> Reconcil
     unnamed_blocker = check6_blocked_without_blocker(record)
     if unnamed_blocker:
         fired.append("blocked-without-blocker")
+    idle_work = check7_work_column_without_work(
+        record, idle_days=idle_days, threshold_days=work_idle_threshold_days
+    )
+    if idle_work:
+        fired.append("work-column-without-work")
 
     label = fired[0] if fired else ""
     return ReconcileVerdict(
@@ -1113,4 +1169,5 @@ def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> Reconcil
         stale_blockers=stale_blockers,
         shipped_commits=shipped_commits,
         unnamed_blocker=unnamed_blocker,
+        idle_work=idle_work,
     )
