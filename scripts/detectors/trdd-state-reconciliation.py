@@ -30,6 +30,7 @@ candidate is not re-nagged every heartbeat.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import sys
@@ -497,14 +498,14 @@ def main() -> int:
                 if _commit_touches_impl(s, root, impl_prefix)
             ]
             merged = list(dict.fromkeys([*rec.impl_commits, *subj_commits]))
-            rec = trdd_common.TrddRecord(
-                uid=rec.uid,
-                column=rec.column,
-                status=rec.status,
-                blocked_by=rec.blocked_by,
-                impl_commits=merged,
-                body=rec.body,
-            )
+            # `dataclasses.replace`, NEVER a field-by-field rebuild. The hand-written
+            # constructor this replaces listed six fields and silently dropped the seventh
+            # (`declares_blocker`), which then fell back to its dataclass default False — so
+            # Check 6 read every blocked card reaching this branch as "names no blocker" and
+            # reported 8 such findings on the live board, ALL 8 wrong. A partial copy of
+            # a dataclass is a bug waiting on the next field to be added; `replace` carries
+            # every field by construction, including ones that do not exist yet.
+            rec = dataclasses.replace(rec, impl_commits=merged)
 
         verdict = trdd_common.reconcile(
             rec, commit_in_released_tag, column_of,

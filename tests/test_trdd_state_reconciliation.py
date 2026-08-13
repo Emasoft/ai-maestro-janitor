@@ -656,3 +656,39 @@ def test_the_regex_uses_no_construct_git_silently_ignores():
     mod = _sym_in_history()
     assert "\\b" not in mod._DEFINITION_RE
     assert "\\s" not in mod._DEFINITION_RE
+
+
+def test_blocked_card_naming_a_non_trdd_blocker_is_not_reported_blockerless(repo: Path):
+    """THE 8-of-8 false-positive regression, found on the LIVE board 2026-08-13.
+
+    A `blocked` card that NAMES a non-TRDD blocker AND has commits in a released tag takes
+    the keystone branch, where the detector used to REBUILD its TrddRecord field-by-field.
+    That copy listed six fields and dropped the seventh, `declares_blocker`, which fell back
+    to its dataclass default False — so Check 6 read the card as naming no blocker. Eight
+    findings on the real board, all eight wrong: the exact false-positive storm that gets a
+    board check switched off wholesale.
+
+    Deliberately UNSHIPPED (an authoring commit only, no release tag). An earlier draft of
+    this test gave the card shipped commits and passed even with the bug restored — because
+    `reconcile` emits ONE label per card, so `partially-shipped-review` masked Check 6 and the
+    test asserted a regression it never exercised. Leaving the card unshipped makes
+    blocked-without-blocker the only label it can produce, so the assertion is load-bearing:
+    with the bug it FIRES, with the fix the card is silent."""
+    uid = "dddddddd"
+    _write_trdd(repo, uid, column="blocked", blocked_by="[publish-of-7ceab3f]",
+                body="\n## STATE\nwaiting on a release nobody here can manufacture\n")
+    _commit_all(repo, f"docs: add TRDD-{uid}", spec_only=True)
+
+    out = _run(repo)
+    assert "blocked-without-blocker" not in out
+
+
+def test_the_detector_never_hand_rebuilds_a_trdd_record():
+    """A field-by-field `TrddRecord(...)` copy silently drops whatever the author forgot —
+    and, worse, whatever is added LATER in a different file by someone who never sees this
+    line. That is precisely how `declares_blocker` reached production defaulted to False.
+    `dataclasses.replace` carries every field by construction, including fields that do not
+    exist yet, so the only safe copy is the one that names no fields at all."""
+    src = DETECTOR.read_text(encoding="utf-8")
+    assert "dataclasses.replace(" in src
+    assert "trdd_common.TrddRecord(" not in src
