@@ -1,9 +1,10 @@
 ---
 trdd-id: XFPOAF2I
 title: Nothing detects two open cards attacking one defect without knowing about each other
-column: todo
+column: complete
 created: 2026-08-13T04:26:15+0200
-updated: 2026-08-13T04:35:08+0200
+updated: 2026-08-13T04:48:04+0200
+implementation-commits: [20a1c14e, c4f11738]
 current-owner: unassigned
 task-type: feature
 approval-tier: 0
@@ -81,6 +82,28 @@ thing it grades, or it is an independent bug wearing a test's clothes.**
       by a unit test and by #238's live exclusion
 - [x] Zero model tokens — the whole check is a script, and it names the pair rather than asking
       the model to go and compare the two cards
-- [ ] Act on the two live findings: cross-link or confirm agreement for #237 and #246
+- [x] Act on the two live findings — both were COMPLEMENTARY, not contradictory, so both were
+      cross-linked (`c4f11738`). #237: EZ3PMQYX item 3 does "flag carries evidence age" for the
+      iTerm flag, 88ZVEQY7 generalizes the same lesson to the fleet audit — one principle on two
+      surfaces, so the second must REUSE the first's age-label mechanism rather than invent a
+      second format. #246: KI6OWCZT owns the answer, G4BCRUP7 merely lists it. #249 made
+      bidirectional while there.
+
+## ⏵ CLOSED 2026-08-13 — and the detector found a bug in ITSELF within the hour
+
+Acting on its own output surfaced a NEW pair — `JPL0JU86 & KI6OWCZT`, sharing only
+`TRDD-G4BCRUP7`, the umbrella they had just been linked to. A shared TRDD-ref is hub-and-spoke
+STRUCTURE, not blindness: an umbrella is cited by many unrelated children (one per contract row),
+so keying on it pairs every child with every other.
+
+**Fatal rather than merely noisy because it is self-inflicted and unbounded** — cross-linking is
+the remedy this detector RECOMMENDS, so each remedy adds a shared TRDD-ref and manufactures the
+next finding. A check whose own advice re-arms it never converges, and one that never converges
+gets switched off. Fixed at `c4f11738`: key on EXTERNAL issue refs only, reusing the predicate
+already in the file. Two tests, both falsified.
+
+**Design lesson worth carrying to the next detector:** when a check RECOMMENDS an action, ask
+what that action does to the check's own input. Here the remedy was also a signal — the one
+shape that guarantees non-convergence.
 
 ## Notes and lessons learned
