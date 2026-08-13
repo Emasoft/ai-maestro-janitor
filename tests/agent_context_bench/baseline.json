@@ -3,8 +3,8 @@
     "samples": 253,
     "benign": 72,
     "attack_claimed": 164,
-    "recall_intended": 0.5244,
-    "recall_any": 0.5671,
+    "recall_intended": 0.5366,
+    "recall_any": 0.5732,
     "false_positive_rate": 0.0417
   },
   "per_population": {
@@ -262,11 +262,10 @@
     "two-step-code-injection": {
       "claimed": true,
       "n": 9,
-      "intended": 3,
-      "any": 7,
+      "intended": 5,
+      "any": 8,
       "misses": [
-        "blind set: JS Buffer.from base64 feeding eval indirectly through setTimeout",
-        "blind set: PowerShell FromBase64String + Invoke-Expression, decode/exec on adjacent lines"
+        "blind set: JS Buffer.from base64 feeding eval indirectly through setTimeout"
       ]
     },
     "git-protocol-only-dependency": {

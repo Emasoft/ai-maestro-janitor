@@ -437,16 +437,28 @@ def dynamic_exec_negative_context_near(text: str, start: int, end: int) -> bool:
 _B64_LITERAL = r"['\"][A-Za-z0-9+/=]{40,}['\"]"
 # `=` is in the charset for padding; the {40,} run anchors a long body before any padding so a
 # short string ending in `=` cannot sneak in.
-_DECODE_CALL = r"(?:Buffer\.from|base64\.b64decode|atob)\s*\("
+# `b64decode` bare (not just `base64.b64decode`) because `from base64 import b64decode` is
+# ordinary, and `FromBase64String` because PowerShell was entirely uncovered — the decode
+# alternation named three JS/Python primitives and no PowerShell one, so a
+# `[Convert]::FromBase64String($B64)` dropper could not match on ANY branch.
+_DECODE_CALL = r"(?:Buffer\.from|base64\.b64decode|b64decode|atob|FromBase64String)\s*\("
 # Same unqualified-name guard as `_DYNAMIC_EXEC`, for the same measured reason: a bare
 # `exec\s*\(` also matches `cursor.exec(...)`, so a migration script with a base64 checksum near
-# a decode helper looked like a two-step dropper.
+# a decode helper looked like a two-step dropper. `Invoke-Expression` / `iex` complete the
+# PowerShell pair: a decode primitive with no reachable sink in the same language is a rule that
+# cannot fire, which is worse than one that fires imprecisely — it is silent.
 _EXEC_SINK = (
     r"(?:(?<![.\w])eval\s*\(|(?<![.\w])Function\s*\(|(?<![.\w])exec\s*\("
-    r"|os\.system\s*\(|(?<![.\w])setTimeout\s*\(\s*['\"])"
+    r"|os\.system\s*\(|(?<![.\w])setTimeout\s*\(\s*['\"]"
+    r"|Invoke-Expression\b|(?<![.\w])iex\b)"
 )
 _WITHIN_5_LINES = r"(?:[^\n]*\n){0,4}"  # up to 4 newlines = within a 5-line window
 
+# FOUR branches, because the three tokens (literal, decode, sink) legitimately appear in more
+# than one ORDER, and a dropper picks the order — we do not. Branch B alone read as "the general
+# case" and was not: nesting the decode INSIDE the sink (`exec(b64decode(blob))`,
+# `new Function(atob(enc))`) puts the sink FIRST, which B cannot match by construction.
+# Measured on the 9-attack / 72-benign set: 3/9 → 5/9 recall, 0/72 false positives unchanged.
 _TWO_STEP_INJECT = _re(
     # Branch A — the payload literal sits INSIDE the decode call.
     rf"(?:(?:Buffer\.from\s*\([^)]{{0,200}}?{_B64_LITERAL}"
@@ -457,9 +469,13 @@ _TWO_STEP_INJECT = _re(
     # what a real dropper looks like (`const p = "<b64>"; Buffer.from(p, 'base64'); eval(...)`),
     # and branch A cannot see it because the literal is never inside the call. Without it the
     # rule scored 0/3 on its own documented shape while reading as CRITICAL coverage — the
-    # blind-corpus audit's finding (janitor#226). Adding it: 0/3 → 1/3 with 0 false positives
-    # across all 68 benign samples.
-    rf"|{_B64_LITERAL}{_WITHIN_5_LINES}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK})"
+    # blind-corpus audit's finding (janitor#226).
+    rf"|{_B64_LITERAL}{_WITHIN_5_LINES}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK}"
+    # Branch C — the sink WRAPS the decode, with the literal assigned above:
+    # `const enc = "<b64>"; (new Function(atob(enc)))();`
+    rf"|{_B64_LITERAL}{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK}[^\n]*?{_DECODE_CALL}"
+    # Branch D — same nesting, literal BELOW the call (a payload defined after its use site).
+    rf"|{_EXEC_SINK}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_B64_LITERAL})"
 )
 
 

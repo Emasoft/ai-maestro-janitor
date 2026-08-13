@@ -26,7 +26,7 @@ not the same as passing.
 | `prompt-injection-multilingual` | 2/7 | weak |
 | `sensitive-secret-ref` | 2/9 | weak |
 | `tool-wildcard-grant` | 7/8 | partial |
-| `two-step-code-injection` | 3/9 | weak |
+| `two-step-code-injection` | 5/9 | partial |
 | `whole-env-exfil` | 3/3 | partial |
 | `worm-self-propagation` | 5/9 | partial |
 
