@@ -1,16 +1,17 @@
 ---
 trdd-id: DB1P25S4
 title: Run the daemon under the signed python.org 3.12 so the existing iTerm Automation grant applies
-column: blocked
+column: human_review
+pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-13T00:44:30+0200
+updated: 2026-08-13T11:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 parent-trdd: VQ4LX7ND
 relevant-rules: []
-blocked-by: [publish-of-75332ba0]
+blocked-by: []
 implementation-commits: [75332ba0]
 ---
 
@@ -149,3 +150,13 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
 - 2026-08-13T00:44:30+0200 — 6/7 acceptance. The end-to-end observation LANDED (see the box); the only remaining
   item is publish-gated, so the card is `blocked` on it rather than sitting in `todo` claiming
   workable.
+- 2026-08-13T11:52:00+0200 — UNBLOCKED: `blocked` → `human_review`, `blocked-by:` cleared.
+  The blocker `publish-of-75332ba0` is SATISFIED — verified first-hand with
+  `git tag --contains 75332ba0`, which lists `ai-maestro-janitor--v2.5.0`, `v2.5.1`, `v2.5.2`.
+  The card had been asserting a wait on a publish that happened days ago, which is the exact
+  failure mode of a stale `blocked-by:`: it is invisible, because a blocked card is *supposed*
+  to sit still, so nothing about the board looks wrong while the work quietly stops.
+  `human_review` rather than `complete` — the STATE block's own STILL OPEN list is not empty
+  (observe a fleet scan enumerate iTerm sessions post-restart; post resolution notes on GH#92 +
+  TRDD-VQ4LX7ND), and the GitHub half is the user's to post. Surfaced by a board-drift audit,
+  then verified against git rather than taken from the audit's report.

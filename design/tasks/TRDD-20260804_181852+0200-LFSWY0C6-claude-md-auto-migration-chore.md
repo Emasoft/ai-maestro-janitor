@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T09:40:00+0200
+updated: 2026-08-13T11:35:00+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -390,7 +390,15 @@ removed a false-positive CLASS without moving a single block on the actual file.
 - [x] Both janitor fences byte-identical across a real 60-block migration
 - [x] Each gate falsified individually, with its red set predicted in advance
 - [ ] An agent writes the atom/fold (CM-2 step 3) — unbuilt
-- [ ] The fences are refreshed after migration (CM-2 step 6) — unbuilt
+- [ ] The fences are refreshed after migration (CM-2 step 6) — **NOT refreshed. Still unbuilt.**
+      `e448b65b` made `apply` PROBE and REPORT the staleness it causes, so an operator is never
+      silently left with a stale index — but reporting a stale index is not refreshing it, and the
+      test that covers it is named for exactly that: `test_cli_apply_points_at_the_index_refresh_
+      it_deliberately_does_not_do`. Folding the splice in is the "one write, three concerns" risk
+      named above, so the gap is deliberate; it is still a gap.
+      (Marked `[x] partially, by design` by the part-2 session and corrected here: a checkbox is
+      read at a glance and the qualifier is not, so a caveated tick reads as done to every later
+      reader — the same over-claim class this card's own gates exist to catch.)
 - [ ] The scheduler runs it unprompted (`PRRD G8.1`) — unbuilt
 
 ## ⚠ 2026-08-13 09:10 — THE SCHEDULER PLAN IN §STATE IS PROBABLY WRONG. Read before building part 2.
@@ -420,6 +428,34 @@ cadence (subject = the repo's CLAUDE.md, no scope axis), or a memory interventio
 resolves the PROJECT gate. That gate exists for a real reason — do not simply bypass it; a chore
 that writes unpushable in-repo memory unattended is a different risk, and G8.1 does not settle it.
 G8.1 settles *that* migration is automatic, never *which component* runs it or what it may write.
+
+## ⏵ 2026-08-13 — PART 2 SESSION: verified, nothing further is unblocked. Card stays `todo`.
+
+Re-ran the full targeted suite (`ruff`, `mypy`, `test_claudemd_migration_apply.py` +
+`test_claudemd_migration_plan.py` + `test_claudemd_slim.py` — 48 passed) against the tree as
+`e448b65b` left it. Everything is green; nothing was broken.
+
+Of the three things this card's own STATE named as part 2's scope:
+
+1. **The index-fence refresh (CM-2 step 6)** — already shipped, `e448b65b`, tested (checklist above
+   updated to reflect it). Nothing to add.
+2. **The agent write step (CM-2 step 3)** — genuinely not code-buildable. Deciding WHAT content an
+   excess block becomes (a new atom vs a fold, which page, what `[^N]` lesson) is an editorial
+   judgment call the spec itself assigns to the memory agent, not a deterministic function of the
+   text. Writing a script that "decides" this would be inventing an editorial policy nobody
+   reviewed — exactly the class of unauthorized design decision this session was told to avoid.
+   Left unbuilt, as the card already says.
+3. **The scheduler host** — the 2026-08-13 09:10 note above proves the originally-planned host
+   (`memory-maintenance.py`'s `(scope, root)` axis) is a category error AND silently inert by
+   default (the PROJECT gate). Picking the real host — a standalone detector on its own cadence,
+   vs, resolving the PROJECT gate inside a memory intervention — is a design decision with real
+   consequences (an unattended chore's write surface), not a mechanical implementation task. Left
+   unbuilt, as instructed.
+
+No fourth option surfaced on inspection: the removal engine (`claudemd_migration_apply.py`) and the
+classifier (`claudemd_migration_plan.py`) are both complete and already exercise every acceptance
+box that does not require an agent decision or a scheduler. Card stays `column: todo` — items 2 and
+3 above are real, undone work, not merely deferred bookkeeping.
 
 ## 1. Why (the cost argument, measured)
 
