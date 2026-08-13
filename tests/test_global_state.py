@@ -1090,6 +1090,41 @@ class _FakeProc:
     pid = 4242
 
 
+def _is_daemon_spawn(argv: list[str]) -> bool:
+    """True iff this argv launches the daemon (under any of the launcher candidates)."""
+    return any(str(a).endswith("daemon.py") for a in argv)
+
+
+def _daemon_spawn_spy(gs, calls: list[list[str]], *, fail_first: bool = False):  # noqa: ANN001
+    """A `subprocess.Popen` double scoped to the DAEMON SPAWN, delegating everything else.
+
+    `monkeypatch.setattr(gs.subprocess, "Popen", ...)` patches the stdlib MODULE object, so
+    a naive fake intercepts every Popen in the process — including the
+    `subprocess.run(["git", "rev-parse", "--show-toplevel"])` inside `state.project_root()`,
+    which `spawn_daemon_detached`'s error path reaches via `state.log_line`. That produced
+    two distinct failures: the git call landed in `calls` and inflated the count, and
+    `subprocess.run` needs the context-manager protocol that a `pid`-only stub does not have.
+
+    Latent until 2026-08-13, and worth remembering WHY: `project_root()` is `@lru_cache`d, so
+    a cache warmed by an earlier test skipped the git call entirely and the suite stayed
+    green. Closing the TRDD-TSTISOL1 isolation leak — which clears that cache per test —
+    removed the MASK, not the bug. Delegating non-spawn commands to the real Popen fixes it
+    properly; re-warming the cache would only hide it again.
+    """
+    real_popen = gs.subprocess.Popen
+
+    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
+        argv = [str(a) for a in cmd]
+        if not _is_daemon_spawn(argv):
+            return real_popen(cmd, **kwargs)
+        calls.append(argv)
+        if fail_first and len(calls) == 1:
+            raise FileNotFoundError("interpreter vanished")
+        return _FakeProc()
+
+    return fake_popen
+
+
 def test_spawn_prefers_managed_interpreter(
     state_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1099,12 +1134,7 @@ def test_spawn_prefers_managed_interpreter(
     gs = _gs()
     calls: list[list[str]] = []
     monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
-
-    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
-        calls.append(list(cmd))
-        return _FakeProc()
-
-    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][0] == "/stable/python3.12"
     assert calls[0][1].endswith("daemon.py")
@@ -1118,12 +1148,7 @@ def test_spawn_falls_back_to_uv_run_without_managed(
     gs = _gs()
     calls: list[list[str]] = []
     monkeypatch.setattr(gs, "_managed_python_path", lambda: None)
-
-    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
-        calls.append(list(cmd))
-        return _FakeProc()
-
-    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][:4] == ["uv", "run", "--script", "--quiet"]
 
@@ -1136,14 +1161,7 @@ def test_spawn_skips_failing_launcher(
     gs = _gs()
     calls: list[list[str]] = []
     monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
-
-    def fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
-        calls.append(list(cmd))
-        if len(calls) == 1:
-            raise FileNotFoundError("interpreter vanished")
-        return _FakeProc()
-
-    monkeypatch.setattr(gs.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls, fail_first=True))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][0] == "/stable/python3.12"
     assert calls[1][:4] == ["uv", "run", "--script", "--quiet"]

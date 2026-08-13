@@ -924,21 +924,41 @@ def test_task_success_resets_streak(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert t._backoff_penalty(t._failcount()) == 0
 
 
+def _workload_spawn_spy(daemon, captured: list, workload: list[str]):  # noqa: ANN001
+    """Capture only the WORKLOAD's child spawns, delegating (and ignoring) all others.
+
+    `monkeypatch.setattr(daemon.subprocess, "Popen", ...)` patches the stdlib MODULE
+    object, so the spy sees EVERY Popen in the process — including the
+    `subprocess.run(["git", "rev-parse", "--show-toplevel"])` inside
+    `state.project_root()`, which the daemon reaches through its own logging. Counting
+    that as a child spawn made the retry assertion below read 3 instead of 2.
+
+    Masked until 2026-08-13 by the `@lru_cache` on `project_root()`: a cache warmed by an
+    earlier test skipped the git call, so the count happened to come out right. The
+    TRDD-TSTISOL1 isolation fix clears that cache per test and EXPOSED this — it did not
+    cause it. Filtering by argv is the honest fix; re-warming the cache would re-hide it.
+    """
+    real_popen = daemon.subprocess.Popen
+
+    def cap(*a, **k):
+        proc = real_popen(*a, **k)
+        if a and list(a[0]) == workload:
+            captured.append(proc)
+        return proc
+
+    return cap
+
+
 def test_run_workload_retries_once_on_nonzero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A workload exiting NON-ZERO is retried exactly once (two real child spawns)."""
     daemon = _daemon_isolated(tmp_path, monkeypatch)
     captured: list = []
-    real_popen = daemon.subprocess.Popen
+    workload = [sys.executable, "-c", "import sys; sys.exit(3)"]
 
-    def cap(*a, **k):
-        proc = real_popen(*a, **k)
-        captured.append(proc)
-        return proc
-
-    monkeypatch.setattr(daemon.subprocess, "Popen", cap)
-    result = daemon._run_workload([sys.executable, "-c", "import sys; sys.exit(3)"], timeout=10)
+    monkeypatch.setattr(daemon.subprocess, "Popen", _workload_spawn_spy(daemon, captured, workload))
+    result = daemon._run_workload(workload, timeout=10)
     assert result is not None and result.returncode == 3
     assert len(captured) == 2, "a non-zero exit must be retried exactly once"
 
@@ -949,14 +969,9 @@ def test_run_workload_no_retry_on_clean_exit(
     """A clean rc==0 workload is NOT retried (a single child spawn)."""
     daemon = _daemon_isolated(tmp_path, monkeypatch)
     captured: list = []
-    real_popen = daemon.subprocess.Popen
+    workload = [sys.executable, "-c", "pass"]
 
-    def cap(*a, **k):
-        proc = real_popen(*a, **k)
-        captured.append(proc)
-        return proc
-
-    monkeypatch.setattr(daemon.subprocess, "Popen", cap)
-    result = daemon._run_workload([sys.executable, "-c", "pass"], timeout=10)
+    monkeypatch.setattr(daemon.subprocess, "Popen", _workload_spawn_spy(daemon, captured, workload))
+    result = daemon._run_workload(workload, timeout=10)
     assert result is not None and result.returncode == 0
     assert len(captured) == 1, "a clean exit must not be retried"

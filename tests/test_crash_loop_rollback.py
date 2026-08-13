@@ -313,13 +313,28 @@ def test_crash_loop_rollback_alert_dedupes(phase_env):
 
 
 def test_crash_loop_no_fallback_is_failopen_noop(phase_env):
-    """Crash-looping but the newest is the only runnable version → NO quarantine,
-    nothing emitted: fail-open, the stub's own backstop still runs the newest."""
+    """Crash-looping but the newest is the only runnable version → NO quarantine and NO
+    rollback alert: fail-open, the stub's own backstop still runs the newest.
+
+    The DAEMON-001 ticket still opens, and must: this is precisely the case the phase's
+    own comment calls out — "if the crash has no bad-version cause (or no fallback to
+    fall back to) the rollback does nothing at all and the daemon stays dead". Rolling
+    back restores service; it never fixes the defect, so the ticket is the only thing
+    here that gets the crash looked at. Asserting total silence would have made a
+    genuinely dead daemon report nothing at all.
+
+    This assertion previously read `out.strip() == ""` and passed — but only because the
+    ticket's dedupe stamp was landing in a state dir leaked from an earlier test, which
+    suppressed the line. Closing the TRDD-TSTISOL1 isolation leak gave each test its own
+    dir, the ticket surfaced, and the over-broad assertion failed. The bug was in the
+    assertion, not in the phase.
+    """
     dispatch = _import_dispatch()
     _make_cache(phase_env["cache"], {"0.21.0": True})  # only one runnable version
     _trip_breaker(dispatch)
     out = _capture(dispatch._phase_crash_loop_rollback)
-    assert out.strip() == ""
+    assert "[janitor-rollback]" not in out, "no fallback exists, so nothing may be rolled back"
+    assert "DAEMON-001" in out, "a crash-looping daemon must still be ticketed"
     assert dispatch.vu.read_quarantine() == set(), \
         "with no fallback, nothing may be quarantined (fail-open)"
 

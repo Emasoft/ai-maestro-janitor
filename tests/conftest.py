@@ -59,10 +59,12 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -769,6 +771,76 @@ def _real_subprocess_optout(request: pytest.FixtureRequest, monkeypatch: pytest.
         return
     names = ",".join(str(a) for a in marker.args) if marker.args else "*"
     monkeypatch.setenv(sandbox_guard.ENV_ALLOW_REAL, names)
+
+
+# The env-dependent path resolvers in `state`. All four are `@lru_cache`d, so the FIRST
+# call in a process pins the answer for the whole process; the last two are cached
+# predicates ABOUT the resolved project and go stale with it.
+_STATE_CACHED_RESOLVERS = (
+    "project_root",
+    "janitor_root",
+    "state_dir",
+    "log_dir",
+    "is_self_scan_target",
+    "project_is_ai_maestro",
+)
+
+
+def _live_state_modules() -> list[ModuleType]:
+    """Every `state` module OBJECT alive in this process — including stale copies.
+
+    `sys.modules` holds at most one. The others are the reason this exists: ~22 test
+    files isolate themselves with `del sys.modules["state"]`, which unbinds the NAME but
+    cannot touch the references its importers already hold. `findings_ledger` does
+    `import state` at module level, so after one delete+reimport it points at the OLD
+    module — whose `state_dir()` is `lru_cache`d to the PREVIOUS test's tmp dir, or, if
+    it bound before any fixture ran, to the REAL REPO. Walking the importers finds those
+    copies; clearing only `sys.modules["state"]` would leave every one of them pinned.
+    """
+    found: dict[int, ModuleType] = {}
+    current = sys.modules.get("state")
+    if isinstance(current, ModuleType):
+        found[id(current)] = current
+    # list(): an importer's own import can mutate sys.modules while we walk it.
+    for mod in list(sys.modules.values()):
+        held = getattr(mod, "state", None)
+        if isinstance(held, ModuleType) and getattr(held, "__name__", "") == "state":
+            found[id(held)] = held
+    return list(found.values())
+
+
+@pytest.fixture(autouse=True)
+def _clear_state_path_caches() -> Iterator[None]:
+    """Re-resolve `state`'s cached paths for every test, in every live copy of the module.
+
+    THE fix for the cross-test pollution in TRDD-TSTISOL1, applied at the source: the
+    contract is 'a test resolves paths from ITS OWN env', and an `lru_cache` filled by an
+    earlier test silently broke it. Two symptoms, one cause — a test that passed alone and
+    failed in company (so a green `-k` subset proved nothing and a red one accused innocent
+    code), and writes that escaped `tmp_path` into the real repo.
+
+    Clearing beats the `del sys.modules` idiom those tests reach for, because clearing
+    fixes every HOLDER at once while deleting fixes only the next importer — and nothing
+    in `state` captures a path at import time (verified: no module-level env reads; every
+    env-dependent path is behind one of these caches), so there is nothing a reimport
+    achieves that a clear does not.
+
+    Runs before AND after: before, so the test sees its own env; after, so a test that
+    resolved paths under a monkeypatched env cannot hand that answer to the next one once
+    monkeypatch has rolled the env back.
+    """
+
+    def _clear() -> None:
+        for mod in _live_state_modules():
+            for name in _STATE_CACHED_RESOLVERS:
+                fn = getattr(mod, name, None)
+                cache_clear = getattr(fn, "cache_clear", None)
+                if cache_clear is not None:
+                    cache_clear()
+
+    _clear()
+    yield
+    _clear()
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
