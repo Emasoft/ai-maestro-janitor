@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-04T18:18:52+0200
+updated: 2026-08-13T06:09:30+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -31,6 +31,45 @@ eht: []
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+
+## ⏵ 2026-08-13 — PRE-CHECK BEFORE BUILDING: the chore has ZERO work today. Build it in two halves.
+
+**Measured now, not assumed:** `claudemd_slim check` → `conforming and fresh`, exit 0. So on this
+repo, today, the chore would migrate nothing. That is not a reason to skip it — G8.1 is GOLDEN and
+narrative WILL accumulate — but it changes two things, and both are the kind of detail that
+silently makes a build worthless:
+
+1. **Acceptance cannot be taken against the live file.** Every box in §4 must run against a
+   SYNTHETIC violation planted in a fixture. A run against today's `CLAUDE.md` passes every box
+   while doing nothing at all — the "green because there was no work" failure this project has hit
+   twice this week (TRDD-4ZSYW21E's rung named 0 cards; TRDD-XFPOAF2I's acceptance was computed by
+   a cruder query than its own spec).
+2. **The end-to-end cannot be observed on real input**, so the preservation oracle is not merely
+   *a* gate — it is the ONLY evidence the chore is safe. It must be falsified explicitly: plant
+   content, break the oracle, and prove the chore REFUSES to remove. An oracle that has never been
+   seen to say no is decoration.
+
+### Build the DECISION half first; the DELIVERY half is separately risky
+
+Applying the `acceptance-criteria-expire` lesson `^decompose-a-blocked-manual-confirmation` — the
+two halves fail for different reasons and are worth separating anyway:
+
+- **DECISION half (safe, build first):** given a `CLAUDE.md`, compute what WOULD migrate — the
+  offending lines, the wikimem page that owns each subject (via recall), and whether a new page
+  is needed. Output a plan. **Removes nothing, writes nothing.** This is independently useful: it
+  is the dry-run a human can read before ever trusting the automatic path, and it is where the
+  hard part actually lives (subject ownership, the §3 exemption boundary).
+- **DELIVERY half (build only once the decision half is trustworthy):** apply the plan through
+  `memory_txn`, gated on the preservation oracle, and remove the lines.
+
+**Why this order and not the reverse:** step 4 deletes from a file the USER also hand-edits. If
+the decision half is wrong — it misjudges the §3 exemption, or picks the wrong owning page — the
+delivery half executes that mistake unattended and the only thing standing between it and lost
+knowledge is an oracle proving *some* text landed *somewhere*, not that it landed in the RIGHT
+place. Preservation and correctness are different properties; the oracle only checks the first.
+
+**Not a blocker, and G8.1 is not in question:** automatic migration is a GOLDEN rule the owner
+set, so the destination is settled. This is sequencing, not a request to reconsider.
 
 ## 1. Why (the cost argument, measured)
 
