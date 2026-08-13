@@ -3,7 +3,7 @@ trdd-id: KVS6K7P9
 title: memory-maint-pending is a single slot — per-dispatch state plus a per-root in-flight gate
 column: todo
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-13T02:30:00+0200
+updated: 2026-08-13T03:46:02+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -26,7 +26,43 @@ that re-reads its authority sees a DIFFERENT chore and can abandon half-finished
 markers on one root put two editors on one knowledge store (the peer prevented both by hand —
 nothing in the protocol asks for that).
 
-## ⏵ STATE — 2026-08-13: item 2 is NOT standalone, and the gate cannot live where item 2 says
+## ⏵ STATE — 2026-08-13 03:46: THE BLOCK BELOW IS STALE. Items 1, 4 and 5 ALREADY SHIPPED.
+
+**Read this before the 02:30 block; that block's premise is false.** It concluded "Not started —
+no code written today" and built a sequencing argument on item 1 being unbuilt. Verified against
+the tree just now, item 1 had already shipped **seven hours before it was written**:
+
+| item | state | evidence |
+|---|---|---|
+| 1 per-dispatch state | **SHIPPED** | `7e0b4115` (Aug 12 19:54); scheduler writes `memory-maint-pending-<dispatch_id>.json` (`memory-maintenance.py:184,195,231`); `scripts/memory_dispatch_claim.py` claims one atomically and renames it out of the pool |
+| 4 record carries SCOPE + ROOT | **SHIPPED** | `memory-maintenance.py:499-502` writes `scope`, `root`, `dispatch_id` |
+| 5 reword the agent contract | **SHIPPED IN REPO** | `rules/janitor-heartbeat-protocol.md:46` now says *"CLAIM your assignment — do not read a shared file for it"* and explicitly forbids the legacy slot |
+| 3 stale reclamation | **composes** | TRDD-2112XCKO, closed 2026-08-13 |
+| 2 per-root in-flight gate | **the only work left** | — and its stated blocker is gone (below) |
+
+**Item 2 is now UNBLOCKED, and the 02:30 finding 1 that blocked it is obsolete.** That finding
+said a root-aware gate is unimplementable because `pending_agents` cannot name the root. True of
+the manifest, irrelevant now: the per-dispatch record itself carries `scope` and `root`, so the
+gate reads THAT, not the manifest. Finding 2 (a TTL stamp, not a flock) and finding 3 (the gate
+must be machine-global in `global_state`, because the USER root is shared across projects while
+the scheduler is per-project) both STAND and are the real design constraints.
+
+**LIVE RISK, and it is the exact half-migrated window this card's third acceptance box exists to
+prevent — currently OPEN on this host.** The repo rule is migrated; the INSTALLED rule is not.
+`~/.claude/rules/janitor-heartbeat-protocol.md:39` still tells a spawned memory agent to read
+`memory-maint-pending.json` — the legacy single slot — because installed rules come from the
+plugin CACHE and the fix has not been published. The scheduler still dual-writes that legacy
+file (`PENDING_LEGACY_NAME`, `:183,199`), so agents do not crash; they silently get the OLD
+single-slot semantics, i.e. **the janitor#242 clobber is still live on this machine**. Nothing
+to fix in code — it closes when a release ships (a USER decision, already held). Do NOT hand-edit
+the installed rule: that hides the publish gap instead of closing it, and the next install
+overwrites it anyway.
+
+**NEXT ACTION:** build item 2 only — a machine-global, per-root, TTL'd in-flight stamp in
+`global_state`, keyed by root path, read by `memory-maintenance.py` before it emits a marker
+(DEFER, do not clobber). Do not rebuild items 1/4/5.
+
+## ⏵ STATE — 2026-08-13 02:30 (SUPERSEDED — its "not started" premise is FALSE, see above)
 
 Picked this up to ship item 2 alone (the safety win without the protocol churn). It does not
 decompose that way. Three findings, read from code:
