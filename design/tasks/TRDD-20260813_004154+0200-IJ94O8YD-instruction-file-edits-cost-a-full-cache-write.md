@@ -3,7 +3,7 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: todo
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-13T12:45:00+0200
+updated: 2026-08-13T13:33:00+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -114,6 +114,20 @@ only has to be sampled before it ages out, the way the first window's rules edit
       (`msg[363] system`, 39.5% of classified breaks). Until its mechanism is known this card is
       optimising the smaller of two costs. Do NOT guess it — agentlenspro could not localise it
       from the prefix diff, so only the raw adjacent-body diff settles it.
+
+      **ATTEMPT 1 (2026-08-13 ~12:3x–13:2x) — ABANDONED, no result.** A background lean-worker
+      was dispatched to diff the captured bodies. It ran ~45 min without returning and was
+      STOPPED, not left to spin. Its own final line on being stopped was *"Waiting for the
+      background analysis job to finish before proceeding"* — so it had spawned a CHILD job and
+      was blocked on it, never returning a result of its own; an earlier progress line showed it
+      reading the agentlenspro CLI help, i.e. reaching for the LIVE tool that is down this
+      session (`ECONNRESET`, recorded above) instead of the on-disk bodies the task specified.
+      A worker that sub-delegates and then waits is indistinguishable from a working one from
+      outside, which is why 45 min elapsed before anyone looked. Recorded as a failed attempt
+      rather than quietly re-dispatched: the delegation itself is the thing that needs
+      correcting, since the card's own method note says the on-disk diff is what delegates
+      safely. NEXT ATTEMPT must hand the worker the concrete body-file PATHS, not the tool name,
+      and must not depend on agentlenspro being reachable.
 - [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
       spelled out rather than implied
 - [ ] Whatever the rule is, it is enforced by something that runs — not only written down
