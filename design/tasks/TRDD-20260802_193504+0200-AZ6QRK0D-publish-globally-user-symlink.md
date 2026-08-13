@@ -3,18 +3,45 @@ trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
 column: todo
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-13T00:22:00+0200
+updated: 2026-08-13T05:17:19+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
 scope: project
 release-via: publish
 created-by: 87RKBYJ8
-external-refs: [52]
+external-refs: [52, TRDD-JPL0JU86]
 npt: []
 eht: []
 implementation-commits: []
 ---
+
+## ⏵ 2026-08-13 — DIRECTION CONSTRAINT from TRDD-JPL0JU86. Read before implementing.
+
+**This card and JPL0JU86 are about the same mechanism from opposite ends, and neither cited the
+other.** JPL0JU86 diagnosed four pages that are PERMANENTLY unmaintainable because they are
+symlinks: the memory transaction core's **M-10 symlink-escape guard refuses them — correctly** —
+so no editorial chore can ever repair, split, atomize or consolidate them, and the refusal ledger
+records a permanent tombstone instead of a transient de-dup. Its verdict on the approach was
+blunt: *"Correct intent, wrong mechanism … MOVE them, do not link them."*
+
+**So a symlink mechanism built naively here does not add a feature — it industrialises that
+defect**, turning four unmaintainable pages into one per `published-globally` page, forever.
+
+**The reconciliation is already in JPL0JU86 and it is about DIRECTION:** *"If the janitor's own
+index still wants them, the link goes the other way."* Concretely, the invariant this card must
+satisfy:
+
+  - the CANONICAL file lives at USER scope and is a REAL FILE there — that is the copy every
+    editorial chore opens, and it must never be reached through a link;
+  - anything PROJECT-side is a pointer OUT to it, never a link that makes a USER page appear to
+    live inside a project's scope root (that is precisely the escape M-10 refuses);
+  - **verify against the guard, not against the filesystem** — "the symlink exists and resolves"
+    is NOT the acceptance test; "a chore can still open and commit the page" is. The four broken
+    pages resolve fine today.
+
+Whichever card ships first must not leave the other one's fix impossible. If this mechanism
+lands first, it must not re-create the four pages JPL0JU86 is trying to move.
 
 # `published-globally` frontmatter value → a real USER-scope symlink
 

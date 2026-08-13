@@ -3,7 +3,7 @@ trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
 column: todo
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-11T20:55:12+0200
+updated: 2026-08-13T05:17:19+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -12,7 +12,7 @@ severity: medium
 relevant-rules: []
 npt: []
 eht: []
-external-refs: [janitor#249, TRDD-G4BCRUP7]
+external-refs: [janitor#249, TRDD-G4BCRUP7, TRDD-AZ6QRK0D]
 ---
 
 # An unmaintainable page must not abstain silently
@@ -37,6 +37,23 @@ repo):** all four are this project's own wikimem pages, named in its `CLAUDE.md`
 wanted knowledge that is true of EVERY project — Claude Code continuity settings, ESC input
 semantics, plugin rollout staleness — recallable from every project, and reached for a symlink
 instead of re-scoping the page. Correct intent, wrong mechanism.
+
+## ⏵ 2026-08-13 — SIBLING CARD TRDD-AZ6QRK0D is building a symlink mechanism
+
+Surfaced by hand (the two share no `external-refs:`, so `trdd-cross-card-blindspot` could not
+see them). **AZ6QRK0D implements a `published-globally` → USER-scope SYMLINK mechanism, on an
+owner directive** — i.e. it generalises the exact mechanism this card calls the wrong one, from
+four pages to every page carrying that field.
+
+They are reconcilable, and this card already contains the reconciliation: *"the link goes the
+other way."* The constraint has been written onto AZ6QRK0D — canonical REAL FILE at USER scope,
+project-side pointers OUT only, and acceptance verified against the M-10 guard ("a chore can
+still open and commit the page") rather than against the filesystem ("the symlink resolves"),
+since the four broken pages resolve fine today.
+
+**Sequencing risk to watch:** if AZ6QRK0D ships first and is naive about direction, this card's
+own fix becomes impossible — the four pages would be re-created as links by the very mechanism
+meant to replace them.
 
 ## The two halves, and only one of them is reusable
 
