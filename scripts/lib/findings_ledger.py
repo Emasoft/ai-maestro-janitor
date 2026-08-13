@@ -40,11 +40,25 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import dedupe  # noqa: E402  -- sibling lib (the once-per-episode ack, generalized here)
 import state  # noqa: E402  -- sibling lib
 import token_meter  # noqa: E402  -- trim_log (the structural-cap pattern, TRDD-a4e41e89)
 
 LEDGER_NAME = "findings-ledger.ndjsonl"
 CURSOR_NAME = "findings-ledger.cursor"
+SURFACED_TO_HUMAN_NAME = "surfaced-to-human.seen"
+
+# TRDD-KU3ERYFX (janitor#234) — the human-only findings class. `actor="human"` marks a
+# finding whose remedy is a GUI toggle or a credential decision an agent structurally
+# cannot perform (e.g. a macOS TCC/Automation grant). It is NOT a new ledger field — the
+# line shape `{ts,sev,code,src,ref,msg}` is a FROZEN CONTRACT (the dashboard feed, §4) —
+# the marker is instead a fixed prefix on `msg` itself, so it survives on disk, in the
+# rendered drift line, and in any consumer that only reads `msg`.
+HUMAN_ONLY_ACTOR = "human"
+HUMAN_ONLY_DIRECTIVE = (
+    "HUMAN-ONLY — surface this to your human and move on; do not re-evaluate or "
+    "attempt this yourself: "
+)
 
 # Caps. `msg` is truncated so one JSON line stays ≤ ~200 chars (the ratified shape);
 # the file is structurally trimmed so the mailbox of a project unattended for months
@@ -132,6 +146,7 @@ def record(
     src: str,
     msg: str,
     ref: str = "-",
+    actor: str = "agent",
     project_dir: str | os.PathLike[str] | None = None,
     now: Optional[int] = None,
     notify: Optional[Callable[[dict], None]] = None,
@@ -143,19 +158,35 @@ def record(
     is the TRDD-4649ZLE0 seam — invoked best-effort with the entry dict when supplied;
     Phase 5 provides the real push, so today every caller passes None.
 
+    `actor="human"` (TRDD-KU3ERYFX, janitor#234) marks a finding an agent structurally
+    cannot act on — the remedy is a GUI toggle or a credential decision only a human at
+    the keyboard can perform. Two effects, both DELIVERY properties (never a change to
+    the finding's CONTENT):
+      * `msg` is prefixed with `HUMAN_ONLY_DIRECTIVE` so the reading agent's correct move
+        is explicit — surface it and stop, not investigate or attempt a fix.
+      * the drift line is emitted ONCE per distinct (code, content) observation — the
+        `dispatch.py` iTerm-alarm hash-ack pattern, generalized here so every caller gets
+        it for free. The ledger ENTRY is still always appended (data is never lost, only
+        the repeat PRINT is suppressed) — see `mark_surfaced_to_human` /
+        `clear_surfaced_to_human` for the stamp that backs this and the never-reported vs
+        reported-pending read (`surfaced_to_human_status`).
+
     Never raises; a failed append returns the sink-2 answer anyway (surfacing beats
     bookkeeping — a finding that reached the session is not lost even if the mailbox
     write failed).
     """
+    import hashlib  # noqa: PLC0415 -- stdlib, keep module import-light
     import time  # noqa: PLC0415 -- stdlib, keep module import-light
 
+    human_only = actor == HUMAN_ONLY_ACTOR
+    raw_msg = (HUMAN_ONLY_DIRECTIVE + msg) if human_only else msg
     entry = {
         "ts": int(time.time()) if now is None else int(now),
         "sev": _clean(sev, 12),
         "code": _clean(code, 24),
         "src": _clean(src, 32),
         "ref": _clean(ref or "-", 24),
-        "msg": _clean(msg, MAX_MSG_CHARS),
+        "msg": _clean(raw_msg, MAX_MSG_CHARS),
     }
     if _enabled():
         try:
@@ -171,7 +202,70 @@ def record(
             notify(entry)
         except Exception:  # noqa: BLE001 -- the push seam must never break the record
             pass
+    if human_only:
+        content_hash = hashlib.sha256(
+            f"{entry['sev']}|{entry['code']}|{entry['msg']}".encode("utf-8")
+        ).hexdigest()[:16]
+        if not mark_surfaced_to_human(str(entry["code"]), content_hash, project_dir=project_dir):
+            return None  # already surfaced this episode — the ledger kept it, the print didn't repeat
     return render_line(entry) if _is_current_project(project_dir) else None
+
+
+def _surfaced_seen_path(project_dir: str | os.PathLike[str] | None = None) -> Path:
+    return state_dir_for(project_dir) / SURFACED_TO_HUMAN_NAME
+
+
+def surfaced_to_human_key(code: str, content_hash: str) -> str:
+    """Stable dedupe key for one (code, content) human-only observation."""
+    return f"{code}:{content_hash}"
+
+
+def mark_surfaced_to_human(
+    code: str, content_hash: str, *, project_dir: str | os.PathLike[str] | None = None
+) -> bool:
+    """Record that this exact human-only observation was surfaced this episode.
+
+    Returns True the FIRST time (the caller should actually emit); False on a repeat
+    (already surfaced — dedupe.emit_once's per-episode ack, generalized). Fail-open on
+    lock contention (dedupe's own contract): a dropped mark just means one repeat print
+    is suppressed a beat later than ideal, never that a NEW observation goes unseen.
+    """
+    key = surfaced_to_human_key(code, content_hash)
+    return dedupe.emit_once(_surfaced_seen_path(project_dir), key, "x") is not None
+
+
+def clear_surfaced_to_human(code: str, *, project_dir: str | os.PathLike[str] | None = None) -> None:
+    """The underlying condition resolved — forget every stamp recorded under `code` so a
+    future recurrence (even with an unchanged content hash) surfaces again.
+
+    Pair this with whatever clears the finding itself (TRDD-KU3ERYFX LIVE INSTANCE #2:
+    a `surfaced-to-human` stamp must not outlive the condition it was surfaced for, or
+    the ledger shows "reported-pending" for a finding that already resolved itself —
+    the exact staleness class TRDD-88ZVEQY7 is about). Best-effort; never raises.
+    """
+    seen_file = _surfaced_seen_path(project_dir)
+    try:
+        lines = seen_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    prefix = f"{code}:"
+    for key in [line for line in lines if line.startswith(prefix)]:
+        dedupe.emit_forget(seen_file, key)
+
+
+def surfaced_to_human_status(
+    code: str, content_hash: str, *, project_dir: str | os.PathLike[str] | None = None
+) -> str:
+    """`"reported-pending"` if this exact (code, content) observation was already
+    surfaced this episode, else `"never-reported"` — the ledger's answer to the peer's
+    ask (janitor#234): distinguish "surfaced to the human, awaiting their action" from
+    "never told anyone at all". Read-only — never mutates the stamp."""
+    key = surfaced_to_human_key(code, content_hash)
+    try:
+        seen = _surfaced_seen_path(project_dir).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        seen = []
+    return "reported-pending" if key in seen else "never-reported"
 
 
 def _read_raw(project_dir: str | os.PathLike[str] | None = None) -> tuple[list[dict], int]:

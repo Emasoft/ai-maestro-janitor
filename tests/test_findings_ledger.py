@@ -212,6 +212,87 @@ def test_opt_out_disables_the_ledger_write_but_not_sink_2(
     assert not fl.ledger_path(None).exists()
 
 
+# ---------- 6. human-only findings class (TRDD-KU3ERYFX, janitor#234) ----------
+
+
+def test_human_only_msg_carries_the_directive_prefix(_isolate: Path) -> None:
+    """`actor='human'` prefixes `msg` with the explicit human-only directive — the
+    reading agent's correct move must be unambiguous: surface it, do not act on it."""
+    fl.record(sev="HIGH", code="H-1", src="d", msg="TCC grant needed", actor="human")
+    entries = _entries(None)
+    assert len(entries) == 1
+    assert entries[0]["msg"].startswith("HUMAN-ONLY")
+    assert "surface this to your human" in entries[0]["msg"]
+
+
+def test_human_only_line_shape_stays_frozen(_isolate: Path) -> None:
+    """The marker lives INSIDE `msg` — it must never add a new ledger key (§4 frozen
+    contract: exactly {ts,sev,code,src,ref,msg})."""
+    fl.record(sev="HIGH", code="H-2", src="d", msg="grant needed", actor="human")
+    data = json.loads(fl.ledger_path(None).read_text(encoding="utf-8").strip())
+    assert set(data) == {"ts", "sev", "code", "src", "ref", "msg"}
+
+
+def test_human_only_emits_once_per_episode_but_still_records(_isolate: Path) -> None:
+    """Repeat calls with the SAME (code, msg) — the same episode — record to the ledger
+    every time (data is never lost) but return the drift line only the first time (no
+    alarm-fatigue repeat print)."""
+    first = fl.record(sev="HIGH", code="H-3", src="d", msg="same observation", actor="human")
+    second = fl.record(sev="HIGH", code="H-3", src="d", msg="same observation", actor="human")
+    assert first is not None and second is None
+    assert len(_entries(None)) == 2, "the ledger keeps BOTH events even though only one surfaced"
+
+
+def test_human_only_distinct_content_resurfaces(_isolate: Path) -> None:
+    """A DIFFERENT observation under the same code is new information — it surfaces."""
+    first = fl.record(sev="HIGH", code="H-4", src="d", msg="observation A", actor="human")
+    second = fl.record(sev="HIGH", code="H-4", src="d", msg="observation B", actor="human")
+    assert first is not None and second is not None
+
+
+def test_surfaced_to_human_status_never_reported_then_reported_pending(_isolate: Path) -> None:
+    """The ledger's own answer to "was a human ever told?" — before any record: never
+    reported; after: reported-pending (the peer's ask, janitor#234)."""
+    content_hash = "deadbeefdeadbeef"
+    assert fl.surfaced_to_human_status("H-5", content_hash) == "never-reported"
+    assert fl.mark_surfaced_to_human("H-5", content_hash) is True
+    assert fl.surfaced_to_human_status("H-5", content_hash) == "reported-pending"
+    assert fl.mark_surfaced_to_human("H-5", content_hash) is False, "a repeat mark is not a NEW surfacing"
+
+
+def test_clear_surfaced_to_human_resets_the_stamp(_isolate: Path) -> None:
+    """The stamp must not outlive the condition (TRDD-KU3ERYFX LIVE INSTANCE #2): once
+    cleared, the SAME content hash reports never-reported again and re-surfaces."""
+    content_hash = "cafebabecafebabe"
+    fl.mark_surfaced_to_human("H-6", content_hash)
+    assert fl.surfaced_to_human_status("H-6", content_hash) == "reported-pending"
+    fl.clear_surfaced_to_human("H-6")
+    assert fl.surfaced_to_human_status("H-6", content_hash) == "never-reported"
+    assert fl.mark_surfaced_to_human("H-6", content_hash) is True
+
+
+def test_clear_surfaced_to_human_does_not_touch_other_codes(_isolate: Path) -> None:
+    """Clearing one code's stamps must not disturb an unrelated code's."""
+    fl.mark_surfaced_to_human("H-7", "hash1")
+    fl.mark_surfaced_to_human("H-8", "hash2")
+    fl.clear_surfaced_to_human("H-7")
+    assert fl.surfaced_to_human_status("H-7", "hash1") == "never-reported"
+    assert fl.surfaced_to_human_status("H-8", "hash2") == "reported-pending"
+
+
+def test_human_only_isolation_still_holds(tmp_path: Path, _isolate: Path) -> None:
+    """The human-only path must not weaken the per-project isolation invariant
+    (TRDD-X92VBFNF, ARCHITECTURE.md §3): a human-only finding about repo B never
+    surfaces in repo A's session, and its stamp lives under repo B's own state dir."""
+    repo_b = tmp_path / "repo-b"
+    line = fl.record(sev="HIGH", code="H-9", src="daemon", msg="repo B needs a human",
+                     actor="human", project_dir=repo_b)
+    assert line is None, "repo B's finding must not surface in repo A's session"
+    assert fl.surfaced_to_human_status("H-9", "whatever") == "never-reported", (
+        "repo A's own stamp store must be untouched by repo B's recording"
+    )
+
+
 def test_corrupt_lines_are_skipped_not_fatal(_isolate: Path) -> None:
     """A torn/garbage line in the NDJSON must not hide the valid entries around it."""
     fl.record(sev="HIGH", code="G-1", src="d", msg="good one", now=100)

@@ -1443,6 +1443,11 @@ def _phase_plugin_reload() -> None:
 
 _ITERM_REARM_EVIDENCE_WINDOW_S = 6 * 3600  # peer-measured: rescues landed 1-4h before a false alarm
 
+# TRDD-KU3ERYFX (janitor#234) — this alarm's remedy is a macOS System Settings toggle: an
+# agent session structurally cannot perform it. The code names the (code, content) pair
+# `findings_ledger.clear_surfaced_to_human` forgets once the condition itself resolves.
+_ITERM_AUTOMATION_CODE = "ITERM-AUTOMATION-TCC"
+
 
 def _latest_iterm_rearm_epoch(log_text: str) -> int | None:
     """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
@@ -1506,6 +1511,11 @@ def _phase_iterm_automation_alarm() -> None:
             # keeps the refire property while the hash-ack below bounds mid-condition
             # writer ping-pong.
             acked.unlink(missing_ok=True)
+            # The `surfaced-to-human` stamp must not outlive the condition it was
+            # surfaced for (TRDD-KU3ERYFX LIVE INSTANCE #2) — clear it here too, in
+            # lockstep with the local ack above, so a future recurrence reports
+            # "never-reported" rather than a stale "reported-pending".
+            findings_ledger.clear_surfaced_to_human(_ITERM_AUTOMATION_CODE)
             return
         try:
             raw_flag = flag.read_text(encoding="utf-8")
@@ -1597,7 +1607,13 @@ def _phase_iterm_automation_alarm() -> None:
             "read from the flag — a pre-JSON flag, a concurrent rewrite, or a read "
             "error; the next fleet scan records it)"
         )
+        # TRDD-KU3ERYFX (janitor#234): the remedy below is a System Settings toggle — an
+        # agent reading this line structurally cannot perform it. The directive prefix
+        # makes the agent's correct move explicit (tell the human, don't investigate);
+        # the CONTENT after it is unchanged — nothing about a correctly-written alarm's
+        # wording is wrong, only its delivery needed the marker.
         print(
+            findings_ledger.HUMAN_ONLY_DIRECTIVE +
             "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
             "iTerm sessions via osascript. A running iTerm always has at least one, so the "
             "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
@@ -1618,6 +1634,11 @@ def _phase_iterm_automation_alarm() -> None:
             "rescues with no Automation grant at all. This alarm clears itself on the next "
             "fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, GH issues #92, #229."
         )
+        # Stamp the `surfaced-to-human` marker for /janitor-findings-style queries (the
+        # local `acked` hash above already gates the print itself — this call is purely
+        # so `findings_ledger.surfaced_to_human_status` can answer "reported-pending" for
+        # this alarm instead of only ever "never-reported").
+        findings_ledger.mark_surfaced_to_human(_ITERM_AUTOMATION_CODE, payload_hash[:16])
     except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
         state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")
 
