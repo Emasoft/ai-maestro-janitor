@@ -19,7 +19,7 @@
     "libs_dev",
     "builds_dev"
   ],
-  "extraPaths": ["scripts/lib", "scripts/oauth_rotator"],
+  "extraPaths": ["scripts/lib", "scripts/oauth_rotator", "tests"],
   "pythonVersion": "3.11",
   "reportMissingImports": "error"
 }
