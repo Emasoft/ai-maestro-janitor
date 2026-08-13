@@ -3,8 +3,8 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T06:47:44+0200
-implementation-commits: [d82dc15a, 20f226ba]
+updated: 2026-08-13T07:15:09+0200
+implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea]
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -176,6 +176,73 @@ symptom patch can satisfy will get one.
 2. Add that as a regression test using a CONFORMING fixture (the current fixtures all plant
    violations, so none of them can catch this class).
 3. Only then revisit delivery.
+
+## ⏵ 2026-08-13 07:15 — CLASSIFIER SHIPPED (`7b7b37ea`). The DECISION half is now correct.
+
+`scripts/lib/claudemd_migration_plan.py::classify_permitted` is the primitive §"THE REAL BLOCKER"
+asked for, built as its own unit with its own tests, with the planner re-pointed at it — not derived
+from `slim_violations`.
+
+Three structural rules, one per narrative-visible §CM-1 element (4 and 5 are fenced and already
+stripped before a block reaches the planner, so only 1–3 can appear):
+
+| element | rule | shape, not meaning |
+|---|---|---|
+| 1 description | first content block, and only while `in_preamble` | `split_narrative_blocks` now tracks preamble: a leading `# Title` is the document title and keeps it open; any deeper heading (or a second H1) closes it. "One-paragraph" is the spec's word, so exactly one block can hold the role |
+| 2 urls | `is_project_url_line` | one line, optional list marker, optional `<label>: ` prefix ≤60 chars carrying no URL of its own, then ONE URL token — bare, `<angled>`, or `[md](link)` |
+| 3 devops | `classify_exemption` — **unchanged** | the closed §CM-3 enumeration, untouched |
+
+**Bias is deliberate and asymmetric.** Where a rule is uncertain it errs toward PERMITTED: keeping
+one block too many leaves the file over budget and the next run still reports it; migrating a
+permitted element deletes content the canonical form requires and no later run restores it. Named
+consequence: `- Note: see https://x.example` reads as a URL line. Accepted.
+
+`exempt` and `permitted` were ONE concept under TWO names — which is precisely how elements 1 and 2
+went unhandled while 3 was covered. Verdict is now `permitted` + `permitted_element`; `render_plan`
+reports migratable-vs-permitted instead of miscounting every block as excess.
+
+### The acceptance test is the shape §"How BOTH previous attempts passed" demanded
+
+Over cap AND carrying all three permitted elements — the intersection both earlier rounds left
+empty. It asserts BOTH halves, because either alone is passable by a wrong fix: planning nothing
+satisfies "no permitted element migrates" (that is exactly what `20f226ba` did), and migrating
+everything satisfies "the excess is found" (the original defect).
+
+**Falsified, not merely green** — each recognizer was removed in-process and the acceptance test
+observed to go red: pre-fix devops-only ✗, description recognizer removed ✗, urls recognizer removed
+✗, permit-everything symptom patch ✗, real classifier ✓.
+
+**Verified on REAL input** (the check that caught both previous misses, run again rather than
+trusted): the live `CLAUDE.md` pushed over cap yields 8 permitted (1 description, 3 urls, 4 devops)
+and 8 migratable, zero leaks. The same file previously gave the description and all of `## Links` as
+`new_page`.
+
+Gates: 15045 passed / 1 skipped, ruff clean, mypy clean (474 files).
+
+### One test was DELETED because it asserted the defect
+
+`test_conforming_gate_actually_gates_a_would_be_migratable_block` required the DESCRIPTION to become
+migratable once a fence was stripped. A guard whose expected result IS the bug cannot fail while the
+bug is present — a fifth variant of this card's recurring theme, and the reason a green suite kept
+certifying broken behavior. Replaced with the orphan paragraph, which is excess whether or not the
+file is over cap, so the only thing varying is the gate under test.
+
+### The `slim_violations` gate STAYS, and it is a scope choice — not a correctness crutch
+
+With the classifier in place the gate no longer hides anything: permitted elements are correctly
+recognized with or without it. What it still does is suppress an under-cap non-permitted block,
+which §CM-1 ("these five and nothing else") does call a defect. That is deliberate: editing
+CLAUDE.md busts the prompt-cache prefix of every live session (TRDD-e247a349 §5), so churning a file
+`check` calls conforming costs more than the stray block does. Both gates are now documented in
+`plan_migration`'s docstring as the two separate questions they answer — WHETHER to plan, and WHICH
+blocks — because conflating them is what shipped broken twice.
+
+### NEXT ACTION — the DELIVERY half, still unbuilt and still separately risky
+
+Nothing in this commit writes anything. Delivery is CM-2 steps 3–5: write the atom (or fold + `[^N]`
+lesson), remove the migrated lines, and prove preservation with `claudemd_slim verify --old` BEFORE
+committing. Its acceptance bar is the same one that caught this: run it on real input, not only on
+fixtures.
 
 ## 1. Why (the cost argument, measured)
 
