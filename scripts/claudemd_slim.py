@@ -277,6 +277,16 @@ def cmd_apply(root: Path, blocks_file: Path, *, dry_run: bool) -> int:
         rg._backup(claude_md)
         result = _apply_with_verify(claude_md, block_texts, corpus)
         sys.stdout.write(cma.render_result(result, dry_run=False))
+        if result.ok:
+            # CM-2 step 6 is a SEPARATE write with its own fence, generator and lock, so
+            # `apply` deliberately does not perform it — one write spanning three concerns
+            # is how a splice starts corrupting a file two of its owners are editing. But
+            # silence here is its own defect: a migration that lands a new wiki page moves
+            # the corpus digest, so the index this apply did not touch is now stale, and
+            # observed on real input NOTHING told the operator that. Read-only probe, one
+            # line, no lock — say it, do not do it.
+            if index_is_stale(claude_md.read_text(encoding="utf-8"), scan_pages(_memdir(root))):
+                print("claudemd-slim: the wikimem index is now STALE — run `claudemd_slim.py index` next")
         return 0 if result.ok else 1
     finally:
         lock.release()

@@ -291,6 +291,21 @@ def test_cli_apply_writes_only_once_the_content_is_in_the_corpus(tmp_path: Path)
     assert _MAP_BLOCK in after and _WIKI_BLOCK in after
 
 
+def test_cli_apply_points_at_the_index_refresh_it_deliberately_does_not_do(tmp_path: Path) -> None:
+    """CM-2 step 6 is a separate write with its own fence and lock, so `apply` does not
+    perform it — but landing the owning page moved the corpus digest, so the index IS now
+    stale. Observed on real input that nothing said so; silence there is its own defect."""
+    root = _write_root(tmp_path, _claude_md(), pages={"frobnicator": _EXCESS})
+    blocks = tmp_path / "blocks.json"
+    blocks.write_text(json.dumps([_EXCESS]), encoding="utf-8")
+
+    res = _run_cli(root, "apply", "--blocks", str(blocks))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "index is now STALE" in res.stdout
+    # and it POINTED, it did not act: the wikimem fence is byte-identical.
+    assert _WIKI_BLOCK in (root / "CLAUDE.md").read_text(encoding="utf-8")
+
+
 def test_cli_apply_rejects_a_malformed_blocks_file(tmp_path: Path) -> None:
     root = _write_root(tmp_path, _claude_md())
     blocks = tmp_path / "blocks.json"
