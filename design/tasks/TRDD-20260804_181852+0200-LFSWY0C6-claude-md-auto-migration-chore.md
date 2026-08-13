@@ -3,8 +3,8 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T09:10:00+0200
-implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836]
+updated: 2026-08-13T09:40:00+0200
+implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -341,13 +341,46 @@ documented.
    locks, and folding them in would make one write span three concerns.
 3. **The scheduler intervention is unbuilt**, so `PRRD G8.1`'s *automatic* is still not satisfied.
    This card stays open on that alone.
-4. **A decision-half consequence found by these tests, recorded not fixed:** a SINGLE-LINE prose
-   sentence containing a §CM-3 word reads as dev-ops and is PERMITTED — `\bpush\b` matches across the
-   hyphen in "an earlier event-push design…", so that sentence is exempt while the same words wrapped
-   over two lines are migratable. That is the classifier's documented, deliberate bias toward keeping
-   a block, and the same accepted class as `- Note: see https://x.example`. Changing it belongs in a
-   decision-half commit with its own falsification, NOT smuggled into a delivery commit — fixing two
-   things at once is how neither gets falsified.
+4. **A decision-half consequence found by these tests, recorded not fixed** *(now FIXED in its own
+   commit — see the next section)*: a SINGLE-LINE prose sentence containing a §CM-3 word reads as
+   dev-ops and is PERMITTED — `\bpush\b` matches across the hyphen in "an earlier event-push design…".
+   Deferred deliberately: changing it belongs in a decision-half commit with its own falsification,
+   NOT smuggled into a delivery commit — fixing two things at once is how neither gets falsified.
+
+## ⏵ 2026-08-13 09:40 — the §CM-3 exemption FP was a DEFECT, not the bias (`c88776c8`)
+
+Deferred above as "the classifier's documented bias". **Measuring it changed the verdict**, and the
+reframing is the substance: the bias justifies keeping AMBIGUOUS blocks, it never justifies exempting
+text the spec explicitly names as non-exempt. §CM-3: *"Architecture, gotchas, incident history, design
+rationale and conventions are NOT exempt however short."*
+
+All four of these one-line ARCHITECTURE/RATIONALE lines were EXEMPT, and all four wrongly:
+
+| line | matched |
+|---|---|
+| `The plugin is installed at user scope, so it runs in every project.` | installing |
+| `The build is reproducible because the lockfile is committed.` | building |
+| `Tests live under tests/ and mirror the scripts/ layout.` | testing |
+| `An earlier event-push design silently dropped frobnications.` | pushing |
+
+`classify_exemption`'s own docstring claimed single-line-ness was *"a STRUCTURAL gate, not a length
+shortcut for prose"* — in practice it was precisely a length shortcut for prose.
+
+**The fix restores the spec's OWN test** — *"is this a command an agent runs to operate the repo?"* —
+structurally: condition (c), the line must contain a backticked code span. A command line contains a
+command. All four of this repo's real §Commands entries carry one; none of the four FPs do.
+
+**Both residuals are TESTED, not merely commented** (a documented consequence no test pins is a
+comment that can quietly stop being true): a backtick-less dev-ops line is now migratable — accepted,
+because the delivery half's preservation gate RELOCATES such a line rather than losing it, whereas
+the pre-fix behaviour parked real narrative in CLAUDE.md permanently, which is the whole cost §1
+exists to eliminate; and prose carrying an unrelated code span (``- See the `docs/` folder for testing
+notes``) is still exempt.
+
+**Falsified** (break E): disabling condition (c) reddened exactly the two new tests, 20 green.
+**Real input unchanged**: the live CLAUDE.md over cap still gives 60 migratable / 8 permitted
+(1 description + 3 urls + 4 devops), and the 4 devops are exactly the real command lines — so this
+removed a false-positive CLASS without moving a single block on the actual file.
 
 ### Delivery-part-1 acceptance (the chore-level §4 boxes stay open — they need the agent + scheduler)
 
