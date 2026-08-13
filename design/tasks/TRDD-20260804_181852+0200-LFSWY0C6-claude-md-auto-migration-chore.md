@@ -237,6 +237,20 @@ CLAUDE.md busts the prompt-cache prefix of every live session (TRDD-e247a349 §5
 `plan_migration`'s docstring as the two separate questions they answer — WHETHER to plan, and WHICH
 blocks — because conflating them is what shipped broken twice.
 
+### Provenance — the two agent reports behind `d82dc15a` and `20f226ba`
+
+Cited so the chain is greppable, and annotated because reports are gitignored and will vanish while
+their conclusions would otherwise survive as unqualified:
+
+| report (`reports/lfswy0c6/`) | produced | STATUS OF ITS CONCLUSION |
+|---|---|---|
+| `20260813_062500+0200-migration-planner.md` | `d82dc15a` — the planner | **Its "13 green tests" claim was TRUE and MEANINGLESS.** Every fixture planted a violation, so the shipped planner was wrong on real input. |
+| `20260813_064433+0200-planner-candidate-fix.md` | `20f226ba` — the gate | **Reported the fix as complete; it was PARTIAL.** Verified by hand the same hour: the defect survived on any over-cap file. |
+
+Neither report was wrong about what it DID; both were wrong about what it MEANT. That is the reason
+this card's own §"How BOTH previous attempts passed" exists, and the reason the classifier's
+acceptance was falsified in-process rather than accepted from a passing suite.
+
 ### NEXT ACTION — the DELIVERY half, still unbuilt and still separately risky
 
 Nothing in this commit writes anything. Delivery is CM-2 steps 3–5: write the atom (or fold + `[^N]`
