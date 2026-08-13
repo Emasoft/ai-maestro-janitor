@@ -1,10 +1,10 @@
 {
   "totals": {
-    "samples": 218,
+    "samples": 233,
     "benign": 64,
-    "attack_claimed": 137,
-    "recall_intended": 0.5036,
-    "recall_any": 0.5255,
+    "attack_claimed": 152,
+    "recall_intended": 0.5132,
+    "recall_any": 0.5526,
     "false_positive_rate": 0.0469
   },
   "per_population": {
@@ -240,6 +240,46 @@
         "fake security alert",
         "buried credential harvester"
       ]
+    },
+    "dynamic-exec-in-body": {
+      "claimed": true,
+      "n": 3,
+      "intended": 1,
+      "any": 1,
+      "misses": [
+        "skill body smuggles a python eval step",
+        "os.system in an 'automation' appendix"
+      ]
+    },
+    "whole-env-exfil": {
+      "claimed": true,
+      "n": 3,
+      "intended": 3,
+      "any": 3,
+      "misses": []
+    },
+    "two-step-code-injection": {
+      "claimed": true,
+      "n": 3,
+      "intended": 0,
+      "any": 3,
+      "misses": []
+    },
+    "git-protocol-only-dependency": {
+      "claimed": true,
+      "n": 3,
+      "intended": 3,
+      "any": 3,
+      "misses": []
+    },
+    "mcp-schema-in-annotations": {
+      "claimed": true,
+      "n": 3,
+      "intended": 2,
+      "any": 2,
+      "misses": [
+        "docs telling implementers to nest the schema"
+      ]
     }
   },
   "false_positives": [
@@ -268,12 +308,6 @@
       "population": "benign"
     }
   ],
-  "unclaimed_rules": [
-    "dynamic-exec-in-body",
-    "git-protocol-only-dependency",
-    "mcp-schema-in-annotations",
-    "two-step-code-injection",
-    "whole-env-exfil"
-  ],
+  "unclaimed_rules": [],
   "split": "all"
 }
