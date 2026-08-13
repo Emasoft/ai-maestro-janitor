@@ -3,7 +3,7 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: todo
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-13T00:41:54+0200
+updated: 2026-08-13T03:31:49+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -36,6 +36,41 @@ rules trim (`29121d8b`) and the preamble dedup (`83a68674`) each rewrote several
 that BOUGHT context-floor headroom paid a full cache write to do. The work was right; only the
 timing was wrong, and the timing is free to change.
 
+### 2026-08-13 03:29 — SECOND MEASUREMENT TAKEN, AND IT REFUTES THE HEADLINE
+
+`agentlenspro get_cache_break_causes`, 336 bodies / 16 sessions, raw JSON at
+`reports/ij94o8yd/20260813_032943+0200-cache-break-causes-second-measurement.json`:
+
+| cause | expected | cache_creation | % |
+|---|---|---|---|
+| COMPACTION | yes | 652,917 | 56.9 |
+| **UNCLASSIFIED** | **no** | **453,881** | **39.5** |
+| NORMAL_GROWTH | yes | 41,494 | 3.6 |
+
+**`CLAUDE_MD_CHANGED` does not appear at all.** This card's headline — *"the ONLY significant
+`expected=false` cause is CLAUDE_MD_CHANGED"* — does not survive its own confirmation box.
+
+**But do NOT flip to "the first measurement was wrong".** The windows differ (412 bodies then,
+336 now) and the rules edits that caused it (`29121d8b`, `83a68674`, 2026-08-12) have aged out.
+Both readings are true of their windows, and together they say something the first could not:
+**CLAUDE_MD_CHANGED is EPISODIC, not structural** — it appears exactly when rules are edited and
+is absent otherwise. That is a much weaker basis for a standing rule than "the dominant avoidable
+cost", and the acceptance boxes below must be re-scoped accordingly rather than deleted: 150k
+tokens on the days it fires is still worth timing correctly; it is simply not the main event.
+
+**The main event is something this card never considered:** ONE avoidable break, 453,881 tokens
+($2.84), in ONE session — actor `usertext block changed at pos 515: msg[363] system`. A `system`
+block MUTATING mid-prefix, nothing to do with instruction files. agentlenspro could not localise
+it (that is what UNCLASSIFIED means), so the mechanism is **UNKNOWN, not assumed** — a
+lean-worker is diffing the adjacent captured bodies now. Candidates to confirm or rule out: a
+`<system-reminder>` task list that re-renders when tasks change, a hook `additionalContext`
+injection stripped retroactively (issue #79's documented mechanism), or a compaction artifact.
+
+**Method note — why this measurement had to run HERE.** The card's own reasoning says a subagent
+has its own prefix; a subagent measuring live cache breaks would measure its own. The forensic
+diff is different: it reads bodies ALREADY captured on disk, so it delegates safely. Measure
+live, analyse anywhere.
+
 ## The tension to resolve — do NOT assume the obvious fix
 
 "Never edit rules mid-session" is unworkable as stated: the janitor edits its own rules as a
@@ -50,8 +85,15 @@ not ship. The real question is WHERE the edit happens:
 
 ## Acceptance
 
-- [ ] The cost is confirmed a second time (a rules edit in a live session, measured before/after
-      with `get_cache_break_causes`) — one measurement is a finding, not a law
+- [x] The cost is confirmed a second time — **TAKEN 2026-08-13 03:29, RESULT NEGATIVE.**
+      `CLAUDE_MD_CHANGED` is absent from the second window entirely; the box did its job by
+      refuting the law rather than blessing it. Revised finding: the cost is EPISODIC (fires on
+      rules-edit days, ~150k tokens) and is NOT the dominant avoidable cause. See the dated
+      section above and the raw JSON in `reports/ij94o8yd/`.
+- [ ] **NEW, and now the bigger prize:** localise the UNCLASSIFIED 453,881-token break
+      (`msg[363] system`, 39.5% of classified breaks). Until its mechanism is known this card is
+      optimising the smaller of two costs. Do NOT guess it — agentlenspro could not localise it
+      from the prefix diff, so only the raw adjacent-body diff settles it.
 - [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
       spelled out rather than implied
 - [ ] Whatever the rule is, it is enforced by something that runs — not only written down
