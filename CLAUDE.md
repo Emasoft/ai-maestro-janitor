@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=610dcdb20460 digest=ef6e473f8a6b generated=2026-08-13T02:12:43+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=10959f30dd6c digest=47c991db6a5f generated=2026-08-13T07:47:47+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/agent_context_bench.py` — agent_context_bench — measure what `agent_config_patterns.scan_text` actually CATCHES.
   · expand_fake_secrets(text) -> str — Materialize `{{FAKESECRET:...}}` / `{{FAKEDSN:...}}` corpus placeholders.
@@ -48,6 +48,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · cmd_index(root, *, to_stdout) -> int
   · cmd_check(root) -> int
   · cmd_verify(root, old_file) -> int — Prove the migration lost nothing: OLD narrative facts + load-bearing tokens must
+  · cmd_plan(root) -> int — DECISION-only migration plan (TRDD-LFSWY0C6): reports what WOULD migrate where.
   · main() -> int
 `scripts/clear_trigger.py` — Backing script for /janitor-handoff-and-clear (TRDD-Z582IKIR P1).
   · plan_clear() -> tuple[list[str], list[str]] — The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
@@ -218,6 +219,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/detectors/tracked-ignored.py` — Tracked-ignored detector — Python port of tracked-ignored.sh.
   · main() -> int
 `scripts/detectors/trashcan-purge.py` — trashcan-purge — Python port of trashcan-purge.sh.
+  · main() -> int
+`scripts/detectors/trdd-cross-card-blindspot.py` — trdd-cross-card-blindspot — flag OPEN cards attacking one defect blind to each other.
   · main() -> int
 `scripts/detectors/trdd-drift.py` — TRDD drift detector — Python port of trdd-drift.sh.
   · review_after_epoch(head) -> int | None — The epoch of a TRDD's `review-after:` date, or None when it declares none. PURE.
@@ -417,6 +420,21 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · classify(*, chore, last_run, cadence_s, now, factor, min_grace_s, observed_s) -> Verdict — Judge ONE claimed chore from its completion stamp. Total — never raises.
   · evaluate(chores, *, last_run_of, cadence_of, now, factor, min_grace_s, observed_of) -> list[Verdict] — Judge every claimed chore; return only the findings, worst-first.
   · describe(v) -> str — One chore's finding, as it appears inside the drift line.
+`scripts/lib/claudemd_migration_plan.py` — CLAUDE.md narrative migration PLANNER — the DECISION half only (TRDD-LFSWY0C6).
+  · NarrativeBlock — One unit of narrative content a human (or the planner) judges as a whole.
+  · split_narrative_blocks(narrative) -> list[NarrativeBlock] — Cut `narrative` into judgeable units.
+  · classify_exemption(block_text) -> str | None — The matched §CM-3 enumeration word if `block_text` is EXEMPT, else None (MIGRATABLE).
+  · is_project_url_line(block_text) -> bool — True iff `block_text` is a §CM-1 element-2 project-URL line.
+  · classify_permitted(block, *, index) -> str | None — Which of the three narrative-visible §CM-1 elements `block` IS, or None when it is
+  · decide_new_page_scope(block_text) -> str — "local" if `block_text` carries a machine-private red flag, else "project".
+  · build_recall_query(block_text) -> str — A short symptom-style phrase to hand `memgrep recall` — the block's own words, with
+  · RecallHit
+  · parse_recall_full_output(stdout) -> list[RecallHit] — Parse `memgrep recall --output full` stdout into ranked `RecallHit`s.
+  · find_memgrep() -> str | None — Resolve the memgrep binary: `MEMGREP_BIN` env override -> PATH -> `~/.cargo/bin`.
+  · recall_top(query, roots, *, memgrep_bin, top, timeout) -> list[RecallHit] — Run `memgrep recall <query> <roots...>` and return ranked GENUINE hits (best first,
+  · BlockPlan — The planner's verdict for one `NarrativeBlock`. Exactly one of the verdict-specific
+  · plan_migration(claude_md_text, *, roots, memgrep_bin, recall_top_n, timeout) -> list[BlockPlan] — The whole DECISION half: narrative -> blocks -> (permitted | fold | new_page) each.
+  · render_plan(plans) -> str — Human-readable plan, one entry per block. Reused by the CLI; kept pure (no I/O) so
 `scripts/lib/cli_agent_roster.py` — CLI agent roster — the INDEPENDENT SECOND VIEW of the running fleet (TRDD-DFKEXO79).
   · parse_agents_json(stdout) -> list[dict[str, Any]] — Parse `claude agents --json` stdout into a list of row dicts.
   · roster_by_cwd(agents) -> dict[str, list[dict[str, Any]]] — Group agent rows by NORMALIZED `cwd` — never by `name`.
@@ -581,7 +599,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · fire_restart(plan, *, enabled, killable, killer, spawner, cmdline_reader) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
 `scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
   · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is the
-  · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
+  · is_repl_invocation(cmd) -> bool — True iff `cmd` starts an interactive claude SESSION rather than a one-shot subcommand.
+  · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude SESSION in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
   · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions. PURE.
   · iterm_automation_payload(*, interpreter, second_view) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
@@ -596,7 +615,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · transcript_activity(root, now) -> tuple[int | None, int, bool] — ``(substantive_age_s, trailing_enqueues, awaiting_user)`` for this project's
   · transcript_age(root, now) -> int | None — Seconds since this project's newest SUBSTANTIVE transcript line, or ``None``
   · sweep_stale_rate_limit(root, *, now, max_age_s) -> bool — Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
-  · diagnose_root(root, *, now, transcript_age, stale_s, server_owned) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
+  · capture_pane_text(terminal) -> str | None — Read the CURRENT RENDERED FRAME of an instance's pane, for retry-wedge detection
+  · write_rate_limited_flag(root, now) -> None — Stamp `<root>/.janitor/state/rate-limited.flag` (+ `rate-limited-since.ts`) as if
+  · diagnose_root(root, *, now, transcript_age, stale_s, server_owned, terminal) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
   · tag_aimaestro_identity(terminal, *, agents, cli, root) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
   · tag_linux_gui_identity(terminal, *, channel) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the Linux
   · gather_fleet(*, now, sweep_stale_rate_limit_s) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
@@ -637,6 +658,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · read_flag_provenance(name) -> dict — Read one control-plane flag's provenance, checking the same THREE locations
   · last_run_path(task) -> Path — WRITE path for one chore's completion stamp — `control_dir()/<task>.last-run.ts`
   · read_last_run(task) -> int — One chore's completion epoch, taking the NEWEST across all three eras.
+  · read_failcount(task) -> int — One chore's CONSECUTIVE-FAILURE streak (0 when absent, unreadable, or corrupt).
   · migrate_global_state_to_data_dir() -> Optional[int] — One-time staged migration legacy → plugin DATA dir (TRDD-2U8AH82F).
   · daemon_pid() -> Optional[int] — Read daemon.pid → int, or None if missing / malformed at EVERY era.
   · write_daemon_pid(pid) -> None — Publish the daemon's pid at EVERY era's path (see the dual-write note above).
@@ -661,6 +683,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · fleet_stop_flag_state() -> str | None — ``"disarm"`` iff the machine-wide kill-switch is set, else None.
   · record_rotation_success(now) -> None — Stamp that a rotation just put a NEW live credential in place (TRDD-UA4FAX67).
   · rotation_succeeded_within(seconds, *, now) -> bool — True iff a rotation landed within the last `seconds` — i.e. the reason a pane is
+  · record_memory_root_inflight(root, *, dispatch_id, now) -> None — Stamp that a dispatch is IN FLIGHT on `root` — the gate the SCHEDULER checks before
+  · memory_root_inflight(root, *, now, ttl_s) -> Optional[dict] — The live holder payload (`{dispatch_id, root, ts}`) for `root`, or None when there is
+  · clear_memory_root_inflight(root) -> None — Best-effort removal of the in-flight stamp for `root` (the escape hatch — normally the
   · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
   · clear_fleet_injections(flag_state) -> None — Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
@@ -972,12 +997,14 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · parse_approval_response(reply) -> bool — Return True iff the reply is EXACTLY ``APPROVED`` after .strip().
   · apply_fp_filters(text, filters) -> bool — Return True iff ``text`` contains ANY substring from ``filters``.
 `scripts/lib/pending_agents.py` — Pending background-agent manifest (TRDD-82OP4EN9 W1) — deterministic fork
-  · add(agent_id, description, now, transcript) -> None — Record a spawned subagent. Fail-open: swallows everything.
+  · add(agent_id, description, now, transcript, agent_dir) -> None — Record a spawned subagent. Fail-open: swallows everything.
   · remove(agent_id, now) -> None — Clear a finished subagent. No-op on empty/unknown id (fail-open).
   · pending(now, *, state_dir) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
   · is_janitor_agent(entry) -> bool — True iff this manifest entry is a background agent the JANITOR spawned for
   · pending_external(now, *, state_dir) -> list[dict] — Live entries EXCLUDING the janitor's own housekeeping agents — the set the
   · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
+  · resolve_transcript(entry) -> str — The entry's usable transcript path, resolved LAZILY. Never raises; "" when nothing
+  · respawn_prompt_for(entry) -> str — `respawn_prompt`, but resolving the transcript LAZILY via `resolve_transcript` first —
   · spawn_prompt(transcript_path) -> str — The original spawn prompt of an agent, read from the FIRST user message of its
   · respawn_prompt(transcript_path) -> str — The full prompt to respawn an interrupted agent with, preamble included.
 `scripts/lib/plugin_freshness.py` — Plugin-freshness helper (issue #69, TRDD-YF4NDYYE) — verify cached-vs-live BEFORE
@@ -1163,6 +1190,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/sentinel/rules_repo.py` — Repo-level Sentinel rules — checks that span the whole repository rather
   · missing_zizmor(workflow_texts) -> list[Finding] — Repo-level: no workflow runs the zizmor static analyzer anywhere.
 `scripts/lib/session_liveness.py` — Session-liveness detection primitives (TRDD-dccb0b8a, Phase 1).
+  · is_retry_wedge(text) -> bool — True iff `text` (a captured pane frame) shows the CC retry-watchdog wedge signature.
+  · retry_wedge_attempt(text) -> int | None — The `attempt N` number from a captured pane frame, or None when the wedge signature
+  · retry_wedge_state_update(*, prev, current_attempt) -> tuple[dict[str, object] | None, bool] — Advance the persisted retry-wedge episode state by ONE poll and decide whether THIS
   · capture_terminal_identity(env) -> dict[str, str] — Extract the stable terminal-pane identifiers the daemon needs to inject
   · is_session_frozen(*, transcript_mtime, rate_limited_since, flag_present, now, heartbeat_interval_s, freeze_factor, grace_s) -> bool — True iff a session is FROZEN-AND-STUCK and needs an external wake.
   · rate_limit_flag_is_stale(flag_mtime, now, max_age_s) -> bool — True iff a `rate-limited.flag` is old enough to be litter rather than a rate limit.
@@ -1171,7 +1201,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · recovery_action_for(attempt) -> str — The recovery action for the Nth (0-based) consecutive failed wake. Walks
   · is_hard_rung(action) -> bool — True iff ``action`` kills/replaces the claude process (subject to the
   · crash_loop_tripped(hard_attempts_in_window, max_in_window) -> bool — True iff the hard-restart rungs have fired too many times in the guard window —
-  · diagnose_instance(*, deliberately_unarmed, pane_alive, transcript_stale, rate_limited, version_stale, server_owned) -> str — Classify ONE armed claude instance's janitor health from pre-gathered
+  · diagnose_instance(*, deliberately_unarmed, pane_alive, transcript_stale, rate_limited, version_stale, server_owned, retry_wedged) -> str — Classify ONE armed claude instance's janitor health from pre-gathered
   · recovery_for_diagnosis(diagnosis) -> str | None — The recovery action for a diagnosis, or None to leave the instance alone
   · normalize_tty(raw) -> str — Normalize a TTY name to a comparable key (the device basename, e.g.
   · resolve_terminal_for_tty(tty, *, iterm_by_tty, tmux_by_tty) -> dict[str, str] — Resolve a process's terminal-injection identity from its (normalized) TTY,
@@ -1391,8 +1421,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · check5_dead_symbol_citations(record, token_is_dead) -> list[DeadSymbolCitation] — Check 5 — a STATE block cites a code symbol the tree no longer has (TRDD-FDV1RQEB).
   · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
   · ReconcileVerdict.fires(self) -> bool
+  · check7_work_column_without_work(record, *, idle_days, threshold_days) -> bool — Check 7 — a WORK column claiming activity nobody is providing (TRDD-F4IBIDB6).
   · check6_blocked_without_blocker(record) -> bool — Check 6 — `column: blocked` while naming NO blocker (TRDD-F4IBIDB6).
-  · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
+  · check8_shipped_unreleased(record, commit_at_head) -> bool — Check 8 — lower-confidence rung: commits at HEAD, no released tag yet (TRDD-4ZSYW21E).
+  · reconcile(record, commit_in_released_tag, column_of, *, idle_days, work_idle_threshold_days, commit_at_head) -> ReconcileVerdict — Run every check on one record; return the consolidated verdict.
 `scripts/lib/usage_probe.py` — Throttled single-writer probe for Anthropic's `/api/oauth/usage` (TRDD-WEBA1RMF).
   · ttl_seconds() -> int
   · stale_seconds() -> int
@@ -1533,6 +1565,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/oauth_rotator/rotator.py` — Claude Code multi-subscription account rotator.
   · SlotKeychainWriteError — A keychain/keyring was PRESENT but refused a slot write — fail CLOSED.
   · configured_rotator_home() -> Path | None — The rotator home the daemon ACTUALLY uses, or None when none is configured (opt-in by
+  · open_login_script() -> Path — The `open-login.sh` the user should ACTUALLY run on THIS host (janitor#258).
   · migrate_root_to_canonical() -> tuple[Path, Path, bool] — One-time: copy ``state.json`` + ``opt-in.flag`` from the legacy standalone root
   · read_live_blob_with_source() -> tuple[dict | None, str] — The live credential PLUS where it came from: ("primary" | "mirror" | "none").
   · read_live_blob() -> dict | None — The live credential, robust against a corrupt/missing primary: the PRIMARY store ladder
