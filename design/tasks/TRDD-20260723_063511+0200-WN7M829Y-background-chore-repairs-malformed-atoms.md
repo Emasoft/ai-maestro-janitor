@@ -38,7 +38,27 @@ A heartbeat surfaced `memgrep lint: 50 findings, none at or above ERROR`. Broken
 **`atom-oversized` is 2 + 10 — byte-identical to the re-measurement above.** Nothing drained it
 in the intervening hour, which is one more confirmation that it does not drain by itself.
 
-**The important part is the other 30 findings.** `lesson-uncited` and `link-one-sided` are NOT
+**⚠ CORRECTION, same session, 14:0x — "the INFO tier" is the wrong cause for PROJECT.** I traced
+the scheduler rather than leaving that as inference, and the two scopes fail for DIFFERENT
+reasons:
+
+- **PROJECT — deliberately gated OFF, not tier-limited.** `memory-maintenance.py::_scopes_in_play`
+  drops PROJECT unless the `edit_project_scope` setting is opted into; it is currently `False`.
+  Its stated reason: PROJECT memory is in-repo and unpushable outside `publish.py`. Verified
+  end-to-end: `_first_due_intervention("PROJECT", …)` returns **`split`** (due AND has work), the
+  scheduler ran 30 min ago, and the dispatch log shows **12 dispatches 08-06 → 08-11, every one
+  LOCAL or USER, zero PROJECT — ever**. So PROJECT's 10 findings are not evidence of a broken
+  drain; they are the visible cost of a switch nobody turned on.
+- **USER — the tier explanation stands.** Chores DID run there 3–16 h ago and its 40 findings
+  survived, so there the chore genuinely does not act on these codes.
+
+**This adds a FOURTH option, and it is the USER's, not mine:** flipping `edit_project_scope` to
+true would let the chores drain PROJECT. It is deliberately not flipped here — it authorises an
+automated agent to edit git-tracked, PUSHED memory, which is exactly the kind of consent the
+gate exists to obtain. No defect was found; the investigation's result is that the system behaves
+as designed and the design has an off switch in the way.
+
+**The other 30 findings — the part the tier argument DOES cover.** `lesson-uncited` and `link-one-sided` are NOT
 among this card's four defect classes, yet they exhibit the identical structure: nothing refuses
 them at write time, they are emitted at INFO so no chore gate may act, and only a hand-dispatched
 agent batch clears them. So the closed loop this card documents is not a property of *oversized
