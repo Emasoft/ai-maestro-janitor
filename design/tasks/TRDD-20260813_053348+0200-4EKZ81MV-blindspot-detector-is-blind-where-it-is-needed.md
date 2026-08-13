@@ -3,7 +3,7 @@ trdd-id: 4EKZ81MV
 title: The cross-card blindspot detector is weakest exactly where it is most needed
 column: todo
 created: 2026-08-13T05:33:48+0200
-updated: 2026-08-13T05:33:48+0200
+updated: 2026-08-13T06:02:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -45,7 +45,29 @@ inverted with respect to its purpose.
    | KU3ERYFX | `[janitor#234]` |
 
    Zero overlap, and one card has no refs at all — so no amount of dedupe tuning changes the
-   outcome. A run today emitted nothing, and no `trdd-cross-card-blindspot-seen.txt` exists.
+   outcome.
+
+### ⚠ CORRECTION 2026-08-13 — one piece of the evidence above was CONFOUNDED
+
+This card originally added: *"A run today emitted nothing, and no
+`trdd-cross-card-blindspot-seen.txt` exists."* **Withdraw the seen-file half.** The detector was
+committed at `20a1c14e` with git mode `100644`, and `_run_detector` skips any script failing
+`os.access(..., X_OK)` — so it had **never run from the heartbeat at all**. An absent seen-file is
+exactly what that produces, independently of recall. Fixed in `30d9ddc1`.
+
+My "a run today emitted nothing" was a HAND run via `uv run --script <path>`, an
+explicit-interpreter invocation that is mode-agnostic — the same blind spot
+`tests/test_detector_executable_bits.py` was written to close. The manual run succeeding and the
+production path skipping it entirely are perfectly consistent observations, which is why nothing
+looked wrong.
+
+**The card's thesis is unaffected**, because it never rested on that half: the zero-overlap table
+above is a property of the CARDS, not of any run. Two cards that share no `external-refs` cannot be
+paired by a detector that groups on shared `external-refs`, whether or not it ever executes. That
+remains true and remains the whole argument.
+
+Correcting rather than deleting, because the mistake is the reusable part: **an untested
+verification path can make a real defect and a never-executed guard produce identical evidence.**
 
 **Sample so far: every real relationship on this board was found by a human reading, none by
 the detector.** That is a small sample and the detector is young — but it is the only sample

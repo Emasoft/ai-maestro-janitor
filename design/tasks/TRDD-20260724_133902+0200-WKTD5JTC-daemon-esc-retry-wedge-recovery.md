@@ -1,9 +1,10 @@
 ---
 trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
-column: todo
+column: testing
 created: 2026-07-24T13:39:02+0200
-updated: 2026-08-13T05:29:05+0200
+updated: 2026-08-13T06:01:12+0200
+implementation-commits: [3517836b]
 current-owner: main
 task-type: feature
 scope: project
@@ -13,6 +14,33 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
 ---
 
 # Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
+
+## ⏵ 2026-08-13 — PHASE 1 SHIPPED (`3517836b`). Column `todo → testing`.
+
+Implemented across `session_liveness.py` / `fleet_recovery.py` / `fleet_scan.py` / `daemon.py`
+with 24 new tests. Full suite 15024 passed / 1 skipped; ruff clean. All six guards were proven
+by BREAKING each and watching a named test go red — the mapping is in the commit body, and
+each has a test named for the property rather than for the function.
+
+**Verification item 3 below is now WRONG AS WRITTEN and must not be run as stated.** It says
+*"the daemon breaks the wedge with ESC; `on-stop-failure` then writes `rate-limited.flag`"* —
+measured today, `on-stop-failure` does NOT fire on an ESC-cancel (that is finding 1b). The
+**daemon** writes the flag itself, before the ESC. Corrected item 3:
+
+> End-to-end on a real wedge: the daemon writes `rate-limited.flag` and injects exactly one
+> ESC; the turn ends via plain `Stop`; the next heartbeat sees the flag and emits
+> `[janitor-resume]`. Assert the flag is written by the DAEMON (its own log line), not by the
+> stop hook — asserting only "the flag exists" would pass even if the ordering were wrong.
+
+**What actually remains, stated honestly:** one live observation of the actuation on a real
+wedge. That is a genuinely different kind of gap from the 1a/1b questions, which were about
+CC's behaviour and were answerable from accumulated logs — this one is about whether OUR ESC
+reaches OUR pane, and no historical record contains it because the code did not exist until
+today. Do not re-run the decomposition trick here expecting the same result.
+
+The unit layer already covers everything a fake fleet can show (seeded panes, cooldowns,
+precedence, the automation-blocked decline), so the remaining risk is exactly the seam the
+tests cannot cross: osascript/tmux actually delivering the keystroke to a wedged pane.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-24
 
