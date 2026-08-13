@@ -93,3 +93,22 @@ moved-detail backlinks is still the correct editorial act, so do it.
 Each is mechanically checked by `memory_edit_verify.verify_split` before the
 transaction commits, so a pass that would violate one aborts rather than landing a
 half-split page — the invariants are enforced, not merely documented.
+
+## Size rule (e) — headroom, and why it is a rule rather than a preference
+
+**Never emit a sub-page within ~10% of `split_max_bytes`** (≈32,400 B at the 36,000 default).
+Prefer one more seam over one nearly-full sibling.
+
+A sibling that lands just under the cap is re-split by the very next atom added to it — and
+**every split MINTS NEW PAGE NAMES.** Conflict refusals are keyed by root-relative PATH
+(`scripts/lib/memory_refusals.py::candidate_key`), so new names void every refusal recorded for
+that family, and the `conflict` chore re-judges it from scratch.
+
+Measured (janitor#241 / TRDD-RG4IUZ6I): one such null pass cost **221,612 subagent tokens for
+zero mutations**, and the sibling that caused it sat **279 bytes** under the cap. Re-measured
+2026-08-13: that page is **35,724 B against 36,000 — 276 bytes of headroom**, so the next edit
+to it repeats the whole cycle.
+
+Splitting right up to the cap is not efficient use of space; it schedules the next expensive
+re-litigation. (The durable fix — explicit split lineage so siblings are never conflict
+candidates at all — is TRDD-3QIQ2E6J; this rule stands whichever card ships.)
