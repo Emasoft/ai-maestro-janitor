@@ -4,7 +4,7 @@ title: Run the daemon under the signed python.org 3.12 so the existing iTerm Aut
 column: human_review
 pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-13T14:14:00+0200
+updated: 2026-08-13T14:33:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -26,11 +26,32 @@ osascript), not an empty host** — the reading the alarm text previously could 
 It named the same binary this card is about:
 `~/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12`.
 
-**Consequence, unchanged and ongoing:** the fleet guardian cannot rescue a frozen or
-rate-limited Claude in ANY iTerm pane and has been skipping them silently (tmux panes are
-unaffected). That is the exact failure this card's fix removes, and it is still happening 8 days
-after the code half landed in `75332ba0` — so the card sitting in `human_review` is not a
-formality, it is the live gap.
+**⚠ SAME-DAY CORRECTION (14:3x) — I overstated the consequence above. Read this instead.**
+I wrote that the guardian "cannot rescue a frozen or rate-limited Claude in ANY iTerm pane and
+has been skipping them silently". **That is false for today**, and the daemon log refutes it:
+
+```
+[2026-08-13T06:21:49+0200] session-liveness: FIRED rearm → iterm for AgentlensPro [cron_dead]
+[2026-08-13T06:51:04+0200] session-liveness: AgentlensPro [cron_dead] INPUT FIELD BUSY on iterm
+```
+
+The 06:21 line is the alarm's OWN positive falsifier — a rearm actually fired through iTerm. The
+06:51 line is equally positive and is not counted: detecting a busy input field REQUIRES the
+Apple Event to have answered (the point of janitor#261, verified here: this host has **15 BUSY
+vs 9 FIRED** iterm lines, so the uncounted outcome is the MORE common one).
+
+**So the channel answered at 06:51, ~7.5 h before the 14:1x alarm.** That is evidence against a
+DENIED GRANT and for an INTERMITTENT hang/timeout — which is exactly the conclusion
+TRDD-EZ3PMQYX already reached on 2026-08-08 ("the launch-context CAUSE claim is RETRACTED …
+intermittent osascript hangs/timeouts, plausibly load-correlated"), and which I failed to apply
+before relaying a System Settings remedy to the owner.
+
+**What survives:** the alarm's blocked-vs-empty-host discrimination is sound (osascript returned
+zero while a grant-free enumeration found live sessions), so SOMETHING failed at 14:1x. What does
+NOT survive is attributing it to a missing grant, or claiming iTerm rescue is dead on this host.
+This card's proposal still stands on its own merits — a stable, signed binary removes the
+path-fragility regardless of today's cause — but it must not be justified by a denial that the
+same day's log contradicts.
 
 Nothing here changes the proposal or the acceptance criteria; it is evidence for the pending
 decision, recorded so the card is not judged on 8-day-old symptoms.
