@@ -1140,9 +1140,10 @@ def _phase_clear_resume() -> bool:
 
     ARMING (the load-bearing difference from the other two phases). The flag is a
     PRE-marker — it is written BEFORE the /clear it describes — so its mere PRESENCE
-    proves nothing. Between the write and the clear there is a real window (widest in
-    the USER_PRESENT case, where the clear waits on a human), and a heartbeat landing in
-    it must leave the flag alone. `/clear` has no hook of its own, but it re-enters
+    proves nothing. Between the write and the clear there is a real window (widest when
+    the injector is deferring to a user who keeps typing — every keystroke pushes the
+    send another 8 s out, and it never gives up), and a heartbeat landing in it must
+    leave the flag alone. `/clear` has no hook of its own, but it re-enters
     SessionStart with `source=clear`, which stamps `clear-observed.ts` — the ONE
     unambiguous observation that the clear happened. So this phase consumes the flag
     only when a clear was observed AT OR AFTER the flag was written.
@@ -1884,6 +1885,17 @@ def _phase_autofix_mode_reminder() -> None:
     Dedup key is the local-date bucket; the reminder fires at most once
     every 24 h regardless of cron cadence. When autofix is back ON (the
     default), this phase is a near-free no-op (one file stat).
+
+    DELIBERATELY NOT recorded to the findings ledger — do not "fix" this by adding
+    a `findings_ledger.record(...)` call. The ledger exists for conditions that
+    CANNOT be re-observed later: an intermittent channel failure, a rolling-window
+    cost overrun, a transient the receiving session forgets. This condition is a
+    FILE ON DISK (`autofix-off.flag`) that the user themselves created and that any
+    later turn can read directly via `state.autofix_disabled()` — a durable record
+    of a durable fact adds no evidence, only one ledger line per day forever until
+    the user re-enables. The discriminator, stated once for the whole file: does the
+    evidence survive on its own for later inspection? Yes ⇒ nudge, print only.
+    No ⇒ finding, record it (see `_phase_self_cost_alarm` and the iTerm alarm).
     """
     if not state.autofix_disabled():
         return
@@ -2338,6 +2350,30 @@ def _phase_self_cost_alarm() -> None:
         if line is not None:
             print(line)
             state.log_line("dispatch", f"self-cost: 7d heartbeat cost {cost} >= budget {budget}")
+            # RECORD each crossing, not just the dedupe marker — the same defect the iTerm
+            # alarm had (299f775c). `cost` is a ROLLING 7d window: it is recomputed from a
+            # log the meter trims, so an overrun that has aged out is unreconstructable
+            # later. Without this, "the cadence was too expensive last Tuesday" is a claim
+            # nobody can check — and the whole point of the line is that a human decides,
+            # possibly days after the fire that saw it.
+            #
+            # `actor="human"` is load-bearing, not decoration: it prefixes the entry with
+            # HUMAN_ONLY_DIRECTIVE so a later agent reading "heartbeat cost over budget"
+            # surfaces it and STOPS. The two remedies in the message are slow-the-cadence
+            # and /janitor-disarm — an agent that "helpfully" applied the second would be
+            # cost pressure switching the guard off by itself, exactly what the owner
+            # ruling in this docstring forbids. The ledger ENTRY is still always appended;
+            # only record()'s RETURN is suppressed on a repeat, and we ignore the return
+            # (the print above already happened, gated by this phase's own emit_once).
+            #
+            # LOW, so it can never escalate into a push: this is a budget report the user
+            # opted into by setting the knob, not a defect. `notify` is omitted (it is a
+            # CALLABLE — see 299f775c; the print is already the human surface).
+            findings_ledger.record(
+                sev="LOW", code="HEARTBEAT-COST", src="self-cost-alarm",
+                msg=f"7d heartbeat cost {cost} weighted tokens >= budget {budget}",
+                ref="", actor=findings_ledger.HUMAN_ONLY_ACTOR,
+            )
     except Exception as exc:  # noqa: BLE001 — FAIL-OPEN normative: a metering bug must never break a fire
         state.log_line("dispatch", f"self-cost phase failed: {exc}")
 

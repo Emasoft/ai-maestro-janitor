@@ -99,6 +99,20 @@ def _fire(script: str) -> None:
     )
 
 
+def _undeliverable(why: str) -> None:
+    """The skills reload could NOT be typed — print the legacy marker AND un-consume the signal.
+
+    `[janitor-reload-skills]` is emitted once per skills-reload generation and its ack advances
+    at EMISSION time, so any non-delivery silently eats the only signal that a reload was needed.
+    Identical defect and identical discipline as the plugin-reload trigger — the full rationale
+    lives on `reload_trigger._undeliverable`; keep the two in step.
+    """
+    state.rollback_marker_ack(
+        "skills-reload-acked.ts", actor="reload-skills-trigger", why=why
+    )
+    print("NO_ITERM")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Self-trigger /reload-skills at this session's pane.")
     ap.add_argument(
@@ -133,41 +147,36 @@ def main() -> int:
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
+    # See `reload_trigger._undeliverable` for the full rationale: presence now DEFERS at the
+    # pane (8 s per keystroke, never stops trying) instead of cancelling here, so this send is
+    # never refused for presence and `USER_PRESENT` cannot come back.
     sent = terminal_trigger.send_self_command(
-        "/reload-skills", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+        "/reload-skills",
+        delay_s=args.delay,
+        esc_first=esc_first,
+        dry_run=args.dry_run,
+        respect_user_presence=False,
     )
-    # The user is AT the keyboard and did not ask for this — do not type into their pane.
-    if sent == terminal_trigger.USER_PRESENT:
-        # janitor#257 (same defect as the plugin-reload trigger): `[janitor-reload-skills]` is
-        # emitted once per skills-reload generation and its ack advances at EMISSION time, so
-        # declining here would consume the only signal that a reload was needed. Roll it back.
-        state.rollback_marker_ack(
-            "skills-reload-acked.ts",
-            actor="reload-skills-trigger",
-            why="USER_PRESENT: declined to type into a pane the user is using",
-        )
-        print("USER_PRESENT")
-        return 0
-
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RELOAD_SKILLS_FIRED")
         elif sent.startswith("DRY_RUN:"):
             print(f"DRY_RUN {sent.split(':', 1)[1]}")
         else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
-            print("NO_ITERM")
+            _undeliverable(f"no automatable terminal ({sent})")
         return 0
 
     iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
     if not iterm:
-        print("NO_ITERM")
+        _undeliverable("iTerm path chosen but $ITERM_SESSION_ID is unset")
         return 0
     uuid = iterm.split(":")[-1].strip()
     if not _UUID_RE.match(uuid):
         # Malformed / untrusted session id — refuse to build the osascript rather
         # than risk AppleScript injection. The skill asks the user to reload manually.
         print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        print("NO_ITERM")
+        _undeliverable("iTerm session id is not a bare UUID")
         return 0
     if args.dry_run:
         plan = ("ESC->" if esc_first else "") + "/reload-skills"

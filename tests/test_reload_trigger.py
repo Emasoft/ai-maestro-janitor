@@ -164,74 +164,105 @@ def test_soft_and_hard_are_mutually_exclusive() -> None:
     assert proc.returncode != 0, "contradictory modes must be rejected"
 
 
-def test_no_iterm_reports_noop() -> None:
-    """No ITERM_SESSION_ID: prints only NO_ITERM, fires nothing."""
-    proc = _run([], iterm=None)
+def test_no_iterm_reports_noop(tmp_path: Path) -> None:
+    """No ITERM_SESSION_ID: prints only NO_ITERM, fires nothing.
+
+    `project=` is REQUIRED even though this test asserts only on stdout: the NO_ITERM path now
+    rolls the reload ack back, and an unpinned project resolves `state.state_dir()` to the
+    DEVELOPER'S OWN repo — the test would silently zero the live `reload-acked.ts`.
+    """
+    proc = _run([], iterm=None, project=_proj(tmp_path))
     assert proc.returncode == 0
     assert proc.stdout.strip() == "NO_ITERM"
     assert "RELOAD_FIRED" not in proc.stdout
 
 
-def test_malformed_iterm_id_refuses_to_fire() -> None:
+def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
     """An injection-shaped ITERM_SESSION_ID is rejected (NO_ITERM), never fired."""
-    proc = _run([], iterm='x:" then do shell script "touch /tmp/pwned" --')
+    proc = _run(
+        [],
+        iterm='x:" then do shell script "touch /tmp/pwned" --',
+        project=_proj(tmp_path),
+    )
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "RELOAD_FIRED" not in proc.stdout
 
 
-# ---------- the presence decline must not CONSUME the reload signal (janitor#257) ----
+# ---------- presence DEFERS; only real non-delivery un-consumes the signal (janitor#257) ----
+#
+# The owner retired the presence CANCEL (2026-08-02, restated 2026-08-13): the only input is the
+# last keystroke, each one pushes the send 8 s ahead, and it never stops trying. So "the user is
+# present" is no longer an outcome this script can produce, and the tests that pinned it are gone.
+#
+# The rollback they exercised is NOT gone — it moved to the outcome that actually means the reload
+# did not happen. That distinction is the whole of janitor#257: `[janitor-reload]` is emitted once
+# per reload generation and `dispatch` advances its ack at EMISSION time, so ANY non-delivery eats
+# the only signal that a reload was needed, and "told the human, who never did it" then looks
+# exactly like "reloaded".
 
 _PANE = "w0t0p0:11111111-2222-3333-4444-555555555555"
 
 
-def _present_run(proj: Path) -> subprocess.CompletedProcess:
-    """A real run with the user AT the keyboard and a zero deferral budget.
+def _proj(tmp_path: Path) -> Path:
+    """A pinned project dir with a janitor state dir — so a rollback never touches the real repo."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    return proj
 
-    `PRESENCE_WAIT_S=0` pins the give-up so this stays a test of what happens AFTER the gate
-    refuses, not a test of how long it polls first.
-    """
-    return _run(
-        [],
+
+def test_a_present_user_no_longer_cancels_the_reload(tmp_path: Path) -> None:
+    """The user AT the keyboard must NOT abort the send — presence defers at the pane, it never
+    refuses. `PRESENCE_WAIT_S=0` is the sharp form of the assertion: under the OLD gate a zero
+    deferral budget meant an immediate `USER_PRESENT` + return, so if any presence check survived
+    anywhere in this path, this test fails."""
+    proj = _proj(tmp_path)
+    acked = proj / ".janitor" / "state" / "reload-acked.ts"
+    acked.write_text("1755000000\n", encoding="utf-8")
+
+    proc = _run(
+        ["--dry-run"],
         iterm=_PANE,
         present=True,
         project=proj,
         extra_env={"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": "0"},
     )
 
+    assert proc.returncode == 0
+    assert "USER_PRESENT" not in proc.stdout, proc.stdout + proc.stderr
+    assert "DRY_RUN" in proc.stdout, "a present user must reach the send, not be turned away"
+    assert acked.read_text().strip() == "1755000000", (
+        "nothing was un-delivered, so the ack must stand — rolling it back on a successful send "
+        "would re-emit the marker forever"
+    )
 
-def test_user_present_rolls_the_reload_ack_back(tmp_path: Path) -> None:
-    """janitor#257: declining to type must not swallow the reload signal.
 
-    `dispatch` emits `[janitor-reload]` once per reload generation and advances its ack at
-    EMISSION time — before delivery can be known. So a decline here used to be the end of it: the
-    reload never happened, never retried, and the session kept running stale plugin code with
-    nothing left to say so. The ack must go back so the next fire re-emits.
-    """
-    proj = tmp_path / "proj"
-    (proj / ".janitor" / "state").mkdir(parents=True)
+def test_undeliverable_rolls_the_reload_ack_back(tmp_path: Path) -> None:
+    """No automatable terminal ⇒ the reload did NOT happen ⇒ the ack must go back so the next
+    heartbeat re-emits. This is the guarantee the retired presence branch used to carry, now
+    attached to an outcome that genuinely means non-delivery."""
+    proj = _proj(tmp_path)
     acked = proj / ".janitor" / "state" / "reload-acked.ts"
     acked.write_text("1755000000\n", encoding="utf-8")
 
-    proc = _present_run(proj)
+    proc = _run([], iterm=None, project=proj)
 
     assert proc.returncode == 0
-    assert proc.stdout.strip() == "USER_PRESENT", proc.stdout + proc.stderr
+    assert proc.stdout.strip() == "NO_ITERM", proc.stdout + proc.stderr
     assert acked.read_text().strip() == "0", (
         "the ack must be rolled back to 0 — ANY current generation then compares as newer and "
         "re-emits; storing the PREVIOUS generation would work only until the daemon bumped it"
     )
 
 
-def test_user_present_does_not_invent_an_ack_file(tmp_path: Path) -> None:
+def test_undeliverable_does_not_invent_an_ack_file(tmp_path: Path) -> None:
     """No ack on disk means no reload was ever acked — creating one would be the exact bug
     inverted (a fabricated ack that a later comparison could read as 'already handled')."""
-    proj = tmp_path / "proj"
-    (proj / ".janitor" / "state").mkdir(parents=True)
+    proj = _proj(tmp_path)
     acked = proj / ".janitor" / "state" / "reload-acked.ts"
 
-    proc = _present_run(proj)
+    proc = _run([], iterm=None, project=proj)
 
     assert proc.returncode == 0
-    assert proc.stdout.strip() == "USER_PRESENT"
+    assert proc.stdout.strip() == "NO_ITERM"
     assert not acked.exists(), "the rollback must not CREATE an ack that never existed"

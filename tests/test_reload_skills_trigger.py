@@ -73,16 +73,23 @@ def _run(
     )
 
 
-def test_user_present_rolls_the_skills_reload_ack_back(tmp_path: Path) -> None:
-    """janitor#257's sibling: `[janitor-reload-skills]` has the same emission-time ack, so a
-    presence decline must not consume it either."""
+def _proj(tmp_path: Path) -> Path:
+    """A pinned project dir with a janitor state dir — so a rollback never touches the real repo."""
     proj = tmp_path / "proj"
-    (proj / ".janitor" / "state").mkdir(parents=True)
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    return proj
+
+
+def test_a_present_user_no_longer_cancels_the_skills_reload(tmp_path: Path) -> None:
+    """Presence DEFERS at the pane, it never refuses (owner directive 2026-08-02, migrated
+    2026-08-13). `PRESENCE_WAIT_S=0` is the sharp form: under the old gate a zero deferral budget
+    meant an immediate `USER_PRESENT` + return, so any surviving presence check fails this."""
+    proj = _proj(tmp_path)
     acked = proj / ".janitor" / "state" / "skills-reload-acked.ts"
     acked.write_text("1755000000\n", encoding="utf-8")
 
     proc = _run(
-        [],
+        ["--dry-run"],
         iterm="w0t0p0:11111111-2222-3333-4444-555555555555",
         present=True,
         project=proj,
@@ -90,8 +97,35 @@ def test_user_present_rolls_the_skills_reload_ack_back(tmp_path: Path) -> None:
     )
 
     assert proc.returncode == 0
-    assert proc.stdout.strip() == "USER_PRESENT", proc.stdout + proc.stderr
+    assert "USER_PRESENT" not in proc.stdout, proc.stdout + proc.stderr
+    assert "DRY_RUN" in proc.stdout
+    assert acked.read_text().strip() == "1755000000", "a delivered send must not roll the ack back"
+
+
+def test_undeliverable_rolls_the_skills_reload_ack_back(tmp_path: Path) -> None:
+    """janitor#257's sibling: `[janitor-reload-skills]` has the same emission-time ack, so any
+    NON-DELIVERY must un-consume it — otherwise the session keeps running stale skills with
+    nothing left to say so."""
+    proj = _proj(tmp_path)
+    acked = proj / ".janitor" / "state" / "skills-reload-acked.ts"
+    acked.write_text("1755000000\n", encoding="utf-8")
+
+    proc = _run([], iterm=None, project=proj)
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "NO_ITERM", proc.stdout + proc.stderr
     assert acked.read_text().strip() == "0"
+
+
+def test_undeliverable_does_not_invent_a_skills_ack_file(tmp_path: Path) -> None:
+    """No ack on disk means none was ever taken — fabricating one is the bug inverted."""
+    proj = _proj(tmp_path)
+    acked = proj / ".janitor" / "state" / "skills-reload-acked.ts"
+
+    proc = _run([], iterm=None, project=proj)
+
+    assert proc.returncode == 0
+    assert not acked.exists()
 
 
 # ---------- pure helper -----------------------------------------------------

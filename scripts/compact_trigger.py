@@ -227,17 +227,20 @@ def main() -> int:
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
+    # A compact injection IS the most destructive of the four — which is an argument for waiting
+    # until the field is empty, not for abandoning it. The pane-level injector does exactly that
+    # (empty field required, stop on the first keystroke, retry 8 s later, never give up), so the
+    # half-typed prompt this cancel was protecting is already protected, and protected better:
+    # the old cancel left an over-full context un-compacted with no retry, which is how a session
+    # reaches the ~999k wall where `/compact` itself can no longer run.
     sent = terminal_trigger.send_self_command(
-        commands, delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+        commands,
+        delay_s=args.delay,
+        esc_first=esc_first,
+        dry_run=args.dry_run,
+        respect_user_presence=False,
     )
-    # The user is AT the keyboard and did not ask for this. Do NOT type into their pane —
-    # a compact injection is the most destructive of all (the HARD form ESC-interrupts the
-    # turn), and clobbering a half-typed prompt is guaranteed. The resume directive was
-    # still recorded above, so a compact the user runs themselves still auto-resumes.
-    if sent == terminal_trigger.USER_PRESENT:
-        print("USER_PRESENT")
-        return 0
-
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("COMPACT_FIRED")

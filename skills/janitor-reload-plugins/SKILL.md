@@ -69,12 +69,6 @@ safety one, so a truly-needed reload always wins.
    Read the one-word result:
    - `RELOAD_FIRED` → the reload is queued at your pane (iTerm or tmux); proceed to
      step 2.
-   - `USER_PRESENT` → the user is AT the keyboard and did not ask for this, so
-     NOTHING was typed (typing into a pane someone is using clobbers what they are
-     writing). This is a refusal, not a failure: the script rolled the reload ack
-     back, so a later heartbeat re-emits `[janitor-reload]` once they step away.
-     Say one line — *"Plugins were auto-updated; deferring the reload while you're
-     typing (run `/reload-plugins --force` yourself to do it now)."* — then stop.
    - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
      so self-trigger isn't available. Tell the user: *"Plugins were auto-updated —
      please run `/reload-plugins --force` now (auto-trigger works in iTerm and tmux)."*
@@ -105,20 +99,24 @@ when ONE of these holds:
   `/reload-plugins --force` at this pane: emit one short line (e.g. "Reloading
   plugins to pick up the update.") and END THE TURN IMMEDIATELY (call no more
   tools). STOP.
-- [ ] **USER_PRESENT** — the user is typing, so nothing was sent and the reload ack
-  was rolled back for a later fire: say so in one line, offer the manual command,
-  then STOP. Do NOT retry, do NOT switch to `--hard` — that is exactly the
-  keystroke-clobbering the gate exists to prevent.
 - [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`
   unavailable: tell the user to run `/reload-plugins --force` manually, then STOP.
 
+## Being at the keyboard is not an outcome
+
+There is no `USER_PRESENT` result, and typing while this runs cancels nothing
+(owner directive 2026-08-02). Presence is handled one layer down, by the injector:
+it waits for an empty input field, stops the instant a key is pressed, pushes the
+send 8 s further out on every keystroke, and **never stops trying**. So a reload
+fired while you are mid-sentence lands a few seconds after you finish, instead of
+being abandoned. Do not add a presence check on top of it.
+
 ## Error handling
 
-- `USER_PRESENT` → not an error. Nothing was typed because the user is at the
-  keyboard; the signal is preserved (ack rolled back) so a later heartbeat
-  re-emits `[janitor-reload]`. Never re-run the script to "get past" this.
 - `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run
-  `/reload-plugins --force` manually.
+  `/reload-plugins --force` manually. The script also rolls the reload ack back on
+  this path, so a later heartbeat re-emits `[janitor-reload]` — the reload is not
+  silently forgotten just because it could not be typed.
 - The script never blocks: it returns immediately and the keystrokes fire detached.
 - If no automatable terminal is detected (e.g. plain Apple Terminal / VS Code, or
   `osascript` unavailable on non-macOS), the keystroke send degrades — ask the

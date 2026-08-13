@@ -270,36 +270,37 @@ def test_no_iterm_reports_and_still_records_directive(tmp_path: Path) -> None:
     assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
 
 
-def test_a_present_user_is_never_typed_at_but_the_directive_IS_recorded(tmp_path: Path) -> None:
-    """The presence gate, from the caller's side, with a ZERO deferral budget.
+def test_a_present_user_defers_the_compact_but_never_cancels_it(tmp_path: Path) -> None:
+    """Presence must DEFER the send, not abandon it (owner directive 2026-08-02, migrated to this
+    trigger 2026-08-13 — janitor#257).
 
-    Typing `/compact` into a pane the user is actively using DESTROYS what they were typing — it
-    happened to this user, mid-sentence, and it is why the gate exists. So while they are at the
-    keyboard the trigger does not send, whatever the terminal supports.
+    Typing `/compact` into a pane the user is mid-sentence in DESTROYS what they were writing —
+    that happened, and it is why a gate exists at all. But the gate that was here CANCELLED, and
+    cancelling is the worse failure: the context stays over-full with no retry, which is the road
+    to the ~999k wall where `/compact` itself can no longer run. The pane-level injector protects
+    the half-typed prompt properly — it requires an empty field, stops on the first keystroke,
+    pushes 8 s ahead per keystroke, and never stops trying.
 
-    But it still WRITES THE DIRECTIVE: not injecting is not the same as not remembering. When the
-    user runs `/compact` themselves, the session must still know where to resume.
+    `PRESENCE_WAIT_S=0` is the sharp form of the assertion: under the OLD gate a zero deferral
+    budget produced an immediate `USER_PRESENT` + return, so this fails if any presence check
+    survives on this path. The pane-level deferral is covered two-sidedly in
+    tests/test_terminal_trigger_presence_defers.py.
 
-    `PRESENCE_WAIT_S=0` pins the give-up so this stays a test of the CALLER's handling of
-    USER_PRESENT. Since 2026-08-05 the gate DEFERS by default (it polls until the pane goes quiet,
-    because an agent that stops is a janitor failure), and this fixture's breadcrumb is a static
-    timestamp — so with the default budget the 10 s presence window would simply age out mid-wait
-    and the send would proceed, testing the clock rather than the contract. The deferral itself is
-    covered two-sidedly in tests/test_terminal_trigger_presence_defers.py.
+    The directive is still written either way: injecting and remembering are separate promises.
     """
     p = tmp_path / "proj"
     p.mkdir()
     pane = "w0t0p0:11111111-2222-3333-4444-555555555555"
     proc = _run(
-        ["--directive", "continue TRDD-abcd1234"],
+        ["--dry-run", "--directive", "continue TRDD-abcd1234"],
         project=p,
         iterm=pane,
         home=_home(tmp_path, present=True, pane_id=pane),
         extra_env={"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": "0"},
     )
     assert proc.returncode == 0
-    assert "USER_PRESENT" in proc.stdout
-    assert "COMPACT_FIRED" not in proc.stdout, "it must NOT type into a pane the user is using"
+    assert "USER_PRESENT" not in proc.stdout, proc.stdout + proc.stderr
+    assert "DRY_RUN" in proc.stdout, "a present user must reach the send, not be turned away"
     assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
 
 

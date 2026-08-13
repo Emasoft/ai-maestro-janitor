@@ -100,6 +100,28 @@ def _fire(script: str) -> None:
     )
 
 
+def _undeliverable(why: str) -> None:
+    """The reload could NOT be typed — print the legacy marker AND un-consume the signal.
+
+    janitor#257 found this rollback attached to the presence cancel, which was the wrong
+    outcome to attach it to (that cancel is now gone entirely — presence defers at the pane,
+    it never refuses). The defect it fixes is real and OUTLIVES the cancel: `[janitor-reload]`
+    is once-per-reload-generation and `dispatch` advances its ack at EMISSION time, before
+    delivery can possibly be known. So any non-delivery silently consumes the only signal that
+    a reload was needed — the session keeps running stale plugin code with nothing left to say
+    so, and "asked the human, who never did it" is indistinguishable from "reloaded".
+
+    Rolling the ack back makes the next fire re-emit. `dispatch`'s own reload-guard already
+    uses this discipline for the high-context case ("ack left unadvanced; re-checked on the
+    next fire"); this applies it to the outcomes only knowable AFTER the marker is out, which
+    is why they must be UNDONE rather than withheld. Rollback semantics (why 0, why an absent
+    stamp stays absent) live in `state.rollback_marker_ack` — shared with the skills trigger,
+    which has the same emission-time ack and the same delivery failure modes.
+    """
+    state.rollback_marker_ack("reload-acked.ts", actor="reload-trigger", why=why)
+    print("NO_ITERM")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Self-trigger /reload-plugins at this session's pane.")
     ap.add_argument(
@@ -135,55 +157,39 @@ def main() -> int:
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
+    # This used to gate on `user_intent.injection_allowed` and, on refusal, `print("USER_PRESENT")`
+    # and return. That is the retired one-shot model: it handed the work back to the human it
+    # exists to relieve, and the owner's replacement has exactly one input — the last keystroke.
+    # Presence now DEFERS at the pane level inside `terminal_trigger.inject_until_sent`: wait for
+    # an empty field, stop the instant a key is pressed, push 8 s ahead per keystroke, and NEVER
+    # stop trying. So the send is never refused for presence and `USER_PRESENT` cannot come back.
     sent = terminal_trigger.send_self_command(
-        "/reload-plugins --force", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+        "/reload-plugins --force",
+        delay_s=args.delay,
+        esc_first=esc_first,
+        dry_run=args.dry_run,
+        respect_user_presence=False,
     )
-    # The user is AT the keyboard and did not ask for this. Do NOT type into their pane —
-    # it would clobber whatever they are writing. Handled before the iTerm fallback below,
-    # which does its own osascript send and would otherwise bypass the gate entirely.
-    if sent == terminal_trigger.USER_PRESENT:
-        # janitor#257: NOT typing is correct — but the marker that sent us here was
-        # once-per-reload-generation, and `dispatch` advanced its ack at EMISSION time, before
-        # delivery could possibly be known. So declining here used to CONSUME the only signal
-        # that a reload was needed: it never happened, never retried, and the session kept
-        # running stale plugin code with nothing left to say so.
-        #
-        # Roll the ack back so the next fire re-emits. `dispatch`'s own reload-guard already
-        # uses exactly this discipline for the high-context case ("ack left unadvanced;
-        # re-checked on the next fire") — this applies it to an outcome that can only be
-        # discovered AFTER the marker is out, which is why it has to be undone rather than
-        # withheld.
-        #
-        # The rollback semantics (why 0, why an absent stamp stays absent) live in
-        # `state.rollback_marker_ack` — shared with the skills trigger, which has the same
-        # emission-time ack and the same presence gate.
-        state.rollback_marker_ack(
-            "reload-acked.ts",
-            actor="reload-trigger",
-            why="USER_PRESENT: declined to type into a pane the user is using",
-        )
-        print("USER_PRESENT")
-        return 0
-
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RELOAD_FIRED")
         elif sent.startswith("DRY_RUN:"):
             print(f"DRY_RUN {sent.split(':', 1)[1]}")
         else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
-            print("NO_ITERM")
+            _undeliverable(f"no automatable terminal ({sent})")
         return 0
 
     iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
     if not iterm:
-        print("NO_ITERM")
+        _undeliverable("iTerm path chosen but $ITERM_SESSION_ID is unset")
         return 0
     uuid = iterm.split(":")[-1].strip()
     if not _UUID_RE.match(uuid):
         # Malformed / untrusted session id — refuse to build the osascript rather
         # than risk AppleScript injection. The skill asks the user to reload manually.
         print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        print("NO_ITERM")
+        _undeliverable("iTerm session id is not a bare UUID")
         return 0
     if args.dry_run:
         plan = ("ESC->" if esc_first else "") + "/reload-plugins --force"

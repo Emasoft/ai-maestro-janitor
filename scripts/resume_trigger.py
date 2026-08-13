@@ -145,17 +145,21 @@ def main() -> int:
     # fire-time check above stays as the cheap no-subprocess early exit; the child
     # re-checks the same flags after its delay, so a heartbeat fire consuming them
     # DURING the sleep no longer gets a redundant `/janitor-resume` typed after it.
+    #
+    # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
+    # This used to refuse outright when the user looked present, on the theory that "a present
+    # user IS the resume". That theory is wrong in the case this exists for: a user sitting at
+    # the keyboard reading a compacted session is not resuming anything, and the refusal was
+    # terminal — the resume flag stays pending with nothing left to fire it. Presence now DEFERS
+    # at the pane instead (8 s per keystroke, never stops trying), so a resume typed into a busy
+    # pane lands a few seconds late rather than never. `abort_unless_any` remains the correct
+    # cancel here, and it cancels on the RIGHT evidence: the flags being gone means some other
+    # path already resumed, which presence never implied.
     sent = terminal_trigger.send_self_command(
         RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run,
         abort_unless_any=pending_flags or None,
+        respect_user_presence=False,
     )
-    # The user is AT the keyboard — they will drive the session themselves, so a resume
-    # nudge is both unnecessary and destructive (it would clobber what they are typing).
-    # Resume injection exists for UNATTENDED sessions; a present user IS the resume.
-    if sent == terminal_trigger.USER_PRESENT:
-        print("USER_PRESENT")
-        return 0
-
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RESUME_FIRED")
