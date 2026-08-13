@@ -108,8 +108,24 @@ ITERM_REARM_LOG_NAMES = ("daemon.log", "daemon.log.1")
 ITERM_REARM_EVIDENCE_WINDOW_S = 6 * 3600  # peer-measured: rescues landed 1-4h before a false alarm
 
 
+# Every log line that PROVES the iTerm Apple Event channel answered. Both are positive
+# evidence, and leaving the second one out is what made a healthy channel age into looking
+# dead (janitor#261, measured on this host: 15 BUSY vs 9 FIRED — the UNCOUNTED outcome is the
+# MORE COMMON one).
+#
+# Why BUSY counts: to report "the input field is busy" the daemon had to READ the pane, which
+# requires the Apple Event to have come back. A denied or hung event produces neither line.
+# Counting only `FIRED rearm` measured "did the guardian have work to do recently", not "does
+# the channel work" — and on a healthy fleet it usually has no work, so the evidence age grew
+# without bound while nothing was wrong. Seven consecutive fires were misread that way.
+_ITERM_CHANNEL_EVIDENCE = (
+    "FIRED rearm → iterm",       # the guardian resolved the channel AND injected
+    "INPUT FIELD BUSY on iterm",  # the guardian READ the pane and declined to inject
+)
+
+
 def latest_iterm_rearm_epoch(log_text: str) -> int | None:
-    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
+    """The epoch of the newest line PROVING the iTerm channel answered, or None. PURE.
 
     THE single parser for this line — `dispatch.py`'s alarm and `fleet_scan`'s flag stamp
     both call it. It lives here because this module OWNS the semantics of that line: it is
@@ -129,7 +145,7 @@ def latest_iterm_rearm_epoch(log_text: str) -> int | None:
 
     latest: int | None = None
     for line in log_text.splitlines():
-        if "FIRED rearm → iterm" not in line or not line.startswith("["):
+        if not line.startswith("[") or not any(m in line for m in _ITERM_CHANNEL_EVIDENCE):
             continue
         try:
             stamp = line[1 : line.index("]")]

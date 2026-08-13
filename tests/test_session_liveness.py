@@ -327,3 +327,37 @@ def test_resolve_terminal_for_tty() -> None:
     assert both == {"tmux_pane": "%9", "iterm_session_id": "u"}
     assert sl.resolve_terminal_for_tty("", iterm_by_tty=iterm, tmux_by_tty=tmux) == {}
     assert sl.resolve_terminal_for_tty("ttysZ", iterm_by_tty=iterm, tmux_by_tty=tmux) == {}
+
+
+def test_iterm_channel_evidence_counts_a_busy_read_not_only_a_fired_rearm() -> None:
+    """A pane READ that found the input field busy PROVES the Apple Event answered — so it is
+    positive channel evidence, exactly like a fired rearm (janitor#261).
+
+    Counting only `FIRED rearm` measured "did the guardian have work recently", not "does the
+    channel work". On a healthy fleet the guardian usually has nothing to rearm, so the
+    evidence age grew without bound while nothing was wrong, and the alarm read as an
+    escalating failure. Measured on the owner's host: 15 BUSY lines vs 9 FIRED — the
+    uncounted outcome was the MORE COMMON one, which is why the misread lasted seven fires.
+    """
+    import session_liveness as sl  # type: ignore[import-not-found]
+
+    fired = "[2026-08-13T06:21:49+0200] session-liveness: FIRED rearm → iterm for X [cron_dead]"
+    busy = (
+        "[2026-08-13T06:51:04+0200] session-liveness: X [cron_dead] attempt=0 "
+        "INPUT FIELD BUSY on iterm — would rearm; skipped"
+    )
+    # The BUSY line is NEWER, so a parser that ignores it reports a staler channel than reality.
+    both = sl.latest_iterm_rearm_epoch(f"{fired}\n{busy}\n")
+    only_fired = sl.latest_iterm_rearm_epoch(f"{fired}\n")
+    assert both is not None and only_fired is not None
+    assert both > only_fired, "a busy-read must count as channel evidence, not be discarded"
+
+    # Each shape alone is sufficient evidence.
+    assert sl.latest_iterm_rearm_epoch(busy) is not None
+    assert sl.latest_iterm_rearm_epoch(fired) is not None
+
+    # A line proving NOTHING about the channel is still ignored — widening the evidence set
+    # must not become "any log line counts", or the alarm can never fire at all.
+    assert sl.latest_iterm_rearm_epoch(
+        "[2026-08-13T07:00:00+0200] session-liveness: X [cron_dead] no channel resolved"
+    ) is None
