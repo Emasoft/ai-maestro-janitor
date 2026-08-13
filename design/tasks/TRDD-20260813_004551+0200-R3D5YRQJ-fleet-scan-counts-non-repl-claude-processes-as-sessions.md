@@ -1,9 +1,10 @@
 ---
 trdd-id: R3D5YRQJ
 title: The fleet scan counts non-REPL claude subcommands as recoverable sessions
-column: todo
+column: complete
+implementation-commits: [c7063a79]
 created: 2026-08-13T00:45:51+0200
-updated: 2026-08-13T00:48:52+0200
+updated: 2026-08-13T04:47:00+0200
 current-owner: unassigned
 task-type: bugfix
 approval-tier: 0
@@ -89,8 +90,33 @@ Including a non-session costs a no-op recovery; excluding a real session costs a
 
 ## Acceptance
 
-- [ ] `parse_ps_claude` (or a new pure sibling) excludes subcommand invocations, proven against
-      the three command lines in the table above as fixtures
-- [ ] A real REPL with an empty tty is still included — pinned by its own test, because the
-      tempting shortcut breaks headless sessions
-- [ ] The live scan reports the corrected count (1 cron_dead, not 3) with no other change
+- [x] `parse_ps_claude` excludes subcommand invocations via the pure sibling
+      `is_repl_invocation`, proven against the table's REAL command lines as fixtures.
+- [x] A real REPL with an empty tty is still included — `test_a_real_session_with_an_empty_tty_is_still_included`,
+      plus `test_flag_values_are_never_mistaken_for_subcommands` (adversarial `--agent plugin`:
+      the value is itself a subcommand name, and a "first non-flag token" scan would drop it).
+- [x] The live scan reports the corrected count — **25 claude processes, 22 sessions, 3
+      excluded**, one MORE than predicted; see below.
+
+## ⏵ STATE — 2026-08-13: shipped at c7063a79. The live-scan box paid for itself.
+
+**Design, as sketched:** argv-shaped, position 1 only. Every real subcommand puts its verb
+first while a session's argv starts with a flag, so a flag VALUE can never reach position 1 and
+be misread. Unknown first token ⇒ SESSION, per the ratified failure direction.
+
+**Trap 1 recurred immediately, and that is the finding.** The card warned that `daemon` is
+hidden from `claude --help`, so a help-derived allowlist misses it silently. Running the live
+scan surfaced **two more of exactly that kind** — `bg-spare` and `bg-pty-host`, internal
+background helpers, running on this host at the time, in no listing, unknown to this card when
+it was written. Both are now in the set, and the set is explicitly maintained from OBSERVED
+processes rather than documentation. Expect more; add them the same way.
+
+**Method note, kept because it nearly produced a false all-clear:** the first live check
+reported "0 excluded". Its filter matched `' claude'` with a leading space, which never matches
+`/Users/…/bin/claude daemon run` — so the verifier could not see the very process it was
+verifying. The fix was working the whole time. The tell was the result looking too clean.
+
+**Not folded in, per this card's own instruction:** the wedged `claude plugin marketplace
+update` (pid 54330, 4.3 days) is ABSENT from today's scan — it exited on its own, so there is
+nothing left to kill and no live evidence of why it hung. Recorded rather than silently
+dropped.
