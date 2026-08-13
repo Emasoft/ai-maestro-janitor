@@ -1,15 +1,16 @@
 ---
 trdd-id: 2112XCKO
 title: Orphaned memory-maint-pending detector — a silently dropped memory pass must alarm
-column: todo
+column: complete
 created: 2026-08-08T08:59:51+0200
-updated: 2026-08-08T10:48:00+0200
+updated: 2026-08-13T03:58:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
+implementation-commits: [9e75a7d9, 169d967d, 74420875]
 external-refs: [janitor#238, janitor#232]
 ---
 
@@ -44,11 +45,44 @@ A heartbeat detector (`scripts/detectors/orphaned-memory-maint.py`, pattern-copi
 
 ## Acceptance
 
-- [ ] Pure lib function with tests: `(pending_age_s, cadence_s, factor) -> orphaned?`
-- [ ] Detector emits one deduped drift line + ledger entry when orphaned; silent otherwise
-- [ ] A consumed (absent) pending file emits nothing and clears any prior dedupe state
-- [ ] Malformed/unreadable pending JSON is itself a finding (absence-of-signal-is-not-health)
-- [ ] Test that 3 consecutive drops (the AMOA case) produce a finding after the first window
+- [x] Pure lib function with tests: `(pending_age_s, cadence_s, factor) -> orphaned?` —
+      `omm.is_orphaned` + `pending_age_s` + `factor_for_scope`, 3 unit tests.
+- [x] Detector emits one deduped drift line + ledger entry when orphaned; silent otherwise —
+      `test_orphaned_local_pending_alarms`, `test_no_pending_file_is_silent`,
+      `test_fresh_pending_is_silent`, `test_superseded_elsewhere_does_not_alarm`.
+- [x] A consumed (absent) pending file emits nothing and clears any prior dedupe state —
+      `test_repeated_orphan_fires_write_the_ledger_once_then_healing_clears_dedupe`.
+- [x] Malformed/unreadable pending JSON is itself a finding —
+      `test_read_pending_malformed_json_is_a_finding`,
+      `test_read_pending_missing_required_field_is_malformed`,
+      `test_malformed_pending_alarms_once_and_recovers`.
+- [x] Test that 3 consecutive drops (the AMOA case) produce a finding after the first window —
+      **this was the one box no test actually asserted**; added at 74420875 as
+      `test_three_consecutive_dropped_passes_alarm_once_not_never`, falsified by forcing
+      `orphaned = False`.
+
+## ⏵ STATE — 2026-08-13: complete. Was DONE-BUT-UNCLOSED for 5 days; closed after verification.
+
+Shipped at **9e75a7d9** (2026-08-12), mode-fixed at **169d967d**, acceptance completed at
+**74420875**. The card sat at `column: todo` the whole time with `updated: 2026-08-08` and no
+`implementation-commits`, i.e. the board claimed unstarted work that was in fact running in
+production — the failure mode `the-kanban-is-a-pipeline-that-must-drain` calls worse than an
+unstarted card, because it is invisible from the only view anyone consults.
+
+**Verified before closing, not assumed** (a green test file is not evidence the feature is
+reachable):
+- **Dispatched**: `dispatch.py:326` — `("orphaned-memory-maint", 300, …)`. A detector that
+  exists but is never dispatched does nothing, and the file's existence cannot show that.
+- **Boxes 1–4** map onto 21 existing tests, listed above.
+- **Box 5 did NOT hold.** The nearest test looks like it covers the AMOA case but its own
+  docstring scopes it to the CONSUMED-file criterion, and it heals partway through — which is
+  precisely what three consecutive drops never do. Ticking it on the name match would have
+  closed the card on an unasserted claim.
+
+**Design note worth keeping:** three consecutive drops emit ONCE, because the dedupe key is
+`(intervention, scope)` and repeated drops are one standing fact. Both failure directions are
+pinned — silence (the original bug) and one-line-per-drop (which trains the reader to filter
+the detector out).
 
 ## LOCAL scope is the load-bearing case (janitor#238, orchestrator peer)
 
