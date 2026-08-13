@@ -199,12 +199,22 @@ def init_state() -> None:
         pass
 
 
-def atomic_write(target: Path, value: str) -> None:
+def atomic_write(target: Path | str, value: str) -> None:
     """Atomic-by-rename write: write to tmp, then os.replace into place.
 
     `os.replace` is atomic on POSIX and Windows (per Python docs), so a
     concurrent reader sees either the old content or the new — never a
     half-written file.
+
+    `target` is `Path | str` because the body has ALWAYS normalized with
+    `Path(target)` and many callers legitimately pass an `os.path.join(...)`
+    str. The annotation previously said `Path` alone, which was simply untrue
+    of the contract the body implements — and the project's mypy gate could not
+    catch the mismatch, because `mypy_path = "scripts"` leaves a bare
+    `import state` from a `scripts/lib/` sibling unresolved and
+    `ignore_missing_imports` degrades it to `Any` (pyright resolves it and did
+    flag it). Widening to match reality is the honest fix; narrowing the callers
+    to satisfy a wrong annotation would have been churn. See TRDD-BMDZK4RA.
     """
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
