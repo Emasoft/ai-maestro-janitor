@@ -3,7 +3,8 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T06:09:30+0200
+updated: 2026-08-13T06:31:40+0200
+implementation-commits: [d82dc15a]
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -70,6 +71,61 @@ place. Preservation and correctness are different properties; the oracle only ch
 
 **Not a blocker, and G8.1 is not in question:** automatic migration is a GOLDEN rule the owner
 set, so the destination is settled. This is sequencing, not a request to reconsider.
+
+## ⏵ 2026-08-13 — DECISION HALF SHIPPED (`d82dc15a`) AND IT IS WRONG ON REAL INPUT. Do not build delivery.
+
+The planner exists (`scripts/lib/claudemd_migration_plan.py` + `claudemd_slim.py plan`), 13 tests
+green, full suite 15038 passed, mypy + ruff clean. **And running it once on the live `CLAUDE.md`
+— which it is safe to do, because it writes nothing — showed it is wrong.**
+
+### The defect, diagnosed and verified (not inferred)
+
+| predicate | value on the live `CLAUDE.md` |
+|---|---|
+| `slim_violations(text)` | **0** — the file CONFORMS (`claudemd_slim check` agrees: "conforming and fresh") |
+| `narrative_outside_fences(text)` | **1029 bytes** — and the planner treats ALL of it as migration candidates |
+
+Those two are not the same set, and that is the whole bug. `narrative_outside_fences` returns
+everything outside the two janitor fences, which **by design includes the five PERMITTED
+elements** — the H1 title, the one-paragraph description, `## Links`, `## Commands`. So on a
+fully-conforming file the planner proposes 8 migrations. Measured output:
+
+```
+[1] MIGRATABLE -> FOLD into 'fleet-third-party-plugin-dep-fork-pin-pattern'   <- the description
+[2] MIGRATABLE -> FOLD into 'ai-maestro-fleet-hub-what-and-roster'            <- "- Repo: <url>"
+[3] MIGRATABLE -> FOLD into 'ai-maestro-amp-down-coordinate-via-github-issues' <- "- Marketplace: <url>"
+[4] MIGRATABLE -> FOLD into 'ai-maestro-amp-down-coordinate-via-github-issues' <- "- Connected harness: <url>"
+[5] EXEMPT (matched enumeration word: 'testing')                              <- correct
+```
+
+The §3 exemption works correctly (5 is right). The **candidate selection** is what is wrong, and
+the destinations it picks for a bare URL line are nonsense — recall will always return *some*
+page, so a wrong candidate silently acquires a confident-looking home.
+
+### Why this is the vindication of splitting the card, not a setback
+
+Had the DELIVERY half been built in the same pass, its first unattended run would have deleted
+this project's title, description and entire `## Links` section from `CLAUDE.md` and scattered
+four URLs into three unrelated wiki pages. **The preservation oracle would very likely have
+PASSED**, because the text did land somewhere — which is exactly the distinction recorded above
+this block: *preservation and correctness are different properties, and the oracle only checks
+the first.* That was written as an argument; it is now an observation.
+
+**Note what did NOT catch this: 13 passing tests.** They use synthetic fixtures, and the fixtures
+did not reproduce a conforming file's permitted-element structure. The suite is green and the
+planner is wrong — the same shape as everything else on this board tonight. The ONE thing that
+caught it was running it on real input, which was only safe *because* the delivery half does not
+exist.
+
+### FIX BEFORE ANY DELIVERY WORK
+
+1. Candidate selection must key on what actually VIOLATES the slim contract, not on
+   `narrative_outside_fences`. A file where `slim_violations` is empty MUST yield an empty plan —
+   that is the single strongest acceptance test available and it runs against the live file for
+   free.
+2. Add that as a regression test using a CONFORMING fixture (the current fixtures all plant
+   violations, so none of them can catch this class).
+3. Only then revisit delivery.
 
 ## 1. Why (the cost argument, measured)
 
