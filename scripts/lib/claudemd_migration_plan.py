@@ -6,7 +6,7 @@ wikimem. This module computes WHAT WOULD MOVE WHERE. It never writes CLAUDE.md, 
 creates or edits a memory page, and never removes a line — that is the DELIVERY half, a
 separate, later, and separately-risky task (TRDD-LFSWY0C6 "PRE-CHECK" note, 2026-08-13).
 
-Three pure decisions, each independently testable without touching a filesystem:
+Four pure decisions, each independently testable without touching a filesystem:
 
 1. `split_narrative_blocks` — cut the narrative (already extracted by
    `repomap.claudemd_slim.narrative_outside_fences`) into the units a human would judge
@@ -15,7 +15,12 @@ Three pure decisions, each independently testable without touching a filesystem:
    The word list is a LITERAL, CLOSED enumeration lifted verbatim from the spec — never a
    regex pattern that could be "widened by analogy" (e.g. adding `build`/`lint`/`test` stems
    the spec did not list) by a future reader who thinks it obviously belongs.
-3. `decide_new_page_scope` — when no owning page exists, is the new page PROJECT- or
+3. `classify_permitted` — is this block ANY of the §CM-1 elements the narrative may hold
+   (the description, a project URL, or a dev-ops command), or is it excess to migrate?
+   Element 3 delegates to `classify_exemption`; elements 1 and 2 had no recognizer at all
+   until 2026-08-13, which is why the planner proposed migrating this project's own
+   description and `## Links` section (TRDD-LFSWY0C6).
+4. `decide_new_page_scope` — when no owning page exists, is the new page PROJECT- or
    LOCAL-scoped (the memory-scope-routing gate: machine-private content never lands in the
    git-tracked PROJECT store).
 
@@ -43,6 +48,7 @@ from repomap.claudemd_slim import narrative_outside_fences, slim_violations
 
 _LIST_ITEM_RE = re.compile(r"^\s*([-*+]|\d+[.)])\s+")
 _HEADING_RE = re.compile(r"^\s*#")
+_HEADING_LEVEL_RE = re.compile(r"^\s*(#{1,6})")
 
 
 @dataclass(frozen=True)
@@ -53,10 +59,16 @@ class NarrativeBlock:
     `split_narrative_blocks` (i.e. after fenced regions are already stripped) — good
     enough for a human-readable plan; it is not a byte-exact offset into the original
     CLAUDE.md, which the DECISION half has no need to compute.
+
+    `in_preamble` is True while the block sits ABOVE the first section heading — the only
+    place §CM-1's element 1 (the one-paragraph description) can live. It defaults to True
+    so a hand-built block in a unit test needs no boilerplate; `split_narrative_blocks` is
+    what sets it truthfully.
     """
 
     text: str
     line_no: int
+    in_preamble: bool = True
 
 
 def split_narrative_blocks(narrative: str) -> list[NarrativeBlock]:
@@ -66,21 +78,33 @@ def split_narrative_blocks(narrative: str) -> list[NarrativeBlock]:
     `1. `) is its own one-line block, because a §Commands list mixes exempt dev-ops lines
     with (potentially) migratable ones and each must be judged independently. Everything
     else is a blank-line-delimited paragraph.
+
+    A skipped heading still leaves one trace: the LEADING `# Title` is the document title,
+    not a section, and §CM-1's description sits directly beneath it — so the first heading,
+    when it is an H1, keeps the preamble open. Any deeper heading (or a second H1) opens a
+    section and closes it for good.
     """
     lines = narrative.splitlines()
     blocks: list[NarrativeBlock] = []
     i = 0
     n = len(lines)
+    headings_seen = 0
+    in_preamble = True
     while i < n:
         line = lines[i]
         if not line.strip():
             i += 1
             continue
         if _HEADING_RE.match(line):
+            m = _HEADING_LEVEL_RE.match(line)
+            level = len(m.group(1)) if m else 1
+            headings_seen += 1
+            if not (headings_seen == 1 and level == 1):
+                in_preamble = False
             i += 1
             continue
         if _LIST_ITEM_RE.match(line):
-            blocks.append(NarrativeBlock(text=line, line_no=i + 1))
+            blocks.append(NarrativeBlock(text=line, line_no=i + 1, in_preamble=in_preamble))
             i += 1
             continue
         start = i
@@ -89,7 +113,7 @@ def split_narrative_blocks(narrative: str) -> list[NarrativeBlock]:
         while i < n and lines[i].strip() and not _HEADING_RE.match(lines[i]) and not _LIST_ITEM_RE.match(lines[i]):
             para_lines.append(lines[i])
             i += 1
-        blocks.append(NarrativeBlock(text="\n".join(para_lines), line_no=start + 1))
+        blocks.append(NarrativeBlock(text="\n".join(para_lines), line_no=start + 1, in_preamble=in_preamble))
     return blocks
 
 
@@ -167,7 +191,93 @@ def classify_exemption(block_text: str) -> str | None:
     return _GROUP_TO_CATEGORY[group_name]
 
 
-# ── 3. New-page scope routing (memory-scope-routing.md's WRITE gate) ────────────────────
+# ── 3. The permitted-element classifier (spec §CM-1 elements 1 and 2) ──────────────────
+
+# §CM-1 lists FIVE permitted elements, in order. Elements 4 and 5 are the janitor's own
+# fenced regions, and `narrative_outside_fences` has already removed them before any block
+# reaches here — so exactly THREE can appear in the narrative:
+#
+#   1. the one-paragraph project description
+#   2. the project URLs
+#   3. the dev-ops commands  (already recognized by `classify_exemption`, above)
+#
+# Until 2026-08-13 only element 3 had a recognizer, so the planner proposed migrating this
+# project's OWN description and its whole `## Links` section — permitted content, not
+# defects (TRDD-LFSWY0C6). `slim_violations` cannot stand in for this and no tightening of
+# it ever could: it is four WHOLE-FILE checks (both fences present, a github URL somewhere,
+# total narrative bytes under the cap), so it can say the narrative is too big and can
+# never say WHICH block is the excess. That is the missing primitive this section supplies.
+#
+# Every rule below is STRUCTURAL — position, line count, punctuation shape — never a
+# judgement about what a block MEANS. Where a rule is uncertain it is biased toward
+# PERMITTED, because the two errors are not symmetric: keeping one block too many leaves a
+# file slightly over its byte budget and the next run still reports it, while migrating a
+# permitted element deletes content the canonical form requires and no later run restores.
+PERMITTED_DESCRIPTION = "description"
+PERMITTED_URLS = "urls"
+PERMITTED_DEVOPS = "devops"
+PERMITTED_ELEMENTS: tuple[str, ...] = (PERMITTED_DESCRIPTION, PERMITTED_URLS, PERMITTED_DEVOPS)
+
+# A project-URL line is `<label>: <url>`, where the label is a LABEL ("Repo", "Marketplace
+# (`ai-maestro-plugins`)") and never a sentence. This cap is what separates the two, and it
+# is why `Note: the daemon polls https://x.example on every fire because …` stays
+# migratable while `- Repo: https://github.com/o/r` does not.
+_URL_LABEL_MAX_CHARS = 60
+
+_URL_ANYWHERE_RE = re.compile(r"https?://")
+_BARE_URL_RE = re.compile(r"https?://\S+")
+_MD_LINK_URL_RE = re.compile(r"\[[^\]]*\]\(https?://[^)\s]+\)")
+_ANGLE_URL_RE = re.compile(r"<https?://[^>\s]+>")
+
+
+def is_project_url_line(block_text: str) -> bool:
+    """True iff `block_text` is a §CM-1 element-2 project-URL line.
+
+    The shape, and nothing wider: ONE line, an optional list marker, an optional
+    `<label>: ` prefix that is short and carries no URL of its own, then a single URL token
+    — bare (`https://x`), angle-bracketed (`<https://x>`), or a markdown link
+    (`[text](https://x)`). A URL merely mentioned INSIDE prose fails, because prose leaves
+    text after the URL, or puts a whole clause where the label belongs.
+    """
+    stripped = block_text.strip()
+    if "\n" in stripped:
+        return False
+    body = _LIST_ITEM_RE.sub("", stripped, count=1).strip()
+    if not body:
+        return False
+    # rpartition, not partition: a label may legitimately contain its own colon
+    # ("Repo (see also: mirrors): https://…"), and only the LAST ": " separates label
+    # from URL.
+    label, sep, rest = body.rpartition(": ")
+    if sep:
+        if len(label) > _URL_LABEL_MAX_CHARS or _URL_ANYWHERE_RE.search(label):
+            return False
+        body = rest.strip()
+    return bool(_BARE_URL_RE.fullmatch(body) or _MD_LINK_URL_RE.fullmatch(body) or _ANGLE_URL_RE.fullmatch(body))
+
+
+def classify_permitted(block: NarrativeBlock, *, index: int) -> str | None:
+    """Which of the three narrative-visible §CM-1 elements `block` IS, or None when it is
+    excess narrative the chore must migrate.
+
+    - **description** — the FIRST content block, and only when it sits in the preamble
+      (above the first section heading) and is not a list item. "One-paragraph" is the
+      spec's own wording, so exactly one block can ever hold this role and a second
+      preamble paragraph is excess. A narrative that opens under a `## Section` heading has
+      no description element at all, and its first block is judged on its own merits.
+    - **urls** — `is_project_url_line`.
+    - **devops** — `classify_exemption`, the closed §CM-3 enumeration, unchanged.
+    """
+    if index == 0 and block.in_preamble and not _LIST_ITEM_RE.match(block.text):
+        return PERMITTED_DESCRIPTION
+    if is_project_url_line(block.text):
+        return PERMITTED_URLS
+    if classify_exemption(block.text) is not None:
+        return PERMITTED_DEVOPS
+    return None
+
+
+# ── 4. New-page scope routing (memory-scope-routing.md's WRITE gate) ────────────────────
 
 # Red flags that force a new page to LOCAL scope instead of PROJECT (git-tracked, pushed to
 # every cloner): a machine-specific absolute path, or phrasing that names "this machine" as
@@ -336,8 +446,9 @@ class BlockPlan:
     field groups is populated, selected by `verdict`."""
 
     block: NarrativeBlock
-    verdict: str  # "exempt" | "fold" | "new_page"
-    exemption_word: str = ""
+    verdict: str  # "permitted" | "fold" | "new_page"
+    permitted_element: str = ""  # one of PERMITTED_ELEMENTS, when verdict == "permitted"
+    exemption_word: str = ""  # the matched §CM-3 category, when permitted_element == devops
     query: str = ""
     candidate_page: str = ""
     candidate_locator: str = ""
@@ -355,21 +466,25 @@ def plan_migration(
     recall_top_n: int = 3,
     timeout: int = 60,
 ) -> list[BlockPlan]:
-    """The whole DECISION half: narrative -> blocks -> (exempt | fold | new_page) each.
+    """The whole DECISION half: narrative -> blocks -> (permitted | fold | new_page) each.
 
     NEVER writes CLAUDE.md, NEVER writes/creates a memory page — `claude_md_text` and
     `roots` are read-only inputs (roots are read by the `memgrep recall` subprocess only).
 
-    Candidate selection keys on `slim_violations` — the authoritative "does this file
-    actually violate the slim contract" check — NOT on `narrative_outside_fences` alone.
-    `narrative_outside_fences` returns everything outside the two janitor fences, which
-    BY DESIGN also includes the five PERMITTED elements (title, description, project
-    URLs, dev-ops commands): treating all of that as migration candidates is exactly the
-    2026-08-13 defect (TRDD-LFSWY0C6) — it proposed migrating this project's own title,
-    description and `## Links` section, none of which are defects. A file `check` already
-    calls conforming (`slim_violations(claude_md_text) == []`) MUST plan to migrate
-    nothing; only once the file is diagnosed as non-conforming does per-block candidate
-    selection have any defect to locate.
+    TWO independent gates, and the distinction matters because conflating them is what
+    shipped broken twice on 2026-08-13:
+
+    - **WHETHER to plan at all** — `slim_violations`. A file `check` already calls
+      conforming plans nothing. This is a deliberate SCOPE choice, not a correctness
+      requirement: §CM-1 says "these five and nothing else", so a small non-permitted block
+      under the byte cap is technically a defect this planner will not report. Editing
+      CLAUDE.md busts the prompt-cache prefix of every live session (TRDD-e247a349 §5), so
+      churning a file the contract check calls fine costs more than the stray block does.
+    - **WHICH blocks are the defect** — `classify_permitted`, per block. `slim_violations`
+      structurally cannot answer this (it is four whole-file checks), and using it as if it
+      could was the `20f226ba` partial fix: it silenced the CONFORMING case and left every
+      permitted element wrongly migratable the moment the file went over cap — the only
+      case the chore exists for.
     """
     if not slim_violations(claude_md_text):
         return []
@@ -377,10 +492,13 @@ def plan_migration(
     blocks = split_narrative_blocks(narrative)
     binary = memgrep_bin or find_memgrep()
     plans: list[BlockPlan] = []
-    for block in blocks:
-        word = classify_exemption(block.text)
-        if word is not None:
-            plans.append(BlockPlan(block=block, verdict="exempt", exemption_word=word))
+    for index, block in enumerate(blocks):
+        element = classify_permitted(block, index=index)
+        if element is not None:
+            word = classify_exemption(block.text) or "" if element == PERMITTED_DEVOPS else ""
+            plans.append(
+                BlockPlan(block=block, verdict="permitted", permitted_element=element, exemption_word=word)
+            )
             continue
         query = build_recall_query(block.text)
         hits = recall_top(query, roots, memgrep_bin=binary, top=recall_top_n, timeout=timeout)
@@ -420,10 +538,18 @@ def render_plan(plans: list[BlockPlan]) -> str:
     tests can assert on its text directly."""
     if not plans:
         return "claudemd-migration-plan: no narrative blocks found outside the five permitted elements"
-    lines = [f"claudemd-migration-plan: {len(plans)} narrative block(s) found outside the five permitted elements", ""]
+    migratable = [p for p in plans if p.verdict != "permitted"]
+    lines = [
+        f"claudemd-migration-plan: {len(migratable)} migratable block(s) of {len(plans)} narrative "
+        f"block(s) ({len(plans) - len(migratable)} permitted by spec §CM-1)",
+        "",
+    ]
     for i, p in enumerate(plans, start=1):
-        if p.verdict == "exempt":
-            lines.append(f"[{i}] EXEMPT (matched enumeration word: {p.exemption_word!r})")
+        if p.verdict == "permitted":
+            detail = f"§CM-1 element: {p.permitted_element}"
+            if p.exemption_word:
+                detail += f", matched enumeration word: {p.exemption_word!r}"
+            lines.append(f"[{i}] PERMITTED ({detail})")
         elif p.verdict == "fold":
             lines.append(
                 f"[{i}] MIGRATABLE -> FOLD into {p.candidate_page!r} "

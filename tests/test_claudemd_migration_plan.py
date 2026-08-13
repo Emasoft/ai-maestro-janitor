@@ -67,6 +67,7 @@ def _corpus(root: Path) -> Path:
 
 _MAP_BLOCK = f"{MAP_START} v1 sha=x digest=y generated=z\nmap\n{MAP_END}\n"
 
+_DESCRIPTION_PARAGRAPH = "A one-paragraph description of proj, the thing this repo builds."
 _ARCHITECTURE_PARAGRAPH = (
     "The daemon restarts on crash automatically via a supervising watchdog loop that "
     "re-execs the process whenever its pid file goes stale, because a bare launchd "
@@ -80,8 +81,15 @@ _ORPHAN_PARAGRAPH = (
 
 
 def _fixture_claude_md() -> str:
+    """A non-conforming CLAUDE.md (no wikimem fence) that nonetheless carries a REAL §CM-1
+    element-1 description. The description is not decoration: without it the architecture
+    paragraph would be the first preamble block and would take the description's one
+    permitted slot, so every "this paragraph is migratable" assertion below would be
+    testing the wrong block."""
     return (
         "# proj\n\n"
+        f"{_DESCRIPTION_PARAGRAPH}\n\n"
+        "## Notes\n\n"
         f"{_ARCHITECTURE_PARAGRAPH}\n\n"
         f"{_ORPHAN_PARAGRAPH}\n\n"
         "## Commands\n\n"
@@ -125,6 +133,44 @@ def test_classify_exemption_rejects_unlisted_words() -> None:
     as "deployment") must never be treated as exempt — the closed-list guarantee."""
     assert cmig.classify_exemption("- Verify: `uv run scripts/audit.py`") is None
     assert cmig.classify_exemption("- Architecture: see the deployment diagram") is None
+
+
+def test_is_project_url_line_accepts_the_three_link_shapes_and_rejects_prose() -> None:
+    """§CM-1 element 2. The three surface forms a project-URL line actually takes — bare,
+    angle-bracketed, markdown link — with or without a short `<label>: ` prefix; and NOT a
+    prose sentence that merely mentions a URL, which is what separates element 2 from
+    narrative."""
+    assert cmig.is_project_url_line("- Repo: https://github.com/o/r")
+    assert cmig.is_project_url_line("- Marketplace (`ai-maestro-plugins`): https://github.com/o/m")
+    assert cmig.is_project_url_line("- Docs: <https://example.com/d>")
+    assert cmig.is_project_url_line("- Related: [upstream](https://github.com/o/u)")
+    assert cmig.is_project_url_line("https://github.com/o/r")
+    assert not cmig.is_project_url_line(
+        "The daemon polls https://x.example on every fire because a push model lost events."
+    )
+    assert not cmig.is_project_url_line("- Note: see https://x.example and then restart the daemon")
+    assert not cmig.is_project_url_line("- " + "w" * 70 + ": https://x.example")
+    assert not cmig.is_project_url_line("- Tests: `uv run pytest`")
+
+
+def test_description_is_only_the_first_preamble_paragraph() -> None:
+    """§CM-1 element 1 is "ONE-paragraph", so exactly one block can hold it: the first, and
+    only while still above the first section heading. A second preamble paragraph is
+    excess."""
+    blocks = cmig.split_narrative_blocks("# T\n\nfirst para\n\nsecond para\n\n## S\n\nthird para\n")
+    assert [b.in_preamble for b in blocks] == [True, True, False]
+    assert cmig.classify_permitted(blocks[0], index=0) == cmig.PERMITTED_DESCRIPTION
+    assert cmig.classify_permitted(blocks[1], index=1) is None
+    assert cmig.classify_permitted(blocks[2], index=2) is None
+
+
+def test_a_narrative_opening_under_a_section_heading_has_no_description() -> None:
+    """The preamble gate is load-bearing, not decoration: put a `## Section` before the
+    first paragraph and it is ordinary narrative again. Without this, the description rule
+    would hand a free pass to whatever text happened to come first."""
+    blocks = cmig.split_narrative_blocks("# T\n\n## Architecture\n\nA long architecture note.\n")
+    assert blocks[0].in_preamble is False
+    assert cmig.classify_permitted(blocks[0], index=0) is None
 
 
 def test_build_recall_query_strips_markdown_noise() -> None:
@@ -179,7 +225,8 @@ def test_devops_command_line_is_exempt_and_names_the_matched_word(tmp_path: Path
     memdir = _corpus(tmp_path)
     plans = cmig.plan_migration(_fixture_claude_md(), roots=[memdir])
     cmd = next(p for p in plans if p.block.text == _DEVOPS_COMMAND_LINE)
-    assert cmd.verdict == "exempt"
+    assert cmd.verdict == "permitted"
+    assert cmd.permitted_element == cmig.PERMITTED_DEVOPS
     assert cmd.exemption_word == "testing"
 
 
@@ -303,10 +350,90 @@ def test_slim_violations_empty_implies_empty_plan_on_the_live_claude_md() -> Non
 
 
 def test_conforming_gate_actually_gates_a_would_be_migratable_block() -> None:
-    """Prove the guard is load-bearing, not vacuous: strip the wikimem-index fence (a
-    real violation) from the conforming fixture and the SAME description paragraph the
-    previous test proved is now suppressed becomes MIGRATABLE again."""
-    non_conforming = _conforming_claude_md().replace(_WIKI_BLOCK, "")
+    """Prove the `slim_violations` SCOPE gate is load-bearing, not vacuous — using a
+    genuinely migratable block.
+
+    This test previously asserted that stripping a fence made the DESCRIPTION migratable
+    again: the 2026-08-13 defect written down as the expected result. A guard whose
+    fixture is the bug cannot fail when the bug is present, which is exactly how it
+    survived a green suite. The orphan paragraph is the honest subject — it is excess
+    under §CM-1 whether or not the file is over cap, so the only thing varying here is the
+    gate itself.
+    """
+    with_excess = _conforming_claude_md().replace("## Commands\n", f"## Notes\n\n{_ORPHAN_PARAGRAPH}\n\n## Commands\n")
+    assert cmig.slim_violations(with_excess) == []  # still conforming: under the byte cap
+    assert cmig.plan_migration(with_excess, roots=[]) == []  # ...so the gate suppresses it
+
+    non_conforming = with_excess.replace(_WIKI_BLOCK, "")
     assert cmig.slim_violations(non_conforming) != []
     plans = cmig.plan_migration(non_conforming, roots=[])
-    assert any("A short one-paragraph project description" in p.block.text for p in plans)
+    assert [p.block.text for p in plans if p.verdict != "permitted"] == [_ORPHAN_PARAGRAPH]
+
+
+# ── THE acceptance test: over cap AND carrying every permitted element ─────────────────
+
+_EXCESS_SENTENCE = (
+    "The widget frobnicator keeps its internal state consistent by polling a queue of "
+    "pending frobnications and applying them in timestamp order, because an earlier "
+    "design applied them on arrival and two concurrent producers could interleave a "
+    "stale write over a fresh one. "
+)
+_EXCESS_COUNT = 10
+_URL_LINES = (
+    "- Repo: https://github.com/o/r",
+    "- Marketplace (`plugins`): https://github.com/o/m",
+    "- Related: [upstream](https://github.com/o/u)",
+)
+_COMMAND_LINES = (_DEVOPS_COMMAND_LINE, "- Lint: `uv run ruff check scripts tests`")
+
+
+def _over_cap_claude_md() -> str:
+    """A CLAUDE.md that is BOTH over the narrative byte cap AND carries all three
+    narrative-visible §CM-1 elements (description, project URLs, dev-ops commands).
+
+    Neither earlier round of fixtures had this shape, and each missed what the other
+    covered: round 1 planted a violation in every fixture but gave none of them the
+    permitted elements, round 2 gave the permitted elements only to a CONFORMING file that
+    short-circuits before any per-block decision runs. The defect lives exactly in the
+    intersection they left empty.
+    """
+    excess = "\n\n".join(f"Excess paragraph {n}. " + _EXCESS_SENTENCE * 4 for n in range(_EXCESS_COUNT))
+    return (
+        "# proj\n\n"
+        "A short one-paragraph project description with a link https://github.com/o/r for context.\n\n"
+        "## Links\n\n" + "\n".join(_URL_LINES) + "\n\n"
+        "## Commands\n\n" + "\n".join(_COMMAND_LINES) + "\n\n"
+        "## Notes\n\n"
+        f"{excess}\n\n"
+        f"{_MAP_BLOCK}"
+        f"{_WIKI_BLOCK}"
+    )
+
+
+def test_over_cap_file_migrates_the_excess_and_never_a_permitted_element() -> None:
+    """The keystone: on the only input shape the chore exists for — a file already over
+    the byte cap — every §CM-1 permitted element is left alone AND all of the excess is
+    still found.
+
+    Both halves are asserted because either alone is passable by a wrong fix: "no
+    permitted element is migratable" is satisfied by planning nothing (the `20f226ba`
+    partial fix), and "the excess is found" is satisfied by migrating everything (the
+    original defect).
+    """
+    text = _over_cap_claude_md()
+    violations = cmig.slim_violations(text)
+    assert any("cap" in v for v in violations), violations  # precondition: OVER CAP, not some other defect
+
+    plans = cmig.plan_migration(text, roots=[])
+    by_text = {p.block.text: p for p in plans}
+
+    desc = next(p for p in plans if p.block.text.startswith("A short one-paragraph project description"))
+    assert (desc.verdict, desc.permitted_element) == ("permitted", cmig.PERMITTED_DESCRIPTION)
+    for line in _URL_LINES:
+        assert (by_text[line].verdict, by_text[line].permitted_element) == ("permitted", cmig.PERMITTED_URLS)
+    for line in _COMMAND_LINES:
+        assert (by_text[line].verdict, by_text[line].permitted_element) == ("permitted", cmig.PERMITTED_DEVOPS)
+
+    migratable = [p for p in plans if p.verdict != "permitted"]
+    assert len(migratable) == _EXCESS_COUNT
+    assert all(p.block.text.startswith("Excess paragraph ") for p in migratable)
