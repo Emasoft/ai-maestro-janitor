@@ -65,6 +65,7 @@ def test_read_pending_well_formed_payload(tmp_path):
     )
     payload, malformed = omm.read_pending(tmp_path)
     assert malformed is False
+    assert payload is not None
     assert payload["intervention"] == "repair"
     assert payload["scope"] == "LOCAL"
 

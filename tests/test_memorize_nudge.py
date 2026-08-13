@@ -257,6 +257,7 @@ def _import():
     """Load the detector as a module so its pure helpers can be unit-tested."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("memorize_nudge_under_test", _DETECTOR)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

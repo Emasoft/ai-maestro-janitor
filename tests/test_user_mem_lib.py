@@ -236,7 +236,7 @@ def test_previous_user_message_handles_block_content(tmp_path):
         ],
     )
     got = user_mem_lib.previous_user_message(tr)
-    assert "block one" in got and "block two" in got
+    assert got is not None and "block one" in got and "block two" in got
 
 
 def test_previous_user_message_missing_transcript_returns_none(tmp_path):

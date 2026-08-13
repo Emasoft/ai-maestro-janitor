@@ -9,6 +9,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
@@ -255,6 +256,17 @@ def _usage(*, output: int = 0, cache_creation: int = 0) -> token_meter.TurnUsage
     )
 
 
+class _ThresholdKwargs(TypedDict):
+    """Shape of `_TH` — a TypedDict so `**self._TH` unpacks with precise per-key types
+    (PEP 692) instead of pyright broadcasting a bare `dict[str, int]` value type against
+    every other keyword parameter of `evaluate_turn_budget` (which is how the untyped-dict
+    form produced spurious `int is not assignable to list[int] | None` / `... to bool`
+    errors on calls that also pass `output_baseline_history=`/`ignore_cache_creation=`)."""
+
+    output_hard: int
+    cache_creation_hard: int
+
+
 class TestEvaluateTurnBudget(unittest.TestCase):
     """The pure real-time budget classifier (TRDD-KI24GR5Z).
 
@@ -264,7 +276,7 @@ class TestEvaluateTurnBudget(unittest.TestCase):
     is now BASELINE-RELATIVE (`output_baseline_history`), not a fixed knob.
     """
 
-    _TH = dict(output_hard=1000, cache_creation_hard=2000)
+    _TH: _ThresholdKwargs = {"output_hard": 1000, "cache_creation_hard": 2000}
 
     def test_ok_below_hard_no_baseline(self):
         v = token_meter.evaluate_turn_budget(_usage(output=50, cache_creation=50), **self._TH)
@@ -310,11 +322,19 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         window. This history scores 50_744 unclamped: the advisory could never have fired.
         """
         hist = [1200, 2400, 3100, 4800, 5200, 6900, 8300, 11000, 13500, 16000, 21000, 27000]
-        th = dict(output_hard=40_000, cache_creation_hard=75_000, output_baseline_history=hist)
-        # The bar is real (it does not simply always fire) ...
-        self.assertEqual(token_meter.evaluate_turn_budget(_usage(output=29_000), **th).tier, "ok")
+        # Passed explicitly rather than **-unpacked from a local dict: pyright cannot
+        # narrow a bare dict's per-key value types, so it would broadcast the dict's
+        # value type against every other keyword param (see `_ThresholdKwargs` above).
+        self.assertEqual(
+            token_meter.evaluate_turn_budget(
+                _usage(output=29_000), output_hard=40_000, cache_creation_hard=75_000, output_baseline_history=hist
+            ).tier,
+            "ok",
+        )
         # ... and it is REACHABLE strictly below the hard cap.
-        v = token_meter.evaluate_turn_budget(_usage(output=31_000), **th)
+        v = token_meter.evaluate_turn_budget(
+            _usage(output=31_000), output_hard=40_000, cache_creation_hard=75_000, output_baseline_history=hist
+        )
         self.assertEqual(v.tier, "advisory")
 
     def test_output_below_baseline_bar_stays_silent(self):

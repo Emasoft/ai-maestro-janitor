@@ -1,6 +1,18 @@
 {
+  // venvPath+venv: without them pyright resolves imports against its OWN interpreter and cannot
+  // see the project venv, so `import pytest` alone accounted for 149 of the 194 missing-import
+  // errors under tests/ — config noise that would have been mistaken for 149 defects.
+  // pythonVersion stays 3.11 (the floor the scripts declare) even though the venv is 3.12.
+  //
+  // A "//" KEY was used here first and pyright answered `Config contains unrecognized setting
+  // "//"` on every run — a self-inflicted warning on a type-check gate, which is exactly the
+  // kind of permanent noise that teaches a reader to ignore this tool's output. Line comments
+  // are supported; a "//" key is not.
+  "venvPath": ".",
+  "venv": ".venv",
   "include": [
-    "scripts"
+    "scripts",
+    "tests"
   ],
   "exclude": [
     "**/__pycache__",
@@ -19,7 +31,7 @@
     "libs_dev",
     "builds_dev"
   ],
-  "extraPaths": ["scripts/lib", "scripts/oauth_rotator", "tests"],
+  "extraPaths": ["scripts", "scripts/lib", "scripts/oauth_rotator", "tests"],
   "pythonVersion": "3.11",
   "reportMissingImports": "error"
 }

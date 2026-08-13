@@ -511,6 +511,7 @@ def test_typing_and_ENTER_are_separate_acts_or_rule_3_cannot_exist() -> None:
     be separable."""
     t = {"kind": "tmux", "pane": "%1"}
     typed = tt.build_type_only_steps(t, "/clear")
+    assert typed is not None
     assert typed == [["RUN", "tmux", "send-keys", "-t", "%1", "-l", "/clear"]]
     assert not any("Enter" in step for step in typed), "typing must NOT submit"
     assert tt.build_submit_steps(t) == [["RUN", "tmux", "send-keys", "-t", "%1", "Enter"]]
@@ -520,6 +521,7 @@ def test_literal_flag_is_present_or_a_command_becomes_a_KEYSTROKE() -> None:
     """`-l` is load-bearing: without it tmux reads the text as KEY NAMES, so typing a
     command containing `Enter` would send the Enter KEY instead of the characters."""
     steps = tt.build_type_only_steps({"kind": "tmux", "pane": "%1"}, "/janitor-resume")
+    assert steps is not None
     assert "-l" in steps[0], "missing -l turns typed text into key names"
 
 
@@ -588,7 +590,7 @@ def test_an_absent_or_corrupt_stamp_reads_as_NOT_YET_never_as_ready(tmp_path) ->
 def _chain_env(gate_path, *, gate_writes_on_submit=True):
     """A fake pane that always verifies, plus a gate stamp the submit optionally advances."""
     log: list[str] = []
-    state = {"typed": None}
+    state: dict[str, str | None] = {"typed": None}
 
     def reader(_t):
         return _pane(state["typed"] or "")

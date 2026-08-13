@@ -8,6 +8,7 @@ written for (2026-08-06: probed 60-minute cache TTL, `*/5 * * * *` cadence) — 
 regression guard for the whole reason this module deviates from the card's literal wording.
 """
 
+import dataclasses
 import sys
 import time
 from pathlib import Path
@@ -27,7 +28,6 @@ FIRING = dict(
     min_context=150_000,
     min_idle_s=3600,
     headroom_s=60,
-    user_present=False,
     active_waiting=False,
     in_cooldown=False,
 )
@@ -97,9 +97,24 @@ def test_cooldown_vetoes_so_the_two_levers_never_double_fire():
     assert v.fire is False and v.why == "cooldown"
 
 
-def test_user_present_vetoes_an_unrecoverable_clear():
-    """Somebody typing in this pane is not an abandoned session."""
-    assert verdict(user_present=True).fire is False
+def test_the_gate_knows_nothing_about_the_user_being_present():
+    """INVERTED (owner, 2026-08-13: *"my presence must not even be mentioned"*).
+
+    This test used to assert `user_present=True` vetoes. That veto is what kept the whole
+    external-clear lever dead: the injection layer migrated on 2026-08-02 to the three ratified
+    rules — inject only into an empty field, STOP the instant a key is typed, retry 8 s later,
+    NEVER cancel — but the decision layer kept refusing outright, so the injector that would
+    have deferred was never asked. Presence now lives in exactly one place, as one fact: the
+    last-keystroke timestamp the injector defers 8 s from.
+
+    Asserted structurally, on the SIGNATURE, because that is the only form a future re-add
+    cannot slip past: a re-introduced veto would have to add the parameter back first.
+    """
+    import inspect
+
+    params = set(inspect.signature(ec.should_clear_externally).parameters)
+    assert "user_present" not in params, "presence must not be an input to the decision"
+    assert not any("present" in p for p in params), f"no presence-shaped input: {sorted(params)}"
 
 
 def test_active_waiting_vetoes():
@@ -166,7 +181,6 @@ def test_every_refusal_explains_itself():
     """A gate that cannot say why it declined is indistinguishable from a dead one."""
     for override in (
         {"in_cooldown": True},
-        {"user_present": True},
         {"active_waiting": True},
         {"idle_seconds": None},
         {"seconds_to_next_fire": 10},
@@ -227,8 +241,16 @@ def test_missing_or_garbage_ttl_falls_back_to_the_short_side(tmp_path):
 NOW_ISO = "2026-08-06T18:07:00+0200"
 
 
-def _inputs(**kw):
-    base = dict(
+def _inputs(**kw) -> ec.HandoffInputs:
+    """A representative `HandoffInputs`, with per-test overrides.
+
+    Built as a TYPED instance + `dataclasses.replace` rather than `HandoffInputs(**dict(...))`.
+    A heterogeneous `dict(...)` literal collapses to a union value type, so every field became
+    unassignable and the helper type-checked as nothing at all — meaning a test could pass a
+    wrong-typed field (a str where a Sequence belongs) and no checker would say so. `replace`
+    keeps the base fully checked and still accepts arbitrary overrides.
+    """
+    base = ec.HandoffInputs(
         cards=[("PXP08ZQC", "dev", "External zero-turn handoff-and-clear")],
         commits=[("f3f664de", "feat(fleet): rotation unblocks the panes it fixed")],
         findings=["HIGH WINDOW-BURN: 7d/Fable window 100% at 29% elapsed"],
@@ -237,8 +259,7 @@ def _inputs(**kw):
         idle_seconds=7200,
         context_tokens=460_000,
     )
-    base.update(kw)
-    return ec.HandoffInputs(**base)
+    return dataclasses.replace(base, **kw) if kw else base
 
 
 def test_template_handoff_carries_the_pointers_it_promises():
@@ -324,7 +345,7 @@ def test_a_fresh_cache_does_not_veto_the_other_triggers():
 
 def test_every_safety_veto_outranks_a_certain_expiry():
     """`/clear` is unrecoverable; a cache miss is money. Neither buys the right to destroy work."""
-    for veto in ("user_present", "active_waiting", "in_cooldown"):
+    for veto in ("active_waiting", "in_cooldown"):
         v = verdict(cache_expired=True, **{veto: True})
         assert not v.fire, f"{veto} must still veto a measured expiry"
 
@@ -383,12 +404,17 @@ def test_the_watchers_gate_dict_matches_the_gates_signature():
     src = Path(__file__).resolve().parent.parent / "scripts" / "external_handoff_clear.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     keys = {
-        k.value
+        str(k.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
         and any(getattr(t, "id", "") == "gate" for t in node.targets)
         and isinstance(node.value, ast.Dict)
         for k in node.value.keys
+        # `str(...)`, not the bare `.value`: an `ast.Constant`'s value is an untyped union, so
+        # the set was `set[_ConstantValue]` — `keys <= params` compared it against a `set[str]`
+        # and `sorted()` on the difference was a type error. Worse than untidy: a non-string
+        # key would then never match a parameter name and the check would pass by never
+        # comparing anything, which is exactly the shape of a guard that guards nothing.
         if isinstance(k, ast.Constant)
     }
     assert keys, "no `gate = {...}` literal found — did the call site get renamed?"

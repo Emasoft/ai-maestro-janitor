@@ -39,6 +39,20 @@ def _open(sdir: Path, **kw):
     return tickets.open_ticket(**kw)
 
 
+def _open_ok(sdir: Path, **kw) -> tickets.Ticket:
+    """Open a ticket that MUST succeed — narrows the return type for the caller."""
+    t, why = _open(sdir, **kw)
+    assert t is not None, why
+    return t
+
+
+def _load_ok(ticket_id: str, sdir: Path) -> tickets.Ticket:
+    """Load a ticket that MUST exist — narrows the return type for the caller."""
+    t = tickets.load(ticket_id, sdir)
+    assert t is not None
+    return t
+
+
 # --------------------------------------------------------------------------- #
 # 1. THE OWNERSHIP BOUNDARY
 # --------------------------------------------------------------------------- #
@@ -123,44 +137,44 @@ def test_only_a_wellformed_id_is_accepted() -> None:
 
 def test_a_recurring_finding_is_ONE_ticket_not_a_flood(sdir: Path) -> None:
     """The heartbeat fires every 5 min. Without dedupe, one broken index = 288 tickets/day."""
-    first, _ = _open(sdir, dedupe_key="index:/mem")
+    first = _open_ok(sdir, dedupe_key="index:/mem")
     for _ in range(20):
         again, why = _open(sdir, dedupe_key="index:/mem")
         assert again is not None and again.id == first.id
         assert "already tracked" in why
     assert len(tickets.load_all(sdir)) == 1
-    assert tickets.load(first.id, sdir).seen_count == 21
+    assert _load_ok(first.id, sdir).seen_count == 21
 
 
 def test_critical_is_dispatched_before_a_flood_of_low(sdir: Path) -> None:
     """A flood of low-severity findings must never starve a critical one."""
-    lows = [_open(sdir, kind="state-corruption", severity="low", dedupe_key=f"l{i}", now=NOW - 900 + i)[0] for i in range(5)]
-    crit, _ = _open(sdir, kind="migration-failure", severity="critical", dedupe_key="c", now=NOW)
+    lows = [_open_ok(sdir, kind="state-corruption", severity="low", dedupe_key=f"l{i}", now=NOW - 900 + i) for i in range(5)]
+    crit = _open_ok(sdir, kind="migration-failure", severity="critical", dedupe_key="c", now=NOW)
     picked = tickets.select_due([*lows, crit], now=NOW, per_fire=1, budget_left=20, inflight=0)
     assert [t.id for t in picked] == [crit.id]
 
 
 def test_oldest_first_within_a_severity(sdir: Path) -> None:
     """No ticket may be starved forever by newer arrivals of equal severity."""
-    old, _ = _open(sdir, dedupe_key="a", now=NOW - 5000)
-    new, _ = _open(sdir, dedupe_key="b", now=NOW)
+    old = _open_ok(sdir, dedupe_key="a", now=NOW - 5000)
+    new = _open_ok(sdir, dedupe_key="b", now=NOW)
     picked = tickets.select_due([new, old], now=NOW, per_fire=1, budget_left=20, inflight=0)
     assert picked[0].id == old.id
 
 
 def test_the_per_fire_cap_holds(sdir: Path) -> None:
-    ts = [_open(sdir, dedupe_key=f"k{i}", now=NOW - i)[0] for i in range(6)]
+    ts = [_open_ok(sdir, dedupe_key=f"k{i}", now=NOW - i) for i in range(6)]
     assert len(tickets.select_due(ts, now=NOW, per_fire=2, budget_left=20, inflight=0)) == 2
 
 
 def test_an_exhausted_daily_budget_dispatches_NOTHING(sdir: Path) -> None:
-    ts = [_open(sdir, dedupe_key=f"k{i}", now=NOW)[0] for i in range(3)]
+    ts = [_open_ok(sdir, dedupe_key=f"k{i}", now=NOW) for i in range(3)]
     assert tickets.select_due(ts, now=NOW, per_fire=2, budget_left=0, inflight=0) == []
 
 
 def test_in_flight_work_consumes_a_slot(sdir: Path) -> None:
     """A ticket already being worked must not be re-dispatched, and it occupies capacity."""
-    ts = [_open(sdir, dedupe_key=f"k{i}", now=NOW)[0] for i in range(3)]
+    ts = [_open_ok(sdir, dedupe_key=f"k{i}", now=NOW) for i in range(3)]
     assert len(tickets.select_due(ts, now=NOW, per_fire=2, budget_left=20, inflight=2)) == 0
 
 
@@ -173,7 +187,7 @@ def test_the_rolling_24h_budget(sdir: Path) -> None:
 def test_a_failure_backs_off_then_gives_up_EXPLICITLY(sdir: Path) -> None:
     """A ticket the janitor cannot fix must land in `needs_human`, never go quiet: a silent give-up
     is indistinguishable from a fix."""
-    t, _ = _open(sdir)
+    t = _open_ok(sdir)
     t.max_attempts = 3
     tickets.mark_failed(t, now=NOW, backoff_s=1800, why="rebuild failed")
     assert t.status == tickets.OPEN and t.not_before == NOW + 1800
@@ -189,7 +203,7 @@ def test_a_failure_backs_off_then_gives_up_EXPLICITLY(sdir: Path) -> None:
 def test_a_dead_agents_ticket_is_reclaimed(sdir: Path) -> None:
     """The weekly rate cap killed a background agent mid-work this very session. Without reclaim its
     ticket would sit in `dispatched` forever and the queue would quietly stop working."""
-    t, _ = _open(sdir)
+    t = _open_ok(sdir)
     t.status = tickets.DISPATCHED
     t.dispatched_at = NOW
     assert tickets.reclaim_stale([t], now=NOW + 60, stale_s=3600) == []
@@ -199,12 +213,12 @@ def test_a_dead_agents_ticket_is_reclaimed(sdir: Path) -> None:
 
 def test_a_resolved_ticket_is_archived_not_deleted(sdir: Path) -> None:
     """The record of what the janitor did to this machine outlives the incident (RULE 0's spirit)."""
-    t, _ = _open(sdir)
+    t = _open_ok(sdir)
     t.status = tickets.RESOLVED
     tickets.save(t, sdir)
     assert not (tickets.tickets_dir(sdir) / f"{t.id}.json").exists()
     assert (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
-    assert tickets.load(t.id, sdir).status == tickets.RESOLVED
+    assert _load_ok(t.id, sdir).status == tickets.RESOLVED
     assert tickets.select_due(tickets.load_all(sdir), now=NOW, per_fire=2, budget_left=20, inflight=0) == []
 
 
@@ -231,7 +245,7 @@ def test_invalid_is_terminal_and_does_NOT_requeue(sdir: Path) -> None:
     An agent that proved a finding false had no honest option — `resolved` claims a fix that never
     happened, `failed` re-queues and then pages a human for a non-defect.
     """
-    t, _ = _open(sdir)
+    t = _open_ok(sdir)
     tickets.mark_invalid(t, now=NOW, why="the validator checks table shape before the version stamp")
     tickets.save(t, sdir)
     assert t.status == tickets.INVALID
@@ -239,12 +253,12 @@ def test_invalid_is_terminal_and_does_NOT_requeue(sdir: Path) -> None:
     assert tickets.select_due(tickets.load_all(sdir), now=NOW, per_fire=2, budget_left=20, inflight=0) == []
     # Archived, never deleted — the disproof is the record (RULE 0's spirit).
     assert (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
-    assert tickets.load(t.id, sdir).resolution.startswith("the validator checks")
+    assert _load_ok(t.id, sdir).resolution.startswith("the validator checks")
 
 
 def test_a_refused_finding_does_not_reopen(sdir: Path) -> None:
     """The cost this fixes: re-opening spends a full subagent dispatch to re-derive the same `no`."""
-    t, _ = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
+    t = _open_ok(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
     tickets.mark_invalid(t, now=NOW, why="an honest v5 DB, not corruption")
     tickets.save(t, sdir)
     tickets.record_refusal(t, now=NOW, state_dir=sdir)
@@ -256,7 +270,7 @@ def test_a_refused_finding_does_not_reopen(sdir: Path) -> None:
 
 def test_changed_evidence_reopens_because_it_is_a_NEW_finding(sdir: Path) -> None:
     """A refusal is a claim about the INPUTS examined, not about the key forever."""
-    t, _ = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
+    t = _open_ok(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
     tickets.mark_invalid(t, now=NOW, why="an honest v5 DB")
     tickets.save(t, sdir)
     tickets.record_refusal(t, now=NOW, state_dir=sdir)
@@ -277,7 +291,7 @@ def test_a_stale_refusal_never_suppresses_live_work(sdir: Path) -> None:
     Without this an entry left behind by a `retry` would silently veto every future finding under
     that key — the failure the gate exists to prevent, inverted.
     """
-    t, _ = _open(sdir, dedupe_key="k", evidence=["e"])
+    t = _open_ok(sdir, dedupe_key="k", evidence=["e"])
     tickets.mark_invalid(t, now=NOW, why="not a defect")
     tickets.save(t, sdir)
     tickets.record_refusal(t, now=NOW, state_dir=sdir)
@@ -291,7 +305,7 @@ def test_a_stale_refusal_never_suppresses_live_work(sdir: Path) -> None:
 
 def test_an_explicit_human_approval_overrides_a_refusal(sdir: Path) -> None:
     """A person choosing to work it anyway outranks a prior agent verdict."""
-    t, _ = _open(sdir, kind="security-workflow", trdd="ABC12345", dedupe_key="wf:1", evidence=["e"])
+    t = _open_ok(sdir, kind="security-workflow", trdd="ABC12345", dedupe_key="wf:1", evidence=["e"])
     tickets.mark_invalid(t, now=NOW, why="the rule does not apply to this workflow")
     tickets.save(t, sdir)
     tickets.record_refusal(t, now=NOW, state_dir=sdir)
@@ -303,7 +317,7 @@ def test_an_explicit_human_approval_overrides_a_refusal(sdir: Path) -> None:
 def test_the_refusal_index_is_bounded(sdir: Path) -> None:
     """Bounded append site (repo invariant S3/S4) — newest kept, oldest dropped."""
     for i in range(tickets.REFUSALS_MAX + 25):
-        t, _ = _open(sdir, dedupe_key=f"k{i}", evidence=[f"e{i}"])
+        t = _open_ok(sdir, dedupe_key=f"k{i}", evidence=[f"e{i}"])
         tickets.mark_invalid(t, now=NOW + i, why="not a defect")
         tickets.save(t, sdir)
         tickets.record_refusal(t, now=NOW + i, state_dir=sdir)

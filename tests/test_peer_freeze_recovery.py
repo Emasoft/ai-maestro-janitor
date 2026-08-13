@@ -42,8 +42,8 @@ def det(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "peer_freeze_recovery",
         _PROJECT_ROOT / "scripts" / "detectors" / "peer-freeze-recovery.py",
     )
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
     spec.loader.exec_module(mod)
     yield mod
     # Leave no poisoned cache for the NEXT file either — symmetric hygiene.

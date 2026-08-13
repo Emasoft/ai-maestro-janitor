@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, TypedDict
 
 import pytest
 
@@ -24,12 +25,25 @@ _VERDICT = {"model": "Fable", "scoped_label": "7d/Fable", "scoped_util": 98.0,
             "account_max_util": 60.0, "resets_at_epoch": NOW + 1000}
 
 
-def _plan(**over):
-    kw = dict(
-        verdict=_VERDICT, current_model="Fable 5", target="opus",
-        last_switch_ts=0, now=NOW, is_enabled=True,
-    )
-    kw.update(over)
+class _PlanKwargs(TypedDict):
+    """Shape of `plan_model_fallback`'s kwargs (TypedDict, PEP 692) — a bare `dict(...)`
+    mixing dict/str/int/bool values infers one union value type, so `**kw` would broadcast
+    that union against every keyword parameter."""
+
+    verdict: dict[str, Any] | None
+    current_model: str | None
+    target: str
+    last_switch_ts: int
+    now: int
+    is_enabled: bool
+
+
+def _plan(**over: Any) -> dict:
+    kw: _PlanKwargs = {
+        "verdict": _VERDICT, "current_model": "Fable 5", "target": "opus",
+        "last_switch_ts": 0, "now": NOW, "is_enabled": True,
+    }
+    kw.update(over)  # type: ignore[typeddict-item]  # `over` is a caller-supplied partial override
     return mf.plan_model_fallback(**kw)
 
 

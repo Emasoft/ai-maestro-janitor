@@ -19,6 +19,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -26,6 +27,19 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import fleet_restart as fn  # type: ignore[import-not-found]  # noqa: E402
+
+
+class _KillableKwargs(TypedDict):
+    """Shape of `is_killable`'s kwargs (TypedDict, PEP 692) — a bare `dict(...)` mixing
+    int/str/bool values infers a single union value type, so `**base` broadcasts that
+    union against every keyword parameter regardless of which key actually supplies it."""
+
+    pid: int
+    command: str
+    active: bool
+    diagnosis: str
+    self_pid: int
+    daemon_pid: int
 
 
 def test_hard_restart_disabled_by_default(monkeypatch) -> None:
@@ -44,8 +58,14 @@ def test_hard_restart_disabled_by_default(monkeypatch) -> None:
 def test_is_killable_refuses_everything_but_a_wedged_claude() -> None:
     """The hard kill-gate: only a genuinely-frozen, non-active, real-claude pid that
     is neither this process nor the daemon may be killed."""
-    base = dict(pid=4242, command="claude --foo", active=False, diagnosis="frozen",
-                self_pid=10, daemon_pid=20)
+    base: _KillableKwargs = {
+        "pid": 4242,
+        "command": "claude --foo",
+        "active": False,
+        "diagnosis": "frozen",
+        "self_pid": 10,
+        "daemon_pid": 20,
+    }
     assert fn.is_killable(**base) is True                       # the one allowed case
     assert fn.is_killable(**{**base, "active": True}) is False  # user is WORKING → never
     assert fn.is_killable(**{**base, "command": "vim notes"}) is False   # not a claude pid
@@ -390,18 +410,19 @@ def test_command_plan_prefers_tmux_then_iterm_then_aimaestro_then_linux_gui() ->
         "linux_gui_channel": "wtype",
     }
     plan = fn.command_injection_plan(terminal_all, "/janitor-arm", esc_first=True)
-    assert plan["channel"] == "tmux"
+    assert plan is not None and plan["channel"] == "tmux"
 
     no_tmux = dict(terminal_all)
     del no_tmux["tmux_pane"]
     plan = fn.command_injection_plan(no_tmux, "/janitor-arm", esc_first=True)
-    assert plan["channel"] == "iterm"
+    assert plan is not None and plan["channel"] == "iterm"
 
     aimaestro_only = {
         "aimaestro_session": "agent-x", "aimaestro_cli": "/bin/aimaestro-agent.sh",
         "linux_gui_channel": "xdotool",
     }
     plan = fn.command_injection_plan(aimaestro_only, "/janitor-arm", esc_first=True)
+    assert plan is not None
     assert plan["channel"] == "aimaestro"
     assert plan["argv"] == [
         "/bin/aimaestro-agent.sh", "session", "command", "agent-x",
@@ -410,6 +431,7 @@ def test_command_plan_prefers_tmux_then_iterm_then_aimaestro_then_linux_gui() ->
 
     gui_only = {"linux_gui_channel": "xdotool"}
     plan = fn.command_injection_plan(gui_only, "/janitor-arm", esc_first=True)
+    assert plan is not None
     assert plan["channel"] == "xdotool"
     assert ["RUN", "xdotool", "type", "--clearmodifiers", "--", "/janitor-arm"] in plan["steps"]
 
@@ -427,6 +449,7 @@ def test_command_plan_wtype_channel_builds_steps() -> None:
     """The Linux GUI channel dispatches to the matching builder (wtype vs xdotool) by
     the `linux_gui_channel` tag; falls open to None with an unrecognised value."""
     plan = fn.command_injection_plan({"linux_gui_channel": "wtype"}, "/compact", esc_first=True)
+    assert plan is not None
     assert plan["channel"] == "wtype"
     assert ["RUN", "wtype", "/compact"] in plan["steps"]
     assert fn.command_injection_plan({"linux_gui_channel": "bogus"}, "/x", esc_first=True) is None

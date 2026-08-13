@@ -48,6 +48,16 @@ from janitor_self_integrity import (  # noqa: E402
     write_manifest,
 )
 
+
+def _key(tmp_path: Path) -> bytes:
+    """`load_or_create_key` is `bytes | None` by signature (it can fail to persist);
+    every caller here relies on it succeeding, so narrow it once instead of re-asserting
+    at each of the ~15 call sites below."""
+    k = load_or_create_key(data_dir=tmp_path)
+    assert k is not None
+    return k
+
+
 # ---------- Section 1: integrity notice preamble -------------------------
 
 
@@ -71,8 +81,8 @@ def test_has_integrity_notice_negative() -> None:
 
 
 def test_key_generated_and_persisted(tmp_path: Path) -> None:
-    k1 = load_or_create_key(data_dir=tmp_path)
-    k2 = load_or_create_key(data_dir=tmp_path)
+    k1 = _key(tmp_path)
+    k2 = _key(tmp_path)
     assert k1 is not None
     assert k2 is not None
     assert k1 == k2  # persistent across calls
@@ -82,7 +92,7 @@ def test_key_generated_and_persisted(tmp_path: Path) -> None:
 
 
 def test_key_file_mode_0600(tmp_path: Path) -> None:
-    load_or_create_key(data_dir=tmp_path)
+    _key(tmp_path)
     key_file = tmp_path / ".integrity-key"
     mode = key_file.stat().st_mode & 0o777
     # On POSIX filesystems, mode should be 0o600. Skip on others.
@@ -91,7 +101,7 @@ def test_key_file_mode_0600(tmp_path: Path) -> None:
 
 
 def test_compute_finding_hmac_deterministic(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     tag_a = compute_finding_hmac(
         rule_id="X", severity="HIGH", path="/foo", line_number=10,
         message="hello", corpus_hash="abc", key=k,
@@ -106,7 +116,7 @@ def test_compute_finding_hmac_deterministic(tmp_path: Path) -> None:
 
 
 def test_compute_finding_hmac_changes_with_input(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     base = compute_finding_hmac(
         rule_id="X", severity="HIGH", path="/foo", line_number=10,
         message="hello", corpus_hash="abc", key=k,
@@ -138,7 +148,7 @@ def test_finding_hmac_returns_none_without_key(monkeypatch, tmp_path: Path) -> N
 
 
 def test_wrap_and_verify_roundtrip(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     raw = "[detector] some drift line"
     wrapped = wrap_drift_line(
         raw, rule_id="R", severity="MEDIUM",
@@ -152,7 +162,7 @@ def test_wrap_and_verify_roundtrip(tmp_path: Path) -> None:
 
 
 def test_verify_drift_line_fails_on_tampered_body(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     raw = "[detector] some drift line"
     wrapped = wrap_drift_line(
         raw, rule_id="R", severity="MEDIUM",
@@ -167,7 +177,7 @@ def test_verify_drift_line_fails_on_tampered_body(tmp_path: Path) -> None:
 
 
 def test_verify_drift_line_fails_without_tag(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     raw = "[detector] some drift line"
     # Not wrapped → should fail
     assert verify_drift_line(
@@ -190,7 +200,7 @@ def test_wrap_unchanged_without_key(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_audit_chain_empty_verifies_clean(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     chain = AuditChain(tmp_path / "chain.ndjson", k)
     ok, n, reason = chain.verify()
     assert ok is True
@@ -199,7 +209,7 @@ def test_audit_chain_empty_verifies_clean(tmp_path: Path) -> None:
 
 
 def test_audit_chain_append_and_verify(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     log_path = tmp_path / "chain.ndjson"
     chain = AuditChain(log_path, k)
     chain.append({"event": "start"})
@@ -212,7 +222,7 @@ def test_audit_chain_append_and_verify(tmp_path: Path) -> None:
 
 
 def test_audit_chain_links_with_prev_hmac(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     log_path = tmp_path / "chain.ndjson"
     chain = AuditChain(log_path, k)
     e1 = chain.append({"event": "a"})
@@ -221,7 +231,7 @@ def test_audit_chain_links_with_prev_hmac(tmp_path: Path) -> None:
 
 
 def test_audit_chain_detects_middle_edit(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     log_path = tmp_path / "chain.ndjson"
     chain = AuditChain(log_path, k)
     chain.append({"event": "a"})
@@ -242,7 +252,7 @@ def test_audit_chain_detects_middle_edit(tmp_path: Path) -> None:
 
 
 def test_audit_chain_detects_truncation(tmp_path: Path) -> None:
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     log_path = tmp_path / "chain.ndjson"
     chain = AuditChain(log_path, k)
     chain.append({"event": "a"})
@@ -266,7 +276,7 @@ def test_audit_chain_requires_key() -> None:
 
 
 def _grown_chain(tmp_path: Path, n: int = 40) -> "AuditChain":
-    k = load_or_create_key(data_dir=tmp_path)
+    k = _key(tmp_path)
     chain = AuditChain(tmp_path / "chain.ndjson", k)
     for i in range(n):
         chain.append({"event": "detector.fire", "seq": i})
@@ -554,7 +564,7 @@ def test_audit_chain_survives_concurrent_appends_from_many_processes(tmp_path: P
 
     libdir = str(_PROJECT_ROOT / "scripts" / "lib")
     chain_path = tmp_path / "janitor-chain.ndjson"
-    load_or_create_key(data_dir=tmp_path)          # mint the key ONCE, before the fan-out
+    _key(tmp_path)          # mint the key ONCE, before the fan-out
 
     workers, per_worker = 6, 12
     procs = [
@@ -568,7 +578,7 @@ def test_audit_chain_survives_concurrent_appends_from_many_processes(tmp_path: P
     for p in procs:
         assert p.wait(timeout=60) == 0
 
-    chain = AuditChain(chain_path, load_or_create_key(data_dir=tmp_path))
+    chain = AuditChain(chain_path, _key(tmp_path))
     ok, n, reason = chain.verify()
     assert ok, f"chain broken at entry {n}: {reason}"
     assert n == workers * per_worker, f"lost an audit record: {n} of {workers * per_worker}"
@@ -583,7 +593,7 @@ def test_audit_chain_trim_does_not_lose_a_concurrent_append(tmp_path: Path) -> N
 
     libdir = str(_PROJECT_ROOT / "scripts" / "lib")
     chain_path = tmp_path / "janitor-chain.ndjson"
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     chain = AuditChain(chain_path, key)
     for i in range(400):                            # enough bulk that a trim actually fires
         chain.append({"event": "detector.fire", "seq": i, "pad": "x" * 200})
@@ -615,7 +625,7 @@ def _forge(chain: AuditChain, prev: str, event: dict) -> str:
 def _forked_chain(tmp_path: Path) -> AuditChain:
     """A chain carrying the permanent artifact of the pre-F4 race: two key-signed entries
     that both claim the same parent (both heartbeats read `prev` before either wrote)."""
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     path = tmp_path / "chain.ndjson"
     chain = AuditChain(path, key)
     chain.append({"event": "detector.fire", "seq": 0})
@@ -640,7 +650,7 @@ def test_concurrent_fork_verifies_broken_but_is_classified_benign(tmp_path: Path
 
 def test_clean_chain_is_not_reported_as_a_fork(tmp_path: Path) -> None:
     """No fork, no classification — the predicate requires at least one."""
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     chain = AuditChain(tmp_path / "chain.ndjson", key)
     for i in range(4):
         chain.append({"event": "detector.fire", "seq": i})
@@ -652,7 +662,7 @@ def test_deleted_entry_is_NOT_masked_as_a_fork(tmp_path: Path) -> None:
     """THE test that keeps the alarm honest. Removing an entry is the attack the chain
     exists to catch: the next entry's parent is then absent from the file, so this must
     stay False and the detector must still scream."""
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     path = tmp_path / "chain.ndjson"
     chain = AuditChain(path, key)
     for i in range(5):
@@ -679,7 +689,7 @@ def test_deleted_entry_is_NOT_masked_even_when_the_chain_also_has_a_real_fork(
 def test_edited_entry_is_NOT_masked_as_a_fork(tmp_path: Path) -> None:
     """An edited payload no longer verifies under the key — the classifier requires EVERY
     entry to be key-signed, so an edit can never pass as a race artifact."""
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     path = tmp_path / "chain.ndjson"
     chain = AuditChain(path, key)
     for i in range(3):
@@ -694,7 +704,7 @@ def test_edited_entry_is_NOT_masked_as_a_fork(tmp_path: Path) -> None:
 def test_reordered_entries_are_NOT_masked_as_a_fork(tmp_path: Path) -> None:
     """A reorder points an entry at a parent that has not been seen YET (it sits later in
     the file) — the ancestor-must-be-present rule catches it."""
-    key = load_or_create_key(data_dir=tmp_path)
+    key = _key(tmp_path)
     path = tmp_path / "chain.ndjson"
     chain = AuditChain(path, key)
     for i in range(4):
@@ -777,7 +787,7 @@ def test_key_mint_adopts_an_existing_key_rather_than_overwriting_it(tmp_path: Pa
     """The loser's branch, directly: an existing key file is ADOPTED, never replaced."""
     existing = bytes(range(32))
     (tmp_path / ".integrity-key").write_bytes(existing)
-    assert load_or_create_key(data_dir=tmp_path) == existing
+    assert _key(tmp_path) == existing
     assert (tmp_path / ".integrity-key").read_bytes() == existing
 
 
@@ -829,8 +839,8 @@ def test_manifest_check_skipped_in_source_checkout(tmp_path: Path) -> None:
     (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
 
     mod = _load_detector_module()
-    mod._PLUGIN_ROOT = root
-    mod._MANIFEST_PATH = manifest_path
+    setattr(mod, "_PLUGIN_ROOT", root)  # dynamic module-level constant, not a static attribute
+    setattr(mod, "_MANIFEST_PATH", manifest_path)  # dynamic module-level constant
     assert mod._check_manifest() is None, (
         "manifest check fired on a source checkout — every post-release commit "
         "re-opens a false CRITICAL SELFINT-001 ticket (this is ticket T-DTTXJGC7)"
@@ -848,8 +858,8 @@ def test_manifest_check_still_fires_outside_source_checkout(tmp_path: Path) -> N
     (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
 
     mod = _load_detector_module()
-    mod._PLUGIN_ROOT = root
-    mod._MANIFEST_PATH = manifest_path
+    setattr(mod, "_PLUGIN_ROOT", root)  # dynamic module-level constant, not a static attribute
+    setattr(mod, "_MANIFEST_PATH", manifest_path)  # dynamic module-level constant
     finding = mod._check_manifest()
     assert finding is not None and "mutated=1" in finding and "README.md" in finding
 
@@ -871,8 +881,8 @@ def test_missing_manifest_on_an_installed_root_is_a_finding(tmp_path: Path) -> N
     (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
 
     mod = _load_detector_module()
-    mod._PLUGIN_ROOT = root
-    mod._MANIFEST_PATH = root / ".integrity" / "manifest-sha256.json"
+    setattr(mod, "_PLUGIN_ROOT", root)  # dynamic module-level constant, not a static attribute
+    setattr(mod, "_MANIFEST_PATH", root / ".integrity" / "manifest-sha256.json")  # dynamic module-level constant
     assert not mod._MANIFEST_PATH.exists()
 
     finding = mod._check_manifest()
@@ -897,7 +907,7 @@ def test_missing_manifest_in_a_source_checkout_stays_silent(tmp_path: Path) -> N
     (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
 
     mod = _load_detector_module()
-    mod._PLUGIN_ROOT = root
-    mod._MANIFEST_PATH = root / ".integrity" / "manifest-sha256.json"
+    setattr(mod, "_PLUGIN_ROOT", root)  # dynamic module-level constant, not a static attribute
+    setattr(mod, "_MANIFEST_PATH", root / ".integrity" / "manifest-sha256.json")  # dynamic module-level constant
 
     assert mod._check_manifest() is None

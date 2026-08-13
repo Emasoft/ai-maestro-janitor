@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util as _u
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -164,7 +165,7 @@ def test_failure_line_sanitizes_marker_mimicry() -> None:
 
 
 @pytest.fixture
-def _isolated_project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def _isolated_project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     """Pin the CURRENT project to an isolated dir and flush the process-lifetime path
     caches — same discipline as test_findings_ledger.py::_isolate — so this test can
     never touch the real repo's findings ledger."""

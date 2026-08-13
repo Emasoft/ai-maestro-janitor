@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -314,12 +315,23 @@ def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:
 
 # --- long-idle CLEAR (owner directive 2026-08-02) --------------------------------------
 
-def _clear_kw(**over):
-    kw = dict(
-        user_present=False, active_waiting=False,
-        min_idle_s=3600,
-    )
-    kw.update(over)
+class _ClearKwargs(TypedDict):
+    """Shape of `should_clear_when_long_idle`'s bool/int kwargs (TypedDict, PEP 692) —
+    a bare `dict(...)` mixing bool and int values infers one union value type, so `**kw`
+    would broadcast that union against every keyword parameter (bool params included)."""
+
+    user_present: bool
+    active_waiting: bool
+    min_idle_s: int
+
+
+def _clear_kw(**over: bool | int) -> _ClearKwargs:
+    kw: _ClearKwargs = {
+        "user_present": False,
+        "active_waiting": False,
+        "min_idle_s": 3600,
+    }
+    kw.update(over)  # type: ignore[typeddict-item]  # `over` is a caller-supplied partial override
     return kw
 
 

@@ -49,6 +49,14 @@ def isolated(monkeypatch, tmp_path: Path):
     return {"gstate": gstate, "data": data}
 
 
+def _key() -> bytes:
+    """`ra._resolve_key()` is `bytes | None` by signature; every caller here relies on
+    the fixed DATA-dir key existing, so narrow it once instead of asserting per call."""
+    k = ra._resolve_key()
+    assert k is not None
+    return k
+
+
 def _rec(ra_mod, *, outcome: str = "fired", project_root: str = "/tmp/projA",
          pid: int = 123, diagnosis: str = "frozen", rung: str = "rearm",
          channel: str = "iterm") -> dict | None:
@@ -173,7 +181,7 @@ def test_trim_keeps_the_chain_verifiable_from_genesis(isolated) -> None:
     path = ra.recovery_audit_path()
     for i in range(60):
         _rec(ra, outcome="fired", pid=2000 + i)
-    chain = jsi.AuditChain(path, ra._resolve_key())
+    chain = jsi.AuditChain(path, _key())
     assert chain.verify()[0] is True                      # green before
 
     ra.trim_recovery_audit(path, keep_lines=10, max_bytes=1)
@@ -194,7 +202,7 @@ def test_trim_leaves_a_deleted_record_detectable(isolated) -> None:
     del lines[5]                                          # excise one recovery record
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    chain = jsi.AuditChain(path, ra._resolve_key())
+    chain = jsi.AuditChain(path, _key())
     assert chain.verify()[0] is False
 
 

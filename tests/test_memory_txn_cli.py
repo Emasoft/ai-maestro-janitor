@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -663,7 +664,10 @@ def test_authoring_gate_blocks_a_newly_introduced_body_less_lesson(tmp_path):
     good = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: a real lesson body.\n'
     (scope / rel).write_text(good, encoding="utf-8")
     bad = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
-    ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: bad})
+    # A real MemoryTxn needs a live transaction; _authoring_gate only reads .scope_root,
+    # so a minimal stand-in is cast to the real type rather than built end-to-end.
+    fake_txn = cast(MemoryTxn, types.SimpleNamespace(scope_root=scope))
+    ok, reasons, _ = cli._authoring_gate(fake_txn, {rel: bad})
     assert not ok
     assert any("empty-lesson-body" in r for r in reasons), reasons
 
@@ -681,5 +685,6 @@ def test_authoring_gate_ignores_a_preexisting_violation_carried_forward(tmp_path
     bad = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
     (scope / rel).write_text(bad, encoding="utf-8")
     after = bad.replace("body.[^1]", "body edited.[^1]")  # same pre-existing bad lesson; count unchanged
-    ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: after})
+    fake_txn = cast(MemoryTxn, types.SimpleNamespace(scope_root=scope))
+    ok, reasons, _ = cli._authoring_gate(fake_txn, {rel: after})
     assert ok, reasons  # delta is 0 → not blocked

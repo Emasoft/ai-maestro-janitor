@@ -33,7 +33,8 @@ def test_claim_returns_the_oldest_dispatch_first(tmp_path):
     """Newest-first would starve the dispatch that has already waited longest."""
     _dispatch(tmp_path, 2000, "consolidate")
     _dispatch(tmp_path, 1000, "repair")
-    assert mdc.claim_one(tmp_path)["intervention"] == "repair"
+    got = mdc.claim_one(tmp_path)
+    assert got is not None and got["intervention"] == "repair"
 
 
 def test_a_claimed_dispatch_is_never_handed_out_twice(tmp_path):
@@ -42,8 +43,8 @@ def test_a_claimed_dispatch_is_never_handed_out_twice(tmp_path):
     _dispatch(tmp_path, 1000, "repair")
     _dispatch(tmp_path, 2000, "consolidate")
     first, second, third = (mdc.claim_one(tmp_path) for _ in range(3))
-    assert first["intervention"] == "repair"
-    assert second["intervention"] == "consolidate"
+    assert first is not None and first["intervention"] == "repair"
+    assert second is not None and second["intervention"] == "consolidate"
     assert third is None
 
 
@@ -64,6 +65,7 @@ def test_an_in_flight_claim_cannot_be_repointed_by_a_later_dispatch(tmp_path):
     to the same root 367s later. The repair's own record must be byte-identical afterwards."""
     _dispatch(tmp_path, 1000, "repair")
     claimed = mdc.claim_one(tmp_path)
+    assert claimed is not None
     before = Path(claimed["claimed_path"]).read_bytes()
     _dispatch(tmp_path, 1367, "consolidate")
     (tmp_path / mdc.LEGACY_NAME).write_text(json.dumps({"intervention": "consolidate"}),
@@ -93,7 +95,8 @@ def test_an_unreadable_record_is_skipped_not_consumed(tmp_path):
     bad = tmp_path / f"{mdc.PENDING_PREFIX}1000-deadbeef.json"
     bad.write_text("{not json", encoding="utf-8")
     _dispatch(tmp_path, 2000, "repair")
-    assert mdc.claim_one(tmp_path)["intervention"] == "repair"
+    got = mdc.claim_one(tmp_path)
+    assert got is not None and got["intervention"] == "repair"
     assert bad.is_file(), "the corrupt record must stay put for the orphan detector"
 
 
@@ -105,6 +108,7 @@ def test_claimed_records_are_pruned_too(tmp_path, monkeypatch):
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "mm", _ROOT / "scripts" / "detectors" / "memory-maintenance.py")
+    assert spec is not None and spec.loader is not None
     mm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mm)
     monkeypatch.setattr(mm.state, "state_dir", lambda: tmp_path)

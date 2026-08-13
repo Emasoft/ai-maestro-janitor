@@ -40,10 +40,14 @@ jobs:
         run: uv python install 3.12
 
       - name: Ruff check (all Python sources)
-        run: uvx ruff check scripts/
+        run: uvx ruff check scripts/ tests/
 
+      # No path argument: pyrightconfig.json's `include` covers scripts/ AND tests/.
+      # tests/ was outside this gate until 2026-08-13 — 176 real type errors had accumulated
+      # there unseen, in the very files that are supposed to catch defects. A gate that skips the
+      # tests cannot notice a test asserting against a signature that no longer exists.
       - name: Pyright (type check)
-        run: uvx --with pyright pyright scripts/
+        run: uvx --with pyright pyright
 
   validate:
     name: Validate
