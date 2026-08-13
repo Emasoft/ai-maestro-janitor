@@ -35,9 +35,15 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 import global_state
+import memory_split_lineage
 import state
 
 _STAGING_DIRNAME = ".maint-staging"
+
+# The `op` value that marks a transaction as a SPLIT — the one operation whose writes carry a
+# lineage stamp (TRDD-3QIQ2E6J). Matches the `--op split` the split skill passes to
+# `memory_txn_cli.py commit`.
+_OP_SPLIT = "split"
 
 # Journal phases — the ONLY values `phase` ever holds.
 _PHASE_STAGING = "staging"        # building the txn; nothing applied yet
@@ -355,8 +361,38 @@ class MemoryTxn:
 
     def stage_write(self, rel_path: str, content: str) -> None:
         """Stage the FULL new content of `rel_path` (created or overwritten on
-        commit). Supersedes a pending delete of the same path."""
+        commit). Supersedes a pending delete of the same path.
+
+        On a SPLIT, the pages this transaction PRODUCES are stamped with its `txn_id` as their
+        `split-lineage:` (TRDD-3QIQ2E6J), so the librarian can later tell "one split emitted both
+        of these" and stop re-litigating siblings that share vocabulary by construction. Stamping
+        here rather than in the split SKILL is deliberate: a skill instruction is a request to an
+        agent, and a lineage field that is merely usually present is worse than none — the pairs it
+        silently fails to cover are exactly the ones that go on costing ~221k tokens per pass, with
+        nothing to show that they were missed.
+
+        NOT every write is stamped — see `is_split_child`. A split also rewrites OTHER pages'
+        inbound `[[links]]`, and marking those as siblings would suppress genuine conflicts against
+        unrelated pages.
+
+        KNOWN, BOUNDED GAP — stated because it is real, not because it bites. `cmd_commit` runs
+        `verify_split` on the RECONSTRUCTED write set and only then calls this method, so the
+        oracle inspects the page one line SHORTER than what lands on disk. Every preservation
+        check is body-level and so is unaffected; the one size-sensitive check,
+        `split_converged`, could in principle pass at exactly the cap and then apply a page ~50 B
+        over it. It cannot in practice: the split skill's headroom rule already refuses to emit a
+        sibling within 10% of the cap (3 600 B at the 36 000 B default), which is ~70x the stamp.
+        Stamping here rather than before verify is still the right trade — this is the ONE choke
+        point every writer passes through, including `apply_atomic`, and a stamp that some future
+        split path silently skipped would be worse than a 50-byte accounting gap.
+        """
         _ensure_rel_inside(self.scope_root, rel_path)  # M-10: no scope escape
+        if self.op == _OP_SPLIT and memory_split_lineage.is_split_child(
+            rel_path,
+            sources=self.sources,
+            exists_in_live=(self.scope_root / rel_path).exists(),
+        ):
+            content = memory_split_lineage.stamp(content, self.txn_id)
         dst = self.staging_dir / rel_path
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(content, encoding="utf-8")

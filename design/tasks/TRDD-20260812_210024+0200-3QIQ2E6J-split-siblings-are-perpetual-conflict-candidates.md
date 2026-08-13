@@ -1,9 +1,9 @@
 ---
 trdd-id: 3QIQ2E6J
 title: Split siblings are perpetual conflict candidates — the refusal ledger cannot fix this because the pages are genuinely new
-column: todo
+column: testing
 created: 2026-08-12T21:00:24+0200
-updated: 2026-08-13T04:16:35+0200
+updated: 2026-08-13T10:18:09+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -16,6 +16,86 @@ external-refs: [TRDD-WP7TCRME, TRDD-RG4IUZ6I, janitor#241]
 ---
 
 # Split siblings re-litigate forever
+
+## ⏵ 2026-08-13 — IMPLEMENTED (producer + consumer). Retro-stamp REFUSED, with reasons.
+
+Shipped exactly the settled design below — Python only, no Rust change, no memgrep release.
+
+| piece | where |
+|---|---|
+| the marker + all four pure predicates | `scripts/lib/memory_split_lineage.py` (new) |
+| producer — stamps the pages a split PRODUCES | `memory_txn.MemoryTxn.stage_write`, gated on `op == "split"` |
+| consumer — diverts sibling pairs out of the candidate list | `detectors/memory-librarian.py::_conflict_pairs` |
+| the visible trace | `ScopeReport.split_suppressed` → proposal section + an UNCONDITIONAL log line |
+
+**Field:** `split-lineage: <32-hex>`, the split transaction's own `txn_id` — already minted,
+already unique, and traceable back to that transaction's journal, so the audit trail costs nothing
+extra. A re-split OVERWRITES it (grandchildren are siblings of the *newer* event).
+
+**The producer is the transaction, NOT the skill.** A skill instruction is a request to an agent,
+and a lineage field that is merely *usually* present is worse than none: the pairs it silently
+fails to cover are exactly the ones that keep costing ~221k tokens, with nothing to show they were
+missed. `stage_write` is the one choke point every writer passes (including `apply_atomic`), and
+`memory_txn_cli.py::cmd_commit` reconstructs the split's write set through it (`:506`), so the
+real agent-driven path is covered — verified, not assumed.
+
+**Not every write is stamped.** `is_split_child` stamps a NEW path or the SOURCE path (the
+overview), and refuses a pre-existing non-source page — those are BACKLINK REDIRECTS
+(`canonicalize_retired_links`). Stamping them would mark unrelated pages as siblings: box 2's
+failure, arriving through the back door of "stamp everything this transaction wrote".
+
+### ✔ The `publish-globally` fight cannot happen — VERIFIED in the Rust, not reasoned about
+
+The card required the field be added THROUGH that normalizer, "not beside it, or the two will
+fight". Read the code: `atomic_write_page`'s only content mutation is
+`insert_frontmatter_field(text, "publish-globally", …)`, which splices ONE line in before the
+closing `---` and copies every other line through verbatim (`memory.rs:4260`). Unknown keys are
+preserved, so there is nothing to fight over — and the split path is Python and never invokes the
+Rust writer at all. `stamp` inserts at the same position so a page touched by both has no
+ordering tell. Confirmed end-to-end: `memgrep lint` on a stamped page → **0 findings**; the
+frontmatter schema is open, there is no allowed-key list to add to.
+
+### ✔ Falsified per guard, both directions
+
+- drop the `bool(a)` guard in `same_split` (⇒ "no lineage" == "no lineage" ⇒ suppress everything):
+  2 unit tests red, **and** the end-to-end control red.
+- `is_split_child` → always True (the tempting simplification): 2 red, including the
+  backlink-redirect case.
+
+### ⚠ FOUND WHILE FALSIFYING — a pre-existing control test that gated nothing
+
+`test_wiki_conflict_pair_reads_real_bodies` stayed GREEN with the conflict scan fully silenced.
+Both its assertions were satisfiable at zero conflicts: the heartbeat line reads
+`"N aggregation + M conflict"` so `assertIn("conflict", out)` passes at M=0, and the two notes
+also cluster on `retry`, so their names appear in the AGGREGATION section regardless. Then my
+own first fix was ALSO weak — asserting on the conflict SECTION still passed, because the new
+suppression trace is rendered in that same section and names the same two pages. It now asserts
+on column-0 candidate ROWS, and only that version goes red under the falsification.
+
+### ✗ RETRO-STAMP REFUSED — no provenance survives, and the only available inference is the one this card killed
+
+The pages named in the resume directive (`memory-librarian-flags-benign` / `-candidates-cli` /
+`-verdict-log`) **do not exist on this host** — janitor#241 was filed from a different agent's
+corpus. What *is* here is the live defect, in USER scope right now:
+
+```
+verify-cross-repo-cited-sha-before-building-{deployment-and-enforcement-claims,
+                                             governance-and-release-state} vs …-sha-verification-check
+debugging-methodology-verify-before-concluding-causal-claims vs debugging-methodology
+```
+
+No `.maint-staging/*.json` journal survives for any of them, so the ONLY way to assert lineage is
+the shared filename PREFIX — prefix-derived ancestry, killed on acceptance box 2 and explicitly
+off-limits. Two of those pairs are hub-vs-component, which is precisely the relation box 2
+protects. A stamp is a claim that *the janitor separated these two*; fabricating it would make the
+marker mean "an agent guessed", which is the same defect this card rejects for the refusal ledger
+— a record that asserts a verdict nobody reached.
+
+Cost of NOT retro-stamping is bounded and self-healing: those pairs are re-litigated until their
+next split re-stamps them properly, or a human merges them. Cost of a wrong stamp is permanent,
+silent, undetectable suppression. **If retro-stamping is wanted, it needs a `--retro-stamp` verb
+taking an EXPLICIT page list plus a human's per-pair confirmation, recorded as human-asserted
+lineage — a USER call, not an inference.**
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
@@ -113,10 +193,20 @@ one inserting a field the other does not know about, each rewriting the page the
 
 ## Acceptance
 
-- [ ] Split siblings are not offered as conflict candidates, proven on a real post-split corpus
-- [ ] A genuine conflict between UNRELATED pages still fires (the fix must not silence the chore)
-- [ ] The lineage field is emitted and normalized by the same path that owns `publish-globally`
-- [ ] Measured: a post-split conflict pass costs ~0 tokens instead of ~221k
+- [x] Split siblings are not offered as conflict candidates — `test_split_siblings_are_not_offered_as_conflict_candidates`,
+      run end-to-end through the detector on the SAME fixture the control proves IS a conflict
+- [x] A genuine conflict between UNRELATED pages still fires — two ways: pages from DIFFERENT
+      splits still conflict (`test_pages_from_DIFFERENT_splits_still_conflict`), and lineage-free
+      pages are never siblings (falsified: removing that guard reddens the control)
+- [x] The lineage field coexists with `publish-globally` — verified in `memory.rs:4260`
+      (single-line splice, unknown keys preserved) and confirmed by `memgrep lint` → 0 findings.
+      NOTE the card's phrasing assumed one writer; there are two, and the Rust one never runs on
+      the split path. Coexistence is the real requirement and it is proven, not assumed.
+- [ ] Measured: a post-split conflict pass costs ~0 tokens instead of ~221k — **not yet
+      measurable here.** It needs a real split to occur on this host so its children carry the
+      stamp; the existing sibling-shaped pairs predate the marker and were NOT retro-stamped (see
+      the refusal above). The mechanism is proven end-to-end in the suite; the token figure is a
+      production measurement that has to wait for the next split.
 
 ## Approval log
 

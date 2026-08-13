@@ -261,10 +261,84 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
                       body="The widget retries 5 times then fails."))
             out = _run(home, project)
             self.assertIn("[memory-librarian]", out)
+            # Assert on the CONFLICT SECTION, not on the proposal as a whole. Both assertions
+            # this replaces were satisfiable without any conflict at all: the heartbeat line
+            # reads "N aggregation + M conflict" so the literal word is present at M=0, and
+            # these two notes also cluster on `retry`, so their names appear in the AGGREGATION
+            # section regardless. The test therefore stayed green when the conflict scan was
+            # disabled outright — found by falsifying TRDD-3QIQ2E6J's suppression rule, which
+            # silenced this pair while this test kept passing.
+            # …and on CANDIDATE ROWS specifically (column 0), not on the section text. The
+            # suppressed-pair trace is rendered in this same section as blockquoted `> - topic`
+            # rows naming the same two pages, so a section-wide substring check would ALSO pass
+            # when the pair was suppressed rather than reported — the second, self-inflicted
+            # version of the same weakness this comment's first half describes.
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+            rows = [ln for ln in conflict.splitlines() if ln.startswith("- topic")]
+            self.assertTrue(
+                any("wikimem/retry-cap-a.md" in r and "wikimem/retry-cap-b.md" in r for r in rows),
+                f"the pair must be an offered conflict candidate; section was:\n{conflict}",
+            )
+
+    def test_split_siblings_are_not_offered_as_conflict_candidates(self):
+        """TRDD-3QIQ2E6J acceptance box 1: a pair the janitor's own split produced is not a
+        conflict candidate — proven on the SAME fixture the control above proves IS one.
+
+        Reusing `test_wiki_conflict_pair_reads_real_bodies`'s exact pages is deliberate. The only
+        difference between that test and this one is the shared `split-lineage:` line, so a pass
+        here cannot be explained by the fixture having stopped being a conflict for some unrelated
+        reason — the control test would go red too.
+        """
+        lineage = "split-lineage: " + "a" * 32 + "\n"
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            wiki = memdir / "wikimem"
+            wiki.mkdir()
+            for name, n in (("retry-cap-a", 3), ("retry-cap-b", 5)):
+                note = _note(name, "widget retry cap value", ["retry"],
+                             body=f"The widget retries {n} times then fails.")
+                (wiki / f"{name}.md").write_text(note.replace("ocd:", lineage + "ocd:", 1))
+            _run(home, project)
+            proposal_path = memdir / PROPOSAL_NAME
+            proposal = proposal_path.read_text() if proposal_path.exists() else ""
+            conflict = (
+                proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+                if "### Conflict candidates" in proposal else "(none)"
+            )
+            # A CANDIDATE row starts at column 0; the trace rows are blockquoted (`> - topic`),
+            # so match on the row shape rather than on the substring both share.
+            candidates = [ln for ln in conflict.splitlines() if ln.startswith("- topic")]
+            self.assertEqual(candidates, [],
+                             f"split siblings must not be conflict candidates; got:\n{conflict}")
+            # …and the suppression must leave a VISIBLE TRACE rather than vanish silently: a
+            # silencing rule with no record is indistinguishable from a broken scan.
+            self.assertIn("Not offered (same-split siblings", conflict)
+            self.assertIn("> - topic", conflict)
+            self.assertIn("retry-cap-a", conflict)
+
+    def test_pages_from_DIFFERENT_splits_still_conflict(self):
+        """Acceptance box 2: the rule keys on ONE split event, not on "was ever split".
+
+        If `same_split` degraded to "both pages carry the field", this goes red — which is the
+        failure this test exists to catch, because that degradation is invisible in production.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            wiki = memdir / "wikimem"
+            wiki.mkdir()
+            for name, n, ident in (("retry-cap-a", 3, "a" * 32), ("retry-cap-b", 5, "b" * 32)):
+                note = _note(name, "widget retry cap value", ["retry"],
+                             body=f"The widget retries {n} times then fails.")
+                (wiki / f"{name}.md").write_text(
+                    note.replace("ocd:", f"split-lineage: {ident}\nocd:", 1))
+            out = _run(home, project)
             self.assertIn("conflict", out)
             proposal = (memdir / PROPOSAL_NAME).read_text()
-            self.assertIn("wikimem/retry-cap-a.md", proposal)
-            self.assertIn("wikimem/retry-cap-b.md", proposal)
+            conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+            self.assertIn("retry-cap-a", conflict)
 
     def test_proposal_file_not_treated_as_a_note(self):
         """A pre-existing proposal file is never itself clustered/flagged."""

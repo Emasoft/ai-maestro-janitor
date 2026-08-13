@@ -59,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import memory_scopes  # noqa: E402
+import memory_split_lineage  # noqa: E402
 import state  # noqa: E402
 
 # The librarian's own output file — written into the memory dir but it is NOT a
@@ -310,9 +311,19 @@ class ScopeReport:
     orphans: list[str] = field(default_factory=list)
     index_sync: list[str] = field(default_factory=list)
     one_sided: list[str] = field(default_factory=list)
+    #: Pairs that WOULD have been conflict candidates but share a `split-lineage:` — the janitor
+    #: itself separated them (TRDD-3QIQ2E6J). Carried as a visible TRACE, never as a finding:
+    #: `has_findings` deliberately ignores it, because counting a suppression as a finding would
+    #: re-arm the very chore the suppression exists to stop. It is what makes over-suppression
+    #: legible — the failure mode of any silencing rule is that it silences too much, and that is
+    #: invisible by construction unless the suppressed set is written down somewhere a human reads.
+    split_suppressed: list[tuple[str, str, str]] = field(default_factory=list)
 
     def has_findings(self) -> bool:
-        """True iff this scope surfaces ANYTHING (candidate or integrity issue)."""
+        """True iff this scope surfaces ANYTHING (candidate or integrity issue).
+
+        `split_suppressed` is excluded ON PURPOSE — see its own comment.
+        """
         return bool(
             self.clusters or self.conflicts or self.shape
             or self.broken or self.orphans or self.index_sync or self.one_sided
@@ -919,8 +930,8 @@ def _conflict_pairs(
     notes: dict[str, NoteMeta],
     linked: set[frozenset[str]],
     note_texts: dict[str, str],
-) -> list[tuple[str, str, str]]:
-    """SAME-SUBJECT note pairs with an actual CONTRADICTION → (noteA, noteB, topic).
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+    """SAME-SUBJECT note pairs with an actual CONTRADICTION → `(conflicts, split_suppressed)`.
 
     A conflict CANDIDATE requires BOTH (issues #35/#38/#43):
       * the two notes are the SAME SUBJECT — they share ≥ _MIN_SHARED_TOKENS
@@ -938,11 +949,22 @@ def _conflict_pairs(
     membership): a chain A-B-C where A and C share nothing directly must not flag
     A vs C. An already-cross-linked pair (the wiki invariant working as intended)
     is excluded. Bounded by `_MAX_PAIRS_LISTED`.
+
+    A pair sharing a `split-lineage:` id is diverted to the SECOND list instead of the first
+    (TRDD-3QIQ2E6J): the janitor's own split produced both pages, so they share vocabulary by
+    construction and re-judging them costs ~221k tokens to reach the same "no" every time.
+
+    The diversion is the LAST test, after every other gate has already agreed the pair is a
+    genuine conflict candidate. That ordering is the point of the second list: it holds exactly
+    the pairs that WOULD have been reported, so its length is an honest measure of what this rule
+    silences. Testing lineage first would be cheaper and would fill the trace with pairs that were
+    never candidates anyway — an over-suppression counter that always reads zero.
     """
     distinctive = _distinctive_token_sets(notes)
     names = sorted(notes)
     seen: set[frozenset[str]] = set()
     out: list[tuple[str, str, str]] = []
+    suppressed: list[tuple[str, str, str]] = []
     for i in range(len(names)):
         name_i = names[i]
         for j in range(i + 1, len(names)):
@@ -960,10 +982,17 @@ def _conflict_pairs(
             ):
                 continue  # same subject but COMPLEMENTARY → aggregation, not conflict
             seen.add(pair)
-            out.append((name_i, name_j, "+".join(sorted(shared_tokens)[:4])))
+            topic = "+".join(sorted(shared_tokens)[:4])
+            if memory_split_lineage.same_split(
+                note_texts.get(name_i, ""), note_texts.get(name_j, "")
+            ):
+                if len(suppressed) < _MAX_PAIRS_LISTED:
+                    suppressed.append((name_i, name_j, topic))
+                continue  # one split emitted both — not a conflict to re-litigate
+            out.append((name_i, name_j, topic))
             if len(out) >= _MAX_PAIRS_LISTED:
-                return out
-    return out
+                return out, suppressed
+    return out, suppressed
 
 
 def _split_frontmatter(text: str) -> tuple[list[str], list[str]]:
@@ -1587,7 +1616,20 @@ def _analyze_scope(binary: str, memdir: Path, scope: str, corpus: CorpusIndex) -
             # spot a contradiction signal (a number/antonym clash) — the index
             # only carries name+description. Read the cluster's notes once.
             note_texts = _read_note_texts(memdir, notes.keys())
-            report.conflicts = _conflict_pairs(notes, linked, note_texts)
+            report.conflicts, report.split_suppressed = _conflict_pairs(
+                notes, linked, note_texts
+            )
+            if report.split_suppressed:
+                # Logged UNCONDITIONALLY, before any has_findings() gate can drop this scope.
+                # When suppression is working perfectly the report is never written at all, so
+                # the log is the only place the trace can survive — and a silencing rule whose
+                # effect leaves no record anywhere is indistinguishable from a broken scan.
+                state.log_line(
+                    "memory-librarian",
+                    f"{scope}: {len(report.split_suppressed)} conflict pair(s) suppressed as "
+                    "same-split siblings: "
+                    + "; ".join(f"{a} vs {b}" for a, b, _ in report.split_suppressed),
+                )
 
     return report
 
@@ -1619,6 +1661,14 @@ def _render_scope_section(report: ScopeReport) -> list[str]:
             lines.append(f"- topic `{tag}`: {a} vs {b}")
     else:
         lines.append("- (none)")
+    if report.split_suppressed:
+        # Rendered as a NOTE, not as a candidate row: nothing here is work for the agent. It is
+        # here so a reader can audit what the split-lineage rule silenced, and challenge it — a
+        # pair listed below that is NOT actually a split sibling is the bug report this section
+        # exists to make possible.
+        lines += ["", "> Not offered (same-split siblings — the janitor's own split produced both):"]
+        for a, b, tag in report.split_suppressed[:_MAX_PAIRS_LISTED]:
+            lines.append(f"> - topic `{tag}`: {a} vs {b}")
 
     # Page shape — structural integrity per note (rank 3). Listed only when there
     # is something to fix; a clean corpus shows "(none)" so the section's meaning
