@@ -336,11 +336,21 @@ def directive_lines(now: int | None = None) -> list[str]:
     # One shared note (not per-line — token economy). It must NOT claim the ping is
     # free: an agent that DIED (terminal API error) re-runs its failing request on
     # every resume, which is exactly how issue #75 burned tokens for a week.
-    lines.append(
+    note = (
         "(check each agent's status before resuming: a finished agent just restates its "
         f"result, but a DIED agent re-runs the request that killed it; each is listed at "
         f"most {MAX_NUDGES} times, then dropped)"
     )
+    # The respawn fallback (TRDD-KTXZJC6E part B): only named when it would actually work
+    # right now — an entry whose transcript cannot be resolved gets no pointer, so the note
+    # never promises a prompt that would come back empty (the "documented and inert" failure
+    # this whole card is about, one paragraph away from repeating it).
+    if any(resolve_transcript(e) for e in listed):
+        note += (
+            " If a resume fails, respawn instead: `respawn_prompt_cli.py <agent-id>` prints "
+            "the original prompt to spawn a fresh agent with."
+        )
+    lines.append(note)
     return lines
 
 

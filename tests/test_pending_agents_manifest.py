@@ -869,3 +869,90 @@ def test_respawn_prompt_for_resolves_lazily_and_reissues_the_original(tmp_path, 
     out = pa.respawn_prompt_for(entry)
     assert "DO THE ORIGINAL JOB PRECISELY" in out
     assert out.startswith("RESUMED JOB")
+
+
+# --------------------------------------------------------------------------- #
+# Part B (TRDD-KTXZJC6E) — a real consumer for the respawn handle
+# --------------------------------------------------------------------------- #
+
+
+def test_directive_note_names_respawn_fallback_when_a_handle_resolves(tmp_path, iso) -> None:
+    """The resume directive's shared note points at the respawn CLI, but ONLY when at
+    least one listed entry's transcript actually resolves — the pointer must not promise
+    a prompt that would come back empty."""
+    pa = iso["pa"]
+    agent_dir = tmp_path / "subagents"
+    agent_dir.mkdir()
+    (agent_dir / "agent-a1.jsonl").write_text(
+        '{"type":"user","message":{"content":"job"}}\n', encoding="utf-8"
+    )
+    pa.add("a1", "recoverable fork", now=1000, agent_dir=str(agent_dir))
+    note = pa.directive_lines(now=1000)[-1]
+    assert "respawn_prompt_cli.py" in note
+    assert note.startswith("(check each agent's status before resuming")
+
+
+def test_directive_note_omits_respawn_fallback_when_no_handle_resolves(iso) -> None:
+    """Falsification: an entry whose transcript cannot be resolved (no `agentDir`, no real
+    `transcript` file — the ordinary case for a workflow-spawned subagent before it has
+    written anything) produces NO pointer, so the note never over-promises."""
+    pa = iso["pa"]
+    pa.add("a1", "no handle yet", now=1000)
+    note = pa.directive_lines(now=1000)[-1]
+    assert "respawn_prompt_cli.py" not in note
+    assert note.startswith("(check each agent's status before resuming")
+
+
+def _run_cli(args: list[str], project: Path) -> subprocess.CompletedProcess[str]:
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "CLAUDE_PROJECT_DIR": str(project),
+        "CLAUDE_PLUGIN_ROOT": str(_ROOT),
+        "HOME": str(project),
+    }
+    return subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "respawn_prompt_cli.py"), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def test_respawn_prompt_cli_prints_the_original_prompt(tmp_path, iso) -> None:
+    """The entry point named in the directive note (correction 3): a shell command, not a
+    Python import, turns an agent id into its respawn prompt."""
+    pa, project = iso["pa"], iso["project"]
+    agent_dir = tmp_path / "subagents"
+    agent_dir.mkdir()
+    (agent_dir / "agent-a1.jsonl").write_text(
+        '{"type":"user","message":{"content":"DO THE ORIGINAL JOB"}}\n', encoding="utf-8"
+    )
+    # A real (not year-1970) timestamp: the CLI subprocess calls `pending()` with the real
+    # wall clock, and a `ts` far in the past would be swept by the MAX_AGE_S sweep before the
+    # CLI ever saw it.
+    pa.add("a1", "recoverable fork", now=int(time.time()), agent_dir=str(agent_dir))
+    res = _run_cli(["a1"], project)
+    assert res.returncode == 0, res.stderr
+    assert "DO THE ORIGINAL JOB" in res.stdout
+    assert res.stdout.startswith("RESUMED JOB")
+
+
+def test_respawn_prompt_cli_fails_loud_on_unknown_agent(iso) -> None:
+    """No manifest entry at all → non-zero exit + a diagnostic, never a fabricated prompt."""
+    project = iso["project"]
+    res = _run_cli(["does-not-exist"], project)
+    assert res.returncode != 0
+    assert res.stdout == ""
+    assert "does-not-exist" in res.stderr
+
+
+def test_respawn_prompt_cli_fails_loud_on_unrecoverable_transcript(iso) -> None:
+    """A known agent whose transcript cannot be recovered must not invent a prompt for a
+    different job under the same name."""
+    pa, project = iso["pa"], iso["project"]
+    pa.add("a1", "no handle", now=int(time.time()))
+    res = _run_cli(["a1"], project)
+    assert res.returncode != 0
+    assert res.stdout == ""
+    assert "a1" in res.stderr
