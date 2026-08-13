@@ -1,11 +1,11 @@
 {
   "totals": {
-    "samples": 233,
-    "benign": 64,
+    "samples": 237,
+    "benign": 68,
     "attack_claimed": 152,
-    "recall_intended": 0.5132,
+    "recall_intended": 0.5197,
     "recall_any": 0.5526,
-    "false_positive_rate": 0.0469
+    "false_positive_rate": 0.0441
   },
   "per_population": {
     "benign": {
@@ -13,7 +13,7 @@
       "fp": 3
     },
     "benign-ordinary": {
-      "n": 24,
+      "n": 28,
       "fp": 0
     }
   },
@@ -261,7 +261,7 @@
     "two-step-code-injection": {
       "claimed": true,
       "n": 3,
-      "intended": 0,
+      "intended": 1,
       "any": 3,
       "misses": []
     },

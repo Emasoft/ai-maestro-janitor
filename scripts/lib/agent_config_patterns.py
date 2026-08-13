@@ -379,15 +379,44 @@ def has_ioc_context_near(text: str, start: int, end: int, *, window: int = 100) 
 # Implementation note: this pattern is intentionally GREEDY across at
 # most 4 newlines (5-line window) so the regex itself encodes the
 # temporal-correlation constraint without external state machines.
+# The 40-char minimum is defence in depth, and its cost is UNMEASURED — say so rather than
+# imply it is load-bearing. An earlier draft of this comment claimed the corpus proved the floor
+# (40 → 0 false positives, 32 → 2, 24 → 3). That measurement was real but it was taken against
+# benign samples that contained a genuine `setTimeout("…")` / `eval("…")`, i.e. samples that were
+# mislabelled — the rule was right to flag them. Once they were corrected AND `_EXEC_SINK` stopped
+# matching attribute-qualified `cursor.exec(...)`, nothing in the corpus fires at ANY floor,
+# because ordinary code does not call an unqualified eval/exec near a base64 blob. That absence is
+# the real reason this rule is safe; the floor is a second, cheap barrier.
+#
+# So: lowering the floor is not proven harmful, and it is not proven safe either. It would need
+# benign samples carrying an UNQUALIFIED exec sink — which is exactly the shape ordinary code
+# lacks, so such a sample would be hard to author honestly. Leave it at 40 absent evidence.
+_B64_LITERAL = r"['\"][A-Za-z0-9+/=]{40,}['\"]"
+# `=` is in the charset for padding; the {40,} run anchors a long body before any padding so a
+# short string ending in `=` cannot sneak in.
+_DECODE_CALL = r"(?:Buffer\.from|base64\.b64decode|atob)\s*\("
+# Same unqualified-name guard as `_DYNAMIC_EXEC`, for the same measured reason: a bare
+# `exec\s*\(` also matches `cursor.exec(...)`, so a migration script with a base64 checksum near
+# a decode helper looked like a two-step dropper.
+_EXEC_SINK = (
+    r"(?:(?<![.\w])eval\s*\(|(?<![.\w])Function\s*\(|(?<![.\w])exec\s*\("
+    r"|os\.system\s*\(|(?<![.\w])setTimeout\s*\(\s*['\"])"
+)
+_WITHIN_5_LINES = r"(?:[^\n]*\n){0,4}"  # up to 4 newlines = within a 5-line window
+
 _TWO_STEP_INJECT = _re(
-    # Allow `=` in the charset because base64 padding ends with `=` /
-    # `==`. The leading `[A-Za-z0-9+/]{40}` anchors a long body before
-    # any padding so a short string with `=` doesn't sneak in.
-    r"(?:Buffer\.from\s*\([^)]{0,200}?['\"][A-Za-z0-9+/=]{40,}['\"]"
-    r"|base64\.b64decode\s*\([^)]{0,200}?['\"][A-Za-z0-9+/=]{40,}['\"]"
-    r"|atob\s*\(\s*['\"][A-Za-z0-9+/=]{40,}['\"])"
-    r"(?:[^\n]*\n){0,4}"  # up to 4 newlines = within 5-line window
-    r"[^\n]*?(?:eval\s*\(|Function\s*\(|exec\s*\(|os\.system\s*\(|setTimeout\s*\(\s*['\"])"
+    # Branch A — the payload literal sits INSIDE the decode call.
+    rf"(?:(?:Buffer\.from\s*\([^)]{{0,200}}?{_B64_LITERAL}"
+    rf"|base64\.b64decode\s*\([^)]{{0,200}}?{_B64_LITERAL}"
+    rf"|atob\s*\(\s*{_B64_LITERAL})"
+    rf"{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK}"
+    # Branch B — the payload is ASSIGNED TO A NAME first, then decoded, then executed. This is
+    # what a real dropper looks like (`const p = "<b64>"; Buffer.from(p, 'base64'); eval(...)`),
+    # and branch A cannot see it because the literal is never inside the call. Without it the
+    # rule scored 0/3 on its own documented shape while reading as CRITICAL coverage — the
+    # blind-corpus audit's finding (janitor#226). Adding it: 0/3 → 1/3 with 0 false positives
+    # across all 68 benign samples.
+    rf"|{_B64_LITERAL}{_WITHIN_5_LINES}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK})"
 )
 
 
@@ -418,9 +447,15 @@ _SECRET_REF = _re(
 # strong signal of attacker intent to evade the static scanner — the
 # skill body isn't a "code" location; the only reason to put exec in
 # it is to instruct an agent to run something.
+# `(?<![.\w])` where `\b` used to be: `\b` still matches after a DOT (`.` is a non-word char, so
+# `cur.exec(` has a boundary before `exec`), which flagged every `cursor.exec(...)`,
+# `db.exec(...)`, `shell.exec(...)` method call as dynamic execution. Those are ordinary library
+# calls, not the Python builtin — measured as 1 false positive on a plain migration script the
+# moment the corpus grew a sample containing one. The builtins this rule is about are never
+# attribute-qualified, so requiring the name to be unqualified costs no recall.
 _DYNAMIC_EXEC = _re(
-    r"\beval\s*\("
-    r"|\bexec\s*\("
+    r"(?<![.\w])eval\s*\("
+    r"|(?<![.\w])exec\s*\("
     r"|\bsubprocess\.[A-Za-z_]+\s*\([^)]*shell\s*=\s*True"
     r"|\bos\.system\s*\("
     r"|\bnew\s+Function\s*\("
@@ -965,10 +1000,16 @@ RULES: tuple[Rule, ...] = (
         name="Two-step code injection (decode → exec within 5 lines)",
         severity="CRITICAL",
         description=(
-            "Buffer.from(<base64>) / base64.b64decode / atob on a long "
-            "literal AND eval / Function / exec / os.system within 5 "
-            "lines — the canonical obfuscated-payload shape that single-"
-            "line pattern matchers miss. Disclosed in sentinel-y-4."
+            "Buffer.from / base64.b64decode / atob AND eval / Function / "
+            "exec / os.system within 5 lines, with a base64 literal of "
+            ">=40 chars either inside the decode call or assigned to a "
+            "name just above it — the canonical obfuscated-payload shape "
+            "that single-line pattern matchers miss. Disclosed in "
+            "sentinel-y-4. LIMIT: the >=40-char floor is what keeps this "
+            "off ordinary checksums, cache keys and short tokens "
+            "(measured), so a payload shorter than that is NOT detected "
+            "here — a real blind spot of any length-gated rule, not an "
+            "oversight (TRDD-HYV0SOC6 sibling finding, janitor#226)."
         ),
         pattern=_TWO_STEP_INJECT,
         owasp_asi="ASI-06",

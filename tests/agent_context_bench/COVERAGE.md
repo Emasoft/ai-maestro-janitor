@@ -26,10 +26,10 @@ not the same as passing.
 | `prompt-injection-multilingual` | 2/7 | weak |
 | `sensitive-secret-ref` | 2/9 | weak |
 | `tool-wildcard-grant` | 7/8 | partial |
-| `two-step-code-injection` | 0/3 | **FALSIFIED** — seeded and caught nothing |
+| `two-step-code-injection` | 1/3 | weak |
 | `whole-env-exfil` | 3/3 | partial |
 | `worm-self-propagation` | 5/9 | partial |
 
-**2 claimed rules are FALSIFIED**: seeded with 11 blind-authored
+**1 claimed rules are FALSIFIED**: seeded with 8 blind-authored
 samples of their own class, they caught zero. That is stronger than untested — the
 defect was planted, the rule was watched, and it did not fire.
