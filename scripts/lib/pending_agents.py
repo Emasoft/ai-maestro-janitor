@@ -37,6 +37,14 @@ Payload reality (hook reference, verified 2026-07-08): SubagentStart carries
 best-effort and the TIME SWEEP below is the guaranteed cleanup path for
 entries whose Stop never fired (which is exactly the crash case the manifest
 exists for).
+
+A DELIBERATE KILL is a second, non-crash instance of the same case, observed
+2026-08-13: stopping a background agent with the TaskStop tool does NOT fire
+SubagentStop, so its entry survives the kill and rides the nudge path — the
+heartbeat then invites a resume of a corpse for up to ``MAX_NUDGES`` fires.
+Bounded and fail-open by design, not a defect; but a caller that KNOWS it just
+killed an agent should call ``remove()`` itself rather than pay those nudges,
+since it holds information neither the hook nor the sweep can infer.
 """
 
 from __future__ import annotations
