@@ -3,7 +3,7 @@ trdd-id: XFPOAF2I
 title: Nothing detects two open cards attacking one defect without knowing about each other
 column: todo
 created: 2026-08-13T04:26:15+0200
-updated: 2026-08-13T04:26:15+0200
+updated: 2026-08-13T04:35:08+0200
 current-owner: unassigned
 task-type: feature
 approval-tier: 0
@@ -54,17 +54,33 @@ model tokens (PRRD C2: a chore a script can do must be done by a script).
   - **Cross-referencing is the correct silencer.** Once each card names the other (frontmatter
     `external-refs:` or a `TRDD-<id8>` in the body), the pair drops out — the agents involved now
     know. This gives the detector a built-in self-test: the #241 pair was cross-linked at
-    `854259d8`, so a correct implementation reports **four** pairs today, not five. If it still
-    reports #241, the silencer is broken.
+    `854259d8`, so a correct implementation must NOT report #241. If it still does, the silencer
+    is broken.
+
+**CORRECTION 2026-08-13 — the "four pairs" figure this card originally predicted was WRONG, and
+the way it was wrong is the lesson.** The real answer is **two** (#246 and #237). The five-ref
+tally came from a raw `grep | uniq -c` over `external-refs:` that applied NEITHER of the two
+rules this same card specifies one paragraph above: the cross-reference silencer (#249 is
+silenced — `JPL0JU86` already carries `TRDD-G4BCRUP7`) and the open-cards-only rule (#238 is
+excluded — its partner `2112XCKO` is `complete`). So the acceptance criterion was computed by a
+cruder query than the spec it was meant to grade, and it disagreed with a CORRECT
+implementation. Had the number been trusted over the code, the fix would have been to break the
+silencer until it reported four. **An expected value must be derived by the same rules as the
+thing it grades, or it is an independent bug wearing a test's clothes.**
 
 ## Acceptance
 
-- [ ] Fires on a synthetic pair sharing a ref with no cross-reference; silent once either card
-      cites the other
-- [ ] Run on the live board reports the four remaining pairs and NOT janitor#241 (the built-in
-      self-test above — a run that still names #241 is a broken silencer, not a finding)
-- [ ] Terminal/archived cards are excluded (a closed card cannot be re-litigated)
-- [ ] Zero model tokens — the whole check is a script, and it names the pair rather than asking
+- [x] Fires on a synthetic pair sharing a ref with no cross-reference; silent once either card
+      cites the other — 5 tests, each falsified and restored
+- [x] Live board: reports exactly **TRDD-88ZVEQY7 & TRDD-EZ3PMQYX** (janitor#237) and
+      **TRDD-G4BCRUP7 & TRDD-KI6OWCZT** (janitor#246), and correctly silences #241
+      (cross-linked), #249 (`JPL0JU86` cites `TRDD-G4BCRUP7`) and #238 (partner terminal). All
+      five verified by hand against the cards before accepting the run — see the CORRECTION
+      above for why the originally-predicted count was wrong
+- [x] Terminal/archived cards are excluded (a closed card cannot be re-litigated) — proven both
+      by a unit test and by #238's live exclusion
+- [x] Zero model tokens — the whole check is a script, and it names the pair rather than asking
       the model to go and compare the two cards
+- [ ] Act on the two live findings: cross-link or confirm agreement for #237 and #246
 
 ## Notes and lessons learned

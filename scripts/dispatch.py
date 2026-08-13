@@ -84,6 +84,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # the git work is negligible. SURFACE-ONLY (report + drift line; mutates no
     # TRDD); per-(TRDD,verdict) seen-file dedupe avoids re-nagging.
     ("trdd-state-reconciliation", 86400, "CLAUDE_PLUGIN_OPTION_TRDD_RECONCILIATION_INTERVAL"),
+    # trdd-cross-card-blindspot: the sibling of trdd-state-reconciliation that
+    # judges cards AGAINST EACH OTHER instead of against the tree — flags OPEN
+    # cards that cite the same `external-refs:` issue without citing each other
+    # (TRDD-XFPOAF2I). Board-hygiene, slow-moving; daily cadence.
+    ("trdd-cross-card-blindspot", 86400, "CLAUDE_PLUGIN_OPTION_TRDD_CROSS_CARD_BLINDSPOT_INTERVAL"),
     # global-chore-blackout: alarm when a live ai-maestro server suppresses the janitor
     # daemon but has not absorbed the chores it displaced (ai-maestro#111). HOURLY — the
     # condition changes on the scale of days and the check is a few file stats, so a
@@ -556,7 +561,8 @@ _MARKER_OWNERS: dict[str, re.Pattern[str]] = {
 # nudges, hygiene, informational counts. Nothing here is broken, unsafe, or
 # stalled, so none of it earns an interruption.
 _ADVISORY_DETECTORS = frozenset({
-    "trdd-reminder", "trdd-drift", "trdd-state-reconciliation", "report-to-trdd-drift",
+    "trdd-reminder", "trdd-drift", "trdd-state-reconciliation", "trdd-cross-card-blindspot",
+    "report-to-trdd-drift",
     "memorize-nudge", "memory-librarian", "project-map-drift", "wikimem-syntax",
     "why-in-commits", "subagent-report", "stale-task", "stale-stash", "dirty-tree",
     "worktree-janitor", "trashcan-purge", "reports-purge", "screenshot-purge",
