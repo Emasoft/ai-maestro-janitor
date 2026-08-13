@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -223,7 +224,13 @@ def iterm_automation_blocked(*, iterm_running: bool, sessions: dict[str, str]) -
     return iterm_running and not sessions
 
 
-def iterm_automation_payload(*, interpreter: str, second_view: str = "") -> str:
+def iterm_automation_payload(
+    *,
+    interpreter: str,
+    second_view: str = "",
+    probe_outcome: str = "",
+    rearm_evidence_age_s: int | None = None,
+) -> str:
     """The flag's exact content for a blocked observation. PURE — so the compare-and-write
     below can decide "has anything CHANGED?" without a timestamp making it always-yes.
 
@@ -231,17 +238,86 @@ def iterm_automation_payload(*, interpreter: str, second_view: str = "") -> str:
     `channel-blocked-not-empty` / `consistent-empty` / `probe-failed:<why>` / "" (not
     probed). It is part of the payload so a verdict CHANGE re-alarms once — the moment
     the second view first proves "blocked-not-empty" is exactly new information.
+
+    `probe_outcome` (TRDD-EZ3PMQYX, janitor#233) is the call site's OWN classification
+    of the osascript run that produced zero sessions: ``"error"`` (nonzero exit or the
+    binary could not run), ``"timeout"`` (exceeded its deadline), or ``"empty"`` (the
+    call succeeded and simply returned nothing to parse). Empty string means the caller
+    did not classify it (e.g. a pre-upgrade write path) — never invented as a default,
+    because a guessed outcome is worse than an admittedly-absent one.
+
+    `rearm_evidence_age_s` (#237) is the age, in seconds, of the newest `FIRED rearm →
+    iterm` daemon-log line AT THE MOMENT this flag was written — read here so the flag is
+    self-contained for a consumer that never reads the daemon log itself. Absent (None)
+    when no such line was found; the field is OMITTED, not written as 0 (a zero would
+    read as "just happened" rather than "unknown").
     """
-    data = {
+    data: dict[str, str | int] = {
         "observed": "iTerm running, 0 iTerm sessions enumerated by osascript",
         "interpreter": interpreter,
     }
     if second_view:
         data["second_view"] = second_view
+    if probe_outcome:
+        data["probe_outcome"] = probe_outcome
+    if rearm_evidence_age_s is not None:
+        data["rearm_evidence_age_s"] = rearm_evidence_age_s
     return json.dumps(data, sort_keys=True)
 
 
-def record_iterm_automation_state(blocked: bool, *, second_view: str = "") -> None:
+# Same window dispatch.py's own alarm hedges the rearm-evidence read against — kept in
+# sync by comment, not by import, because dispatch.py is out of scope for this change
+# (a separate agent owns it) and duplicating a 2-line constant is cheaper than coupling
+# the two call sites. If either window changes, check the other.
+_ITERM_REARM_LOG_NAMES = ("daemon.log", "daemon.log.1")
+
+
+def _latest_iterm_rearm_epoch(log_text: str) -> int | None:
+    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
+
+    Deliberately duplicated from `dispatch.py`'s identically-named helper (TRDD-EZ3PMQYX):
+    that alarm's own 6h-window parse over the LIVE log stays authoritative for what it
+    prints, so this copy exists only to let `record_iterm_automation_state` stamp the
+    flag's `rearm_evidence_age_s` field at WRITE time, for consumers that never read the
+    daemon log themselves. Malformed timestamps are skipped, never fatal.
+    """
+    import datetime as _dt  # noqa: PLC0415 -- local, matches dispatch.py's own helper
+
+    latest: int | None = None
+    for line in log_text.splitlines():
+        if "FIRED rearm → iterm" not in line or not line.startswith("["):
+            continue
+        try:
+            stamp = line[1 : line.index("]")]
+            epoch = int(_dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp())
+        except (ValueError, IndexError):
+            continue
+        if latest is None or epoch > latest:
+            latest = epoch
+    return latest
+
+
+def _iterm_rearm_evidence_age_s(gs) -> int | None:  # noqa: ANN001 -- gs is the global_state module
+    """Age, in seconds, of the newest `FIRED rearm → iterm` daemon-log line, or None when
+    no such line was found in either the live or the just-rotated log. Never raises."""
+    latest: int | None = None
+    for log_name in _ITERM_REARM_LOG_NAMES:
+        log_path = gs.global_state_dir() / log_name
+        if log_path.is_file():
+            try:
+                found = _latest_iterm_rearm_epoch(log_path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            if found is not None and (latest is None or found > latest):
+                latest = found
+    if latest is None:
+        return None
+    return max(0, int(time.time()) - latest)
+
+
+def record_iterm_automation_state(
+    blocked: bool, *, second_view: str = "", probe_outcome: str = ""
+) -> None:
     """Persist (or clear) the observation for the heartbeat to surface.
 
     The daemon is a detached process nobody reads the logs of; the heartbeat is the only
@@ -264,6 +340,19 @@ def record_iterm_automation_state(blocked: bool, *, second_view: str = "") -> No
       the opposite failure: `dispatch` keys its once-per-occurrence ack on the flag's
       MTIME, so a rewrite every beat would re-alarm every beat.
 
+    `probe_outcome` (TRDD-EZ3PMQYX) is threaded straight into the payload — the caller
+    (`gather_fleet`) is the one that actually ran osascript and knows whether it errored,
+    timed out, or returned cleanly-but-empty; this function only persists that verdict.
+
+    `rearm_evidence_age_s` is EXCLUDED from the change-detection comparison below on
+    purpose: it is a live clock, seconds older on every single scan of an unbroken
+    episode, so comparing it byte-for-byte would make the flag "change" every beat and
+    re-alarm every beat via dispatch's content-hash ack — exactly the fatigue the
+    unchanged-content skip exists to prevent. The written age is therefore a SNAPSHOT
+    taken at the moment something else about the observation actually changed (or the
+    episode began), not a continuously-updated live value; a consumer reads "how old was
+    the evidence when this was last written", which is what the field promises.
+
     Best-effort: this must never break a fleet scan.
     """
     try:
@@ -273,18 +362,41 @@ def record_iterm_automation_state(blocked: bool, *, second_view: str = "") -> No
         if not blocked:
             flag.unlink(missing_ok=True)
             return
-        payload = iterm_automation_payload(interpreter=sys.executable, second_view=second_view)
+        core_payload = iterm_automation_payload(
+            interpreter=sys.executable, second_view=second_view, probe_outcome=probe_outcome
+        )
         try:
-            if flag.read_text(encoding="utf-8") == payload:
-                return  # unchanged — leave the mtime alone so the ack still holds
+            if _iterm_payload_core(flag.read_text(encoding="utf-8")) == core_payload:
+                return  # unchanged — leave the flag (and its age snapshot) alone
         except OSError:
             pass  # absent or unreadable → (re)write it below
+        payload = iterm_automation_payload(
+            interpreter=sys.executable,
+            second_view=second_view,
+            probe_outcome=probe_outcome,
+            rearm_evidence_age_s=_iterm_rearm_evidence_age_s(gs),
+        )
         # Atomic (tmp+rename): dispatch reads this file concurrently from another
         # process, and a truncate-then-write lets it observe a half-written flag —
         # json.loads then fails and the alarm prints the wrong fallback diagnosis.
         state.atomic_write(flag, payload)
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
         pass
+
+
+def _iterm_payload_core(raw: str) -> str:
+    """`raw` with `rearm_evidence_age_s` stripped, re-serialized the same way
+    `iterm_automation_payload` does — the comparable EQUALITY surface a change-detection
+    check can use without a live clock field forcing a "changed" verdict every scan.
+    Malformed/legacy (pre-JSON) content is returned unchanged, so it never spuriously
+    compares equal to a well-formed payload and the upgrade path still rewrites once."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return raw
+    if isinstance(data, dict):
+        data.pop("rearm_evidence_age_s", None)
+    return json.dumps(data, sort_keys=True)
 
 
 def iterm_automation_interpreter(raw: str) -> str:
@@ -301,6 +413,27 @@ def iterm_automation_second_view(raw: str) -> str:
     """The second-view verdict recorded in a flag's contents, or "" when absent. PURE.
     Same fail-open contract as `iterm_automation_interpreter`."""
     return _iterm_flag_field(raw, "second_view")
+
+
+def iterm_automation_probe_outcome(raw: str) -> str:
+    """The osascript probe's own outcome (`"error"` / `"timeout"` / `"empty"`) recorded
+    in a flag's contents, or "" when the write path did not classify it. PURE. Same
+    fail-open contract as `iterm_automation_interpreter` (TRDD-EZ3PMQYX)."""
+    return _iterm_flag_field(raw, "probe_outcome")
+
+
+def iterm_automation_rearm_evidence_age_s(raw: str) -> int | None:
+    """Seconds since the newest `FIRED rearm → iterm` daemon-log line AS OF the moment
+    this flag was last written, or None when the flag names none (no evidence was found,
+    or a pre-upgrade/malformed flag). PURE. #237."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("rearm_evidence_age_s")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _iterm_flag_field(raw: str, key: str) -> str:
@@ -759,6 +892,28 @@ def _run(cmd: list[str], *, timeout: int = 10) -> str:
         return ""
 
 
+def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str]:
+    """Like ``_run``, but distinguishes HOW an empty result happened (TRDD-EZ3PMQYX,
+    janitor#233): a nonzero exit or an unrunnable binary is ``"error"``, an exceeded
+    deadline is ``"timeout"``, and a clean exit is ``"ok"`` whatever the stdout looks
+    like (the caller decides "empty" from the parsed result, since an ``"ok"`` run can
+    legitimately return nothing to parse).
+
+    ``_run`` alone cannot support this: it swallows both a nonzero return code (no
+    ``check=True``) and every exception into the SAME blank string, so "the Apple Event
+    was denied", "osascript hung past the deadline", and "osascript is not installed"
+    were all indistinguishable at the call site — the exact ambiguity the iTerm-blocked
+    alarm has had to hedge around with two-cause language ever since. Never raises.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "", "timeout"
+    except Exception:  # noqa: BLE001 -- a probe failure must never break the scan
+        return "", "error"
+    return result.stdout, ("ok" if result.returncode == 0 else "error")
+
+
 def _cwd_of(pid: int) -> str | None:
     """The working directory of ``pid`` via ``lsof`` (macOS-friendly), or None."""
     for line in _run(
@@ -866,15 +1021,27 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     )
     iterm_by_tty: dict[str, str] = {}
     iterm_running = "iTerm" in ps_text
+    # `osascript_outcome` classifies HOW the call went, not just what it returned
+    # (TRDD-EZ3PMQYX, janitor#233): "error" (nonzero exit / unrunnable), "timeout"
+    # (exceeded its deadline), or "ok" (clean exit, whatever the stdout held). Only
+    # meaningful when `iterm_running` — osascript is never invoked otherwise.
+    osascript_outcome = "ok"
     if iterm_running:  # only drive osascript when iTerm is already up
-        iterm_by_tty = parse_iterm_sessions(
-            _run(["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15)
+        osascript_stdout, osascript_outcome = _run_probe_outcome(
+            ["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15
         )
+        iterm_by_tty = parse_iterm_sessions(osascript_stdout)
     # iTerm up + zero sessions enumerated = the Apple Event was blocked (TRDD-VQ4LX7ND).
     # Record it so the heartbeat can tell the human ONCE, instead of the daemon skipping
     # every frozen iTerm instance in silence forever. Self-clears the moment the grant
     # lands and sessions come back.
     blocked = iterm_automation_blocked(iterm_running=iterm_running, sessions=iterm_by_tty)
+    # A clean exit (`"ok"`) that still enumerated zero sessions means the CALL succeeded
+    # and simply had nothing to report — that is what the alarm names `"empty"`, distinct
+    # from the call itself failing. An `"error"`/`"timeout"` outcome carries as-is.
+    probe_outcome = "empty" if (blocked and osascript_outcome == "ok") else (
+        osascript_outcome if blocked else ""
+    )
     second_view = ""
     if blocked:
         # The INDEPENDENT SECOND VIEW (TRDD-DFKEXO79, janitor#92): osascript's zero alone
@@ -896,7 +1063,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
             )
         except Exception:  # noqa: BLE001 -- the second view must never break a scan
             second_view = ""
-    record_iterm_automation_state(blocked, second_view=second_view)
+    record_iterm_automation_state(blocked, second_view=second_view, probe_outcome=probe_outcome)
     aimaestro_cli, aimaestro_agents, aimaestro_list_ok = _aimaestro_agents()
     # The harness-exclusion inputs (TRDD-PZLVT2RN): a SUCCESSFUL list refreshes the
     # last-known agent-roots cache; a FAILED one (server down OR hiccup — we cannot

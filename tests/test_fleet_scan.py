@@ -397,6 +397,158 @@ def test_second_view_parse_fails_open() -> None:
 
 
 # ---------------------------------------------------------------------------
+# TRDD-EZ3PMQYX (janitor#233) — the osascript call site must distinguish HOW an
+# empty result happened: a nonzero exit / unrunnable binary ("error"), an exceeded
+# deadline ("timeout"), or a clean call that simply returned nothing ("empty").
+# ---------------------------------------------------------------------------
+def test_run_probe_outcome_ok_on_clean_exit() -> None:
+    stdout, outcome = fs._run_probe_outcome(["true"])
+    assert outcome == "ok"
+    assert stdout == ""
+
+
+def test_run_probe_outcome_error_on_nonzero_exit() -> None:
+    stdout, outcome = fs._run_probe_outcome(["false"])
+    assert outcome == "error"
+
+
+def test_run_probe_outcome_error_on_unrunnable_binary() -> None:
+    _, outcome = fs._run_probe_outcome(["/no/such/binary/at/all"])
+    assert outcome == "error"
+
+
+def test_run_probe_outcome_timeout_on_exceeded_deadline() -> None:
+    _, outcome = fs._run_probe_outcome(["sleep", "5"], timeout=0.05)
+    assert outcome == "timeout"
+
+
+def test_flag_carries_the_probe_outcome(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """RED without the fix: before this field existed, an "error" (denied/unrunnable) and
+    a "timeout" (transient hang) both collapsed into the same silence the alarm then had
+    to hedge between with two-cause language. Now the call site's own verdict rides the
+    flag."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True, probe_outcome="timeout")
+    raw = flag.read_text(encoding="utf-8")
+    assert fs.iterm_automation_probe_outcome(raw) == "timeout"
+
+    # A DIFFERENT outcome IS a content change → the compare-and-write must catch it, the
+    # same way a second_view change does (re-alarm once, not every beat).
+    fs.record_iterm_automation_state(True, probe_outcome="error")
+    assert fs.iterm_automation_probe_outcome(flag.read_text(encoding="utf-8")) == "error"
+
+
+def test_probe_outcome_parse_fails_open() -> None:
+    """Same fail-open contract as every other flag field: absent/pre-upgrade/garbage → ""."""
+    assert fs.iterm_automation_probe_outcome("plain prose flag") == ""
+    assert fs.iterm_automation_probe_outcome('{"interpreter": "/x"}') == ""
+    assert fs.iterm_automation_probe_outcome('{"probe_outcome": 3}') == ""
+
+
+# ---------------------------------------------------------------------------
+# #237 — the flag carries the age of the newest `FIRED rearm → iterm` daemon-log line
+# AT WRITE TIME, so a consumer that never reads the daemon log itself is not blind to
+# the positive evidence dispatch.py's own alarm already correlates against.
+# ---------------------------------------------------------------------------
+def test_latest_iterm_rearm_epoch_finds_the_newest_matching_line() -> None:
+    log = (
+        "[2026-08-08T10:00:00+0200] some other line\n"
+        "[2026-08-08T10:05:00+0200] FIRED rearm → iterm\n"
+        "[2026-08-08T10:12:00+0200] FIRED rearm → iterm\n"
+        "[not-a-timestamp] FIRED rearm → iterm\n"
+    )
+    import datetime as dt
+
+    epoch = fs._latest_iterm_rearm_epoch(log)
+    assert epoch == int(
+        dt.datetime.strptime("2026-08-08T10:12:00+0200", "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    )
+
+
+def test_latest_iterm_rearm_epoch_none_when_no_match() -> None:
+    assert fs._latest_iterm_rearm_epoch("[2026-08-08T10:00:00+0200] nothing relevant\n") is None
+
+
+def test_flag_carries_rearm_evidence_age_when_a_daemon_log_has_it(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    import time as _time
+
+    now = int(_time.time())
+    rearm_epoch = now - 600  # 10 minutes ago
+    import datetime as dt
+
+    stamp = dt.datetime.fromtimestamp(rearm_epoch, tz=dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S+0000"
+    )
+    (tmp_path / "daemon.log").write_text(
+        f"[{stamp}] FIRED rearm → iterm\n", encoding="utf-8"
+    )
+
+    fs.record_iterm_automation_state(True)
+
+    raw = (tmp_path / fs.ITERM_TCC_FLAG).read_text(encoding="utf-8")
+    age = fs.iterm_automation_rearm_evidence_age_s(raw)
+    assert age is not None
+    assert 590 <= age <= 700  # a few seconds of test-run slack either side of 600
+
+
+def test_flag_omits_rearm_evidence_age_when_none_found(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """Absent evidence -> the field is OMITTED, not written as 0 (a 0 would read as
+    "just happened" rather than "unknown"; acceptance criterion of TRDD-EZ3PMQYX)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+
+    fs.record_iterm_automation_state(True)
+
+    raw = (tmp_path / fs.ITERM_TCC_FLAG).read_text(encoding="utf-8")
+    assert "rearm_evidence_age_s" not in raw
+    assert fs.iterm_automation_rearm_evidence_age_s(raw) is None
+
+
+def test_rearm_evidence_age_does_not_force_a_rewrite_on_every_scan(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """RED without the fix: a live, ever-increasing age field naively included in the
+    change-detection comparison would make the flag "change" (and dispatch's content-hash
+    ack re-alarm) on every single scan of an unbroken episode, even though nothing about
+    the OBSERVATION changed — precisely the alarm-fatigue bug the unchanged-content skip
+    exists to prevent (see test_unchanged_observation_does_not_touch_the_flag_mtime)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    import datetime as dt
+    import time as _time
+
+    stamp = dt.datetime.fromtimestamp(
+        int(_time.time()) - 60, tz=dt.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    (tmp_path / "daemon.log").write_text(
+        f"[{stamp}] FIRED rearm → iterm\n", encoding="utf-8"
+    )
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True)
+    first_mtime = flag.stat().st_mtime_ns
+    os.utime(flag, ns=(first_mtime - 5_000_000_000, first_mtime - 5_000_000_000))
+    aged_mtime = flag.stat().st_mtime_ns
+
+    fs.record_iterm_automation_state(True)  # same observation, later wall-clock instant
+
+    assert flag.stat().st_mtime_ns == aged_mtime, (
+        "the live age field must not by itself trigger a rewrite/re-alarm"
+    )
+
+
+# ---------------------------------------------------------------------------
 # TRDD-8DR0X08A — substantive liveness: the guardian's own typed command appends
 # a queue-operation line that refreshed the mtime probe, resetting the attempt
 # budget and re-injecting forever. These pin the fix at every layer.
