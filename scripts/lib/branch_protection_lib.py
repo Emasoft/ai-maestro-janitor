@@ -108,9 +108,63 @@ _ADMIN_REPOSITORY_ROLE_ID = 5
 _TAG_PROTECT_REF = "refs/tags/v*.*.*"
 
 
+def require_pull_request_for(slug: str | None = None) -> bool:
+    """Should the baseline demand a PULL REQUEST for this repo? PR only when a party OTHER
+    than the author reviews it. USER governance ruling, 2026-08-13.
+
+    TRUE in exactly two situations:
+
+    1. **Inside the ai-maestro harness.** Governance there is that every repo is managed by
+       the MAINTAINER agent (and the INTEGRATOR within a team): a working agent may only
+       change things locally on its own branch and then open a PR, which the MAINTAINER
+       reviews and approves or rejects. The PR is the hand-off that governance is built on,
+       so it MUST be enforced — dropping it there would remove the review authority itself.
+
+    2. **A repo owned by SOMEONE ELSE.** Collaborating on another owner's project means the
+       PR is a genuine request to a genuine second party, harness or not. (Push would be
+       refused anyway; the ruleset should not pretend otherwise.)
+
+    FALSE standalone on your own repo — the overwhelmingly common case here. The same agent
+    writes the code and reviews it, so a PR is addressed to its own author: it reviews
+    nothing, gates nothing, and is the direct cause of a repo sitting "eternally stuck with
+    dozens of feature branches it can open but never merge" (USER, 2026-08-13). A direct
+    push is the correct workflow.
+
+    Fail-open toward the WORKFLOW: an undeterminable backend or login returns False. A
+    wrongly-DEMANDED PR silently halts all merging (the disaster this ruling exists to end);
+    a wrongly-omitted one only means a solo owner pushes to their own default branch, which
+    is what they would do anyway.
+    """
+    try:
+        import harness_backend  # noqa: PLC0415 -- local: keeps this module importable alone
+
+        if harness_backend.backend() == harness_backend.BACKEND_AIMAESTRO:
+            return True
+    except Exception:  # noqa: BLE001 -- never let a backend probe break a baseline apply
+        pass
+    if not slug:
+        return False
+    try:
+        import cross_project_issue as cpi  # noqa: PLC0415 -- local, same reason
+
+        login = cpi.gh_login()
+        # Unknown login → False, per the fail-open note above: we must not demand a PR on a
+        # repo we merely FAILED to confirm is ours.
+        return bool(login) and not cpi.is_owned_by(slug, login)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def require_pull_request_default() -> bool:
+    """Back-compat shim for callers with no repo slug — harness-only decision."""
+    return require_pull_request_for(None)
+
+
 def baseline_ruleset_payloads(
     default_branch: str,
     required_status_checks: list[dict] | None = None,
+    *,
+    require_pull_request: bool | None = None,
 ) -> list[dict]:
     """Return the three ratified baseline ruleset payloads (branch pair + tag protection).
 
@@ -145,6 +199,7 @@ def baseline_ruleset_payloads(
     if not default_branch:
         raise ValueError("default_branch must be a non-empty string")
     checks = list(required_status_checks or [])
+    want_pr = require_pull_request_default() if require_pull_request is None else require_pull_request
     history_protect = {
         "name": HISTORY_RULESET_NAME,
         "target": "branch",
@@ -155,7 +210,26 @@ def baseline_ruleset_payloads(
                 "exclude": [],
             },
         },
-        "bypass_actors": [],
+        # The OWNER (admin role) bypasses history-protect. USER Tier-3 ruling 2026-08-13:
+        # "both baseline-history-protect and baseline-pr-and-checks must be changed to allow
+        # mutations in history and direct pushing/merging by the owner."
+        #
+        # This was `[]` — nobody, explicitly including the admin. On a repo whose only human
+        # is the owner that is not protection, it is a lock with no key: an amend, a rebase of
+        # a stale branch, or a force-push to undo a bad commit becomes impossible for the one
+        # person entitled to do it, and the guardian ends up being the thing blocking the work.
+        # Same reasoning that removed `required_linear_history` (janitor#14): the baseline may
+        # protect against accident, never against the owner's deliberate act.
+        #
+        # `deletion` + `non_fast_forward` still apply to EVERY non-admin actor, so CI, agents
+        # and outside contributors remain fully constrained — only the owner is exempt.
+        "bypass_actors": [
+            {
+                "actor_id": _ADMIN_REPOSITORY_ROLE_ID,
+                "actor_type": "RepositoryRole",
+                "bypass_mode": "always",
+            },
+        ],
         "rules": [
             {"type": "deletion"},
             {"type": "non_fast_forward"},
@@ -191,19 +265,49 @@ def baseline_ruleset_payloads(
         ],
         # The checks rule is APPENDED BELOW only when `checks` is non-empty — GitHub
         # 422s an empty required_status_checks array and fails the whole write.
-        "rules": [
+        #
+        # The pull_request rule below is emitted ONLY when `want_pr` (see
+        # `require_pull_request_default`). Standalone, the author and the reviewer are the
+        # same agent, so a PR is addressed to its own author — it reviews nothing and only
+        # blocks the merge. CI still runs on push, and history-protect still forbids deletion
+        # and history rewrite for every non-owner, so dropping the PR rule costs no real
+        # protection; it removes a hand-off to a party that does not exist.
+        "rules": [],
+    }
+    if want_pr:
+        pr_and_checks["rules"].append(
             {
                 "type": "pull_request",
                 "parameters": {
-                    "required_approving_review_count": 1,
+                    # ZERO required approvals, not 1. USER Tier-3 ruling 2026-08-13, from a
+                    # measured failure: a repo sat "eternally stuck with dozens of feature
+                    # branches it can open but never merge".
+                    #
+                    # WHY 1 was unsatisfiable rather than merely strict: GitHub does not let
+                    # an author approve their own pull request. On a repo whose only human is
+                    # the owner — which is every repo in this fleet — a PR they opened can
+                    # NEVER reach one approval. There is no second reviewer and there never
+                    # will be. So the rule did not raise the bar, it closed the door, and the
+                    # branches piled up behind it.
+                    #
+                    # The PR path itself is KEPT (this rule still exists): PRs still run CI,
+                    # still collect review threads, and `required_review_thread_resolution`
+                    # still forces open threads to be resolved before merge. What is removed
+                    # is only the count that no solo-owner repo could ever reach.
+                    #
+                    # Do NOT "restore" this to 1 on the theory that review is being skipped.
+                    # It is the same class of error as `required_linear_history` (janitor#14)
+                    # — a rule that reads as rigour and functions as a deadlock. If a repo
+                    # ever genuinely has two humans, raise it FOR THAT REPO, not in the
+                    # fleet-wide baseline.
+                    "required_approving_review_count": 0,
                     "dismiss_stale_reviews_on_push": True,
                     "require_code_owner_review": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
                 },
-            },
-        ],
-    }
+            }
+        )
     if checks:
         pr_and_checks["rules"].append(
             {
@@ -562,7 +666,12 @@ def apply_baseline_rulesets(
                 by_name[nm] = rid
 
     checks = detect_required_status_checks(project_root)
-    payloads = baseline_ruleset_payloads(default_branch, checks)
+    # Slug-aware: this caller KNOWS the repo, so it can tell "my own standalone project"
+    # (push directly) from "someone else's repo" (PR is a real request). See
+    # `require_pull_request_for`.
+    payloads = baseline_ruleset_payloads(
+        default_branch, checks, require_pull_request=require_pull_request_for(slug)
+    )
 
     results: list[tuple[str, bool, str]] = []
     rulesets_ok = True

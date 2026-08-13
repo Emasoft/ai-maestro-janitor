@@ -208,12 +208,100 @@ def test_pr_checks_omits_the_checks_rule_when_no_contexts(project_env: Path) -> 
 
     pr = bpl.baseline_ruleset_payloads("main", [])[1]
     assert pr["name"] == "baseline-pr-and-checks"
+    # Pinned in HARNESS mode explicitly: this test is about the CHECKS rule's omission, and
+    # since 2026-08-13 the pull_request rule is itself conditional, so an implicit default
+    # would silently change what this test measures.
+    pr = bpl.baseline_ruleset_payloads("main", [], require_pull_request=True)[1]
     rule_types = [r["type"] for r in pr["rules"]]
     assert rule_types == ["pull_request"], f"empty contexts must omit the checks rule, got {rule_types}"
-    # The PR-review gate — the part that actually matters — survives everywhere.
-    assert pr["rules"][0]["parameters"]["required_approving_review_count"] == 1
+    # The PR-review gate — the part that actually matters — survives everywhere. The APPROVAL
+    # COUNT is 0 (USER Tier-3 ruling 2026-08-13): GitHub forbids approving your own PR, so on
+    # a solo-owner repo a count of 1 is unsatisfiable and merges can never happen at all.
+    assert pr["rules"][0]["parameters"]["required_approving_review_count"] == 0
     # None behaves the same as [].
-    assert [r["type"] for r in bpl.baseline_ruleset_payloads("main", None)[1]["rules"]] == ["pull_request"]
+    assert [
+        r["type"]
+        for r in bpl.baseline_ruleset_payloads("main", None, require_pull_request=True)[1]["rules"]
+    ] == ["pull_request"]
+
+
+def test_standalone_omits_the_pull_request_rule(project_env: Path) -> None:
+    """STANDALONE (outside the ai-maestro harness): NO pull_request rule, so the owner pushes
+    to the default branch directly.
+
+    USER Tier-3 ruling 2026-08-13. Outside the harness the same agent writes the code and
+    reviews it, so a PR is addressed to its own author — it reviews nothing and only blocks
+    the merge, which is how a repo ends up with feature branches it can open but never merge.
+    A PR is a hand-off to a SECOND party; standalone there is no second party.
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    pr = bpl.baseline_ruleset_payloads("main", [{"context": "ci"}], require_pull_request=False)[1]
+    assert [r["type"] for r in pr["rules"]] == ["required_status_checks"], (
+        "standalone must not demand a PR — CI still gates, the PR does not"
+    )
+    # What must NOT be lost with it: history-protect still constrains every non-owner.
+    hist = bpl.baseline_ruleset_payloads("main", require_pull_request=False)[0]
+    assert {r["type"] for r in hist["rules"]} == {"deletion", "non_fast_forward"}
+
+
+def test_require_pull_request_for_covers_all_three_governance_cases(
+    project_env: Path, monkeypatch
+) -> None:
+    """The USER governance ruling (2026-08-13) has THREE cases, not two — pin all of them.
+
+    harness → PR (MAINTAINER/INTEGRATOR reviews it) · foreign repo → PR (a real second
+    party) · own repo standalone → NO PR (a PR to yourself reviews nothing).
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    import cross_project_issue as cpi  # type: ignore[import-not-found]
+    import harness_backend as hb  # type: ignore[import-not-found]
+
+    monkeypatch.setattr(cpi, "gh_login", lambda: "Emasoft")
+
+    monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_AIMAESTRO)
+    assert bpl.require_pull_request_for("Emasoft/anything") is True, "harness always demands a PR"
+
+    monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_STANDALONE)
+    assert bpl.require_pull_request_for("Emasoft/ai-maestro-janitor") is False, (
+        "own repo standalone must push directly — a PR to yourself is the deadlock"
+    )
+    assert bpl.require_pull_request_for("someone-else/their-repo") is True, (
+        "a repo owned by another party is a real hand-off"
+    )
+    # Unknown login must NOT be read as 'foreign' — failing open toward the workflow is the
+    # whole point; demanding a PR we cannot justify is the disaster this ruling ends.
+    monkeypatch.setattr(cpi, "gh_login", lambda: "")
+    assert bpl.require_pull_request_for("someone-else/their-repo") is False
+
+
+def test_baseline_never_demands_immutable_history(project_env: Path) -> None:
+    """USER ruling: immutable history must NEVER be enabled — 'an impossible requirement that
+    will block the development causing disasters'.
+
+    Two independent ways it could creep back: the `required_linear_history` RULE, or a
+    history-protect ruleset with no bypass (which makes `non_fast_forward` absolute for the
+    owner too). Both are asserted against, in BOTH modes.
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    for want_pr in (True, False):
+        hist = bpl.baseline_ruleset_payloads("main", require_pull_request=want_pr)[0]
+        assert "required_linear_history" not in {r["type"] for r in hist["rules"]}
+        assert hist["bypass_actors"], "the owner must always retain a way to amend history"
+
+
+def test_harness_keeps_the_pull_request_rule(project_env: Path) -> None:
+    """HARNESS: the PR rule IS emitted — there a MAINTAINER/INTEGRATOR agent is delegated to
+    review, so the PR is a genuine hand-off and not ceremony. The two modes must differ; if
+    this ever matches the standalone shape the distinction has silently collapsed."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    harness = bpl.baseline_ruleset_payloads("main", [{"context": "ci"}], require_pull_request=True)[1]
+    standalone = bpl.baseline_ruleset_payloads("main", [{"context": "ci"}], require_pull_request=False)[1]
+    assert "pull_request" in {r["type"] for r in harness["rules"]}
+    assert "pull_request" not in {r["type"] for r in standalone["rules"]}
 
 
 def test_pr_checks_includes_the_checks_rule_when_contexts_exist(project_env: Path) -> None:
@@ -223,9 +311,16 @@ def test_pr_checks_includes_the_checks_rule_when_contexts_exist(project_env: Pat
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
 
     ctx = [{"context": "test"}, {"context": "lint"}]
-    pr = bpl.baseline_ruleset_payloads("main", ctx)[1]
+    # HARNESS mode explicitly (the PR rule is conditional since 2026-08-13), so this keeps
+    # testing the checks rule's presence and ORDER rather than accidentally testing the mode.
+    pr = bpl.baseline_ruleset_payloads("main", ctx, require_pull_request=True)[1]
     rule_types = [r["type"] for r in pr["rules"]]
     assert rule_types == ["pull_request", "required_status_checks"]
+    # And standalone the checks rule must STILL carry the contexts — CI is what gates there,
+    # so losing it would leave the default branch with no automated gate at all.
+    sa = bpl.baseline_ruleset_payloads("main", ctx, require_pull_request=False)[1]
+    sa_checks = next(r for r in sa["rules"] if r["type"] == "required_status_checks")
+    assert sa_checks["parameters"]["required_status_checks"] == ctx
     checks_rule = pr["rules"][1]
     assert checks_rule["parameters"]["required_status_checks"] == ctx
     assert checks_rule["parameters"]["strict_required_status_checks_policy"] is True
@@ -242,9 +337,18 @@ def test_history_protect_ruleset_shape(project_env: Path) -> None:
     assert hist["enforcement"] == "active"
     assert hist["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
     assert hist["conditions"]["ref_name"]["exclude"] == []
-    assert hist["bypass_actors"] == []
+    # The OWNER bypasses (USER Tier-3 ruling 2026-08-13). This was `== []`; a baseline that
+    # locks the owner out of their own history is a lock with no key, not protection.
+    assert hist["bypass_actors"] == [
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+    ]
     rule_types = {r["type"] for r in hist["rules"]}
     assert rule_types == {"deletion", "non_fast_forward"}
+    # The rules THEMSELVES must survive — the ruling exempts the owner, it does not delete
+    # the protection. Everyone who is not admin is still blocked from deleting the branch or
+    # rewriting its history.
+    assert {"type": "deletion"} in hist["rules"]
+    assert {"type": "non_fast_forward"} in hist["rules"]
     # Regression guard: linear history must NEVER come back — it is harmful for
     # the multi-agent model (forbids merge commits → endless rebase churn).
     assert "required_linear_history" not in rule_types
@@ -262,7 +366,9 @@ def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:
     """
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    pr = bpl.baseline_ruleset_payloads("main", [{"context": "test"}])[1]
+    # HARNESS mode explicitly — this test pins the PR rule's PARAMETERS, which only exist
+    # when the rule is emitted at all (conditional since the 2026-08-13 ruling).
+    pr = bpl.baseline_ruleset_payloads("main", [{"context": "test"}], require_pull_request=True)[1]
     assert pr["target"] == "branch"
     assert pr["enforcement"] == "active"
     assert pr["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
@@ -274,7 +380,13 @@ def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:
     rule_types = {r["type"] for r in pr["rules"]}
     assert rule_types == {"pull_request", "required_status_checks"}
     pr_rule = next(r for r in pr["rules"] if r["type"] == "pull_request")
-    assert pr_rule["parameters"]["required_approving_review_count"] == 1
+    # 0, not 1 — see the ruling note above. The PR RULE itself is still asserted present
+    # (rule_types above), so the pull-request path and its CI are intact; only the
+    # unreachable approval count is gone.
+    assert pr_rule["parameters"]["required_approving_review_count"] == 0
+    # Thread resolution still gates the merge, so review feedback cannot be silently ignored
+    # — that is what carries the review guarantee now that the count cannot.
+    assert pr_rule["parameters"]["required_review_thread_resolution"] is True
     assert pr_rule["parameters"]["dismiss_stale_reviews_on_push"] is True
     assert pr_rule["parameters"]["require_code_owner_review"] is False
     assert pr_rule["parameters"]["require_last_push_approval"] is False

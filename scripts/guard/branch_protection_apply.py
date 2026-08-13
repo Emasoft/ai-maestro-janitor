@@ -197,7 +197,12 @@ def main() -> int:
         return 0
 
     # Loud + auditable announcement. Record both emitted payloads.
-    payloads = bpl.baseline_ruleset_payloads(default_branch, checks)
+    # Same slug-aware decision the applier used, so the AUDIT RECORD shows the payloads that
+    # were actually applied. Recomputing it without the slug would log a PR rule this repo
+    # never received (or omit one it did) — an audit trail that disagrees with reality.
+    payloads = bpl.baseline_ruleset_payloads(
+        default_branch, checks, require_pull_request=bpl.require_pull_request_for(slug)
+    )
     payloads_json = json.dumps(payloads, separators=(",", ":"))
     summary = "; ".join(f"{name}={msg}" for name, _ok, msg in results)
     _audit_append(f"OK\t{slug}\t{default_branch}\t{summary}\t{payloads_json}")
