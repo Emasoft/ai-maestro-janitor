@@ -3,7 +3,7 @@ trdd-id: 3QIQ2E6J
 title: Split siblings are perpetual conflict candidates — the refusal ledger cannot fix this because the pages are genuinely new
 column: todo
 created: 2026-08-12T21:00:24+0200
-updated: 2026-08-12T21:00:24+0200
+updated: 2026-08-13T04:16:35+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -46,6 +46,39 @@ at all.** They share vocabulary by construction — the split is what gave them 
 — so the conflict scan surfaces them, an agent judges them, declines, and the next split-shaped
 edit re-arms the whole cycle. The janitor is proposing to undo a decision the janitor just
 made, and paying ~221k tokens per round to be told no.
+
+## ⏵ 2026-08-13 — DESIGN SETTLED (two decisions), scope cut to PYTHON-ONLY. Not yet implemented.
+
+Re-verified the card's three claims first-hand (all hold: no lineage field anywhere in
+`scripts/`+`skills/`; `candidate_key` is path-keyed; `content_hash` hashes bytes). Then two
+findings that change the work:
+
+**1. NO RUST CHANGE, NO memgrep RELEASE — the consumer can read frontmatter itself.** The
+conflict candidates are surfaced by `detectors/memory-librarian.py`, whose `NoteMeta`
+(`:286`) carries only `tags` + `tokens` because it parses `memgrep index --markdown`. Routing a
+new field through that output means editing the Rust crate AND shipping a memgrep release. But
+the librarian already holds each note's memdir-relative PATH, so it can read the lineage field
+straight from the page's own frontmatter. That keeps the whole change in Python + the split
+skill, and — the real prize — it means the field never has to become part of memgrep's index
+schema at all.
+
+**2. A CHEAPER ALTERNATIVE WAS CONSIDERED AND KILLED ON THE ACCEPTANCE CRITERIA — do not
+revive it.** `verify_split` already requires a split to emit an OVERVIEW page that links every
+sub-page (`:1181`, "a map of summaries … the leaves it points to"), so "siblings = both linked
+from one overview" looked like it needed no schema change whatsoever. **It fails acceptance box
+2.** A hub links ALL its components, not only pages one split produced, so that predicate
+silences genuine conflicts BETWEEN two components of the same hub — exactly the case box 2
+protects. Link-derived sibling-hood is strictly wider than split-sibling-hood.
+
+**Therefore the card's original sketch stands and is the right shape:** an explicit marker
+meaning *"the janitor itself separated these two"*, which is the exact predicate and nothing
+wider. Its narrowness is the feature, not an accident of implementation.
+
+**Still genuinely open when picked up** (per the card's own warning, do not treat as settled):
+the field's NAME and whether it names the parent page or a per-split id. Prefer a per-split ID:
+naming the parent breaks when the parent is later renamed or itself split again, whereas an id
+survives both and answers "same split event?" directly. Whatever is chosen must be emitted and
+normalized through the `publish-globally` normalizer (`9ddb3cf7`, `25013e64`), never beside it.
 
 ## Sketch (decide when picked up — do NOT treat as settled)
 
