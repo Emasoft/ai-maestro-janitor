@@ -23,6 +23,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import claudemd_migration_plan as cmig  # noqa: E402
+from repomap.claudemd_slim import WIKIMEM_FENCE_END, WIKIMEM_FENCE_START  # noqa: E402
 from repomap.renderer import FENCE_END as MAP_END  # noqa: E402
 from repomap.renderer import FENCE_START as MAP_START  # noqa: E402
 
@@ -256,3 +257,56 @@ def test_render_plan_reports_no_blocks_when_conforming() -> None:
     plans = cmig.plan_migration(text, roots=[])
     assert plans == []
     assert "no narrative blocks" in cmig.render_plan(plans)
+
+
+# ── the 2026-08-13 keystone regression: candidate selection keys on actual violations ──
+
+_WIKI_BLOCK = f"{WIKIMEM_FENCE_START} v1 digest=x generated=y\nindex\n{WIKIMEM_FENCE_END}\n"
+
+
+def _conforming_claude_md() -> str:
+    """A file that GENUINELY conforms to the slim contract: both fences present, a
+    github URL in the narrative, and the narrative — title, one-paragraph description,
+    a `## Links` URL, a `## Commands` dev-ops line — well under the byte cap. This is
+    exactly the shape of the five PERMITTED elements the 2026-08-13 pre-check found the
+    planner wrongly proposing to migrate."""
+    return (
+        "# proj\n\n"
+        "A short one-paragraph project description with a link https://github.com/o/r for context.\n\n"
+        "## Links\n\n"
+        "- Repo: https://github.com/o/r\n\n"
+        "## Commands\n\n"
+        f"{_DEVOPS_COMMAND_LINE}\n\n"
+        f"{_MAP_BLOCK}"
+        f"{_WIKI_BLOCK}"
+    )
+
+
+def test_conforming_claude_md_yields_empty_plan() -> None:
+    """The keystone regression (TRDD-LFSWY0C6, 2026-08-13 pre-check): a CLAUDE.md that
+    `check` already calls conforming (`slim_violations` reports nothing) MUST plan to
+    migrate nothing. None of the OTHER fixtures in this file can catch this class of bug
+    — every one of them plants a real violation (a missing fence, a missing github URL,
+    or both) — which is exactly why 13 green tests missed the live-input defect."""
+    text = _conforming_claude_md()
+    assert cmig.slim_violations(text) == []  # sanity: this fixture is genuinely conforming
+    assert cmig.plan_migration(text, roots=[]) == []
+
+
+def test_slim_violations_empty_implies_empty_plan_on_the_live_claude_md() -> None:
+    """The exact invariant the card demands, checked for free against the repo's own
+    live `CLAUDE.md` — no synthetic fixture needed, and no memgrep binary needed either:
+    a conforming file short-circuits before the (impure) recall step ever runs."""
+    text = (_PROJECT_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert cmig.slim_violations(text) == []
+    assert cmig.plan_migration(text, roots=[]) == []
+
+
+def test_conforming_gate_actually_gates_a_would_be_migratable_block() -> None:
+    """Prove the guard is load-bearing, not vacuous: strip the wikimem-index fence (a
+    real violation) from the conforming fixture and the SAME description paragraph the
+    previous test proved is now suppressed becomes MIGRATABLE again."""
+    non_conforming = _conforming_claude_md().replace(_WIKI_BLOCK, "")
+    assert cmig.slim_violations(non_conforming) != []
+    plans = cmig.plan_migration(non_conforming, roots=[])
+    assert any("A short one-paragraph project description" in p.block.text for p in plans)

@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from repomap.claudemd_slim import narrative_outside_fences
+from repomap.claudemd_slim import narrative_outside_fences, slim_violations
 
 # ── 1. Narrative block splitting ─────────────────────────────────────────────────────
 
@@ -359,7 +359,20 @@ def plan_migration(
 
     NEVER writes CLAUDE.md, NEVER writes/creates a memory page — `claude_md_text` and
     `roots` are read-only inputs (roots are read by the `memgrep recall` subprocess only).
+
+    Candidate selection keys on `slim_violations` — the authoritative "does this file
+    actually violate the slim contract" check — NOT on `narrative_outside_fences` alone.
+    `narrative_outside_fences` returns everything outside the two janitor fences, which
+    BY DESIGN also includes the five PERMITTED elements (title, description, project
+    URLs, dev-ops commands): treating all of that as migration candidates is exactly the
+    2026-08-13 defect (TRDD-LFSWY0C6) — it proposed migrating this project's own title,
+    description and `## Links` section, none of which are defects. A file `check` already
+    calls conforming (`slim_violations(claude_md_text) == []`) MUST plan to migrate
+    nothing; only once the file is diagnosed as non-conforming does per-block candidate
+    selection have any defect to locate.
     """
+    if not slim_violations(claude_md_text):
+        return []
     narrative = narrative_outside_fences(claude_md_text)
     blocks = split_narrative_blocks(narrative)
     binary = memgrep_bin or find_memgrep()
