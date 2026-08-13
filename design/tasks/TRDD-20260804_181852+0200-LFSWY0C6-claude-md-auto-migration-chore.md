@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T08:42:00+0200
+updated: 2026-08-13T09:10:00+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -359,6 +359,34 @@ documented.
 - [ ] An agent writes the atom/fold (CM-2 step 3) — unbuilt
 - [ ] The fences are refreshed after migration (CM-2 step 6) — unbuilt
 - [ ] The scheduler runs it unprompted (`PRRD G8.1`) — unbuilt
+
+## ⚠ 2026-08-13 09:10 — THE SCHEDULER PLAN IN §STATE IS PROBABLY WRONG. Read before building part 2.
+
+The original NEXT ACTION says *"implement the chore per §2 as a new intervention in the
+memory-maintenance scheduler … + a `[janitor-memory-claudemd]` marker"*. Read that scheduler before
+acting on it — two problems, the second decisive.
+
+**1. Axis mismatch.** `scripts/detectors/memory-maintenance.py` round-robins over
+`_scopes_in_play() × _MARKERS` — every intervention's subject is a MEMORY SCOPE ROOT, and the
+per-dispatch pending state names `(scope, root)`. This chore's subject is a FILE in the repo. Keying
+it on a memory scope is a category error, and the cursor would rotate it against scopes that have
+nothing to do with it.
+
+**2. The PROJECT gate makes it inert by default — VERIFIED, not assumed.**
+`memory_settings.py:60` — `"edit_project_scope": False` — and `_scopes_in_play` (line 130) DROPS the
+PROJECT scope unless the user opted in, deliberately, *"because PROJECT memory is in-repo and
+unpushable outside publish.py"*.
+
+CLAUDE.md carries project architecture and code knowledge, which the scope-routing rule sends to
+**PROJECT** wikimem. So a chore hosted here would be **silently disabled on every default install**:
+wired, reachable, documented, and inert — the exact failure shape this card and TRDD-KTXZJC6E are
+both about, reproduced one layer up by following this card's own plan.
+
+**So part 2 must first DECIDE the host, not just implement it:** a separate detector on its own
+cadence (subject = the repo's CLAUDE.md, no scope axis), or a memory intervention that explicitly
+resolves the PROJECT gate. That gate exists for a real reason — do not simply bypass it; a chore
+that writes unpushable in-repo memory unattended is a different risk, and G8.1 does not settle it.
+G8.1 settles *that* migration is automatic, never *which component* runs it or what it may write.
 
 ## 1. Why (the cost argument, measured)
 
