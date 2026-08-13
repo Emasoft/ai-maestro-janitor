@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=10959f30dd6c digest=47c991db6a5f generated=2026-08-13T07:47:47+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0010d752ffb0 digest=5147c7bd333f generated=2026-08-13T17:40:07+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/agent_context_bench.py` — agent_context_bench — measure what `agent_config_patterns.scan_text` actually CATCHES.
   · expand_fake_secrets(text) -> str — Materialize `{{FAKESECRET:...}}` / `{{FAKEDSN:...}}` corpus placeholders.
@@ -49,6 +49,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · cmd_check(root) -> int
   · cmd_verify(root, old_file) -> int — Prove the migration lost nothing: OLD narrative facts + load-bearing tokens must
   · cmd_plan(root) -> int — DECISION-only migration plan (TRDD-LFSWY0C6): reports what WOULD migrate where.
+  · cmd_apply(root, blocks_file, *, dry_run) -> int — DELIVERY (TRDD-LFSWY0C6, CM-2 §4-5): remove already-migrated blocks, or refuse.
   · main() -> int
 `scripts/clear_trigger.py` — Backing script for /janitor-handoff-and-clear (TRDD-Z582IKIR P1).
   · plan_clear() -> tuple[list[str], list[str]] — The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
@@ -256,8 +257,6 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/external_handoff_clear.py` — External (ZERO model turn) handoff-and-clear — the watcher (TRDD-PXP08ZQC).
   · main() -> int
-`scripts/findings_cli.py` — Backing CLI for /janitor-findings (TRDD-FENWWB4E — ARCHITECTURE.md §4, ratified rev 3).
-  · main() -> int
 `scripts/fleet_status.py` — Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
   · main() -> int
 `scripts/generate_integrity_manifest.py` — generate_integrity_manifest — write .integrity/manifest-sha256.json.
@@ -283,8 +282,6 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · response_text(payload) -> str — Flatten a tool_response of unknown shape (str | dict | list) to text.
   · main() -> int
 `scripts/github_config_fix.py` — Backing script for /janitor-github-config-fix (TRDD-157OH2D7) — the on-demand FIX.
-  · main() -> int
-`scripts/global_control_cli.py` — Backing CLI for the MACHINE-WIDE janitor control flags (TRDD-a3fa4d5d).
   · main() -> int
 `scripts/guard/branch_protection_apply.py` — Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
   · main() -> int
@@ -392,7 +389,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · find_install_import_correlations(prose_text, python_files, declared_deps) -> list[Finding] — Cross-reference install commands and imports.
   · scan_text(text) -> list[Finding] — Run every single-regex rule against ``text`` (prose; the caller is
 `scripts/lib/branch_protection_lib.py` — Branch-protection ruleset helpers — shared between the Tier 1 user-invoked
-  · baseline_ruleset_payloads(default_branch, required_status_checks) -> list[dict] — Return the three ratified baseline ruleset payloads (branch pair + tag protection).
+  · require_pull_request_for(slug) -> bool — Should the baseline demand a PULL REQUEST for this repo? PR only when a party OTHER
+  · require_pull_request_default() -> bool — Back-compat shim for callers with no repo slug — harness-only decision.
+  · baseline_ruleset_payloads(default_branch, required_status_checks, *, require_pull_request) -> list[dict] — Return the three ratified baseline ruleset payloads (branch pair + tag protection).
   · detect_repo_slug(plugin_root) -> str | None — Read `repository` from `.claude-plugin/plugin.json` and return
   · gh_available() -> bool
   · detect_default_branch(slug) -> str | None — Ask gh for the repo's default branch. Returns None on failure.
@@ -420,12 +419,19 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · classify(*, chore, last_run, cadence_s, now, factor, min_grace_s, observed_s) -> Verdict — Judge ONE claimed chore from its completion stamp. Total — never raises.
   · evaluate(chores, *, last_run_of, cadence_of, now, factor, min_grace_s, observed_of) -> list[Verdict] — Judge every claimed chore; return only the findings, worst-first.
   · describe(v) -> str — One chore's finding, as it appears inside the drift line.
+`scripts/lib/claudemd_migration_apply.py` — CLAUDE.md migration DELIVERY — the half that removes lines (TRDD-LFSWY0C6, CM-2 §4-5).
+  · Refusal — One gate saying no. `reason` is a slug above; `detail` is for the human.
+  · ApplyResult — The verdict for one apply. `text` is meaningful ONLY when `refusals` is empty —
+  · ApplyResult.ok(self) -> bool
+  · apply_migration(claude_md_text, block_texts, corpus_texts) -> ApplyResult — Remove `block_texts` from `claude_md_text` — or refuse, having changed nothing.
+  · render_result(result, *, dry_run) -> str — The CLI's human output. Pure, so a test asserts on it without a subprocess.
 `scripts/lib/claudemd_migration_plan.py` — CLAUDE.md narrative migration PLANNER — the DECISION half only (TRDD-LFSWY0C6).
   · NarrativeBlock — One unit of narrative content a human (or the planner) judges as a whole.
   · split_narrative_blocks(narrative) -> list[NarrativeBlock] — Cut `narrative` into judgeable units.
   · classify_exemption(block_text) -> str | None — The matched §CM-3 enumeration word if `block_text` is EXEMPT, else None (MIGRATABLE).
   · is_project_url_line(block_text) -> bool — True iff `block_text` is a §CM-1 element-2 project-URL line.
   · classify_permitted(block, *, index) -> str | None — Which of the three narrative-visible §CM-1 elements `block` IS, or None when it is
+  · classify_blocks(claude_md_text) -> list[tuple[NarrativeBlock, str | None]] — Every narrative block of `claude_md_text`, paired with its §CM-1 permitted element
   · decide_new_page_scope(block_text) -> str — "local" if `block_text` carries a machine-private red flag, else "project".
   · build_recall_query(block_text) -> str — A short symptom-style phrase to hand `memgrep recall` — the block's own words, with
   · RecallHit
@@ -462,6 +468,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · floor_needs_learning(state_dir) -> bool — True iff a compaction has LANDED that no floor measurement has observed yet.
   · refresh_floor(state_dir, context_tokens) -> int | None — Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
 `scripts/lib/cross_project_issue.py` — File a finding as an issue on the repo it BELONGS to (TRDD-WP7TCRME, Rule 4).
+  · defang_mentions(text) -> str — `text` with every bare `@name` wrapped in backticks, so it names without PAGING.
   · dedupe_marker(code, key) -> str — The stable identity of ONE finding, as it is embedded in the issue body.
   · repo_slug_for(project_dir) -> str — `owner/repo` for a project's `origin`, or "" when it has none / is not GitHub.
   · is_owned_by(slug, login) -> bool — True iff `slug`'s owner is exactly `login` (case-insensitive).
@@ -552,7 +559,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · state_dir_for(project_dir) -> Path — The janitor state dir of the AFFECTED project. None ⇒ the CURRENT project
   · ledger_path(project_dir) -> Path
   · render_line(entry) -> str — One greppable session line for a ledger entry. Values were sanitized at record
-  · record(*, sev, code, src, msg, ref, project_dir, now, notify) -> str | None — THE choke point: record one finding event into the affected project's ledger.
+  · record(*, sev, code, src, msg, ref, actor, project_dir, now, notify) -> str | None — THE choke point: record one finding event into the affected project's ledger.
+  · surfaced_to_human_key(code, content_hash) -> str — Stable dedupe key for one (code, content) human-only observation.
+  · mark_surfaced_to_human(code, content_hash, *, project_dir) -> bool — Record that this exact human-only observation was surfaced this episode.
+  · clear_surfaced_to_human(code, *, project_dir) -> None — The underlying condition resolved — forget every stamp recorded under `code` so a
+  · surfaced_to_human_status(code, content_hash, *, project_dir) -> str — `"reported-pending"` if this exact (code, content) observation was already
   · unread_entries(project_dir, *, cap, budget_bytes, exclude_codes) -> tuple[list[str], int] — (rendered unread lines, NEWEST first, capped by count AND byte budget;
   · advance_cursor(project_dir) -> None — Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises.
   · surface_block(project_dir) -> str — The SessionStart injection: capped unread lines + ONE fold line, then the cursor
@@ -603,10 +614,12 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude SESSION in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
   · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions. PURE.
-  · iterm_automation_payload(*, interpreter, second_view) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
-  · record_iterm_automation_state(blocked, *, second_view) -> None — Persist (or clear) the observation for the heartbeat to surface.
+  · iterm_automation_payload(*, interpreter, second_view, probe_outcome, rearm_evidence_age_s) -> str — The flag's exact content for a blocked observation. PURE — so the compare-and-write
+  · record_iterm_automation_state(blocked, *, second_view, probe_outcome) -> None — Persist (or clear) the observation for the heartbeat to surface.
   · iterm_automation_interpreter(raw) -> str — The interpreter path recorded in a flag's contents, or "" when it names none. PURE.
   · iterm_automation_second_view(raw) -> str — The second-view verdict recorded in a flag's contents, or "" when absent. PURE.
+  · iterm_automation_probe_outcome(raw) -> str — The osascript probe's own outcome (`"error"` / `"timeout"` / `"empty"`) recorded
+  · iterm_automation_rearm_evidence_age_s(raw) -> int | None — Seconds since the newest `FIRED rearm → iterm` daemon-log line AS OF the moment
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · stale_threshold_for(armed_cron, base_stale_s) -> int — The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
@@ -949,6 +962,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · harvest_watermark_read(scope, root) -> dict — Return the ``{note_name: content_sha256}`` map of buffer notes already mirrored
   · harvest_note_is_mirrored(scope, root, note_name, note_text) -> bool — True iff `note_name` was mirrored AND its content is unchanged since (the stored
   · harvest_mark_mirrored(scope, root, note_name, note_text) -> None — Record that `note_name` (with this exact content) has been mirrored into the
+`scripts/lib/memory_split_lineage.py` — Split lineage — the marker meaning "the janitor itself separated these two pages" (TRDD-3QIQ2E6J).
+  · lineage_of(text) -> str — The page's split-lineage id, or `""` when it declares none (or declares a malformed one).
+  · same_split(text_a, text_b) -> bool — True iff both pages carry the SAME valid split-lineage id — i.e. one split emitted both.
+  · stamp(text, split_id) -> str — Return `text` carrying `split-lineage: <split_id>`, replacing any id already there.
+  · is_split_child(rel_path, *, sources, exists_in_live) -> bool — Is this staged write one of the pages the split PRODUCED (⇒ stamp it)?
 `scripts/lib/memory_txn.py` — Memory-edit transaction core (TRDD-b92a9dd0) — the safety substrate every
   · MemoryTxnError — A transaction precondition failed (stale source, vanished source, lock
   · MemoryTxnConflict — A roll-forward found a source page changed since the txn began, so the txn was
@@ -1193,6 +1211,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · is_retry_wedge(text) -> bool — True iff `text` (a captured pane frame) shows the CC retry-watchdog wedge signature.
   · retry_wedge_attempt(text) -> int | None — The `attempt N` number from a captured pane frame, or None when the wedge signature
   · retry_wedge_state_update(*, prev, current_attempt) -> tuple[dict[str, object] | None, bool] — Advance the persisted retry-wedge episode state by ONE poll and decide whether THIS
+  · latest_iterm_rearm_epoch(log_text) -> int | None — The epoch of the newest line PROVING the iTerm channel answered, or None. PURE.
   · capture_terminal_identity(env) -> dict[str, str] — Extract the stable terminal-pane identifiers the daemon needs to inject
   · is_session_frozen(*, transcript_mtime, rate_limited_since, flag_present, now, heartbeat_interval_s, freeze_factor, grace_s) -> bool — True iff a session is FROZEN-AND-STUCK and needs an external wake.
   · rate_limit_flag_is_stale(flag_mtime, now, max_age_s) -> bool — True iff a `rate-limited.flag` is old enough to be litter rather than a rate limit.
@@ -1495,24 +1514,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · Classifier.classify(self, text) -> Iterator[Finding]
   · Classifier.re2_active(self) -> bool
 `scripts/lib/zizmor_patterns_extra.py` — Extension catalog for the janitor's second-pass workflow auditor.
-`scripts/memory_candidates_cli.py` — List the pages an editorial chore should actually work — the janitor#227 fix.
-  · repair_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.repair_defect` flags, MINUS pages the
-  · atomize_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.atomize_defect` flags, MINUS pages the
-  · consolidate_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every `(tier, type)` GROUP `memory_content_precheck.consolidate_group_defect`
-  · main() -> int
 `scripts/memory_dispatch_claim.py` — Claim one memory-maintenance dispatch — the CONSUMED flag the system never had (janitor#242).
   · candidates(state_dir) -> list[Path] — Unclaimed per-dispatch files, oldest first. A claimed one is renamed away, so its
   · claim_one(state_dir) -> dict | None — Atomically claim the oldest unclaimed dispatch and return its payload, else None.
-  · main() -> int
-`scripts/memory_refusal_cli.py` — Record (or inspect) a memory-chore refusal — the write surface of the ledger (issue #131).
-  · main() -> int
-`scripts/memory_settings_cli.py` — Backing script for the /janitor-memory-*-frequency-{set,get} + -maxsize commands
-  · main() -> int
-`scripts/memory_txn_cli.py` — Backing CLI for ONE atomic wikimem memory edit (TRDD-b92a9dd0, TRDD-A foundation).
-  · cmd_begin(args) -> int
-  · cmd_commit(args) -> int
-  · cmd_abort(args) -> int
-  · cmd_resume(args) -> int
   · main() -> int
 `scripts/migrate_memory_scope.py` — Memory scope-migration helper (TRDD-47df698b) — re-scope a LOCAL memory corpus
   · main() -> int
@@ -1700,8 +1704,6 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · main() -> int
 `scripts/safe_delete.py` — safe-delete — Python port of safe-delete.sh.
   · main() -> int
-`scripts/ticket_cli.py` — The janitor support-ticket CLI — the SINGLE mutation surface (TRDD-CGYMUKO6).
-  · main() -> int
 `scripts/token_report.py` — Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
   · main() -> int
 `scripts/wikimem_bench.py` — wikimem retrieval benchmark — accuracy and END-TO-END token cost (TRDD-DO6X4ZF8).
@@ -1739,6 +1741,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · run_lint(paths, *, extra_args) -> tuple[int, str, list[Finding]] — Run `memgrep lint` over `paths` (default: the three scopes) → (exit code, stdout, findings).
   · main() -> int
 ### Convention groups
+`scripts/*_cli.py` (×8) [findings, global_control, memory_candidates, memory_refusal, memory_settings, memory_txn, respawn_prompt, ticket]
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
