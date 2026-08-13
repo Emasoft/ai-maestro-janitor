@@ -404,6 +404,44 @@ def test_output_only_wording_keeps_compact_recommendation(tmp_path: Path) -> Non
     assert "/compact" in ctx
 
 
+def test_hard_output_nudge_names_the_lean_worker_delegation(tmp_path: Path) -> None:
+    """R11 of TRDD-G4BCRUP7: a token-waste alert must SUGGEST delegating to a
+    lean-worker. The requirement lives entirely inside one long advisory string, so
+    without this assertion any reword drops it and nothing fails — the text was
+    reachable and wired but unpinned when the audit reached this row."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(50_000, tool=True))
+    ctx = _ctx(_run(str(t), env_extra={_BUDGET_HARD: "40000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "lean-worker" in ctx
+
+
+def test_advisory_nudge_names_the_lean_worker_delegation(tmp_path: Path) -> None:
+    """R11 again, at the ADVISORY tier — the tier a long session actually meets first,
+    and the one where redirecting bounded work is still cheap enough to matter."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_baseline(proj, [20] * 8)
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(150, tool=True))
+    ctx = _ctx(_run(str(t), project_dir=str(proj)))
+    assert ctx is not None
+    assert "Token spike" in ctx and "lean-worker" in ctx
+
+
+def test_the_spawn_deny_never_suggests_delegating_to_a_subagent(tmp_path: Path) -> None:
+    """The DENY is the one token-waste message that must NOT carry R11's suggestion:
+    it exists to refuse a subagent spawn, so advising a subagent in the same breath
+    would tell the agent to do the thing just blocked. Pinned as a deliberate
+    exception so a well-meaning "make R11 consistent everywhere" edit cannot
+    reintroduce the contradiction."""
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(50_000, tool=True))
+    proc = _run(str(t), tool_name="Task", env_extra={_BUDGET_HARD: "40000", _ENFORCE: "true"})
+    reason = _decision(proc).get("permissionDecisionReason", "")
+    assert "Do NOT spawn another subagent" in reason
+    assert "lean-worker" not in reason
+
+
 def test_bucket_tokens_floors_to_10k() -> None:
     """TRDD-YRPUSIFY: the pure bucketer floors to the nearest 10k so a whole band of raw
     counts renders as ONE cache-stable label; sub-10k and negatives clamp to ~0k."""

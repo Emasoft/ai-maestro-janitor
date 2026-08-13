@@ -3,7 +3,7 @@ trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
 column: todo
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-13T00:15:36+0200
+updated: 2026-08-13T03:23:31+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -18,6 +18,29 @@ external-refs: [TRDD-TUIBWHT7, TRDD-BRHJHWW0, janitor#246, janitor#248, janitor#
 # Armed once ⇒ autonomous forever
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+
+### 2026-08-13 — R11 closed, and it exposes a SECOND defect class beside "shipped dark"
+
+This card's standing rule is *"do NOT close a row on the strength of a docstring or a grep
+hit"* — aimed at code that exists but never RUNS. R11 turned out to be the mirror image, and
+the rule as written would have waved it through: the text existed, was **reachable**, and was
+**wired** on all three surfaces. Reachability was never the problem. **Nothing held it in
+place.** `grep -rn "lean.worker" tests/` returned zero, and the requirement lived as one clause
+inside three long advisory strings — the single most reword-prone shape in the tree. A
+plausible tidy-up drops R11 and every gate stays green.
+
+**Call it SHIPPED UNGUARDED.** Audit each remaining row for BOTH: *does it run?* **and** *what
+fails if someone deletes it?* If the answer to the second is "nothing", the row is not closed —
+it is merely true today. Applies with most force to any requirement whose whole implementation
+is PROSE (a message, a nudge, a docstring contract), because prose has no compiler.
+
+Method note, worth repeating: my first hypothesis was that the live alarm had OMITTED the
+suggestion — the anomaly line I had been shown ended "…robust-z 61.1 over 2578 buckets…
+agentlensPro: $201/h". Reading the source disproved it: the clause is unconditional and the
+agentlensPro enrichment is appended AFTER it, so a truncated rendering shows the enrichment
+while hiding the suggestion. **Absence in a truncated quote is not absence in the code** — the
+same "the result looked too clean" tell as the two broken selectors on 2026-08-12, arriving
+from the opposite direction.
 
 ### 2026-08-12 session — released v3.1.4 + v3.1.5, and drained the WORK columns to ZERO
 
@@ -237,5 +260,20 @@ being cancelled rather than accepted.
       fresh install — or, where one is unavoidable, `/janitor-arm` performs it
 - [ ] C2 audit: every drift line that ASKS the model to do something a script could do is
       either converted to a script action or justified in writing on this card
-- [ ] R11's suggestion text actually names lean-workers / cheap subagents
+- [x] R11's suggestion text actually names lean-workers / cheap subagents — **VERIFIED
+      REACHABLE AND NOW PINNED.** Three surfaces, all wired: `token-usage-anomaly.py:147`
+      (unconditional inside the alarm f-string; roster `dispatch.py:446`),
+      `pre-tool-token-budget.py:424` (hard+output) and `:440` (advisory), hook registered at
+      `hooks.json:164`. The deny at `:422` deliberately does NOT carry it — it refuses a
+      subagent spawn, so advising a subagent there would recommend the thing just blocked.
+      **The box could not honestly be ticked on that alone: `grep -rn "lean.worker" tests/`
+      returned ZERO.** The requirement lived only as a clause inside three long advisory
+      strings — the most reword-prone text in the tree — so any rewrite dropped R11 silently.
+      Now guarded by 3 tests (`test_hard_output_nudge_names_the_lean_worker_delegation`,
+      `test_advisory_nudge_names_the_lean_worker_delegation`,
+      `test_alarm_names_the_lean_worker_delegation`) plus
+      `test_the_spawn_deny_never_suggests_delegating_to_a_subagent`, which pins the deny's
+      exception so a "make R11 consistent everywhere" edit cannot reintroduce the
+      contradiction. Falsified: reworded "lean-worker"→"cheaper" in all three sources and
+      exactly those 3 failed; reverted, 50 pass, ruff clean.
 - [ ] Released, and CLI-verified installed (tag-vs-cache file diff, 0 missing)

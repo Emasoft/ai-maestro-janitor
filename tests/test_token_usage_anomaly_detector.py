@@ -62,6 +62,21 @@ def test_alarms_on_outlier(tmp_path: Path) -> None:
     assert "100000" in out
 
 
+def test_alarm_names_the_lean_worker_delegation(tmp_path: Path) -> None:
+    """R11 of TRDD-G4BCRUP7: a token-waste alert must SUGGEST delegating to a
+    lean-worker rather than only reporting a number. This is the SLOW heartbeat
+    surface — the one an unattended session meets — and the suggestion is a clause
+    inside a single long f-string, so nothing but this assertion holds it in place.
+
+    Asserted independently of the agentlensPro enrichment (OFF here): the enrich text
+    is appended AFTER this clause, so a truncated reading of a live alarm can show the
+    enrichment while hiding the suggestion. Absence downstream is not absence here."""
+    _write_log(tmp_path, [100] * 12 + [100_000])
+    out = _run(tmp_path).stdout
+    assert "[token-anomaly]" in out
+    assert "lean-worker" in out
+
+
 def test_silent_on_normal_log(tmp_path: Path) -> None:
     _write_log(tmp_path, [90, 110, 95, 105, 100, 120, 88, 112, 99, 101, 97, 103, 130])
     assert _run(tmp_path).stdout.strip() == ""
