@@ -14,6 +14,7 @@ wikimem page) is the `janitor-project-cld-md-optimizer` skill.
   uv run scripts/claudemd_slim.py index --stdout   # print the block, touch nothing
   uv run scripts/claudemd_slim.py check            # slim-contract + index freshness probe
   uv run scripts/claudemd_slim.py verify --old F   # preservation proof for a migration
+  uv run scripts/claudemd_slim.py plan             # DECISION-only migration plan (writes nothing)
 
 Exit codes: 0 = ok / written / fresh / preserved; 1 = check found violations or a stale
 index, or verify found DROPPED content; 3 = error (no CLAUDE.md, malformed fences, lock
@@ -43,7 +44,9 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+import claudemd_migration_plan as cmig  # noqa: E402  # TRDD-LFSWY0C6 — DECISION-only planner
 import memory_edit_verify as mev  # noqa: E402
+import memory_scopes  # noqa: E402
 import repomap_generate as rg  # noqa: E402  # the shared anti-corruption write machinery
 from repomap import MalformedFences  # noqa: E402
 from repomap.claudemd_slim import (  # noqa: E402
@@ -179,6 +182,21 @@ def cmd_verify(root: Path, old_file: Path) -> int:
     return 1
 
 
+def cmd_plan(root: Path) -> int:
+    """DECISION-only migration plan (TRDD-LFSWY0C6): reports what WOULD migrate where.
+    Never writes CLAUDE.md, never writes/creates a memory page, never removes a line —
+    the delivery half is a separate, later task."""
+    claude_md = root / "CLAUDE.md"
+    if not claude_md.is_file():
+        print("claudemd-slim: no CLAUDE.md")
+        return 3
+    text = claude_md.read_text(encoding="utf-8")
+    roots = [scope_root for _label, scope_root in memory_scopes.resolve_scope_dirs()]
+    plans = cmig.plan_migration(text, roots=roots)
+    print(cmig.render_plan(plans), end="")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Slim janitor-managed CLAUDE.md — wikimem index + contract checks")
     ap.add_argument("--root", help="project root (default: $CLAUDE_PROJECT_DIR or cwd)")
@@ -188,6 +206,7 @@ def main() -> int:
     sub.add_parser("check", help="slim-contract + index freshness probe (no write)")
     p_verify = sub.add_parser("verify", help="preservation proof for a migration")
     p_verify.add_argument("--old", required=True, help="pre-migration CLAUDE.md copy")
+    sub.add_parser("plan", help="DECISION-only migration plan — writes nothing (TRDD-LFSWY0C6)")
 
     args = ap.parse_args()
     root = rg._resolve_root(args.root)
@@ -196,6 +215,8 @@ def main() -> int:
             return cmd_index(root, to_stdout=args.stdout)
         if args.cmd == "check":
             return cmd_check(root)
+        if args.cmd == "plan":
+            return cmd_plan(root)
         return cmd_verify(root, Path(args.old).resolve())
     except MalformedFences as exc:
         print(f"claudemd-slim: refusing to touch CLAUDE.md — {exc}")
