@@ -52,14 +52,27 @@ DEFAULT_CACHE_EXPIRED_COMMAND = "agentlenspro cache-expired"
 
 _TIMEOUT_S = 5.0
 
-# DELIBERATELY NOT `_TIMEOUT_S`. Measured three consecutive `cache-expired` calls on one warm
-# host: 0.15 s, 11.5 s, 19.7 s — the latency is wildly variable and the tail is nowhere near the
-# 5 s the burn probes use. Under 5 s this probe returned None on 2 of 3 runs, which fails OPEN and
-# so looks exactly like "agentlensPro is not installed": the trigger would have shipped dead, the
-# defect class this whole card exists to remove. The asymmetry decides the number — too short
-# silently disables the feature, too long costs wall-clock in a DETACHED one-shot watcher that
-# nobody is waiting on. So: generous, and separate, so tuning the burn probes cannot re-break it.
-_CACHE_EXPIRED_TIMEOUT_S = 30.0
+# DELIBERATELY NOT `_TIMEOUT_S`. This probe's latency is wildly variable and its tail is nowhere
+# near the 5 s the burn probes use. Measured on one warm host, in two sittings:
+#
+#     2026-08-06:  0.15 s, 11.5 s, 19.7 s
+#     2026-08-13:  23.96 s, 26.14 s, 8.36 s
+#
+# The asymmetry decides the number, and it is brutal: a timeout returns None, None means "no
+# signal", and no signal is INDISTINGUISHABLE FROM "agentlensPro is not installed" — so a timeout
+# does not degrade the feature, it silently deletes it, with no error anywhere to say so. Too
+# long merely costs wall-clock.
+#
+# 30 s was chosen against the 2026-08-06 sample and is NOT ENOUGH: the 2026-08-13 re-measurement
+# put two of three runs within 4-6 s of that ceiling, i.e. the trigger was one slow call away from
+# reporting "unknown" and doing nothing — and that is exactly what was observed while wiring the
+# resume hook that day. 90 s puts the ceiling ~3.5x above the worst observed call.
+#
+# Affordable because the caller changed: this is no longer read only by a detached watcher nobody
+# waits on — the SessionStart hook now BLOCKS on it, with a 600 s hook budget, precisely so no
+# turn can start before the answer arrives. Spending 90 s of that budget to avoid a false
+# "unknown" is the right trade, because a false unknown costs the full-price turn.
+_CACHE_EXPIRED_TIMEOUT_S = 90.0
 
 
 def probe_cache_expired(
@@ -110,7 +123,29 @@ def probe_cache_expired(
         return None
     if getattr(proc, "returncode", 1) != 0:
         return None
-    word = (getattr(proc, "stdout", "") or "").strip().lower()
+    # THE ANSWER IS THE LAST NON-EMPTY LINE, not the whole of stdout.
+    #
+    # HONEST PROVENANCE (corrected 2026-08-13, same day it was first written). This started as a
+    # claimed BUG FIX: that the CLI prints a human preamble on stdout ahead of the verdict, so
+    # `stdout.strip().lower()` matched a two-line blob and returned None every time. That claim
+    # was WRONG, and measurement is what settled it — the preamble goes to STDERR, stdout carries
+    # the bare verdict, and the old one-liner parsed it correctly:
+    #
+    #     stdout: 'false\n'   stderr: 'session … — idle 6s vs 60min TTL\n'
+    #
+    # The `None` that prompted the "fix" came from somewhere else entirely: the probe's TIMEOUT
+    # (see `_CACHE_EXPIRED_TIMEOUT_S`, then 30 s against calls measured at 24-26 s). Reading a
+    # symptom and inventing a parse defect for it nearly shipped a false explanation into the one
+    # place a later reader would trust — which is the real lesson worth keeping here.
+    #
+    # This parse SURVIVES the correction on its own merit, not the retracted one: `.strip()` on
+    # multi-line stdout yields a blob matching neither word, so the day the CLI adds one stdout
+    # line the probe would go silently "unknown" — and unknown is indistinguishable from
+    # "agentlensPro is not installed", so nothing would report it. Two lines to be immune to a
+    # failure mode that reports itself as absence is worth keeping; the claim that it had already
+    # happened is not.
+    lines = [ln.strip().lower() for ln in (getattr(proc, "stdout", "") or "").splitlines()]
+    word = next((ln for ln in reversed(lines) if ln), "")
     if word == "true":
         return True
     if word == "false":

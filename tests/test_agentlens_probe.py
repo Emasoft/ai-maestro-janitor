@@ -302,3 +302,100 @@ def test_probe_json_none_on_timeout(tmp_path: Path) -> None:
     """A command that hangs past the timeout → None (the daemon must never wedge)."""
     cmd = _write_script(tmp_path, "hang.sh", "sleep 5; echo '{}'")
     assert ap.probe_json(cmd, timeout=0.5) is None
+
+
+# --- probe_cache_expired: the answer is the LAST non-empty stdout line ------------------
+#
+# WHY THESE EXIST, stated accurately (the first draft of this block was wrong and is corrected
+# here the same day). The tolerant parse was written as a fix for a preamble on stdout; measuring
+# the live CLI showed the preamble goes to STDERR and stdout carries the bare verdict, so the
+# previous `stdout.strip().lower()` was already correct. The observed `None` came from the
+# probe's TIMEOUT, not from parsing.
+#
+# The parse is still worth pinning, for the property it has regardless of that history: EVERY
+# failure of this probe returns None, None means "no signal", and no-signal is indistinguishable
+# from "agentlensPro is not installed" — so if the CLI ever adds a stdout line, the trigger goes
+# quiet and NOTHING reports it. These tests pin the shapes that must not silently answer None.
+
+
+def test_cache_expired_reads_the_verdict_after_a_preamble(tmp_path: Path) -> None:
+    """A stdout preamble ahead of `false` must still yield False.
+
+    NOT the shape the CLI emits today (its preamble is on stderr) — this pins tolerance to the
+    day it changes, because that change would otherwise turn the trigger off silently.
+    """
+    cmd = _write_script(
+        tmp_path,
+        "verbose-false.sh",
+        "echo 'session 35e1e917 in /tmp/x — idle 32s vs 60min TTL'\necho false",
+    )
+    assert ap.probe_cache_expired(cmd) is False
+
+
+def test_cache_expired_reads_a_true_verdict_after_a_preamble(tmp_path: Path) -> None:
+    """The same preamble shape with `true` yields True — a real expiry is still detected."""
+    cmd = _write_script(
+        tmp_path,
+        "verbose-true.sh",
+        "echo 'session 35e1e917 in /tmp/x — idle 9h vs 60min TTL'\necho TRUE",
+    )
+    assert ap.probe_cache_expired(cmd) is True
+
+
+def test_cache_expired_ignores_trailing_blank_lines(tmp_path: Path) -> None:
+    """Trailing blank lines are not the answer — the LAST NON-EMPTY line is."""
+    cmd = _write_script(tmp_path, "trailing.sh", "echo preamble\necho false\necho ''\necho '  '")
+    assert ap.probe_cache_expired(cmd) is False
+
+
+def test_cache_expired_zero_exit_does_not_mean_expired(tmp_path: Path) -> None:
+    """rc=0 is only 'I answered'. `--help` documents rc=0 as EXPIRED, but that applies to -q
+    only: the verbose form exits 0 while printing `false`. Reading rc here would report a cache
+    miss on every healthy session, and the consumer of this signal fires an irreversible
+    /clear."""
+    cmd = _write_script(tmp_path, "zero-false.sh", "echo false; exit 0")
+    assert ap.probe_cache_expired(cmd) is False
+
+
+def test_cache_expired_none_when_the_cli_cannot_answer(tmp_path: Path) -> None:
+    """Cannot-answer is a non-zero exit with empty stdout → None, never a fabricated False."""
+    cmd = _write_script(tmp_path, "cannot.sh", "exit 2")
+    assert ap.probe_cache_expired(cmd) is None
+
+
+def test_cache_expired_none_on_missing_binary() -> None:
+    """A missing executable → None (fail-open), never an exception."""
+    assert ap.probe_cache_expired("/definitely/not/a/real/binary/xyzzy cache-expired") is None
+
+
+def test_cache_expired_none_on_timeout(tmp_path: Path) -> None:
+    """A hanging probe → None. It runs in a SessionStart hook, which must never wedge."""
+    cmd = _write_script(tmp_path, "hang-cache.sh", "sleep 5; echo false")
+    assert ap.probe_cache_expired(cmd, timeout=0.5) is None
+
+
+def test_the_cache_expired_timeout_clears_the_measured_latency_with_headroom() -> None:
+    """The timeout is THE failure mode of this probe, so it is pinned as a number.
+
+    A timeout returns None; None means "no signal"; no signal is indistinguishable from
+    "agentlensPro is not installed" — so an under-set timeout does not degrade the trigger, it
+    deletes it, silently. Measured calls on this host reached 26.14 s, and the previous 30 s
+    ceiling left ~4 s of headroom, i.e. one slow call from reporting "unknown" and doing nothing.
+
+    Pinned against the WORST OBSERVED latency rather than a round number, so a future edit that
+    tightens this has to argue with the measurement instead of a taste for small timeouts.
+    """
+    worst_observed_s = 26.14
+    assert ap._CACHE_EXPIRED_TIMEOUT_S >= worst_observed_s * 3, (
+        "a timeout near the observed latency silently disables the cache-expiry trigger"
+    )
+    assert ap._CACHE_EXPIRED_TIMEOUT_S > ap._TIMEOUT_S, (
+        "it must stay SEPARATE from the burn-probe timeout — tuning those must not re-break this"
+    )
+
+
+def test_cache_expired_passes_the_project_through(tmp_path: Path) -> None:
+    """`--project <path>` is appended, so the probe answers about the RIGHT session — a probe
+    that silently answered about the daemon's cwd would be worse than no probe at all."""
+    cmd = _write_script(tmp_path, "echo-argv.sh", 'echo preamble\n[ "$1" = "--project" ] && [ "$2" = "/tmp/proj" ] && echo true || echo false')
+    assert ap.probe_cache_expired(cmd, project="/tmp/proj") is True
