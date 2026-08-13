@@ -21,14 +21,16 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e7bffba4eb79 digest=d86b8a5fef2f generated=2026-08-12T17:13:31+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=610dcdb20460 digest=ef6e473f8a6b generated=2026-08-13T02:12:43+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/agent_context_bench.py` — agent_context_bench — measure what `agent_config_patterns.scan_text` actually CATCHES.
+  · expand_fake_secrets(text) -> str — Materialize `{{FAKESECRET:...}}` / `{{FAKEDSN:...}}` corpus placeholders.
   · claimed_rule_ids() -> set[str] — The classes the rule set CLAIMS to cover — derived from the code, never a copy of it.
   · load_corpus(path) -> list[dict] — Parse the JSONL corpus, skipping unparseable lines rather than dying.
   · split_of(sample) -> str — Deterministic `dev` / `holdout` assignment, keyed on the sample's own content.
   · score(samples) -> dict — Run every sample through `scan_text` and tally recall / false positives.
   · render(res) -> str
+  · coverage_doc(res) -> str — The per-rule MEASURED coverage table, for `COVERAGE.md`.
   · compare(cur, base) -> tuple[bool, list[str]] — Regression gate: recall may never fall and false positives may never rise.
   · main() -> int
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
@@ -157,6 +159,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · slot_needs_login(has_refresh, token_days, has_session_key, grace_days, refresh_failures) -> bool — PURE: does this account need a ONE-TIME human login?
   · slot_capture_stalled(has_refresh, has_session_key, refresh_failures) -> bool — PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
   · main() -> int
+`scripts/detectors/orphaned-memory-maint.py` — orphaned-memory-maint — notice a memory-maintenance pass that was scheduled and
+  · main() -> int
 `scripts/detectors/orphaned-resume-flag.py` — orphaned-resume-flag — notice a session whose wake-up chain silently failed (#125).
   · main() -> int
 `scripts/detectors/package-manager-policy.py` — Package-manager-policy detector — supply-chain hardening audit.
@@ -186,6 +190,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/detectors/repo-trust-score.py` — repo-trust-score — dropper-pattern audit on the current project tree.
   · main() -> int
 `scripts/detectors/report-to-trdd-drift.py` — report-to-trdd-drift — nudge when a DECISION report has no TRDD.
+  · main() -> int
+`scripts/detectors/reports-gitignore.py` — reports-gitignore — keep `reports/` and `reports_dev/` OUT of git (TRDD-WP7TCRME Rule 3).
   · main() -> int
 `scripts/detectors/reports-purge.py` — reports-purge — S8 of the fseventsd plan (TRDD-LCO8229M): bound the janitor's own
   · main() -> int
@@ -366,6 +372,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · AgentContextWriter — One known offender: the binary + the subcommand that triggers the write, plus the
   · command_invokes_agent_writer(command) -> Optional[AgentContextWriter] — The ``AgentContextWriter`` a shell COMMAND invokes, or ``None``.
 `scripts/lib/agentlens_probe.py` — Shared agentlensPro probe — config-gated, bounded, fail-open (TRDD-WUUR2DFX).
+  · probe_cache_expired(command, *, project, timeout, runner) -> bool | None — TRI-STATE: has this project's conversation outlived its prompt-cache TTL?
   · probe_json(command, *, timeout) -> dict | None — Run ``command`` and return its parsed-JSON stdout as a dict, else None.
   · BurnStatus — The slice of ``get_burn_status`` the janitor trusts (verified authoritative).
   · parse_burn_status(data) -> BurnStatus | None — Extract the trusted ``BurnStatus`` slice from a ``get_burn_status`` payload.
@@ -436,6 +443,13 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · read_floor(state_dir) -> tuple[int | None, int] — `(floor_tokens, measured_after_compact_ts)` — the context size observed right AFTER the most
   · floor_needs_learning(state_dir) -> bool — True iff a compaction has LANDED that no floor measurement has observed yet.
   · refresh_floor(state_dir, context_tokens) -> int | None — Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
+`scripts/lib/cross_project_issue.py` — File a finding as an issue on the repo it BELONGS to (TRDD-WP7TCRME, Rule 4).
+  · dedupe_marker(code, key) -> str — The stable identity of ONE finding, as it is embedded in the issue body.
+  · repo_slug_for(project_dir) -> str — `owner/repo` for a project's `origin`, or "" when it has none / is not GitHub.
+  · is_owned_by(slug, login) -> bool — True iff `slug`'s owner is exactly `login` (case-insensitive).
+  · gh_login() -> str — The authenticated gh username, or "" when gh is absent/logged out.
+  · build_body(*, code, key, detail, detector, observed_in) -> str — The issue body: self-ID, the finding, and the hidden dedupe marker.
+  · file_finding(*, slug, code, key, title, detail, detector, observed_in, login, runner) -> tuple[str, str] — File the finding on `slug`. Returns `(outcome, detail)`; NEVER raises.
 `scripts/lib/daemon_path.py` — Restore a usable tool PATH for the OS-keepalive daemon (TRDD-VQ4LX7ND).
   · default_prefixes(platform) -> tuple[str, ...] — The candidate dirs for a platform. Unknown platforms get none (no guessing).
   · augmented_path(current, *, candidates, exists) -> tuple[str, list[str]] — Return ``(new_path, added_dirs)`` — ``current`` with every candidate that
@@ -503,10 +517,15 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · min_context_tokens() -> int
   · headroom_seconds() -> int
   · use_llm_ext() -> bool
+  · llm_ext_data_dir(binary) -> str — The `CLAUDE_PLUGIN_DATA` value llm-externalizer needs, DERIVED from its own path.
+  · run_llm_ext_summary(transcript, *, timeout_s, runner) -> str | None — The session summary as TEXT, or None on any failure. NEVER raises.
+  · recent_messages(transcript, *, limit) -> list[str] — The last `limit` conversation turns as `ROLE: text` lines. ZERO model tokens.
+  · compose_handoff(inputs, *, now_iso, summary, tail, max_bytes) -> str — The full injected payload: scriptable facts + llm-ext summary + a TRUNCATED tail.
   · seconds_until_next_fire(cron, now) -> int | None — Seconds from `now` until the next `*/N * * * *` fire, or None when the cron is not that
   · next_fire_misses_cache(*, last_turn_age_s, seconds_to_next_fire, ttl_minutes) -> bool — PURE. Will the NEXT heartbeat fire land on an EXPIRED prompt cache (and so pay the full
+  · cache_certainly_expired(project_dir) -> bool | None — The REACTIVE trigger's input: is this project's prompt cache ALREADY cold?
   · ClearVerdict — Whether to clear, which rule decided it, and a human-readable why.
-  · should_clear_externally(*, idle_seconds, last_turn_age_s, ttl_minutes, seconds_to_next_fire, context_tokens, min_context, min_idle_s, headroom_s, user_present, active_waiting, in_cooldown) -> ClearVerdict — PURE. The whole external-clear decision, with the deciding rule named.
+  · should_clear_externally(*, idle_seconds, last_turn_age_s, ttl_minutes, seconds_to_next_fire, context_tokens, min_context, min_idle_s, headroom_s, user_present, active_waiting, in_cooldown, cache_expired) -> ClearVerdict — PURE. The whole external-clear decision, with the deciding rule named.
   · terminal_from_record(record) -> dict[str, str] — PURE adapter: the FLEET-shaped pane identity a session records at start →
   · read_ttl_minutes(state_dir) -> int — The probed prompt-cache TTL the dispatcher cached, or `DEFAULT_TTL_MINUTES`.
   · HandoffInputs — Everything the template composer needs, already gathered from disk.
@@ -606,6 +625,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · audit_fleet(plugins_root, *, now) -> FleetAudit — Probe every fleet repo READ-ONLY and classify. The daemon's single entry point.
   · findings_digest(payload) -> str — A stable 12-hex digest over the (slug, code) finding set — the dedupe key so an
   · payload_for_slug(payload, slug) -> dict — The findings sub-payload for ONE repo — the ONLY view a per-session surface may
+  · payload_age_seconds(payload, *, now) -> int | None — Seconds since this audit was generated, or None when it names no usable time. PURE.
+  · age_label(age_s) -> str — The parenthetical age suffix appended to every surfaced line, e.g. `(audit 3.2d old)`.
+  · payload_is_stale(age_s, *, cadence_s, factor) -> bool — True iff findings this old must be WITHHELD instead of surfaced. PURE.
+  · staleness_line(age_s, slug) -> str — The ONE line that REPLACES withheld findings — it names the staleness itself.
   · summarize_for_slug(payload, slug) -> str | None — Build THIS repo's one-line drift summary, or None when this repo is clean.
 `scripts/lib/global_state.py` — Shared contract for the GLOBAL janitor daemon — system-wide singleton that
   · global_state_dir() -> Path — Return the system-wide janitor state directory.
@@ -872,6 +895,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
   · is_note_file(path) -> bool — True iff ``path`` is a real memory NOTE — the SSOT discriminator.
   · iter_note_files(memdir) -> list[Path] — Every real memory NOTE under ``memdir`` (recursive), filtered by ``is_note_file``.
+  · escapes_root(path, root) -> bool — True iff ``path`` resolves OUTSIDE ``root`` — i.e. it is a symlink into another scope.
   · project_slug(project_dir) -> str — Harness per-project slug: the absolute path with every NON-ALPHANUMERIC char dashed.
   · resolve_local_dir_for(project_dir) -> Path — The LOCAL agent-memory dir of an EXPLICIT project path (M-11 — the SSOT
   · resolve_local_dir() -> Path — The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
@@ -923,6 +947,13 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · webhook_url() -> str
   · build_message(*, sev, code, project, summary, hint) -> str — The one-line push body (ARCHITECTURE.md §5 shape): name the project so the human
   · push(*, sev, code, project, summary, hint, now, runner, opener) -> str — THE gated push. Returns the outcome constant (for the daemon log + tests).
+`scripts/lib/orphaned_memory_maint.py` — Orphaned memory-maintenance pass detection (issue #238, TRDD-2112XCKO) — the PURE
+  · factor_for_scope(scope, *, default, local) -> int — The staleness factor (in cadences) for `scope`. See module docstring.
+  · read_pending(state_dir) -> tuple[dict | None, bool] — The legacy pending payload for `state_dir`.
+  · pending_age_s(payload, *, now) -> int — Seconds since this pending record was stamped. Never negative — a clock skew (or
+  · pending_is_current(payload, *, last_run) -> bool — True iff no NEWER dispatch of the same (intervention, scope, root) has landed
+  · is_orphaned(age_s, cadence_s, *, factor) -> bool — PURE: is a pending dispatch of this age, for an intervention with this cadence,
+  · format_finding(intervention, scope, age_s, cadence_s) -> str — One ledger-ready line. LOCAL gets its own wording (#238) so the reader restarts
 `scripts/lib/orphaned_resume.py` — Orphaned resume-flag detection (issue #125) — the PURE decision layer.
   · project_root_from_transcript(transcript) -> str — The absolute project path a harness transcript belongs to, or "" when unknown.
   · known_project_roots(projects_root) -> list[str] — Every project root the harness has a transcript for, deduped, sorted.
@@ -1010,6 +1041,11 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · render_body(filemaps, *, coverage_note) -> str — Deterministic map body (no fences, no timestamp). Individual files first
   · structure_hash(filemaps, *, coverage_note) -> str — 12-hex sha256 over the rendered body. Identical structure → identical
   · render_block(filemaps, *, generated_iso, digest, coverage_note) -> str — The full fenced block ready to splice into CLAUDE.md. `digest` is the
+`scripts/lib/reports_gitignore.py` — Keep `reports/` and `reports_dev/` out of git — check, and FIX (TRDD-WP7TCRME Rule 3).
+  · is_ignored(root, rel) -> bool | None — True/False, or None when git cannot answer (not a repo, git missing).
+  · tracked_under(root, directory) -> list[str] — Files git already TRACKS under `directory` — the case this must not auto-resolve.
+  · ensure_ignored(root) -> tuple[list[str], list[str], list[str]] — Ensure both report dirs are ignored. Returns `(added, already_ok, needs_human)`.
+  · format_finding(needs_human) -> str — The one line for the decision-margin case, or "" when there is nothing to say.
 `scripts/lib/rotator_usage.py` — Shared READ-ONLY account-usage gather (TRDD-OY0W6LX5).
   · accounts_usage() -> list[dict] — `[{"label", "usage"}]` for every unique known account (live + slots, deduped by
 `scripts/lib/rules_installer.py` — Install plugin-shipped rule files into the active scope's .claude/rules/.
@@ -1156,6 +1192,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · bump_user_presence(home, now, env) -> None — Record a GENUINE user-input event — stamp BOTH epochs to `now`.
   · refresh_user_presence_written_at(home, now) -> None — Refresh the breadcrumb's liveness (written_at_epoch) WITHOUT touching input recency.
   · read_int_state(path, default) -> int — Read a non-negative int from a state file.
+  · rollback_marker_ack(filename, *, actor, why) -> bool — Undo a once-per-generation marker ack so the NEXT heartbeat re-emits it (janitor#257).
   · is_truthy_env(name, default) -> bool — Read a yes/no env var with friendly false-spellings.
   · parse_nonneg_int(s) -> Optional[int] — Parse a non-negative integer from a config-value string, or None.
   · coerce_int(value, default, *, detector_name, var_name) -> int — Coerce a (possibly user-supplied) value to a non-negative int.
@@ -1305,8 +1342,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · TurnUsage.as_record(self, now_epoch) -> dict
   · tail_turn_usage(transcript_path) -> Optional[TurnUsage] — Sum the most-recent turn's token usage and flag whether it's a heartbeat.
   · latest_context_size(transcript_path) -> Optional[int] — Total INPUT context (input + cache_read + cache_creation tokens) the model
+  · latest_context_entry(transcript_path) -> Optional[tuple[int, Optional[int]]] — `(tokens, entry_epoch)` for the newest usage-bearing assistant message, or None.
   · read_context_snapshot(project_dir, session_id) -> Optional[dict] — The statusline-written context snapshot dict for (project_dir, session_id), or
-  · resolve_context(project_dir, session_id, transcript, window_default, *, now) -> tuple[Optional[int], Optional[int], Optional[int], bool] — Return (pct, tokens, window, stale) — the live context-window occupancy.
+  · reading_predates_compaction(entry_ts, last_compact_ts) -> bool — True iff a reading taken at `entry_ts` was invalidated by a compaction at
+  · resolve_context(project_dir, session_id, transcript, window_default, *, now, last_compact_ts) -> tuple[Optional[int], Optional[int], Optional[int], bool] — Return (pct, tokens, window, stale) — the live context-window occupancy.
   · reload_guard_should_block(tokens, threshold) -> bool — True iff the janitor's auto-emitted `[janitor-reload]` should be DEFERRED now.
   · CompactPrediction — Predicted auto-compact geometry from CLAUDE_CODE_AUTO_COMPACT_WINDOW (TRDD-TKNSTP82 C).
   · predict_auto_compact(used_tokens, *, env) -> Optional[CompactPrediction] — Predict the EXACT auto-compact point from the CLAUDE_CODE_AUTO_COMPACT_WINDOW env var.
@@ -1336,6 +1375,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · extract_trdd_refs(text) -> list[str] — Return every `TRDD-<id8>` id referenced in `text` (order-preserving, deduped).
   · parse_flow_list(raw) -> list[str] — Parse a YAML flow-style list value into its raw element strings.
   · blocked_by_ids(raw) -> list[str] — Extract the blocker TRDD ids from a `blocked-by:` flow-list value.
+  · has_blocked_by_value(head) -> bool — True iff the frontmatter declares a NON-EMPTY `blocked-by:`, whatever the elements look like.
   · has_stated_precondition(head) -> bool — True iff `head` declares WHY it is stalled — a non-empty `blocked-by:` or `npt:`.
   · impl_commit_shas(raw) -> list[str] — Extract commit SHAs from an `implementation-commits:` flow-list value.
   · TrddRecord — Everything the four reconciliation checks need, parsed from ONE TRDD.
@@ -1351,6 +1391,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · check5_dead_symbol_citations(record, token_is_dead) -> list[DeadSymbolCitation] — Check 5 — a STATE block cites a code symbol the tree no longer has (TRDD-FDV1RQEB).
   · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
   · ReconcileVerdict.fires(self) -> bool
+  · check6_blocked_without_blocker(record) -> bool — Check 6 — `column: blocked` while naming NO blocker (TRDD-F4IBIDB6).
   · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
 `scripts/lib/usage_probe.py` — Throttled single-writer probe for Anthropic's `/api/oauth/usage` (TRDD-WEBA1RMF).
   · ttl_seconds() -> int
@@ -1426,6 +1467,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · repair_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.repair_defect` flags, MINUS pages the
   · atomize_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every page `memory_content_precheck.atomize_defect` flags, MINUS pages the
   · consolidate_candidates(root, *, scope, now, max_bytes) -> list[tuple[str, str]] — Every `(tier, type)` GROUP `memory_content_precheck.consolidate_group_defect`
+  · main() -> int
+`scripts/memory_dispatch_claim.py` — Claim one memory-maintenance dispatch — the CONSUMED flag the system never had (janitor#242).
+  · candidates(state_dir) -> list[Path] — Unclaimed per-dispatch files, oldest first. A claimed one is renamed away, so its
+  · claim_one(state_dir) -> dict | None — Atomically claim the oldest unclaimed dispatch and return its payload, else None.
   · main() -> int
 `scripts/memory_refusal_cli.py` — Record (or inspect) a memory-chore refusal — the write surface of the ledger (issue #131).
   · main() -> int
