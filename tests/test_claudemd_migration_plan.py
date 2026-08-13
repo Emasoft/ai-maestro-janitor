@@ -128,6 +128,32 @@ def test_classify_exemption_is_multiline_gated() -> None:
     assert cmig.classify_exemption(prose) is None
 
 
+def test_classify_exemption_rejects_prose_that_merely_mentions_a_devops_word() -> None:
+    """§CM-3: "Architecture, gotchas, incident history, design rationale and conventions
+    are NOT exempt however short." Every line below is one-line ARCHITECTURE or RATIONALE
+    that happens to contain a category word, and all four were wrongly EXEMPT until the
+    command-shape condition was added (measured 2026-08-13). The fourth is the tell:
+    `\\bpush\\b` matches ACROSS THE HYPHEN in "event-push"."""
+    assert cmig.classify_exemption("The plugin is installed at user scope, so it runs everywhere.") is None
+    assert cmig.classify_exemption("The build is reproducible because the lockfile is committed.") is None
+    assert cmig.classify_exemption("Tests live under tests/ and mirror the scripts/ layout.") is None
+    assert cmig.classify_exemption("An earlier event-push design silently dropped frobnications.") is None
+
+
+def test_classify_exemption_requires_a_command_not_only_a_category_word() -> None:
+    """The exemption's own test is "is this a command an agent runs to operate the repo?",
+    and a command line contains a command. The backticked span is the structural stand-in.
+
+    Both residuals are asserted rather than left implicit — a documented consequence that
+    no test pins is just a comment that can silently stop being true."""
+    assert cmig.classify_exemption("- Tests: `uv run pytest`") == "testing"
+    # residual 1: a real dev-ops line written WITHOUT backticks is now migratable. Accepted
+    # because the delivery half's preservation gate relocates such a line, never loses it.
+    assert cmig.classify_exemption("- Tests: uv run pytest") is None
+    # residual 2: prose carrying an unrelated code span still reads as exempt.
+    assert cmig.classify_exemption("- See the `docs/` folder for testing notes") == "testing"
+
+
 def test_classify_exemption_rejects_unlisted_words() -> None:
     """A word NOT in the closed enumeration (e.g. "verify", "audit", "deploying" spelled
     as "deployment") must never be treated as exempt — the closed-list guarantee."""

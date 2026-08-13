@@ -167,20 +167,53 @@ _DEVOPS_WORD_RE = re.compile(
 )
 _GROUP_TO_CATEGORY = {f"w{i}": word for i, word in enumerate(DEVOPS_EXEMPTION_WORDS)}
 
+# A markdown inline code span — the structural stand-in for "this line contains a COMMAND"
+# (condition (c) of `classify_exemption`). Non-greedy and requiring at least one character,
+# so a stray pair of empty backticks does not qualify a prose line.
+_CODE_SPAN_RE = re.compile(r"`[^`\n]+`")
+
 
 def classify_exemption(block_text: str) -> str | None:
     """The matched §CM-3 enumeration word if `block_text` is EXEMPT, else None (MIGRATABLE).
 
-    A block is exempt only when BOTH:
-      (a) it is a SINGLE LINE — the spec's own test is "a command an agent runs to operate
-          the repo", and architecture/gotcha/rationale prose is multi-sentence by nature;
-          the spec is explicit that short prose is still narrative ("however short"), so
-          single-line-ness is a STRUCTURAL gate, not a length shortcut for prose;
+    A block is exempt only when ALL THREE hold:
+      (a) it is a SINGLE LINE — architecture/gotcha/rationale prose is multi-sentence by
+          nature, so single-line-ness is a STRUCTURAL gate;
       (b) it names one of the closed §CM-3 categories via one of that category's literal
-          surface forms, as a whole word (case-insensitive).
-    Both conditions are mechanical, not semantic — no similarity scoring, no analogy.
+          surface forms, as a whole word (case-insensitive);
+      (c) it CONTAINS A COMMAND — a backticked code span.
+    All three are mechanical, not semantic — no similarity scoring, no analogy.
+
+    **(c) was added 2026-08-13 to fix a defect, not to tighten a bias.** (a)+(b) alone
+    exempted any one-line sentence that merely MENTIONED a category word, which is exactly
+    what §CM-3 forbids: *"Architecture, gotchas, incident history, design rationale and
+    conventions are NOT exempt however short."* Measured before the fix — all four EXEMPT,
+    all four wrongly:
+
+        "The plugin is installed at user scope, so it runs in every project."  -> installing
+        "The build is reproducible because the lockfile is committed."          -> building
+        "Tests live under tests/ and mirror the scripts/ layout."               -> testing
+        "An earlier event-push design silently dropped frobnications."          -> pushing
+
+    The last one is the tell: `\bpush\b` matches ACROSS THE HYPHEN in "event-push". The old
+    docstring claimed single-line-ness was "a STRUCTURAL gate, not a length shortcut for
+    prose", and in practice it was precisely a length shortcut for prose.
+
+    (c) restores the spec's OWN test — *"is this a command an agent runs to operate the
+    repo?"* — structurally: a command line contains a command. All four of this repo's real
+    §Commands entries carry a backticked span; none of the four false positives do.
+
+    **The residual, named rather than hidden:** a dev-ops line written WITHOUT backticks
+    (`- Tests: uv run pytest`) is now migratable, and a prose line that happens to carry a
+    code span (``- See the `docs/` folder for testing notes``) is still exempt. The first is
+    the riskier direction, and it is accepted because the preservation gate in
+    `claudemd_migration_apply` means such a line is relocated, never lost — whereas the
+    pre-fix behaviour parked real narrative in CLAUDE.md permanently, which is the entire
+    cost this card exists to eliminate (§1: paid per turn, per tool call, per agent).
     """
     if "\n" in block_text.strip():
+        return None
+    if not _CODE_SPAN_RE.search(block_text):
         return None
     m = _DEVOPS_WORD_RE.search(block_text)
     if m is None:
