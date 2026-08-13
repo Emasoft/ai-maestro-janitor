@@ -15,7 +15,7 @@ not the same as passing.
 | `cross-skill-shadowing` | 4/9 | weak |
 | `crypto-clipper-triad` | 9/9 | partial |
 | `dns-exfil-long-subdomain` | 4/7 | partial |
-| `dynamic-exec-in-body` | 3/3 | partial |
+| `dynamic-exec-in-body` | 6/9 | partial |
 | `exfil-webhook-sink` | 0/8 | **FALSIFIED** — seeded and caught nothing |
 | `git-hook-install-from-body` | 5/9 | partial |
 | `git-protocol-only-dependency` | 3/3 | partial |
@@ -26,7 +26,7 @@ not the same as passing.
 | `prompt-injection-multilingual` | 2/7 | weak |
 | `sensitive-secret-ref` | 2/9 | weak |
 | `tool-wildcard-grant` | 7/8 | partial |
-| `two-step-code-injection` | 1/3 | weak |
+| `two-step-code-injection` | 3/9 | weak |
 | `whole-env-exfil` | 3/3 | partial |
 | `worm-self-propagation` | 5/9 | partial |
 
