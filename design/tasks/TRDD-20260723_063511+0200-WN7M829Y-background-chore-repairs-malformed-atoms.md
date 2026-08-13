@@ -3,7 +3,7 @@ trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
 column: todo
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-12T15:39:16+0200
+updated: 2026-08-13T12:58:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -11,7 +11,51 @@ relevant-rules: [1]
 npt: [DOJ2LE1G]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-13
+
+**RE-MEASURED 2026-08-13 12:5x, first-hand (`memgrep lint` per scope). The 2026-08-02 numbers
+below are 11 days stale in BOTH directions:**
+
+| scope | 2026-08-02 | now | |
+|---|---|---|---|
+| LOCAL | 0 | **0** | held |
+| PROJECT | 0 ("fully clean, 8/8 decomposed") | **2** | **REGRESSED** |
+| USER | 22 remaining | **10** | drained, uncredited |
+
+USER quietly drained 22 → 10 and nobody updated the card. PROJECT went 0 → 2, so this is **not a
+backlog that empties** — it REFILLS.
+
+### Why it refills, verified in the code rather than assumed
+
+`atom_max_chars()` (memory.rs:3788, default 1500) is referenced from exactly ONE place —
+memory.rs:4553, inside the LINT path. There is no write-time check anywhere: `add-atom` will
+create a 3000-char atom without complaint. And the finding is deliberately **INFO**, pinned by a
+test whose own message says why: *"atom-oversized must be INFO, not WARN — no chore gate can ever
+act on it (janitor#200)"*.
+
+Put together, the three facts are a closed loop: **nothing prevents creation, the detection tier is
+chosen so no automation may act, and the only thing that clears the backlog is a hand-dispatched
+agent batch.** So every measurement of "how many oversized atoms remain" is a snapshot of how long
+it has been since someone ran a batch — which is exactly what the table above shows, and why this
+card has been re-measured three times and never closed.
+
+**That reframes the card.** "Retroactively repair" is treating a symptom on a schedule nobody
+keeps. The candidate fixes are different in kind and should be chosen deliberately, not drifted
+into:
+
+  1. **Refuse at write time** — `add-atom`/`add-lesson` reject an over-budget body and tell the
+     author to split. Stops the refill at the source; costs an author friction they cannot defer.
+  2. **Raise the tier so a chore CAN act** — directly contradicts janitor#200's ratified reasoning
+     (INFO because an oversized atom is a style debt, not an actionable defect). Needs that
+     decision revisited on its merits, not quietly reversed.
+  3. **Accept it as permanent style debt** and close this card — legitimate, and cheaper than
+     either of the above, provided it is a DECISION rather than the current default of
+     re-measuring forever.
+
+All three are USER/design calls, so none is taken here. What IS settled is that the current shape
+cannot converge, and the card should stop being scheduled as if it will.
+
+## ⏵ STATE (superseded) — 2026-08-02
 
 **2026-08-02 20:15 — USER BATCH 1 VERIFIED: 33→22 (11 done, 0 flagged).** Count re-checked
 first-hand via `memgrep lint`; no pending transactions; touched pages gained no new findings.
