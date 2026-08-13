@@ -1,9 +1,10 @@
 ---
 trdd-id: KI6OWCZT
 title: pre-tool-token-budget advisory must clear the actionable-and-anomalous bar
-column: todo
+column: human_review
 created: 2026-08-11T18:41:10+0200
-updated: 2026-08-13T04:43:15+0200
+updated: 2026-08-13T04:58:42+0200
+implementation-commits: [3890d7b1, 03253c6e]
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -53,7 +54,27 @@ Concretely in `pre-tool-token-budget.py`:
 
 ## Acceptance
 
-- [ ] A routine post-idle cache-miss turn produces NO advisory (test)
-- [ ] Any surviving advisory is baseline-relative, not fixed-threshold (test)
-- [ ] Hard-block behavior byte-identical (test)
-- [ ] #246 answered with the commit id
+- [x] A routine post-idle cache-miss turn produces NO advisory — the advisory branch was
+      deleted OUTRIGHT, not thresholded: `token_meter.evaluate_turn_budget` never appends a
+      cache-miss reason to `reasons_advisory` (`:612-637`), so output is the only signal that
+      can reach the advisory tier. Pinned by `test_cache_miss_advisory_is_never_emitted`
+      (`tests/test_pre_tool_token_budget.py:188`).
+- [x] Any surviving advisory is baseline-relative, not fixed-threshold — `robust_baseline` /
+      `percentile` over the session's own recent output history, gated by
+      `_MIN_OUTPUT_BASELINE_HISTORY = 8` (`token_meter.py:543,575,617`). Pinned by
+      `test_warns_over_baseline` and `test_no_baseline_history_stays_silent`, the latter proving
+      NO fixed-threshold fallback survives.
+- [x] Hard-block behaviour unchanged — the hard tier still fires on a SUSTAINED cache-miss
+      pattern and still denies a spawner under ENFORCE; covered by the `test_hard_tier_*` set.
+- [ ] **#246 answered with the commit id — USER-gated (outward-facing GitHub reply).** The
+      commits to cite are `3890d7b1` (the fix) and `03253c6e` (follow-up: the advisory was
+      unreachable on a heartbeat-dominated log, so the first fix had shipped a tier that could
+      not fire — worth naming in the reply, since the peer's report is what would otherwise read
+      as still-open).
+
+## ⏵ COLUMN 2026-08-13: `todo` → `human_review` — nothing here is pullable by an agent
+
+All three implementable boxes are shipped and pinned. The only remaining item is posting a
+reply, which only the owner can do. `todo` asserts "ready for an agent to pull", which is false;
+`human_review` is the column that means "waiting on a person", so it is the true state and it
+stops this card inflating the pullable queue.
