@@ -312,6 +312,40 @@ def test_malformed_pending_alarms_once_and_recovers(tmp_path):
     assert "cannot be parsed" in out4
 
 
+def test_three_consecutive_dropped_passes_alarm_once_not_never(tmp_path):
+    """THE AMOA case (janitor#238) and the card's fifth acceptance box: a memory pass
+    dispatched and silently dropped THREE times in a row, with no heal in between.
+
+    Two ways to fail it, and both are bad in the direction this detector exists to prevent:
+    staying silent (the original bug — a dropped pass is invisible, so the corpus quietly
+    stops being maintained), or shouting once per drop (three lines for one standing fact
+    trains the reader to filter the detector out). The contract is exactly one finding, and
+    one ledger entry, for as long as the condition holds.
+
+    Distinct from the dedupe/heal test below, whose docstring scopes it to the CONSUMED-file
+    criterion: here nothing ever heals, which is the whole point.
+    """
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+
+    outs = []
+    # Each drop: the scheduler dispatched and stamped, and nothing ever consumed it. Every
+    # stamp stays well past factor*cadence so no intermediate evaluation reads as healthy —
+    # a single healthy read would emit_forget the key and mask the "alarms once" claim.
+    for stamped_at in (now - 1500, now - 1100, now - 700):
+        _write_pending(state_dir, intervention="repair", scope="LOCAL", root=root,
+                       stamped_at=stamped_at)
+        _stamp_last_run(gstate, "repair", "LOCAL", root, stamped_at)
+        outs.append(_run(home, project, gstate, settings))
+
+    alarms = [o for o in outs if "orphaned-memory-maint" in o]
+    assert len(alarms) == 1, f"exactly one standing finding expected, got {len(alarms)}: {outs!r}"
+    assert alarms[0] is not None and outs[0] == alarms[0], "it must alarm on the FIRST window"
+    assert len(_ledger_lines(project)) == 1
+
+
 def test_repeated_orphan_fires_write_the_ledger_once_then_healing_clears_dedupe(tmp_path):
     """Regression guard for the acceptance criterion: 'a consumed (absent) pending
     file emits nothing and clears any prior dedupe state' — a healed key must not
