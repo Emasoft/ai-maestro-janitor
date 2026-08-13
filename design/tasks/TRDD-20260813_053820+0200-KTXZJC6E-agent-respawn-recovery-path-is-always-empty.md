@@ -3,7 +3,8 @@ trdd-id: KTXZJC6E
 title: The background-agent respawn path is always empty so the documented fallback cannot run
 column: todo
 created: 2026-08-13T05:38:20+0200
-updated: 2026-08-13T07:32:00+0200
+updated: 2026-08-13T07:55:00+0200
+implementation-commits: [e81ac464]
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -111,6 +112,52 @@ That is this card's own thesis — *"wired, reachable, documented, and inert"* �
 it recorded, and it is why the acceptance list below is split. Populating the field is still correct
 and still the prerequisite; it is simply not sufficient, and saying otherwise is how a mechanism
 gets declared fixed while remaining inert.
+
+## ⏵ 2026-08-13 07:55 — PART A SHIPPED (`e81ac464`). Part B is what remains.
+
+`agentDir` is recorded by the hook when — and only when — the blanking guard fires;
+`pending_agents.resolve_transcript` does the deferred lookup at resume time, preferring a stored
+`transcript` that still resolves and otherwise searching `<agentDir>` for `agent-<id>.jsonl`
+(direct hit first, then `rglob` for the `workflows/wf_*/` nesting). `respawn_prompt_for(entry)` is
+the form callers should use.
+
+### Review caught a real defect in the delivered work, and it was correction 2 in mirror image
+
+The implementation computed `agentDir` OUTSIDE the blanking guard, so it was also stored for the
+branch where the payload already carries the AGENT's own transcript. There `Path(transcript).parent`
+is `<slug>/<session_id>/subagents[/workflows/wf_…]`, so the join produced
+`…/wf_c1827891-050/<session_id>/subagents` — **verified against a real on-disk path: it cannot
+exist.** Harmless in the happy path (a resolvable `transcript` is preferred), and precisely the sin
+§CORRECTIONS names: *an unresolvable path recorded as fact.* Moved inside the guard, plus a mirror
+test asserting that branch stores `agentDir == ""`. The guard now carries a comment saying why the
+derivation may never leave it.
+
+### Falsified — three breaks, each re-run first-hand rather than accepted from the report
+
+| break | test that must go red | result |
+|---|---|---|
+| `agentDir` computed outside the guard | `…stores_no_agent_dir_when_the_payload_gave_the_agents_own_path` | ✗ red |
+| `rglob` branch removed | `…finds_nested_workflow_shape` | ✗ red |
+| hook stops passing `agent_dir` | `…stores_agent_dir_alongside_blanked_transcript` | ✗ red |
+
+Restored after each; 59 tests in the file pass, ruff + mypy clean.
+
+### Provenance
+
+`reports/ktxzjc6e/20260813_072505+0200-respawn-handle.md` (gitignored, so annotated here rather
+than trusted later). Its claims — implementation complete, both falsifications observed, three
+gates green — were each TRUE of what it ran, and it still delivered the out-of-guard `agentDir`
+defect above: its two falsifications tested the two guards it had been told to test, and neither
+could see a third guard that did not yet exist. The lesson is not "the agent was careless" but the
+one already on this board: **a falsification proves the guards you wrote, never the guard you
+failed to write.**
+
+### What part A does NOT do — the honest limit
+
+The handle is populated and resolvable. **Nothing reads it.** Correction 3 still stands: grep finds
+no caller of `respawn_prompt` outside its own unit tests, so recovery remains a manual act (as done
+by hand this session). Part B is unstarted, and this card must not be closed until it exists —
+otherwise the mechanism is exactly what this card was filed about, one layer deeper.
 
 ## Acceptance — part A: the recovery handle is populated and resolvable
 
