@@ -1,9 +1,11 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by: [awaiting-live-429-observation]
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-13T00:37:09+0200
+updated: 2026-08-13T04:22:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -77,6 +79,23 @@ correct in principle, but (a) removed the dependency, so it is no longer on this
 
 **Do NOT close this card on the strength of its tests.** They pass, they are falsified, and
 they prove the wiring — between two ends that are not connected on the host that matters.
+
+### 2026-08-13 — `todo → blocked`. The card was claiming workable and is not.
+
+Both remaining boxes are outside anyone's effort right now: box 1 needs a REAL 429 (the STATE
+above already refuses to manufacture one), and box 2 is an upstream filing sitting in the
+user's GitHub-reply gate. Nothing here can be pulled and worked, so leaving it in `todo` made
+the board overstate its available work — the failure `the-kanban-is-a-pipeline-that-must-drain`
+names: a column that asserts activity nobody is providing.
+
+`blocked-by: [awaiting-live-429-observation]` is deliberately an EVENT, not a card id. The rule
+wants a blocker that is true and greppable; inventing a placeholder card so the field could
+name one would be ceremony, and would hide that the blocker is the physical world rather than
+another task. `pre-block-column: todo` restores it the moment the observation lands.
+
+**This is a park, not an abandonment.** The code is shipped (`f3f664de`, `624c63a4`) and live;
+what remains is confirmation. If a 429 occurs and the pane continues untouched, box 1 closes on
+the spot.
 
 ---
 
