@@ -87,7 +87,16 @@ verified exactly this way: narrative 48,165 → 1,031 bytes, map fence byte-iden
 ## Conformance
 
 - `claudemd_slim check` — exit 0 iff the file conforms and the index is fresh.
-- `claudemd_slim verify --old <file>` — the preservation oracle.
+- `claudemd_slim verify --old <file>` — the preservation oracle, run AFTER a migration
+  against a pre-migration copy.
+- `claudemd_slim plan` — reports which narrative blocks are excess and which are the
+  permitted elements of CM-1. Writes nothing (TRDD-LFSWY0C6).
+- `claudemd_slim apply --blocks <json> [--dry-run]` — performs the removal, gated BEFORE
+  the write on: the block being excess rather than a CM-1 permitted element, a unique
+  location, both fences unchanged, the repo URL surviving, and the preservation oracle.
+  Any gate failing means nothing is written. Note that preservation alone is INSUFFICIENT
+  — content folded into a wiki page satisfies the oracle while its removal from CLAUDE.md
+  may still violate CM-1, so the permitted-element gate is separate and runs first.
 - `repomap_generate` — regenerates element 4.
 
 ## Does NOT apply to

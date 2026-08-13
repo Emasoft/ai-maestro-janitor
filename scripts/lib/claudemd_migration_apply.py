@@ -134,9 +134,14 @@ def _remove_unique(text: str, block_text: str) -> tuple[str, Refusal | None]:
             f"block occurs {count} time(s) in CLAUDE.md, need exactly 1: {block_text[:120]!r}",
         )
     head, _, tail = text.partition(block_text)
-    # Drop the newline the removed block left behind so the narrative does not accumulate
-    # blank lines across successive runs. Only ONE, and only when the block sat on its own
-    # line — anything more starts reflowing text the human wrote.
+    # Take the block's OWN line terminator with it, and nothing else — exact line removal.
+    # This deliberately does NOT collapse the seam, so a paragraph that sat between blank
+    # lines leaves BOTH behind (`A\n\nBLOCK\n\nB` -> `A\n\n\nB`, one extra blank line,
+    # which markdown renders identically). Collapsing to a single blank would insert a gap
+    # into a tight list — `- a\n- BLOCK\n- c` must stay `- a\n- c` — and would reflow text
+    # the HUMAN wrote around a removal the janitor made, in a file they co-own. Measured
+    # 2026-08-13: 60 removals on the real CLAUDE.md left exactly one 3-newline run, because
+    # excess blocks are typically contiguous, so the accumulation is bounded and cosmetic.
     if head.endswith("\n") and tail.startswith("\n"):
         tail = tail[1:]
     return head + tail, None

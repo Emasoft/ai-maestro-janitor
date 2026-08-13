@@ -52,6 +52,28 @@ proofs live in `scripts/claudemd_slim.py` (TRDD-H12K9JYX). You never lose conten
    Aim under the narrative cap (8 KiB by default —
    `CLAUDE_PLUGIN_OPTION_CLAUDEMD_NARRATIVE_MAX_BYTES`).
 
+   Two optional tools do this half mechanically (TRDD-LFSWY0C6). `plan` writes nothing
+   and reports which blocks are excess versus which are §CM-1 permitted elements:
+
+   ```bash
+   uv run scripts/claudemd_slim.py plan
+   ```
+
+   `apply` performs the deletion, but ONLY after proving it safe — it refuses to remove a
+   permitted element, refuses a block it cannot locate uniquely, refuses if either fence
+   would change, and refuses if the content is not yet in the corpus. Pass the exact block
+   texts as a JSON array, and run `--dry-run` first (identical gates, no write):
+
+   ```bash
+   uv run scripts/claudemd_slim.py apply --blocks blocks.json --dry-run
+   uv run scripts/claudemd_slim.py apply --blocks blocks.json
+   ```
+
+   Its gates run BEFORE the write, so step 3 must already have landed the content — that
+   ordering is enforced, not merely advised. Step 6's `verify` is still worth running: it
+   is an INDEPENDENT path over the pre-migration copy, so it corroborates rather than
+   repeats.
+
 5. **Splice the index.**
 
    ```bash
@@ -88,7 +110,10 @@ the detector only nudges; a human/agent runs this skill deliberately.
 
 ## Resources
 
-- `scripts/claudemd_slim.py` — `index` / `check` / `verify` (the mechanics + proofs).
+- `scripts/claudemd_slim.py` — `index` / `check` / `verify` (the mechanics + proofs),
+  plus `plan` / `apply` (TRDD-LFSWY0C6: decide what is excess, then remove it or refuse).
+- `scripts/lib/claudemd_migration_plan.py` — the pure classifier behind `plan`.
+- `scripts/lib/claudemd_migration_apply.py` — the pure gate chain behind `apply`.
 - `scripts/lib/repomap/claudemd_slim.py` — the pure lib (fence, renderer, oracles).
 - `scripts/repomap_generate.py` — the sibling map generator (same write discipline).
 - `~/.claude/rules/markdown-memory-recall.md` — the recall/authoring protocol step 3

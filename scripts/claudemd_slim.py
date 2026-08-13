@@ -15,6 +15,8 @@ wikimem page) is the `janitor-project-cld-md-optimizer` skill.
   uv run scripts/claudemd_slim.py check            # slim-contract + index freshness probe
   uv run scripts/claudemd_slim.py verify --old F   # preservation proof for a migration
   uv run scripts/claudemd_slim.py plan             # DECISION-only migration plan (writes nothing)
+  uv run scripts/claudemd_slim.py apply --blocks B  # DELIVERY: remove migrated blocks, or refuse
+  uv run scripts/claudemd_slim.py apply --blocks B --dry-run   # same gates, writes nothing
 
 Exit codes: 0 = ok / written / fresh / preserved; 1 = check found violations or a stale
 index, or verify found DROPPED content; 3 = error (no CLAUDE.md, malformed fences, lock
