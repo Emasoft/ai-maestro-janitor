@@ -1605,12 +1605,25 @@ def _phase_iterm_automation_alarm() -> None:
         # any local process can write, and this print IS the heartbeat's trusted
         # stdout — an embedded newline + bare `[janitor-...]` line would otherwise
         # become an actionable marker. Same defang every other drift line gets.
+        # The grantee is ALWAYS a Python RUNTIME, never `uv`. uv is a launcher: it execs an
+        # interpreter and is gone, so it is never the process holding the Apple Event and
+        # granting it would protect nothing. The daemon's launchd plist already names an
+        # absolute python3.12 as ProgramArguments[0] for exactly this reason.
+        #
+        # The old fallback said "the janitor daemon's uv/python entry", which invited a reader
+        # with no interpreter path to go looking for a uv binary to authorise — a grant that
+        # can never work. Say the runtime, and say why the path matters: a UV-MANAGED
+        # interpreter is a poor grantee twice over — it is adhoc-signed (no stable Team ID, so
+        # on macOS 26+ the toggle may not persist) and its path moves on upgrade, silently
+        # orphaning a grant that was correctly given. That is what TRDD-DB1P25S4 proposes to
+        # end by running the daemon under a signed python.org build.
         binary = (
-            f"the binary that made the call ({state.sanitize_for_drift_line(interpreter)})"
+            f"the PYTHON RUNTIME that made the call ({state.sanitize_for_drift_line(interpreter)})"
             if interpreter
-            else "the janitor daemon's uv/python entry (no interpreter path could be "
-            "read from the flag — a pre-JSON flag, a concurrent rewrite, or a read "
-            "error; the next fleet scan records it)"
+            else "the python3 runtime executing the janitor daemon — NOT `uv`, which is only a "
+            "launcher and never holds the Apple Event (read the absolute interpreter from "
+            "ProgramArguments[0] of the daemon's launchd plist; no path could be read from "
+            "the flag here — a pre-JSON flag, a concurrent rewrite, or a read error)"
         )
         # TRDD-KU3ERYFX (janitor#234): the remedy below is a System Settings toggle — an
         # agent reading this line structurally cannot perform it. The directive prefix
@@ -1625,12 +1638,18 @@ def _phase_iterm_automation_alarm() -> None:
             "Two causes fit it equally: (a) macOS is denying Automation (Apple Events) "
             "access, or (b) the osascript hung/timed out/failed for another reason. Absence "
             "of a denial message in the logs is NOT evidence of a working grant — a denied "
-            "event that returns empty logs nothing either. The only POSITIVE evidence is the "
-            "guardian actually resolving an iTerm channel (a `FIRED rearm → iterm` line)."
+            "event that returns empty logs nothing either. POSITIVE evidence is the guardian "
+            "reaching an iTerm pane at all — EITHER a `FIRED rearm → iterm` line (it injected) "
+            "OR an `INPUT FIELD BUSY on iterm` line (it read the pane and declined to inject; "
+            "reading it required the Apple Event to answer). The busy/skip outcome is the "
+            "COMMON one on a healthy fleet, so judging by rearms alone ages a WORKING channel "
+            "into looking dead (janitor#261)."
             f"{discriminated} "
-            "Consequence either way: the fleet guardian CANNOT rescue a frozen/rate-limited "
-            "Claude in any iTerm pane (tmux panes are unaffected) and has been skipping them "
-            "silently. If it is (a): System Settings → Privacy & Security → Automation → "
+            "Consequence: the guardian cannot rescue an iTerm pane while the channel is down "
+            "(tmux panes are unaffected). Check the evidence age below before concluding it "
+            "has been down for long — an intermittent hang and a revoked grant look identical "
+            "in a single scan, and recent evidence means the grant itself is fine. If it is "
+            "(a): System Settings → Privacy & Security → Automation → "
             f"allow {binary} to control iTerm. Note the grant follows that exact binary, so "
             "a uv/python upgrade that moves the path silently orphans a grant you really "
             "did give. On some hosts (macOS 26+, an adhoc-signed uv/python with no stable "

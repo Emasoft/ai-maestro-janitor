@@ -1509,7 +1509,13 @@ def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
 
     assert "enumerated ZERO" in first
     assert "Automation" in first
-    assert "CANNOT rescue" in first          # the consequence
+    assert "cannot rescue an iTerm pane" in first   # the consequence, stated for the OUTAGE only
+    # It must NOT claim a standing, open-ended outage. The old wording ("has been skipping them
+    # silently") asserted a duration a single scan cannot observe, and that is what sent a
+    # reader to re-toggle a grant whose own log proved it had worked 30 min earlier
+    # (janitor#261). The alarm may report what it saw; it may not narrate how long.
+    assert "has been skipping them" not in first
+    assert "INPUT FIELD BUSY" in first       # the second, commoner form of positive evidence
     assert "System Settings" in first        # the remedy
     assert "will not persist" in first       # #92 — the toggle may revert on adhoc-signed clients
     assert "tmux" in first                   # #92 — the honest fallback, not a guaranteed one-click fix
