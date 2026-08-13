@@ -244,7 +244,10 @@ _WORKLOAD_MAX_ATTEMPTS = 2
 # cadence every tick forever. After this many CONSECUTIVE failures the task is
 # quarantined: its next-due is pushed out by interval * 2**(fails - K), capped at
 # _TASK_MAX_BACKOFF_SEC. A single success resets the streak (see Task.run).
-_TASK_BACKOFF_AFTER_FAILS = 3
+# SHARED with the health watchdogs (TRDD-3GF9PSQB): the streak at which the daemon gives up
+# on a task is exactly the streak at which a watchdog should SAY the task is unhealthy. Two
+# copies of this number would be two definitions of "unhealthy" drifting apart silently.
+_TASK_BACKOFF_AFTER_FAILS = gs.QUARANTINE_AFTER_FAILS
 _TASK_MAX_BACKOFF_SEC = 3600  # 1 h ceiling so a recovered task is retried within the hour
 
 # Patterns that prove a `claude plugin update` subprocess actually changed

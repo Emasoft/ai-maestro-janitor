@@ -90,6 +90,44 @@ def emit_if_daemon_stale(
     except Exception:
         pass
 
+    # ---- FAILING-BUT-RUNNING (TRDD-3GF9PSQB) — checked BEFORE the staleness path -------
+    #
+    # A task that fails on EVERY run is invisible to everything below, for two independent
+    # reasons, and both had to be bypassed rather than one:
+    #   1. the completion stamp is written in the daemon's `finally` BEFORE the failure
+    #      branch (both `Task.run` and `Task.poll_background`), so a task failing forever
+    #      keeps a perpetually FRESH stamp and never reaches the age test; and
+    #   2. even a stale stamp is suppressed by the `daemon_is_alive()` gate below — and a
+    #      task that is running and failing has, by definition, a live daemon.
+    #
+    # So the loudest possible failure produced the quietest possible signal: a POSITIVE
+    # health indicator manufactured by the failure itself. The `last_run <= 0` comment below
+    # already knew the stamp is unconditional and reasoned correctly about ZERO; nobody
+    # followed the same fact through to non-zero.
+    #
+    # The failure streak is the signal that CAN'T be faked by failing: only a success clears
+    # it. Fire at the daemon's own quarantine threshold — the point where it stops retrying
+    # normally is exactly the point where a human should hear about it — so there is one
+    # definition of "unhealthy", not two.
+    fails = gs.read_failcount(chore)
+    if fails >= gs.QUARANTINE_AFTER_FAILS:
+        fail_msg = (
+            f"[{task_name}] the daemon is RUNNING this task but it has FAILED "
+            f"{fails} consecutive times, so {subject} is not actually happening — its "
+            f"completion stamp stays fresh because it is written on failure too, which is "
+            f"why nothing reported this until now."
+        )
+        fail_log = gs.global_state_dir() / "daemon.log"
+        if fail_log.is_file():
+            fail_msg += f" The error is in {fail_log} (grep \"task '{chore}' FAILED\")."
+        fail_seen = state.state_dir() / f"{task_name}-failing-seen.txt"
+        # Keyed on the STREAK, not the hour: a task stuck at the same failure count is one
+        # standing fact, not hourly news, so it is said once and then only when it worsens.
+        out = dedupe.emit_once(fail_seen, f"failing@{fails}", fail_msg)
+        if out is not None:
+            print(out)
+        return
+
     # Dual-read across all three control-plane eras (TRDD-QK7M2B0X phase B step 2).
     last_run = gs.read_last_run(chore)
     if last_run <= 0:

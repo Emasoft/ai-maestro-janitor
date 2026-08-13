@@ -345,6 +345,38 @@ def read_last_run(task: str) -> int:
     return best
 
 
+#: Consecutive-failure streak at which the daemon QUARANTINES a task (starts exponential
+#: backoff) — and therefore the point at which a task is unhealthy enough for a watchdog to
+#: say so out loud. Deliberately ONE constant, imported by both the daemon that writes the
+#: streak and the watchdogs that read it: two copies would be two different meanings of
+#: "unhealthy", which is the ambiguity TRDD-3GF9PSQB exists to remove.
+QUARANTINE_AFTER_FAILS = 3
+
+
+def read_failcount(task: str) -> int:
+    """One chore's CONSECUTIVE-FAILURE streak (0 when absent, unreadable, or corrupt).
+
+    The companion to `read_last_run`, and the whole reason it exists (TRDD-3GF9PSQB): the
+    completion stamp is written in the daemon's `finally`, BEFORE the failure branch, in both
+    the foreground (`Task.run`) and background (`Task.poll_background`) lanes. So it answers
+    "when did this task last FINISH", never "when did it last SUCCEED" — and a task that
+    fails on every single run therefore carries a PERPETUALLY FRESH stamp. A health reader
+    consulting only the stamp is blind to exactly the tasks most worth reporting: the louder
+    the failure, the fresher the signal it reads. Read BOTH, always.
+
+    Single path, unlike `read_last_run`'s three-era max: the streak is private daemon state
+    with no second writer (daemon.py keeps it out of the shared control plane on purpose), so
+    there is no other era to reconcile.
+    """
+    try:
+        p = global_state_dir() / f"{task}.failcount"
+        if p.is_file():
+            return max(0, int(p.read_text(encoding="utf-8").strip() or 0))
+    except (OSError, ValueError):
+        pass  # an unreadable streak must fail OPEN (0 = "no evidence of failure"), never alarm
+    return 0
+
+
 def _generation_from_flag(name: str) -> int:
     """Generation number for one of the two reload flags, across all three
     control-plane locations (max() wins — a stamp from ANY era/location still

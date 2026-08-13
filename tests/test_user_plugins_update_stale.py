@@ -110,3 +110,73 @@ def test_below_threshold_silent_even_if_dead(tmp_path: Path) -> None:
     _seed_dead(gsd)
     out = _run_helper(gsd, tmp_path)
     assert out == "", f"below-threshold staleness must be silent, got: {out!r}"
+
+
+# --- the failing-but-running blind spot (TRDD-3GF9PSQB) ---------------------------
+#
+# The daemon stamps `<task>.last-run.ts` in its `finally`, BEFORE the failure branch, so a
+# task that fails every run keeps a PERPETUALLY FRESH stamp. Combined with the alive-daemon
+# gate (a failing task's daemon is alive by definition) that made the loudest possible
+# failure produce the quietest possible signal.
+
+_QUARANTINE_AFTER_FAILS = 3  # mirrors global_state.QUARANTINE_AFTER_FAILS
+
+
+def _seed_fails(gsd: Path, fails: int) -> None:
+    gsd.mkdir(parents=True, exist_ok=True)
+    (gsd / "user-plugins-update.failcount").write_text(str(fails), encoding="utf-8")
+
+
+def test_failing_task_is_reported_despite_a_fresh_stamp_and_live_daemon(tmp_path: Path) -> None:
+    """THE blind spot. Exactly the state a permanently-failing task produces: the stamp is
+    FRESH (it is written on failure too) and the daemon is ALIVE (it is running the task and
+    the task is erroring). Both existing gates therefore return early, and before this fix
+    NOTHING reported it — the more reliably the task failed, the healthier it looked."""
+    gsd = tmp_path / "gs"
+    _seed_age(gsd, 0)                      # stamped seconds ago — by a FAILED run
+    _seed_alive(gsd)                       # daemon is fine; the TASK is not
+    _seed_fails(gsd, _QUARANTINE_AFTER_FAILS)
+    out = _run_helper(gsd, tmp_path)
+    assert "[user-plugins-update]" in out, f"a task failing every run must be reported: {out!r}"
+    assert "FAILED" in out
+    assert str(_QUARANTINE_AFTER_FAILS) in out
+    # It must NOT be dressed up as the daemon being dead — the daemon is healthy here, and
+    # sending the reader to look at the daemon would waste the one thing they have least of.
+    assert "not responding" not in out
+
+
+def test_healthy_task_with_a_fresh_stamp_stays_silent(tmp_path: Path) -> None:
+    """No new noise: the overwhelmingly common state (zero failures, fresh stamp, live
+    daemon) must remain completely silent. A watchdog that chirps on healthy tasks gets
+    ignored, which would cost more than the blind spot it fixes."""
+    gsd = tmp_path / "gs"
+    _seed_age(gsd, 0)
+    _seed_alive(gsd)
+    _seed_fails(gsd, 0)
+    assert _run_helper(gsd, tmp_path) == ""
+
+
+def test_a_transient_failure_streak_below_quarantine_is_silent(tmp_path: Path) -> None:
+    """One or two failures are a blip the daemon retries on its normal cadence; only at the
+    threshold where the DAEMON ITSELF gives up (starts exponential backoff) does a human need
+    to hear about it. Reusing the daemon's own constant is what keeps 'unhealthy' one
+    definition instead of two."""
+    gsd = tmp_path / "gs"
+    _seed_age(gsd, 0)
+    _seed_alive(gsd)
+    _seed_fails(gsd, _QUARANTINE_AFTER_FAILS - 1)
+    assert _run_helper(gsd, tmp_path) == ""
+
+
+def test_failing_line_is_said_once_per_streak_and_again_when_it_worsens(tmp_path: Path) -> None:
+    """A task stuck at the same failure count is ONE standing fact, not hourly news — so the
+    dedupe key is the streak, not the hour. A worsening streak is new information and speaks
+    again."""
+    gsd = tmp_path / "gs"
+    _seed_age(gsd, 0)
+    _seed_alive(gsd)
+    _seed_fails(gsd, _QUARANTINE_AFTER_FAILS)
+    assert "[user-plugins-update]" in _run_helper(gsd, tmp_path)
+    assert _run_helper(gsd, tmp_path) == "", "same streak must not re-nag"
+    _seed_fails(gsd, _QUARANTINE_AFTER_FAILS + 1)
+    assert "[user-plugins-update]" in _run_helper(gsd, tmp_path), "a worsening streak is news"
