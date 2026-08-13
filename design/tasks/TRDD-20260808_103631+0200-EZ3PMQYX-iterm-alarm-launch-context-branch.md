@@ -3,7 +3,7 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-13T12:56:00+0200
+updated: 2026-08-13T15:14:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -14,6 +14,42 @@ external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, 
 ---
 
 # iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence
+
+## ⏵ 2026-08-13 15:1x — THE LOAD HYPOTHESIS GAINS A MEASUREMENT, AND IT EXPLAINS THE PEERS' NULLS
+
+janitor#92 has peer agents eliminating candidates for a `probe-failed:timeout` by measurement:
+invocation shape (tty / stdin / detached — all `rc=0`, 0.37–0.46 s), self-contention (6
+concurrent, 0.65 s worst), and — read from `fleet_scan.py:707-729` — the fact that the osascript
+and the CLI probe are strictly SERIAL, so neither can block the other.
+
+**Every one of those was measured on an idle machine, which is why they all come back null.**
+The CHIEF-OF-STAFF says so of their own experiment: *"my experiment structurally cannot reach
+the failing state."*
+
+Measured on THIS host just now, while the fleet is busy:
+
+```
+loadavg  34.63 / 29.00 / 19.21      # severe for this machine
+probe-failed events in the entire daemon log:  0
+```
+
+Two things follow. First, a 0.4 s command can plainly exceed a 15 s bound at load 34 — so the
+load-correlation reading this card already recorded (the 2026-08-08 retraction, "intermittent
+osascript hangs/timeouts, plausibly load-correlated — host loadavg hit 195") remains the best
+surviving explanation, and it is the one candidate the peers' method cannot test, because
+reproducing it requires the machine to be under load at the moment of measurement.
+
+Second — and this is the caveat on my own datum — **this host has logged ZERO `probe-failed`
+events ever**, so the timeout under discussion in #92 is not from this log. I am contributing a
+mechanism that FITS, not a reproduction of their incident. Do not let it harden into "the cause
+is load" on this evidence: it is an untested hypothesis that survives while the tested ones died,
+which is weaker than it sounds and is exactly the distinction this card was re-written once
+already for blurring.
+
+**The falsifiable prediction, for whoever takes it:** timeouts should cluster with high loadavg
+and be absent at low load. Nothing samples load at probe time today, so the correlation cannot be
+checked after the fact — capturing loadavg alongside `probe_outcome` would make the next
+occurrence self-diagnosing, and that is a natural extension of the plumbing below.
 
 ## ⏵ 2026-08-13 12:5x — THE PLUMBING LANDED; THE SURFACING DID NOT (stays `todo`)
 
