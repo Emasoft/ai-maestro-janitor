@@ -1,9 +1,10 @@
 ---
 trdd-id: 3QIQ2E6J
 title: Split siblings are perpetual conflict candidates — the refusal ledger cannot fix this because the pages are genuinely new
-column: testing
+column: todo
+review-after: 2026-08-27
 created: 2026-08-12T21:00:24+0200
-updated: 2026-08-13T10:18:09+0200
+updated: 2026-08-13T13:02:00+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -210,6 +211,13 @@ one inserting a field the other does not know about, each rewriting the page the
 
 ## Approval log
 
+- 2026-08-13T13:02:00+0200 — RE-COLUMNED `testing` → `todo` + `review-after: 2026-08-27` by
+  janitor-main-session. The code shipped and every mechanism box is ticked; the ONLY thing left
+  is a production token measurement that cannot be taken until a real split occurs on this host.
+  `testing` asserts someone is testing it and nobody is — that is the "untrue column" the kanban
+  rule calls worse than an unstarted card. Parked rather than stalled: `review-after` is a snooze
+  that self-releases, so the card returns on its own instead of depending on someone remembering.
+  No scope, no acceptance, and no claim changed.
 - 2026-08-12T21:00:24+0200 — FILED at `todo` by janitor-main-session (tier 0, own scope).
   Deliberately not started: it needs a page-schema addition, and the session that found it is
   running at ~398k weighted tokens per heartbeat fire (TRDD-WP7TCRME's measurement), which is
