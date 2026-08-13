@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T14:26:19+0200
+updated: 2026-08-13T05:29:05+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -38,7 +38,68 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
     exclusion — two owners actuating one pane is the corruption the split prevents) and contributes
     ONLY the spec. That spec is written into `design/ARCHITECTURE.md` §8 this session — the sanctioned
     channel to the server (the TS port is built from that doc).
-- **NEXT ACTION (REVISED after advisor review — see `## Advisor review` below):** do NOT write code
+## ⏵ 2026-08-13 — 1a AND 1b ARE ANSWERED. No real wedge was needed; the evidence was already on disk.
+
+**The NEXT ACTION below said "verify on a REAL wedge", which reads as *wait for an event* and is why
+this card sat 20 days untouched. It was decomposable** (the `acceptance-criteria-expire` lesson
+`^decompose-a-blocked-manual-confirmation`): both questions are answerable from the transcripts and
+the janitor's own `stop-failure.log`, which have been accumulating the whole time.
+
+**Corpus:** 835 structural `isApiErrorMessage` records across this project's transcripts; 2139
+StopFailure fires in `.janitor/logs/stop-failure.log` spanning 85.6 days (2026-04-23 → 2026-07-17);
+53 `Request interrupted` (ESC) records inside that same window.
+
+### ✔ (1a) ANSWERED — **NO**. CC appends NOTHING during the retry loop, so `transcript_stale` DOES trip.
+
+The advisor's feared branch — *"if YES, the whole flag-independent detection is dead"* — **does not
+apply**. The design's transcript-stale gate stands as written. Two INDEPENDENT proofs:
+
+1. **CC's system-record vocabulary contains no retry subtype.** The only subtypes emitted are
+   `stop_hook_summary`, `turn_duration`, `scheduled_task_fire`, `away_summary`, `compact_boundary`,
+   `local_command`. There is no per-attempt record type at all. (The `/attempt N\/M/` matches that
+   *do* exist live in `attachment` / `last-prompt` / `queue-operation` — echoes of this very TRDD's
+   own prose, which is exactly the self-trigger hazard this card already warns about. A naive
+   whole-file grep returns 4843 files and is worthless here; key on the STRUCTURAL field.)
+2. **Every API-error record coincides with a turn END.** 832/832 (**100%**) have a StopFailure fire
+   within 90s. A record written *mid*-retry would have no such fire. Zero do. Independently, no two
+   API-error records are ever adjacent — every consecutive pair is ≥3 lines apart and always has a
+   `user(HEARTBEAT)` between them, i.e. each is a separate cron-fired turn, never a burst inside one.
+
+### ✔ (1b) ANSWERED — **plain `Stop`, NO flag.** The daemon MUST write `rate-limited.flag` itself.
+
+The advisor's feared branch here **DOES apply**, so the fallback is mandatory, not optional:
+
+| event in the shared window | n | StopFailure fire within ±90s |
+|---|---|---|
+| API-error record | 832 | **832 (100%)** |
+| ESC / `Request interrupted` | 53 | **1 (2%)** |
+
+The lone match is **below the chance rate**: 2139 fires over 85.6 days give a 5.1% probability that
+any random ±90s window contains one, i.e. ~2.7 coincidental matches expected among 53 — we observed
+1, and it has no API-error record beside it to explain it. So ESC-cancel does not fire StopFailure.
+
+**Consequence for §3:** the ESC alone does NOT start the resume chain. The daemon writes
+`rate-limited.flag` **before** injecting (precedent: `fleet_scan.sweep_stale_rate_limit` already
+owns that flag's lifecycle). Without this the wedge breaks and the session then just sits idle —
+strictly worse than today, because the wedge at least made the stall visible.
+
+**The hook cannot help here:** `on-stop-failure.py` receives no distinguishing payload — it fires
+and writes unconditionally. The Stop-vs-StopFailure choice is entirely CC's, so it can only be
+measured from outside, as above.
+
+### Remaining NEXT ACTION — implement Phase 1, with 1b's fallback wired in
+
+Both empirical gates are green. Implement the corrected Phase 1 per Design §1-§3 + the four advisor
+corrections, with the flag-before-ESC ordering now REQUIRED rather than conditional. Do NOT
+implement on a rate-limited window.
+
+- **SUPERSEDED — do NOT carry forward:** the "verify 1a/1b on a REAL wedge first" gate below, and
+  the §3 note *"'everything downstream already works' is CONDITIONAL on §1b — verify first"*. It is
+  no longer conditional: §1b is answered and the answer is the fallback branch.
+
+---
+
+- **NEXT ACTION (SUPERSEDED 2026-08-13 — see the block above; kept for provenance):** do NOT write code
   yet. FIRST empirically verify the two load-bearing assumptions on a REAL wedge (cheapest possible
   signal; if either fails, the design changes shape):
   - **(1a)** During the `Retrying … attempt N/300` loop, does CC append records to the session
