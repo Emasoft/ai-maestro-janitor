@@ -3,7 +3,7 @@ trdd-id: KTXZJC6E
 title: The background-agent respawn path is always empty so the documented fallback cannot run
 column: todo
 created: 2026-08-13T05:38:20+0200
-updated: 2026-08-13T05:38:20+0200
+updated: 2026-08-13T07:32:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -78,7 +78,59 @@ because the caller believes a fallback exists.
    is the same bug re-inverted.
 2. Keep the existing guard intact — do not widen it to accept the parent transcript.
 
-## Acceptance
+## ⚠ CORRECTIONS 2026-08-13 07:30 — three things this card got wrong, found by checking it
+
+Written from observation, then verified before acting. The thesis survives; the prescription in
+§What does not.
+
+**1. The derived path in §"The right path exists" is INCOMPLETE.** Workflow-spawned agents do not
+sit at `<session_id>/subagents/agent-<id>.jsonl` — they nest one level deeper:
+
+```
+<projects>/<slug>/<session_id>/subagents/workflows/wf_<runid>/agent-<agent_id>.jsonl
+```
+
+Measured on disk today. A fix built from the path this card stated would resolve direct Agent-tool
+spawns and silently miss every workflow agent — and workflow agents are the majority case, because
+they are the ones whose payload carries the parent transcript and therefore the ones the guard
+blanks. Resolution must SEARCH the session's `subagents/` subtree, not join a fixed path.
+
+**2. "Store it only when the file is resolvable" is UNSATISFIABLE at SubagentStart.** The hook fires
+at spawn; the agent's transcript does not exist yet. Obeying that instruction literally stores
+nothing — the same bug, reached by a different route. The resolution must therefore be LAZY: store
+the SEARCH ROOT (derivable at spawn from data the hook holds, and a search root is not a claim that
+a file exists), and resolve the file at READ time, when recovery actually runs and the transcript is
+guaranteed to exist.
+
+**3. The bigger finding — NOTHING CALLS `respawn_prompt`.** Grepped the whole tree: the only callers
+of `spawn_prompt` / `respawn_prompt` are their own unit tests. So populating the field fixes a
+prerequisite for a consumer that does not exist, and this card as written would have shipped a
+correctly-populated field nobody reads.
+
+That is this card's own thesis — *"wired, reachable, documented, and inert"* — one layer deeper than
+it recorded, and it is why the acceptance list below is split. Populating the field is still correct
+and still the prerequisite; it is simply not sufficient, and saying otherwise is how a mechanism
+gets declared fixed while remaining inert.
+
+## Acceptance — part A: the recovery handle is populated and resolvable
+
+- [ ] The hook stores a SEARCH ROOT (`<projects>/<slug>/<session_id>/subagents`) whenever it blanks
+      a parent-session `transcript_path`; the blanking guard itself is unchanged
+- [ ] Resolution finds the agent transcript at BOTH shapes — `<root>/agent-<id>.jsonl` and
+      `<root>/workflows/wf_*/agent-<id>.jsonl` — the second being correction 1
+- [ ] Recovery returns the agent's ORIGINAL PROMPT TEXT (assert on content, not on non-emptiness —
+      an empty-but-present file passes the weaker check)
+- [ ] Falsified per guard: drop the subtree search and watch the workflow case go red; drop the
+      search-root storage and watch both go red
+- [ ] The workflow-subagent case still stores no parent transcript (the guard tested in its own
+      right, since widening it is the tempting wrong fix)
+
+## Acceptance — part B: a consumer exists (correction 3; NOT satisfied by part A)
+
+- [ ] Some production path actually calls the respawn fallback when a resume fails — until then the
+      handle is populated and unread, and this card must not be called complete
+
+## Original acceptance (superseded by A and B above)
 
 - [ ] A newly spawned background agent's manifest entry carries a NON-empty `transcript` that
       resolves to a real file
