@@ -101,6 +101,46 @@ def retry_wedge_state_update(
     return {"attempt": current_attempt, "confirmed": prev_confirmed}, prev_confirmed
 
 
+# PUBLIC: both dispatch.py's alarm and fleet_scan's flag stamp import these, so they are
+# part of this module's surface, not internals. See `latest_iterm_rearm_epoch` for why the
+# parser and its inputs must have exactly one home.
+ITERM_REARM_LOG_NAMES = ("daemon.log", "daemon.log.1")
+ITERM_REARM_EVIDENCE_WINDOW_S = 6 * 3600  # peer-measured: rescues landed 1-4h before a false alarm
+
+
+def latest_iterm_rearm_epoch(log_text: str) -> int | None:
+    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
+
+    THE single parser for this line — `dispatch.py`'s alarm and `fleet_scan`'s flag stamp
+    both call it. It lives here because this module OWNS the semantics of that line: it is
+    written by the session-liveness recovery path, so a change to its wording or timestamp
+    format is a change to this module's own output.
+
+    Previously duplicated verbatim in both callers and "kept in sync by comment, not by
+    import". That is the failure this consolidation removes: if the log line or the
+    `%Y-%m-%dT%H:%M:%S%z` stamp ever changes, one copy would be updated and the other would
+    silently return None forever — the flag's `rearm_evidence_age_s` going permanently
+    absent while the alarm's own parse kept working, so nothing would look broken.
+
+    Malformed timestamps are skipped, never fatal — a log line we cannot date is not
+    evidence in either direction.
+    """
+    import datetime as _dt  # noqa: PLC0415 -- local: keeps module import cost off the hot path
+
+    latest: int | None = None
+    for line in log_text.splitlines():
+        if "FIRED rearm → iterm" not in line or not line.startswith("["):
+            continue
+        try:
+            stamp = line[1 : line.index("]")]
+            epoch = int(_dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp())
+        except (ValueError, IndexError):
+            continue
+        if latest is None or epoch > latest:
+            latest = epoch
+    return latest
+
+
 def capture_terminal_identity(env: Mapping[str, str]) -> dict[str, str]:
     """Extract the stable terminal-pane identifiers the daemon needs to inject
     recovery into THIS session from OUTSIDE, from the session's own environment.

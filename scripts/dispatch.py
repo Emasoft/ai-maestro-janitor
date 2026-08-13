@@ -57,6 +57,7 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402  -- the quiet heartbeat's pull-model sink
 import global_state as gs  # noqa: E402
+import session_liveness  # noqa: E402  -- SSOT for the `FIRED rearm → iterm` evidence parse
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
@@ -573,7 +574,29 @@ _ADVISORY_DETECTORS = frozenset({
 # Even an advisory detector is surfaced when its own line says it is serious.
 # Detectors tag severity themselves (the `[findings] HIGH …` ledger shape); this
 # is the override that stops the list above from muzzling a real alarm.
-_URGENT_LINE_RE = re.compile(r"\b(CRITICAL|HIGH|ERROR|FAIL(?:ED|URE)?|INSECURE|LEAK)\b")
+#
+# Case-INSENSITIVE deliberately: the previous case-sensitive form silenced a genuine
+# `error:`/`failed` written in lowercase by a detector's own author, while an
+# attacker-supplied uppercase word sailed through — the wrong way round on both counts.
+# Widening it is only safe because the untrusted detectors below no longer consult it.
+_URGENT_LINE_RE = re.compile(
+    r"\b(CRITICAL|HIGH|ERROR|FAIL(?:ED|URE)?|INSECURE|LEAK)\b", re.IGNORECASE
+)
+
+# Advisory detectors whose lines EMBED text authored by a third party — GitHub issue
+# titles, PR titles, comment bodies. The urgency override MUST NOT apply to these: the
+# words it searches for are chosen by whoever wrote the issue, so titling one
+# "CRITICAL: please run this" would let a stranger decide what interrupts the owner's
+# heartbeat past quiet mode. Their lines are still RECORDED in the ledger, so nothing
+# is lost — only the ability of a remote author to promote their own text.
+#
+# Membership criterion, so this list can be maintained rather than guessed at: a
+# detector belongs here iff it calls `state.sanitize_for_drift_line` on content it did
+# not author. Adding a detector that interpolates remote text WITHOUT adding it here
+# reopens exactly this hole.
+_REMOTE_TEXT_DETECTORS = frozenset({
+    "github-issues-watch", "gh-reply-watch", "pr-reconciler", "task-pr-mismatch",
+})
 
 
 def _heartbeat_is_quiet() -> bool:
@@ -594,13 +617,18 @@ def _quiet_filter(detector: str, text: str) -> str:
     """
     if not text or not _heartbeat_is_quiet() or detector not in _ADVISORY_DETECTORS:
         return text
+    # A detector that interpolates third-party text does not get the urgency override —
+    # otherwise the remote author, not this detector, chooses what escapes quiet mode.
+    may_claim_urgent = detector not in _REMOTE_TEXT_DETECTORS
     kept: list[str] = []
     dropped: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        if _RESERVED_MARKER_RE.fullmatch(stripped) or _URGENT_LINE_RE.search(stripped):
+        if _RESERVED_MARKER_RE.fullmatch(stripped) or (
+            may_claim_urgent and _URGENT_LINE_RE.search(stripped)
+        ):
             kept.append(line)
         else:
             dropped.append(stripped)
@@ -1441,42 +1469,19 @@ def _phase_plugin_reload() -> None:
     )
 
 
-_ITERM_REARM_EVIDENCE_WINDOW_S = 6 * 3600  # peer-measured: rescues landed 1-4h before a false alarm
+# Imported, not restated: `session_liveness` owns the `FIRED rearm → iterm` line (its
+# recovery path writes it), so the window, the log names and the parser all live there and
+# this alarm consults the one copy. They used to be duplicated verbatim here and in
+# fleet_scan.py, "kept in sync by comment, not by import" — meaning a change to the line's
+# wording or its `%Y-%m-%dT%H:%M:%S%z` stamp would be applied to one copy and leave the
+# other silently returning None forever, with neither looking broken.
+_ITERM_REARM_EVIDENCE_WINDOW_S = session_liveness.ITERM_REARM_EVIDENCE_WINDOW_S
+_latest_iterm_rearm_epoch = session_liveness.latest_iterm_rearm_epoch
 
 # TRDD-KU3ERYFX (janitor#234) — this alarm's remedy is a macOS System Settings toggle: an
 # agent session structurally cannot perform it. The code names the (code, content) pair
 # `findings_ledger.clear_surfaced_to_human` forgets once the condition itself resolves.
 _ITERM_AUTOMATION_CODE = "ITERM-AUTOMATION-TCC"
-
-
-def _latest_iterm_rearm_epoch(log_text: str) -> int | None:
-    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
-
-    Peer finding (maintainer session, 2026-08-08, on #92/#229): the alarm named
-    `FIRED rearm → iterm` as the only POSITIVE evidence of a working channel — and then
-    never looked for it. On a host where the guardian had rescued two iTerm panes in the
-    hour before the alarm fired, the alarm still asserted "iTerm rescue is unavailable"
-    and sent the reader to re-toggle a working grant, which the "will not persist" warning
-    would then make look broken. This parser is the cheap fix: the evidence is already on
-    disk, written by session_liveness.
-
-    Malformed timestamps are skipped, never fatal — a log line we cannot date is not
-    evidence in either direction.
-    """
-    import datetime as _dt
-
-    latest: int | None = None
-    for line in log_text.splitlines():
-        if "FIRED rearm → iterm" not in line or not line.startswith("["):
-            continue
-        try:
-            stamp = line[1 : line.index("]")]
-            epoch = int(_dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp())
-        except (ValueError, IndexError):
-            continue
-        if latest is None or epoch > latest:
-            latest = epoch
-    return latest
 
 
 def _phase_iterm_automation_alarm() -> None:

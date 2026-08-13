@@ -515,11 +515,12 @@ def has_stated_precondition(head: str) -> bool:
     if not fm:
         return False
     block = fm.group(1)
-    # ANY non-empty blocked-by value, not just TRDD-shaped ids (see `has_blocked_by_value`):
-    # keying on the id list made `blocked-by: [ai-maestro#102]` read as "no on-file excuse" and
-    # left a correctly-parked card drift-eligible — the same defect, in the older caller.
-    bm = FM_BLOCKED_BY_RE.search(block)
-    if bm and parse_flow_list(bm.group(1)):
+    # ANY non-empty blocked-by value, not just TRDD-shaped ids — via `has_blocked_by_value`,
+    # the SSOT for that predicate rather than a third inline copy of it: keying on the id list
+    # made `blocked-by: [ai-maestro#102]` read as "no on-file excuse" and left a correctly-parked
+    # card drift-eligible, and a predicate re-spelled at three call sites is a defect that only
+    # ever gets fixed at two of them.
+    if has_blocked_by_value(head):
         return True
     nm = FM_NPT_RE.search(block)
     if nm and parse_flow_list(nm.group(1)):
@@ -866,7 +867,21 @@ _OBITUARY_VERB_RE = re.compile(
 )
 # A commit SHA (7-40 hex chars) on the token's own line — citing the commit
 # that removed a symbol is, by construction, already "done the homework".
-_COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
+#
+# TWO narrowings, both measured, because a bare `\b[0-9a-f]{7,40}\b` swallows far
+# more than commits and every false hit SILENCES a real dead-symbol finding:
+#   * LEGACY TRDD IDS ARE 8 HEX CHARS. `TRDD-32acd15f`, `TRDD-dfc0959a` and their
+#     kin appear on ordinary STATE-block lines all over this board, so the bare
+#     pattern classified any line citing one as an "obituary" and dropped its
+#     citations. TRDD citations are therefore stripped from the line first.
+#   * A run that is ALL LETTERS is an English word, not a SHA (`acceded`,
+#     `defaced`, `effaced` are all a-f only); a run that is ALL DIGITS is a
+#     number or a date. Requiring at least one of each keeps real SHAs and drops
+#     both classes.
+_TRDD_CITATION_RE = re.compile(r"\bTRDD-[0-9A-Za-z]{8}\b", re.IGNORECASE)
+_COMMIT_SHA_RE = re.compile(
+    r"\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b", re.IGNORECASE
+)
 
 
 @dataclass
@@ -920,8 +935,14 @@ def _is_obituary_line(line: str) -> bool:
     longer exists") or a commit SHA (7-40 hex chars) on the token's own line
     means the card has already done the finding's job — repeating "cites an
     absent symbol" is noise, not signal (TRDD-Q4AMWYCY).
+
+    TRDD citations are stripped before the SHA probe: a legacy id8 IS 8 hex
+    chars, so a line that merely cites `TRDD-32acd15f` is not an obituary and
+    must not silence the citations that share it (see `_COMMIT_SHA_RE`).
     """
-    return bool(_OBITUARY_VERB_RE.search(line) or _COMMIT_SHA_RE.search(line))
+    if _OBITUARY_VERB_RE.search(line):
+        return True
+    return _COMMIT_SHA_RE.search(_TRDD_CITATION_RE.sub(" ", line)) is not None
 
 
 def _next_action_span(state_block: str) -> tuple[int, int] | None:
@@ -1222,7 +1243,19 @@ def reconcile(
     # (an untagged commit is much weaker evidence than a tagged one, a prose mismatch, a stale
     # blocker, or an unnamed/idle claim), so it must never bury a stronger signal out of the
     # single-label summary — it only ever becomes `label` when nothing else fired.
-    _head_seam = commit_at_head if commit_at_head is not None else _commit_never_at_head
+    # MEMOIZED per reconcile() call. Check 8 probes the seam once inside
+    # `check8_shipped_unreleased` and the evidence list re-probes EVERY commit right after, so an
+    # un-memoized production seam (`git merge-base --is-ancestor`, one subprocess per call) pays
+    # for each SHA twice. The detector happens to memoize its own seam; a caller that does not
+    # would silently double its git cost, so the guarantee belongs here, next to the double call.
+    _raw_seam = commit_at_head if commit_at_head is not None else _commit_never_at_head
+    _head_cache: dict[str, bool] = {}
+
+    def _head_seam(sha: str) -> bool:
+        if sha not in _head_cache:
+            _head_cache[sha] = _raw_seam(sha)
+        return _head_cache[sha]
+
     shipped_unreleased = False
     unreleased_commits: list[str] = []
     if not shipped:

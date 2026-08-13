@@ -199,6 +199,21 @@ def _legacy_pending_path() -> Path:
     return state.state_dir() / PENDING_LEGACY_NAME
 
 
+def _dispatch_sort_key(path: Path, prefix: str) -> tuple[int, str]:
+    """Oldest-first ordering for a `<prefix><epoch>-<hex>.json` record — the SAME key
+    `memory_dispatch_claim._dispatch_epoch` uses to decide which dispatch is claimed next.
+
+    Deliberately NOT `st_mtime`, and the two must agree. The claimer parses the epoch out of
+    the NAME precisely because mtime "is not stable across a copy, a restore, or a filesystem
+    that rounds it"; a pruner ordering by mtime therefore has a different opinion of which
+    record is oldest and can delete the very file the claimer was about to hand to an agent.
+    An unparseable name sorts as epoch 0 (evicted first) — it is claimable by nobody anyway.
+    """
+    stem = path.name[len(prefix):-len(".json")]
+    head = stem.split("-", 1)[0]
+    return (int(head) if head.isdigit() else 0, path.name)
+
+
 def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
     """Keep only the newest `keep` per-dispatch records. Best-effort — a pruning
     failure must never break the dispatch it rides on.
@@ -212,9 +227,15 @@ def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
     """
     for prefix in (_PENDING_PREFIX, _CLAIMED_PREFIX):
         try:
+            # `prefix` is captured late, which is SAFE here and must stay this way: `sorted`
+            # calls the key eagerly, inside this same loop iteration, so the closure can never
+            # observe the next prefix. The `lambda p, _pre=prefix:` early-binding idiom looks
+            # more defensive but gives mypy an un-inferable lambda signature ("Cannot infer type
+            # of lambda") and reddens the type gate for a hazard that does not exist at this
+            # call site. Do not reintroduce it; if this sort ever becomes lazy, bind explicitly.
             files = sorted(
                 state.state_dir().glob(f"{prefix}*.json"),
-                key=lambda p: p.stat().st_mtime,
+                key=lambda p: _dispatch_sort_key(p, prefix),
             )
             for stale in files[:-keep] if len(files) > keep else []:
                 stale.unlink(missing_ok=True)

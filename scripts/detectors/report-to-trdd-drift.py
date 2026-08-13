@@ -197,13 +197,19 @@ def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
     if not _contained(rep, reports_dir):
         return False
     try:
-        text = rep.read_text(encoding="utf-8", errors="replace")[:_MARKER_SCAN_BYTES]
+        text = rep.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
     # The curator's own machine verdict, when present, is authoritative in BOTH directions
-    # (janitor#259). Scanned over the whole report because it is APPENDED when the pass ends —
-    # the outcome is not knowable at the moment the file is seeded.
-    marker = _MEMORY_OUTCOME_RE.search(text)
+    # (janitor#259). It is APPENDED when the pass ends, so it lives in the report's TAIL —
+    # a head-only slice of `_MARKER_SCAN_BYTES` therefore misses it on exactly the long
+    # decision reports, and silently reverts them to the fragile prose path this marker
+    # exists to retire. Scan the head AND the tail, each bounded, never the head alone.
+    window = (
+        text if len(text) <= 2 * _MARKER_SCAN_BYTES
+        else text[:_MARKER_SCAN_BYTES] + "\n" + text[-_MARKER_SCAN_BYTES:]
+    )
+    marker = _MEMORY_OUTCOME_RE.search(window)
     if marker is not None:
         return marker.group(1).lower() == "noop"
     # No marker: a legacy report (or a curator that skipped the closing block). Fall back to the

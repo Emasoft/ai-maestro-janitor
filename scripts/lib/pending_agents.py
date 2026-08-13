@@ -353,7 +353,15 @@ def directive_lines(now: int | None = None) -> list[str]:
     # right now — an entry whose transcript cannot be resolved gets no pointer, so the note
     # never promises a prompt that would come back empty (the "documented and inert" failure
     # this whole card is about, one paragraph away from repeating it).
-    if any(resolve_transcript(e) for e in listed):
+    # Cheap stat-only pass FIRST: in the common case a transcript sits at the direct path, so
+    # this answers the question with no directory walk at all. Only when nothing is findable
+    # that way do we pay `resolve_transcript`'s rglob — which is also the case where the note
+    # would otherwise be misleading, so the cost lands where correctness needs it and nowhere
+    # else. Semantics are unchanged (still "does ANY listed entry resolve?"); only the common
+    # path got cheaper.
+    if any(_transcript_hit_cheap(e) for e in listed) or any(
+        resolve_transcript(e) for e in listed
+    ):
         note += (
             " If a resume fails, respawn instead: `respawn_prompt_cli.py <agent-id>` prints "
             "the original prompt to spawn a fresh agent with."
@@ -387,6 +395,32 @@ RESPAWN_PREAMBLE = (
     "Any transaction the previous run left open was aborted; nothing it COMMITTED was lost.\n"
     "--- ORIGINAL PROMPT FOLLOWS ---\n"
 )
+
+
+def _transcript_hit_cheap(entry: dict) -> bool:
+    """True iff this entry's transcript is findable with STATS ONLY — no directory walk.
+
+    Covers both shapes `resolve_transcript` tries before its `rglob`: the stored path and
+    the direct `<agentDir>/agent-<id>.jsonl` join. Exists so a caller that only needs to know
+    "would the respawn pointer work for ANY of these?" can answer it without walking a
+    subagents tree per entry on the resume hot path — where a compaction or rate-limit
+    recovery is already in flight and every avoidable syscall is paid at the worst moment.
+
+    Deliberately INCOMPLETE, and safe because of the direction it errs: a workflow-spawned
+    transcript nested under `workflows/wf_<runid>/` returns False here even though the full
+    resolver would find it, so a caller must fall back to `resolve_transcript` before
+    concluding NOTHING resolves. Never the reverse — this never claims a hit the full
+    resolver would miss.
+    """
+    stored = str(entry.get("transcript", "") or "")
+    agent_dir = str(entry.get("agentDir", "") or "")
+    agent_id = str(entry.get("agentId", "") or "").strip()
+    try:
+        if stored and Path(stored).is_file():
+            return True
+        return bool(agent_dir and agent_id and (Path(agent_dir) / f"agent-{agent_id}.jsonl").is_file())
+    except OSError:
+        return False
 
 
 def resolve_transcript(entry: dict) -> str:

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -48,10 +49,30 @@ import state  # noqa: E402
 __all__ = [
     "build_body",
     "dedupe_marker",
+    "defang_mentions",
     "file_finding",
     "is_owned_by",
     "repo_slug_for",
 ]
+
+# A bare `@name` at a WORD BOUNDARY pages a real GitHub account; the same token inside a code
+# span does not (`~/.claude/rules/github-mentions.md`, measured with `gh api markdown`). The
+# lookbehind excludes both an address' local part (`user@host` never pages) and a token already
+# opened by a backtick, so re-wrapping cannot nest.
+_MENTION_RE = re.compile(r"(?<![\w`@])@([A-Za-z0-9][A-Za-z0-9-]{0,38})")
+
+
+def defang_mentions(text: str) -> str:
+    """`text` with every bare `@name` wrapped in backticks, so it names without PAGING.
+
+    The module docstring promises this file never `@`-mentions, but only the TEMPLATE was ever
+    `@`-free: `detail` and `title` are caller-supplied and interpolated verbatim, so a finding
+    built from an issue title, a workflow string, or a pasted log carries whatever `@` it found.
+    And this posts through `subprocess`, NOT the Bash tool — so `pre-bash-safety.
+    check_outbound_publication`, the PreToolUse guard that would have caught it, never sees the
+    command at all. The promise has to be kept HERE or it is not kept.
+    """
+    return _MENTION_RE.sub(lambda m: f"`@{m.group(1)}`", text)
 
 # The hidden marker that makes a re-file detectable. An HTML comment so it is invisible in the
 # rendered issue but exactly greppable through the search API — the issue TITLE is not usable
@@ -117,7 +138,7 @@ def build_body(*, code: str, key: str, detail: str, detector: str, observed_in: 
         "",
         f"## {code}",
         "",
-        detail.strip(),
+        defang_mentions(detail.strip()),
         "",
         f"- detector: `{detector}`",
         f"- observed by a janitor running in: `{observed_in}`",
@@ -136,19 +157,30 @@ def _already_filed(slug: str, marker: str) -> bool | None:
     Three-valued on purpose. A failed search must NOT read as "not filed": that is precisely
     the state in which filing again is wrong, and a transient network error would otherwise
     reopen an issue on every fire until someone noticed.
+
+    THE SEARCH IS A PRE-FILTER, NEVER THE VERDICT. `--search` runs GitHub's full-text query,
+    which TOKENIZES: `<!--` and `-->` are noise, `janitor-finding:` reads as a qualifier
+    attempt, and the remaining words match any issue that shares them. Asking only for
+    `number` and calling a non-empty list "already filed" therefore reports EVERY janitor
+    finding on a repo as a duplicate of the first one ever filed there — a permanent, silent
+    suppression of every later, distinct finding. So we fetch the BODY and require the exact
+    marker substring; the search only narrows what we have to read.
     """
     proc = state.run_subprocess(
         ["gh", "issue", "list", "--repo", slug, "--state", "all", "--limit", "100",
-         "--search", marker, "--json", "number"],
+         "--search", marker, "--json", "number,body"],
         timeout=30,
         detector_name="cross-project-issue",
     )
     if proc is None or proc.returncode != 0:
         return None
     try:
-        return bool(json.loads(proc.stdout or "[]"))
+        issues = json.loads(proc.stdout or "[]")
     except (ValueError, TypeError):
         return None
+    if not isinstance(issues, list):
+        return None
+    return any(isinstance(i, dict) and marker in str(i.get("body") or "") for i in issues)
 
 
 def file_finding(
@@ -184,7 +216,7 @@ def file_finding(
                       observed_in=observed_in)
     run = runner if runner is not None else state.run_subprocess
     proc = run(
-        ["gh", "issue", "create", "--repo", slug, "--title", title, "--body", body],
+        ["gh", "issue", "create", "--repo", slug, "--title", defang_mentions(title), "--body", body],
         timeout=60,
         detector_name="cross-project-issue",
     )

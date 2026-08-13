@@ -34,14 +34,13 @@ memory stores.
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import user_mem_lib
 from repomap.claudemd_slim import narrative_outside_fences, slim_violations
 
 # ── 1. Narrative block splitting ─────────────────────────────────────────────────────
@@ -434,16 +433,15 @@ def parse_recall_full_output(stdout: str) -> list[RecallHit]:
 def find_memgrep() -> str | None:
     """Resolve the memgrep binary: `MEMGREP_BIN` env override -> PATH -> `~/.cargo/bin`.
 
-    Mirrors `wikimem_syntax_lint.find_memgrep` / `user_mem_lib.find_memgrep` (both scripts,
-    not importable here without sys.path surgery this lib package must not depend on)."""
-    override = os.environ.get("MEMGREP_BIN")
-    if override and Path(override).is_file():
-        return override
-    found = shutil.which("memgrep")
-    if found:
-        return found
-    cargo_bin = Path(os.path.expanduser("~")) / ".cargo" / "bin" / "memgrep"
-    return str(cargo_bin) if cargo_bin.is_file() else None
+    DELEGATES to `user_mem_lib.find_memgrep`, the resolver `post-edit-wikimem-lint.py`,
+    `handoff_clear_verify.py`, `memgrep-index-health.py` and `on-prompt-submit-autorecall.py`
+    already share. It is a SIBLING of this module in `scripts/lib`, so importing it needs no
+    sys.path surgery at all — an earlier note here claimed otherwise and the claim is what
+    justified a fourth private copy of a resolution order that has to stay identical
+    everywhere (a `MEMGREP_BIN` override honoured by three call sites and ignored by the
+    fourth is the exact bug a duplicated resolver produces).
+    """
+    return user_mem_lib.find_memgrep()
 
 
 # memgrep's own ranker returns its top-N candidates EVEN when none of them genuinely match

@@ -123,22 +123,27 @@ def _parse_card(path: Path, scope: str) -> _Card | None:
     uid = trdd_common.extract_uid(path.name)
     if uid is None:
         return None
+    # WHOLE FILE, not `RECONCILE_BYTES`. The body is what the cross-reference SILENCER
+    # (`_references`) searches, so a truncated read makes a citation past the cap invisible and
+    # the pair is re-reported forever — cross-linking, the remedy this detector recommends,
+    # cannot silence it. Measured on this board: 11 of 274 cards exceed the 24 KB cap, and the
+    # longest cards are precisely the most cross-referenced ones. The frontmatter parse below
+    # is unaffected (it is anchored at the top of the file either way).
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as f:
-            head = f.read(trdd_common.RECONCILE_BYTES)
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    fm = trdd_common.FRONTMATTER_RE.match(head)
+    fm = trdd_common.FRONTMATTER_RE.match(text)
     if not fm:
         return None
-    _, column = trdd_common.parse_state_text(head)
+    _, column = trdd_common.parse_state_text(text)
     if trdd_common.is_terminal_column(column):
         return None
     ext_refs: list[str] = []
     rm = _FM_EXTERNAL_REFS_RE.search(fm.group(1))
     if rm:
         ext_refs = trdd_common.parse_flow_list(rm.group(1))
-    body = head[fm.end():]
+    body = text[fm.end():]
     return _Card(uid=uid, scope=scope, ext_refs=ext_refs, body=body)
 
 
@@ -199,6 +204,9 @@ def main() -> int:
                 bucket.append(uid)
 
     new_pairs: list[str] = []
+    # The dedupe key of each newly-emitted pair, in the SAME order as `new_pairs`, so the
+    # ones the display cap drops can have their seen-mark rolled back below.
+    new_keys: list[str] = []
     for key, uids in ref_to_uids.items():
         if len(uids) < 2:
             continue
@@ -213,14 +221,23 @@ def main() -> int:
             msg = f"TRDD-{a} & TRDD-{b} ({state.sanitize_for_drift_line(ref_display[key])})"
             if dedupe.emit_once(seen, dedupe_key, msg) is not None:
                 new_pairs.append(msg)
+                new_keys.append(dedupe_key)
 
     if not new_pairs:
         state.rotate_log_if_big("trdd-cross-card-blindspot")
         return 0
 
+    # `emit_once` above MARKED every new pair as seen, but only `_MAX_LISTED` of them are
+    # actually NAMED below — so without this, pairs past the cap are reported once as an
+    # anonymous "+N more" and then never surface again, on any later fire. Forget the ones we
+    # are not naming so the next fire can name them; the cap is a line-length budget, not a
+    # licence to drop findings.
+    for dropped_key in new_keys[_MAX_LISTED:]:
+        dedupe.emit_forget(seen, dropped_key)
+
     shown = ", ".join(new_pairs[:_MAX_LISTED])
     if len(new_pairs) > _MAX_LISTED:
-        shown += f", +{len(new_pairs) - _MAX_LISTED} more"
+        shown += f", +{len(new_pairs) - _MAX_LISTED} more (re-reported next run)"
     print(
         f"[trdd-cross-card-blindspot] {len(new_pairs)} pair(s) cite the same issue and may "
         f"not know about each other — {shown}. SURFACE-ONLY (no TRDD mutated); "

@@ -265,36 +265,13 @@ def iterm_automation_payload(
     return json.dumps(data, sort_keys=True)
 
 
-# Same window dispatch.py's own alarm hedges the rearm-evidence read against — kept in
-# sync by comment, not by import, because dispatch.py is out of scope for this change
-# (a separate agent owns it) and duplicating a 2-line constant is cheaper than coupling
-# the two call sites. If either window changes, check the other.
-_ITERM_REARM_LOG_NAMES = ("daemon.log", "daemon.log.1")
-
-
-def _latest_iterm_rearm_epoch(log_text: str) -> int | None:
-    """The epoch of the newest `FIRED rearm → iterm` line in a daemon log, or None. PURE.
-
-    Deliberately duplicated from `dispatch.py`'s identically-named helper (TRDD-EZ3PMQYX):
-    that alarm's own 6h-window parse over the LIVE log stays authoritative for what it
-    prints, so this copy exists only to let `record_iterm_automation_state` stamp the
-    flag's `rearm_evidence_age_s` field at WRITE time, for consumers that never read the
-    daemon log themselves. Malformed timestamps are skipped, never fatal.
-    """
-    import datetime as _dt  # noqa: PLC0415 -- local, matches dispatch.py's own helper
-
-    latest: int | None = None
-    for line in log_text.splitlines():
-        if "FIRED rearm → iterm" not in line or not line.startswith("["):
-            continue
-        try:
-            stamp = line[1 : line.index("]")]
-            epoch = int(_dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp())
-        except (ValueError, IndexError):
-            continue
-        if latest is None or epoch > latest:
-            latest = epoch
-    return latest
+# The `FIRED rearm → iterm` parser and its log-name list now live in `session_liveness`,
+# which OWNS that line (its recovery path writes it), and both this module and dispatch.py
+# call the one copy. They were previously duplicated verbatim and "kept in sync by comment,
+# not by import" — which meant a change to the line's wording or timestamp format would be
+# applied to one copy, leaving the other to return None forever with nothing looking broken.
+_ITERM_REARM_LOG_NAMES = session_liveness.ITERM_REARM_LOG_NAMES
+_latest_iterm_rearm_epoch = session_liveness.latest_iterm_rearm_epoch
 
 
 def _iterm_rearm_evidence_age_s(gs) -> int | None:  # noqa: ANN001 -- gs is the global_state module
@@ -860,13 +837,21 @@ def diagnose_root(
     retry_wedged = False
     if transcript_stale and terminal and not deliberately_unarmed and not server_owned:
         pane_text = capture_pane_text(terminal)
-        current_attempt = (
-            session_liveness.retry_wedge_attempt(pane_text) if pane_text is not None else None
-        )
-        new_state, retry_wedged = session_liveness.retry_wedge_state_update(
-            prev=_read_retry_wedge_state(root), current_attempt=current_attempt
-        )
-        _write_retry_wedge_state(root, new_state)
+        prev = _read_retry_wedge_state(root)
+        if pane_text is None:
+            # CANNOT ASSESS — `capture_pane_text` returns None for a DECLINED or FAILED read
+            # (TCC-blocked iTerm, a transient tmux hiccup), and its contract says a caller must
+            # never read that as "not wedged". Folding it into `current_attempt=None` did exactly
+            # that: `retry_wedge_state_update` treats a missing attempt number as "the signature
+            # is gone" and CLEARS the episode, so a single flaky read resets the advance-across-
+            # polls counter and a genuine wedge on a flaky channel could never reach `confirmed`.
+            # Leave the episode exactly as it stands and report only what it has already proven.
+            retry_wedged = bool(prev and prev.get("confirmed"))
+        else:
+            new_state, retry_wedged = session_liveness.retry_wedge_state_update(
+                prev=prev, current_attempt=session_liveness.retry_wedge_attempt(pane_text)
+            )
+            _write_retry_wedge_state(root, new_state)
     else:
         _write_retry_wedge_state(root, None)
     diagnosis = session_liveness.diagnose_instance(
