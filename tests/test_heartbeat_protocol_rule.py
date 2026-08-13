@@ -224,3 +224,36 @@ def test_issue150_the_sidecar_path_is_absolute_and_has_no_silent_fallback():
         "the fallback is the defect — it converts an unreadable assignment into a wrong-scope run, "
         "so the rule must forbid it explicitly rather than just omit it"
     )
+
+
+def test_issue260_the_content_decision_belongs_to_the_skill_not_the_receiving_agent():
+    """A receiving agent must not substitute its OWN measurement to decline a memory chore.
+
+    janitor#260: a peer followed this row faithfully, then judged the scope with `memgrep
+    lint`/`validate`, found it clean, and declined twice. But lint and the scheduler's
+    precheck disagree BY DESIGN (janitor#227 — the repair skill's own step 3 says so in
+    bold), so a lint-clean scope can still carry real structural defects. Declining on lint
+    therefore skips genuine repairs, and the peer's premise ("provably clean") was proven
+    with the one oracle that cannot prove it.
+
+    The row was exhaustive about CLAIMING a dispatch and silent about JUDGING one, which is
+    what invited the substitution. That silence is the defect this pins.
+
+    Anchored on the ISSUE CITATIONS, not on the sentence: a guard keyed on wording reddens on
+    a harmless reword, and the cheapest way to green it again is to delete the warning it
+    exists to protect. Issue numbers do not get reworded.
+    """
+    text = _rule_text()
+    row = next(ln for ln in text.splitlines() if "memory_dispatch_claim.py" in ln)
+    assert "janitor#260" in row, (
+        "the row must carry the case that motivated the prohibition, so a future editor "
+        "trimming it can find out what it cost before deleting it"
+    )
+    assert "janitor#227" in row, (
+        "the lint-vs-precheck divergence is the REASON lint is the wrong oracle — without "
+        "the citation the prohibition reads as arbitrary and gets trimmed"
+    )
+    assert "memgrep lint" in row, (
+        "lint is the specific tool a receiving agent reaches for, so the row must name it "
+        "rather than warn generically about 'measuring'"
+    )
