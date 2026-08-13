@@ -1663,6 +1663,27 @@ def _phase_iterm_automation_alarm() -> None:
         # so `findings_ledger.surfaced_to_human_status` can answer "reported-pending" for
         # this alarm instead of only ever "never-reported").
         findings_ledger.mark_surfaced_to_human(_ITERM_AUTOMATION_CODE, payload_hash[:16])
+        # RECORD THE FIRE ITSELF, not just the dedupe marker (peer finding on janitor#92,
+        # verified here: 69 detectors keep a last-run stamp in .janitor/state; this alarm kept
+        # NONE, and grep found its wording in zero files on disk). `mark_surfaced_to_human`
+        # answers "has this been shown?" — it does not say WHEN, HOW OFTEN, or with what
+        # evidence, so every fire vanished the moment the receiving session moved on.
+        #
+        # That is why the correlation nobody could compute stayed uncomputable: five agents
+        # spent an afternoon on whether a channel was down for hours or hung for seconds, with
+        # ~10 fires that day and no record of any of them. A detector whose output is the only
+        # trace of its own findings cannot be debugged after the fact — and this one's whole
+        # job is to report an intermittent condition, where the TIMELINE is the evidence.
+        #
+        # `notify` is OMITTED, not passed False: it is a CALLABLE (the push channel), so
+        # `notify=False` is a type error — pyright caught it, mypy did not (the scripts/lib
+        # sibling-import blind spot, TRDD-BMDZK4RA). Omitting it is also the behaviour we
+        # want: the print above is already the human-facing surface, so this write is purely
+        # the durable record and must not duplicate into a push.
+        findings_ledger.record(
+            sev="HIGH", code=_ITERM_AUTOMATION_CODE, src="iterm-automation-alarm",
+            msg=f"iTerm channel unreachable; evidence={rearm_epoch or 'none'}", ref="",
+        )
     except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
         state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")
 
