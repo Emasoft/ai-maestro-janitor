@@ -32,10 +32,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 DETECTOR = (
     Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "memory-maintenance.py"
@@ -612,7 +616,7 @@ def test_pending_writes_a_per_dispatch_file_alongside_the_legacy_sidecar(fixture
     assert data == legacy, "per-dispatch file and legacy sidecar must agree for a fresh dispatch"
 
 
-def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture):
+def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture, monkeypatch):
     """The measured janitor#242 failure: a repair dispatch's authority was
     overwritten by a LATER consolidate marker while the repair agent was still
     running. Two consecutive fires (repair, then split) must each get their OWN
@@ -631,6 +635,12 @@ def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture):
     first_legacy = json.loads((state_dir / "memory-maint-pending.json").read_text(encoding="utf-8"))
     first_file = state_dir / f"memory-maint-pending-{first_legacy['dispatch_id']}.json"
     first_content_before = first_file.read_text(encoding="utf-8")
+
+    # The first dispatch's agent has (in this scenario) already finished — clear its
+    # in-flight stamp on this SAME root (TRDD-KVS6K7P9 item 2) so the second dispatch
+    # below is not deferred by the new gate; this test is about per-dispatch FILE
+    # identity, not the in-flight gate (covered separately).
+    _gs(monkeypatch, fixture["home"]).clear_memory_root_inflight(str(fixture["local"]))
 
     # A second, DIFFERENT chore becomes due (repair is no longer due — just
     # stamped — so switch settings to make split due instead, mirroring a
@@ -862,3 +872,99 @@ def test_unexpected_error_is_fail_open_silent(fixture, tmp_path):
     bogus_gstate.write_text("not a dir", encoding="utf-8")
     out = _run(_env(fixture["home"], fixture["project"], bogus_gstate, fixture["settings"]))
     assert out.strip() == "", out
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-KVS6K7P9 item 2: machine-global, per-ROOT, TTL'd in-flight gate — the
+# scheduler DEFERS instead of clobbering a dispatch already in flight on the
+# same memory root. `control_dir()` resolves off $HOME (same as the subprocess
+# env's HOME), so a test-process import with HOME monkeypatched to the
+# fixture's fake home lands on the IDENTICAL stamp path the detector
+# subprocess will read/write.
+# --------------------------------------------------------------------------- #
+
+def _gs(monkeypatch: pytest.MonkeyPatch, home: Path):
+    """Import global_state fresh, WITHOUT touching env.
+
+    `home` is accepted for call-site symmetry but deliberately unused: the
+    project's autouse `_isolate_control_dir` fixture (tests/conftest.py) already
+    points `$JANITOR_CONTROL_DIR` at a per-test tmp dir for EVERY test, and
+    `_env()` captures the CURRENT `os.environ` (including that override) into the
+    subprocess's env. As long as this helper is called without changing
+    `JANITOR_CONTROL_DIR`/`HOME` in between, an in-process read/write here lands
+    on the IDENTICAL control_dir() path the detector subprocess uses — reloading
+    the module just drops any stale cached state from a previous test."""
+    del home
+    if "global_state" in sys.modules:
+        del sys.modules["global_state"]
+    import global_state  # type: ignore[import-not-found]
+    return global_state
+
+
+def test_inflight_gate_defers_and_leaves_intervention_still_due(fixture, monkeypatch):
+    """A LIVE in-flight stamp on the picked root -> the fire is silent (deferred),
+    and mark_ran was never called: clearing the stamp afterwards proves the
+    cadence slot was not consumed — the intervention is still due."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    gs = _gs(monkeypatch, fixture["home"])
+    gs.record_memory_root_inflight(
+        str(fixture["local"]), dispatch_id="prior-dispatch", now=int(time.time())
+    )
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    deferred = _run(env)
+    assert deferred.strip() == "", deferred
+    # Prove it is STILL due: clear the stamp (simulating TTL expiry) and re-fire —
+    # if mark_ran had been (wrongly) called on the deferred pass, this would be silent.
+    gs.clear_memory_root_inflight(str(fixture["local"]))
+    resumed = _run(env)
+    lines = [ln for ln in resumed.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-split]"], resumed
+
+
+def test_inflight_gate_ignores_an_expired_stamp(fixture, monkeypatch):
+    """A stamp older than the TTL is not a live holder -> the dispatch proceeds
+    normally and prints its marker (the gate must not block forever on a crashed
+    agent's stale stamp)."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    gs = _gs(monkeypatch, fixture["home"])
+    expired_ts = int(time.time()) - gs.MEMORY_INFLIGHT_TTL_S - 100
+    gs.record_memory_root_inflight(
+        str(fixture["local"]), dispatch_id="long-dead-dispatch", now=expired_ts
+    )
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-split]"], out
+
+
+def test_dispatch_records_inflight_stamp_matching_the_pending_payload(fixture, monkeypatch):
+    """No prior stamp -> the dispatch proceeds AND records an in-flight stamp for
+    the root whose dispatch_id equals the one just persisted in the pending
+    sidecar (payload and stamp can never disagree about which dispatch holds it)."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert "[janitor-memory-split]" in out
+    sidecar = fixture["project"] / ".janitor" / "state" / "memory-maint-pending.json"
+    pending = json.loads(sidecar.read_text(encoding="utf-8"))
+    gs = _gs(monkeypatch, fixture["home"])
+    holder = gs.memory_root_inflight(
+        str(fixture["local"]), now=int(time.time()), ttl_s=gs.MEMORY_INFLIGHT_TTL_S
+    )
+    assert holder is not None, "a fired dispatch must record an in-flight stamp"
+    assert holder["dispatch_id"] == pending["dispatch_id"]
+
+
+def test_inflight_gate_fails_open_on_a_corrupt_stamp(fixture, monkeypatch):
+    """A corrupt/unreadable in-flight stamp file must never block a dispatch —
+    fail OPEN, proceed normally."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    gs = _gs(monkeypatch, fixture["home"])
+    path = gs._memory_root_inflight_path(str(fixture["local"]))  # noqa: SLF001 — test-only
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-split]"], out

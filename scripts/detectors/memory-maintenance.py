@@ -455,6 +455,25 @@ def _run() -> int:
             return 0
         next_cursor, intervention, scope_label, root = picked
 
+        # In-flight gate (TRDD-KVS6K7P9 item 2): a prior dispatch on this SAME root may
+        # still have its background agent running (an editorial pass is minutes; this
+        # scheduler process exits right after emitting the marker, so mark_ran alone
+        # cannot tell us an agent is still working the corpus). Defer rather than
+        # re-stamp — advance the cursor so OTHER scopes still get a turn this fire, but
+        # skip mark_ran/_write_pending/the marker entirely so this intervention is still
+        # due next heartbeat and simply retries.
+        holder = global_state.memory_root_inflight(
+            str(root), now=now, ttl_s=global_state.MEMORY_INFLIGHT_TTL_S
+        )
+        if holder is not None:
+            state.log_line(
+                "memory-maintenance",
+                f"deferred: {intervention} @ {scope_label} ({root}) — dispatch "
+                f"{holder.get('dispatch_id')} still in flight on this root",
+            )
+            _write_cursor(next_cursor)
+            return 0
+
         # Stamp BEFORE emitting: the stamp is the cross-session dedupe oracle. If we
         # crashed between stamp and emit the worst case is one skipped pass (it
         # re-surfaces next cadence) — strictly safer than emitting-then-crashing,
@@ -493,14 +512,19 @@ def _run() -> int:
         # also persists this dispatch under its own immutable `dispatch_id`
         # filename, so a record of exactly what THIS dispatch stamped survives
         # any later dispatch's overwrite of the legacy path.
+        dispatch_id = _new_dispatch_id(now)
         _write_pending({
             "marker": marker,
             "intervention": intervention,
             "scope": scope_label,
             "root": str(root),
             "stamped_at": now,
-            "dispatch_id": _new_dispatch_id(now),
+            "dispatch_id": dispatch_id,
         })
+        # Record the in-flight gate under the SAME dispatch_id just persisted above, so
+        # the payload and the stamp can never disagree about which dispatch is holding
+        # this root (the scheduler checks this stamp before picking the same root again).
+        global_state.record_memory_root_inflight(str(root), dispatch_id=dispatch_id, now=now)
         # The marker MUST be bare/exact on its own line (the cron clause keys on
         # that). NEVER routed through sanitize_for_drift_line — that is for UNTRUSTED
         # text; this is our own trusted, constant marker, and defanging it would

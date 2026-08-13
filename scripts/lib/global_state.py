@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -1024,6 +1025,81 @@ def rotation_succeeded_within(seconds: int, *, now: int) -> bool:
     except (OSError, ValueError):
         return False
     return 0 <= (int(now) - ts) <= max(0, seconds)
+
+
+# --------------------------------------------------------------------------- #
+# Memory-root in-flight gate (TRDD-KVS6K7P9 item 2)
+# --------------------------------------------------------------------------- #
+#
+# A TTL STAMP, not a flock: the memory-maintenance SCHEDULER stamps this the
+# moment it dispatches a background editorial agent and then EXITS — the
+# scheduler process is not the holder of the "in-flight" window, the spawned
+# agent is, and that agent runs for minutes. A flock held only for the
+# scheduler's own (sub-second) critical section would release long before the
+# agent finishes, so it cannot protect the corpus during the actual edit.
+#
+# MACHINE-GLOBAL and keyed by the root PATH (not by project): the scheduler
+# runs per-project, but the USER memory root is shared by every project on the
+# machine, so a per-project gate would silently fail to protect exactly the
+# corpus most at risk of two concurrent editorial passes clobbering each
+# other. Filenames are keyed by a sha256 of the absolute root path so an
+# arbitrary filesystem path is always a safe, collision-resistant filename.
+
+MEMORY_INFLIGHT_TTL_S = 30 * 60  # an editorial agent pass is minutes; generous + self-healing
+
+
+def _memory_root_inflight_path(root: str) -> Path:
+    digest = hashlib.sha256(str(root).encode("utf-8", errors="surrogateescape")).hexdigest()[:16]
+    return control_dir() / f"memory-root-inflight.{digest}.json"
+
+
+def record_memory_root_inflight(root: str, *, dispatch_id: str, now: int) -> None:
+    """Stamp that a dispatch is IN FLIGHT on `root` — the gate the SCHEDULER checks before
+    picking the same root again. Written once, at dispatch time; the holder is the spawned
+    agent, not this (already-exited) process. Fail-OPEN: a lost stamp costs at most one
+    clobbered dispatch, which is the pre-existing behavior this gate is added to prevent —
+    never worth crashing the scheduler over."""
+    try:
+        path = _memory_root_inflight_path(root)
+        # Stamp lives under control_dir(), NOT global_state_dir() — init_global_state()
+        # creates the wrong directory here, so the parent must be made explicitly
+        # (mirrors every other control_dir() writer's "mkdir on write, never on read").
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"dispatch_id": dispatch_id, "root": str(root), "ts": int(now)}
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def memory_root_inflight(root: str, *, now: int, ttl_s: int) -> Optional[dict]:
+    """The live holder payload (`{dispatch_id, root, ts}`) for `root`, or None when there is
+    no stamp, it is unreadable/corrupt, or it has expired past `ttl_s`. Fail-OPEN: any read
+    failure returns None so a corrupt stamp file can never block a dispatch forever."""
+    try:
+        raw = _memory_root_inflight_path(root).read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    ts = payload.get("ts")
+    if not isinstance(ts, (int, float)):
+        return None
+    age = int(now) - int(ts)
+    if age < 0 or age > max(0, int(ttl_s)):
+        return None
+    return payload
+
+
+def clear_memory_root_inflight(root: str) -> None:
+    """Best-effort removal of the in-flight stamp for `root` (the escape hatch — normally the
+    stamp is left to expire via TTL rather than actively cleared)."""
+    try:
+        _memory_root_inflight_path(root).unlink()
+    except OSError:
+        pass
 
 
 def record_fleet_injection(pid: int, flag_state: str, now: int) -> None:
