@@ -277,6 +277,24 @@ def classify_permitted(block: NarrativeBlock, *, index: int) -> str | None:
     return None
 
 
+def classify_blocks(claude_md_text: str) -> list[tuple[NarrativeBlock, str | None]]:
+    """Every narrative block of `claude_md_text`, paired with its §CM-1 permitted element
+    (or None when the block is EXCESS the chore may migrate).
+
+    PURE — no recall, no subprocess, no I/O — which is what lets the DELIVERY half reuse it
+    as a removal gate. That reuse is the point: the planner decides WHICH blocks are excess
+    and the applier refuses to delete anything this same call did not call excess. A second,
+    independent implementation of "is this permitted" would drift from this one, and the
+    drift would only ever be discovered by a permitted element going missing from a file the
+    canonical form requires it in.
+    """
+    narrative = narrative_outside_fences(claude_md_text)
+    return [
+        (block, classify_permitted(block, index=index))
+        for index, block in enumerate(split_narrative_blocks(narrative))
+    ]
+
+
 # ── 4. New-page scope routing (memory-scope-routing.md's WRITE gate) ────────────────────
 
 # Red flags that force a new page to LOCAL scope instead of PROJECT (git-tracked, pushed to
@@ -488,12 +506,9 @@ def plan_migration(
     """
     if not slim_violations(claude_md_text):
         return []
-    narrative = narrative_outside_fences(claude_md_text)
-    blocks = split_narrative_blocks(narrative)
     binary = memgrep_bin or find_memgrep()
     plans: list[BlockPlan] = []
-    for index, block in enumerate(blocks):
-        element = classify_permitted(block, index=index)
+    for block, element in classify_blocks(claude_md_text):
         if element is not None:
             word = classify_exemption(block.text) or "" if element == PERMITTED_DEVOPS else ""
             plans.append(

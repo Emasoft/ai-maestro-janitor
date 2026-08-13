@@ -36,6 +36,7 @@ same discipline the wikimem editor applies to its own merges.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -44,6 +45,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+import claudemd_migration_apply as cma  # noqa: E402  # TRDD-LFSWY0C6 — DELIVERY, the half that writes
 import claudemd_migration_plan as cmig  # noqa: E402  # TRDD-LFSWY0C6 — DECISION-only planner
 import memory_edit_verify as mev  # noqa: E402
 import memory_scopes  # noqa: E402
@@ -197,6 +199,87 @@ def cmd_plan(root: Path) -> int:
     return 0
 
 
+def _project_corpus(root: Path) -> list[str]:
+    """Every PROJECT wikimem page's text — the haystack half of the preservation proof."""
+    texts: list[str] = []
+    for p in scan_pages(_memdir(root)):
+        try:
+            texts.append((_memdir(root) / p.filename).read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return texts
+
+
+def _apply_with_verify(claude_md: Path, block_texts: list[str], corpus: list[str]) -> cma.ApplyResult:
+    """The anti-corruption write for a REMOVAL, mirroring rg.splice_with_verify.
+
+    The candidate is recomputed from the file's CURRENT text on every attempt — never
+    computed once and written later — so a human edit landing mid-apply is respected rather
+    than clobbered: their new text is what the gates run against, and a block they just
+    changed stops matching uniquely and refuses. A refusal returns IMMEDIATELY: it is a
+    deterministic verdict on the text we just read, not a collision, and retrying it four
+    more times only reprints it.
+    """
+    for attempt in range(rg._SPLICE_ATTEMPTS):
+        if attempt:
+            time.sleep(rg._SPLICE_SETTLE_S)
+        sig_before = rg._stat_sig(claude_md)
+        current = claude_md.read_text(encoding="utf-8") if sig_before is not None else ""
+        if sig_before is not None and not current.strip():
+            time.sleep(rg._SPLICE_SETTLE_S)  # torn read — settle past a writer's truncate window
+            current = claude_md.read_text(encoding="utf-8")
+        result = cma.apply_migration(current, block_texts, corpus)
+        if not result.ok:
+            return result
+        if rg._stat_sig(claude_md) != sig_before:
+            continue
+        rg._atomic_replace(claude_md, result.text)
+        return result
+    return cma.ApplyResult(
+        refusals=[cma.Refusal("actively-edited", "CLAUDE.md is being actively edited — giving up safely (retry later)")]
+    )
+
+
+def cmd_apply(root: Path, blocks_file: Path, *, dry_run: bool) -> int:
+    """DELIVERY (TRDD-LFSWY0C6, CM-2 §4-5): remove already-migrated blocks, or refuse.
+
+    `blocks_file` is a JSON array of the EXACT block texts to remove — written by the memory
+    agent AFTER it has landed each block's content in a wikimem page, because the preservation
+    gate reads that corpus to prove nothing is lost. Run it with `--dry-run` first: identical
+    gates, no write, so the refusals are free to discover.
+    """
+    claude_md = root / "CLAUDE.md"
+    if not claude_md.is_file():
+        print("claudemd-slim: no CLAUDE.md")
+        return 3
+    try:
+        block_texts = json.loads(blocks_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"claudemd-slim: cannot read --blocks {blocks_file}: {exc}")
+        return 3
+    if not isinstance(block_texts, list) or not all(isinstance(b, str) for b in block_texts):
+        print("claudemd-slim: --blocks must be a JSON array of block-text strings")
+        return 3
+
+    corpus = _project_corpus(root)
+    if dry_run:
+        result = cma.apply_migration(claude_md.read_text(encoding="utf-8"), block_texts, corpus)
+        sys.stdout.write(cma.render_result(result, dry_run=True))
+        return 0 if result.ok else 1
+
+    lock = rg._GenLock(root)
+    if not lock.acquire():
+        print("claudemd-slim: another generator holds the lock — skipping")
+        return 3
+    try:
+        rg._backup(claude_md)
+        result = _apply_with_verify(claude_md, block_texts, corpus)
+        sys.stdout.write(cma.render_result(result, dry_run=False))
+        return 0 if result.ok else 1
+    finally:
+        lock.release()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Slim janitor-managed CLAUDE.md — wikimem index + contract checks")
     ap.add_argument("--root", help="project root (default: $CLAUDE_PROJECT_DIR or cwd)")
@@ -207,6 +290,9 @@ def main() -> int:
     p_verify = sub.add_parser("verify", help="preservation proof for a migration")
     p_verify.add_argument("--old", required=True, help="pre-migration CLAUDE.md copy")
     sub.add_parser("plan", help="DECISION-only migration plan — writes nothing (TRDD-LFSWY0C6)")
+    p_apply = sub.add_parser("apply", help="DELIVERY — remove already-migrated blocks, or refuse (TRDD-LFSWY0C6)")
+    p_apply.add_argument("--blocks", required=True, help="JSON array of the exact block texts to remove")
+    p_apply.add_argument("--dry-run", action="store_true", help="run every gate, write nothing")
 
     args = ap.parse_args()
     root = rg._resolve_root(args.root)
@@ -217,6 +303,8 @@ def main() -> int:
             return cmd_check(root)
         if args.cmd == "plan":
             return cmd_plan(root)
+        if args.cmd == "apply":
+            return cmd_apply(root, Path(args.blocks).resolve(), dry_run=args.dry_run)
         return cmd_verify(root, Path(args.old).resolve())
     except MalformedFences as exc:
         print(f"claudemd-slim: refusing to touch CLAUDE.md — {exc}")
