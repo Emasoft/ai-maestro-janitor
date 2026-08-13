@@ -3,7 +3,7 @@ trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
 column: todo
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-13T05:17:19+0200
+updated: 2026-08-13T11:55:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -15,6 +15,28 @@ npt: []
 eht: []
 implementation-commits: []
 ---
+
+## ⏵ 2026-08-13 11:55 — THE MECHANISM ALREADY SHIPPED, AND IT SHIPPED IN THE FORBIDDEN DIRECTION
+
+**Verified first-hand in the Rust, not taken from a report.** `9ddb3cf7` shipped the write half
+inside memgrep: `atomic_write_page` normalizes `publish-globally:` on every page write, and
+`memory.rs:4168` computes `let link_path = resolve_user_mem_root().join(&file_name)` which
+`:4188` passes to `create_user_symlink(&state.link_path, &state.page_abs)`.
+
+So the SYMLINK IS CREATED AT THE USER ROOT, POINTING AT THE PROJECT PAGE — the exact direction the
+constraint below forbids, and the exact shape TRDD-JPL0JU86 ruled against: those pages are
+permanently unmaintainable because the transaction core's M-10 symlink-escape guard refuses them,
+so no editorial chore can ever repair, split, atomize or consolidate them. JPL0JU86's verdict was
+*"Correct intent, wrong mechanism … MOVE them, do not link them."*
+
+**Shipped code now contradicts a ratified verdict.** That is not a bug to patch quietly — the two
+cards disagree about what the mechanism should be, and choosing between them (does `9ddb3cf7`'s
+symlink count as "naive" in JPL0JU86's sense? does the USER-glob vs PROJECT-glob asymmetry make
+this direction safe in practice?) is an architecture call with real tradeoffs both ways. **USER
+decision. Do not resolve it by editing either card.**
+
+Second gap, already on this card and unchanged: the privacy gate (may a PROJECT page be published
+to USER scope unattended?) is likewise a decision, not mechanical work.
 
 ## ⏵ 2026-08-13 — DIRECTION CONSTRAINT from TRDD-JPL0JU86. Read before implementing.
 
