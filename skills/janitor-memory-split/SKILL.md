@@ -153,6 +153,20 @@ byte-identical into exactly one output page — `verify_split` fails on any drop
 rewording. (d) If a sub-page is still over cap after this run, the next heartbeat
 splits it — convergence requires only real progress this level.
 
+**(e) HEADROOM — do not emit a sub-page within ~10% of the cap** (i.e. keep each
+under ~90% of `split_max_bytes`; at the 36,000 B default that is ~32,400 B). Prefer
+one more seam over one nearly-full sibling.
+
+WHY this is a rule and not a preference: a sibling that lands just under the cap is
+split again by the very next atom added to it, and each split MINTS NEW PAGE NAMES —
+which voids every conflict refusal keyed to the old names, so the `conflict` chore
+re-judges the family from scratch. Measured (janitor#241, TRDD-RG4IUZ6I): one such
+null pass cost **221,612 subagent tokens for zero mutations**, and the sibling that
+caused it was sitting **279 bytes** under the cap. Re-measured 2026-08-13: that page
+is now 35,724 B against 36,000 — **276 bytes** of headroom, so the next edit to it
+repeats the whole cycle. Splitting to the cap is not "using the space efficiently";
+it is scheduling the next expensive re-litigation.
+
 ### 4. Redirect inbound [[links]] (the connectedness gap — mandatory)
 
 When detail moves into a sub-page, any OTHER page that linked `[[source-slug]]`
