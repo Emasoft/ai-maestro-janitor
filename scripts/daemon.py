@@ -178,6 +178,22 @@ _INTERVAL_FLEET_STOP = _env_interval(
 #  the opt-in (CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED=1) is on. A responsive cadence so
 #  a global /janitor-global-disarm reaches every already-armed session within ~1 min,
 #  with no human — the reach-every-session half of the self-disarm story (RQ9FIFX6).
+_INTERVAL_COLD_CACHE_CLEAR = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_COLD_CACHE_CLEAR_INTERVAL", 300
+)  # 5 min — shrink a session whose prompt cache has gone cold, BEFORE its next cron fire
+#  pays for it (owner directive 2026-08-13: "if at any chron beat by any chance the cache is
+#  expired, doing the compact before running the chron turn, that would burn all tokens").
+#
+#  THE DAEMON HAS TO OWN THIS, and it is the whole reason this task exists: a cron fire's cost
+#  is incurred the moment the turn STARTS, and the dispatcher stub runs INSIDE that turn — by
+#  the time any in-session code could notice the cold cache, the full-price re-read is already
+#  billed. The daemon is the only actor on the machine running outside every turn, so it is the
+#  only one that can act BEFORE one. The SessionStart hook covers the other window (a session
+#  reloaded after being away); together they cover both ways a cold cache gets paid for.
+#
+#  A cadence just under the common `*/5` heartbeat, so a session that goes cold is normally
+#  reached within one beat of its own next fire. Steady state is cheap: a ps scan plus, per
+#  candidate, a local transcript-age read — the expensive probe only runs once those pass.
 _INTERVAL_RULES_CLEANUP = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
@@ -1812,6 +1828,79 @@ def task_fleet_stop() -> None:
         _fire_fleet_stop(by_pid.get(p["pid"]), p, flag_state, now)
 
 
+def task_cold_cache_clear() -> None:
+    """Shrink every running session whose prompt cache has gone cold, before its next fire pays.
+
+    THE WINDOW, and why nothing in-session can cover it: a cron fire's input cost is billed when
+    the turn STARTS, and the dispatcher stub runs inside that turn. Any in-session check is
+    therefore reading a bill that has already been paid. The daemon runs outside every turn, so
+    it is the only place a cold-cache session can be shrunk BEFORE one begins.
+
+    It delegates rather than reimplements — one `external_handoff_clear.py --project-root <p>`
+    per candidate. That script owns the gate, the handoff composition (with its retry loop and
+    fleet lane) and the injection chain; duplicating any of that here would be a second
+    implementation of an unrecoverable `/clear`.
+
+    ONE CANDIDATE PER BEAT, deliberately. Even with the fleet lane spacing the llm-ext calls,
+    firing N clears from one beat means N concurrent children each holding a lane ticket, and the
+    last one's ticket is minutes out — so they would pile up faster than they drain. Draining one
+    per beat lets a 20-session fleet settle over ~20 beats with at most one child alive at a time.
+
+    SAFETY: default-OFF via the same opt-in as the hook (`external_clear.enabled()`), never a
+    session the daemon cannot identify a pane for, never one whose transcript is ADVANCING (that
+    is a human working — clearing under them is the one unrecoverable mistake here), and never
+    twice inside the cooldown (`cold_cache_compact.clear_in_cooldown`). Never raises.
+    """
+    try:
+        import cold_cache_compact  # noqa: PLC0415
+        import external_clear as ec  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - a missing sibling must not kill the beat
+        state.log_line("daemon", f"cold-cache-clear: libs unavailable: {exc}")
+        return
+    if not ec.enabled():
+        return  # ships inert, exactly like the SessionStart half — /clear is unrecoverable
+    now = int(time.time())
+    try:
+        fleet = fleet_scan.gather_fleet(now=now)
+    except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
+        state.log_line("daemon", f"cold-cache-clear: fleet scan failed: {exc}")
+        return
+
+    watcher = Path(__file__).resolve().parent / "external_handoff_clear.py"
+    if not watcher.is_file():
+        return
+    for inst in fleet:
+        # `inst.project_root`, NOT `getattr(inst, "root", "")`. The first draft used the getattr
+        # form with a default, and `Instance` has no `root` — so it would have read "" for every
+        # instance and this whole task would have shipped as a permanent no-op that logs nothing
+        # and looks exactly like "no session needed clearing". Attribute access on a known
+        # dataclass field is the version that FAILS LOUDLY when the field is renamed.
+        root = inst.project_root or ""
+        # `active` means the transcript is ADVANCING — a live turn, i.e. someone (or something)
+        # is working. Clearing that is unrecoverable, and unlike a keystroke it cannot be
+        # deferred-and-retried into safety, so it is a hard skip rather than a wait.
+        if not root or inst.active:
+            continue
+        if inst.pid in (os.getpid(), gs.daemon_pid()):
+            continue
+        sd = Path(root) / ".janitor" / "state"
+        if not sd.is_dir() or cold_cache_compact.clear_in_cooldown(sd, now=now):
+            continue
+        try:
+            subprocess.Popen(  # noqa: S603 - fixed argv, feature-detected script
+                [sys.executable, str(watcher), "--project-root", root],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env={**os.environ, "CLAUDE_PROJECT_DIR": root},
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad spawn must not stop the beat
+            state.log_line("daemon", f"cold-cache-clear: spawn failed for {root}: {exc}")
+            continue
+        state.log_line("daemon", f"cold-cache-clear: evaluating {root}")
+        return  # one per beat — see the docstring
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -2033,6 +2122,7 @@ def _build_tasks() -> list[Task]:
              background=True),
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
         Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
+        Task("cold-cache-clear", _INTERVAL_COLD_CACHE_CLEAR, task_cold_cache_clear),
     ]
 
 

@@ -165,12 +165,18 @@ def _last_turn_age(root: Path, now: int) -> int | None:
         return None
 
 
-def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVerdict, dict]:
+def _decide(
+    root: Path, sd: Path, now: int, *, force: bool, on_resume: bool = False
+) -> tuple[ec.ClearVerdict, dict]:
     """Gather every runtime fact and run the pure gate. Returns (verdict, facts-for-logging)."""
     import cold_cache_compact  # noqa: PLC0415
     import dispatch  # noqa: PLC0415 - reuses _cadence_active_waiting rather than re-deriving it
     import fleet_scan  # noqa: PLC0415
-    import user_intent  # noqa: PLC0415
+
+    # `user_intent` is deliberately NOT imported: this path knows nothing about whether the
+    # user is "present". The only keystroke fact anywhere in the system is the LAST KEYSTROKE
+    # TIMESTAMP, and it lives where it is used — inside the injector, which defers 8 s from it
+    # and retries. A presence predicate here is what kept this watcher dead for weeks.
 
     cron = ""
     try:
@@ -184,18 +190,17 @@ def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVer
     # the summary branch would have degraded to template-only on every run — shipping the
     # feature dark in the same commit that exists to un-dark it (TRDD-1QJIZFFW).
     newest = cold_cache_compact.newest_transcript(root)
-    user_present = user_intent.user_is_present(now=now)
     active_waiting = dispatch._cadence_active_waiting(sd, now)
     in_cooldown = cold_cache_compact.clear_in_cooldown(sd, now=now)
+    # The user's presence is deliberately NOT gathered (owner, 2026-08-13). It used to be read
+    # here and fed to the gate as a hard veto; since the injector handles presence by DELAYING
+    # 8 s per keystroke and never cancelling, reading it here could only re-introduce the
+    # refusal that kept this watcher dead. See `ec.should_clear_externally`'s docstring.
+    #
     # The ONE subprocess on this path, so it is skipped whenever a local fact already refuses.
-    # Those three vetoes hold regardless of what the probe would say, and they are true most of
-    # the time (somebody is usually working), so probing first would spend a bounded-but-real
-    # 5 s per fire to compute an input the gate is about to ignore.
-    cache_expired = (
-        None
-        if (user_present or active_waiting or in_cooldown)
-        else ec.cache_certainly_expired(root)
-    )
+    # Both vetoes hold regardless of what the probe would say, so probing first would spend a
+    # bounded-but-real 5 s per fire to compute an input the gate is about to ignore.
+    cache_expired = None if (active_waiting or in_cooldown) else ec.cache_certainly_expired(root)
     # SPLIT DELIBERATELY: `gate` is exactly the pure decision's parameters, `facts` is the log
     # record that also carries composer-only fields. They were one dict until `transcript` was
     # added to it, which made every run raise `unexpected keyword argument 'transcript'` — the
@@ -211,12 +216,26 @@ def _decide(root: Path, sd: Path, now: int, *, force: bool) -> tuple[ec.ClearVer
         "min_context": ec.min_context_tokens(),
         "min_idle_s": cold_cache_compact.clear_min_idle_seconds(),
         "headroom_s": ec.headroom_seconds(),
-        "user_present": user_present,
         "active_waiting": active_waiting,
         "in_cooldown": in_cooldown,
         "cache_expired": cache_expired,
     }
     facts = {**gate, "transcript": str(newest) if newest else ""}
+    if on_resume:
+        # The RESUME gate, not the abandoned-session one. A session loaded seconds ago can never
+        # satisfy the long-idle term, so `should_clear_externally` would refuse every resume —
+        # which is precisely the shrink that matters most, because the first turn after a cold
+        # load re-reads the whole context at full price. The hook has already established the
+        # `source`; re-asserting it here keeps the pure gate the single place that enforces it.
+        verdict = ec.should_clear_on_resume(
+            source="resume",
+            cache_expired=cache_expired,
+            context_tokens=gate["context_tokens"],
+            min_context=gate["min_context"],
+            in_cooldown=in_cooldown,
+            already_fired_this_session=False,
+        )
+        return verdict, {**facts, "gate": "resume"}
     verdict = ec.should_clear_externally(**gate)
     if force and not verdict.fire and verdict.why.startswith(("idle ", "no-headroom")):
         # --force overrides the two TRIGGER terms ONLY (is it idle enough / would the next fire
@@ -252,12 +271,28 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
     # THE WIRING (TRDD-1QJIZFFW). `use_llm_ext()` shipped exported, defaulting True, with ZERO
     # callers — a switch whose default was a promise the code did not keep. This is the caller.
     #
-    # Both branches produce a handoff; neither can produce none. `run_llm_ext_summary` answers
-    # None for every failure mode of a young CLI (absent binary, unresolvable data dir, non-zero
-    # exit, timeout, empty output), and `compose_handoff` then emits the scriptable facts and
-    # the message tail alone. Degrading to a smaller handoff is survivable; degrading to no
-    # handoff is not, because the `/clear` it precedes is unrecoverable.
-    summary = ec.run_llm_ext_summary(transcript) if (ec.use_llm_ext() and transcript) else None
+    # RETRY, THEN DEGRADE — NEVER BLOCK FOREVER (owner, 2026-08-13: *"the compacting must succeed
+    # no matter what. even if it gets timeouts or error or disconnects from the internet for
+    # hours"*). `summarize_with_retry` keeps trying across timeouts, 429s and a dead network,
+    # taking a fleet-lane ticket per attempt so 20 sessions do not burst at one free-tier
+    # endpoint. It stops early only when retrying provably cannot help.
+    #
+    # What must succeed unconditionally is the CLEAR, and it does: both branches produce a
+    # handoff and neither can produce none. When the summary never lands, `compose_handoff`
+    # emits the scriptable facts and the message tail alone — no network, no model, always
+    # available. Degrading to a smaller handoff is survivable; degrading to NO clear is not,
+    # because the un-shrunk session then pays the full-price turn this whole feature exists to
+    # prevent. So the summary is best-effort and the clear is the guarantee.
+    summary = None
+    if ec.use_llm_ext() and transcript:
+        got = ec.summarize_with_retry(
+            transcript,
+            deadline=time.time() + ec.summary_deadline_s(),
+            log=lambda m: state.log_line(_LOG, m),
+        )
+        summary = got.text
+        if not summary:
+            state.log_line(_LOG, f"handoff degraded to template: {got.outcome} — {got.detail}")
     text = ec.compose_handoff(
         inputs,
         now_iso=now_iso,
@@ -315,6 +350,10 @@ def main() -> int:
                     help="gather, decide and compose, but write NOTHING and fire NOTHING")
     ap.add_argument("--force", action="store_true",
                     help="override the idle/cache TRIGGER terms; every safety veto still holds")
+    ap.add_argument("--on-resume", action="store_true",
+                    help="use the RESUME gate (ec.should_clear_on_resume) instead of the "
+                         "abandoned-session one: a just-loaded session can never satisfy the "
+                         "long-idle term, so the default gate would always refuse it")
     args = ap.parse_args()
 
     root = Path(args.project_root or os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd()).resolve()
@@ -328,7 +367,7 @@ def main() -> int:
         print(f"NO_JANITOR_STATE {sd}")
         return 0
 
-    verdict, facts = _decide(root, sd, now, force=args.force)
+    verdict, facts = _decide(root, sd, now, force=args.force, on_resume=args.on_resume)
     print(f"VERDICT {'FIRE' if verdict.fire else 'HOLD'} "
           f"trigger={verdict.trigger or '-'} why={verdict.why}")
     if not verdict.fire:

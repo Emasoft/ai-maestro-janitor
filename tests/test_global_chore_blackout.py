@@ -86,7 +86,7 @@ def test_absorbed_and_unabsorbed_partition_the_roster_without_overlap() -> None:
     assert absorbed <= set(hb.GLOBAL_CHORES), "an absorbed chore that is not a real chore"
 
 
-def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
+def test_unabsorbed_chores_names_the_eight_the_server_never_claimed() -> None:
     """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails.
 
     `fleet-plugins-update` joined the roster on 2026-08-11 (TRDD-G4BCRUP7 R3) and is the
@@ -94,6 +94,14 @@ def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
     tripwire fired correctly and the fact it exposed is that on a host running a live
     ai-maestro server — which suppresses the daemon — fleet-wide plugin updates do not run
     at ALL, because the server does not claim that chore and the daemon has yielded.
+
+    `cold-cache-clear` joined on 2026-08-13 as the EIGHTH, and it is added here by the same
+    discipline: the tripwire fired, and the honest answer is that ai-maestro's server does not
+    claim it either. That matters more than the others, because this chore is the ONLY actor
+    that can shrink a cold-cache session before its next cron fire pays full price — so on a
+    server host, the exact expense the chore exists to prevent goes unprevented. The
+    SessionStart half still fires there (it is a hook, not a daemon task), so the blackout costs
+    the running-session window, not the whole feature.
 
     So R3 ("keep every project's plugins updated") is satisfied on a standalone host and
     BLACKED OUT on a server host until ai-maestro claims it. That is a cross-repo ask, not
@@ -104,7 +112,7 @@ def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
     assert set(hb.unabsorbed_chores()) == {
         "memory-guard", "cache-prune", "rules-cleanup",
         "github-config-audit", "session-liveness", "fleet-stop",
-        "fleet-plugins-update",
+        "fleet-plugins-update", "cold-cache-clear",
     }
 
 
