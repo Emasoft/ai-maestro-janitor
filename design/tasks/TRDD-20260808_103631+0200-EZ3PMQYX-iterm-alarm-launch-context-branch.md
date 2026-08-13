@@ -3,7 +3,7 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-13T04:43:15+0200
+updated: 2026-08-13T12:56:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -14,6 +14,21 @@ external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, 
 ---
 
 # iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence
+
+## ⏵ 2026-08-13 12:5x — THE PLUMBING LANDED; THE SURFACING DID NOT (stays `todo`)
+
+`a0dfb901` shipped the **recording** half only: `fleet_scan` now carries `probe_outcome` and a
+rearm-evidence AGE, so an `iterm-automation-blocked` observation records WHY it was reached and
+how old its evidence is — the exact discriminator the revision below says the alarm is missing.
+58 tests pass; ruff + mypy green.
+
+**What is NOT done, and why the card is not closer to done than that:** the alarm TEXT still
+reads the old way, because the wiring lives in `dispatch.py`, which was out of scope for that
+pass. So the richer fields are written and **nobody reads them yet** — the same
+recorded-but-inert shape this corpus keeps producing. Do not read `a0dfb901` as "the alarm now
+distinguishes error from timeout"; it does not. NEXT ACTION: consume `probe_outcome` +
+evidence-age in `dispatch.py`'s alarm line, and drop the System Settings remedy whenever recent
+success evidence exists.
 
 ## ⚠ REVISED 2026-08-08 ~16:20 — the launch-context CAUSE claim is RETRACTED
 
