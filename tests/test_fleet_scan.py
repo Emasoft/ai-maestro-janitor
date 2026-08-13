@@ -41,6 +41,54 @@ def test_parse_ps_claude_recognizes_both_shapes() -> None:
     assert by_pid[404] == "ttys004"
 
 
+def test_parse_ps_claude_excludes_one_shot_subcommands() -> None:
+    """TRDD-R3D5YRQJ, from a live scan: `claude daemon run` and `claude plugin marketplace
+    update` were counted among the fleet's `cron_dead` instances and scheduled for `rearm`.
+    Neither is a session — neither has a cron to be dead. Both argv strings are the REAL ones
+    recorded in that scan, not synthesized shapes."""
+    txt = (
+        "46727 ?? claude daemon run --json-path /tmp/d.json --origin transient\n"
+        "54330 ?? claude plugin marketplace update\n"
+        " 7588 s003 claude --add-dir /tmp --continue\n"
+    )
+    assert sorted(r[0] for r in fs.parse_ps_claude(txt)) == [7588]
+
+
+def test_a_real_session_with_an_empty_tty_is_still_included() -> None:
+    """The opposite and worse mistake. A headless/harness session has no tty, so a tty-shaped
+    filter would drop exactly the sessions the guardian exists to recover. The discriminator
+    must be argv-shaped, and an empty tty must not disqualify anything."""
+    txt = "9001 ?? claude --agent worker --dangerously-skip-permissions\n"
+    assert [r[0] for r in fs.parse_ps_claude(txt)] == [9001]
+
+
+def test_flag_values_are_never_mistaken_for_subcommands() -> None:
+    """Only position 1 is consulted, so a flag VALUE cannot be read as a verb. `--agent
+    plugin` is adversarial on purpose: the value is itself a real subcommand name, and a
+    'first non-flag token' scan would drop this real session."""
+    for cmd in (
+        "claude --add-dir /tmp --continue",
+        "claude --agent plugin",
+        "claude --model sonnet --continue",
+    ):
+        assert fs.is_repl_invocation(cmd), cmd
+
+
+def test_an_unknown_first_token_is_treated_as_a_session() -> None:
+    """The ratified failure direction: including a non-session costs one no-op recovery,
+    excluding a real session costs a lost one. So a future (or hidden) verb this set does not
+    know must fail toward SESSION — the old bug, in the safe direction."""
+    assert fs.is_repl_invocation("claude some-future-verb --flag")
+    assert fs.is_repl_invocation("claude")
+    # ...but every hidden verb we have actually OBSERVED must be KNOWN, not left to that
+    # fallback. `daemon` motivated the card; `bg-spare` and `bg-pty-host` were found running
+    # on the host while fixing it — one live scan, two more verbs no help listing mentions.
+    for hidden in ("claude daemon run",
+                   "claude bg-spare --bg-spare /tmp/x.claim.sock",
+                   "claude bg-pty-host --bg-pty-host /tmp/x.pty.sock 200 50"):
+        assert not fs.is_repl_invocation(hidden), hidden
+
+
 def test_parse_iterm_sessions() -> None:
     """tty|id lines → {normalized_tty: id}; malformed/half rows dropped. The
     delimiter is a literal '|' because AppleScript's `tab` constant emits the

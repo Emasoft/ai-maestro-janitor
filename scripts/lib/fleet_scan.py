@@ -100,11 +100,63 @@ class Instance:
     awaiting_user: bool = False
 
 
+#: Every `claude` verb that starts a ONE-SHOT CLI invocation rather than an interactive REPL
+#: session. Sourced from `claude --help` PLUS the hidden verbs that listing omits.
+#:
+#: `daemon` is the case that motivated this (TRDD-R3D5YRQJ) and the reason this comment is
+#: long: `claude daemon run` runs in production, is long-lived BY DESIGN — so its inherited
+#: transcript age grows forever and it looks more dead every day — and appears in NO help
+#: listing. An allowlist derived from the help text is the obvious way to build this set and
+#: the way that looks rigorous, and it misses that single case SILENTLY. Hidden verbs exist;
+#: when the next one surfaces, add it here explicitly rather than re-deriving from `--help`.
+#: `bg-spare` and `bg-pty-host` were found the same way and prove the point twice over: they
+#: were running on this host while the card was being fixed, they are internal background
+#: helpers, they are in no help listing either, and the card that documented `daemon` did not
+#: know about them. Two more hidden verbs surfaced by ONE live scan is the reason the list is
+#: maintained from observed processes rather than from documentation.
+_CLAUDE_SUBCOMMANDS = frozenset({
+    "agents", "auth", "auto-mode", "bg-pty-host", "bg-spare", "daemon", "doctor", "gateway",
+    "import", "install", "mcp", "plugin", "plugins", "project", "setup-token", "ultrareview",
+    "update", "upgrade",
+})
+
+
+def is_repl_invocation(cmd: str) -> bool:
+    """True iff `cmd` starts an interactive claude SESSION rather than a one-shot subcommand.
+
+    Only the token IMMEDIATELY after argv[0] is consulted, and that positional choice is what
+    makes this safe: every real subcommand puts its verb first (`claude daemon run`,
+    `claude plugin marketplace update`), while a session's argv starts with a FLAG. So a flag
+    VALUE — `--agent foo`, `--model sonnet`, `--add-dir /tmp` — can never reach position 1 and
+    be misread as a verb. Scanning for the first non-flag token instead would need the full
+    which-flags-take-values table to avoid exactly that, and getting it wrong DROPS a real
+    headless session.
+
+    UNKNOWN first token ⇒ SESSION, deliberately (TRDD-R3D5YRQJ): including a non-session costs
+    one no-op recovery, excluding a real session costs a lost one. The same asymmetry is why
+    the fix is argv-shaped and not tty-shaped — filtering on an empty tty would also drop real
+    headless/harness sessions, the opposite and worse mistake.
+
+    A transcript-shaped filter is not available at all: the scan resolves a project from the
+    process cwd and reads that PROJECT's newest transcript, so a non-session inherits whatever
+    session last worked there — `claude daemon run` reported a 16.3-day age it never earned.
+    """
+    toks = cmd.split()
+    if len(toks) < 2:
+        return True  # bare `claude` — the plainest REPL there is
+    return toks[1] not in _CLAUDE_SUBCOMMANDS
+
+
 def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
-    """``(pid, normalized_tty, command)`` for every claude process in
+    """``(pid, normalized_tty, command)`` for every claude SESSION in
     ``ps -eo pid=,tty=,command=`` output. A claude process = argv[0] basename
     ``claude`` OR a ``/share/claude/versions/`` launcher path in the cmdline
-    (the two shapes the real install presents). Malformed rows are skipped."""
+    (the two shapes the real install presents). Malformed rows are skipped.
+
+    One-shot CLI invocations are EXCLUDED (`is_repl_invocation`, TRDD-R3D5YRQJ): both callers
+    — the fleet guardian and the status table — are asking about sessions, and a live scan
+    counted `claude daemon run` and `claude plugin marketplace update` among its `cron_dead`
+    instances, which is the number a human reads to decide whether the guardian works."""
     out: list[tuple[int, str, str]] = []
     for ln in ps_text.splitlines():
         if not ln.strip():
@@ -120,6 +172,8 @@ def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
         toks = cmd.split()
         first = toks[0] if toks else ""
         if os.path.basename(first) == "claude" or "/share/claude/versions/" in cmd:
+            if not is_repl_invocation(cmd):
+                continue  # a one-shot CLI verb, not a session that can be dead or recovered
             out.append((pid, session_liveness.normalize_tty(tty_s), cmd))
     return out
 
