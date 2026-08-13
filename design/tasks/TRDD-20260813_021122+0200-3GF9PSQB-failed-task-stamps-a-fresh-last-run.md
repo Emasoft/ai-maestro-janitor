@@ -1,10 +1,10 @@
 ---
 trdd-id: 3GF9PSQB
 title: A failing daemon task stamps a fresh last-run, so every stamp-keyed watchdog is blind to it
-column: todo
+column: complete
 created: 2026-08-13T02:11:22+0200
-updated: 2026-08-13T02:11:22+0200
-current-owner: unassigned
+updated: 2026-08-13T03:41:00+0200
+current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 scope: project
@@ -12,6 +12,7 @@ severity: medium
 relevant-rules: []
 npt: []
 eht: []
+implementation-commits: [0cc466d2]
 external-refs: [TRDD-88ZVEQY7, TRDD-6CRC9SQQ]
 ---
 
@@ -78,8 +79,41 @@ discipline — the exact class that produced seven defects on 2026-08-12).
 
 ## Acceptance
 
-- [ ] A task that fails every run is reported as unhealthy by the stamp-keyed watchdogs, proven
-      by a test that FAILS against today's code
-- [ ] A task that succeeds is unaffected (no new noise) — pinned separately
-- [ ] Both the background (`poll_background`) and foreground (`run`) lanes audited, and whichever
-      is not changed is explicitly recorded as already-correct
+- [x] A task that fails every run is reported as unhealthy by the stamp-keyed watchdogs, proven
+      by a test that FAILS against today's code — `test_failing_task_is_reported_despite_a_fresh_stamp_and_live_daemon`;
+      falsified by disabling the branch (7 run, 2 emission guards failed).
+- [x] A task that succeeds is unaffected (no new noise) — pinned separately by
+      `test_healthy_task_with_a_fresh_stamp_stays_silent` and
+      `test_a_transient_failure_streak_below_quarantine_is_silent`. Both stay green with the
+      fix disabled, which is correct: they guard against noise, not for emission.
+- [x] Both lanes audited — and NEITHER was already correct. `Task.run:1977` and
+      `Task.poll_background:1941` share the identical shape (stamp in `finally`, before the
+      failure branch). Nothing to record as already-correct.
+
+## ⏵ STATE — 2026-08-13: shipped at 0cc466d2. Read this before reopening.
+
+**Two blinders, not one.** The refreshed stamp is only half of it: even a stale stamp is
+suppressed by the `daemon_is_alive()` gate, and a task that is running-and-failing has a live
+daemon by definition. A fix that addressed only the stamp would have stayed silent.
+
+**The stamp was deliberately NOT changed.** `time_until_due()` reads it for SCHEDULING (plus the
+backoff penalty), so making it success-only would alter retry semantics for every task. The
+ambiguity lived in the READERS, so that is where it was resolved — one meaning per file, as the
+sketch asked.
+
+**`QUARANTINE_AFTER_FAILS` is now shared** (`global_state`), imported by the daemon that WRITES
+the streak and the watchdog that READS it. The alternative — a second threshold in the watchdog —
+would have been two definitions of "unhealthy" drifting apart silently, which is this card's own
+defect class.
+
+**KNOWN REMAINING GAP — needs a different owner.** `claimed_chore_watch` judges chores claimed by
+the ai-maestro SERVER, which writes those stamps. The failure streak is janitor-private daemon
+state and does not exist for a server-owned chore, so the same blind spot persists there and
+CANNOT be closed from this side. It needs the server to publish a failure signal. Cross-project ⇒
+file an issue on ai-maestro, never an edit. Queued behind the user's GitHub-reply gate.
+
+**Provenance worth keeping:** found while working TRDD-88ZVEQY7 on a hypothesis that turned out to
+be WRONG (the fleet payload was stale because the server had absorbed the chore, not because a
+task was failing). The defect is real independently. Chasing a wrong hypothesis to the source is
+what surfaced it — the watchdog's own `last_run <= 0` comment already stated the stamp is
+unconditional and reasoned correctly about ZERO; nobody had followed the same fact to non-zero.
