@@ -188,6 +188,28 @@ def configured_rotator_home() -> Path | None:
     return root if (root / "state.json").is_file() else None
 
 
+def open_login_script() -> Path:
+    """The `open-login.sh` the user should ACTUALLY run on THIS host (janitor#258).
+
+    Two layouts put it in different places and only one exists on any given host: a LEGACY
+    standalone install copied the shell helpers INTO the rotator home, while a plugin install
+    leaves them in the plugin tree and only ever writes STATE into the home. Nothing in this
+    codebase copies the script into the home, so the historical hard-coded
+    `~/.claude/account-rotator/open-login.sh` was correct ONLY on a legacy host.
+
+    Probe for the home copy, else return the shipped one. Never hard-code either: a diagnostic
+    instruction is the one line a reader follows when something is ALREADY wrong, so naming a
+    path that is not there costs them the thing they have least of at that moment.
+
+    Companion to `configured_rotator_home()` and here for the same reason it is: the resolution
+    belongs in ONE place that every user-facing surface reads, not re-derived per detector —
+    that duplication is exactly what TRDD-5EUYV08H had to undo for the state path."""
+    home = configured_rotator_home()
+    if home is not None and (home / "open-login.sh").is_file():
+        return home / "open-login.sh"
+    return Path(__file__).resolve().parent / "open-login.sh"
+
+
 def migrate_root_to_canonical() -> tuple[Path, Path, bool]:
     """One-time: copy ``state.json`` + ``opt-in.flag`` from the legacy standalone root
     into the canonical DATA-dir root (atomic, NON-destructive — the legacy copy is kept

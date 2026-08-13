@@ -290,20 +290,71 @@ def test_daily_dedupe_second_run_silent(tmp_path: Path) -> None:
 
 def test_capture_stalled_nudge_points_to_log_and_reseed(tmp_path: Path) -> None:
     """B3: a logged-in account whose OAuth capture hasn't completed (no refresh + live
-    session) gets the SECONDARY '[oauth-capture-stalled]' nudge pointing at the bootstrap
-    LOG and the open-login.sh re-seed — both paths that ACTUALLY EXIST (the earlier manual
-    capture command referenced ~/.claude/account-rotator/slot_capture_browser.py, which the
-    standalone install does not ship)."""
+    session) gets the SECONDARY '[oauth-capture-stalled]' nudge pointing at a log that
+    ACTUALLY EXISTS plus the open-login.sh re-seed.
+
+    CORRECTED 2026-08-13 (janitor#258). This test used to assert the literal
+    `bootstrap-<email>.log`, under a docstring claiming both paths "ACTUALLY EXIST". Neither
+    claim held: that file is opened only when `_invoke_slot_capture` actually LAUNCHES a
+    capture, so on a host where the launch was skipped it is absent — and the test pinned the
+    defect rather than the contract, which is why the wrong pointer shipped and survived. The
+    contract is: name evidence that is there. `rotator.log` is written unconditionally."""
     out, rc = _run(tmp_path, {"seed@x.com": False}, {"seed@x.com": 20.0})
     assert rc == 0
     stalled = _stalled_line(out)
     assert "[oauth-capture-stalled]" in stalled
     assert "seed@x.com" in stalled
     assert "logged in but their OAuth capture hasn't completed" in stalled
-    assert "bootstrap-<email>.log" in stalled
+    assert "rotator.log" in stalled
+    # No capture was launched in this fixture, so no bootstrap log exists -> never named.
+    assert "bootstrap-" not in stalled
     assert "open-login.sh <email>" in stalled
     # It must NOT be misclassified as a LOGIN nudge.
     assert _login_line(out) == ""
+
+
+def test_stalled_nudge_names_the_bootstrap_log_only_when_it_exists(tmp_path: Path) -> None:
+    """The other half of the contract: when a capture DID launch, its per-account log is real
+    evidence and IS named alongside rotator.log. Proves the omission above is conditional on
+    the file's absence, not a blanket removal (janitor#258)."""
+    home = tmp_path / "rotator"
+    (home / "slots").mkdir(parents=True, exist_ok=True)
+    (home / "bootstrap-seed@x.com.log").write_text("consent page timed out\n")
+    out, rc = _run(tmp_path, {"seed@x.com": False}, {"seed@x.com": 20.0})
+    assert rc == 0
+    stalled = _stalled_line(out)
+    assert "rotator.log" in stalled
+    assert "bootstrap-seed@x.com.log" in stalled
+
+
+def test_no_message_hard_codes_the_legacy_rotator_home(tmp_path: Path) -> None:
+    """THE janitor#258 regression guard. Every path a message names must be RESOLVED from the
+    home the detector actually read, never the literal `~/.claude/account-rotator/`.
+
+    The state read was moved onto `configured_rotator_home()` by TRDD-5EUYV08H, but these two
+    messages kept the legacy literal — so on a migrated install the detector read the canonical
+    dir and then told the reader to look in the legacy one. Both nudges are asserted here
+    because the bug was in BOTH and only one was reported."""
+    out, rc = _run(
+        tmp_path,
+        {"login@x.com": False, "seed@x.com": False},
+        {"login@x.com": None, "seed@x.com": 20.0},
+    )
+    assert rc == 0
+    login, stalled = _login_line(out), _stalled_line(out)
+    assert login and stalled
+    for line in (login, stalled):
+        assert ".claude/account-rotator" not in line
+    # The home-owned artifact (rotator.log) must point INTO the home actually in use...
+    assert str(tmp_path) in stalled
+    # ...while open-login.sh is a SHIPPED script: this fixture's home has no copy, so the
+    # resolver must fall back to the plugin tree. Assert the remedy names a path that is
+    # really there — that is the whole contract janitor#258 broke, so test it directly
+    # rather than testing which directory it happens to be in.
+    for line in (login, stalled):
+        named = [tok.strip("`") for tok in line.split() if "open-login.sh" in tok]
+        assert named, f"no open-login.sh path in: {line}"
+        assert Path(named[0]).is_file(), f"remedy names a missing file: {named[0]}"
 
 
 def test_capture_stalled_daily_dedupe(tmp_path: Path) -> None:

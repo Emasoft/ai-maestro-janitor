@@ -143,12 +143,28 @@ def _grace_days() -> float:
     return val if val > 0 else 1.0
 
 
+def _disp(path: Path) -> str:
+    """`path` with the user's home collapsed to `~` — still copy-pasteable in a shell, but
+    short enough that the remedy stays readable inside an already-long drift line."""
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
 def main() -> int:
     state.init_state()
 
     home = _rotator_home()
     if home is None:
         return 0  # opt-in: no rotator configured on this machine -> silent no-op
+
+    # Every path named in the messages below is RESOLVED, never hard-coded (janitor#258).
+    # These lines used to spell `~/.claude/account-rotator/...` literally while the state read
+    # went through `configured_rotator_home()` — so on a migrated install the detector read the
+    # canonical dir and then told the reader to look in the legacy one. That is TRDD-5EUYV08H
+    # exactly, one field over: the fix covered the DATA path and left the MESSAGE path behind.
+    login_sh = _disp(rotator.open_login_script())
 
     grace = _grace_days()
     now = time.time()
@@ -182,7 +198,7 @@ def main() -> int:
         emails = ", ".join(needing)
         msg = (
             f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
-            f"{emails} — run `~/.claude/account-rotator/open-login.sh <email>` for each "
+            f"{emails} — run `{login_sh} <email>` for each "
             f"(opens a DEDICATED Chrome window; your default browser is untouched). "
             f"The rotator auto-bootstraps the rest."
         )
@@ -200,11 +216,27 @@ def main() -> int:
         seen2 = home / ".oauth-capture-stalled-seen.txt"
         sig2 = hashlib.sha1(",".join(stalled).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         emails2 = ", ".join(stalled)
+        # The per-account `bootstrap-<email>.log` exists ONLY if a capture was actually
+        # LAUNCHED — `rotator._invoke_slot_capture` opens it at Popen time, and the launch is
+        # skippable (auto-launch opted off, past the launch cap, or a denied domain). Naming it
+        # unconditionally sent the reader to a missing file at the exact moment they had least
+        # patience for one, and read as "the capture never started" when that was not the
+        # finding (janitor#258). `rotator.log` is written unconditionally and carries the
+        # decision either way, so it is the honest primary pointer; the bootstrap log is named
+        # only when it is genuinely there.
+        boot_logs = [
+            p
+            for p in (home / ("bootstrap-%s.log" % e.replace("/", "_")) for e in stalled)
+            if p.is_file()
+        ]
+        evidence = f"`{_disp(home / 'rotator.log')}`"
+        if boot_logs:
+            evidence += " and " + ", ".join(f"`{_disp(p)}`" for p in boot_logs)
         msg2 = (
             f"[oauth-capture-stalled] {len(stalled)} account(s) are logged in but their OAuth "
             f"capture hasn't completed: {emails2} — the rotator retries the capture every tick; "
-            f"if it keeps failing, check the log `~/.claude/account-rotator/bootstrap-<email>.log`, "
-            f"and if the session has lapsed re-run `~/.claude/account-rotator/open-login.sh <email>`."
+            f"if it keeps failing, check {evidence}, "
+            f"and if the session has lapsed re-run `{login_sh} <email>`."
         )
         line2 = dedupe.emit_once(seen2, f"stalled-{day}-{sig2}", msg2)
         if line2 is not None:

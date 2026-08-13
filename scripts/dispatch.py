@@ -270,8 +270,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # opt-in-by-presence gate (a rotator home with a state.json). It surfaces the
     # accounts that need a ONE-TIME human login because they can neither self-renew
     # (no refreshToken) nor auto-bootstrap (no live claude.ai Chrome session), so
-    # only a fresh sign-in via ~/.claude/account-rotator/open-login.sh can revive
-    # them. Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
+    # only a fresh sign-in via open-login.sh can revive them (the detector resolves that
+    # script's real path per host — it is NOT at a fixed location; see janitor#258).
+    # Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
     # machine-scoped daily dedupe keeps it gentle.
     ("oauth-login-needed", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_LOGIN_NEEDED_INTERVAL"),
     # keychain-health is the FLEET GUARDIAN's keychain probe (TRDD-KCHEALTH, the 2026-07-12
