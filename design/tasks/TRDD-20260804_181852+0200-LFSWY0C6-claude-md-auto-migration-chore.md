@@ -3,8 +3,8 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T06:31:40+0200
-implementation-commits: [d82dc15a]
+updated: 2026-08-13T06:47:44+0200
+implementation-commits: [d82dc15a, 20f226ba]
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: [7.1, 8.1, 9.1, 10.1]
@@ -116,6 +116,56 @@ did not reproduce a conforming file's permitted-element structure. The suite is 
 planner is wrong — the same shape as everything else on this board tonight. The ONE thing that
 caught it was running it on real input, which was only safe *because* the delivery half does not
 exist.
+
+### ⏵ 06:50 UPDATE — the fix attempt (`20f226ba`) is PARTIAL. The defect survives, measured.
+
+`20f226ba` gates `plan_migration` on `slim_violations(text) == []`. That is a correct NECESSARY
+condition and the conforming case is now safe (live file: 8 blocks → 0). **It is not sufficient**,
+and the tests do not show it because all three new tests exercise only the conforming path.
+
+Measured on the real `CLAUDE.md` plus enough narrative to cross the 8192-byte cap (narrative 9932
+bytes, `slim_violations` = 1) — i.e. the ONLY case the chore exists for:
+
+```
+total blocks planned: 48
+[0] new_page | 'A Claude Code plugin that keeps the dev environme…'   <- the description
+[1] new_page | '- Repo: https://github.com/Emasoft/ai-maestro-jan…'   <- ## Links
+[2] new_page | '- Marketplace (`ai-maestro-plugins`): https://git…'
+[3] new_page | '- Connected ai-maestro harness: https://github.co…'
+```
+
+### THE REAL BLOCKER: the primitive this needs does not exist
+
+Neither existing function can answer "is THIS block excess?":
+
+| function | what it actually is | why it cannot be the candidate set |
+|---|---|---|
+| `narrative_outside_fences` | everything outside the two fences | INCLUDES the five permitted elements by design |
+| `slim_violations` | 4 whole-file checks: both fences present, a github url present, and total narrative bytes ≤ `narrative_max_bytes()` (8192) | coarse by construction — it can say the narrative is TOO BIG, never WHICH blocks are excess |
+
+So the missing piece is a **per-block permitted-element classifier**: given a narrative block, is it
+the H1 title / the one-paragraph description / a `## Links` entry / a `## Commands` line (all
+PERMITTED), or is it excess? That is the function the planner should select on, and it is also what
+would let `check` report violations per-block instead of one whole-file byte count.
+
+**Write that classifier first, as its own unit with its own tests, then re-point the planner at it.**
+Do not try to derive it from `slim_violations` — that function is structurally the wrong shape.
+
+### ⚠ How BOTH previous attempts passed while wrong — read before writing the next acceptance test
+
+1. The first planner: 13 green tests, all fixtures PLANTED a violation, so none exercised a
+   conforming file.
+2. The fix: 3 new green tests, all exercised the CONFORMING file, so none exercised an over-cap one.
+
+Each round tested exactly the case the previous round got wrong, and missed the next. **The
+acceptance test for the classifier must assert on a file that is BOTH over-cap AND contains the
+permitted elements** — that is the only shape where the two failure modes cannot hide behind each
+other. Concretely: `plan_migration(over_cap_text)` must contain the excess blocks and MUST NOT
+contain the title, the description, any `## Links` entry, or any `## Commands` line.
+
+My own criterion caused the second miss: I specified "empty `slim_violations` ⇒ empty plan", which
+a top-level early return satisfies exactly. It was necessary, not sufficient, and a spec that a
+symptom patch can satisfy will get one.
 
 ### FIX BEFORE ANY DELIVERY WORK
 
