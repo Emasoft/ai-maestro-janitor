@@ -128,6 +128,21 @@ only has to be sampled before it ages out, the way the first window's rules edit
       correcting, since the card's own method note says the on-disk diff is what delegates
       safely. NEXT ATTEMPT must hand the worker the concrete body-file PATHS, not the tool name,
       and must not depend on agentlenspro being reachable.
+
+      **THE PATHS, established 2026-08-13 13:3x so no future attempt rediscovers them.** The
+      data is on disk; the live server is NOT required:
+      - `~/.agentlens/store/bodies/` — **3221** captured request bodies, 62M. (`otel-bodies/` is
+        EMPTY and is a red herring; `store.old-v0/bodies/` holds 342 older ones.)
+      - `~/.agentlens/forensics.db` — 20M SQLite; tables `api_calls`, `call_content`,
+        `call_injections`, `index_state`. Dump `.schema` before querying — do not guess columns.
+      - `~/.agentlens/requests.log`, `requests.log.1`
+
+      CAVEAT measured at the same time: **0 bodies are newer than 6h**, so retention may already
+      have rotated the 03:29 window away. If it has, "the bodies are gone" is the correct
+      finding and closes this box as UNMEASURABLE — it is not a licence to estimate.
+
+      **ATTEMPT 2 dispatched** with those paths and the two constraints attempt 1 violated: do
+      not sub-delegate, and do not touch the live agentlenspro surface.
 - [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
       spelled out rather than implied
 - [ ] Whatever the rule is, it is enforced by something that runs — not only written down
