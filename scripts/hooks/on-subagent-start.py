@@ -41,6 +41,7 @@ def main() -> int:
     desc = ""
     cwd_fallback = ""
     transcript = ""
+    agent_dir = ""
     try:
         payload = json.loads(raw) if raw.strip() else {}
         if isinstance(payload, dict):
@@ -62,8 +63,25 @@ def main() -> int:
             # `<session-id>.jsonl`, so a stem equal to session_id PROVES the file is
             # the session's, not the agent's. Empty is honest: spawn_prompt("")
             # already yields "" and the caller reports the prompt as unrecoverable.
+            # Having REJECTED the parent's path, derive the LAZY resolution root, so the
+            # blanking leaves a way back instead of nothing. The agent's own transcript
+            # does not exist yet at SubagentStart — it appears at
+            # `<projects>/<slug>/<session_id>/subagents/[workflows/wf_<runid>/]agent-<id>.jsonl`
+            # only once the agent produces its first turn — so a path cannot be resolved
+            # now, only a directory to search later (`pending_agents.resolve_transcript`).
+            #
+            # This MUST stay INSIDE the guard, and the reason is the whole point of the
+            # guard: `Path(transcript).parent` is the `<projects>/<slug>` dir ONLY when the
+            # payload carried `<slug>/<session_id>.jsonl`, which is exactly what the stem
+            # check just proved. In the ELSE case the payload already gave the AGENT's own
+            # transcript, whose parent is `<slug>/<session_id>/subagents[/workflows/wf_…]`
+            # — joining `session_id/subagents` onto THAT yields a path that can never
+            # exist, and storing it would re-commit this card's original sin in mirror
+            # image: a knowingly-unresolvable path recorded as if it were a fact. That
+            # branch needs no root anyway — it has the real file.
             session_id = str(payload.get("session_id", "") or "").strip()
             if session_id and transcript and Path(transcript).stem == session_id:
+                agent_dir = str(Path(transcript).parent / session_id / "subagents")
                 transcript = ""
     except (ValueError, TypeError):
         return 0
@@ -87,7 +105,7 @@ def main() -> int:
 
     try:
         state.init_state()
-        pending_agents.add(agent_id, desc, transcript=transcript)
+        pending_agents.add(agent_id, desc, transcript=transcript, agent_dir=agent_dir)
     except Exception as exc:  # noqa: BLE001 - fail-open, always exit 0
         try:
             state.log_line("subagent-start", f"manifest add failed: {exc}")

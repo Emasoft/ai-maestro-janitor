@@ -79,9 +79,10 @@ def _import_session_start_hook():
 
 
 def test_add_then_pending_roundtrip(iso) -> None:
-    """add() records {agentId, description, ts, nudges, transcript}; pending() returns it
-    live. `nudges` seeds at 0 — the per-entry resume budget introduced for #75.
-    `transcript` is the respawn-recovery handle (empty when the payload carried none)."""
+    """add() records {agentId, description, ts, nudges, transcript, agentDir}; pending()
+    returns it live. `nudges` seeds at 0 — the per-entry resume budget introduced for #75.
+    `transcript` is the respawn-recovery handle (empty when the payload carried none);
+    `agentDir` is the lazy-resolution root for when `transcript` is unusable."""
     pa = iso["pa"]
     pa.add("agent-abc123", "fix runtime LOWs", now=1000)
     got = pa.pending(now=1000)
@@ -92,6 +93,7 @@ def test_add_then_pending_roundtrip(iso) -> None:
             "ts": 1000,
             "nudges": 0,
             "transcript": "",
+            "agentDir": "",
         }
     ]
 
@@ -753,3 +755,117 @@ def test_respawn_prompt_is_empty_when_the_original_is_lost(tmp_path, iso) -> Non
     same name, which is worse than reporting the job unrecoverable."""
     pa = iso["pa"]
     assert pa.respawn_prompt(str(tmp_path / "gone.jsonl")) == ""
+
+
+# ---------- lazy transcript resolution (TRDD-KTXZJC6E part A) -----------------
+
+
+def test_start_hook_stores_agent_dir_alongside_blanked_transcript(iso) -> None:
+    """The blanking guard still fires exactly as before — `transcript` stays "" for the
+    parent-session's own file — but the hook now ALSO stores `agentDir`, the root under
+    which the agent's real transcript will eventually appear, so a later resume can find it
+    once it exists."""
+    project = iso["project"]
+    sid = "be8c05d6-8513-4f84-8980-7fe885a361a0"
+    res = _run_hook(
+        _START_HOOK,
+        {
+            "hook_event_name": "SubagentStart",
+            "agent_id": "wf002",
+            "session_id": sid,
+            "transcript_path": f"/tmp/projects/whatever/{sid}.jsonl",
+            "cwd": str(project),
+        },
+        project,
+    )
+    assert res.returncode == 0, res.stderr
+    data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
+    assert data[0]["transcript"] == ""
+    assert data[0]["agentDir"] == f"/tmp/projects/whatever/{sid}/subagents"
+
+
+def test_start_hook_stores_no_agent_dir_when_the_payload_gave_the_agents_own_path(iso) -> None:
+    """The MIRROR of the test above, and the one that keeps the derivation honest.
+
+    `<parent>/<session_id>/subagents` is the right root ONLY when the payload carried the
+    parent session's `<session_id>.jsonl` — which is precisely what the blanking guard's stem
+    check establishes. When the payload instead carries the AGENT's own transcript, its parent
+    is already `<session_id>/subagents[/workflows/wf_…]`, so the same join produces
+    `…/subagents/workflows/wf_x/<session_id>/subagents` — a path that can never exist on any
+    machine.
+
+    Recording that would repeat this card's original defect in mirror image: an unresolvable
+    path stored as if it were a fact. The branch needs no root anyway — it already holds the
+    real file, which `resolve_transcript` prefers. Verified against a real on-disk transcript
+    path 2026-08-13 before this test was written.
+    """
+    project = iso["project"]
+    sid = "be8c05d6-8513-4f84-8980-7fe885a361a0"
+    own = f"/tmp/projects/whatever/{sid}/subagents/workflows/wf_c1827891-050/agent-a693805.jsonl"
+    res = _run_hook(
+        _START_HOOK,
+        {
+            "hook_event_name": "SubagentStart",
+            "agent_id": "a693805",
+            "session_id": sid,
+            "transcript_path": own,
+            "cwd": str(project),
+        },
+        project,
+    )
+    assert res.returncode == 0, res.stderr
+    data = json.loads((project / ".janitor" / "state" / "pending-agents.json").read_text())
+    assert data[0]["transcript"] == own  # the guard correctly leaves the agent's own path alone
+    assert data[0]["agentDir"] == ""  # ...and stores NO speculative root beside it
+
+
+def test_resolve_transcript_finds_direct_agent_tool_shape(tmp_path, iso) -> None:
+    """A plain Agent-tool spawn's transcript sits directly at `<agentDir>/agent-<id>.jsonl`."""
+    pa = iso["pa"]
+    agent_dir = tmp_path / "subagents"
+    agent_dir.mkdir()
+    target = agent_dir / "agent-mem001.jsonl"
+    target.write_text('{"type":"user","message":{"content":"job"}}\n', encoding="utf-8")
+    entry = {"agentId": "mem001", "transcript": "", "agentDir": str(agent_dir)}
+    assert pa.resolve_transcript(entry) == str(target)
+
+
+def test_resolve_transcript_finds_nested_workflow_shape(tmp_path, iso) -> None:
+    """A workflow-spawned subagent's transcript sits one level deeper, under an unlearnable
+    run-id directory — `<agentDir>/workflows/wf_<runid>/agent-<id>.jsonl` — so a fixed-depth
+    join cannot find it and the lookup must search (rglob)."""
+    pa = iso["pa"]
+    agent_dir = tmp_path / "subagents"
+    nested = agent_dir / "workflows" / "wf_abc123"
+    nested.mkdir(parents=True)
+    target = nested / "agent-wf002.jsonl"
+    target.write_text('{"type":"user","message":{"content":"nested job"}}\n', encoding="utf-8")
+    entry = {"agentId": "wf002", "transcript": "", "agentDir": str(agent_dir)}
+    assert pa.resolve_transcript(entry) == str(target)
+
+
+def test_resolve_transcript_empty_when_nothing_resolves(tmp_path, iso) -> None:
+    """Missing agentDir, missing file, or no id at all — resolve_transcript must fail
+    quietly with "", never raise."""
+    pa = iso["pa"]
+    assert pa.resolve_transcript({"agentId": "x", "transcript": "", "agentDir": ""}) == ""
+    assert pa.resolve_transcript({"agentId": "", "transcript": "", "agentDir": str(tmp_path)}) == ""
+    missing_dir = tmp_path / "does-not-exist"
+    assert pa.resolve_transcript({"agentId": "x", "transcript": "", "agentDir": str(missing_dir)}) == ""
+
+
+def test_respawn_prompt_for_resolves_lazily_and_reissues_the_original(tmp_path, iso) -> None:
+    """`respawn_prompt_for` is the end-to-end path: an entry with a blanked `transcript` but
+    a real `agentDir` still recovers the ORIGINAL PROMPT TEXT, verbatim, inside the respawn
+    envelope."""
+    pa = iso["pa"]
+    agent_dir = tmp_path / "subagents"
+    agent_dir.mkdir()
+    (agent_dir / "agent-mem001.jsonl").write_text(
+        '{"type":"user","message":{"content":"DO THE ORIGINAL JOB PRECISELY"}}\n',
+        encoding="utf-8",
+    )
+    entry = {"agentId": "mem001", "transcript": "", "agentDir": str(agent_dir)}
+    out = pa.respawn_prompt_for(entry)
+    assert "DO THE ORIGINAL JOB PRECISELY" in out
+    assert out.startswith("RESUMED JOB")

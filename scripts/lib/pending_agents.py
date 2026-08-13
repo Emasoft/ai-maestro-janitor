@@ -186,6 +186,10 @@ def _normalize(entry: object, now: int) -> dict | None:
         # set, so any field not named here is silently dropped on the first load — which
         # would delete the one thing a respawn needs, at the moment it is needed most.
         "transcript": str(entry.get("transcript", "") or ""),
+        # The LAZY-resolution root (see `resolve_transcript`) — same "carried through
+        # explicitly" reasoning: drop this and a respawn loses the only way to find the
+        # agent's transcript once `transcript` itself was blanked or never resolvable.
+        "agentDir": str(entry.get("agentDir", "") or ""),
     }
 
 
@@ -209,6 +213,7 @@ def add(
     description: str = "",
     now: int | None = None,
     transcript: str = "",
+    agent_dir: str = "",
 ) -> None:
     """Record a spawned subagent. Fail-open: swallows everything.
 
@@ -218,6 +223,12 @@ def add(
     not carry one. The agent's first user message does, so the transcript path is what makes
     the fallback possible at all. Storing the path (not the prompt) keeps the manifest small
     and always current.
+
+    `agent_dir` is the LAZY-resolution root — the `<session>/subagents` dir the agent's own
+    transcript will eventually appear under. It exists because the file the hook needs does
+    not exist yet at spawn time (SubagentStart fires before the agent produces its first
+    turn), so `transcript` is often blanked or unusable at record time. See
+    `resolve_transcript` for the deferred lookup this root makes possible.
     """
     try:
         agent_id = str(agent_id or "").strip()
@@ -235,6 +246,7 @@ def add(
                     "ts": t,
                     "nudges": 0,  # a re-spawned id gets a fresh nudge budget
                     "transcript": str(transcript or ""),
+                    "agentDir": str(agent_dir or ""),
                 }
             )
             _save_unlocked(entries[-MAX_ENTRIES:])
@@ -357,6 +369,50 @@ RESPAWN_PREAMBLE = (
     "Any transaction the previous run left open was aborted; nothing it COMMITTED was lost.\n"
     "--- ORIGINAL PROMPT FOLLOWS ---\n"
 )
+
+
+def resolve_transcript(entry: dict) -> str:
+    """The entry's usable transcript path, resolved LAZILY. Never raises; "" when nothing
+    resolves.
+
+    WHY lazy: at SubagentStart time the agent's own transcript file does not exist yet (it is
+    created once the agent starts producing turns), so the hook can only record `agentDir` —
+    the `<session>/subagents` dir the file will eventually land under — not the file itself.
+    This function does the deferred lookup at RESUME time, when the file has had a chance to
+    appear.
+
+    WHY rglob: a plain Agent-tool spawn's transcript sits directly at
+    `<agentDir>/agent-<id>.jsonl`, but a workflow-spawned subagent's sits one level deeper at
+    `<agentDir>/workflows/wf_<runid>/agent-<id>.jsonl` — the run id is not something this
+    manifest ever learns, so a fixed-depth join cannot find it. rglob searches both shapes
+    with one call; results are sorted first so a repeat call is deterministic even if more
+    than one match somehow exists.
+    """
+    stored = str(entry.get("transcript", "") or "")
+    if stored and Path(stored).is_file():
+        return stored
+    agent_dir = str(entry.get("agentDir", "") or "")
+    agent_id = str(entry.get("agentId", "") or "").strip()
+    if not agent_dir or not agent_id:
+        return ""
+    try:
+        root = Path(agent_dir)
+        direct = root / f"agent-{agent_id}.jsonl"
+        if direct.is_file():
+            return str(direct)
+        matches = sorted(root.rglob(f"agent-{agent_id}.jsonl"))
+        if matches:
+            return str(matches[0])
+    except OSError:
+        return ""
+    return ""
+
+
+def respawn_prompt_for(entry: dict) -> str:
+    """`respawn_prompt`, but resolving the transcript LAZILY via `resolve_transcript` first —
+    the form every caller should use, since the manifest entry alone rarely carries a usable
+    `transcript` (see `resolve_transcript`)."""
+    return respawn_prompt(resolve_transcript(entry))
 
 
 def spawn_prompt(transcript_path: str) -> str:
