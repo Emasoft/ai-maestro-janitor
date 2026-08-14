@@ -1,9 +1,9 @@
 ---
 trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
-column: dev
+column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-14T17:36:00+0200
+updated: 2026-08-14T18:22:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
