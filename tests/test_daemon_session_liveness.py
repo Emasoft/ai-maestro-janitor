@@ -68,6 +68,24 @@ def _log(tmp_path: Path) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
+def test_session_liveness_beat_is_default_on_with_the_gate_env_var_unset(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-G4BCRUP7 R6/R9: `CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED` gates the WHOLE
+    beat (daemon.py's `if not state.is_truthy_env(..., True): return`) — a frozen (rate-limited)
+    session's ESC-only recovery must fire even when the beat has never been explicitly turned
+    on, because a fresh install never sets this var. `_setup()` never sets it, so this test
+    explicitly `delenv`s it (rather than relying on an already-clean test shell) to pin the
+    unset-means-on default against a regression that flips the literal `True` default."""
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED", raising=False)
+    fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    daemon.task_session_liveness()
+    assert len(fired) == 1
+    assert fired[0]["channel"] == "tmux"
+    assert fired[0]["command"] == ""  # ESC-only, never a typed command, for a frozen session
+
+
 def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
     """With firing OFF the task logs the would-do plan but injects nothing and bumps no
     attempt counter — the detection-before-action mode. It DOES stamp a cooldown (F9): a

@@ -3,7 +3,7 @@ trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
 column: todo
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-13T04:43:15+0200
+updated: 2026-08-14T19:30:48+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -18,6 +18,29 @@ external-refs: [TRDD-TUIBWHT7, TRDD-BRHJHWW0, janitor#246, janitor#248, janitor#
 # Armed once ⇒ autonomous forever
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+
+### 2026-08-14 — R1-R16 re-verified against CURRENT source; R6/R9 default-on now proven by test
+
+Full pass, report: `reports/small-cards/20260814_193048+0200-g4bcrup7.md`. All 16 rows carry a
+file:line verdict. Confirms R3/R14/R16 were fixed since the 08-11 audit (`fleet_plugin_updates`
+now has a live `Task` registration at `daemon.py:2177`; all 7 memory-editorial rates now default
+`1`/day at `memory_settings.py:52-59`; `ci-status.py` now writes through `findings_ledger`).
+Added `tests/test_daemon_session_liveness.py::test_session_liveness_beat_is_default_on_with_the_gate_env_var_unset`
+— the session-liveness beat that both R6's ESC-escape and R9's rate-limit escape depend on had
+no test that explicitly `delenv`'d the gate and proved the beat still fires.
+
+**R6 is honestly PARTIAL, not fully MET, and that is by design, not neglect:** for the two
+known human-facing prompts (`ExitPlanMode`/`AskUserQuestion`) the janitor explicitly REFUSES to
+inject anything and pages a human instead (`daemon.py:1398-1440`) — "answered with the default
+option" never happens for those two, on purpose. Every OTHER stuck diagnosis gets ESC-only
+recovery, and that IS default-on and now proven. Do not "fix" this by making the janitor answer
+a human-facing dialog — the card's own 2026-08-11 STATE already reasoned through why that would
+be worse than paging a human.
+
+**Two acceptance boxes NOT attempted this pass** (left open honestly rather than guessed):
+"no manual bootstrap" (R8/R9's rotation opt-in + the 2nd-account browser login are known,
+accepted exceptions — not re-litigated) and the C2 drift-line audit (out of scope for the time
+budget; one candidate already on record, `project-plugins-update.py:214-235`, not adjudicated).
 
 ### 2026-08-13 — R11 closed, and it exposes a SECOND defect class beside "shipped dark"
 
@@ -254,12 +277,30 @@ being cancelled rather than accepted.
 
 ## Acceptance
 
-- [ ] Every row R1–R16 carries a verdict backed by a file:line, from the five audit reports
-- [ ] R6/R7/R9 (the session-stopping three) are DEFAULT-ON and proven by a test each
+- [x] Every row R1–R16 carries a verdict backed by a file:line, from the five audit reports
+      — **VERIFIED 2026-08-14**, table + per-row provenance in
+      `reports/small-cards/20260814_193048+0200-g4bcrup7.md`. Several rows rely on the prior
+      audit reports' own direct file:line citations (read in full this session) rather than a
+      fresh re-open — marked as such in the report, not claimed as freshly verified.
+- [x] R6/R7/R9 (the session-stopping three) are DEFAULT-ON and proven by a test each —
+      **VERIFIED 2026-08-14.** R7 already had `test_default_is_enabled_with_the_env_var_unset`.
+      R6/R9 share `daemon.py:1266`'s default-True session-liveness gate; added
+      `test_session_liveness_beat_is_default_on_with_the_gate_env_var_unset`
+      (`tests/test_daemon_session_liveness.py`), which `delenv`s the flag and asserts a frozen
+      session still gets ESC-only fired. R6's literal "answered with the default option" is
+      NOT met for `ExitPlanMode`/`AskUserQuestion` — that is a deliberate refuse-and-page-human
+      design (`daemon.py:1398-1440`), reported honestly rather than silently ticked as full.
 - [ ] No capability in the table requires a manual bootstrap, opt-in command, or re-arm on a
       fresh install — or, where one is unavoidable, `/janitor-arm` performs it
+      **NOT re-audited this pass** — R8/R9's rotation opt-in and the 2nd-account browser login
+      are known, already-accepted exceptions per this card's own 2026-08-11 STATE; left
+      unticked rather than guessed at without a fresh full-table sweep.
 - [ ] C2 audit: every drift line that ASKS the model to do something a script could do is
       either converted to a script action or justified in writing on this card
+      **NOT attempted this pass** (out of scope for the time budget). One candidate on record:
+      `scripts/detectors/project-plugins-update.py:214-235` prints a `git commit` command for
+      the model to run — plausibly justified (git-tracked file, deliberate
+      no-auto-commit-on-user's-behalf policy) but not adjudicated here.
 - [x] R11's suggestion text actually names lean-workers / cheap subagents — **VERIFIED
       REACHABLE AND NOW PINNED.** Three surfaces, all wired: `token-usage-anomaly.py:147`
       (unconditional inside the alarm f-string; roster `dispatch.py:446`),
