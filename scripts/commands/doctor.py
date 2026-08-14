@@ -121,7 +121,16 @@ def _check_libs_present() -> CheckResult:
 def _check_git_available() -> CheckResult:
     if shutil.which("git") is None:
         return ("git-available", "FAIL", "git not in PATH", "Install git — most detectors require it")
-    proc = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False)
+    # `--version` never touches a repo (no cwd, no .git/ involved), so it can never
+    # take .git/index.lock either — but GIT_OPTIONAL_LOCKS=0 is harmless here too,
+    # and setting it uniformly is what keeps this file's drift guard (janitor#245,
+    # tests/test_git_optional_locks_guard.py) simple: every read-only git call in
+    # this module carries it, with no "except this one, it's provably safe" carve-out.
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+    proc = subprocess.run(
+        ["git", "--version"], capture_output=True, text=True, check=False, env=git_env
+    )
     version = proc.stdout.splitlines()[0] if proc.stdout else "unknown"
     return ("git-available", "PASS", f"git in PATH ({version})", "")
 

@@ -104,6 +104,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("task-pr-mismatch", 1800, "CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL"),
     ("stale-task", 1800, "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree", 300, "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),
+    # stale-index-lock: self-clear an orphaned .git/index.lock left behind by a
+    # SIGKILLed/OOM-killed writer (janitor#245 follow-up) — the only production
+    # caller of git_utils.clear_stale_index_lock. 5-minute cadence matches the
+    # default min-age threshold so a genuinely stale lock clears on its first
+    # eligible beat.
+    ("stale-index-lock", 300, "CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_INTERVAL"),
     ("subagent-report", 3600, "CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL"),
     ("version-update", 300, "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
     ("trashcan-purge", 86400, "CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL"),
@@ -566,6 +572,7 @@ _ADVISORY_DETECTORS = frozenset({
     "report-to-trdd-drift",
     "memorize-nudge", "memory-librarian", "project-map-drift", "wikimem-syntax",
     "why-in-commits", "subagent-report", "stale-task", "stale-stash", "dirty-tree",
+    "stale-index-lock",
     "worktree-janitor", "trashcan-purge", "reports-purge", "screenshot-purge",
     "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
     "oauth-cookie-reminder", "oauth-beacon-refresh",
@@ -2037,7 +2044,7 @@ def _phase_idle_clear_nudge() -> bool:
         if present or active:
             return False
         root = state.project_root()
-        idle_s, _enq, _await = fleet_scan.transcript_activity(str(root), now)
+        idle_s, _, _ = fleet_scan.transcript_activity(str(root), now)
         ctx = cold_cache_compact.context_tokens_for(
             cold_cache_compact.newest_transcript(root)
         )
@@ -2185,10 +2192,10 @@ def _directive_task_is_terminal(directive_text: str) -> bool:
         columns: dict[str, str] = {}
         project_root = str(state.project_root())
         for folder in trdd_common.DESIGN_FOLDERS:
-            for _scope, path in trdd_common.trdd_files(folder, project_root):
+            for _, path in trdd_common.trdd_files(folder, project_root):
                 uid = trdd_common.extract_uid(path.name)
                 if uid and uid not in columns:
-                    _status, column = trdd_common.parse_trdd_state(path)
+                    _, column = trdd_common.parse_trdd_state(path)
                     columns[uid] = column
         for uid in ids:
             column = columns.get(uid)

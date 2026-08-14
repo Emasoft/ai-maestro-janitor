@@ -7,9 +7,11 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -49,6 +51,431 @@ def _git(
         check=False,
         env=env,
     )
+
+
+def run_git_readonly(
+    cmd: list[str], *, cwd: Optional[Path] = None, timeout: Optional[float] = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a READ-ONLY git invocation (`cmd` starts with "git") with
+    `GIT_OPTIONAL_LOCKS=0`, so it never contends for `.git/index.lock`.
+
+    The public, drop-in-friendly sibling of the module-private `_git` above —
+    `_git(*args)` builds the argv for you (`["git", *args]`); this one takes the
+    full argv (including `"git"`) so an existing `subprocess.run(["git", ...])`
+    call site can switch to it with a one-line change. Same fix, same reason
+    (janitor#245 — see `_git`'s docstring for the measured incident): `git
+    status`/`git diff` WRITE `.git/index.lock` for an OPTIONAL stat-cache
+    write-back even on a pure read, and that collided with a concurrent
+    WRITER's real lock need. GIT_OPTIONAL_LOCKS=0 is git's own documented
+    escape hatch for that write-back and is a no-op for every WRITE command
+    (add/commit/push/mv/rm/checkout/reset/clean/tag) that legitimately needs
+    the lock — so callers should reserve this helper for read-only argvs and
+    keep write invocations going through a plain `subprocess.run`/`run()` that
+    is allowed to take the lock.
+
+    `tests/test_git_optional_locks_guard.py` is the drift guard that keeps
+    every read-only git call site under `scripts/` routed through this
+    (or an equivalent explicit `GIT_OPTIONAL_LOCKS=0`) pattern.
+    """
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd is not None else None,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+        env=env,
+    )
+
+
+def _lock_is_held(lock_path: Path) -> Optional[bool]:
+    """PRIMARY guard (G0): does ANY process have `lock_path` open right now?
+
+    Probes the LOCK FILE ITSELF via `lsof -a -- <lock_path>` — never a
+    process-table scan. `_live_git_holds` (the belt-and-braces SECOND guard,
+    below) only recognises a holder that shows up as a `git` command in a
+    `ps` snapshot with a cwd inside `repo_root`. That misses a real, live
+    holder: libgit2-based GUI clients (Fork, GitKraken, JetBrains' built-in
+    git, several VS Code extensions) take `.git/index.lock` themselves with
+    NO `git` executable in the process table at all — the cwd guard passes
+    clean and this module would delete a LIVE lock out from under a running
+    write. It also naturally covers `GIT_DIR=... git ...` invoked from a
+    cwd outside `repo_root` (which the cwd guard's `git status` proxy could
+    miss). Probing the file's own open-fd table sidesteps all of that: it
+    does not care WHO opened the file, only WHETHER it is open.
+
+    Returns:
+      True  — `lsof` exits 0 with non-empty stdout: some process holds the
+              file open right now. The caller must not remove it.
+      False — `lsof` exits 1 with empty stdout: nothing holds it open.
+              Falls through to the remaining (cwd + age) guards below —
+              this probe ALONE is not sufficient, because git's lockfile
+              API can briefly CLOSE the fd before it calls
+              `commit_lock_file` to finalise the write, so a momentary
+              "not held" reading does not itself prove the lock is
+              abandoned. The age guard is the tie-breaker that makes that
+              gap safe.
+      None  — anything else: a non-0/1 exit code, an unparseable result,
+              `lsof` missing, a timeout, or any other OSError. UNKNOWN, and
+              the caller must fail CLOSED (refuse to remove) rather than
+              silently falling back to the weaker cwd-only guard.
+    """
+    try:
+        proc = subprocess.run(
+            ["lsof", "-a", "--", str(lock_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode == 0 and proc.stdout.strip():
+        return True
+    if proc.returncode == 1 and not proc.stdout.strip():
+        return False
+    return None
+
+
+def clear_stale_index_lock(
+    repo_root: Path,
+    *,
+    min_age_s: float = 1800.0,
+    ps_snapshot: Optional[str] = None,
+) -> str:
+    """Remove an ORPHANED `<repo_root>/.git/index.lock`, never raises.
+
+    Owner ruling (janitor#245 follow-up): prevention (GIT_OPTIONAL_LOCKS=0 on
+    every reader, above) stops READERS from ever taking the lock — but it
+    cannot stop a WRITER (a real `git add`/`git commit`) from being SIGKILLed,
+    crashing, or dying to an OOM guard mid-write, which leaves the lock file
+    behind forever. An unattended run then stalls indefinitely on a lock
+    nothing will ever release. This is the recovery half.
+
+    This function's SOLE PRODUCTION CALLER is a heartbeat DETECTOR
+    (`scripts/detectors/stale-index-lock.py`), not a write path. That is
+    deliberate, not an oversight: the stalled writer is usually a FOREIGN
+    process (a user's own `git commit`, a pre-commit hook, another tool
+    entirely) that the janitor has no way to intercept or be called from —
+    the only place this recovery CAN run is an independent, periodically
+    firing observer. A write path calling this immediately before its own
+    git invocation would only ever see its OWN lock (which it never left
+    behind, being the process about to take it), so it would never have
+    anything to recover.
+
+    Why it is safe to remove WITHOUT asking a human: `.git/index.lock` is a
+    transient marker file, never work product — git recreates it on its next
+    write and its removal (`rm .git/index.lock`) is git's OWN documented
+    recovery procedure for "fatal: Unable to create '.git/index.lock': File
+    exists." The only real danger is removing a lock a *live* git process
+    (or a libgit2-based GUI client — see `_lock_is_held`) still holds (that
+    would corrupt its concurrent write), so this function is built around
+    excluding exactly that case via guards that must ALL clear before
+    anything is removed:
+
+      0. `_lock_is_held(lock_path)` — the PRIMARY guard: is the lock FILE
+         itself open by any process right now (`lsof`, not a `ps` scan)?
+         True blocks removal outright (`"held"`). Unknown (lsof missing,
+         errored, timed out) fails CLOSED — remove NOTHING (`"no-probe"`).
+         Only False falls through to the guards below; see `_lock_is_held`'s
+         own docstring for why this probe alone is not sufficient (git can
+         briefly close the fd mid-write) and why the older cwd-based check
+         is kept as a second, belt-and-braces guard rather than replaced.
+      1. No LIVE git process that could HOLD *this repo's* lock appears in a
+         `ps` snapshot. `ps_snapshot` may be INJECTED (which keeps the
+         decision pure and unit-testable); when it is None we gather one
+         ourselves with a bare `ps -eo pid,ppid,etime,command` and match in
+         Python.
+
+         That is the sanctioned snapshot-then-match shape. The thing to avoid
+         is `pgrep -f` / `ps | grep`, where the scanning pipeline carries the
+         search pattern in its OWN argv and so matches itself; a bare `ps`
+         argv carries no pattern and its own command token is `ps`, so it
+         cannot self-match.
+
+         A git process whose CWD is a *different* repository cannot be
+         holding `<repo_root>/.git/index.lock` — its own working tree has
+         its own index. On a multi-session host (many terminals, many
+         repos) there is almost always SOME `git` process running
+         somewhere, so treating "any git process exists on the machine" as
+         "this repo's lock is live" makes the guard refuse forever — a
+         guard that always refuses is equivalent to no guard at all
+         (janitor#245 follow-up: this was measured, not theorised — see
+         `_live_git_holds` for the scoped check that replaced it). So each
+         candidate pid's cwd is resolved and compared against `repo_root`:
+         a pid whose cwd is confirmed to be OUTSIDE `repo_root` is excluded;
+         only a pid whose cwd IS `repo_root` (or whose cwd could not be
+         resolved at all — fail CLOSED, see `_live_git_holds`) blocks
+         removal.
+
+         **If the snapshot cannot be gathered we return `"no-snapshot"` and
+         remove NOTHING.** Letting a missing snapshot silently skip this
+         guard would leave the age check deciding alone — and a long-running
+         live writer still holding a lock older than `min_age_s` is exactly
+         the case guard 1 exists to exclude.
+      2. The lock file is at least `min_age_s` OLD (by mtime). A FRESH lock
+         means a real git process only just started writing (it may not have
+         shown up in the ps snapshot yet, or the snapshot may be stale by a
+         few hundred ms) — age is the tie-breaker that makes the race safe.
+         A big `git add` or a slow pre-commit hook legitimately holds the
+         lock for minutes, so the default is 30 minutes, not seconds.
+      3. TOCTOU re-check: immediately before removing, the lock is re-stat'd
+         and compared (inode + mtime) against the FIRST stat taken at the top
+         of this call. Two sessions in the same project can both run this
+         detector; if session A's guards clear on a genuinely orphaned lock
+         but session B reaps it (or a fresh writer takes it) in the window
+         between A's first stat and A's removal, the identity check catches
+         it and A backs off (`"raced"`) instead of destroying a brand-new,
+         live lock.
+
+    Any guard failing means "do not remove" — that asymmetry is the whole
+    safety property: wrongly refusing to remove a stale lock only costs the
+    caller a retry; wrongly removing a live one corrupts a concurrent write.
+
+    Removal itself RENAMES the lock aside (`index.lock.stale-<epoch>`, same
+    directory, atomic `os.replace`) rather than unlinking it — git regains
+    the ability to write immediately either way, but the renamed file stays
+    on disk as a forensic trace of what was cleared and when, matching this
+    project's "a recoverable action needs no human permission" philosophy
+    (`~/.claude/rules/use-safe-delete.md`).
+
+    Returns one of:
+      "absent"      — no lock file exists; nothing to do (not an error).
+      "held"        — `_lock_is_held` confirmed a live holder; left alone.
+      "no-probe"    — `_lock_is_held` could not determine holder status
+                      (lsof missing/errored/timed out); left alone
+                      (fail-closed).
+      "live-git"    — a git process that could hold THIS repo's lock (cwd
+                      inside repo_root, or cwd unresolvable) appears in the
+                      snapshot; left alone.
+      "no-snapshot" — no snapshot could be gathered, so guard 1 could not be
+                      evaluated; left alone (fail-closed).
+      "too-young"   — the lock is younger than `min_age_s`; left alone.
+      "raced"       — the lock's identity changed between the initial stat
+                      and the removal step (TOCTOU); left alone.
+      "removed"     — the lock was stale and ownerless; renamed aside.
+      "error"       — the rename failed for a reason other than the lock
+                      having already vanished (e.g. permission denied);
+                      left alone (or in an indeterminate state — the error
+                      is real and must not be reported as success).
+    """
+    lock_path = _resolve_git_dir(Path(repo_root)) / "index.lock"
+    try:
+        stat_result = lock_path.stat()
+    except OSError:
+        return "absent"
+
+    # Guard 0 — PRIMARY: is the lock FILE itself open right now? See
+    # `_lock_is_held`'s docstring for why this exists ALONGSIDE, not INSTEAD
+    # of, the cwd-based guard below (a libgit2 GUI client vs. the momentary
+    # fd-close gap in git's own lockfile API — each guard covers what the
+    # other misses).
+    held = _lock_is_held(lock_path)
+    if held is True:
+        return "held"
+    if held is None:
+        return "no-probe"
+    # held is False: fall through to the belt-and-braces guards below.
+
+    # Fail CLOSED: an absent snapshot must never degrade this into an age-only
+    # decision (see guard 1 above) — gather one, and refuse if we cannot.
+    if ps_snapshot is None:
+        ps_snapshot = _gather_ps_snapshot()
+    if ps_snapshot is None:
+        return "no-snapshot"
+    if _live_git_holds(ps_snapshot, Path(repo_root)):
+        return "live-git"
+
+    age_s = time.time() - stat_result.st_mtime
+    if age_s < min_age_s:
+        return "too-young"
+
+    # Guard 3 — TOCTOU: re-stat immediately before removing. A DIFFERENT
+    # inode, or the same inode with a changed mtime, means the file we are
+    # about to remove is not the one all the guards above judged safe —
+    # abort rather than risk destroying a fresh, live lock.
+    try:
+        restat = lock_path.stat()
+    except OSError as exc:
+        if exc.errno == errno.ENOENT:
+            return "removed"  # vanished between checks — already cleared
+        return "error"
+    if restat.st_ino != stat_result.st_ino or restat.st_mtime != stat_result.st_mtime:
+        return "raced"
+
+    stale_path = lock_path.with_name(f"index.lock.stale-{int(time.time())}")
+    try:
+        os.replace(lock_path, stale_path)
+    except OSError as exc:
+        # Only a confirmed "it's already gone" (ENOENT — another process, or
+        # a concurrent recovery pass, cleared it first) may report success.
+        # Any OTHER errno (EACCES/EPERM etc.) is a REAL failure and must be
+        # reported as one — conflating them previously made a permission
+        # error look like a successful removal.
+        if exc.errno == errno.ENOENT:
+            return "removed"
+        return "error"
+    return "removed"
+
+
+def _resolve_git_dir(repo_root: Path) -> Path:
+    """The real git dir for `repo_root` — `<root>/.git`, or what it POINTS AT.
+
+    In a LINKED WORKTREE `.git` is a FILE containing `gitdir: <path>`, and the
+    index (and therefore `index.lock`) lives at that path, not under the
+    worktree. Treating `.git` as a directory unconditionally would make every
+    lookup in a worktree return "absent" — a silent no-op that looks exactly
+    like "there is no stale lock", which is the failure mode this whole module
+    exists to avoid. This repo is routinely worked in worktrees, so that is the
+    common case, not an exotic one.
+
+    Falls back to `<root>/.git` whenever the pointer cannot be read, so a
+    malformed file degrades to the ordinary layout rather than raising.
+    """
+    dot_git = repo_root / ".git"
+    try:
+        if dot_git.is_file():
+            text = dot_git.read_text(encoding="utf-8", errors="replace").strip()
+            if text.startswith("gitdir:"):
+                target = Path(text.split(":", 1)[1].strip())
+                # A relative pointer is relative to the worktree root.
+                return target if target.is_absolute() else (repo_root / target).resolve()
+    except OSError:
+        pass
+    return dot_git
+
+
+def _gather_ps_snapshot() -> Optional[str]:
+    """A process-table snapshot as TEXT, or None when it cannot be taken.
+
+    A bare `ps` argv — no pattern, no shell, no pipe — so the scan cannot match
+    itself the way `pgrep -f <pat>` / `ps | grep <pat>` do (there, the scanning
+    process carries `<pat>` in its own argv). Returning None on ANY failure is
+    what makes the caller's fail-closed branch reachable: a snapshot we could
+    not take must never read as "no git is running".
+    """
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "pid,ppid,etime,command"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    return proc.stdout
+
+
+def _live_git_pids(ps_snapshot: str) -> list[int]:
+    """The pids of every running `git` process in `ps_snapshot`.
+
+    Matches on the COMMAND column (basename of any argv token equal to "git"
+    exactly — never a substring match, so a path like `/Users/x/git-utils.py`
+    is not mistaken for the `git` executable), returning the pids so
+    `_live_git_holds` can go on to ask WHERE each one is running.
+    """
+    pids: list[int] = []
+    for line in ps_snapshot.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        # fields[0] is pid, fields[1] ppid, fields[2] etime — a header line
+        # ("PID PPID ELAPSED COMMAND") fails the int() conversion and is
+        # skipped, same as any other unparseable line.
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            continue
+        # The COMMAND column starts after pid, ppid, etime — but etime can
+        # itself contain no spaces (e.g. "01:23:45"), so fields[3] is the
+        # start of the command for a well-formed `ps -eo pid,ppid,etime,command`
+        # line. Match on the basename of that token (or the next token, for a
+        # command invoked as `/usr/bin/git ...`) equal to "git" exactly, or a
+        # later argv token equal to "git" (covers `sh -c git ...` wrappers).
+        command_tokens = fields[3:]
+        for tok in command_tokens:
+            base = tok.rsplit("/", 1)[-1]
+            if base == "git":
+                pids.append(pid)
+                break
+    return pids
+
+
+def _pid_cwd(pid: int) -> Optional[Path]:
+    """The current working directory of `pid`, or None if it cannot be resolved.
+
+    Uses `lsof -a -p <pid> -d cwd -Fn` (the `-F` "field output" format: a `p<pid>`
+    line followed by an `n<path>` line for the cwd file descriptor) rather than
+    `lsof -p <pid> | grep cwd`, for the same reason the rest of this module
+    avoids `ps | grep`-shaped pipelines — no shell, no self-matching pattern,
+    just a parseable machine format. Returns None on ANY failure (binary
+    missing, pid gone, permission denied, timeout, unparseable output) — the
+    caller (`_live_git_holds`) treats an unresolvable cwd as FAIL CLOSED
+    (i.e. "assume it could be holding our lock"), so returning None here must
+    never be conflated with "confirmed outside the repo".
+    """
+    try:
+        proc = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        if line.startswith("n"):
+            candidate = line[1:].strip()
+            if candidate:
+                try:
+                    return Path(candidate).resolve()
+                except OSError:
+                    return None
+    return None
+
+
+def _live_git_holds(ps_snapshot: str, repo_root: Path) -> bool:
+    """True iff SOME live `git` process in `ps_snapshot` could be holding
+    `repo_root`'s `.git/index.lock` — i.e. its cwd is inside `repo_root`, or
+    its cwd could not be positively confirmed to be elsewhere.
+
+    A git process running in a DIFFERENT repository cannot hold THIS repo's
+    index.lock (each repo has its own index), so on a multi-session host —
+    where some unrelated `git status` in another project's terminal is
+    almost always running — a bare "is any git process alive anywhere on the
+    machine" check would refuse removal forever (an earlier, unscoped
+    version of this guard did exactly that). A guard that always refuses is
+    equivalent to no guard at all, so this is the scoped replacement — guard
+    1 of `clear_stale_index_lock`.
+
+    The asymmetry that keeps this safe: exclude a pid ONLY when its cwd is
+    resolved AND positively outside `repo_root`. Every other case — cwd
+    resolves inside `repo_root`, or cwd could not be resolved at all — is
+    treated as "might hold the lock" and blocks removal. An unresolvable cwd
+    fails CLOSED (counts as blocking) rather than being silently excluded,
+    because "I could not find out" must never read as "confirmed safe" for a
+    guard whose only job is preventing a live writer's lock from being
+    deleted out from under it.
+    """
+    root = repo_root.resolve()
+    for pid in _live_git_pids(ps_snapshot):
+        cwd = _pid_cwd(pid)
+        if cwd is None:
+            return True  # fail closed: could not confirm this pid is elsewhere
+        try:
+            cwd.relative_to(root)
+        except ValueError:
+            continue  # positively outside repo_root — cannot hold our lock
+        return True  # cwd is inside repo_root — treat as holding the lock
+    return False
 
 
 def is_squash_merged(branch_ref: str, base_ref: str, cwd: Optional[Path] = None) -> bool:

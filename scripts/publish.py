@@ -244,16 +244,23 @@ _CPV_SPEC = f"git+https://github.com/Emasoft/claude-plugins-validation@{_CPV_PIN
 
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
-    timeout: int = 300,
+    timeout: int = 300, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command, stream output, fail-fast on error."""
+    """Run a command, stream output, fail-fast on error.
+
+    `env=None` (the default) inherits the parent process's environment
+    unchanged, exactly as before this parameter existed. Callers issuing a
+    READ-ONLY git invocation pass `env=_readonly_git_env()` (see below); a
+    WRITE invocation (add/commit/tag/push) omits it and takes the lock it
+    legitimately needs.
+    """
     cprint(f"  {BLUE}$ {' '.join(cmd)}{NC}")
     # A subprocess exceeding `timeout` raises TimeoutExpired; without this it
     # would die with a raw traceback instead of the styled fail-fast message
     # every other failure path uses. Catch it and exit 1.
     try:
         result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
-                                capture_output=capture, timeout=timeout)
+                                capture_output=capture, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         cprint(f"  {RED}Command timed out after {timeout}s: {' '.join(cmd)}{NC}")
         sys.exit(1)
@@ -262,9 +269,32 @@ def run(
         sys.exit(result.returncode)
     return result
 
+
+def _readonly_git_env() -> dict[str, str]:
+    """Env for a READ-ONLY git subprocess (status/diff/show/log/config --get/...).
+
+    `git status`/`git diff` WRITE `.git/index.lock` for an OPTIONAL stat-cache
+    write-back even though they only READ — and this pipeline is exactly the
+    WRITER that collision hurts: `stage_check_clean` reads `git status`
+    minutes before `stage_commit_and_push` commits, and a heartbeat detector's
+    concurrent `git status` can steal the lock in between and fail this
+    pipeline's own `git commit`/`git push` with "Unable to create
+    .git/index.lock" (janitor#245; scripts/lib/git_utils.py carries the full
+    measurement). GIT_OPTIONAL_LOCKS=0 is git's own documented escape hatch
+    for that write-back and is a no-op for the WRITE invocations
+    (add/commit/tag/push) elsewhere in this file, which is why only the
+    READ-ONLY call sites pass this. publish.py is a standalone script (no
+    scripts/lib import), so this mirrors `git_utils.run_git_readonly` inline
+    rather than adding a new import to the release pipeline.
+    """
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    return env
+
+
 def get_repo_root() -> Path:
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                       capture_output=True, text=True, check=True)
+                       capture_output=True, text=True, check=True, env=_readonly_git_env())
     return Path(r.stdout.strip())
 
 
@@ -291,6 +321,7 @@ def _resolve_owner_repo(plugin_root: Path) -> tuple[str, str]:
     result = subprocess.run(
         ["git", "config", "--get", "remote.origin.url"],
         cwd=str(plugin_root), capture_output=True, text=True, timeout=10, check=False,
+        env=_readonly_git_env(),
     )
     if result.returncode != 0 or not result.stdout.strip():
         cprint(f"  {RED}Could not read remote.origin.url. Run: git remote add origin <url>{NC}")
@@ -668,6 +699,7 @@ def _get_origin_slug(root: Path) -> str | None:
         r = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],
             capture_output=True, text=True, cwd=str(root), check=False,
+            env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -792,7 +824,7 @@ def _called_by_publish_orchestrator(root: Path) -> bool:
     """
     expected_abs = str((root / "scripts" / "publish.py").resolve())
     expected_rel = "scripts/publish.py"
-    for _pid, cmdline in _get_process_ancestry():
+    for _, cmdline in _get_process_ancestry():
         if "publish.py" not in cmdline:
             continue
         if "--gate" in cmdline:
@@ -838,6 +870,7 @@ def run_gate(root: Path) -> int:
             sym = subprocess.run(
                 ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
                 capture_output=True, text=True, cwd=str(root), timeout=10,
+                env=_readonly_git_env(),
             )
             if sym.returncode == 0 and sym.stdout.strip():
                 # Output looks like "refs/remotes/origin/main"
@@ -855,6 +888,7 @@ def run_gate(root: Path) -> int:
                 r = subprocess.run(
                     ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
                     capture_output=True, text=True, cwd=str(root), timeout=10,
+                    env=_readonly_git_env(),
                 )
             except (OSError, subprocess.SubprocessError):
                 continue
@@ -1178,7 +1212,7 @@ def stage_bypass_guard() -> None:
 def stage_check_clean(root: Path) -> None:
     """Step 1: Working tree must be clean."""
     cprint(f"\n{BOLD}[1/11] Checking working tree...{NC}")
-    r = run(["git", "status", "--porcelain"], cwd=root, capture=True)
+    r = run(["git", "status", "--porcelain"], cwd=root, capture=True, env=_readonly_git_env())
     if r.stdout.strip():
         cprint(f"  {RED}Working tree is dirty. Commit or stash changes first.{NC}")
         cprint(r.stdout)
@@ -1458,7 +1492,7 @@ def _gh_secret_exists(plugin_root: Path, secret_name: str) -> bool:
 def _current_repo_slug(plugin_root: Path) -> str | None:
     """Return owner/repo slug for current git origin, or None."""
     r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(plugin_root),
-                       capture_output=True, text=True, timeout=30)
+                       capture_output=True, text=True, timeout=30, env=_readonly_git_env())
     if r.returncode != 0:
         return None
     m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", r.stdout.strip())
@@ -1678,6 +1712,7 @@ def _read_remote_version(plugin_root: Path) -> str | None:
                 ["git", "show", f"{ref}:.claude-plugin/plugin.json"],
                 capture_output=True, text=True, cwd=str(plugin_root),
                 check=False, timeout=15,
+                env=_readonly_git_env(),
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -1692,17 +1727,6 @@ def _read_remote_version(plugin_root: Path) -> str | None:
     return None
 
 
-def _infer_bump_type(old: str, new: str) -> str | None:
-    """Classify a semver delta as 'major', 'minor', 'patch', or None."""
-    o = parse_semver(old)
-    n = parse_semver(new)
-    if o is None or n is None or n <= o:
-        return None
-    if n[0] != o[0]:
-        return "major"
-    if n[1] != o[1]:
-        return "minor"
-    return "patch"
 
 
 def _git_porcelain_clean(root: Path) -> bool:
@@ -1711,7 +1735,7 @@ def _git_porcelain_clean(root: Path) -> bool:
         r = subprocess.run(
             ["git", "status", "--porcelain"],
             capture_output=True, text=True, cwd=str(root),
-            check=False, timeout=10,
+            check=False, timeout=10, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1749,6 +1773,7 @@ def _is_version_only_change(root: Path, rel: str) -> bool:
         r = subprocess.run(
             ["git", "diff", "--unified=0", "--", rel],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
+            env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1777,6 +1802,7 @@ def _release_paths(root: Path) -> tuple[list[str], list[str]]:
             # name the offending files rather than a folder.
             ["git", "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
+            env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return [], []
@@ -1804,7 +1830,7 @@ def _head_commit_message(root: Path) -> str:
         r = subprocess.run(
             ["git", "log", "-1", "--pretty=%s"],
             capture_output=True, text=True, cwd=str(root),
-            check=False, timeout=10,
+            check=False, timeout=10, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -1817,7 +1843,7 @@ def _local_tag_exists(root: Path, tag: str) -> bool:
         r = subprocess.run(
             ["git", "rev-parse", "--verify", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
-            check=False, timeout=10,
+            check=False, timeout=10, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -2057,7 +2083,7 @@ def _remote_tag_exists(root: Path, tag: str) -> bool:
         r = subprocess.run(
             ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
             capture_output=True, text=True, cwd=str(root),
-            check=False, timeout=30,
+            check=False, timeout=30, env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -2251,6 +2277,7 @@ def _release_notes_for(root: Path, new_ver: str) -> str:
     log_range = f"{prev_tag}..HEAD" if prev_tag else "HEAD"
     log_result = run(
         ["git", "log", "--oneline", "-n", "200", log_range], cwd=root, check=False, capture=True,
+        env=_readonly_git_env(),
     )
     body = preamble + (log_result.stdout or "(no commits found)\n")
     if len(body) > _RELEASE_NOTES_MAX_CHARS:
