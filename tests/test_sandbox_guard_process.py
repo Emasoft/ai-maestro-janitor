@@ -134,6 +134,11 @@ def test_a_prefix_launcher_cannot_smuggle_a_denied_binary() -> None:
     exact escape it wraps — the daemon really does spawn
     `taskpolicy -b claude plugin marketplace update`. So the launcher is unwrapped and the
     INNER command classified, or the guard is one token wide."""
+    # macOS-only launcher: with `taskpolicy` absent from PATH the guard ALLOWS by design
+    # (sandbox_guard.py: "exec of a non-existent file cannot touch the machine"), so on Linux
+    # this test would assert the opposite of the guard's documented contract.
+    if shutil.which("taskpolicy") is None:
+        pytest.skip("taskpolicy is macOS-only; an absent binary is allowed by design")
     assert _verdict(["taskpolicy", "-b", "claude", "plugin", "marketplace", "update"]).allowed is False
     assert _verdict(["nice", "-n", "10", "gh", "api", "repos/x/y"]).allowed is False
     # ...while a launcher wrapping something harmless still works.
@@ -148,6 +153,8 @@ def test_unscoped_security_is_denied() -> None:
     credentials, and a `-w` read raises the ACL dialog — the prompt FLOOD that once opened
     hundreds of modals and locked the user out. The audit proved all 161 current calls are
     already scoped, so this costs nothing today; it is here so the 162nd cannot forget."""
+    if shutil.which("security") is None:
+        pytest.skip("security is macOS-only; an absent binary is allowed by design")
     verdict = _verdict(["security", "find-generic-password", "-s", "Claude Code-credentials"])
     assert verdict.allowed is False
     assert "isolated_keychain" in verdict.reason
@@ -169,6 +176,8 @@ def test_security_scoped_to_the_real_login_keychain_is_denied() -> None:
     keychain-db` is a tmp path, and the test would have asserted the exact opposite of what it
     claims. (It did, on the first run. The isolation that protects the suite also lies to it.)
     """
+    if shutil.which("security") is None:
+        pytest.skip("security is macOS-only; an absent binary is allowed by design")
     real = "/Users/someone/Library/Keychains/login.keychain-db"
     assert _verdict(["security", "find-generic-password", "-s", "x", real]).allowed is False
 
@@ -263,6 +272,8 @@ def test_the_marker_permits_exactly_the_named_binary() -> None:
     in ONE binary, not the whole machine."""
     env = {**_ENV, sandbox_guard.ENV_ALLOW_REAL: "bash"}
     assert _verdict(["bash", "/some/script.sh"], env=env).allowed is True
+    if shutil.which("launchctl") is None:
+        return  # macOS-only binary → absent → allowed by design; the per-binary claim needs it present
     assert _verdict(["launchctl", "bootstrap"], env=env).allowed is False, "the hatch is per-binary"
 
 
@@ -293,18 +304,24 @@ def test_hardening_leaves_a_non_python_child_alone() -> None:
 
 def test_a_real_spawn_of_a_denied_binary_raises() -> None:
     """End-to-end through `subprocess.run` — the API the whole codebase actually uses."""
+    if shutil.which("launchctl") is None:
+        pytest.skip("launchctl is macOS-only; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
         subprocess.run(["launchctl", "list"], capture_output=True)
 
 
 def test_a_real_spawn_through_check_output_raises() -> None:
     """`run`/`call`/`check_output`/`check_call` all funnel through Popen — one patch covers all."""
+    if shutil.which("gh") is None:
+        pytest.skip("gh not installed here; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
         subprocess.check_output(["gh", "--version"])
 
 
 def test_os_system_raises() -> None:
     """`os.system` bypasses Popen entirely, so it needs its own patch."""
+    if shutil.which("gh") is None:
+        pytest.skip("gh not installed here; an absent binary is allowed by design")
     with pytest.raises(SandboxViolation):
         os.system("gh --version")  # noqa: S605 - the point of the test is that it is refused
 
