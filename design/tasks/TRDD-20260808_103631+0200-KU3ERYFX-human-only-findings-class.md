@@ -65,7 +65,18 @@ premise, observed rather than argued, five days after filing.
 
 ## Acceptance
 
-- [ ] Schema + emission-contract tests (once per session; explicit human-only prefix)
-- [ ] The iTerm alarm's session-branch grant advice carries the marker
-- [ ] Ledger distinguishes never-reported vs surfaced-pending
-- [ ] #234 answered when it ships
+- [x] Schema + emission-contract tests (once per session; explicit human-only prefix) —
+      `tests/test_findings_ledger.py` §6 (human-only findings class): `actor` field,
+      once-per-episode emission, budget isolation from `msg`, distinct-content resurfacing.
+- [x] The iTerm alarm's session-branch grant advice carries the marker — all three
+      `_phase_iterm_automation_alarm` branches (base, hard-negative, timeout) prefix
+      their print with `findings_ledger.HUMAN_ONLY_DIRECTIVE`; the base branch was
+      missing it in the working tree and has been restored + asserted in
+      `tests/test_dispatch_phases.py` (`test_iterm_alarm_fires_once_with_the_remedy`,
+      `test_iterm_alarm_hard_negative_beats_the_base_ambiguity_clause`,
+      `test_iterm_alarm_names_the_timeout_and_drops_the_remedy`); falsified (removed the
+      prefix, watched RED, restored, watched GREEN).
+- [x] Ledger distinguishes never-reported vs surfaced-pending —
+      `findings_ledger.surfaced_to_human_status` / `mark_surfaced_to_human` /
+      `clear_surfaced_to_human`, tested in `tests/test_findings_ledger.py`.
+- [ ] #234 answered when it ships — PUBLISH-GATED, left open.

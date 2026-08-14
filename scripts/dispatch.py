@@ -1744,6 +1744,7 @@ def _phase_iterm_automation_alarm() -> None:
             )
         else:
             print(
+                findings_ledger.HUMAN_ONLY_DIRECTIVE +
                 "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
                 "iTerm sessions via osascript. A running iTerm always has at least one, so the "
                 "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
