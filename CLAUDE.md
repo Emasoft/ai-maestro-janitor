@@ -47,6 +47,22 @@ reads `X` as the FILENAME), and `explain` takes `<FILE> <FUNCTION>` in that orde
 and builds the whole-project call graph — minutes on a repo this size. Prefer
 `structure` + `impact`, which are seconds.
 
+**`tldr` is OPTIONAL and may be absent — never assume it.** It is not a declared
+dependency of this repo; it installs to `~/.cargo/bin`, which is NOT on a default
+non-interactive PATH, and a read-only agent (the advisor's `Read, Grep, Glob`) has
+no Bash to invoke it with at all. So:
+
+```bash
+command -v tldr >/dev/null || echo "fall back to Glob + Grep + scoped Read"
+```
+
+The fallback is the ordinary path and is entirely sufficient: `Glob` for
+`scripts/**/*.py`, `Grep` for `def <name>` / the call sites, then `Read` with
+`offset`/`limit`. `tldr` makes that faster, it is not what makes it possible —
+the point of removing the map was to stop paying for navigation on every turn,
+not to make navigation depend on one machine's tooling. Install it with
+`cargo install --git https://github.com/parcadei/tldr-code` if you want it.
+
 For *knowledge* rather than code — why something is the way it is, what already
 failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
