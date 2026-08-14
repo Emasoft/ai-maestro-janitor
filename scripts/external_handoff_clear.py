@@ -184,7 +184,14 @@ def _decide(
     except (OSError, ValueError):
         pass
 
-    idle_s, _enq, _await = fleet_scan.transcript_activity(str(root), now)
+    idle_s, trailing_enqueues, awaiting_user = fleet_scan.transcript_activity(str(root), now)
+    # `trailing_enqueues` is deliberately NOT wired into `should_clear_externally` — it is a
+    # DIFFERENT signal (the daemon's wedged-session evidence, TRDD-8DR0X08A F2: how many typed
+    # commands sat queued and never executed), not a veto for THIS gate. It cannot substitute for
+    # `awaiting_user` either: per `fleet_scan.awaiting_user_decision`'s own docstring it only goes
+    # non-zero AFTER something has already been typed, so it would miss the FIRST unanswered
+    # `tool_use` — the one that actually reaches a human. `awaiting_user`, below, is the fix for
+    # TRDD-OO301H7D: it used to be bound to `_await` and discarded on this same line.
     # Resolved ONCE and carried in `facts`, because the composer needs the same transcript the
     # verdict was computed from. Without it there `_compose` had no path to hand llm-ext, and
     # the summary branch would have degraded to template-only on every run — shipping the
@@ -218,9 +225,17 @@ def _decide(
         "headroom_s": ec.headroom_seconds(),
         "active_waiting": active_waiting,
         "in_cooldown": in_cooldown,
+        "awaiting_user": awaiting_user,
         "cache_expired": cache_expired,
     }
-    facts = {**gate, "transcript": str(newest) if newest else ""}
+    # `trailing_enqueues` is log-only (see the comment where it is unpacked above) — carried in
+    # `facts`, never in `gate`, so it stays visible for diagnosis without becoming an undeclared
+    # extra keyword `should_clear_externally` would reject.
+    facts = {
+        **gate,
+        "transcript": str(newest) if newest else "",
+        "trailing_enqueues": trailing_enqueues,
+    }
     if on_resume:
         # The RESUME gate, not the abandoned-session one. A session loaded seconds ago can never
         # satisfy the long-idle term, so `should_clear_externally` would refuse every resume —
@@ -239,10 +254,13 @@ def _decide(
     verdict = ec.should_clear_externally(**gate)
     if force and not verdict.fire and verdict.why.startswith(("idle ", "no-headroom")):
         # --force overrides the two TRIGGER terms ONLY (is it idle enough / would the next fire
-        # miss). Every SAFETY veto — cooldown, user present, active waiting, unknown idle, tiny
-        # context — still holds, because those are the ones that protect work, and an operator
-        # asking to observe the mechanism has not thereby authorized clearing a session someone
-        # is typing into.
+        # miss). Every SAFETY veto — cooldown, active waiting, awaiting-user (a human is being
+        # asked a question — TRDD-OO301H7D), unknown idle, tiny context — still holds, because
+        # those are the ones that protect work, and an operator asking to observe the mechanism
+        # has not thereby authorized clearing a session someone is typing into or waiting on.
+        # (There is no separate "user present" veto — that one was removed 2026-08-13; see
+        # `ec.should_clear_externally`'s docstring for why re-adding it would silently re-break
+        # the whole lever.)
         verdict = ec.ClearVerdict(True, "forced", f"--force (gate said: {verdict.why})")
     return verdict, facts
 

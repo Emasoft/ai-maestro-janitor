@@ -156,6 +156,64 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _iso(epoch: int) -> str:
+    """A transcript-style UTC timestamp ('2026-07-17T16:55:41.797Z' shape)."""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def test_awaiting_user_veto_reaches_the_watcher_end_to_end(tmp_path, monkeypatch):
+    """GATHER layer, not the pure gate (TRDD-OO301H7D). The bug was `idle_s, _enq, _await =
+    fleet_scan.transcript_activity(...)` — an argument that was computed and then never PASSED.
+    No mutation of `should_clear_externally` alone can catch a value that never arrives at its
+    call site; only a real transcript flowing through `_decide` proves the wiring is intact. A
+    tail ending on an unanswered `ExitPlanMode` must refuse EVEN THOUGH every trigger the gate
+    would otherwise fire on (long idle, a readable but irrelevant cron) is satisfied — and
+    `--force` must not be able to override that refusal, because it is a safety veto."""
+    import json
+
+    import memory_scopes  # noqa: PLC0415
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
+    monkeypatch.setenv(ec.MIN_CONTEXT_ENV, "0")  # context-size clause never vetoes this test
+    import cold_cache_compact  # noqa: PLC0415
+
+    monkeypatch.setenv(cold_cache_compact.CLEAR_MIN_IDLE_ENV, "60")  # trivially met if not vetoed
+
+    now = int(time.time())
+    root = tmp_path / "proj"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    slug = memory_scopes.project_slug(os.path.realpath(str(root)))
+    tdir = tmp_path / ".claude" / "projects" / slug
+    tdir.mkdir(parents=True)
+    lines = [
+        json.dumps({"type": "assistant", "timestamp": _iso(now - 4000), "message": {}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "timestamp": _iso(now - 2000),
+                "message": {
+                    "content": [{"type": "tool_use", "id": "toolu_PLAN", "name": "ExitPlanMode"}]
+                },
+            }
+        ),
+    ]
+    (tdir / "s1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    sd = root / ".janitor" / "state"
+    verdict, facts = ehc._decide(root, sd, now, force=False)
+    assert verdict.fire is False
+    assert verdict.why == "awaiting-user"
+    assert facts["awaiting_user"] is True
+
+    forced, _ = ehc._decide(root, sd, now, force=True)
+    assert forced.fire is False and forced.why == "awaiting-user", (
+        "--force overrides trigger terms only; a human is being asked a question"
+    )
+
+
 def test_unknown_idle_holds_end_to_end_and_touches_nothing(tmp_path):
     """A project with no transcript has an unknown idle age, which may never authorize a clear."""
     root = _project(tmp_path)
@@ -205,7 +263,7 @@ def test_force_never_overrides_a_safety_veto():
     every safety veto returns a different reason string.
     """
     overridable = {"idle 600s < 3600s and the next fire is still warm", "no-headroom (10s < 60s)"}
-    safety = {"cooldown", "user-present", "active-waiting", "idle-unknown",
+    safety = {"cooldown", "active-waiting", "awaiting-user", "idle-unknown",
               "context 50000 < 150000 — nothing worth reclaiming"}
     for why in overridable:
         assert why.startswith(("idle ", "no-headroom"))

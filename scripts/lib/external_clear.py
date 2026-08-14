@@ -938,6 +938,7 @@ def should_clear_externally(
     headroom_s: int,
     active_waiting: bool,
     in_cooldown: bool,
+    awaiting_user: bool,
     cache_expired: bool | None = None,
 ) -> ClearVerdict:
     """PURE. The whole external-clear decision, with the deciding rule named.
@@ -960,6 +961,13 @@ def should_clear_externally(
         other down. That sharing IS the coexistence contract while both exist.
       * `active_waiting` — a resume or a background agent is in flight. NOT about the user:
         this is machine state, and firing into it would type over a chain already running.
+      * `awaiting_user`   — the transcript tail ends on an unanswered HUMAN-FACING `tool_use`
+        (`ExitPlanMode` / `AskUserQuestion` — see `fleet_scan.awaiting_user_decision`). This is
+        NOT the removed `user_present` veto: that one refused on the user's mere presence and
+        broke the whole lever (2026-08-13). This one refuses only when the session is parked on
+        a QUESTION addressed to a person — idle by construction, satisfies the long-idle trigger,
+        and would otherwise be `/clear`ed with the pending decision lost (TRDD-OO301H7D). `--force`
+        must NOT be able to override this: it is a SAFETY veto, not a trigger term.
       * `idle_seconds is None` — an UNKNOWN idle age must never authorize a destructive action.
         Note the deliberate asymmetry with `context_tokens`, below.
       * headroom — a fire is imminent, so the chain would be typing into a session mid-turn.
@@ -982,6 +990,8 @@ def should_clear_externally(
         return ClearVerdict(False, why="cooldown")
     if active_waiting:
         return ClearVerdict(False, why="active-waiting")
+    if awaiting_user:
+        return ClearVerdict(False, why="awaiting-user")
     if idle_seconds is None:
         return ClearVerdict(False, why="idle-unknown")
     if seconds_to_next_fire is not None and seconds_to_next_fire < headroom_s:

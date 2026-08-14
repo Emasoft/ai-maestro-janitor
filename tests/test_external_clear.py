@@ -30,6 +30,7 @@ FIRING = dict(
     headroom_s=60,
     active_waiting=False,
     in_cooldown=False,
+    awaiting_user=False,
 )
 
 
@@ -122,6 +123,14 @@ def test_active_waiting_vetoes():
     assert verdict(active_waiting=True).fire is False
 
 
+def test_awaiting_user_vetoes():
+    """TRDD-OO301H7D: a session parked on an unanswered human-facing `tool_use` (plan approval,
+    permission prompt) is idle by construction and would otherwise satisfy the long-idle
+    trigger — this must refuse instead of clearing the pending question away."""
+    v = verdict(awaiting_user=True)
+    assert v.fire is False and v.why == "awaiting-user"
+
+
 def test_unknown_idle_vetoes_because_it_cannot_authorize_a_destructive_act():
     """`idle_seconds is None` must never reach a `/clear` — unlike unknown context."""
     v = verdict(idle_seconds=None)
@@ -182,6 +191,7 @@ def test_every_refusal_explains_itself():
     for override in (
         {"in_cooldown": True},
         {"active_waiting": True},
+        {"awaiting_user": True},
         {"idle_seconds": None},
         {"seconds_to_next_fire": 10},
         {"context_tokens": 50_000},
