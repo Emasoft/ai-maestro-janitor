@@ -233,7 +233,14 @@ _EXPIRY_HINT = _re(r"(?:expir|rotation|rotate|lifetime|90.day)")
 # ``[A-Za-z0-9_]{30,200}`` keeps the prefix tight and RE2-safe.
 _LITERAL_PAT_TOKEN = _re(
     r"\b(?:ghp_|github_pat_|ghs_|ghu_|ghr_|npm_|pypi-AgEIcHlwaS5vcmcC"
-    r"|cio_)[A-Za-z0-9_]{20,200}\b"
+    r"|cio_"
+    # GitLab families. Claude Code added redaction for exactly these in 2.1.232 — the
+    # routable `glpat-`/`gldt-` pair plus the seven narrower kinds — and the janitor
+    # detected NONE of them, so a leaked GitLab PAT read as ordinary text while the GitHub
+    # equivalent was flagged. They use a HYPHEN after the prefix, not the underscore the
+    # GitHub families use, which is why a `_`-only alternation silently missed all of them.
+    r"|glpat-|gldt-|glrt-|gloas-|glptt-|glagent-|glimt-|glsoat-|glcbt-|glft-|glffct-"
+    r")[A-Za-z0-9_-]{20,200}\b"
 )
 
 

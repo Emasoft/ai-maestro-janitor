@@ -95,7 +95,14 @@ _SECRET_REFERENCE = re.compile(
     | \bprocess\.env\.[A-Za-z_]                                                    # process.env.X
     | \bgetenv\s*\(                                                                # getenv(...)
     | (?:cat|read|open|load)\w*\s*\(?\s*['"`]?[^\s'"`]*\.env\b                     # read('.env')
-    | \b(?:~|\$HOME|/home/[^\s]+|/Users/[^\s]+)/\.(?:aws|ssh|config/gh|netrc)      # ~/.aws, ~/.ssh
+      # NO leading \b here — it made this whole branch DEAD, and it had never once fired.
+      # Every alternative begins with a NON-word char (`~`, `$`, `/`), and the character
+      # before it is normally a space: non-word -> non-word is not a word boundary, so the
+      # group could never start matching. Measured 2026-08-14 — `~/.aws/`, `~/.ssh/` and
+      # `~/.config/gh/` all failed. The branch LOOKED alive only because `~/.config/gh/hosts.yml`
+      # matched the separate `hosts.yml` named-store alternative below, so a spot-check on the
+      # obvious example passed while the branch itself did nothing. Do not re-add the \b.
+    | (?:~|\$HOME|/home/[^\s]+|/Users/[^\s]+)/\.(?:aws|ssh|config/(?:gh|glab)|netrc)  # ~/.aws, ~/.ssh, gh/glab
     | \b(?:credentials|id_rsa|\.netrc|hosts\.yml)\b\s*(?:file|path)?               # named stores
     | \bsession[_-]?token\s*[=:]                                                   # session_token=
     """,

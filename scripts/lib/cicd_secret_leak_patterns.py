@@ -398,6 +398,11 @@ _CREDENTIAL_PATHS_RE = _re(
     r"|"
     r"~/\.config/gh"
     r"|"
+    # The glab CLI's config store, the GitLab analogue of ~/.config/gh. CC 2.1.232 gave it
+    # "the same sandbox and credential-path protection as `gh`"; a guard that covers only
+    # one of two interchangeable CLIs just tells an attacker which one to read.
+    r"~/\.config/glab"
+    r"|"
     r"\$\{?HOME\}?/\.[a-z][a-z0-9_-]{0,40}rc"
     r"|"
     r"/etc/secrets/"
