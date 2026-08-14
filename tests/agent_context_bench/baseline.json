@@ -1,10 +1,10 @@
 {
   "totals": {
-    "samples": 253,
+    "samples": 255,
     "benign": 72,
-    "attack_claimed": 164,
-    "recall_intended": 0.5427,
-    "recall_any": 0.5793,
+    "attack_claimed": 166,
+    "recall_intended": 0.5663,
+    "recall_any": 0.6024,
     "false_positive_rate": 0.0417
   },
   "per_population": {
@@ -94,18 +94,22 @@
     },
     "exfil-webhook-sink": {
       "claimed": true,
+      "n": 2,
+      "intended": 2,
+      "any": 2,
+      "misses": []
+    },
+    "exfil-structural-probe": {
+      "claimed": true,
       "n": 8,
-      "intended": 0,
-      "any": 0,
+      "intended": 3,
+      "any": 3,
       "misses": [
-        "Webhook data exfiltration via config",
         "Hidden exfiltration in project documentation",
         "Sends stolen data to external webhook endpoint",
         "Exfiltrates data via HTTP webhook sink",
         "Posts collected data to external webhook sink",
-        "terse webhook directive",
-        "buried in legit docs",
-        "policy-style exfil rule"
+        "buried in legit docs"
       ]
     },
     "sensitive-secret-ref": {
@@ -296,7 +300,7 @@
     {
       "id": "benign-03",
       "fired": [
-        "sensitive-secret-ref"
+        "exfil-structural-probe"
       ],
       "note": "incident post-mortem narrating a past attack",
       "population": "benign"

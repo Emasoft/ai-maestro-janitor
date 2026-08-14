@@ -52,12 +52,21 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import agent_config_patterns as acp  # type: ignore[import-not-found]  # noqa: E402
+import exfil_verify  # type: ignore[import-not-found]  # noqa: E402
+import findings_ledger  # type: ignore[import-not-found]  # noqa: E402
 import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "agent-context-integrity"
 _CODE = "AICTX-003"
+
+# TRDD-HYV0SOC6, owner ruling 2026-08-14: `exfil-structural-probe` is DETECTED WIDE
+# (unmasked, in `agent_config_patterns`) precisely so it can catch what the domain
+# denylist cannot. That means a match here is a SUSPICION, not a fact, so this one rule
+# id is diverted out of the normal print+ticket pipeline below and routed through
+# `exfil_verify.verify_exfil_candidate` instead — see `_route_exfil_candidate`.
+_EXFIL_RULE_ID = "exfil-structural-probe"
 
 # The auto-loaded surface. `security_helpers.is_agent_context_path` owns the canonical
 # definition; these are the globs that FIND the files, since a walk needs patterns rather
@@ -244,11 +253,59 @@ def _file_kind(path: Path) -> str:
     return "prose" if path.suffix.lower() in (".md", ".markdown", "") else "source"
 
 
+def _offset_of(text: str, line: int, col: int) -> int:
+    """Reverse of `agent_config_patterns._line_col`: (1-based line, 1-based column) -> the
+    string offset. Needed because `Finding` carries a human-readable position, not the raw
+    match span `exfil_verify.verify_exfil_candidate` needs — recomputing it is cheaper and
+    less invasive than widening the shared `Finding` shape for one caller."""
+    lines = text.split("\n")
+    return sum(len(p) + 1 for p in lines[: line - 1]) + (col - 1)
+
+
+def _route_exfil_candidate(rel: str, text: str, f: acp.Finding) -> str:
+    """Run the TRDD-HYV0SOC6 verification ladder on one `exfil-structural-probe` match and
+    record the outcome in the findings ledger — never the print+ticket pipeline `_scan`
+    otherwise uses, because a bare pattern match here is a SUSPICION, not a fact (owner
+    ruling: "if the janitor detects an exfiltration it must ... be sure").
+
+    FAIL-CLOSED ON THE ALARM, NOT ON THE FINDING: every candidate is recorded either way —
+    dropping the unverified ones would reintroduce the domain-denylist's 0/8 blindness
+    through the back door. Only a VERIFIED candidate returns a line (the caller prints it as
+    the heartbeat drift); an unverified one is recorded at LOW severity and returns "", so it
+    reaches the ledger and never the human.
+    """
+    start = _offset_of(text, f.line, f.column)
+    end = start + len(f.matched_text)
+    verdict = exfil_verify.verify_exfil_candidate(text, start, end, filename=rel)
+    if verdict.verified:
+        return findings_ledger.record(
+            sev="HIGH",
+            code=_CODE,
+            src=_NAME,
+            msg=f"VERIFIED exfil candidate {rel}:{f.line} — {verdict.reason}",
+            ref=rel,
+        ) or ""
+    findings_ledger.record(
+        sev="LOW",
+        code=_CODE,
+        src=_NAME,
+        msg=f"unverified exfil candidate {rel}:{f.line} — failed {', '.join(verdict.failed())}",
+        ref=rel,
+    )
+    return ""
+
+
 def _scan(
     paths: list[Path], project_root: Path, budget: int
-) -> list[tuple[str, acp.Finding]]:
-    """`(relative path, Finding)` for every REPORTABLE finding, within `budget` files."""
+) -> tuple[list[tuple[str, acp.Finding]], list[str]]:
+    """`(relative path, Finding)` for every REPORTABLE finding, within `budget` files, plus
+    the rendered drift line for every VERIFIED `exfil-structural-probe` candidate.
+
+    `exfil-structural-probe` findings never enter the first list — see `_route_exfil_candidate`
+    for why they are diverted to the findings ledger + verification ladder instead of the
+    normal print+ticket pipeline below."""
     out: list[tuple[str, acp.Finding]] = []
+    exfil_drift: list[str] = []
     # TRDD-XOITBRIZ: collect what the per-match discriminators SILENCED, and log it.
     # `scan_text` accepts this list opt-in (default None), and an opt-in trace that no
     # production caller passes is decoration — the suppression would be invisible exactly
@@ -267,12 +324,15 @@ def _scan(
         # `filename` is the FP-hardening hint: it suppresses rules that would otherwise fire
         # on a security tool's own IOC catalogues and red-team fixtures.
         before = len(suppressed)
-        out.extend(
-            (rel, f)
-            for f in acp.scan_text(
-                text, file_kind=_file_kind(path), filename=rel, suppressed_out=suppressed
-            )
-        )
+        for f in acp.scan_text(
+            text, file_kind=_file_kind(path), filename=rel, suppressed_out=suppressed
+        ):
+            if f.rule_id == _EXFIL_RULE_ID:
+                line = _route_exfil_candidate(rel, text, f)
+                if line:
+                    exfil_drift.append(line)
+                continue
+            out.append((rel, f))
         for rule_id, line, _col, reason in suppressed[before:]:
             # LOG, never a finding: a suppression is not work for the reader, it is the audit
             # trail that makes over-suppression arguable. Greppable by rule id + reason.
@@ -280,7 +340,7 @@ def _scan(
                 "agent-context-integrity",
                 f"suppressed {rule_id} at {rel}:{line} ({reason})",
             )
-    return out
+    return out, exfil_drift
 
 
 def poisoned_reason(findings: list[tuple[str, acp.Finding]], *, cap: int = 3) -> str:
@@ -360,8 +420,16 @@ def main() -> int:
         except OSError:
             pass
 
-    findings = _scan(scanned, project_root, _max_files())
+    findings, exfil_drift = _scan(scanned, project_root, _max_files())
     state.atomic_write(last_hash_file, signature)
+
+    # `exfil_drift` is independent of `findings` — a file may carry ONLY a VERIFIED
+    # exfil-structural-probe match and nothing else, and that must still reach the human
+    # (it already went through the verification ladder in `_route_exfil_candidate`; there is
+    # no further gate here). Printed before the early-return so a clean-otherwise file with a
+    # verified exfil candidate is never silenced by the "nothing else to report" branch below.
+    for line in exfil_drift:
+        print(line)
 
     if not findings:
         # Clean now — withdraw every standing proposal. Reconciling only when there IS

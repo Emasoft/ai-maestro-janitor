@@ -301,6 +301,61 @@ _EXFIL_WEBHOOK = _re(
 )
 
 
+# ---- Structural exfiltration probe (TRDD-HYV0SOC6, owner ruling 2026-08-14) ---------------
+#
+# `_EXFIL_WEBHOOK` above is a denylist of known-bad hosts and is provably blind to the real
+# attack: every seeded sample posts to a host the attacker chose freely
+# (`analytics.example.com`, `metrics.internal.company.io`), so a domain list scores 0/8 by
+# construction. This rule asks the STRUCTURAL question instead: does an outbound-transmission
+# verb, a sensitive-payload token, and an `https?://` URL all co-occur within one window? That
+# is the shape of the attack regardless of which host it names.
+#
+# DETECT WIDE, UNMASKED — no negative-context filter here. The owner ruling on TRDD-HYV0SOC6
+# is explicit that a finding and an alarm are not the same event: this rule stays a SUSPICION
+# (recorded, not pushed) until `exfil_verify.verify_exfil_candidate` clears it at the alarm
+# layer (scripts/detectors/agent-context-integrity.py). Masking here — the janitor#254
+# negative-context discriminator this module already carries for `dynamic-exec-in-body` /
+# `sensitive-secret-ref` — was measured on the SAME rebuilt prototype to cost a real attack
+# sample (`-08`) to remove one false positive (a post-mortem, `-03` in the benign corpus),
+# which is the wrong trade at the detection layer: it silently discards a true positive. See
+# TRDD-HYV0SOC6's "re-measurement" section for the numbers this rule reproduces exactly.
+#
+# The vocabulary and the ±400-char window are REUSED verbatim from the card's committed
+# re-measurement (reports/janitor-HYV0SOC6/…-exfil-prototype-remeasure.md) — not re-derived —
+# because that report is itself a good-faith rebuild of a prototype whose exact code was never
+# committed, and re-deriving a second time would drift from the ONE measurement this module can
+# point to. Measured on the current corpus: 3/8 seeded attacks (`-01`, `-06`, `-08`); the one
+# attributable benign false positive (`benign-03`, the incident post-mortem) was ALREADY firing
+# `sensitive-secret-ref` in the shipped baseline, so this rule adds no NEW false positive.
+#
+# Order-agnostic within the window: a real directive states verb/token/URL in whatever order
+# reads naturally ("MUST be POSTed to: <url> … X-Session: ${SESSION_TOKEN}" states the URL
+# before the token; a config block states the URL before the payload fields). Six branches,
+# one per permutation of (verb, token, url) — same "cover every attacker-chosen order" reasoning
+# as `_CRYPTO_CLIPPER`'s two orderings and `_TWO_STEP_INJECT`'s four, just with a third element.
+_EXFIL_STRUCTURAL_VERB = (
+    r"(?:\bPOST(?:s|ed|ing)?\b|\btransmit(?:s|ted|ting)?\b|requests\.post|fetch\s*\()"
+)
+_EXFIL_STRUCTURAL_TOKEN = (
+    r"(?:\bsession_token\b|\bcredentials?\b|context\s+snapshot|\.env\b)"
+)
+_EXFIL_STRUCTURAL_URL = r"https?://\S+"
+_EXFIL_STRUCTURAL_GAP = r"[\s\S]{0,400}?"
+_EXFIL_STRUCTURAL_PROBE = _re(
+    "|".join(
+        a + _EXFIL_STRUCTURAL_GAP + b + _EXFIL_STRUCTURAL_GAP + c
+        for a, b, c in (
+            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_URL),
+            (_EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_TOKEN),
+            (_EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_URL),
+            (_EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB),
+            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_VERB, _EXFIL_STRUCTURAL_TOKEN),
+            (_EXFIL_STRUCTURAL_URL, _EXFIL_STRUCTURAL_TOKEN, _EXFIL_STRUCTURAL_VERB),
+        )
+    )
+)
+
+
 # FP-hardening (round 3): IOC-context lexicon. When one of these
 # tokens appears within ±100 chars of a webhook-sink match, the prose
 # is DESCRIBING the IOC / IoA / red-team fixture rather than actively
@@ -936,6 +991,21 @@ RULES: tuple[Rule, ...] = (
         owasp_asi="ASI-02",
     ),
     Rule(
+        id="exfil-structural-probe",
+        name="Structural exfiltration probe — transmit verb + sensitive payload + URL",
+        severity="HIGH",
+        description=(
+            "An outbound-transmission verb (POST/transmit/requests.post/fetch), a "
+            "sensitive-payload token (session_token/credential/context snapshot/.env), and "
+            "an http(s) URL all co-occur within one window — the SHAPE of exfiltration, not a "
+            "denylist of known hosts. UNMASKED BY DESIGN (TRDD-HYV0SOC6): this is a SUSPICION, "
+            "not an alarm — `agent-context-integrity` runs `exfil_verify.verify_exfil_candidate` "
+            "on every match and pushes to the user only when it clears every rung."
+        ),
+        pattern=_EXFIL_STRUCTURAL_PROBE,
+        owasp_asi="ASI-02",
+    ),
+    Rule(
         id="sensitive-secret-ref",
         name="Sensitive secret reference",
         severity="HIGH",
@@ -1244,7 +1314,7 @@ def scan_text(
     findings: list[Finding] = []
     seen: set[tuple[str, int, int]] = set()
     source_safe_rules = {
-        "exfil-webhook-sink", "sensitive-secret-ref",
+        "exfil-webhook-sink", "exfil-structural-probe", "sensitive-secret-ref",
         "git-hook-install-from-body", "dynamic-exec-in-body",
         "base-url-override",
         # Wave 11 source-file patterns — every one of these only appears

@@ -397,6 +397,19 @@ def main() -> int:
     ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     ap.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     ap.add_argument("--write-baseline", action="store_true")
+    # COVERAGE.md used to be writable ONLY as a side effect of --write-baseline, which made the
+    # honest doc and the regression gate a package deal: refreshing a stale claim meant also
+    # rewriting the numbers the gate compares against. So the safe move (never --write-baseline)
+    # left the doc asserting things the bench had already disproved — on 2026-08-14 it still read
+    # "`exfil-structural-probe` UNMEASURED — not evidence of working" while the same run measured
+    # it at 3/8. A doc that contradicts its own measurement is worse than no doc: it is read as
+    # evidence. This flag refreshes the doc ALONE, and deliberately does NOT return early, so the
+    # baseline gate still runs afterwards — the claim cannot be refreshed while the gate is red.
+    ap.add_argument(
+        "--write-coverage",
+        action="store_true",
+        help="Regenerate COVERAGE.md from THIS run's measurement, WITHOUT touching the baseline.",
+    )
     ap.add_argument("--json", action="store_true")
     ap.add_argument(
         "--split",
@@ -424,6 +437,12 @@ def main() -> int:
         doc.write_text(coverage_doc(res), encoding="utf-8")
         print(f"\nbaseline written: {args.baseline}\ncoverage doc: {doc}")
         return 0
+
+    if args.write_coverage:
+        doc = args.baseline.parent / "COVERAGE.md"
+        doc.write_text(coverage_doc(res), encoding="utf-8")
+        print(f"\ncoverage doc: {doc}")
+        # NO early return — fall through to the gate below on purpose (see the flag's comment).
 
     if args.baseline.exists():
         ok, problems = compare(res, json.loads(args.baseline.read_text(encoding="utf-8")))

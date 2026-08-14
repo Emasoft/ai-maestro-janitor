@@ -16,7 +16,8 @@ not the same as passing.
 | `crypto-clipper-triad` | 9/9 | partial |
 | `dns-exfil-long-subdomain` | 4/7 | partial |
 | `dynamic-exec-in-body` | 7/9 | partial |
-| `exfil-webhook-sink` | 0/8 | **FALSIFIED** — seeded and caught nothing |
+| `exfil-structural-probe` | 3/8 | weak |
+| `exfil-webhook-sink` | 2/2 | partial |
 | `git-hook-install-from-body` | 5/9 | partial |
 | `git-protocol-only-dependency` | 3/3 | partial |
 | `html-comment-impersonation` | 5/9 | partial |
@@ -29,7 +30,3 @@ not the same as passing.
 | `two-step-code-injection` | 5/9 | partial |
 | `whole-env-exfil` | 3/3 | partial |
 | `worm-self-propagation` | 5/9 | partial |
-
-**1 claimed rules are FALSIFIED**: seeded with 8 blind-authored
-samples of their own class, they caught zero. That is stronger than untested — the
-defect was planted, the rule was watched, and it did not fire.
