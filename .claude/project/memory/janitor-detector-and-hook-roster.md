@@ -13,7 +13,7 @@ metadata:
 # janitor-detector-and-hook-roster
 
 
-^ATOM-UWO2-0TIH [desc:"The full 39-detector grouped roster (git/workflow hygiene, TRDD/task, cleanup, observability, scope drift, supply-chain/security, updates), the boundedness invariants (S3+S4), and the pattern-library ", keywords: 39_detectors_grouped_list_git_workflow_hygiene github-issues-watch_always_on_first_fire_silent boundedness_invariants_dedupe_backoff_rotate_trim pattern_libraries_scripts_lib_patterns_naming_convention, type: reference, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-UWO2-0TIH [desc:"The full 39-detector grouped roster (git/workflow hygiene, TRDD/task, cleanup, observability, scope drift, supply-chain/security, updates), the boundedness invariants (S3+S4), and the pattern-library ", keywords: 39_detectors_grouped_list_git_workflow_hygiene github-issues-watch_always_on_first_fire_silent boundedness_invariants_dedupe_backoff_rotate_trim pattern_libraries_scripts_lib_patterns_naming_convention, type: reference, ocd: 2026-08-02, lmd: 2026-08-02] [^2]
 
 ### Conventions (breadth — list, don't per-symbol-dump)
 
@@ -179,3 +179,4 @@ Agent context is poisoned three ways: a dependency postinstall WRITES `CLAUDE.md
     real heavy-tailed history the bar (39_202, measured) lands at the 40_000 hard cap and the
     advisory tier is unreachable. DO seed baseline fixtures with NONZERO dispersion at
     realistic magnitudes, and assert the bar sits strictly below the hard cap.
+[^2]: [id:ATOM-JYY7-VMAM, status:valid, supersedes:ATOM-UWO2-0TIH, desc:"the roster's detector COUNT went stale as detectors were added — measured 72 registered, not 39", keywords:"how_many_janitor_detectors_are_there the_roster_count_is_wrong 39_detectors_is_stale detector_list_does_not_match_dispatch my_inventory_undercounts_the_fleet a_documented_roster_nobody_updates", ocd:2026-08-14, lmd:2026-08-14] DO NOT trust this page's detector COUNT (or any hand-maintained inventory) without re-measuring it against the code that registers them, BECAUSE a roster is written once and the fleet keeps growing: measured 2026-08-14, `dispatch.py` registers **72** detectors while this page said **39** — stale by 33, so nearly half the fleet was undocumented, and nothing failed or reddened to say so. An inventory has no test; it rots silently and still reads authoritative. DO re-derive the count from the registration site (the `("name", cadence, "CLAUDE_PLUGIN_OPTION_…")` entries in `scripts/dispatch.py`) before citing it, and treat the GROUPED list below as partial until a curator pass reconciles it — the groups are still correct about the detectors they name, they simply do not name them all. SUPERSEDED BODY: (empty)

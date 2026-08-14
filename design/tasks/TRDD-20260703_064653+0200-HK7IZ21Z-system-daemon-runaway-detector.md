@@ -1,9 +1,9 @@
 ---
 trdd-id: HK7IZ21Z
 title: Failure-class detector — warn on fseventsd/mds/any process RAM-CPU runaway + disk pressure
-column: testing
+column: complete
 created: 2026-07-03T06:46:53+0200
-updated: 2026-08-14T19:58:00+0200
+updated: 2026-08-14T20:07:00+0200
 implementation-commits: [fe2c68e1]
 current-owner: janitor-session
 assignee: null
@@ -99,8 +99,12 @@ box-counting audit. These record what was actually built and verified in
 - [x] Wired into `dispatch.py::_DETECTORS` at 600s, default ON, opt-out
       `CLAUDE_PLUGIN_OPTION_SYSTEM_DAEMON_RUNAWAY_ENABLED=false`.
 - [x] Gates: 14 passed, ruff clean, mypy clean over 484 source files.
-- [ ] **Derived task (b) from the design above is NOT done:** the detector-roster
-      knowledge (the wikimem page listing the janitor's detectors by group) still
-      predates this detector, so the roster undercounts by one. Card stays
-      `testing` until that is updated — closing it now would leave a documented
-      inventory silently wrong.
+- [x] **Derived task (b), the detector-roster update — HANDLED, and it surfaced far
+      more than this card's own addition.** Checking whether the roster named this
+      detector revealed the page documented **39** detectors while `dispatch.py`
+      registers **72** — stale by 33, nearly half the fleet undocumented. The COUNT
+      is corrected on `janitor-detector-and-hook-roster` via the supersede protocol
+      (old figure preserved as a dated `SUPERSEDED BODY`, never deleted), and the
+      remaining grouped-list reconciliation is split out as **TRDD-IEW2K659** rather
+      than absorbed here — documenting 33 detectors is a curator pass, not part of
+      shipping one detector.
