@@ -49,6 +49,40 @@ jobs:
       - name: Pyright (type check)
         run: uvx --with pyright pyright
 
+  # Until 2026-08-14 the 15k-test suite ran ONLY inside publish.py's release gate,
+  # so every push between releases was guarded by lint and types and by no test at
+  # all. That window is exactly where the expensive defects live: a helper with no
+  # production caller, a docstring promising two guards over code running one, a
+  # `.git` path wrong in a linked worktree — ruff and pyright are structurally
+  # blind to all three, and each one shipped green. A gate that runs only at
+  # release lets a week of them compound before anything goes red.
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # `--extra dev` is load-bearing: pytest and pytest-xdist live in
+      # [project.optional-dependencies].dev. A bare `uv run pytest` succeeds
+      # locally only because the developer's .venv already has them installed, so
+      # dropping the flag fails on a clean runner and nowhere else.
+      #
+      # `-n auto` matches how the suite is actually run. It is also why the
+      # deadlines in tests/test_daemon.py carry x4 slack (a0d3438e): those tests
+      # spawn a real daemon, and an idle-machine deadline fails under parallel
+      # load for reasons that have nothing to do with correctness.
+      - name: Pytest
+        run: uv run --extra dev pytest -q -n auto
+
   validate:
     name: Validate
     runs-on: ubuntu-latest
