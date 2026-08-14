@@ -333,12 +333,15 @@ def _scan(
                     exfil_drift.append(line)
                 continue
             out.append((rel, f))
-        for rule_id, line, _col, reason in suppressed[before:]:
+        # `lineno`, not `line` — the exfil branch above binds `line` to the drift STRING
+        # `_route_exfil_candidate` returns, and reusing the name here for a line NUMBER made
+        # the two types collide (mypy caught it at the publish gate; pyright did not).
+        for rule_id, lineno, _col, reason in suppressed[before:]:
             # LOG, never a finding: a suppression is not work for the reader, it is the audit
             # trail that makes over-suppression arguable. Greppable by rule id + reason.
             state.log_line(
                 "agent-context-integrity",
-                f"suppressed {rule_id} at {rel}:{line} ({reason})",
+                f"suppressed {rule_id} at {rel}:{lineno} ({reason})",
             )
     return out, exfil_drift
 
