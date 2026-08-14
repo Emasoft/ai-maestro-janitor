@@ -399,10 +399,9 @@ changes what the atom asserts, and a reader who acted on the old assertion has n
 ever differed. The chain — newest truth on top, each prior body dated beneath it — is the
 atom's history, and it is the only record of WHEN a fact became true.
 
-> **TOOLING GAP (2026-08-04, WM-ATOM-09 forward-citation):** no verb implements a lesson-free
-> supersession today — `add-lesson --supersedes` is the only path and it REQUIRES a lesson,
-> which WM-LES-09 forbids for a clean update. Approved card: **TRDD-3PWQK8NM**. Until it lands,
-> a clean update is the one case where the chain cannot be recorded as specified.
+> **TOOLING GAP CLOSED (2026-08-14, TRDD-3PWQK8NM):** `add-atom --supersedes <ID>` (WM-CLI-13)
+> now implements the lesson-free path — a clean update records its chain without fabricating a
+> lesson. `add-lesson --supersedes` remains the path when the supersession DOES record a mistake.
 
 `WM-LES-08` **lessons-travel-with-their-atom** — an atom's dated superseded-lessons ARE its
 changelog; on a WM-MIG move they TRAVEL with the atom (with the references they use), except a
@@ -1013,6 +1012,14 @@ Their flags, which WM-CLI-10 holds them to:
 atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>`; the optional
 `--retire-atom` sets the atom marker `status: superseded, superseded-by:<lesson-id>`
 (idempotent). Default correction is in-place same-id (WM-LES-05), never a duplicate.
+
+`WM-CLI-13` **add-atom-supersedes** — `add-atom --supersedes <ID>` `MUST`, in one transaction: mark
+the target atom `status: superseded, superseded-by:<new-atom-id>`, move its marker + body verbatim
+below the page's `## Superseded` heading (creating it, before `## Notes and lessons learned`, when
+absent), then insert the new atom (the caller's body/keywords) at the normal `add-atom` position.
+Refuses a target that already carries `status:` (chain by superseding its successor, never
+re-superseding directly). This is the WM-LES-09 lesson-free path — `add-lesson --supersedes`
+(WM-CLI-04) stays the path for a supersession that records a mistake.
 
 `WM-CLI-05` **index-sidecar** — the corpus is indexed into a SQLite sidecar (`.memgrep/`);
 `index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher

@@ -13,17 +13,20 @@ eht: []
 
 # memgrep can supersede an atom without inventing a lesson
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-04
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
 
-**NOT STARTED.** Spec landed (`WM-LES-09`, `WM-LES-10`); the verb does not exist.
+**PARTIAL — §2 shipped, §3 NOT started.** `add-atom --supersedes <ID>` (WM-CLI-13) lands the
+whole lesson-free mechanism from §2: mark-and-move the old atom below `## Superseded`
+(creating the heading before `## Notes and lessons learned` when absent), insert the new atom
+in the live section above it, unbounded chaining, refuse re-superseding an already-superseded
+atom. 2 new Rust integration tests (`add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading`,
+`add_atom_supersedes_chains_across_multiple_generations`) plus all 138 existing Rust tests and
+all 21 `test_wikimem_spec_drift.py` cases pass.
 
-- **The gap**: `add-lesson --supersedes` is the ONLY supersession path and it REQUIRES a
-  lesson body. `WM-LES-09` forbids a lesson when nothing went wrong, so a clean update —
-  an implementation landing as designed, a fact being refined — currently has **no
-  conformant way to be recorded**. The author must either fabricate a lesson (polluting the
-  guardrail surface) or edit in place (destroying the history `WM-LES-10` requires).
-- **NEXT ACTION**: add lesson-free supersession to the memgrep verb surface (see §2), then
-  a `WM-LINT` check for `WM-LES-10` violations.
+- **NEXT ACTION**: implement `WM-LES-10`'s lint check (§3) — needs real git-history integration
+  (no git plumbing exists anywhere in the memgrep crate yet: diff an atom's CURRENT body against
+  its last-committed body to flag a substantive in-place edit with no new superseded version).
+  Scope it as its own TRDD; §3 already calls it deliberately non-blocking (a WARN, not an ERROR).
 
 ## 1. Why (owner rule, 2026-08-04)
 
@@ -83,15 +86,22 @@ decides.
 
 ## 4. Acceptance
 
-- [ ] An atom can be superseded with NO lesson, in one transaction.
-- [ ] The old atom is moved BELOW `## Superseded`, verbatim, marked `status: superseded` +
+- [x] An atom can be superseded with NO lesson, in one transaction (`add-atom --supersedes <ID>`,
+      WM-CLI-13, `scripts/memgrep/src/memory.rs::supersede_atom_lesson_free`).
+- [x] The old atom is moved BELOW `## Superseded`, verbatim, marked `status: superseded` +
       `superseded-by:<new id>`; the heading is created when the page lacks one.
-- [ ] `recall` returns the NEW atom and skips the old one unless `--include-superseded`.
-- [ ] A second supersession chains (v1 → v2 → v3) rather than overwriting the first record.
-- [ ] No duplicate LIVE atom is left behind.
-- [ ] `validate` + `lint` clean; existing lesson-bearing supersession is unaffected.
-- [ ] Spec drift suite recognises the new verb (`tests/test_wikimem_spec_drift.py`).
-- [ ] The `WM-LES-10` lint check warns on a substantive in-place edit.
+- [x] `recall` returns the NEW atom and skips the old one unless `--include-superseded`.
+- [x] A second supersession chains (v1 → v2 → v3) rather than overwriting the first record.
+- [x] No duplicate LIVE atom is left behind.
+- [x] `validate` + `lint` clean; existing lesson-bearing supersession is unaffected (138/138 Rust
+      tests green, incl. 2 new; `add-lesson --supersedes` untouched).
+- [x] Spec drift suite recognises the new verb (`tests/test_wikimem_spec_drift.py` — 21/21 pass;
+      the flag was already covered by the spec's existing `--supersedes` mentions, and WM-CLI-13 +
+      the SKILL.md row now document it explicitly rather than passing by accident).
+- [ ] The `WM-LES-10` lint check warns on a substantive in-place edit. **NOT DONE** — this needs
+      genuine git-history integration (diff an atom's body against its prior committed version) that
+      does not exist anywhere in the memgrep crate today; the card itself marks it "Deliberately NOT
+      a hard gate at first" (§3). Left for a follow-up TRDD — out of this session's bounded scope.
 
 ## 5. Risks
 

@@ -2681,14 +2681,27 @@ struct AddAtomArgs {
     /// the canonical refusal. Omit to write unconditionally (still lock-serialized).
     #[arg(long = "base-sha256")]
     base_sha256: Option<String>,
+    /// LESSON-FREE SUPERSESSION (TRDD-3PWQK8NM, WM-LES-09): this new atom REPLACES the atom named
+    /// here (`^name`, `ATOM-XXXX-XXXX`, or its bare 8-char payload) — a CLEAN update where nothing
+    /// went wrong, so no lesson is authored. In the same transaction: the target atom is marked
+    /// `status: superseded, superseded-by:<this new atom's id>` and MOVED VERBATIM below the
+    /// page's canonical `## Superseded` heading (created before `## Notes and lessons learned`
+    /// when the page has none yet), then this new atom is inserted at the normal `add-atom`
+    /// position carrying the CURRENT truth. The old body is never dropped — only relocated
+    /// (WM-LES-06). For a supersession that DOES record a mistake, use `add-lesson --supersedes`
+    /// instead — that path anchors a `[^N]` guardrail; this one does not.
+    #[arg(long = "supersedes")]
+    supersedes: Option<String>,
 }
 
-/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …] [--base-sha256 …]` (body on
-/// stdin). Synthesise a corpus-unique id + today's dates, emit the exact `^id [desc:"…",
-/// keywords: …, type: …, ocd:…, lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the page
-/// (before the earliest footer section — `## Applies to` / `## Governed by` / `## Notes and
-/// lessons learned` — if any), write atomically, reindex the scope. Prints
-/// `<id>\t<page>`.
+/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …] [--supersedes ID] [--base-sha256
+/// …]` (body on stdin). Synthesise a corpus-unique id + today's dates, emit the exact `^id
+/// [desc:"…", keywords: …, type: …, ocd:…, lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the
+/// page (before the earliest footer section — `## Applies to` / `## Governed by` / `## Notes and
+/// lessons learned` — if any), write atomically, reindex the scope. Prints `<id>\t<page>`.
+///
+/// With `--supersedes <ID>`, first relocates the named atom's CURRENT block verbatim below `##
+/// Superseded` (WM-LES-09/WM-LES-10) — see the flag doc above for the full transaction shape.
 ///
 /// Holds the page's scope write-lock (TRDD-7YHT3FNK) from BEFORE the read through the write, so
 /// no other memgrep write verb (or a Python wikimem-editor transaction, same lock formula) can
@@ -2730,11 +2743,128 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     let today = today_date();
     let marker = build_atom_marker(&id, &keywords, a.desc.as_deref(), a.atom_type.as_deref(), &today);
 
-    let out = bump_page_lmd(&insert_atom_block(&text, &marker, &body), &today);
+    // `--supersedes`: relocate the target atom's CURRENT block below `## Superseded` FIRST, on the
+    // text we already have — so the boundary computed just below (which now also excludes the
+    // `## Superseded` section) reflects the move before the new atom is spliced in.
+    let text = match a.supersedes.as_deref() {
+        Some(target) => supersede_atom_lesson_free(&a.page, &text, target, &id)?,
+        None => text,
+    };
+
+    // The ordinary splice boundary is the earliest footer heading (`insert_atom_block`'s own
+    // `footer_section_line`). Under `--supersedes` that alone is not enough: the page now also
+    // carries a `## Superseded` heading, and the card's own mechanism (TRDD-3PWQK8NM §2 step 3)
+    // requires the NEW atom to land "in the live section above" it — never inside/after the
+    // retired content, or a plain `recall` still finds the current truth but any reader scanning
+    // the page top-to-bottom sees the SUPERSEDED body before the atom that replaced it. Narrowing
+    // the boundary to whichever comes first (an existing footer, or `## Superseded`) keeps ordinary
+    // `add-atom` calls (no `--supersedes`) byte-for-byte unaffected — `superseded_heading_line` only
+    // ever returns `Some` here because `supersede_atom_lesson_free` just created/reused it.
+    let mut boundary = footer_section_line(&text);
+    if a.supersedes.is_some()
+        && let Some(sup_line1) = superseded_heading_line(&text)
+    {
+        let sup_idx0 = sup_line1 - 1;
+        boundary = Some(boundary.map_or(sup_idx0, |f| f.min(sup_idx0)));
+    }
+
+    let out = bump_page_lmd(&insert_atom_block_before(&text, &marker, &body, boundary), &today);
     atomic_write_page(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{id}\t{}", rel(&a.page));
     Ok(())
+}
+
+/// The lesson-free half of `add-atom --supersedes` (TRDD-3PWQK8NM): locate the atom `target`
+/// answers to on `page`'s text, mark it `status: superseded, superseded-by:<new_id>` in place,
+/// then MOVE its whole block (marker + verbatim body, original line breaks preserved) below the
+/// page's canonical `## Superseded` heading — creating that heading (before `## Notes and lessons
+/// learned`, or at EOF when the page has no Notes section either) when absent. Returns the page
+/// text with the move applied; the caller then splices the NEW atom in with the ordinary
+/// `insert_atom_block` path. Bails if `target` cannot be found, or if it already carries a
+/// `status:` (already-superseded atoms are chained by superseding their SUCCESSOR, never
+/// re-superseded directly — that would orphan the existing `superseded-by:` pointer).
+fn supersede_atom_lesson_free(page: &Path, text: &str, target: &str, new_id: &str) -> Result<String> {
+    let query = target.strip_prefix('^').unwrap_or(target);
+    let atom_query_matches = |id: &str| atom_id_matches(id, query);
+    let (marker_idx, body_last_idx) = locate_atom_body_matching(text, &atom_query_matches)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no BODY atom answering to `{target}` on {} — add-atom --supersedes replaces an \
+                 EXISTING atom",
+                page.display()
+            )
+        })?;
+
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let (_s, end, _id, props_raw) = first_block_property_marker(&lines[marker_idx]).ok_or_else(|| {
+        anyhow::anyhow!("atom `{target}` on {} has no parseable marker line", page.display())
+    })?;
+    if props_raw.contains("status:") {
+        anyhow::bail!(
+            "atom `{target}` on {} already carries a `status:` — it is already superseded; \
+             supersede its SUCCESSOR instead of re-superseding it directly",
+            page.display()
+        );
+    }
+    // Same shared-renderer discipline as `add-lesson --retire-atom` (janitor#266): both fields go
+    // through ONE `render_block_props` call so the spelling can never drift between call sites.
+    let retire_props = render_block_props(&[
+        ("status", "superseded".to_string()),
+        ("superseded-by", new_id.to_string()),
+    ]);
+    lines[marker_idx].insert_str(end - 1, &format!(", {retire_props}"));
+
+    // Extract the block VERBATIM (marker line, now carrying the retirement props, through the last
+    // body line `locate_atom_body_matching` found) and remove it from its current position.
+    let block: Vec<String> = lines[marker_idx..=body_last_idx].to_vec();
+    lines.drain(marker_idx..=body_last_idx);
+    // Drop one leftover blank line right where the block used to start, when both its former
+    // neighbours are blank — otherwise the removal leaves a double-blank seam.
+    if marker_idx < lines.len()
+        && marker_idx > 0
+        && lines[marker_idx].trim().is_empty()
+        && lines[marker_idx - 1].trim().is_empty()
+    {
+        lines.remove(marker_idx);
+    }
+
+    let rebuilt = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+
+    // Insert the retired block below `## Superseded`, creating the heading (before `## Notes and
+    // lessons learned`, per the QKWU26ZG placement precedent) when the page has none yet.
+    let mut out_lines: Vec<String> = rebuilt.lines().map(str::to_string).collect();
+    let heading_idx0 = match superseded_heading_line(&rebuilt) {
+        Some(line1based) => line1based - 1,
+        None => {
+            let insert_at = notes_section_line(&rebuilt).unwrap_or(out_lines.len());
+            let mut heading_block = vec![String::new(), "## Superseded".to_string(), String::new()];
+            if insert_at < out_lines.len() {
+                let tail = out_lines.split_off(insert_at);
+                out_lines.append(&mut heading_block);
+                out_lines.extend(tail);
+            } else {
+                out_lines.append(&mut heading_block);
+            }
+            // Re-locate: the heading text itself never changes, so a fresh scan is exact and keeps
+            // this function's only source of truth for "where is the heading" the shared helper.
+            let rebuilt2 = out_lines.join("\n") + "\n";
+            superseded_heading_line(&rebuilt2).expect("heading was just inserted") - 1
+        }
+    };
+
+    // Insert AFTER the heading (and its trailing blank line, when present), so successive
+    // supersessions on the same page simply stack — newest-superseded first, oldest last.
+    let mut insert_at = heading_idx0 + 1;
+    if insert_at < out_lines.len() && out_lines[insert_at].trim().is_empty() {
+        insert_at += 1;
+    }
+    let tail = out_lines.split_off(insert_at);
+    out_lines.push(String::new());
+    out_lines.extend(block);
+    out_lines.extend(tail);
+
+    Ok(out_lines.join("\n") + "\n")
 }
 
 /// Splice one atom block into a page's text — the PURE core of `add-atom` (so the round-trip test
@@ -2746,12 +2876,22 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
 /// parser ends at the next heading — is bounded and never bleeds into a footer section), else at
 /// EOF. The result always ends in exactly one newline.
 fn insert_atom_block(text: &str, marker: &str, body: &str) -> String {
+    insert_atom_block_before(text, marker, body, footer_section_line(text))
+}
+
+/// The `boundary`-parameterized core `insert_atom_block` delegates to (with `boundary =
+/// footer_section_line(text)`, its historical behaviour, byte-for-byte). `add-atom --supersedes`
+/// (TRDD-3PWQK8NM) is the one other caller: it narrows `boundary` to whichever comes first, an
+/// ordinary footer heading OR the page's `## Superseded` delimiter — so the NEW atom lands in the
+/// live section above the retired content it replaces, never inside/after it. `boundary` is a
+/// 0-based line index into `text`; `None` means "no boundary — append at EOF".
+fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Option<usize>) -> String {
     let mut atom_lines: Vec<String> = vec![String::new(), marker.to_string(), String::new()];
     atom_lines.extend(body.lines().map(str::to_string));
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    match footer_section_line(text) {
+    match boundary {
         Some(idx) => {
-            atom_lines.push(String::new()); // blank between the atom body and the footer heading
+            atom_lines.push(String::new()); // blank between the atom body and the boundary heading
             let tail = lines.split_off(idx);
             lines.extend(atom_lines);
             lines.extend(tail);

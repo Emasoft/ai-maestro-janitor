@@ -2929,6 +2929,107 @@ fn add_atom_refuses_a_missing_page_and_empty_body() {
     );
 }
 
+/// `add-atom --supersedes` (TRDD-3PWQK8NM, WM-CLI-13): the target atom is retired in place and
+/// moved verbatim below a fresh `## Superseded` heading, the new atom carries the current truth,
+/// no lesson is authored, and `recall`/`validate`/`lint` all treat the result exactly like the
+/// lesson-bearing supersession path.
+#[test]
+fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
+    let d = TempDir::new("addatom-supersedes");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "d", "--type", "reference",
+    ]);
+    let old_out = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "old, thing"],
+        "the old fact.",
+    );
+    let old_id = old_out.split_whitespace().next().unwrap().to_string();
+
+    let new_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", "new, thing",
+            "--supersedes", &old_id,
+        ],
+        "the refined fact.",
+    );
+    let new_id = new_out.split_whitespace().next().unwrap().to_string();
+    assert_ne!(old_id, new_id, "the new atom gets a FRESH id, never the old one");
+
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(text.contains("## Superseded"), "the heading is created:\n{text}");
+    assert!(
+        text.contains(&format!("status: superseded, superseded-by: {new_id}"))
+            || text.contains(&format!("status:superseded, superseded-by:{new_id}")),
+        "the old marker records the retirement + forward pointer:\n{text}"
+    );
+    assert!(text.contains("the old fact."), "the old body survives VERBATIM:\n{text}");
+    let sup_pos = text.find("## Superseded").unwrap();
+    let old_pos = text.find(&old_id).unwrap();
+    let new_pos = text.find(&new_id).unwrap();
+    assert!(old_pos > sup_pos, "the old atom sits BELOW the delimiter:\n{text}");
+    assert!(new_pos < sup_pos, "the new atom sits at the ordinary insertion point, above the delimiter:\n{text}");
+
+    // `recall` defaults to skipping the superseded version and returning only the current truth.
+    let recalled = run(&["recall", "thing", d.as_str()]);
+    assert!(recalled.contains(&new_id), "recall returns the new atom: {recalled}");
+    assert!(!recalled.contains(&old_id), "recall skips the superseded atom by default: {recalled}");
+    let recalled_full = run(&["recall", "thing", d.as_str(), "--include-superseded"]);
+    assert!(recalled_full.contains(&old_id), "--include-superseded surfaces it: {recalled_full}");
+
+    // The page stays clean by the corpus's own oracles.
+    let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
+    assert_eq!(code, 0, "validate must be clean after a lesson-free supersession");
+    let (_, lint_code) = run_with_code(&["lint", page.to_str().unwrap()]);
+    assert_eq!(lint_code, 0, "lint must report zero findings after a lesson-free supersession");
+}
+
+/// A second `--supersedes` on the same page CHAINS (v1 → v2 → v3) instead of overwriting the
+/// first supersession record, and no duplicate LIVE atom is left behind at any point.
+#[test]
+fn add_atom_supersedes_chains_across_multiple_generations() {
+    let d = TempDir::new("addatom-supersedes-chain");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "d", "--type", "reference",
+    ]);
+    let v1 = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing"],
+        "v1 fact.",
+    ).split_whitespace().next().unwrap().to_string();
+    let v2 = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing", "--supersedes", &v1],
+        "v2 fact.",
+    ).split_whitespace().next().unwrap().to_string();
+    let v3 = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing", "--supersedes", &v2],
+        "v3 fact.",
+    ).split_whitespace().next().unwrap().to_string();
+
+    let text = std::fs::read_to_string(&page).unwrap();
+    // Every generation's body is still present — nothing was dropped by the chain.
+    for (id, body) in [(&v1, "v1 fact."), (&v2, "v2 fact."), (&v3, "v3 fact.")] {
+        assert!(text.contains(id) && text.contains(body), "generation {id} survives:\n{text}");
+    }
+    // Exactly ONE live (non-superseded) atom marker remains — v3.
+    let live_markers = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with('^') && l.contains("[keywords:") && !l.contains("status:"))
+        .count();
+    assert_eq!(live_markers, 1, "no duplicate LIVE atom is left behind:\n{text}");
+
+    // Re-superseding an already-superseded atom is refused — chain via its successor instead.
+    run_stdin_fail(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "x", "--supersedes", &v1],
+        "should be refused.",
+    );
+
+    let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
+    assert_eq!(code, 0, "validate stays clean across a multi-generation chain");
+}
+
 #[test]
 fn add_lesson_anchors_from_an_atom_and_round_trips() {
     let d = TempDir::new("addlesson");
