@@ -242,6 +242,58 @@ def hid_idle_seconds(*, timeout_s: float = 3.0) -> float | None:
     return None if best_ns is None else best_ns / 1e9
 
 
+def user_presence(
+    *,
+    idle_s: int = USER_PRESENT_IDLE_S,
+    home: Path | None = None,
+    now: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool | None:
+    """TRI-STATE presence: True = provably present, False = provably away, None = UNKNOWN.
+
+    Extracted from `user_is_present` (2026-08-15) because ONE boolean cannot serve its two
+    consumer classes, and forcing it to was a live defect on every headless runner:
+
+      * INJECTORS (dispatch, on-stop-proactive-compact) must map unknown → present — typing
+        `/clear` into a pane somebody might be using is unrecoverable. That mapping is
+        `user_is_present()` below, unchanged.
+      * The PUSH gate (post-compact-resume) and the TYPING PROBES (terminal_trigger) must map
+        unknown → absent: their own documented contract is "no breadcrumb at all → treat as
+        UNATTENDED", and mapping unknown → present there suppressed every push on a headless
+        box AND spun `inject_until_sent`'s wait loop forever under a frozen test clock — the
+        22-minute silent hang that killed the first Linux CI run (31844013197).
+
+    The ladder itself is IDENTICAL to what `user_is_present` always ran; only the
+    cannot-tell outcomes now say so instead of picking a side here. Consumers pick the side,
+    each with its own safety argument at the call site (`is not False` = fail toward present;
+    `is True` = fail toward absent).
+    """
+    # RUNG 0 — the REAL typing signal: any keyboard/mouse event in the last `idle_s`
+    # seconds means the user is AT the machine RIGHT NOW, whatever pane is targeted.
+    hid = hid_idle_seconds()
+    if hid is not None and hid <= idle_s:
+        return True
+    current = int(time.time()) if now is None else int(now)
+    pane_key = state.terminal_pane_key(env)
+    if pane_key is not None:
+        pane_path = state.per_pane_presence_path(pane_key, home)
+        if not pane_path.exists():
+            return False  # user never typed in THIS pane → provably unattended here
+        last = _presence_epoch(pane_path)
+        if last is None:
+            return None  # corrupt breadcrumb → cannot tell
+        if last <= 0:
+            return False  # stamped but no real input recorded → unattended
+        return (current - last) <= idle_s
+    # No pane id → machine-global fallback.
+    last = _presence_epoch(state.user_presence_path(home))
+    if last is None:
+        return None  # no breadcrumb at all → cannot tell (headless box, fresh HOME, …)
+    if last <= 0:
+        return False  # breadcrumb exists but no user input was EVER recorded → unattended
+    return (current - last) <= idle_s
+
+
 def user_is_present(
     *,
     idle_s: int = USER_PRESENT_IDLE_S,
@@ -268,35 +320,13 @@ def user_is_present(
 
     Fails CLOSED: a corrupt/unreadable breadcrumb returns True (assume present), so a breadcrumb
     problem can never license typing into someone's pane.
+
+    THE INJECTOR WRAPPER over `user_presence` (the tri-state SSOT above): unknown maps to
+    PRESENT here — `is not False` — because every caller of THIS function is deciding whether
+    it may type into a pane, and an unknown must never authorize that. Consumers whose safe
+    side is the opposite (the push gate, the typing probes) call `user_presence` directly.
     """
-    # RUNG 0 — the REAL typing signal (owner directive 2026-07-18): any keyboard/mouse
-    # event in the last `idle_s` seconds means the user is AT the machine RIGHT NOW —
-    # present, machine-wide, no matter which pane the injector targets. This is what the
-    # submit-based breadcrumb below cannot see: a user mid-typing whose last Enter is
-    # older than the window. HID-idle ABOVE the window is NOT proof of absence for the
-    # pane rungs (probe granularity, clock skew) — fall through to the breadcrumbs.
-    hid = hid_idle_seconds()
-    if hid is not None and hid <= idle_s:
-        return True
-    current = int(time.time()) if now is None else int(now)
-    pane_key = state.terminal_pane_key(env)
-    if pane_key is not None:
-        pane_path = state.per_pane_presence_path(pane_key, home)
-        if not pane_path.exists():
-            return False  # user never typed in THIS pane → unattended here
-        last = _presence_epoch(pane_path)
-        if last is None:
-            return True  # corrupt → fail closed
-        if last <= 0:
-            return False  # stamped but no real input recorded → unattended
-        return (current - last) <= idle_s
-    # No pane id → machine-global fallback (unchanged behaviour).
-    last = _presence_epoch(state.user_presence_path(home))
-    if last is None:
-        return True  # unknown → assume present → do not inject
-    if last <= 0:
-        return False  # breadcrumb exists but no user input was EVER recorded → unattended
-    return (current - last) <= idle_s
+    return user_presence(idle_s=idle_s, home=home, now=now, env=env) is not False
 
 
 def _resolve_idle_s(env: Mapping[str, str] | None) -> int:

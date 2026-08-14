@@ -573,14 +573,25 @@ def wait_until_pane_free(
         try:
             import user_intent  # noqa: PLC0415
 
-            return user_intent.user_is_present(idle_s=int(quiet_s), env=os.environ)
+            # Tri-state, unknown → NOT typing: this probe only defers/loops — the empty-field
+            # check and rule 2 are the real injection guards — and mapping unknown → typing
+            # made the wait loop spin forever on any box with no breadcrumb (the exception
+            # arm below already picked this side).
+            return user_intent.user_presence(idle_s=int(quiet_s), env=os.environ) is True
         except Exception:  # noqa: BLE001
             return False
 
     probe = _default_probe if is_typing is None else is_typing
     giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
     deadline = clock() + giveup_s
+    # Clock-independent bound: with an injected frozen clock (tests) or a stalled monotonic
+    # source, `clock() >= deadline` never trips and this loop pins a core forever. The cap is
+    # sized so it can only fire AFTER the deadline would have under a live clock.
+    max_iters = int(giveup_s / max(min(quiet_s, 1.0), 0.1)) + 16
     while True:
+        max_iters -= 1
+        if max_iters <= 0:
+            return False, f"gave up after the iteration cap (frozen clock?) — {giveup_s:.0f}s budget"
         if probe(terminal):
             if clock() >= deadline:
                 return False, f"user still typing after {giveup_s:.0f}s"
@@ -642,7 +653,12 @@ def inject_until_sent(
         try:
             import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
 
-            return user_intent.user_is_present(idle_s=int(quiet_s), env=os.environ)
+            # Tri-state, unknown → NOT typing — the same side the exception arm below always
+            # took ("unknown presence must not block a requested command forever"). Rules 1-2
+            # (empty field, stop on any keystroke) remain the guards that protect a real user;
+            # unknown → typing here was the tight infinite loop that hung the first Linux CI
+            # run for 22 minutes (31844013197).
+            return user_intent.user_presence(idle_s=int(quiet_s), env=os.environ) is True
         except Exception:  # noqa: BLE001
             return False  # unknown presence must not block a requested command forever
 
@@ -652,8 +668,13 @@ def inject_until_sent(
     deadline = clock() + giveup_s
     last = "not attempted"
     unreadable = 0  # CONSECUTIVE failed reads on a readable channel; reset by any good read
+    # Clock-independent bound (see wait_until_pane_free): a frozen/stalled clock must not
+    # turn "bounded by giveup_s" into an infinite CPU-pinned loop inside a hook or daemon
+    # beat. Exits through the same loud give-up return.
+    max_iters = int(giveup_s / max(min(quiet_s, retry_s, 1.0), 0.1)) + 16
     while True:
-        if clock() >= deadline:
+        max_iters -= 1
+        if clock() >= deadline or max_iters <= 0:
             state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
             return False, f"gave up after {giveup_s:.0f}s ({last})"
 

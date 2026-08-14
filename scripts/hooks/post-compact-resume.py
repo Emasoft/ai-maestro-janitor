@@ -330,7 +330,11 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     try:
         from lib import user_intent  # noqa: PLC0415 - lazy: the hook's sys.path is set up in main()
 
-        if user_intent.user_is_present(idle_s=grace_s):
+        # Tri-state, unknown → NOT active: this gate's own contract is "no breadcrumb at all
+        # → treat as UNATTENDED" (push allowed). The old boolean mapped unknown → present and
+        # silently suppressed every push on a box with no breadcrumb — the safe side for an
+        # INJECTOR, the wrong side for a notification.
+        if user_intent.user_presence(idle_s=grace_s) is True:
             return True
     except Exception:  # noqa: BLE001 -- the probe must never break the push gate
         pass
