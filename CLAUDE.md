@@ -17,9 +17,25 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 ## Commands
 
 - Tests: `uv run pytest`
-- Lint: `uv run ruff check scripts tests`
+- Lint: `uv run ruff check scripts tests` **and `uv run mypy scripts/ --ignore-missing-imports`**
+  — the publish gate runs ruff + **mypy**, not pyright. A pyright-clean tree is NOT the gate:
+  mypy has caught errors here that pyright passed, at the gate, after the work looked done.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
+
+## Working rules (USER, 2026-08-14 — not optional)
+
+- **NEVER `git push`. Publishing and pushing to GitHub go through `scripts/publish.py`
+  ONLY** (`--patch` / `--minor` / `--major`). A pre-push hook enforces this by process
+  ancestry, so a bare push is refused — it re-runs lint, tests and CPV `--strict`
+  immediately before the push, which is the point.
+- **FINISH every pending task and TRDD BEFORE publishing/pushing.** A publish is not a
+  checkpoint for half-done work: check the board (`grep -l "^column: dev" design/tasks/*.md`)
+  and the session task list first, and close or explicitly re-column what is open.
+- **Run tasks and shells in the BACKGROUND** (`run_in_background: true`) so work
+  parallelizes instead of blocking the turn. Read the output file when it completes.
+- **DELEGATE parallelizable work to multiple `lean-worker` subagents** rather than doing it
+  serially in the main context. Fan them out; each returns a path, not content.
 
 ## Navigating this codebase — use `tldr`, never a static map
 

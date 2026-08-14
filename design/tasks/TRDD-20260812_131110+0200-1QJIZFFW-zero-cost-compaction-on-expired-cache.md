@@ -71,6 +71,30 @@ accounting on the clear path.
   - the table row marking `use_llm_ext` **DARK** — it has a caller now
     (`external_handoff_clear._compose`).
 
+### 2026-08-14 — the SessionStart hook was NOT bounded; two "open" gaps were already closed
+
+**FIXED: the hook's declared timeout was 600s.** I had recorded "the probe costs 25-30 s
+inside a SessionStart hook — confirm that is bounded" as a question for the owner. Checked
+it, and the answer was no. The probe's own bound is 90 s (`_CACHE_EXPIRED_TIMEOUT_S`), but
+`hooks/hooks.json` declared **600 s** for the hook — 6.7x its own worst case, and **120x**
+every sibling SessionStart hook (all 5 s). So a hang anywhere in the hook blocked session
+start for TEN MINUTES before Claude Code killed it. Now 120 s: the probe can still take its
+full 90 s, and a hang costs 2 min instead of 10. `DEFAULT_ENABLED = False` means this was
+never live, which is exactly why it survived — an opt-in path's costs are only paid by the
+person who opts in, and nobody had.
+
+**NOT a gap after all — verified, do NOT "fix" these:**
+- *`mark_clear_fired` stamped after spawn.* `dispatch.py:2136` stamps only AFTER a verified
+  send (`if not ok: return False` precedes it); the SessionStart hook latches with
+  `dedupe.emit_once` BEFORE its `Popen`; `external_handoff_clear.py:340` stamps after the
+  spawn call deliberately, with the reasoning written inline, and the window is microseconds
+  against daemon beats minutes apart, serialized by `clear-chain.lock`.
+- *Floor staleness — "nothing consults `measured_after_compact_ts`".* That note was WRONG.
+  `refresh_floor` reads it: `if last_compact <= floor_ts: return floor` — a compaction newer
+  than the measurement re-measures. The residue is install-change (a new plugin raises the
+  real floor while the stored one stays low, over-stating gain), and it self-heals at the
+  next compaction. Not worth code.
+
 ### 2026-08-14 — advisor verdict on the RE-FIRE policy, and a floor-staleness gap
 
 The owner asked whether `already_fired_this_session` is too blunt: a long session whose cache

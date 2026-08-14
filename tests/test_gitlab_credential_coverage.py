@@ -67,6 +67,10 @@ def test_benign_paths_are_not_flagged(benign: str) -> None:
 
 # --- the GitLab token families ---------------------------------------------------------
 
+# The shared fixture tail. Kept separate from every prefix so no line in this file ever
+# contains a contiguous, real-format credential — see `test_secret_fixture_hygiene`.
+_FIXTURE_BODY = "ABCdef1234567890abcdEFGH"
+
 _GITLAB_PREFIXES = (
     "glpat-", "gldt-",  # routable — CC redacts these in full
     "glrt-", "gloas-", "glptt-", "glagent-", "glimt-", "glsoat-", "glcbt-", "glft-", "glffct-",
@@ -80,14 +84,19 @@ def test_gitlab_token_families_are_detected(prefix: str) -> None:
     They use a HYPHEN after the prefix where the GitHub families use an underscore, which
     is why an alternation whose trailing class was `[A-Za-z0-9_]` missed all of them even
     once the prefixes were listed."""
-    token = f"{prefix}ABCdef1234567890abcdEFGH"
-    assert srp._LITERAL_PAT_TOKEN.search(token), f"undetected GitLab token family: {prefix}"
+    assert srp._LITERAL_PAT_TOKEN.search(prefix + _FIXTURE_BODY), (
+        f"undetected GitLab token family: {prefix}"
+    )
 
 
-@pytest.mark.parametrize("token", ["ghp_ABCdef1234567890abcdEF", "github_pat_ABCdef1234567890abcd"])
-def test_github_families_still_detected(token: str) -> None:
-    """The control: adding GitLab must not regress GitHub detection."""
-    assert srp._LITERAL_PAT_TOKEN.search(token)
+@pytest.mark.parametrize("prefix", ["ghp_", "github_pat_"])
+def test_github_families_still_detected(prefix: str) -> None:
+    """The control: adding GitLab must not regress GitHub detection.
+
+    Assembled from prefix + body at runtime, never written as one literal — a contiguous
+    real-format credential in tracked source trips `test_secret_fixture_hygiene`, which is
+    the repo's guard against a fixture that looks exactly like a leak to a scanner."""
+    assert srp._LITERAL_PAT_TOKEN.search(prefix + _FIXTURE_BODY)
 
 
 def test_ordinary_gl_prefixed_words_are_not_tokens() -> None:

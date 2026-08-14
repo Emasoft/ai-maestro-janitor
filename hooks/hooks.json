@@ -33,7 +33,7 @@
           {
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-cold-cache-clear.py",
-            "timeout": 600
+            "timeout": 120
           }
         ]
       }

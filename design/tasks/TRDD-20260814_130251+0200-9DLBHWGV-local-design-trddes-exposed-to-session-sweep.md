@@ -1,9 +1,9 @@
 ---
 trdd-id: 9DLBHWGV
 title: LOCAL design TRDDs live in Claude Code's swept session dir with no backup
-column: dev
+column: complete
 created: 2026-08-14T13:02:51+0200
-updated: 2026-08-14T13:02:51+0200
+updated: 2026-08-14T14:12:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -12,7 +12,7 @@ severity: high
 relevant-rules: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [c0540120]
 ---
 
 # LOCAL design TRDDs live in Claude Code's swept session dir with no backup

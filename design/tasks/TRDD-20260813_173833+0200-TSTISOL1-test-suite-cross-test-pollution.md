@@ -1,9 +1,10 @@
 ---
 trdd-id: TSTISOL1
 title: The test suite leaks state between tests — a test passes alone and fails in company, and writes into the real repo
-column: dev
+column: complete
+implementation-commits: [a749dfcc]
 created: 2026-08-13T17:38:33+0200
-updated: 2026-08-13T19:30:43+0200
+updated: 2026-08-14T15:05:00+0200
 current-owner: unassigned
 task-type: infra
 approval-tier: 0
