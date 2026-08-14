@@ -236,6 +236,13 @@ _PREFIX_LAUNCHERS = frozenset({"taskpolicy", "nice", "ionice", "env", "stdbuf", 
 _READONLY_TOOLS = frozenset({
     "ps", "lsof", "sw_vers", "vm_stat", "sysctl", "mount", "diskutil", "uname", "id",
     "whoami", "hostname", "df", "sleep", "echo", "true", "false", "date", "which", "printf",
+    # `file` identifies a binary's format and cannot alter anything. It is here because
+    # xdist's WORKER BOOTSTRAP calls it — `platform.platform()` -> `architecture()` ->
+    # `file -b <python>` — which happens before any test exists, so neither the stub route
+    # nor the `real_subprocess` marker the denial message offers can reach it: the guard
+    # killed every worker at startup and the whole suite ran serially or not at all.
+    # Allow-listing it is the narrowest fix that keeps the deny-by-default posture intact.
+    "file",
 })
 
 #: git verbs that only READ. Anything else must prove it is operating on a tmp repo.
@@ -363,7 +370,12 @@ def _harden_child_env(argv: list[str], child_env: dict) -> dict:
 _SUITE_REPO = str(Path(__file__).resolve().parent.parent)
 
 
-def _classify_git(argv: list[str], cwd: str, env: dict) -> Verdict:
+# Every classifier below takes the SAME `(argv, cwd, env)` shape because `classify_argv`
+# dispatches them positionally out of `_ALLOW_TABLE` — so a parameter one classifier does not
+# read is still structurally required. Those are spelled with a leading underscore: it keeps the
+# uniform signature (which is what makes the table possible) while saying out loud that this
+# classifier reaches its verdict WITHOUT that input, so a reader does not go looking for the use.
+def _classify_git(argv: list[str], cwd: str, _env: dict) -> Verdict:
     """READ anywhere; MUTATE only inside a tmp repo — and NEVER the suite's own repo.
 
     `-C <dir>` retargets git independently of the cwd, so it must be honoured — otherwise
@@ -393,7 +405,7 @@ def _classify_git(argv: list[str], cwd: str, env: dict) -> Verdict:
     )
 
 
-def _classify_security(argv: list[str], cwd: str, env: dict) -> Verdict:
+def _classify_security(argv: list[str], _cwd: str, _env: dict) -> Verdict:
     """`security` is allowed ONLY when confined to a throwaway keychain file in tmp.
 
     This turns the `keychain_scope_args()` CONVENTION into an enforced INVARIANT. An unscoped
@@ -422,7 +434,7 @@ def _classify_security(argv: list[str], cwd: str, env: dict) -> Verdict:
     return _ALLOW
 
 
-def _classify_touch(argv: list[str], cwd: str, env: dict) -> Verdict:
+def _classify_touch(argv: list[str], cwd: str, _env: dict) -> Verdict:
     """`touch` writes files WITHOUT going through Python, so the file guard cannot see it.
     Allowed only when every path it names is in tmp."""
     paths = [a for a in argv[1:] if not a.startswith("-")]
@@ -485,7 +497,7 @@ def _classify_shell(argv: list[str], cwd: str, env: dict) -> Verdict:
     )
 
 
-def _allow_always(argv: list[str], cwd: str, env: dict) -> Verdict:
+def _allow_always(_argv: list[str], _cwd: str, _env: dict) -> Verdict:
     return _ALLOW
 
 

@@ -58,6 +58,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import shutil
 import sys
 import tempfile
@@ -287,7 +288,33 @@ _GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep", "recovery")
 # below are the ones the suite actually damaged: the user's live `~/.claude` tree, and this
 # repo's own source, which was overwritten with the installed v0.39.0 — silently reverting
 # committed work and clearing exec bits.
-_REAL_HOME_AT_IMPORT = Path(os.path.expanduser("~")).resolve()
+def _real_home() -> Path:
+    """The OS's record of this user's home — NOT `$HOME`, and not `expanduser("~")`.
+
+    This used to be `Path(os.path.expanduser("~")).resolve()`, which reads `$HOME` and was
+    correct only by IMPORT ORDER: conftest is imported before the session fixture below
+    replaces `$HOME` with a temp dir, so the value happened to be the real home.
+
+    That assumption breaks the moment the suite is sharded. An xdist worker is a fresh
+    process that inherits the CONTROLLER's already-mutated environment, so it imports this
+    file with `$HOME` ALREADY pointing at the fake home — and then every protected path in
+    `_SANDBOX_DENY` is computed against the fake tree. The guard would go on reporting that
+    it was armed while protecting a temp directory, leaving the user's REAL `~/.claude`
+    (live plugin DATA, global-state, rules, memory) unguarded for the whole run. The
+    positive control `test_open_write_into_real_claude_tree_is_blocked` is what caught it:
+    under `-n` it wrote its probe successfully and failed with DID NOT RAISE.
+
+    `pwd.getpwuid(os.getuid())` answers from the passwd database, which no environment
+    mutation can reach — so the value is the same in the controller, in a worker, before or
+    after the fixture, and the guard cannot be silently disarmed by inheriting an env.
+    """
+    try:
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except (KeyError, OSError):  # no passwd entry (a container); fall back, still resolved
+        return Path(os.path.expanduser("~")).resolve()
+
+
+_REAL_HOME_AT_IMPORT = _real_home()
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _SANDBOX_DENY: tuple[Path, ...] = (

@@ -77,4 +77,13 @@ dev = [
     # a gate that only approximates the authority it stands in for is worse than none
     # (TRDD-IAJS6M9Z).
     "tiktoken",
+    # The suite is ~15k tests and ran SERIALLY at ~16 min on a 14-core machine, which made a
+    # full verification something you avoid rather than something you do — and a gate people
+    # route around is not a gate. xdist shards it across cores.
+    #
+    # It is safe here specifically because the suite's shared-state hazards are already fixed:
+    # TRDD-TSTISOL1 removed the cross-test pollution, and conftest's write-guard fails loudly
+    # on any test that escapes into the real janitor state dirs. Without those two, sharding
+    # would have converted a deterministic suite into a flaky one.
+    "pytest-xdist",
 ]
