@@ -744,7 +744,11 @@ def test_ordinary_words_are_not_symbols(tmp_path):
     mod = _sym_in_history()
     root = Path(__file__).resolve().parent.parent
     for word in ("queue", "modified", "context", "result", "data", "value"):
-        assert not mod._symbol_in_history(word, root), f"{word!r} is prose, not a symbol"
+        # `is False`, NOT `assert not` — the distinction is the whole point. `None` means the
+        # lookup could not RUN (timeout, git missing), and `assert not None` passes, so the
+        # loose form is satisfied by a check that never executed. A negative test that a dead
+        # check can satisfy proves nothing about the code it names.
+        assert mod._symbol_in_history(word, root) is False, f"{word!r} is prose, not a symbol"
 
 
 def test_real_deleted_symbols_are_still_found(tmp_path):
@@ -753,7 +757,36 @@ def test_real_deleted_symbols_are_still_found(tmp_path):
     mod = _sym_in_history()
     root = Path(__file__).resolve().parent.parent
     for sym in ("_phase_self_budget", "_symbol_in_history", "emit_once"):
-        assert mod._symbol_in_history(sym, root), f"{sym!r} was defined here and must be found"
+        assert mod._symbol_in_history(sym, root) is True, f"{sym!r} was defined here, must be found"
+
+
+def test_an_undetermined_lookup_is_none_not_false(monkeypatch):
+    """A timeout must NOT be spelled the same as "this token was never a symbol".
+
+    THE INCIDENT (2026-08-14): `timeout=8` was sized against an idle machine where this call
+    measures 245-1490ms — an apparent 5x margin. Under `-n auto` the contended call exceeded
+    8s, `run_subprocess` returned None, and the function returned **False**, which the caller
+    reads as "not in history" and silently suppresses every finding. It surfaced only because a
+    TEST asserted a positive; in production the detector would just have gone quiet, and no
+    log, count, or alert could have distinguished that from a clean board.
+
+    This is the test that had never existed: nothing exercised the failure path, so the
+    collapse was invisible by construction — the absence of a failure signal being mistaken for
+    the absence of a defect.
+    """
+    mod = _sym_in_history()
+    # Force the exact shape run_subprocess reports for a timeout / missing binary / OSError.
+    monkeypatch.setattr(mod.state, "run_subprocess", lambda *a, **k: None)
+    assert mod._symbol_in_history("emit_once", Path(".")) is None
+
+    # A non-zero exit is equally undetermined — that is the `-S`/`-G` flag bug (git exit 128),
+    # which returned False and turned the whole check permanently silent without erroring.
+    class _Failed:
+        returncode = 128
+        stdout = ""
+
+    monkeypatch.setattr(mod.state, "run_subprocess", lambda *a, **k: _Failed())
+    assert mod._symbol_in_history("emit_once", Path(".")) is None
 
 
 def test_the_regex_uses_no_construct_git_silently_ignores():

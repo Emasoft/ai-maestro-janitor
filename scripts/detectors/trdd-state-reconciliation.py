@@ -271,8 +271,9 @@ def _symbol_absent_at_head(token: str, root: Path) -> bool:
 _DEFINITION_RE = r"^[[:space:]]*(def |class |async def ){0}[^A-Za-z0-9_]|^{0}[[:space:]]*[:=]"
 
 
-def _symbol_in_history(token: str, root: Path) -> bool:
-    """True iff `token` was once DEFINED as a module-level symbol in `scripts/` history.
+def _symbol_in_history(token: str, root: Path) -> bool | None:
+    """True/False iff `token` was once DEFINED as a module-level symbol in `scripts/` history,
+    or **None when that could not be determined** (git missing, timeout, non-zero exit).
 
     janitor#255: this used `git log -S<token>`, which is a SUBSTRING search over diffs — it
     matches the token anywhere in any changed line, including prose in a comment, a fragment
@@ -287,10 +288,22 @@ def _symbol_in_history(token: str, root: Path) -> bool:
     ever a symbol HERE. A word that only ever appeared inside a line is no longer evidence of
     anything, which is the whole defect.
 
-    Still deliberately conservative in the same direction as before — an unknown answer (git
-    missing, timeout, non-zero exit) returns False, so the check stays silent rather than
-    inventing a finding. A missed dead symbol costs a stale citation; a false one costs the
-    reader's trust in every other finding the detector makes.
+    Still deliberately conservative in the SAME direction as before: the caller treats None
+    exactly as it treated the old False — no finding. A missed dead symbol costs a stale
+    citation; a false one costs the reader's trust in every other finding the detector makes.
+    That trade is unchanged and correct.
+
+    What changed (2026-08-14) is that "no" and "I could not tell" are no longer THE SAME VALUE.
+    They were, and the cost was real: `timeout=8` was sized against an idle machine where this
+    call takes 245-1490ms, looked like a 5x margin, and was not one — under `-n auto` the
+    contended call blew past 8s, returned False, and the check reported nothing. A publish
+    failed on it. But had the timeout been hit in PRODUCTION instead of in a test, the detector
+    would simply have gone quiet, and no alert, count, or log line could have told anyone the
+    difference between a clean board and a check that never ran.
+
+    That is the same permanently-silent shape the `-S`/`-G` note above records — an error path
+    returning a legitimate negative. Fixing it once in this function does not fix the class, so
+    the callers now COUNT the undetermined answers and say so.
     """
     # NO `--pickaxe-regex`: that flag belongs to `-S`, and passing it alongside `-G` makes git
     # exit 128. This function returns False on a non-zero exit, so the combination did not
@@ -302,11 +315,26 @@ def _symbol_in_history(token: str, root: Path) -> bool:
             f"-G{_DEFINITION_RE.format(re.escape(token))}",
             "--", "scripts",
         ],
-        timeout=8,
+        # 30s, not 8s (raised 2026-08-14 after a real failure). MEASURED on an IDLE machine,
+        # this exact `-G` over this repo's history: 245ms / 606ms / 1490ms for the three
+        # symbols `test_real_deleted_symbols_are_still_found` checks. That looks like a
+        # comfortable margin under 8s and is not one — the suite now runs under `-n auto`, and
+        # 14 workers contending for CPU and disk pushed the 1.5s call past 8s, failing the test
+        # and BLOCKING a publish. A bound sized against an idle machine is not a bound.
+        #
+        # The cost of being wrong is asymmetric and invisible, which is why the margin is
+        # generous: on timeout `run_subprocess` returns None and this returns False — the SAME
+        # answer as "this token was never defined here". A `detector_name` log line is written,
+        # but the RETURN VALUE cannot tell a caller "I could not determine" from "no". So a
+        # too-tight timeout does not fail; it silently stops finding dead symbols, which is
+        # exactly the permanently-silent class the note above records for the `-S`/`-G` flag
+        # bug. Distinguishing the two is TRDD-worthy on its own; widening the window first
+        # removes the trigger.
+        timeout=30,
         detector_name="trdd-state-reconciliation",
     )
     if proc is None or proc.returncode != 0:
-        return False
+        return None  # undetermined — NOT "no". See the docstring.
     return bool(proc.stdout.strip())
 
 
@@ -459,12 +487,24 @@ def main() -> int:
     # (per-project mailbox + this session's drift line), NOT folded into the
     # candidate-board rows/report those checks share.
     dead_symbol_cache: dict[str, bool] = {}
+    # Tokens whose history lookup could not be COMPLETED (git missing, timeout, non-zero exit).
+    # Counted, not silently folded into "not dead": an undetermined answer suppresses a finding
+    # exactly as before, but a check that could not run must not be indistinguishable from a
+    # check that ran and found nothing. Without this, the only observable difference between a
+    # clean board and a dead check is that both print nothing.
+    undetermined: set[str] = set()
 
     def token_is_dead(token: str) -> bool:
         if token not in dead_symbol_cache:
-            dead_symbol_cache[token] = _symbol_absent_at_head(token, root) and _symbol_in_history(
-                token, root
-            )
+            if not _symbol_absent_at_head(token, root):
+                dead_symbol_cache[token] = False
+            else:
+                in_history = _symbol_in_history(token, root)
+                if in_history is None:
+                    undetermined.add(token)
+                # None -> False here: SAME suppression as before the tri-state existed. The
+                # value is unchanged; what changed is that we now know it happened.
+                dead_symbol_cache[token] = bool(in_history)
         return dead_symbol_cache[token]
 
     for rec in records:
@@ -487,6 +527,23 @@ def main() -> int:
             )
             if line:
                 print(line)
+
+    # Say so when Check 5 ran DEGRADED. Silence here would be indistinguishable from a clean
+    # board, which is the whole defect this counter exists for: every dead-symbol lookup could
+    # have failed and the detector would have printed exactly what it prints when all is well.
+    #
+    # A LOG line, not a drift line / ledger finding: an undetermined lookup is a fact about
+    # THIS RUN's environment (a contended machine, a missing git), not a defect in the board the
+    # reader is being asked to fix — promoting it to a finding would train them to ignore
+    # findings. The post-mortem question "was the check actually running that day?" now has an
+    # answer on disk.
+    if undetermined:
+        state.log_line(
+            "trdd-state-reconciliation",
+            f"check5 DEGRADED: {len(undetermined)} symbol(s) undetermined "
+            f"(git missing/timeout/non-zero exit), suppressed as not-dead: "
+            f"{', '.join(sorted(undetermined)[:10])}",
+        )
 
     # The git seams — loaded lazily so a project with no candidate TRDDs (the
     # common case) pays nothing. `git log` is read once; `git tag --contains`
