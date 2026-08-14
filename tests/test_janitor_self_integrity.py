@@ -911,3 +911,138 @@ def test_missing_manifest_in_a_source_checkout_stays_silent(tmp_path: Path) -> N
     setattr(mod, "_MANIFEST_PATH", root / ".integrity" / "manifest-sha256.json")  # dynamic module-level constant
 
     assert mod._check_manifest() is None
+
+
+# ---------- Section 7: C3 last-good pin staleness (TRDD-ZM5LZ24Y) ----------
+#
+# `_check_last_good_pin` is the missing alarm for a pin left naming a STALE
+# version: `pin_good_version` advances only when the DAEMON self-updates, so a
+# hand-run `claude plugin update` installs a version the pin never certifies —
+# and C3 goes permanently, silently quiet. These tests write a REAL
+# last-good.json under `JANITOR_DATA_DIR` (the same fixed-dir override
+# `version_update_lib._data_dir()` honours) and load the detector fresh so its
+# `version_update_lib` import re-resolves against that override — no mock of
+# `read_last_good` itself, since that IS the code path under test.
+
+
+def _write_last_good(data_dir: Path, *, version: str) -> None:
+    """Seed a real ``<data_dir>/integrity/last-good.json`` — the on-disk shape
+    `pin_good_version` produces. `janitor_integrity.read_or_restore` trusts a
+    primary file with no `.bak` sidecar as-is, so a plain write is sufficient."""
+    integrity_dir = data_dir / "integrity"
+    integrity_dir.mkdir(parents=True, exist_ok=True)
+    (integrity_dir / "last-good.json").write_text(
+        json.dumps({"version": version, "manifest_hmac": "deadbeef"}),
+        encoding="utf-8",
+    )
+
+
+def _load_pin_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Load the detector fresh with `JANITOR_DATA_DIR` pointed at a tmp dir, so
+    `version_update_lib.read_last_good()` resolves the pin from OUR seeded file
+    instead of the real machine-wide data dir."""
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data_dir))
+    for mod_name in ("version_update_lib", "janitor_self_integrity", "janitor_integrity"):
+        sys.modules.pop(mod_name, None)
+    mod = _load_detector_module()
+    return mod, data_dir
+
+
+def test_pin_staleness_fires_when_pin_names_a_different_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Pin certifies an OLDER version than the one running: the drift-line body
+    must name BOTH versions so the reader can tell what is stale vs. current."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    _write_last_good(data_dir, version="1.2.3")
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "1.9.9")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: False)
+
+    finding = mod._check_last_good_pin()
+
+    assert finding is not None
+    assert "1.2.3" in finding
+    assert "1.9.9" in finding
+
+
+def test_pin_staleness_silent_when_pin_matches_running_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """The pin certifies exactly what is running: no drift, no finding."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    _write_last_good(data_dir, version="2.4.0")
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "2.4.0")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: False)
+
+    assert mod._check_last_good_pin() is None
+
+
+def test_pin_staleness_silent_with_no_pin_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """No pin ever written (fresh install / never daemon-updated) is "no
+    opinion", not a finding — fail-open, same posture as the C3 stub gate."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    assert not (data_dir / "integrity" / "last-good.json").exists()
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "2.4.0")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: False)
+
+    assert mod._check_last_good_pin() is None
+
+
+def test_pin_staleness_silent_on_malformed_version_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """An empty/blank `version` field in an otherwise-valid pin JSON is
+    uncertainty, not a signal — fail-open rather than a false alarm."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    _write_last_good(data_dir, version="   ")
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "2.4.0")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: False)
+
+    assert mod._check_last_good_pin() is None
+
+
+def test_pin_staleness_silent_when_running_root_not_version_shaped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`_PLUGIN_ROOT.name` not looking like a version (a DATA stage dir, a
+    relocated tree — e.g. "stage", no digit-dot shape) has nothing to compare
+    against: no opinion beats a false alarm."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    _write_last_good(data_dir, version="1.2.3")
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "stage")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: False)
+
+    assert mod._check_last_good_pin() is None
+
+
+def test_pin_staleness_silent_in_a_source_checkout_even_with_a_stale_pin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A git source checkout has no version-stamped cache dir and no pin
+    relationship — the guard must short-circuit before even reading the pin,
+    same reasoning as `_check_manifest`'s source-checkout guard."""
+    mod, data_dir = _load_pin_module(monkeypatch, tmp_path)
+    _write_last_good(data_dir, version="1.2.3")
+    setattr(mod, "_PLUGIN_ROOT", tmp_path / "9.9.9")
+    setattr(mod, "is_plugin_source_checkout", lambda _root: True)
+
+    assert mod._check_last_good_pin() is None
+
+
+def test_main_dedupe_signature_includes_pin_part() -> None:
+    """Without a `pin|` part in `main()`'s dedupe signature, a stale-pin finding
+    would be silenced on every fire where the manifest and skills are
+    unchanged — exactly the steady state it exists to report (see the comment
+    at the signature-construction site). Running `main()` end-to-end would
+    require a full detector-enabled subprocess with its own isolated data dir
+    (Section 5's `_run_detector` machinery) just to observe an internal
+    string-building detail, so this asserts at the source level instead: the
+    `pin|` literal appears in the signature-construction block that feeds
+    `signature_parts`.
+    """
+    source = _DETECTOR.read_text(encoding="utf-8")
+    assert 'signature_parts.append(\n        f"pin|' in source or 'f"pin|' in source
+    assert "pin|" in source

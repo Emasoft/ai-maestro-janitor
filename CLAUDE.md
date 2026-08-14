@@ -44,7 +44,10 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   background and do other work; come back when the janitor reports the result.
 - **The moment the janitor reports the published plugin passed CI, upgrade it locally:**
   `claude plugin update <plugin>@<marketplace> --scope user`. A green CI that nobody
-  installs changes nothing on this machine.
+  installs changes nothing on this machine. Known side effect: this manual path does
+  NOT advance the C3 last-good integrity pin (only a daemon self-update does), so
+  `janitor-self-integrity` will report a stale anchor afterwards — expected until
+  TRDD-ZM5LZ24Y lands, not a tamper signal.
 - **Every janitor-armed session on this machine must end up on the new version.** Prefer a
   path that does NOT require `/reload-plugins`, which breaks the prompt-cache prefix and
   re-bills the whole window (see TRDD-VHPYSN56); the cron stub already auto-rolls to the

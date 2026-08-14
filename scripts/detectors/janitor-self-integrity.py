@@ -33,7 +33,13 @@ most one drift line per fire):
      fixed dir the C3 pin path uses — TRDD-DKEYCHN7; NOT $CLAUDE_PLUGIN_DATA),
      walk the chain and surface the first broken link.
 
-  3. SKILL.md integrity-notice preamble drift
+  3. C3 last-good pin currency (TRDD-ZM5LZ24Y)
+     If the pin exists but certifies a DIFFERENT version than the one
+     we are running, the stub's C3 cross-check is permanently "no
+     opinion" and silently degrades to the C2-only gate. Reported
+     because a stale anchor and a healthy one look identical.
+
+  4. SKILL.md integrity-notice preamble drift
      If a janitor SKILL.md is missing the canonical integrity-notice
      block (per `INTEGRITY_NOTICE_PREAMBLE` in the library), surface
      it as a separate finding class — a SKILL.md without its tamper
@@ -242,6 +248,60 @@ def _check_audit_chain() -> str | None:
     )
 
 
+def _check_last_good_pin() -> str | None:
+    """Return a drift-line body when the C3 last-good pin does not certify the
+    version we are RUNNING — i.e. the tamper anchor is stale.
+
+    WHY THIS NEEDS A DETECTOR AT ALL. The stub's C3 gate (`_pin_rejects`) can
+    only have an opinion when the pin names the SAME version it is about to
+    exec; every other state returns False — "no opinion" — and falls through to
+    C2. That fail-open is correct (uncertainty must never block a heartbeat) but
+    it is INVISIBLE: a pin left naming an old version disables C3 permanently
+    and is byte-indistinguishable from a healthy one. Silent absence of a guard
+    is the failure mode this whole detector exists for.
+
+    ROOT CAUSE (verified 2026-08-14, TRDD-ZM5LZ24Y). `pin_good_version` has
+    exactly ONE caller — `daemon.py`, inside `if updated:` — so the pin advances
+    only when the DAEMON performs the self-update. A `claude plugin update` run
+    by hand installs a version that is never certified, and C3 goes quiet for
+    good. This project's CLAUDE.md now tells the agent to run that manual command
+    on every CI pass, so the stale state is not an edge case: it is the norm.
+
+    Conservative by construction: reports ONLY when a pin EXISTS and names a
+    different version than the running one. No pin (never updated, unreadable,
+    malformed) is "no opinion", never a finding — the same posture as the stub.
+    """
+    # A git source checkout has no version-stamped cache dir and no pin
+    # relationship — same dev-state reasoning as the guard in _check_manifest.
+    if is_plugin_source_checkout(_PLUGIN_ROOT):
+        return None
+    try:
+        pin = version_update_lib.read_last_good()
+    except OSError:
+        return None
+    if pin is None:
+        return None
+    pinned = (pin.get("version") or "").strip()
+    running = _PLUGIN_ROOT.name
+    # `running` is the version-stamped cache dir name. When this build executes
+    # from somewhere NOT version-stamped (a DATA stage, a relocated tree), there
+    # is nothing to compare — no opinion beats a false alarm.
+    if not pinned or not running or "." not in running or not running[0].isdigit():
+        return None
+    if pinned == running:
+        return None
+    return (
+        f"C3 last-good pin certifies {pinned}, but the janitor is RUNNING "
+        f"{running} — the HMAC tamper anchor is STALE, so the dispatcher stub "
+        "silently falls back to its C2-only gate (a same-tree UNSIGNED manifest, "
+        "which an attacker holding cache write access could rewrite wholesale). "
+        "C2 still verifies every exec, so this is a DEGRADED defense, not an open "
+        "door. Cause: the pin advances only when the daemon self-updates, so a "
+        "manual `claude plugin update` never re-certifies. There is no user-side "
+        "re-pin command today — TRDD-ZM5LZ24Y tracks the fix."
+    )
+
+
 def _check_skill_preambles() -> str | None:
     """Return a drift-line body if any janitor SKILL.md lacks the preamble.
 
@@ -314,6 +374,14 @@ _TICKET_CODES = {
     "audit-chain": "SELFINT-002",
     "skill-preamble": "SELFINT-003",
 }
+# `last-good-pin` is DELIBERATELY absent — the omission is the design, not an
+# oversight (`_raise_ticket` returns silently on an unmapped class, so an
+# accidental gap here would be invisible; this comment is what makes it not one).
+# A ticket dispatches the repair agent to fix the finding autonomously, and the
+# only fix for a stale C3 pin is to re-certify a version as trusted. An agent
+# that silently rewrites the trust anchor it was asked to audit has destroyed the
+# property the anchor exists to provide. So this finding surfaces as a drift line
+# for a human and stops there; TRDD-ZM5LZ24Y carries the actual fix.
 
 
 def _raise_ticket(finding_class: str, finding: str) -> None:
@@ -393,6 +461,19 @@ def main() -> int:
                 signature_parts.append(f"skill|{rel}|{st.st_mtime_ns}|{st.st_size}")
             except OSError:
                 pass
+    # The C3 pin check reads inputs NOTHING above covers (the pin file and the
+    # running version dir). Without this part the stale-pin finding would be
+    # deduped away on every fire where the manifest and skills were untouched —
+    # i.e. silenced in exactly the steady state it exists to report. A guard that
+    # only fires when something ELSE changed is not a guard.
+    try:
+        _pin = version_update_lib.read_last_good()
+    except OSError:
+        _pin = None
+    signature_parts.append(
+        f"pin|{(_pin or {}).get('version', '')}|{_PLUGIN_ROOT.name}",
+    )
+
     signature = "\n".join(signature_parts)
 
     last_sig_file = state.state_dir() / "janitor-self-integrity-last-sig.txt"
@@ -409,9 +490,15 @@ def main() -> int:
     # the lowest-severity attack-surface nudge.
     finding: str | None = None
     finding_class: str = "clean"
+    # The pin check sits ABOVE skill-preamble: a stale tamper anchor degrades a
+    # real defense, while a missing preamble notice is an attack-surface nudge.
+    # It cannot mask the preamble finding forever — the dedupe signature now
+    # covers the pin, so once reported the whole detector goes quiet until one of
+    # its inputs actually changes.
     for label, fn in (
         ("manifest", _check_manifest),
         ("audit-chain", _check_audit_chain),
+        ("last-good-pin", _check_last_good_pin),
         ("skill-preamble", _check_skill_preambles),
     ):
         try:
