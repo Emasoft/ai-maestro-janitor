@@ -1,16 +1,16 @@
 ---
 trdd-id: YOZ9TS3W
 title: A per-attempt llm-ext timeout shorter than one chunk can never make progress
-column: todo
+column: complete
 created: 2026-08-14T17:36:04+0200
-updated: 2026-08-14T17:36:04+0200
+updated: 2026-08-14T20:42:00+0200
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 approval-tier: 0
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [e4ec23b0]
 ---
 
 # A per-attempt llm-ext timeout shorter than one chunk can never make progress
@@ -104,16 +104,36 @@ measured justification, and B behind it as the durable fix.
 
 ## Acceptance criteria
 
-- [ ] Option chosen and recorded here with one line of rationale.
-- [ ] The ordering invariant `per-attempt < lease TTL` holds by construction, with a
+- [x] **DECISION: C (both), as recommended** — raise the constants so a normal slow
+      chunk fits, AND add the progress gate so a truly stuck run degrades promptly
+      instead of burning the whole deadline. A alone would have made a hung call sit
+      on a fleet lease for the full 2600 s; B alone would still have killed every
+      normal chunk at a budget below the measured 91–1478 s band. Shipped in
+      `e4ec23b0`. **The progress gate ships OFF by default**
+      (`test_the_progress_gate_is_off_by_default`): it reads a checkpoint file the
+      CLI owns, so it is opt-in until that coupling is proven stable — B is present
+      and tested, not yet load-bearing.
+- [x] The ordering invariant `per-attempt < lease TTL` holds by construction, with a
       test that FAILS if a future edit breaks it (the coupling is currently only a
       prose comment, which is what let this drift).
-- [ ] The per-attempt value is justified in a comment against the CLI's own 600 s
+      → `test_the_per_attempt_timeout_is_shorter_than_the_lease_ttl`. The TTL is
+      DERIVED (`LLM_EXT_TIMEOUT_S + _FLEET_LEASE_TTL_MARGIN_S`), never a literal, so
+      the invariant cannot drift by editing one number. A second test,
+      `test_the_blocking_sessionstart_hook_timeout_covers_the_summary_deadline`,
+      pins the other ordering pair — which is the one that was actually broken.
+- [x] The per-attempt value is justified in a comment against the CLI's own 600 s
       `--chunk_timeout_s` default, not against the ~180 s mean.
-- [ ] A test proving a chunk slower than the per-attempt budget is not retried
+      → `scripts/lib/external_clear.py:156`, citing the maintainers' measured
+      91–1478 s per-chunk band alongside the 600 s default.
+- [x] A test proving a chunk slower than the per-attempt budget is not retried
       forever with zero progress (whatever option lands).
-- [ ] `uv run pytest`, `uv run ruff check scripts tests`,
+      → `test_a_chunk_stuck_past_the_budget_stops_after_two_timeouts_not_the_deadline`,
+      with `test_a_chunk_that_keeps_checkpointing_is_not_mistaken_for_stuck` as its
+      falsification partner — a gate that fires on everything would pass the first
+      test alone, so the pair is what makes it evidence.
+- [x] `uv run pytest`, `uv run ruff check scripts tests`,
       `uv run mypy scripts/ --ignore-missing-imports` clean.
+      → 83 passed on the targeted set; ruff clean; mypy clean over 484 files.
 
 ## Provenance
 
