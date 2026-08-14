@@ -667,3 +667,94 @@ def test_iter_escaping_note_files_empty_when_nothing_escapes(tmp_path):
 def test_iter_escaping_note_files_empty_for_missing_dir(tmp_path):
     """Missing root -> empty, mirroring iter_note_files; never raises."""
     assert msc.iter_escaping_note_files(tmp_path / "does-not-exist") == []
+
+
+def test_a_dangling_symlink_never_reaches_the_escape_surface(tmp_path):
+    """A BROKEN link is not reported as an escape — pinning a real, surprising gap.
+
+    `iter_escaping_note_files` filters on `is_file()`, which FOLLOWS symlinks and is False
+    for a dangling one. So a broken link is silently absent from the escape set, not merely
+    ranked lower. Recorded as a test because the behavior reads like a bug at the call site
+    and someone will eventually "fix" the filter without realizing it changes this.
+    """
+    root = tmp_path / "mem"
+    root.mkdir()
+    (root / "broken.md").symlink_to(tmp_path / "nowhere" / "gone.md")
+    assert (root / "broken.md").is_symlink()
+    assert msc.iter_escaping_note_files(root) == []
+
+
+# --- publish-globally: the SANCTIONED escape (see memory.rs::classify_publish_globally) ---
+
+
+def _published_link(tmp_path, value: str | None) -> Path:
+    """A USER-scope symlink pointing at a PROJECT page carrying ``publish-globally: <value>``
+    (omit the field entirely when ``value`` is None). Returns the link."""
+    root = tmp_path / "user-memory"
+    root.mkdir(exist_ok=True)
+    outside = tmp_path / "proj" / ".claude" / "project" / "memory"
+    outside.mkdir(parents=True, exist_ok=True)
+    field = "" if value is None else f"publish-globally: {value}\n"
+    target = outside / "shared.md"
+    target.write_text(f"---\nname: shared\n{field}---\n\nfact\n", encoding="utf-8")
+    link = root / "shared.md"
+    link.symlink_to(target)
+    return link
+
+
+def test_a_publish_globally_true_symlink_is_sanctioned(tmp_path):
+    """field=true + symlink is the CONFORMANT state — the reporter must not call it drift."""
+    assert msc.is_published_globally(_published_link(tmp_path, "true")) is True
+
+
+@pytest.mark.parametrize("value", ["TRUE", "True", '"true"', "'true'", " true "])
+def test_publish_globally_value_grammar_matches_the_rust_ssot(tmp_path, value):
+    """Case-insensitive, quote-tolerant — mirrors `eq_ignore_ascii_case` on the Rust side.
+
+    This is the drift surface between the two implementations, so it is pinned explicitly:
+    if Rust's value grammar changes, this is the test that should go red.
+    """
+    assert msc.is_published_globally(_published_link(tmp_path, value)) is True
+
+
+def test_publish_globally_false_with_a_symlink_stays_a_defect(tmp_path):
+    """The CONFLICT state (flag false, link present) has two defensible fixes, so a human
+    decides — it must keep reporting rather than be quietly absorbed by the exemption."""
+    assert msc.is_published_globally(_published_link(tmp_path, "false")) is False
+
+
+def test_a_symlink_without_the_field_stays_a_defect(tmp_path):
+    """No `publish-globally:` at all ⇒ an ordinary stray escape, still reported."""
+    assert msc.is_published_globally(_published_link(tmp_path, None)) is False
+
+
+def test_a_real_file_is_never_published_globally(tmp_path):
+    """The predicate gates on the LINK, so a page that merely carries the field in its own
+    scope is not mistaken for a published alias."""
+    root = tmp_path / "mem"
+    root.mkdir()
+    p = root / "own.md"
+    p.write_text("---\nname: own\npublish-globally: true\n---\n\nfact\n", encoding="utf-8")
+    assert msc.is_published_globally(p) is False
+
+
+def test_an_unreadable_target_fails_toward_reporting(tmp_path):
+    """A link we cannot resolve or read is NOT sanctioned — mirroring `escapes_root`'s
+    "unresolvable ⇒ escaping". Failing the other way would turn every unreadable page into
+    permanent silence, which is the exact shape of the bug this surface exists to remove."""
+    root = tmp_path / "mem"
+    root.mkdir()
+    (root / "broken.md").symlink_to(tmp_path / "nowhere" / "gone.md")
+    assert msc.is_published_globally(root / "broken.md") is False
+
+
+def test_malformed_frontmatter_is_not_sanctioned(tmp_path):
+    """No opening fence / no closing fence ⇒ not sanctioned, never an exception."""
+    root = tmp_path / "mem"
+    root.mkdir()
+    outside = tmp_path / "other"
+    outside.mkdir()
+    t = outside / "x.md"
+    t.write_text("publish-globally: true\n\nno fences at all\n", encoding="utf-8")
+    (root / "x.md").symlink_to(t)
+    assert msc.is_published_globally(root / "x.md") is False

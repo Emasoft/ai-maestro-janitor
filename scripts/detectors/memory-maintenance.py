@@ -450,13 +450,30 @@ def _surface_scope_escapes(scopes: list[tuple[str, Path]]) -> None:
         seen = state.state_dir() / "memory-scope-escape.seen"
         for scope, root in scopes:
             for path in memory_scopes.iter_escaping_note_files(root):
-                msg = (
-                    f"[memory-scope-escape] {scope}/{path.name} escapes its scope root "
-                    f"({root}) — no chore here can ever write it (M-10). Structural, not "
-                    f"transient: move the page to the scope it actually resolves into, or "
-                    f"re-point the link the other way."
-                )
-                line = dedupe.emit_once(seen, f"{scope}|{path.name}", msg)
+                # A `publish-globally:` symlink escapes BY DESIGN. Reporting it as drift told
+                # the reader to undo the mechanism, so classify instead of suppressing: the
+                # sanctioned case still gets exactly one line, phrased so an autonomous reader
+                # cannot mistake it for work (see the `status-lines-to-autonomous-readers-
+                # cause-escalation` memory — an ambiguous info line gets "fixed").
+                published = memory_scopes.is_published_globally(path)
+                kind = "published" if published else "escape"
+                if published:
+                    msg = (
+                        f"[memory-scope-published] {scope}/{path.name} resolves out to its "
+                        f"PROJECT page — this is the EXPECTED `publish-globally: true` state "
+                        f"and needs NO ACTION. It is maintained in PROJECT scope; recall "
+                        f"reaches it from here."
+                    )
+                else:
+                    msg = (
+                        f"[memory-scope-escape] {scope}/{path.name} escapes its scope root "
+                        f"({root}) — no chore here can ever write it (M-10). Structural, not "
+                        f"transient: move the page to the scope it actually resolves into, or "
+                        f"re-point the link the other way."
+                    )
+                # `kind` is IN the dedupe key: without it, a page reported once as informational
+                # would stay permanently silent if it later degraded into a real defect.
+                line = dedupe.emit_once(seen, f"{scope}|{path.name}|{kind}", msg)
                 if line:
                     print(line, flush=True)
     except Exception as exc:  # noqa: BLE001 — a report must never break the pass it rides on

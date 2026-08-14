@@ -240,6 +240,45 @@ def iter_escaping_note_files(memdir: str | os.PathLike[str]) -> list[Path]:
         return []
 
 
+def is_published_globally(path: Path) -> bool:
+    """True iff ``path`` is a SANCTIONED `publish-globally:` symlink, not a stray escape.
+
+    A PROJECT-scope page may carry `publish-globally: true` and be symlinked into the USER
+    memory dir so recall reaches it from every project. That link ESCAPES the USER root by
+    construction, so `escapes_root` flags it — correctly, for the CANDIDATE question (M-10: a
+    USER chore still cannot write across into a PROJECT file). It is wrong for the REPORTING
+    question: the state is the intended one, and the escape line's remediation advice ("move
+    the page, or re-point the link the other way") would UNDO the mechanism. This predicate is
+    what lets the reporter tell the two apart.
+
+    SSOT for the four states is Rust — `memgrep/src/memory.rs::classify_publish_globally` —
+    which both `memgrep lint` and every write verb's normalizer route through. This is a
+    deliberate ~10-line duplicate of only the CONFORMANT arm (field true + symlink present),
+    NOT a re-implementation of the state machine: shelling out to `memgrep` would couple a
+    never-crash detector to a cargo-installed binary that is not guaranteed present. Value
+    parsing matches the Rust side's case-insensitive compare. Everything else — a `false` flag
+    with a symlink (the CONFLICT a human must resolve), a missing field, an unreadable target —
+    stays a defect here, which is why this FAILS TOWARD REPORTING on any error, mirroring
+    `escapes_root`'s "unresolvable ⇒ escaping".
+    """
+    if not path.is_symlink():
+        return False
+    try:
+        text = path.resolve().read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return False  # unreadable ⇒ NOT sanctioned; a report is cheaper than a silent hole
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    for ln in lines[1:]:
+        if ln.strip() == "---":
+            return False  # end of frontmatter, field never seen
+        key, sep, value = ln.partition(":")
+        if sep and key.strip() == "publish-globally":
+            return value.strip().strip("\"'").casefold() == "true"
+    return False  # no closing fence ⇒ malformed frontmatter ⇒ not sanctioned
+
+
 def project_slug(project_dir: str) -> str:
     """Harness per-project slug: the absolute path with every NON-ALPHANUMERIC char dashed.
 
