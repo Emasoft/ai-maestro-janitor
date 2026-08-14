@@ -146,7 +146,10 @@ def cmd_check(root: Path) -> int:
         print("claudemd-slim: no CLAUDE.md")
         return 3
     text = claude_md.read_text(encoding="utf-8")
-    problems = slim_violations(text)
+    # Only demand the project-map fence from a project that opted IN to the auto map —
+    # see `slim_violations(require_map=...)`. Opting out is a supported, deliberate state.
+    opted_in = (root / ".janitor" / "state" / "repomap-opt-in.flag").is_file()
+    problems = slim_violations(text, require_map=opted_in)
     if index_is_stale(text, scan_pages(_memdir(root))):
         problems.append("wikimem index is STALE vs the corpus (run scripts/claudemd_slim.py index)")
     if not problems:

@@ -229,12 +229,26 @@ def narrative_outside_fences(text: str) -> str:
     return text
 
 
-def slim_violations(text: str) -> list[str]:
+def slim_violations(text: str, *, require_map: bool = False) -> list[str]:
     """The slim-contract check — an ADVISORY list, one string per violation, empty when
     conforming. The detector nudges on it; nothing auto-rewrites CLAUDE.md (it sits in
-    the cached prompt prefix — TRDD-e247a349 §5's nudge-only discipline applies)."""
+    the cached prompt prefix — TRDD-e247a349 §5's nudge-only discipline applies).
+
+    `require_map` DEFAULTS TO FALSE because the project map is OPT-IN
+    (`/janitor-auto-repomap-on`), and an absent fence is the NORMAL state for every
+    project that never opted in — or that deliberately opted out. Demanding it
+    unconditionally was circular: this module's own detector documents the fence as
+    the thing that "opted it in", so requiring it flagged exactly the files that had
+    correctly declined. It fired for real here on 2026-08-14, after the map was removed
+    from this repo's CLAUDE.md to stop paying ~46k tokens per turn: the removal was
+    correct and left this check demanding the map back, forever.
+
+    Callers that KNOW the project opted in (the flag at
+    `.janitor/state/repomap-opt-in.flag`) pass `require_map=True` to get a stale/missing
+    fence reported — that is a real defect for an opted-in project.
+    """
     violations: list[str] = []
-    if _fence_span(text, MAP_FENCE_START, MAP_FENCE_END) is None:
+    if require_map and _fence_span(text, MAP_FENCE_START, MAP_FENCE_END) is None:
         violations.append("no project-map fence (run scripts/repomap_generate.py)")
     if _fence_span(text, WIKIMEM_FENCE_START, WIKIMEM_FENCE_END) is None:
         violations.append("no wikimem-index fence (run scripts/claudemd_slim.py index)")

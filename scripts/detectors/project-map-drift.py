@@ -62,7 +62,11 @@ def _slim_contract_nudge(root: Path, text: str) -> None:
             # presupposes the memory system is bootstrapped (/janitor-memory-bootstrap).
             # Nudging here would point at a command that can only refuse.
             return
-        problems = cslim.slim_violations(text)
+        # `require_map` only when this project actually opted in to the auto map. The flag
+        # is the real opt-in signal; the fence's presence is merely its consequence, so
+        # keying on the fence would report every opted-OUT project as broken forever.
+        opted_in = (root / ".janitor" / "state" / "repomap-opt-in.flag").is_file()
+        problems = cslim.slim_violations(text, require_map=opted_in)
         if cslim.index_is_stale(text, pages):
             problems.append("wikimem index stale")
     except Exception:

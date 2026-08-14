@@ -126,8 +126,15 @@ def test_slim_violations_conforming_and_violating(tmp_path: Path, monkeypatch: p
     good = f"# P — a project (https://github.com/o/r)\n\nBuild: `uv run pytest`\n\n{map_block}\n{idx}"
     assert cs.slim_violations(good) == []
     bare = "# P\n\njust prose, no fences, no url\n"
-    probs = cs.slim_violations(bare)
+    probs = cs.slim_violations(bare, require_map=True)
     assert any("project-map fence" in p for p in probs)
+    # ...but ONLY for an opted-in project. The map is opt-in
+    # (`/janitor-auto-repomap-on`), so for everyone else a missing fence is the normal
+    # state, not a defect — reporting it flagged every project that correctly declined,
+    # and kept demanding the map back after a deliberate `/janitor-auto-repomap-off`.
+    assert not any(
+        "project-map fence" in p for p in cs.slim_violations(bare)
+    ), "opted-out (the default) must not be told to generate a map it declined"
     assert any("wikimem-index fence" in p for p in probs)
     assert any("github repo url" in p for p in probs)
     monkeypatch.setenv(cs.NARRATIVE_MAX_BYTES_ENV, "10")
