@@ -158,6 +158,16 @@ def split_of(sample: dict) -> str:
     return "dev" if int(digest[:8], 16) % 2 == 0 else "holdout"
 
 
+def _full_severity_ids(findings: list) -> set[str]:
+    """The rule ids among `findings` that fired at more than LOW/INFO severity.
+
+    TRDD-XCRTJ1C9 (mention vs use): `provenance_verified` downgrades a corroborated
+    described-attack to `severity="LOW"` rather than removing it, so a plain "did anything
+    fire" set can no longer answer "did this still fire at FULL severity" — that is exactly
+    the distinction the acceptance criteria need measured, not reasoned about."""
+    return {f.rule_id for f in findings if f.severity.upper() not in ("LOW", "INFO")}
+
+
 def score(samples: list[dict]) -> dict:
     """Run every sample through `scan_text` and tally recall / false positives.
 
@@ -165,6 +175,17 @@ def score(samples: list[dict]) -> dict:
     run at all: `source` deliberately skips the injection + authority rules (they fire
     constantly inside code comments), so scanning a poisoned instruction file as `source`
     would understate recall, and scanning a code sample as `prose` would overstate it.
+
+    `provenance_verified` (TRDD-XCRTJ1C9) is passed to `scan_text` ONLY for the `benign*`
+    population, never for an attack-class sample. This mirrors the real trust boundary the
+    detector enforces (`agent-context-integrity.py`'s git-authorship corroboration): the
+    corpus's `benign` samples stand in for content this repo's own git history would verify
+    as locally-authored, while an attack sample models content that arrived from OUTSIDE —
+    exactly the case the corroboration gate must never trust. This is not a shortcut around
+    testing the attacker-writable case: four `benign`-adjacent attack samples in this corpus
+    independently carry genre-marker-shaped text (a "Security Policy" framing, an "inert"
+    claim) and, run with `provenance_verified=False`, still fire at full severity below — the
+    bench proves the corroboration requirement inline, not just the load-bearing unit test.
     """
     claimed = claimed_rule_ids()
     per_class: dict[str, dict] = {}
@@ -175,7 +196,12 @@ def score(samples: list[dict]) -> dict:
     for s in samples:
         label = s["label"]
         kind = s.get("kind") or ("source" if label in _SOURCE_CLASSES else "prose")
-        fired = {f.rule_id for f in acp.scan_text(s["content"], file_kind=kind, filename="")}
+        verified = label.startswith("benign")
+        findings = acp.scan_text(
+            s["content"], file_kind=kind, filename="", provenance_verified=verified
+        )
+        fired = {f.rule_id for f in findings}
+        fired_full = _full_severity_ids(findings)
 
         # Any `benign*` label is a control. They are kept as SEPARATE populations because a
         # single blended rate hides the actual finding: `benign` samples were deliberately
@@ -185,20 +211,31 @@ def score(samples: list[dict]) -> dict:
         # describes neither, and which population you sampled would silently set the result.
         if label.startswith("benign"):
             benign_total += 1
-            by_pop = per_population.setdefault(label, {"n": 0, "fp": 0})
+            by_pop = per_population.setdefault(label, {"n": 0, "fp": 0, "fp_full": 0})
             by_pop["n"] += 1
             if fired:
                 by_pop["fp"] += 1
                 fp_samples.append({"id": s.get("id", ""), "fired": sorted(fired),
                                    "note": s.get("note", ""), "population": label})
+            # `fp_full` is the DOWNGRADE-AWARE count — Option C requires every downgraded
+            # finding to stay emitted (so `fp` above never drops), while the acceptance
+            # criterion is specifically "no longer fire at FULL severity".
+            if fired_full:
+                by_pop["fp_full"] += 1
             continue
 
         bucket = per_class.setdefault(
-            label, {"claimed": label in claimed, "n": 0, "intended": 0, "any": 0, "misses": []}
+            label,
+            {
+                "claimed": label in claimed, "n": 0, "intended": 0, "any": 0,
+                "intended_full": 0, "misses": [],
+            },
         )
         bucket["n"] += 1
         if label in fired:
             bucket["intended"] += 1
+        if label in fired_full:
+            bucket["intended_full"] += 1
         if fired:
             bucket["any"] += 1
         else:
@@ -206,6 +243,7 @@ def score(samples: list[dict]) -> dict:
 
     claimed_n = sum(b["n"] for b in per_class.values() if b["claimed"])
     claimed_hit = sum(b["intended"] for b in per_class.values() if b["claimed"])
+    claimed_hit_full = sum(b["intended_full"] for b in per_class.values() if b["claimed"])
     claimed_any = sum(b["any"] for b in per_class.values() if b["claimed"])
 
     return {
@@ -214,12 +252,25 @@ def score(samples: list[dict]) -> dict:
             "benign": benign_total,
             "attack_claimed": claimed_n,
             "recall_intended": round(claimed_hit / claimed_n, 4) if claimed_n else 0.0,
+            "recall_intended_full_severity": (
+                round(claimed_hit_full / claimed_n, 4) if claimed_n else 0.0
+            ),
             "recall_any": round(claimed_any / claimed_n, 4) if claimed_n else 0.0,
             # None, NEVER 0.0, when no benign sample was measured. "0% false positives" off an
             # empty benign population is the single most flattering thing this tool could
             # print, and it would be indistinguishable from a genuinely clean result.
             "false_positive_rate": (
                 round(len(fp_samples) / benign_total, 4) if benign_total else None
+            ),
+            # The downgrade-aware sibling of the rate above (TRDD-XCRTJ1C9): a benign sample
+            # that still fires but only at LOW counts here as ZERO, because Option C's whole
+            # point is that it no longer competes with a real finding for a human's attention.
+            "false_positive_rate_full_severity": (
+                round(
+                    sum(p["fp_full"] for p in per_population.values()) / benign_total, 4
+                )
+                if benign_total
+                else None
             ),
         },
         "per_population": per_population,
@@ -245,7 +296,8 @@ def render(res: dict) -> str:
         "# agent-context-integrity — rule coverage (janitor#226)",
         "",
         f"samples {t['samples']} · attack(claimed) {t['attack_claimed']} · benign {t['benign']}",
-        f"**recall (intended rule) {t['recall_intended']:.0%}** · recall (any rule) "
+        f"**recall (intended rule) {t['recall_intended']:.0%}** "
+        f"(full severity {t['recall_intended_full_severity']:.0%}) · recall (any rule) "
         f"{t['recall_any']:.0%} · false positives "
         + (
             "UNMEASURED (no benign samples)"
@@ -256,25 +308,40 @@ def render(res: dict) -> str:
             # printing a number that describes neither population.
             else "per population, see below"
             if len(res.get("per_population") or {}) > 1
-            else f"{t['false_positive_rate']:.0%}"
+            else (
+                f"{t['false_positive_rate']:.0%} "
+                f"(full severity {t['false_positive_rate_full_severity']:.0%})"
+            )
         ),
         "",
     ]
     pops = res.get("per_population") or {}
     if pops:
-        out += ["", "| benign population | n | flagged | FP |", "|---|---|---|---|"]
+        # `FP` = anything fired at all (Option C: never zero for a downgraded finding).
+        # `FP (full)` = fired above LOW — the number the mention-vs-use fix (TRDD-XCRTJ1C9)
+        # is actually meant to shrink. Both columns are shown so a downgrade can never look
+        # like a disappearance: see the module docstring's over-suppression warning.
+        out += [
+            "", "| benign population | n | FP | FP rate | FP (full severity) | FP rate (full) |",
+            "|---|---|---|---|---|---|",
+        ]
         for name, p in sorted(pops.items()):
             rate = p["fp"] / p["n"] if p["n"] else 0.0
-            out.append(f"| `{name}` | {p['n']} | {p['fp']} | {rate:.0%} |")
+            fp_full = p.get("fp_full", 0)
+            rate_full = fp_full / p["n"] if p["n"] else 0.0
+            out.append(
+                f"| `{name}` | {p['n']} | {p['fp']} | {rate:.0%} "
+                f"| {fp_full} | {rate_full:.0%} |"
+            )
     out += [
         "",
-        "| class | claimed | n | intended | any |",
-        "|---|---|---|---|---|",
+        "| class | claimed | n | intended | intended (full severity) | any |",
+        "|---|---|---|---|---|---|",
     ]
     for name, b in sorted(res["per_class"].items(), key=lambda kv: (not kv[1]["claimed"], kv[0])):
         out.append(
             f"| `{name}` | {'yes' if b['claimed'] else 'NO (blind spot)'} | {b['n']} "
-            f"| {b['intended']} | {b['any']} |"
+            f"| {b['intended']} | {b.get('intended_full', b['intended'])} | {b['any']} |"
         )
     if res["unclaimed_rules"]:
         out += ["", "**Rules with no corpus coverage** (untested claims): "

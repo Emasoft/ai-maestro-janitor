@@ -295,6 +295,49 @@ def _route_exfil_candidate(rel: str, text: str, f: acp.Finding) -> str:
     return ""
 
 
+def _downgrade_described_attacks(
+    findings: list[tuple[str, acp.Finding]], project_root: Path, verified_local: set[str]
+) -> list[tuple[str, acp.Finding]]:
+    """Option A+C (TRDD-XCRTJ1C9): downgrade — never suppress — a finding whose file BOTH
+    (a) self-declares a genre marker (`agent_config_patterns.declared_content_genre` — a
+    "Security Policy" heading, a post-mortem title, a labelled test fixture) AND (b) has
+    git-corroborated `verified_local` provenance (janitor#214's gate: every known commit on
+    the file is authored by this repo's own identity).
+
+    THE TRAP THIS AVOIDS: a marker alone is attacker-writable — an injected document can carry
+    the identical "# Security Policy —" heading a real one does, and trusting the marker on
+    its own would hand the adversary the exact suppression switch this detector exists to
+    deny them. So EITHER signal alone is not enough: `verified_local` alone already gates the
+    RAISE (no ticket — see janitor#214) but says nothing about whether THIS finding is a
+    described attack or a genuine local mistake; the genre marker alone is a self-report. Only
+    the CONJUNCTION is trusted, and even then the finding is downgraded to `severity="LOW"`,
+    never dropped — over-suppression is invisible by construction (a suppressed true positive
+    produces no output, indistinguishable from a clean repo), the same reasoning that sank
+    prefix-/link-derived ancestry in TRDD-3QIQ2E6J and TRDD-OO301H7D.
+
+    A file is read at most once here (`genre_cache`), and ONLY when it is already in
+    `verified_local` — an untrusted-provenance file never pays the extra read at all.
+    """
+    if not verified_local:
+        return findings
+    genre_cache: dict[str, bool] = {}
+    out: list[tuple[str, acp.Finding]] = []
+    for rel, f in findings:
+        if rel in verified_local and f.severity.upper() not in ("LOW", "INFO"):
+            has_genre_marker = genre_cache.get(rel)
+            if has_genre_marker is None:
+                try:
+                    text = (project_root / rel).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    text = ""
+                has_genre_marker = acp.declared_content_genre(text) is not None
+                genre_cache[rel] = has_genre_marker
+            if has_genre_marker:
+                f = f._replace(severity="LOW")
+        out.append((rel, f))
+    return out
+
+
 def _scan(
     paths: list[Path], project_root: Path, budget: int
 ) -> tuple[list[tuple[str, acp.Finding]], list[str]]:
@@ -443,6 +486,25 @@ def main() -> int:
         state.rotate_log_if_big(_NAME)
         return 0
 
+    # Provenance decides whether a FIXER may be recommended (janitor#167). Computed once per
+    # distinct file, over the FULL finding set (moved ahead of the capped `lines` build below
+    # so the mention-vs-use downgrade — TRDD-XCRTJ1C9 — can apply BEFORE anything is printed,
+    # not after).
+    local = _local_authors(project_root)
+    all_rels = {r for r, _ in findings}
+    foreign = {rel for rel in all_rels if _has_foreign_provenance(project_root, rel, local)}
+    # The RAISE gate (janitor#214): a finding in a file with a KNOWN history that is
+    # entirely local never opens a ticket — it is printed above, once, for a human to read.
+    # See `_is_verified_local_only` for why this is narrower than `all_rels - foreign`.
+    verified_local = {rel for rel in all_rels if _is_verified_local_only(project_root, rel, local)}
+
+    # Option A+C (TRDD-XCRTJ1C9, janitor#254 "mention vs use"): a document that TALKS ABOUT an
+    # attack (a security policy, a post-mortem, a labelled test fixture) is a described attack,
+    # not a performed one. Trust that ONLY when the file's genre marker is CORROBORATED by
+    # `verified_local` — a marker alone is attacker-writable, so an untrusted-provenance file
+    # gets no benefit from carrying one. Downgrade, never suppress: see `_downgrade_described_attacks`.
+    findings = _downgrade_described_attacks(findings, project_root, verified_local)
+
     cap = 5
     lines = []
     for rel, f in findings[:cap]:
@@ -452,23 +514,18 @@ def main() -> int:
         # rule name says what was found, and echoing a payload into heartbeat stdout is the
         # very thing this detector exists to prevent. Sanitizing the whole concatenated
         # string instead defanged OUR brackets too, rendering `⟦rule-id⟧`.
+        #
+        # `f.severity` is printed here (it wasn't before TRDD-XCRTJ1C9) specifically so a
+        # downgrade is OBSERVABLE — a reader (and the test suite) can tell a corroborated
+        # described-attack (LOW) from a live one (its rule's normal CRITICAL/HIGH/MEDIUM)
+        # without re-deriving provenance by hand.
         lines.append(
             f"  - {state.sanitize_for_drift_line(rel)}:{f.line} "
-            f"[{f.rule_id}] {f.description}"
+            f"[{f.rule_id}/{f.severity}] {f.description}"
         )
     if len(findings) > cap:
         lines.append(f"  - …and {len(findings) - cap} more")
 
-    # Provenance decides whether a FIXER may be recommended (janitor#167). Computed once per
-    # distinct file, over the capped finding set only, so a wide finding cannot turn the
-    # heartbeat into a git-log storm.
-    local = _local_authors(project_root)
-    all_rels = {r for r, _ in findings}
-    foreign = {rel for rel in all_rels if _has_foreign_provenance(project_root, rel, local)}
-    # The RAISE gate (janitor#214): a finding in a file with a KNOWN history that is
-    # entirely local never opens a ticket — it is printed above, once, for a human to read.
-    # See `_is_verified_local_only` for why this is narrower than `all_rels - foreign`.
-    verified_local = {rel for rel in all_rels if _is_verified_local_only(project_root, rel, local)}
     hint = (
         sh.security_agent_hint(
             "skill-bundle",

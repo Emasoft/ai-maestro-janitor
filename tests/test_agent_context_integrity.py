@@ -390,6 +390,89 @@ def test_an_untracked_hit_still_opens_a_ticket(tmp_path: Path) -> None:
     assert "approve the fix with" in r.stdout, f"got: {r.stdout!r}"
 
 
+# --------------------------------------------------------------------------- #
+# mention vs use — a genre marker is trusted ONLY with corroborated provenance
+# (TRDD-XCRTJ1C9, janitor#254)
+# --------------------------------------------------------------------------- #
+
+# A self-declared "Security Policy" heading wrapped around the SAME poison payload used
+# throughout this file. `declared_content_genre` recognizes the heading; whether it is TRUSTED
+# depends entirely on the file's git provenance, which is exactly what this section pins.
+_MARKER_POISON = (
+    "# Security Policy — Prompt Injection\n\n"
+    "This document describes known attack classes.\n\n" + _POISON
+)
+
+
+def test_a_marker_with_unverified_provenance_is_not_trusted(tmp_path: Path) -> None:
+    """THE load-bearing test (TRDD-XCRTJ1C9). Without this, the fix is a suppression
+    mechanism handed to the adversary: an injected file can carry the identical
+    "# Security Policy —" heading a real one does. An UNTRACKED file (no git history at all —
+    the shape a real attack takes; see `test_an_untracked_hit_still_opens_a_ticket`) must keep
+    every finding at its RULE'S OWN severity — the marker changes nothing without
+    corroboration."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_MARKER_POISON, encoding="utf-8")
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "[authority-override/HIGH]" in r.stdout, (
+        f"an unverified genre marker must not downgrade severity; got: {r.stdout!r}"
+    )
+    assert "/LOW]" not in r.stdout, (
+        f"nothing should be downgraded on unverified provenance; got: {r.stdout!r}"
+    )
+    # Still a live ticket — the RAISE gate (janitor#214) also only trusts verified-local files.
+    assert "approve the fix with" in r.stdout
+
+
+def test_a_marker_with_foreign_provenance_is_not_trusted(tmp_path: Path) -> None:
+    """The commit-authorship half of the same trap: a marker plus a commit by someone other
+    than this repo's own identity is still not corroborated — `verified_local` requires EVERY
+    known author to be local, so one foreign commit is enough to keep the marker untrusted."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_MARKER_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _FOREIGN)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "[authority-override/HIGH]" in r.stdout, f"got: {r.stdout!r}"
+    assert "/LOW]" not in r.stdout, f"got: {r.stdout!r}"
+
+
+def test_a_marker_corroborated_by_local_provenance_is_downgraded(tmp_path: Path) -> None:
+    """The positive case Option A exists for: EVERY known commit on the file is authored by
+    this repo's own git identity (janitor#214's `verified_local`), AND the content
+    self-declares its genre. Only then does the finding downgrade — to LOW, never dropped
+    (Option C): it must still be printed and still be countable."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_MARKER_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _LOCAL)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout, "a downgraded finding must still be reported"
+    assert "[authority-override/LOW]" in r.stdout, f"got: {r.stdout!r}"
+    assert "[authority-override/HIGH]" not in r.stdout, (
+        f"the corroborated finding must not still assert its original severity; got: {r.stdout!r}"
+    )
+    # Option C: no ticket either way (verified-local already skips the raise — janitor#214),
+    # but the finding itself is neither dropped nor hidden from the printed line above.
+    assert "approve the fix with" not in r.stdout
+
+
+def test_a_locally_authored_hit_with_no_marker_keeps_its_severity(tmp_path: Path) -> None:
+    """The conjunction is required, not either signal alone — `verified_local` alone (no genre
+    marker in the content) must NOT downgrade anything. A locally-authored file with no
+    self-declared genre is still just as likely to be a genuine local mistake as it is to be
+    a described attack; the marker is what makes "mention, not use" a claim worth trusting."""
+    root = _repo_with_identity(tmp_path)
+    (root / "CLAUDE.md").write_text(_POISON, encoding="utf-8")
+    _commit(root, "CLAUDE.md", _LOCAL)
+    r = _run(root)
+    assert "[agent-context-integrity]" in r.stdout
+    assert "[authority-override/HIGH]" in r.stdout, (
+        f"no genre marker present — severity must stay at the rule's own level; got: {r.stdout!r}"
+    )
+    assert "/LOW]" not in r.stdout, f"got: {r.stdout!r}"
+
+
 def test_a_symlink_between_two_scanned_paths_is_counted_once(tmp_path: Path) -> None:
     """Dedupe by RESOLVED path. Two glob-matching paths pointing at the SAME bytes are one
     text: scanning both doubles the pattern count and the 'in N files' figure a human uses to

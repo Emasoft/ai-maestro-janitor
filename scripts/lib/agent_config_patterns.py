@@ -472,6 +472,53 @@ def dynamic_exec_negative_context_near(text: str, start: int, end: int) -> bool:
     return _DYNAMIC_EXEC_NEGATIVE_CONTEXT.search(text[lo:hi]) is not None
 
 
+# ---- Content-genre marker — mention vs use (TRDD-XCRTJ1C9, janitor#254) ---
+#
+# The three false positives this closes all share one shape: a document that TALKS ABOUT
+# an attack class rather than PERFORMING it — a security policy naming prompt injection to
+# prohibit it, a post-mortem narrating a past exfil attempt, a test-fixture file whose
+# strings are deliberately attack-shaped. `dynamic_exec_negative_context_near` above already
+# solves this for two rules by looking at prose IMMEDIATELY around one match; this is the
+# document-wide sibling for rules that don't have a tight, local "we removed this" cue —
+# `prompt-injection-multilingual` and `exfil-structural-probe` fire on the injected
+# LANGUAGE ITSELF, not on a nameable code span, so there is no "±400 chars" to search.
+#
+# THE MARKER IS ATTACKER-WRITABLE — this is not a caveat, it is the whole design constraint.
+# An injected document can carry the exact same title ("# Security Policy —") or the exact
+# same "these are inert test fixtures" sentence that a genuine one carries. So this function
+# returns a SUSPICION, never a verdict: `declared_content_genre` is pure content analysis and
+# MUST NOT, on its own, suppress or downgrade anything. The caller (`scan_text` via
+# `provenance_verified=`, and — one layer up — `agent-context-integrity.py`'s git-authorship
+# check) is what decides whether the marker is trusted. A marker with unverified provenance is
+# exactly as loud as no marker at all; see `test_a_marker_with_unverified_provenance_is_not_trusted`.
+_GENRE_MARKER_RE = _re(
+    # A heading that self-identifies the document's genre — "# Security Policy —",
+    # "## Post-mortem:", "# Incident Report", "# Threat Model". Anchored on a markdown
+    # heading (not just anywhere in prose) so an attacker's mid-sentence use of the word
+    # "policy" cannot trip it.
+    r"^\s{0,3}#{1,3}\s*(?:security\s+polic\w*|post-?mortem\b|incident\s+report\b|threat\s+model\b)"
+    # A fixture/test-data self-declaration: the corpus sample says outright that its
+    # attack-shaped strings are inert and not executed.
+    r"|\bintentionally\s+resembl\w*\s+(?:known\s+)?attack\s+payloads?\b"
+    r"|\b(?:inert\s+test\s+data|clearly\s+labell?ed\b[^\n]{0,40}\bfixture)\b"
+)
+
+
+def declared_content_genre(text: str) -> str | None:
+    """The document's SELF-DECLARED genre ("security-doc" / "test-fixture" / None), from
+    content alone — no filesystem, no git, no caller context.
+
+    Pure content analysis, so the result is a HINT, never a trust decision by itself — see the
+    block comment above `_GENRE_MARKER_RE`. A caller that acts on this without also
+    corroborating provenance (verified-local git authorship) hands an attacker the exact
+    suppression switch this design exists to deny them.
+    """
+    m = _GENRE_MARKER_RE.search(text)
+    if not m:
+        return None
+    return "test-fixture" if "fixture" in m.group(0).lower() else "security-doc"
+
+
 # ---- Multi-line Buffer.from → eval correlation (sentinel-y-4, sweep-C) --
 
 
@@ -1276,6 +1323,8 @@ def scan_text(
     file_kind: str = "prose",
     filename: str = "",
     suppressed_out: list[tuple[str, int, int, str]] | None = None,
+    provenance_verified: bool = False,
+    downgraded_out: list[tuple[str, int, int]] | None = None,
 ) -> list[Finding]:
     """Run every applicable RULES pattern against `text` and return findings.
 
@@ -1308,6 +1357,21 @@ def scan_text(
     Findings are deduped by (rule_id, line, col) — a single line that
     triggers two rules emits two findings, but the same rule firing
     twice on the same line emits one.
+
+    `provenance_verified` is the CALLER's corroboration that `text` came from a source with
+    verified-local git provenance (TRDD-XCRTJ1C9, janitor#254 — "mention vs use"). It is
+    False by default: `scan_text` itself has no filesystem or git access, so trusting it
+    unconditionally is the caller's decision to make, never this function's default. When
+    True AND `declared_content_genre(text)` finds a self-declared genre marker, every finding
+    is DOWNGRADED to `severity="LOW"` — never dropped. This is the load-bearing asymmetry: a
+    marker with UNVERIFIED provenance (the default) changes nothing, because the marker alone
+    is attacker-writable (see the block comment above `_GENRE_MARKER_RE`). Downgrading instead
+    of suppressing keeps every finding emitted and countable — a caller that hid these
+    entirely would be indistinguishable from one that just stopped looking.
+
+    `downgraded_out`, if given, is APPENDED IN PLACE with one `(rule_id, line, col)` tuple per
+    finding that was downgraded — the same transparency contract as `suppressed_out`, so a
+    downgrade decision is auditable rather than a quiet severity edit nobody can trace.
     """
     if not text:
         return []
@@ -1423,4 +1487,18 @@ def scan_text(
                 owasp_asi=rule.owasp_asi,
             ))
     findings.sort(key=lambda f: (f.line, f.column, f.rule_id))
+
+    # Option A+C (TRDD-XCRTJ1C9): downgrade, never suppress. The marker is trusted ONLY when
+    # the caller has already corroborated provenance — an unverified marker (the default) is
+    # a no-op here, which is the attacker-writable case this design must not open.
+    if provenance_verified and findings and declared_content_genre(text) is not None:
+        downgraded: list[Finding] = []
+        for f in findings:
+            if f.severity.upper() not in ("LOW", "INFO"):
+                if downgraded_out is not None:
+                    downgraded_out.append((f.rule_id, f.line, f.column))
+                f = f._replace(severity="LOW")
+            downgraded.append(f)
+        findings = downgraded
+
     return findings
