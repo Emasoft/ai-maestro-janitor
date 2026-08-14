@@ -46,8 +46,14 @@ def _fake_meta(tokens: set[str], tags: set[str] | None = None):
     return librarian.NoteMeta(tags=frozenset(tags or set()), tokens=frozenset(tokens))
 PROPOSAL_NAME = "memory-reorg-proposed.md"
 
+# Resolve through conftest's tree-built binary FIRST: the hand-rolled env/PATH/cargo-bin
+# chain below only resolves on a dev box with a global `cargo install`, so on any clean
+# runner the detector ran memgrep-less and the e2e test compared against empty output.
+from conftest import MEMGREP_BIN_PATH as _TREE_MEMGREP  # noqa: E402
+
 _MEMGREP = (
-    os.environ.get("MEMGREP_BIN")
+    _TREE_MEMGREP
+    or os.environ.get("MEMGREP_BIN")
     or shutil.which("memgrep")
     or str(Path(os.environ.get("HOME") or os.path.expanduser("~")) / ".cargo" / "bin" / "memgrep")
 )

@@ -15,6 +15,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 _SUP_PY = _HERE.parent / "scripts" / "oauth_rotator" / "supervisor.py"
 
@@ -209,6 +211,12 @@ def test_tick_completed_age_reads_real_stamp(tmp_path: Path) -> None:
     assert sup._tick_completed_age_s(tmp_path, now) is None            # garbage
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="the rotator's keychain-swap + tick pipeline is macOS-only; off-mac "
+    "diagnose() short-circuits to 'non-macos' by design (supervisor.py), so "
+    "'tick-stalled' can never appear",
+)
 def test_gather_facts_populates_tick_liveness(tmp_path: Path, monkeypatch) -> None:
     """gather_facts (opted-in) reads the tick-completion stamp and the daemon-alive
     probe into Facts, so diagnose can fire the stall alert. _daemon_alive is stubbed

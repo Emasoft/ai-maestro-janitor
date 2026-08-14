@@ -12,6 +12,7 @@ by the heartbeat detector. Three facts made that possible, and each has a test h
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -94,9 +95,18 @@ def test_the_edited_path_is_read_from_any_payload_shape():
 
 
 def _run_hook(payload: dict) -> subprocess.CompletedProcess:
+    # Pin the TREE-BUILT memgrep for the child (same pattern as test_wikimem_bench._env):
+    # without it the hook resolves memgrep from PATH/~/.cargo/bin, which exists on a dev
+    # box and on NO clean runner — and the hook then fails OPEN silently, so both e2e
+    # tests compare against empty output instead of a lint report.
+    from conftest import MEMGREP_BIN_PATH  # noqa: PLC0415
+
+    env = dict(os.environ)
+    if MEMGREP_BIN_PATH:
+        env["MEMGREP_BIN"] = MEMGREP_BIN_PATH
     return subprocess.run(
         [sys.executable, str(HOOK)], input=json.dumps(payload),
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=120, env=env,
     )
 
 

@@ -21,6 +21,17 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import notify  # type: ignore[import-not-found]  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _native_notifier_available(monkeypatch):
+    """Off macOS, tier-1 delivery is gated on `shutil.which(\"notify-send\")` BEFORE the
+    injected runner is ever called — so on a runner without libnotify every delivery
+    assertion fails against an empty recorder. The tests assert the delivery/message
+    logic, not the box's package list: pin the gate open so the injected-runner seam is
+    exercised on every platform (darwin never consults it)."""
+    if sys.platform != "darwin":
+        monkeypatch.setattr(notify.shutil, "which", lambda _name: "/usr/bin/notify-send")
+
 NOW = 1_800_000_000
 
 

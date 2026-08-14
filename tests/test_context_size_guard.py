@@ -450,6 +450,13 @@ def test_main_advisory_when_enforcement_disabled(tmp_path: Path, monkeypatch, ca
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED", raising=False)
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED", "false")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # Pin the window the test's own arithmetic assumes (710000 tokens → 71%): the
+    # advisory tier only exists relative to a known window, so on a runner WITHOUT this
+    # ambient var (any CI box) main() printed nothing and json.loads("") failed for
+    # reasons unrelated to the tier under test. Verified both directions on 2026-08-15:
+    # deleting the var breaks the test on a dev box too — the dependency is real, so it
+    # must be pinned, not removed.
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
 
     def _boom(_pct: int) -> str:
         raise AssertionError("compact must NOT fire when autocompact is disabled")

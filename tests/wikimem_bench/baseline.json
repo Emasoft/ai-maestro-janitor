@@ -5,9 +5,9 @@
     "hit_at_3": 0.5,
     "hit_at_10": 0.5909,
     "mrr": 0.3841,
-    "mean_total_tokens": 165.0,
-    "total_tokens": 3629,
-    "total_bytes": 14458,
+    "mean_total_tokens": 172.9,
+    "total_tokens": 3804,
+    "total_bytes": 15158,
     "hops_used": 13
   },
   "rows": [
@@ -192,10 +192,10 @@
       "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key",
       "kw_pos": 2,
       "rank": 0,
-      "find_tokens": 107,
+      "find_tokens": 282,
       "hop_tokens": 0,
-      "total_tokens": 107,
-      "bytes": 425,
+      "total_tokens": 282,
+      "bytes": 1125,
       "hop_used": false
     },
     {

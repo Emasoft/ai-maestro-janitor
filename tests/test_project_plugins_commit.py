@@ -62,6 +62,18 @@ def _run_detector(root: Path) -> str:
     env["CLAUDE_PROJECT_DIR"] = str(root)
     env["CLAUDE_SESSION_ID"] = "sess"
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    # The detector gates on `shutil.which("claude")` and returns 0 silently when absent —
+    # so on a runner without Claude Code (any CI box) every test here would "pass the
+    # empty way" or fail before reaching the commit logic under test. A stub `claude`
+    # makes the gate deterministic everywhere AND stops the macOS run from invoking the
+    # real plugin manager against a throwaway repo. The commit logic these tests exercise
+    # is the detector's own git, never `claude` itself.
+    stub_bin = root / "stub-bin"
+    stub_bin.mkdir(exist_ok=True)
+    stub = stub_bin / "claude"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env["PATH"] = f"{stub_bin}{os.pathsep}{env.get('PATH', '')}"
     res = subprocess.run(
         [sys.executable, str(DETECTOR)],
         capture_output=True, text=True, env=env, timeout=60, cwd=str(root),
