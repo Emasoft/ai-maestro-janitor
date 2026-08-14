@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect — /reload-plugins reloads ONLY plugin-bundled ones. Invoke on a [janitor-reload-skills] marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. SOFT by default (enqueues after the turn); --hard presses ESC first. ⚠ Do NOT reload at ≥350k context used — it breaks the prompt cache and re-bills the whole window next turn; shrink first via /janitor-handoff-and-clear, then reload. Trigger with /janitor-reload-skills [--hard].
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect — /reload-plugins reloads ONLY plugin-bundled ones. Invoke on a [janitor-reload-skills] marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. SOFT by default (enqueues after the turn); --hard presses ESC first and never clears. Above 350k context it SHRINKS FIRST automatically (/clear then reload then re-arm then resume), because the reload breaks the prompt cache and would re-bill the whole window — so author the link-only handoff before invoking it at high context. Trigger with /janitor-reload-skills [--hard] [--shrink auto|never|force].
 ---
 
 # Janitor reload-skills
@@ -36,24 +36,36 @@ definitions in place — so there is no resume directive and nothing is lost.
 
 Use `/janitor-reload-plugins` instead when the skill/command lives inside a plugin.
 
-## ⚠ Do NOT reload at high context (≥350k tokens used)
+## High context shrinks FIRST — automatically (TRDD-VHPYSN56)
 
-`/reload-skills` swaps skill/command definitions in place but **breaks the
-prompt-cache prefix** — so the next turn cannot re-use the cached context and
-re-caches the ENTIRE conversation at full write price (~1.25× the cheap 0.1×
-cache-read). Negligible at a low context; a large, avoidable cost at ≥350k tokens.
+`/reload-skills` swaps skill/command definitions in place, and a skill's description
+is injected into the system prompt — so reloading the set **breaks the prompt-cache
+prefix** and the next turn re-caches the ENTIRE conversation at full write price
+(~1.25× the cheap 0.1× cache-read). Negligible at a low context; a large cost at
+≥350k tokens.
 
-So when the reload is not urgent and context is already ≥350k:
+This is no longer a rule you have to remember. `reload_skills_trigger.py` defaults to
+`--shrink auto` and shares its policy with `/janitor-reload-plugins` (one module,
+`lib/reload_shrink.py`, so the two cannot drift): above the reload-guard threshold it
+clears first and reloads into the near-empty context, ordered **`/clear` →
+`/reload-skills` → `/janitor-arm` → `/janitor-resume`**. The reload sits first because
+between `/clear` and the first API turn no cache has been written yet, so it
+invalidates nothing.
 
-1. **Shrink context first** — run `/janitor-handoff-and-clear` (a link-only
-   handoff then `/clear`, the cheapest steady-state shrink) or, if live scratch
-   isn't yet durably on disk, `/janitor-compact-context`.
-2. **Then reload** from the small post-shrink context, where the re-cache is cheap.
+**Evidence note, stated rather than glossed:** the cache-prefix break is MEASURED for
+`/reload-plugins` (`token_meter.py`, wikimem `claude-code-hook-types`) but only
+REASONED for `/reload-skills` — nobody has run the measurement. `auto` bounds the cost
+of that inference being wrong: it only ever clears sessions already above the
+threshold, where a reload is expensive anyway. To settle it, note `cache_read`/
+`cache_write` on a warm turn, run `/reload-skills`, and compare the next turn.
 
-Reload immediately WITHOUT shrinking only when it is genuinely urgent (a
-`[janitor-reload-skills]` marker whose new definitions you must pick up right now).
-The reload never loses the conversation — this is purely a cost guard, not a safety
-one, so a truly-needed reload always wins.
+**The shrink path runs `/clear`, which is UNRECOVERABLE**, so author the link-only
+handoff (`/janitor-write-handoff`) before invoking it at high context. The script warns
+(`HANDOFF_MISSING`) but does not refuse — refusing would leave the session on stale
+definitions, trading a recoverable loss for an invisible one.
+
+`--hard` never shrinks. Add `--shrink never` to force a direct reload, or
+`--shrink force` to clear even below the threshold.
 
 ## Instructions
 
@@ -98,6 +110,11 @@ keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that types
 This skill fires once and ends the turn — it never loops or polls. Complete when
 ONE of these holds:
 
+- [ ] **RELOAD_SKILLS_SHRINK_CHAIN_SPAWNED** — context was above the threshold, so the
+  verified `/clear` → `/reload-skills` → `/janitor-arm` → `/janitor-resume` chain is
+  queued instead. The conversation WILL be cleared and then auto-resumed from your
+  handoff. Say so in one line and END THE TURN IMMEDIATELY — ending the turn is what
+  lets the enqueued `/clear` run. STOP.
 - [ ] **RELOAD_SKILLS_FIRED** — `reload_skills_trigger.py` queued the detached
   reload at this pane: emit one short line and END THE TURN IMMEDIATELY. STOP.
 - [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`

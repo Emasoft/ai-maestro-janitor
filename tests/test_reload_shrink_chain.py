@@ -224,3 +224,33 @@ def test_spawn_shrink_chain_passes_settle_and_then_through(monkeypatch, tmp_path
     assert captured[0]["then"] == then
     assert captured[0]["settle_between_s"] == 4.0
     assert captured[0]["gate_baseline"] == 7
+
+
+# --- 5. the two triggers must not drift apart ----------------------------------------
+
+def test_both_triggers_share_ONE_shrink_policy() -> None:
+    """`/reload-plugins` and `/reload-skills` decide identically, because they call the
+    SAME objects — not because two copies happen to agree today.
+
+    Their own docstrings say to "keep the two in step", and they had already drifted: the
+    plugins path grew a context guard and the skills path never got one, so a skills reload
+    on a 500k session paid the full re-cache with nothing even deferring it. Identity (`is`)
+    is asserted rather than equality, because equal-but-separate copies are exactly what
+    drifts."""
+    import reload_shrink
+
+    rst = _load("reload_skills_trigger_shrink_uut", "scripts/reload_skills_trigger.py")
+    assert rt.should_shrink is reload_shrink.should_shrink
+    assert rt.shrink_threshold is reload_shrink.shrink_threshold
+    assert rt.RELOAD_SETTLE_S is reload_shrink.RELOAD_SETTLE_S
+    assert rst.reload_shrink is reload_shrink, "the skills trigger must use the shared policy"
+
+
+def test_skills_chain_puts_the_reload_before_arm_too() -> None:
+    """The skills chain carries the same ordering invariant as the plugins one: reload
+    first, while no prompt cache has been written yet, then arm, then resume."""
+    rst = _load("reload_skills_trigger_order_uut", "scripts/reload_skills_trigger.py")
+    then = [rst.RELOAD_SKILLS_CMD, *ct.BOOTSTRAP_CMDS]
+    assert then[0] == rst.RELOAD_SKILLS_CMD
+    assert then.index(rst.RELOAD_SKILLS_CMD) < then.index(ct.ARM_CMD)
+    assert then[-1] == ct.RESUME_CMD

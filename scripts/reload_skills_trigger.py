@@ -40,9 +40,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+_SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPTS / "lib"))
+sys.path.insert(0, str(_SCRIPTS))  # sibling triggers (clear_trigger) live here, not in lib/
+import clear_trigger  # noqa: E402  -- the verified /clear chain we reuse for --shrink
+import reload_shrink  # noqa: E402  -- the shrink POLICY, shared with reload_trigger
 import state  # noqa: E402  -- the skills-reload ack rollback (janitor#257)
 import terminal_trigger  # noqa: E402
+
+RELOAD_SKILLS_CMD = "/reload-skills"
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
 # `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
@@ -135,6 +141,20 @@ def main() -> int:
         "a skills reload is rarely that urgent, so this is opt-in",
     )
     ap.add_argument(
+        "--shrink",
+        choices=reload_shrink.SHRINK_MODES,
+        default="auto",
+        help="shrink context (/clear + bootstrap) BEFORE reloading, so the cache-prefix "
+        "break lands on a near-floor context. auto (default) = only above the reload-guard "
+        "threshold; force = always; never = never. --hard implies never.",
+    )
+    ap.add_argument(
+        "--directive",
+        default="",
+        help="one-line resume pointer recorded for the post-clear auto-resume (shrink path "
+        "only; defaults to a pointer at the link-only agent-handoff.md)",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="print the plan, but do NOT fire osascript (for tests)",
@@ -143,6 +163,43 @@ def main() -> int:
     # SOFT is the default (TRDD-0GPQROC1): typed while the agent is mid-turn, the
     # command ENQUEUES and runs at the turn boundary — no in-flight work is lost.
     esc_first = args.hard
+
+    # SHRINK-THEN-RELOAD — the same policy as reload_trigger, from the SAME module, because
+    # these two are documented siblings that must "keep the two in step" and had already
+    # drifted once (the plugins path grew a context guard; this one never had ANY, so a
+    # skills reload on a 500k session paid the full re-cache with nothing even deferring it).
+    #
+    # NOTE the evidence asymmetry, recorded rather than glossed: the cache-prefix break is
+    # MEASURED for /reload-plugins and only REASONED for /reload-skills (a skill's
+    # description is injected into the system prompt, so reloading the set mutates the
+    # cached prefix). `auto` bounds the cost of that inference being wrong — it only ever
+    # clears sessions already above the threshold, where a reload is expensive regardless.
+    ctx = reload_shrink.context_tokens() if args.shrink == "auto" else None
+    threshold = reload_shrink.shrink_threshold()
+    if reload_shrink.should_shrink(
+        args.shrink, context_tokens=ctx, threshold=threshold, hard=args.hard
+    ):
+        then = [RELOAD_SKILLS_CMD, *clear_trigger.BOOTSTRAP_CMDS]
+        if args.dry_run:
+            print(f"DRY_RUN would chain /clear then {' -> '.join(then)} (context={ctx})")
+            return 0
+        directive = args.directive.strip() or reload_shrink.resume_directive("Standalone skills")
+        spawned, why = clear_trigger.spawn_shrink_chain(
+            then=then,
+            directive=directive,
+            delay=args.delay,
+            settle_between_s=reload_shrink.RELOAD_SETTLE_S,
+        )
+        if spawned:
+            state.log_line(
+                "reload-skills-trigger",
+                f"shrink-then-reload chain spawned (context={ctx}, threshold={threshold})",
+            )
+            print("RELOAD_SKILLS_SHRINK_CHAIN_SPAWNED")
+            return 0
+        # Unreadable pane: the chain cannot verify its own /clear. Reload directly rather
+        # than clearing blind — an expensive reload is recoverable, a blind /clear is not.
+        state.log_line("reload-skills-trigger", f"shrink unavailable ({why}) — reloading directly")
 
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
