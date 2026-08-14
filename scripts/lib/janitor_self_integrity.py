@@ -168,22 +168,34 @@ def load_or_create_key(data_dir: Path | None = None) -> bytes | None:
         # and started signing with, leaving that process holding an ORPHANED key: its chain
         # entries verify under a key that no longer exists on disk, so every later session
         # reports "hmac mismatch" at entry 0 — a permanent, unfixable false tamper alarm.
-        # O_EXCL makes the mint atomic, and the loser ADOPTS the winner's key instead of
-        # signing anything with its own.
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # O_EXCL alone was NOT enough (measured 2026-08-15 under a loaded Linux container):
+        # the winner's file becomes VISIBLE at open() but COMPLETE only at write(), so a
+        # loser adopting in that window read 0 bytes and returned None — a minter printing
+        # "NONE" while a perfectly good key landed on disk a tick later. Publish by
+        # HARDLINK instead: write the full key to a private tmp file first, then link() it
+        # into place. link() is atomic and fails EEXIST if someone else won, so the key
+        # file EXISTS only when it is already complete — the adopt read below can never
+        # see a partial, and neither can the is_file() fast path above.
+        tmp = path.with_name(f"{path.name}.mint.{os.getpid()}")
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.write(fd, key)
         finally:
             os.close(fd)
-        return key
-    except FileExistsError:
-        # Another process won the mint between our stat above and here. Its key is the one
-        # on disk and possibly already signing entries — adopt it; never return our orphan.
         try:
-            blob = path.read_bytes()
-        except OSError:
-            return None
-        return blob if len(blob) == _KEY_LEN else None
+            os.link(str(tmp), str(path))
+            return key
+        except FileExistsError:
+            # Another process won the mint between our stat above and here. Its key is the
+            # one on disk and possibly already signing entries — adopt it; never return our
+            # orphan. Complete by construction: a linked-in file was fully written first.
+            try:
+                blob = path.read_bytes()
+            except OSError:
+                return None
+            return blob if len(blob) == _KEY_LEN else None
+        finally:
+            tmp.unlink(missing_ok=True)
     except OSError:
         # If we can't persist the key, return what we minted anyway so
         # the current session has SOME MAC — the next session will get

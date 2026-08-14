@@ -741,16 +741,20 @@ def test_racing_minter_adopts_the_winners_key_instead_of_orphaning_its_own(
     and reported `hmac mismatch` at entry 0 — a permanent, false, unfixable tamper alarm.
 
     Here the winner's key lands INSIDE that window (that is exactly what `racing_open`
-    simulates — the real code path runs, only the interleaving is scheduled). O_EXCL then
-    fails, and the loser must ADOPT the winner's key rather than return its orphan."""
+    simulates — the real code path runs, only the interleaving is scheduled). The publish
+    (link-into-place since 2026-08-15; O_EXCL-on-final before that) then fails EEXIST, and
+    the loser must ADOPT the winner's key rather than return its orphan."""
     import janitor_self_integrity as jsi
 
     winner = bytes(range(32))
     real_open = os.open
 
     def racing_open(path, flags, mode=0o777):
-        Path(path).write_bytes(winner)      # another process wins, after our stat
-        return real_open(path, flags, mode)  # ...so our O_EXCL create must now fail
+        # The winner lands at the FINAL key path between our stat and our publish. os.open
+        # is now called on the private tmp file (the link-publish design), so the plant
+        # goes to the final path explicitly — the subsequent os.link must hit EEXIST.
+        (tmp_path / ".integrity-key").write_bytes(winner)
+        return real_open(path, flags, mode)
 
     monkeypatch.setattr(jsi.os, "open", racing_open)
     key = jsi.load_or_create_key(data_dir=tmp_path)
