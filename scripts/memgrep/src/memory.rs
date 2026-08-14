@@ -4168,11 +4168,11 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
         {
             continue;
         }
-        // A `]` immediately followed by `:` is a DEFINITION marker, not a citation — tested by
-        // peeking, so nothing is consumed and the next `[^…]` on the line is still matchable.
-        if raw[m.end()..].starts_with(':') {
-            continue;
-        }
+        // No trailing-`:` skip here (janitor#270): the only `[^N]:` that is a DEFINITION is the
+        // line-leading one, and the def-span overlap above already excludes exactly that match. A
+        // MID-line `[^N]:` is rendered by comrak as a reference followed by a literal colon, so a
+        // position-blind "followed by `:` ⇒ definition marker" test dropped it as NEITHER — the
+        // citation existed in the page and its lesson was reported UNCITED.
         out.push((c[1].to_string(), false));
     }
     out
@@ -8226,6 +8226,54 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             has_violation(&v, "`[^3]` has no"),
             "dangling [^3] reference must be reported; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn scan_footnotes_counts_a_mid_line_def_shape_as_a_reference() {
+        // janitor#270: `foo [^3]: bar` mid-line is a REFERENCE + literal colon in comrak, but the
+        // old position-blind "followed by `:` ⇒ definition marker" skip classified it as NEITHER,
+        // so a lesson cited only this way was reported UNCITED. Only the LINE-LEADING `[^N]:` is
+        // a definition, and the def-span overlap check owns that exclusion.
+        assert_eq!(
+            scan_footnotes("see the earlier note [^3]: it explains the trap"),
+            vec![("3".to_string(), false)],
+            "a mid-line [^N]: must count as a reference, not vanish"
+        );
+        // The true definition line is unchanged: def counted once, not double-counted as a ref,
+        // and a citation after the def's `:` is still seen.
+        assert_eq!(
+            scan_footnotes("[^1]: lesson body citing [^2]"),
+            vec![("1".to_string(), true), ("2".to_string(), false)],
+        );
+    }
+
+    #[test]
+    fn lint_a_lesson_cited_only_mid_line_is_not_reported_uncited() {
+        // End-to-end of janitor#270 through the lint surface: the ONLY citation of `[^3]` sits
+        // mid-line with a trailing colon. Before the fix this page reported `[^3]:` as an
+        // unreferenced page-level lesson; after it, the citation is seen and no `[^3]` finding
+        // fires at all.
+        let dir = lint_tmpdir("midline_ref");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             the guard exists, see [^3]: the colon here is prose punctuation.\n\n\
+             ## Notes and lessons learned\n[^3]: the lesson body.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        // Assert on the two footnote-integrity CODES, not on any message mentioning `[^3]`:
+        // the minimal fixture legitimately trips unrelated checks (e.g. `lesson-no-meta`),
+        // and this test owns only the citation-visibility half.
+        assert!(
+            !has_code(&v, "footnote-dangling-ref"),
+            "the mid-line [^3] citation must not read as dangling; got: {v:?}"
+        );
+        assert!(
+            !has_code(&v, "lesson-uncited"),
+            "a lesson cited only mid-line must not be reported uncited; got: {v:?}"
         );
     }
 
