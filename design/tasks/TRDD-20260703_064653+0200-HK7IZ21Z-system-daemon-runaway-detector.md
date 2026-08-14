@@ -1,9 +1,10 @@
 ---
 trdd-id: HK7IZ21Z
 title: Failure-class detector — warn on fseventsd/mds/any process RAM-CPU runaway + disk pressure
-column: todo
+column: testing
 created: 2026-07-03T06:46:53+0200
-updated: 2026-08-05T01:30:23+0200
+updated: 2026-08-14T19:58:00+0200
+implementation-commits: [fe2c68e1]
 current-owner: janitor-session
 assignee: null
 priority: 3
@@ -73,3 +74,33 @@ unstarted work, not a done-but-unclosed card. Moved to `todo` (ready to pull), n
 - **NEXT ACTION:** promote from backburner when the parent's release ships; then
   implement detector + pure lib + tests + dispatch wiring + docs; ruff/pyright +
   `pytest tests/test_system_daemon_runaway.py`; ship in a release.
+
+## Acceptance — added 2026-08-14 (the card shipped with none)
+
+This card originally carried NO acceptance boxes, which is its own hazard: a card
+with zero boxes is indistinguishable from a fully-satisfied one under any
+box-counting audit. These record what was actually built and verified in
+`fe2c68e1`.
+
+- [x] Pure classifier `scripts/lib/daemon_runaway.py` takes parsed input, so tests
+      need no live `ps` and no mocks of the thing under test.
+- [x] Detector `scripts/detectors/system-daemon-runaway.py` SNAPSHOTS `ps` to a
+      file and parses the file — never `pgrep -f` / `ps | grep`, whose pipeline
+      shell carries the pattern in its own argv and so matches ITSELF. A runaway
+      detector that matches its own scan reports a phantom leak every run.
+      Pinned by `test_does_not_match_its_own_scanning_process`.
+- [x] READ-ONLY and ALERT-ONLY: it never kills, signals, or remediates. Killing a
+      process a human depends on is the harm it exists to prevent.
+- [x] Fail-open on every error path (no `ps`, unparseable output, unreadable disk
+      stats) — silence, never a crash and never a false alarm; tests cover those
+      paths, not only the happy one.
+- [x] Thresholds RSS>4096MB / CPU>90% / disk-free<5%, all env-overridable;
+      `emit_once`-deduped drift line naming the worst offender.
+- [x] Wired into `dispatch.py::_DETECTORS` at 600s, default ON, opt-out
+      `CLAUDE_PLUGIN_OPTION_SYSTEM_DAEMON_RUNAWAY_ENABLED=false`.
+- [x] Gates: 14 passed, ruff clean, mypy clean over 484 source files.
+- [ ] **Derived task (b) from the design above is NOT done:** the detector-roster
+      knowledge (the wikimem page listing the janitor's detectors by group) still
+      predates this detector, so the roster undercounts by one. Card stays
+      `testing` until that is updated — closing it now would leave a documented
+      inventory silently wrong.

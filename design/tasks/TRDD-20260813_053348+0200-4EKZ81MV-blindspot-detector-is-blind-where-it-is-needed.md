@@ -1,9 +1,10 @@
 ---
 trdd-id: 4EKZ81MV
 title: The cross-card blindspot detector is weakest exactly where it is most needed
-column: todo
+column: complete
 created: 2026-08-13T05:33:48+0200
-updated: 2026-08-13T06:02:40+0200
+updated: 2026-08-14T19:58:00+0200
+implementation-commits: [155ee55e]
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
