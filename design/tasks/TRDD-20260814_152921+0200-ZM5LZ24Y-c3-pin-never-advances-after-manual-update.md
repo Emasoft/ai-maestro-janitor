@@ -1,9 +1,9 @@
 ---
 trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
-column: todo
+column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-14T17:28:26+0200
+updated: 2026-08-14T17:31:38+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -33,6 +33,23 @@ implementation-commits: [a8982a03]
 - **Do NOT** "fix" this by having the detector auto-repair the pin. A detector that
   silently rewrites the trust anchor it is auditing is not an auditor. (Still true —
   the fix lives in the daemon's periodic task, not the detector.)
+- **F1 + F2: SHIPPED together (`a8982a03`), 2026-08-14.** F1 = provenance gate,
+  fail-CLOSED, reusing the tag already fetched by `do_auto_update_if_needed` (its
+  return was widened to carry the published tag — NO second `gh` call). The gate is
+  the LAST predicate, so `force=True` bypasses provenance ONLY: runnable +
+  non-quarantined + C2-clean still apply unchanged. On an unresolvable or mismatched
+  tag it `return`s rather than walking to an older version — it never falls back to
+  "newest on disk", which is the weaker trust F1 exists to close. F2 =
+  `/janitor-repin-integrity` (`scripts/repin_integrity.py`), which prints an
+  unmissable MANUAL OVERRIDE notice naming the human as the provenance.
+- **WHY THIS CARD IS `testing`, NOT `complete`.** One acceptance box is open:
+  `_check_last_good_pin` going quiet on a machine where the fix has run. Ticking it
+  requires this machine's anchor to actually advance — which happens either on the
+  daemon's next periodic fire, or when a HUMAN runs `/janitor-repin-integrity`.
+  **An agent must NOT run that command to close its own card**: the command's entire
+  semantic is that the person invoking it supplies the provenance the F1 gate would
+  otherwise demand from the release channel. An agent running it launders exactly
+  that trust and would tick the box with a fabricated signal.
 
 ## The defect
 
