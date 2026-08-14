@@ -139,11 +139,20 @@ def scan_pages(memdir: Path) -> list[PageInfo]:
 
 
 def corpus_digest(pages: list[PageInfo]) -> str:
-    """12-hex digest over (name, lmd, description) — the cheap freshness probe. lmd is
-    in the mix so an updated page re-renders its (possibly changed) description; file
-    CONTENT beyond that deliberately is not, or every atom edit would churn CLAUDE.md
-    (the cache-bust the nudge-only discipline exists to avoid)."""
-    mix = "\n".join(f"{p.name}\t{p.lmd}\t{p.description}" for p in sorted(pages, key=lambda p: p.name))
+    """12-hex digest over (name, description) — the cheap freshness probe, mixing exactly
+    the two fields the rendered index actually shows.
+
+    `lmd` USED to be in the mix, as a proxy for "this page changed, so re-render its
+    (possibly changed) description". It was a safe proxy only because nothing bumped it
+    (janitor#265): the field was effectively frozen, so it contributed no churn. memgrep's
+    write verbs now stamp it on every add-atom / add-lesson / edit, which would turn that
+    inert proxy into a flip on EVERY atom edit — the exact CLAUDE.md cache-bust this digest
+    was designed to avoid, arriving through the back door.
+
+    Dropping it costs no signal: `description` is already mixed in directly, and it is the
+    only page field `render_index` renders besides `name`. A description change still flips
+    the digest; a body edit that changes neither correctly does not."""
+    mix = "\n".join(f"{p.name}\t{p.description}" for p in sorted(pages, key=lambda p: p.name))
     return hashlib.sha256(mix.encode("utf-8")).hexdigest()[:12]
 
 

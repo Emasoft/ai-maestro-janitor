@@ -81,14 +81,26 @@ def test_render_index_topic_order_and_truncation(tmp_path: Path) -> None:
     assert "missing-page" not in block
 
 
-def test_corpus_digest_moves_with_lmd_only(tmp_path: Path) -> None:
-    """The freshness digest tracks (name, lmd, description) — an atom edit that bumps
-    neither must NOT churn CLAUDE.md; an lmd bump must."""
+def test_corpus_digest_tracks_description_not_lmd(tmp_path: Path) -> None:
+    """The freshness digest mixes (name, description) — the two fields the rendered index
+    actually shows. A changed description MUST churn CLAUDE.md; an `lmd` bump alone must NOT.
+
+    `lmd` used to be in the mix and was harmless only because nothing ever bumped it
+    (janitor#265). memgrep's write verbs now stamp it on every add-atom/add-lesson/edit, so
+    keeping it would flip this digest on every atom edit — precisely the cache-bust the
+    nudge-only discipline exists to avoid."""
     memdir = _corpus(tmp_path)
     d1 = cs.corpus_digest(cs.scan_pages(memdir))
-    _page(memdir, "daemon-page", tier="component", desc="how the daemon works / when it dies", lmd="2026-08-02")
-    d2 = cs.corpus_digest(cs.scan_pages(memdir))
-    assert d1 != d2
+
+    # lmd alone moves: the index renders nothing that changed, so the digest must hold.
+    _page(memdir, "daemon-page", tier="component",
+          desc="how the daemon works / when it dies", lmd="2026-08-02")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) == d1
+
+    # The description changes: the index WOULD render differently, so the digest must move.
+    _page(memdir, "daemon-page", tier="component",
+          desc="a materially different symptom surface", lmd="2026-08-02")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
 
 
 def test_both_fences_coexist_and_neither_eats_the_other(tmp_path: Path) -> None:
