@@ -21,7 +21,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0010d752ffb0 digest=5147c7bd333f generated=2026-08-13T17:40:07+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8d735b502de9 digest=9d70060aafcd generated=2026-08-14T06:52:12+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/agent_context_bench.py` — agent_context_bench — measure what `agent_config_patterns.scan_text` actually CATCHES.
   · expand_fake_secrets(text) -> str — Materialize `{{FAKESECRET:...}}` / `{{FAKEDSN:...}}` corpus placeholders.
@@ -79,6 +79,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · task_github_config_audit() -> None — Fleet-wide GitHub-config audit (TRDD-157OH2D7) — the single-writer machine-global sweep.
   · task_session_liveness(fleet) -> None — Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
   · task_fleet_stop() -> None — Daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF): when the machine-wide
+  · task_cold_cache_clear() -> None — Shrink every running session whose prompt cache has gone cold, before its next fire pays.
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
@@ -303,6 +304,8 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/hooks/on-prompt-submit.py` — UserPromptSubmit hook — host-level user-presence breadcrumb (TRDD-fb4850b5).
   · main() -> int
 `scripts/hooks/on-session-end.py` — SessionEnd hook — the janitor's teardown path (TRDD-TL6NL7MK).
+  · main() -> int
+`scripts/hooks/on-session-start-cold-cache-clear.py` — SessionStart hook — shrink a session RESUMED onto a dead prompt cache, before its first turn.
   · main() -> int
 `scripts/hooks/on-session-start-trdd-state.py` — SessionStart hook — actively surface in-progress TRDD STATE blocks on resume.
   · main() -> int
@@ -544,13 +547,25 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · use_llm_ext() -> bool
   · llm_ext_data_dir(binary) -> str — The `CLAUDE_PLUGIN_DATA` value llm-externalizer needs, DERIVED from its own path.
   · run_llm_ext_summary(transcript, *, timeout_s, runner) -> str | None — The session summary as TEXT, or None on any failure. NEVER raises.
+  · fleet_max_concurrent() -> int — How many llm-ext summarize calls may run at once, machine-wide. 0 disables the lane.
+  · fleet_lease_ttl_s() -> int — Seconds a lease survives without release — the crash backstop, not the expected path.
+  · summary_deadline_s() -> int — Total seconds the summarize effort may take before degrading to the template handoff.
+  · acquire_fleet_lease(*, now, max_concurrent, ttl_s, lane_dir) -> str | None — Take one of `max_concurrent` machine-wide llm-ext leases, or None when all are held.
+  · release_fleet_lease(lease, *, lane_dir) -> None — Hand a lease back so the next waiter starts immediately. Best-effort by design.
+  · await_fleet_lease(*, deadline, max_concurrent, ttl_s, lane_dir, now_fn, sleeper, poll_s) -> str | None — Poll for a lease until one frees or `deadline` passes. None ⇒ the caller must NOT run.
+  · SummaryAttempt — One llm-ext invocation: what it produced, and whether trying again could help.
+  · classify_llm_ext_failure(*, returncode, stderr, timed_out) -> str — PURE: is this failure worth retrying? A timeout always is — it is the shape a stalled
+  · failure_signature(*, returncode, stderr) -> str — A stable identity for 'the same failure again' — exit code + the first stderr line.
+  · attempt_llm_ext_summary(transcript, *, timeout_s, runner) -> SummaryAttempt — One classified llm-ext summarize attempt. NEVER raises.
+  · summarize_with_retry(transcript, *, deadline, now_fn, sleeper, attempt, max_concurrent, lease_ttl_s, lane_dir, jitter, log) -> SummaryAttempt — Keep trying to summarize until it works, the deadline passes, or trying is pointless.
   · recent_messages(transcript, *, limit) -> list[str] — The last `limit` conversation turns as `ROLE: text` lines. ZERO model tokens.
   · compose_handoff(inputs, *, now_iso, summary, tail, max_bytes) -> str — The full injected payload: scriptable facts + llm-ext summary + a TRUNCATED tail.
   · seconds_until_next_fire(cron, now) -> int | None — Seconds from `now` until the next `*/N * * * *` fire, or None when the cron is not that
   · next_fire_misses_cache(*, last_turn_age_s, seconds_to_next_fire, ttl_minutes) -> bool — PURE. Will the NEXT heartbeat fire land on an EXPIRED prompt cache (and so pay the full
+  · should_clear_on_resume(*, source, cache_expired, context_tokens, min_context, in_cooldown, already_fired_this_session) -> ClearVerdict — PURE. Shrink a session that was RESUMED onto a dead prompt cache, before its first turn.
   · cache_certainly_expired(project_dir) -> bool | None — The REACTIVE trigger's input: is this project's prompt cache ALREADY cold?
   · ClearVerdict — Whether to clear, which rule decided it, and a human-readable why.
-  · should_clear_externally(*, idle_seconds, last_turn_age_s, ttl_minutes, seconds_to_next_fire, context_tokens, min_context, min_idle_s, headroom_s, user_present, active_waiting, in_cooldown, cache_expired) -> ClearVerdict — PURE. The whole external-clear decision, with the deciding rule named.
+  · should_clear_externally(*, idle_seconds, last_turn_age_s, ttl_minutes, seconds_to_next_fire, context_tokens, min_context, min_idle_s, headroom_s, active_waiting, in_cooldown, cache_expired) -> ClearVerdict — PURE. The whole external-clear decision, with the deciding rule named.
   · terminal_from_record(record) -> dict[str, str] — PURE adapter: the FLEET-shaped pane identity a session records at start →
   · read_ttl_minutes(state_dir) -> int — The probed prompt-cache TTL the dispatcher cached, or `DEFAULT_TTL_MINUTES`.
   · HandoffInputs — Everything the template composer needs, already gathered from disk.
@@ -578,6 +593,9 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
   · build_injection(terminal, action, *, esc_first, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
   · command_plan_field_busy(terminal, plan) -> bool — True iff `plan` TYPES A COMMAND (never an ESC-only plan) and the target pane's own
+  · field_holds_our_command(pane_text) -> str — The janitor command a pane's input field is holding UNSUBMITTED, or "" if none.
+  · field_holds_our_queued_command(terminal, plan) -> str — The janitor command sitting UNSUBMITTED in this pane's field, or "" — the I/O wrapper
+  · build_submit_plan(terminal, plan) -> dict | None — A plan that presses Enter ALONE into `terminal` — used to FINISH a send of ours that is
   · fire(plan) -> bool — Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
 `scripts/lib/fleet_plugin_updates.py` — Fleet-wide plugin updates — update EVERY project's enabled plugins, not just the live one.
   · registry_path() -> Path — Claude Code's authoritative install registry — the same file `version_update_lib` reads.
@@ -1066,7 +1084,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   · PageInfo — One PROJECT wikimem page, as the index needs it. Parsed from frontmatter only —
   · PageInfo.is_overview(self) -> bool
   · scan_pages(memdir) -> list[PageInfo] — Every real PROJECT wikimem page under `memdir`, sorted by name.
-  · corpus_digest(pages) -> str — 12-hex digest over (name, lmd, description) — the cheap freshness probe. lmd is
+  · corpus_digest(pages) -> str — 12-hex digest over (name, description) — the cheap freshness probe, mixing exactly
   · render_index(pages, *, generated_iso, memdir_rel) -> str — The full fenced index block, trailing newline included.
   · narrative_outside_fences(text) -> str — Everything OUTSIDE both janitor-owned fenced regions — the human/agent narrative
   · slim_violations(text) -> list[str] — The slim-contract check — an ADVISORY list, one string per violation, empty when
@@ -1745,7 +1763,7 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
 <+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=3a990cb645f7 generated=2026-08-12T14:06:16+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7afd8a8549c0 generated=2026-08-14T06:52:18+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
