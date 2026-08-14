@@ -400,9 +400,18 @@ _DYNAMIC_EXEC_NEGATIVE_WINDOW = 400
 
 def dynamic_exec_negative_context_near(text: str, start: int, end: int) -> bool:
     """True if a "this code is bad / we removed it" cue appears within
-    ±400 chars of a `dynamic-exec-in-body` match — i.e. the prose is
-    NAMING the eval/exec call as a threat to find or avoid, not
-    instructing the agent to run it. See the block comment above."""
+    ±400 chars of a match — i.e. the prose is NAMING the matched span
+    (eval/exec call, secret path, …) as a threat to find or avoid, not
+    instructing the agent to act on it. See the block comment above.
+
+    janitor#254: reused verbatim for `sensitive-secret-ref` (see
+    `scan_text`'s `_NEGATIVE_CONTEXT_PROSE_RULES`) — a post-mortem
+    narrating "a malicious script attempted to read `~/.aws/credentials`"
+    is the same shape as a security doc naming eval/exec as a threat to
+    avoid, not a new discriminator. Measured on the corpus: removes the
+    one sensitive-secret-ref FP (a post-mortem literally titled
+    "Post-mortem: …") with zero recall loss on either attack sample that
+    matches the rule's own pattern."""
     lo = max(0, start - _DYNAMIC_EXEC_NEGATIVE_WINDOW)
     hi = min(len(text), end + _DYNAMIC_EXEC_NEGATIVE_WINDOW)
     return _DYNAMIC_EXEC_NEGATIVE_CONTEXT.search(text[lo:hi]) is not None
@@ -1219,7 +1228,8 @@ def scan_text(
     `suppressed_out`, if given, is APPENDED IN PLACE with one
     `(rule_id, line, col, reason)` tuple per match that fired the rule
     but was demoted/dropped by a discriminator (negative-context for
-    `dynamic-exec-in-body`, IOC-context for `exfil-webhook-sink`).
+    `dynamic-exec-in-body` AND `sensitive-secret-ref` — janitor#254,
+    IOC-context for `exfil-webhook-sink`).
     TRDD-XOITBRIZ: a suppressor is itself a silencing rule and must
     never be silent about what it silenced — this is the visible
     trace. Opt-in (default None) so existing callers are unaffected;
@@ -1274,6 +1284,15 @@ def scan_text(
     # for — a SKILL.md, where a fenced block is the thing the agent is
     # instructed to run). The discriminator is applied per-match below,
     # in the same loop as `has_ioc_context_near` for exfil-webhook-sink.
+    #
+    # janitor#254: `sensitive-secret-ref` shares the SAME discriminator.
+    # A post-mortem that narrates "a malicious script attempted to read
+    # `~/.aws/credentials`" is naming the path as something that was
+    # attacked/removed, not instructing the agent to read it — the exact
+    # shape `dynamic_exec_negative_context_near` already exists to catch.
+    # One discriminator for both rules, so there is nothing to drift out
+    # of sync between them.
+    negative_context_prose_rules = ("dynamic-exec-in-body", "sensitive-secret-ref")
 
     for rule in RULES:
         if file_kind == "source" and rule.id not in source_safe_rules:
@@ -1297,13 +1316,16 @@ def scan_text(
                         (rule.id, sline, scol, "ioc-context-near")
                     )
                 continue
-            # TRDD-XOITBRIZ: for dynamic-exec-in-body in prose mode,
-            # drop matches whose surrounding ±400 chars name the code
-            # as something to find/avoid rather than run. Source mode
-            # is deliberately NOT discriminated — the whole point of
-            # source mode is to catch eval in actual code files.
+            # TRDD-XOITBRIZ / janitor#254: for dynamic-exec-in-body AND
+            # sensitive-secret-ref in prose mode, drop matches whose
+            # surrounding ±400 chars name the match as something to
+            # find/avoid/narrate-after-the-fact rather than act on.
+            # Source mode is deliberately NOT discriminated — the whole
+            # point of source mode is to catch eval / a secret path in
+            # actual code files, where "post-mortem" in a comment is not
+            # a credible reason to stay silent.
             if (
-                rule.id == "dynamic-exec-in-body"
+                rule.id in negative_context_prose_rules
                 and file_kind == "prose"
                 and dynamic_exec_negative_context_near(text, m.start(), m.end())
             ):
