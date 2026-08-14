@@ -356,6 +356,21 @@ def _make_manifest(version_dir: Path, *, clean: bool) -> None:
     integrity_dir.mkdir(parents=True, exist_ok=True)
     blob = _clean_manifest_json() if clean else _dirty_manifest_json()
     (integrity_dir / "manifest-sha256.json").write_text(blob, encoding="utf-8")
+    # certify_newest_if_clean now requires scripts/dispatch.py to exist before
+    # a version is even eligible — it mirrors the stub's own predicate (the
+    # stub can never exec a version lacking this entry point). Every fixture
+    # that models a certifiable version must create it, or the fixture is
+    # modelling a version the stub could never actually run.
+    _make_runnable(version_dir)
+
+
+def _make_runnable(version_dir: Path) -> None:
+    """Create the `scripts/dispatch.py` entry point the stub requires to exec
+    a version — without it `certify_newest_if_clean` must skip the version
+    outright, regardless of how clean its manifest is."""
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / "dispatch.py").write_text("", encoding="utf-8")
 
 
 def test_certify_newest_if_clean_pins_a_clean_uncertified_newest(
@@ -443,4 +458,108 @@ def test_certify_newest_if_clean_noop_when_manifest_missing(
 
     vu = _vu()
     assert vu.certify_newest_if_clean(cache_parent) is None
+    assert vu.read_last_good() is None
+
+
+def test_certify_newest_if_clean_walks_past_a_quarantined_newest(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The defect this closes: a QUARANTINED newest version must never be
+    pinned even though it is clean+runnable — certifying it would overwrite
+    the anchor of the OLDER version the stub actually execs (the stub skips
+    quarantined versions), permanently recreating the stale-pin bug. The
+    older, clean, non-quarantined version must be pinned instead."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "6.0.0", clean=True)
+    _make_manifest(cache_parent / "6.1.0", clean=True)
+
+    vu = _vu()
+    assert vu.add_quarantine("6.1.0", reason="proven bad in this test")
+
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned == "6.0.0"
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "6.0.0"
+
+
+def test_certify_newest_if_clean_skips_a_newest_with_no_dispatch_entrypoint(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newest version that verifies C2-clean but ships no
+    `scripts/dispatch.py` can never be the version the stub execs, so it
+    must never be certified — the older, fully-runnable version is pinned
+    instead."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "7.0.0", clean=True)
+
+    # 7.1.0: manifest verifies clean, but no scripts/dispatch.py — built by
+    # hand (not via _make_manifest/_make_runnable) so it deliberately lacks
+    # the entry point.
+    newest_dir = cache_parent / "7.1.0"
+    integrity_dir = newest_dir / ".integrity"
+    integrity_dir.mkdir(parents=True, exist_ok=True)
+    (integrity_dir / "manifest-sha256.json").write_text(
+        _clean_manifest_json(), encoding="utf-8",
+    )
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned == "7.0.0"
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "7.0.0"
+
+
+def test_certify_newest_if_clean_walks_down_past_a_dirty_newest(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newest version whose manifest does NOT verify clean must be skipped
+    (never pinned, per C2), and the walk must continue to an older, clean
+    version rather than giving up — this is the walk-down behaviour that
+    previously returned None and pinned nothing."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "8.0.0", clean=True)
+    _make_manifest(cache_parent / "8.1.0", clean=False)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned == "8.0.0"
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "8.0.0"
+
+
+def test_certify_newest_if_clean_noop_when_every_version_is_quarantined_or_unrunnable(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every cached version is either quarantined or missing the
+    dispatch entry point, there is nothing the stub could ever exec — the
+    function must return None and must NOT touch the anchor (no pin written,
+    no existing pin overwritten)."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+
+    # 9.0.0: clean manifest, runnable, but quarantined.
+    _make_manifest(cache_parent / "9.0.0", clean=True)
+    # 9.1.0: clean manifest, but NOT runnable (no scripts/dispatch.py).
+    unrunnable_dir = cache_parent / "9.1.0"
+    integrity_dir = unrunnable_dir / ".integrity"
+    integrity_dir.mkdir(parents=True, exist_ok=True)
+    (integrity_dir / "manifest-sha256.json").write_text(
+        _clean_manifest_json(), encoding="utf-8",
+    )
+
+    vu = _vu()
+    assert vu.add_quarantine("9.0.0", reason="proven bad in this test")
+
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned is None
     assert vu.read_last_good() is None

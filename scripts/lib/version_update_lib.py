@@ -512,6 +512,13 @@ def certify_newest_if_clean(cache_parent: Path) -> str | None:
     the exact same `verify_manifest` check the janitor-self-integrity
     detector runs. A version that fails C2 is NEVER pinned.
 
+    IT CERTIFIES THE VERSION THE STUB WOULD ACTUALLY EXEC, which is NOT
+    simply the newest on disk. The stub walks newest-first and skips any
+    version that is unrunnable (no `scripts/dispatch.py`), quarantined, or
+    C2-dirty; this walk mirrors that predicate exactly. Certifying anything
+    else is not merely useless but ACTIVELY HARMFUL — see the quarantine
+    comment in the loop.
+
     FAIL-OPEN throughout: no cached versions, an already-current pin, a
     missing manifest, or any verify exception is a silent no-op — never a
     crash, never a partial/false pin. Mirrors `pin_good_version`'s own
@@ -523,23 +530,41 @@ def certify_newest_if_clean(cache_parent: Path) -> str | None:
     installed = list_installed_versions(cache_parent)
     if not installed:
         return None
-    newest = installed[-1]
+    quarantined = read_quarantine()
     pin = read_last_good()
-    if pin is not None and pin.get("version") == newest:
-        return None  # already certified — nothing to do
-    newest_dir = cache_parent / newest
-    manifest_path = newest_dir / _MANIFEST_REL
-    if not manifest_path.is_file():
-        return None  # unpinnable — same fail-open C2 has for a missing manifest
-    try:
-        mutated, missing, extra = janitor_self_integrity.verify_manifest(
-            newest_dir, manifest_path
-        )
-    except Exception:
-        return None  # any verify failure is uncertainty, never a pin
-    if mutated or missing or extra:
-        return None  # C2 caught a live mismatch — never pin a dirty tree
-    return newest if pin_good_version(newest_dir, newest) else None
+    for version in reversed(installed):  # newest-first, mirroring the stub's walk
+        version_dir = cache_parent / version
+        # (1) RUNNABLE. The stub only ever execs a version that has this entry
+        # point, so one without it can never be the version under the anchor.
+        if not (version_dir / "scripts" / "dispatch.py").is_file():
+            continue
+        # (2) NOT QUARANTINED. Certifying a quarantined version is not merely
+        # useless, it is ACTIVELY HARMFUL and self-perpetuating: the stub SKIPS a
+        # quarantined version and walks down to an older one, so pinning it
+        # OVERWRITES the anchor of the version that actually runs — and the
+        # `pin == version` short-circuit below would then no-op on every later
+        # fire, permanently recreating the stale-pin state this whole function
+        # exists to cure. The self-heal would become the disease.
+        if version in quarantined:
+            continue
+        # (3) C2 CLEAN — unchanged and never weakened.
+        manifest_path = version_dir / _MANIFEST_REL
+        if not manifest_path.is_file():
+            continue  # unpinnable — same fail-open C2 has for a missing manifest
+        try:
+            mutated, missing, extra = janitor_self_integrity.verify_manifest(
+                version_dir, manifest_path
+            )
+        except Exception:
+            continue  # any verify failure is uncertainty, never a pin
+        if mutated or missing or extra:
+            continue  # C2 caught a live mismatch — never pin a dirty tree
+        # This is the version the stub would exec, so this is what the anchor
+        # must name. Already correct ⇒ nothing to do.
+        if pin is not None and pin.get("version") == version:
+            return None
+        return version if pin_good_version(version_dir, version) else None
+    return None  # nothing on disk is both runnable and trustworthy — no opinion
 
 
 def read_quarantine() -> set[str]:

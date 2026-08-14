@@ -292,13 +292,16 @@ def _check_last_good_pin() -> str | None:
         return None
     return (
         f"C3 last-good pin certifies {pinned}, but the janitor is RUNNING "
-        f"{running} — the HMAC tamper anchor is STALE, so the dispatcher stub "
-        "silently falls back to its C2-only gate (a same-tree UNSIGNED manifest, "
-        "which an attacker holding cache write access could rewrite wholesale). "
-        "C2 still verifies every exec, so this is a DEGRADED defense, not an open "
-        "door. Cause: the pin advances only when the daemon self-updates, so a "
-        "manual `claude plugin update` never re-certifies. There is no user-side "
-        "re-pin command today — TRDD-ZM5LZ24Y tracks the fix."
+        f"{running} — the HMAC tamper anchor does not cover the running version, "
+        "so the dispatcher stub falls back to its C2-only gate (a same-tree "
+        "UNSIGNED manifest, which an attacker holding cache write access could "
+        "rewrite wholesale). C2 still verifies every exec, so this is a DEGRADED "
+        "defense, not an open door. EXPECTED AND TRANSIENT right after an update: "
+        "the daemon's periodic re-pin (TRDD-ZM5LZ24Y) certifies the running version "
+        "on its next fire. PERSISTING across several daemon fires is the real "
+        "signal — it means the running version could NOT be certified, i.e. it is "
+        "quarantined, C2-dirty, or the daemon is not running. Check the daemon log "
+        "for a 'periodic re-pin' line before treating this as tampering."
     )
 
 
