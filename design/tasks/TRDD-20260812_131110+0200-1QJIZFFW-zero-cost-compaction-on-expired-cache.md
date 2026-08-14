@@ -3,7 +3,7 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: blocked
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-13T00:15:36+0200
+updated: 2026-08-14T11:58:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -70,6 +70,55 @@ accounting on the clear path.
     cannot break the clear path.
   - the table row marking `use_llm_ext` **DARK** — it has a caller now
     (`external_handoff_clear._compose`).
+
+### 2026-08-14 — advisor verdict on the RE-FIRE policy, and a floor-staleness gap
+
+The owner asked whether `already_fired_this_session` is too blunt: a long session whose cache
+expires AGAIN, with a big context, should be allowed to clear again. His proposed simplification
+was to drop the latch and gate on `cache_expired AND context > 300_000`, reasoning that context
+cannot be that large right after a clear — so the threshold IS the loop guard.
+
+**REJECTED on a measured fact.** This install's post-compaction floor is **305,119** (live
+`read_floor`, and the code comment records 308,644 on 2026-07-17). A 300k threshold sits BELOW the
+floor, so every clear would land above it and re-fire forever: the threshold would be a loop
+TRIGGER, not a loop guard. Worse, `external_clear.DEFAULT_MIN_CONTEXT_TOKENS` is **150_000** — less
+than half the floor — so today the latch is the ONLY thing preventing that loop.
+
+Advisor's shipping predicate (drop the latch, keep everything else):
+
+```
+source in RESUME_SOURCES
+and cache_expired is True
+and not in_cooldown                       # stamped by the HOOK, pre-spawn
+and context_tokens is not None
+and context_tokens >= max(min_context, (floor + min_gain) if floor else 350_000)
+```
+
+Why each survivor is load-bearing, not belt-and-braces:
+  - **RESUME_SOURCES** — returns before the ~20s probe on 41 of 48 measured fires, AND
+    `source=compact` is a mid-session re-entry where the docstring's whole safety argument ("no
+    turn has run, nothing in-flight") is FALSE. With floor > 300k, dropping it would `/clear` a
+    live session after every harness compaction.
+  - **cooldown** — the ONLY guard for a FAILED clear (context stays high, cache stays dead, so the
+    threshold passes again). A threshold guards the success case only.
+  - `cache_expired` does NOT break the loop either: only a paid TURN warms a cache.
+
+**BUG found in the current code:** `mark_clear_fired` is stamped AFTER spawn, so two SessionStart
+deliveries can both pass `clear_in_cooldown` and interleave — the second `/clear` destroying the
+first's injected handoff. Stamp it in the hook, before `Popen`.
+
+**GAP found while verifying (this is the open one).** `read_floor` returns
+`(tokens, measured_after_compact_ts)` — the staleness signal is already carried — but NOTHING
+consults it. There is no age or install-change invalidation anywhere. A floor measured before N
+plugins were installed under-reports, so `floor + min_gain` computes a threshold too low and the
+gate fires where there is less to reclaim than it believes; a floor measured on a fat install
+over-reports and the gate never fires. Fail-safe: treat a floor older than the last plugin/rules
+change as UNKNOWN and fall back to the conservative default rather than trust it. The plumbing is
+already in place — the second return value is simply unused.
+
+**VERIFY FIRST, before any of this ships:** if a resume mints a NEW session_id per launch, the
+latch never blocked the owner's scenario at all and the change is moot. One logged resume answers
+it (`cold-cache-clear` log line, `session_id`).
 
 ### 2026-08-12 13:49 — the CLI has LANDED; the block is now only the owner's go-ahead
 
