@@ -259,14 +259,27 @@ def _state_block(text: str) -> str | None:
     return "\n".join(block).strip()
 
 
-def _inflight_trdds(project_root: Path) -> list[tuple[str, str, str, str]]:
+def _inflight_trdds(
+    project_root: Path, git_root: Path | None = None
+) -> list[tuple[str, str, str, str]]:
     """Return in-flight TRDDs as (updated, name, title, full_text), newest first.
 
     `updated:` is an ISO-8601 string that sorts lexicographically within a shared
     local TZ offset, so a reverse string sort puts the most recently touched
     in-flight task first — the best "what was I just doing" heuristic.
+
+    WHY the `git_root` fallback (issue #267): per `trdd-design-tasks.md`, `design/tasks/`
+    is a PROJECT-scope dir rooted at the *repo* root, not necessarily at
+    `$CLAUDE_PROJECT_DIR`. #66 already resolves that nested-repo layout (repo one level
+    below `$CLAUDE_PROJECT_DIR`) into `git_root` for the git sections; without applying
+    the same resolution here, a nested layout makes this function silently return `[]`
+    — byte-identical to "the board is genuinely empty" — right next to git sections that
+    correctly show the resolved subdir repo. Trying `project_root` FIRST preserves the
+    historical/common case (repo at project_root, or no git_root) unchanged.
     """
     tasks_dir = project_root / "design" / "tasks"
+    if not tasks_dir.is_dir() and git_root is not None:
+        tasks_dir = git_root / "design" / "tasks"
     if not tasks_dir.is_dir():
         return []
     rows: list[tuple[str, str, str, str]] = []
@@ -504,9 +517,11 @@ def _build_handoff(
     branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], git_root) or "(unavailable)"
     log = _run_git(["log", "-n", str(MAX_COMMITS), "--oneline", "--no-decorate"], git_root)
     status = _run_git(["status", "--short"], git_root)
-    # TRDD + memory sections stay rooted at $CLAUDE_PROJECT_DIR — design/tasks/ and the
-    # memory scopes are project-dir-relative, NOT git-root-relative.
-    trdds = _inflight_trdds(project_root)
+    # TRDD scan: try project_root first (the common/historical case), fall back to the
+    # already-resolved git_root for the nested-repo layout (issue #267 — #66's descend
+    # reached the git sections but not this collector). Memory scopes are resolved
+    # separately via lib.memory_scopes, which is not affected by this.
+    trdds = _inflight_trdds(project_root, git_root)
 
     out: list[str] = []
     out.append("# PreCompact ground-truth handoff")

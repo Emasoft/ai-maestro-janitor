@@ -307,6 +307,29 @@ def test_hook_subprocess_writes_handoff(tmp_path: Path) -> None:
         assert "precompact-handoff.md" in emitted.get("systemMessage", "")
 
 
+def test_inflight_trdds_found_in_subdir_repo(tmp_path: Path) -> None:
+    """REGRESSION (issue #267): design/tasks/ lives under the nested repo (git_root), not
+    under $CLAUDE_PROJECT_DIR (project_root) — the common layout #66 fixed for the git
+    sections. `_build_handoff` must find the TRDD via the resolved git_root fallback
+    instead of silently reporting 'no in-flight TRDD found' next to correct git state."""
+    hook = _hook()
+    repo = tmp_path / "the-repo"  # git_root — one level below project_root
+    repo.mkdir()
+    _init_git_repo(repo)
+    _write_trdd(
+        repo / "design" / "tasks",
+        "31095269",
+        "dev",
+        "2026-06-02T05:00:00+0200",
+        "Context watchdog",
+        state_block="NEXT ACTION: run the suite",
+    )
+    handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "manual")
+    assert "no in-flight TRDD found" not in handoff
+    assert "TRDD-20260602_044555+0200-31095269" in handoff
+    assert "NEXT ACTION: run the suite" in handoff
+
+
 def test_hook_subprocess_writes_handoff_with_subdir_repo(tmp_path: Path) -> None:
     """End-to-end (issue #66): $CLAUDE_PROJECT_DIR is the PARENT of the repo → git sections
     populate from the discovered subdir repo, not '(unavailable)'. No mocks."""
