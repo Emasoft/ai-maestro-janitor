@@ -1188,6 +1188,70 @@ def test_the_nudge_never_offers_a_way_to_turn_itself_off(env_isolation: dict) ->
         assert verb not in out.lower(), f"the nudge must not suggest {verb!r}: {out!r}"
 
 
+def _write_directive(state, text: str, *, age_s: int):  # noqa: ANN001, ANN202 - local module
+    """Write resume-directive.txt and back-date its mtime by `age_s`."""
+    import os
+    import time
+
+    p = state.state_dir() / "resume-directive.txt"
+    p.write_text(text, encoding="utf-8")
+    when = time.time() - age_s
+    os.utime(p, (when, when))
+    return p
+
+
+def test_a_fresh_directive_naming_no_trdd_is_still_cited(env_isolation: dict) -> None:
+    """The #185 fail-open must survive janitor#264: most agent-authored handoffs point at a
+    handoff FILE and name no TRDD, and those are exactly the ones nothing can verify — so while
+    the directive is FRESH it must still be offered as the current target."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _write_directive(state, "read .janitor/state/agent-handoff.md FIRST, then resume.", age_s=60)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "resume-directive.txt" in out, f"a fresh directive must still be cited: {out!r}"
+
+
+def test_a_directive_that_has_sat_for_hours_stops_being_cited(env_isolation: dict) -> None:
+    """janitor#264: the reporter's directive named NO TRDD (it claimed completion in prose —
+    'COMPLETE and shipped (v13.3.0 + v13.3.1)'), so #185's TRDD check fell through its fail-open
+    branch and the nudge re-cited it as "the current target" on ~40 fires across six hours. By
+    then the project had shipped through v13.3.8 and the directive would have talked a resuming
+    agent OUT OF the fixes it was making.
+
+    Age is the staleness signal that needs no understanding of the content, which is why it
+    covers the gap the TRDD check cannot reach.
+    """
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _write_directive(
+        state,
+        "the work is COMPLETE and shipped (v13.3.0 + v13.3.1) — nothing left to do.",
+        age_s=6 * 3600,
+    )
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "resume-directive.txt" not in out, (
+        f"a six-hour-old directive must not be cited as the current target: {out!r}"
+    )
+
+
+def test_the_nudge_still_fires_after_the_directive_ages_out(env_isolation: dict) -> None:
+    """Degrading must drop the PAYLOAD, never the pulse. The nudge is the night-survival
+    heartbeat — silencing it because its pointer went stale would trade a misleading directive
+    for a stalled session, which is the worse of the two failures."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _write_directive(state, "stale pointer with no TRDD in it", age_s=6 * 3600)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.strip(), "the nudge must still emit its generic form"
+    assert "continue" in out.lower(), f"the generic keep-going line must survive: {out!r}"
+
+
 def test_phase_keep_going_nudge_takes_no_mode(env_isolation: dict) -> None:
     """INVERTED: the phase used to take a `mode` and emit one of TWO lines. The maintenance
     variant is gone with the mode — one wording, no branch, nothing to reason about.

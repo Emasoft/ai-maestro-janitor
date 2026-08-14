@@ -2125,6 +2125,32 @@ def _phase_idle_clear_nudge() -> bool:
         return False
 
 
+_DIRECTIVE_MAX_AGE_ENV = "CLAUDE_PLUGIN_OPTION_RESUME_DIRECTIVE_MAX_AGE_S"
+# 3 h. A resume directive is written at compact/clear time for the NEXT resume to consume, so
+# in its intended lifecycle it is minutes old. Three hours is far past that and still well
+# clear of a slow night: at the `*/5` cadence it is ~36 fires, so a directive genuinely being
+# worked is re-cited plenty before it ages out. Chosen against the reporter's measurement —
+# they observed ~40 fires over six hours, so the bound must sit comfortably under six.
+_DIRECTIVE_MAX_AGE_DEFAULT_S = 10800
+
+
+def _directive_is_stale_by_age(age_s: int) -> bool:
+    """True iff a resume directive this old must no longer be cited as "the current target".
+
+    PURE, so the bound is testable without a clock or a file. 0 disables the age check (a
+    caller who genuinely wants the pre-janitor#264 behaviour), and a malformed knob falls back
+    to the default rather than to "never stale" — a bad env value must not silently restore the
+    forever-citation this fixes.
+    """
+    cap = state.coerce_int(
+        os.environ.get(_DIRECTIVE_MAX_AGE_ENV, ""),
+        _DIRECTIVE_MAX_AGE_DEFAULT_S,
+        detector_name="keep-going-nudge",
+        var_name=_DIRECTIVE_MAX_AGE_ENV,
+    )
+    return cap > 0 and age_s > cap
+
+
 def _directive_task_is_terminal(directive_text: str) -> bool:
     """True iff EVERY `TRDD-<id8>` the directive names has already reached a terminal
     column (published/complete/live/failed/superseded/cancelled/refused) — i.e. the task
@@ -2228,7 +2254,27 @@ def _phase_keep_going_nudge() -> None:
                 directive_text = directive_file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 directive_text = ""
-            if not _directive_task_is_terminal(directive_text):
+            age_s = max(0, int(time.time()) - int(directive_file.stat().st_mtime))
+            if _directive_is_stale_by_age(age_s):
+                # janitor#264: the AGE bound, which is the case #185's TRDD check cannot
+                # reach. That check FAILS OPEN when the directive names no TRDD at all —
+                # deliberately, because most agent-authored handoffs point at a handoff FILE
+                # instead and nothing can verify those. The reporter's directive was exactly
+                # that shape: it claimed the work was "COMPLETE and shipped (v13.3.0 +
+                # v13.3.1)" in prose, named no TRDD, and so was re-cited as "the current
+                # target" on ~40 consecutive fires across six hours — by which time the
+                # project had shipped through v13.3.8 and the directive would have talked a
+                # resuming agent OUT OF the fixes it was making.
+                #
+                # Age is the one staleness signal that needs no understanding of the content,
+                # which is precisely why it covers the gap. A directive is written at
+                # compact/clear time to be consumed by the next resume; one that has sat
+                # untouched for hours is describing a session state that has moved on,
+                # whatever it says. Degrade to the SAME safe generic form #185 uses — the
+                # nudge itself must keep firing (it is the night-survival pulse), it just
+                # stops attaching a frozen payload to it.
+                pass
+            elif not _directive_task_is_terminal(directive_text):
                 bits.append("read .janitor/state/resume-directive.txt for the current target")
     except OSError:
         pass
