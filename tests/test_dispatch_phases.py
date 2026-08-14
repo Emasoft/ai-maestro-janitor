@@ -1611,6 +1611,15 @@ def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
     assert "tmux" in first                   # #92 — the honest fallback, not a guaranteed one-click fix
     assert second == ""                      # acked — not repeated
 
+    # TRDD-KU3ERYFX (janitor#234): a GUI System-Settings remedy is human-only — an agent
+    # reading this line structurally cannot perform it, so the delivery MUST carry the
+    # marker that tells the reading agent to surface it and stop rather than investigate.
+    import findings_ledger
+
+    assert findings_ledger.HUMAN_ONLY_DIRECTIVE in first, (
+        "the base-branch grant advice must carry the human-only marker at delivery"
+    )
+
 
 def test_iterm_alarm_reports_the_observation_not_a_verdict(
     env_isolation: dict, capsys: pytest.CaptureFixture
@@ -1810,6 +1819,12 @@ def test_iterm_alarm_hard_negative_beats_the_base_ambiguity_clause(
     assert "CANNOT tell you why" not in out
     assert "System Settings" in out
 
+    # TRDD-KU3ERYFX: the hard-negative branch still ends in a GUI remedy — must still
+    # carry the human-only marker, same as the base branch.
+    import findings_ledger
+
+    assert findings_ledger.HUMAN_ONLY_DIRECTIVE in out
+
 
 def test_iterm_alarm_base_alarm_unaffected_when_rescue_not_warranted(
     env_isolation: dict, capsys: pytest.CaptureFixture
@@ -1853,6 +1868,12 @@ def test_iterm_alarm_names_the_timeout_and_drops_the_remedy(
     assert "system load" in out
     assert "Privacy & Security → Automation" not in out  # the remedy STEP is dropped
     assert "CANNOT tell you why" not in out
+
+    # TRDD-KU3ERYFX: even with the GUI remedy dropped, the surfacing is still
+    # human-only advisory content — the marker still applies at delivery.
+    import findings_ledger
+
+    assert findings_ledger.HUMAN_ONLY_DIRECTIVE in out
 
 
 def test_iterm_alarm_rescue_warranted_outranks_the_timeout_branch(

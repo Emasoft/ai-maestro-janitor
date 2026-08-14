@@ -463,6 +463,16 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # this roster's cadence is dynamic and a faster beat would fire a burst of switches.
     # SHIPS DARK (CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED defaults off).
     ("model-fallback", 60, "CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_INTERVAL"),
+    # system-daemon-runaway (TRDD-HK7IZ21Z, EHT of TRDD-ZNN0UK5K): the fseventsd-class
+    # safety NET — `memory-guard` only kills JANITOR-OWNED runaways, so a SYSTEM daemon
+    # (fseventsd/mds*) or any OTHER process ballooning in RAM/CPU is otherwise invisible
+    # until it crashes the host. Snapshot-then-parse `ps` (never pgrep/ps|grep — see the
+    # detector's own docstring for the self-match trap), read-only, alert-only — it never
+    # kills anything. 10-min cadence: catching a runaway within minutes at ~4GB (vs the
+    # 39GB the parent incident reached) needs no tighter interval; the check itself is a
+    # few `ps`/`statvfs` reads. Default ON — a host-crashing runaway is a safety concern,
+    # not a hygiene nag; opt-out CLAUDE_PLUGIN_OPTION_SYSTEM_DAEMON_RUNAWAY_ENABLED=false.
+    ("system-daemon-runaway", 600, "CLAUDE_PLUGIN_OPTION_SYSTEM_DAEMON_RUNAWAY_INTERVAL"),
 ]
 
 # #J THIN MODE (TRDD-PZLVT2RN): detectors that must NOT run inside an ai-maestro
@@ -1734,7 +1744,6 @@ def _phase_iterm_automation_alarm() -> None:
             )
         else:
             print(
-                findings_ledger.HUMAN_ONLY_DIRECTIVE +
                 "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
                 "iTerm sessions via osascript. A running iTerm always has at least one, so the "
                 "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
