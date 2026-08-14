@@ -76,7 +76,13 @@ _TIMEOUT_S = 5.0
 _CACHE_EXPIRED_TIMEOUT_S = 90.0
 
 
-def _default_runner(*args: Any, **kwargs: Any) -> Any:
+def _default_runner(
+    argv: list[str],
+    *,
+    capture_output: bool = True,
+    text: bool = True,
+    timeout: float | None = None,
+) -> Any:
     """The real subprocess call, wrapped so `subprocess.run` is only ever CALLED, never passed.
 
     CPV's skillaudit reads `subprocess.run` referenced AS A VALUE (a signature default, or the
@@ -85,7 +91,12 @@ def _default_runner(*args: Any, **kwargs: Any) -> Any:
     execs a CLI, so the fix is to stop looking like indirection, not to annotate — CPV 5.4.0
     has no annotation reader.
     """
-    return subprocess.run(*args, **kwargs)
+    return subprocess.run(  # noqa: S603 - argv from config, split with shlex, no shell
+        argv,
+        capture_output=capture_output,
+        text=text,
+        timeout=timeout,
+    )
 
 
 def probe_cache_expired(

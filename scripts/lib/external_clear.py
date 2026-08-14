@@ -227,7 +227,15 @@ def llm_ext_progress_fn() -> Callable[[], float] | None:
     return lambda: _data_dir_fingerprint(data_dir)
 
 
-def _default_runner(*args: Any, **kwargs: Any) -> Any:
+def _default_runner(
+    argv: list[str],
+    *,
+    capture_output: bool = True,
+    text: bool = True,
+    timeout: float | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = False,
+) -> Any:
     """The real subprocess call, wrapped so `subprocess.run` is only ever CALLED, never passed.
 
     CPV's skillaudit flags the subprocess entry point referenced AS A VALUE — bound to a local
@@ -243,7 +251,14 @@ def _default_runner(*args: Any, **kwargs: Any) -> Any:
     nothing: CPV 5.4.0 ships no annotation reader and its classify() returns the same verdict
     with and without a `# CPV-skillaudit:` comment.
     """
-    return subprocess.run(*args, **kwargs)
+    return subprocess.run(
+        argv,
+        capture_output=capture_output,
+        text=text,
+        timeout=timeout,
+        env=env,
+        check=check,
+    )
 
 
 def run_llm_ext_summary(
