@@ -549,6 +549,105 @@ def test_rearm_evidence_age_does_not_force_a_rewrite_on_every_scan(
 
 
 # ---------------------------------------------------------------------------
+# TRDD-9PDH8G0W (janitor#92 peer self-correction 2026-08-08) — the UNCONDITIONAL
+# NEGATIVE: a rescue was WARRANTED (cron_dead on an instance whose only channel was
+# iTerm) AND the same scan's osascript enumeration came back empty. Unlike the
+# rearm-evidence downgrade, this has no "quiet fleet" innocent explanation.
+# ---------------------------------------------------------------------------
+def _mk_instance(*, diagnosis: str, terminal: dict[str, str]) -> "fs.Instance":
+    return fs.Instance(
+        pid=1, command="claude", tty="ttys001", project_root="/tmp/proj",
+        terminal=terminal, diagnosis=diagnosis, recovery=None, dispatch_age_s=None,
+        active=False, transcript_age_s=None,
+    )
+
+
+def test_rescue_warranted_true_when_cron_dead_has_no_other_channel() -> None:
+    """The ONLY channel a cron_dead instance could have used was iTerm (no tmux_pane,
+    no aimaestro_session, no linux_gui_channel) — the exact "UNREACHABLE" case
+    `fleet_scan._main` already prints."""
+    fleet = [_mk_instance(diagnosis="cron_dead", terminal={})]
+    assert fs.iterm_rescue_warranted(fleet) is True
+
+
+def test_rescue_warranted_false_when_cron_dead_had_a_working_channel() -> None:
+    """A cron_dead instance reachable via tmux does not implicate the iTerm channel at
+    all — this must not false-positive the unconditional negative."""
+    fleet = [_mk_instance(diagnosis="cron_dead", terminal={"tmux_pane": "%3"})]
+    assert fs.iterm_rescue_warranted(fleet) is False
+
+
+def test_rescue_warranted_false_when_nothing_is_cron_dead() -> None:
+    """A healthy fleet with an unreachable-but-not-cron_dead instance did not WARRANT
+    a rescue this scan — no unconditional negative to report."""
+    fleet = [_mk_instance(diagnosis="healthy", terminal={})]
+    assert fs.iterm_rescue_warranted(fleet) is False
+
+
+def test_rescue_warranted_false_on_an_empty_fleet() -> None:
+    assert fs.iterm_rescue_warranted([]) is False
+
+
+def test_record_and_read_rescue_warranted_round_trips(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The writer patches the flag `record_iterm_automation_state` already wrote this
+    beat, and the reader reads it back. PAYLOAD ROUND-TRIP acceptance criterion."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True)  # the early write, as gather_fleet does
+    fs.record_iterm_rescue_warranted(True)  # the later patch, once diagnoses are known
+
+    raw = flag.read_text(encoding="utf-8")
+    assert fs.iterm_automation_rescue_warranted(raw) is True
+    assert fs.iterm_automation_interpreter(raw) == sys.executable  # untouched by the patch
+
+
+def test_rescue_warranted_patch_is_a_noop_when_the_flag_is_absent(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The condition already cleared this beat — nothing to patch, and the patch must
+    never CREATE the flag (that would resurrect a cleared alarm)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+
+    fs.record_iterm_rescue_warranted(True)
+
+    assert not (tmp_path / fs.ITERM_TCC_FLAG).exists()
+
+
+def test_rescue_warranted_stable_write_causes_no_ack_churn(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """Patching the SAME value twice must not re-touch the flag — dispatch's
+    once-per-observation ack is keyed on the flag's content, so a spurious rewrite
+    would re-alarm every beat (acceptance: 'no ack churn from the new field')."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True)
+    fs.record_iterm_rescue_warranted(False)
+    first_mtime = flag.stat().st_mtime_ns
+    os.utime(flag, ns=(first_mtime - 5_000_000_000, first_mtime - 5_000_000_000))
+    aged_mtime = flag.stat().st_mtime_ns
+
+    fs.record_iterm_rescue_warranted(False)  # same value again
+
+    assert flag.stat().st_mtime_ns == aged_mtime
+
+
+def test_rescue_warranted_parse_fails_open() -> None:
+    """Same fail-open contract as every other flag field: absent/pre-upgrade/garbage
+    reads as None ("not yet known"), never crashes, never invents a verdict."""
+    assert fs.iterm_automation_rescue_warranted("plain prose flag") is None
+    assert fs.iterm_automation_rescue_warranted('{"interpreter": "/x"}') is None
+    assert fs.iterm_automation_rescue_warranted('{"rescue_warranted": "yes"}') is None
+
+
+# ---------------------------------------------------------------------------
 # TRDD-8DR0X08A — substantive liveness: the guardian's own typed command appends
 # a queue-operation line that refreshed the mtime probe, resetting the attempt
 # budget and re-injecting forever. These pin the fix at every layer.

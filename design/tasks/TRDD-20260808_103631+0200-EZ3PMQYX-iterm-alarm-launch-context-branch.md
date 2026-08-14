@@ -3,7 +3,7 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-13T15:14:00+0200
+updated: 2026-08-14T17:45:10+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -14,6 +14,34 @@ external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, 
 ---
 
 # iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence
+
+## ⏵ 2026-08-14 17:45 — THE `dispatch.py` SURFACING GAP IS PARTIALLY CLOSED (stays `todo`)
+
+Did the narrow, well-defined half of the NEXT ACTION the 2026-08-13 entry named: `dispatch.py`'s
+`_phase_iterm_automation_alarm` now reads `probe_outcome` from the flag (already plumbed by
+`a0dfb901`) and, when it is `"timeout"`, prints a THIRD branch — names the timeout + system load
+as the likely mechanism, and drops the Automation-grant remedy (a timeout is not a denial) —
+instead of falling into the base two-cause hedge. `probe_outcome == "error"` (or empty/unset)
+still falls through to the unchanged base alarm, matching "only `probe_outcome: error` … ⇒ the
+grant advice" from the What section below (the base alarm already IS that grant advice; no new
+branch was needed for it). Precedence, low to high: base < timeout-branch < rearm-downgrade <
+TRDD-9PDH8G0W's rescue-warranted hard-negative (implemented alongside this in the same session,
+sharing the same `fleet_scan` import block). Tests:
+`tests/test_dispatch_phases.py::test_iterm_alarm_names_the_timeout_and_drops_the_remedy`,
+`test_iterm_alarm_rescue_warranted_outranks_the_timeout_branch`,
+`test_iterm_alarm_error_probe_outcome_keeps_the_base_alarm`.
+
+**What is NOT done, and why the card stays `todo`:** the **host-type surfacing** acceptance box
+(#240 ask 2 + #235 — naming how many currently-scanned claude instances are iTerm-hosted, and the
+"run under tmux" operational guidance) is a SEPARATE, larger ask: `dispatch.py`'s alarm only ever
+reads the flag file, it has no access to the current scan's `fleet` list, so surfacing a live count
+needs new plumbing (the flag would have to carry it, written from `gather_fleet` the same way
+`rescue_warranted` now is) that was out of scope for this pass — implementing it without that
+design would have been exactly the "half-implement, redesign later" outcome the dispatch
+instructions for this session warned against. Also not done: the `#233 #235 #236 #237` / `#92` /
+`#240` GitHub replies (outside this session's scope — no `gh` calls were made). NEXT ACTION for
+whoever picks this up: design the host-iTerm-count field on the flag (written from
+`gather_fleet`, alongside `rescue_warranted`), then wire it into a fourth `dispatch.py` branch.
 
 ## ⏵ 2026-08-13 15:1x — THE LOAD HYPOTHESIS GAINS A MEASUREMENT, AND IT EXPLAINS THE PEERS' NULLS
 

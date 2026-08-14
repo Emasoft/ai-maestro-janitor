@@ -46,9 +46,9 @@ strictly stronger negative available that removes the confound instead of ageing
 
 ## Acceptance
 
-- [ ] Payload extension with compare-and-write stability (no ack churn from the new field)
-- [ ] Alarm precedence pinned by tests (hard-negative > downgrade > base)
-- [ ] The hard-negative text names both facts (warranted + zero enumeration) and drops the
+- [x] Payload extension with compare-and-write stability (no ack churn from the new field)
+- [x] Alarm precedence pinned by tests (hard-negative > downgrade > base)
+- [x] The hard-negative text names both facts (warranted + zero enumeration) and drops the
       System-Settings remedy only if that remains honest (it does not — keep remedy, drop
       the "cannot tell you why" ambiguity clause instead)
 - [ ] #92 updated when it ships

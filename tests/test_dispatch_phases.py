@@ -1757,6 +1757,143 @@ def test_iterm_alarm_stands_when_rearm_evidence_is_stale(
     assert "TRANSIENT" not in out
 
 
+# ---------------------------------------------------------------------------
+# TRDD-9PDH8G0W (janitor#92 peer self-correction) — the UNCONDITIONAL NEGATIVE:
+# `rescue_warranted` outranks the rearm-evidence downgrade AND the base ambiguity
+# clause. Precedence pinned: hard-negative > downgrade > base.
+# ---------------------------------------------------------------------------
+def test_iterm_alarm_hard_negative_outranks_rearm_downgrade(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """A rescue was WARRANTED and denied THIS scan — that outranks even a `FIRED rearm
+    → iterm` from inside the downgrade window: past success does not explain a present
+    hard failure."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "rescue_warranted": true}', encoding="utf-8"
+    )
+    recent = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() - 3600))
+    (gdir / "daemon.log").write_text(
+        f"[{recent}] session-liveness: FIRED rearm → iterm for some-agent [cron_dead] attempt=0\n",
+        encoding="utf-8",
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "UNCONDITIONAL NEGATIVE" in out
+    assert "TRANSIENT" not in out            # the downgrade must NOT win
+    assert "System Settings" in out          # remedy stays
+    assert "CANNOT tell you why" not in out  # the ambiguity clause is dropped
+
+
+def test_iterm_alarm_hard_negative_beats_the_base_ambiguity_clause(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """No rearm evidence at all (would otherwise be the base two-cause alarm) — the
+    hard negative still names both facts and drops the ambiguity clause."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "rescue_warranted": true}', encoding="utf-8"
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "UNCONDITIONAL NEGATIVE" in out
+    assert "rescue was WARRANTED" in out
+    assert "ZERO iTerm sessions" in out
+    assert "CANNOT tell you why" not in out
+    assert "System Settings" in out
+
+
+def test_iterm_alarm_base_alarm_unaffected_when_rescue_not_warranted(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """`rescue_warranted: false` (known, but negative) — the base ambiguity alarm
+    stands exactly as before; the new field must not change unrelated behavior."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "rescue_warranted": false}', encoding="utf-8"
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "CANNOT tell you why" in out
+    assert "UNCONDITIONAL NEGATIVE" not in out
+
+
+# ---------------------------------------------------------------------------
+# TRDD-EZ3PMQYX "What (revised)" item 2 — a call-site `probe_outcome: timeout`
+# classification is stronger than the base two-cause hedge: name the timeout +
+# system load as the likely mechanism, and drop the Automation-grant remedy (a
+# timeout is not a denial).
+# ---------------------------------------------------------------------------
+def test_iterm_alarm_names_the_timeout_and_drops_the_remedy(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "probe_outcome": "timeout"}', encoding="utf-8"
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "probe_outcome: timeout" in out
+    assert "system load" in out
+    assert "Privacy & Security → Automation" not in out  # the remedy STEP is dropped
+    assert "CANNOT tell you why" not in out
+
+
+def test_iterm_alarm_rescue_warranted_outranks_the_timeout_branch(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """Precedence: hard-negative > downgrade > timeout-branch > base. A warranted-and-
+    denied rescue is worse than "merely" a timed-out probe, even when both are true."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "probe_outcome": "timeout", "rescue_warranted": true}',
+        encoding="utf-8",
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "UNCONDITIONAL NEGATIVE" in out
+    assert "probe_outcome: timeout" not in out
+
+
+def test_iterm_alarm_error_probe_outcome_keeps_the_base_alarm(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """`probe_outcome: error` is not "timeout" — it must fall through to the base
+    two-cause alarm unchanged (no behavior change for the error/empty/unset cases)."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "probe_outcome": "error"}', encoding="utf-8"
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "CANNOT tell you why" in out
+    assert "probe_outcome: timeout" not in out
+
+
 def test_iterm_alarm_states_the_second_view_verdict(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:

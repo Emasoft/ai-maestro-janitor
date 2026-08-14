@@ -376,6 +376,73 @@ def _iterm_payload_core(raw: str) -> str:
     return json.dumps(data, sort_keys=True)
 
 
+def iterm_rescue_warranted(fleet: "list[Instance]") -> bool:
+    """True iff THIS scan's own diagnoses give the iTerm-blocked observation an
+    UNCONDITIONAL-NEGATIVE reading (TRDD-9PDH8G0W, janitor#92 peer self-correction
+    2026-08-08): at least one instance was diagnosed `cron_dead` while its terminal
+    resolution found NO other channel (no `tmux_pane`, `aimaestro_session`, or
+    `linux_gui_channel`) — the "UNREACHABLE" case `fleet_scan._main` already prints.
+    On a host where `iterm_by_tty` came back empty (the blocked condition itself), such
+    an instance's ONLY possible channel was iTerm, so a rescue was WARRANTED and the
+    channel was EXERCISED and returned nothing — unlike the v2.8.1 rearm-evidence
+    downgrade, this has no "quiet fleet, nothing needed rescuing" explanation available.
+
+    Callers only need this when `blocked` is already True (a healthy scan never diagnoses
+    the flag at all), but the function itself stays a pure predicate over `fleet` so it is
+    testable without constructing a whole scan. PURE.
+    """
+    return any(
+        inst.diagnosis == "cron_dead"
+        and "tmux_pane" not in inst.terminal
+        and "aimaestro_session" not in inst.terminal
+        and "linux_gui_channel" not in inst.terminal
+        for inst in fleet
+    )
+
+
+def record_iterm_rescue_warranted(warranted: bool) -> None:
+    """Patch the iTerm-automation-blocked flag `record_iterm_automation_state` already
+    wrote THIS beat with whether the SAME scan's diagnoses warrant the unconditional-
+    negative reading (TRDD-9PDH8G0W). This is a separate, later write rather than a
+    field on the original call because the fact it carries — a `cron_dead` diagnosis
+    correlated with the iTerm-blocked observation — is only known once `gather_fleet`'s
+    per-instance loop has run, which happens AFTER `record_iterm_automation_state`'s own
+    early write. That early write cannot be deferred to loop's end either:
+    `capture_pane_text` declines the iTerm channel by checking the flag's mere
+    EXISTENCE mid-loop (TRDD-WKTD5JTC), so delaying the whole write would blind that
+    same-beat decline on the very first blocked beat. Hence: write early (unblocks the
+    decline), patch late (adds the fact once it exists).
+
+    Compare-and-write, same discipline as the rest of this flag: a no-op when the value
+    is unchanged, so this never causes ack churn on its own (no rewrite → no new content
+    hash → dispatch's once-per-observation ack does not re-fire). Read-modify-write on
+    the CURRENT flag content — never creates the flag (nothing to patch once the
+    condition already cleared this beat) and never touches the clear/unlink path.
+
+    Best-effort: a scan must never break because this patch failed.
+    """
+    try:
+        import global_state as gs  # local import — mirrors record_iterm_automation_state
+
+        flag = gs.global_state_dir() / ITERM_TCC_FLAG
+        try:
+            raw = flag.read_text(encoding="utf-8")
+        except OSError:
+            return  # nothing to patch — absent (condition cleared) or unreadable
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return  # legacy/pre-JSON content — leave it; the next full rewrite fixes it
+        if not isinstance(data, dict):
+            return
+        if data.get("rescue_warranted") == warranted:
+            return  # unchanged — no rewrite, no ack churn
+        data["rescue_warranted"] = warranted
+        state.atomic_write(flag, json.dumps(data, sort_keys=True))
+    except Exception:  # noqa: BLE001 -- advisory; must never break the scan
+        pass
+
+
 def iterm_automation_interpreter(raw: str) -> str:
     """The interpreter path recorded in a flag's contents, or "" when it names none. PURE.
 
@@ -411,6 +478,24 @@ def iterm_automation_rearm_evidence_age_s(raw: str) -> int | None:
         return None
     value = data.get("rearm_evidence_age_s")
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def iterm_automation_rescue_warranted(raw: str) -> bool | None:
+    """Whether the SAME scan that wrote this flag also diagnosed `cron_dead` on an
+    instance whose only possible channel was iTerm (TRDD-9PDH8G0W, janitor#92 peer
+    self-correction). ``None`` means "not yet known / not recorded" — distinct from
+    ``False`` ("known: no such instance this scan") — because the field is patched in
+    AFTER the initial write (see `record_iterm_rescue_warranted`) and a pre-patch or
+    pre-upgrade flag must never be misread as a negative verdict. PURE, fail-open like
+    every other flag-field reader here."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("rescue_warranted")
+    return value if isinstance(value, bool) else None
 
 
 def _iterm_flag_field(raw: str, key: str) -> str:
@@ -1118,6 +1203,12 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
                 awaiting_user=awaiting_user,
             )
         )
+    if blocked:
+        # Only known once every instance in THIS scan has been diagnosed — see
+        # `record_iterm_rescue_warranted`'s docstring for why this is a separate,
+        # later patch rather than a field on the early `record_iterm_automation_state`
+        # write above (TRDD-9PDH8G0W).
+        record_iterm_rescue_warranted(iterm_rescue_warranted(fleet))
     return fleet
 
 

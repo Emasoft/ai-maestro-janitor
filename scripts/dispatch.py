@@ -1569,6 +1569,33 @@ def _phase_iterm_automation_alarm() -> None:
         # the System-Settings remedy would be actively misleading (a working toggle that
         # "will not persist" makes a healthy system look broken). Honest tense: the grant
         # worked RECENTLY; a grant orphaned since would produce the same log.
+        try:
+            import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
+
+            interpreter = fleet_scan.iterm_automation_interpreter(raw_flag)
+            second_view = fleet_scan.iterm_automation_second_view(raw_flag)
+            # TRDD-9PDH8G0W (janitor#92 peer self-correction 2026-08-08): a recent
+            # `FIRED rearm → iterm` is a CONDITIONAL positive — it says nothing when a
+            # scan needed no rescue, so its ABSENCE proves nothing either ("quiet fleet"
+            # and "channel dead" are byte-identical). `rescue_warranted` is the stronger,
+            # UNCONDITIONAL negative: THIS scan diagnosed cron_dead on an instance whose
+            # only channel was iTerm (a rescue was WARRANTED) and osascript still came
+            # back with zero sessions (the channel was EXERCISED). That has no innocent
+            # explanation, so it outranks the downgrade below even when a rearm fired
+            # hours ago — a hard failure now beats a success earlier.
+            rescue_warranted = fleet_scan.iterm_automation_rescue_warranted(raw_flag)
+            # TRDD-EZ3PMQYX: the call site's OWN classification of why the enumeration
+            # came back empty — "error" / "timeout" / "empty" — consumed here so the
+            # alarm can say WHICH failure this scan had instead of hedging between two
+            # causes it cannot actually distinguish (the primary fix landed in
+            # a0dfb901; this is the "nobody reads them yet" gap that card's STATE block
+            # names as the remaining NEXT ACTION).
+            probe_outcome = fleet_scan.iterm_automation_probe_outcome(raw_flag)
+        except ImportError:
+            interpreter = ""
+            second_view = ""
+            rescue_warranted = None
+            probe_outcome = ""
         rearm_epoch: int | None = None
         try:
             for log_name in ("daemon.log", "daemon.log.1"):
@@ -1580,7 +1607,11 @@ def _phase_iterm_automation_alarm() -> None:
         except OSError:
             rearm_epoch = None
         now_epoch = int(time.time())
-        if rearm_epoch is not None and 0 <= now_epoch - rearm_epoch <= _ITERM_REARM_EVIDENCE_WINDOW_S:
+        if (
+            not rescue_warranted
+            and rearm_epoch is not None
+            and 0 <= now_epoch - rearm_epoch <= _ITERM_REARM_EVIDENCE_WINDOW_S
+        ):
             age_min = (now_epoch - rearm_epoch) // 60
             print(
                 "[janitor] OBSERVED: the global daemon's osascript enumerated ZERO iTerm "
@@ -1593,14 +1624,6 @@ def _phase_iterm_automation_alarm() -> None:
                 "rearm evidence should send anyone to System Settings. See janitor#92."
             )
             return
-        try:
-            import fleet_scan  # noqa: PLC0415 -- local, as everywhere else in this file
-
-            interpreter = fleet_scan.iterm_automation_interpreter(raw_flag)
-            second_view = fleet_scan.iterm_automation_second_view(raw_flag)
-        except ImportError:
-            interpreter = ""
-            second_view = ""
         # The grant-free second view (TRDD-DFKEXO79): `claude agents --json` needs no
         # Automation grant, so its answer can discriminate what osascript's zero cannot.
         # Sanitized like every other flag-derived string — this print is trusted stdout.
@@ -1652,34 +1675,92 @@ def _phase_iterm_automation_alarm() -> None:
         # makes the agent's correct move explicit (tell the human, don't investigate);
         # the CONTENT after it is unchanged — nothing about a correctly-written alarm's
         # wording is wrong, only its delivery needed the marker.
-        print(
-            findings_ledger.HUMAN_ONLY_DIRECTIVE +
-            "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
-            "iTerm sessions via osascript. A running iTerm always has at least one, so the "
-            "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
-            "Two causes fit it equally: (a) macOS is denying Automation (Apple Events) "
-            "access, or (b) the osascript hung/timed out/failed for another reason. Absence "
-            "of a denial message in the logs is NOT evidence of a working grant — a denied "
-            "event that returns empty logs nothing either. POSITIVE evidence is the guardian "
-            "reaching an iTerm pane at all — EITHER a `FIRED rearm → iterm` line (it injected) "
-            "OR an `INPUT FIELD BUSY on iterm` line (it read the pane and declined to inject; "
-            "reading it required the Apple Event to answer). The busy/skip outcome is the "
-            "COMMON one on a healthy fleet, so judging by rearms alone ages a WORKING channel "
-            "into looking dead (janitor#261)."
-            f"{discriminated} "
-            "Consequence: the guardian cannot rescue an iTerm pane while the channel is down "
-            "(tmux panes are unaffected). Check the evidence age below before concluding it "
-            "has been down for long — an intermittent hang and a revoked grant look identical "
-            "in a single scan, and recent evidence means the grant itself is fine. If it is "
-            "(a): System Settings → Privacy & Security → Automation → "
-            f"allow {binary} to control iTerm. Note the grant follows that exact binary, so "
-            "a uv/python upgrade that moves the path silently orphans a grant you really "
-            "did give. On some hosts (macOS 26+, an adhoc-signed uv/python with no stable "
-            "Team ID) the toggle will not persist and reverts to off — if it does, iTerm "
-            "rescue is not attainable here; run agents under tmux, which the guardian "
-            "rescues with no Automation grant at all. This alarm clears itself on the next "
-            "fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, GH issues #92, #229."
-        )
+        if rescue_warranted:
+            # TRDD-9PDH8G0W: the UNCONDITIONAL-NEGATIVE reading. Unlike the two-cause
+            # hedge below, this scan does not need to guess between denial and hang —
+            # it has direct evidence a rescue was NEEDED (cron_dead, no other channel)
+            # and the channel PRODUCED NOTHING when exercised, so "CANNOT tell you why"
+            # would be dishonest here: the ambiguity that clause names does not apply to
+            # THIS scan's own diagnosis, only to a bare "0 sessions" reading in isolation.
+            # The remedy stays — a hard failure is still consistent with a denied grant.
+            print(
+                findings_ledger.HUMAN_ONLY_DIRECTIVE +
+                "[janitor] OBSERVED: this scan diagnosed `cron_dead` on an instance whose "
+                "ONLY possible channel was iTerm — a rescue was WARRANTED — AND osascript's "
+                "enumeration came back with ZERO iTerm sessions, the same scan the rescue "
+                "was needed. This is an UNCONDITIONAL NEGATIVE, not the usual two-cause "
+                "ambiguity: the channel was EXERCISED (something needed it right now) and "
+                "returned nothing, so there is no 'quiet fleet, nothing to rescue' reading "
+                "available — a hard failure, right now."
+                f"{discriminated} "
+                "A hard failure THIS scan outranks a `FIRED rearm → iterm` from earlier "
+                "today: past success does not explain why the rescue THIS scan needed was "
+                "denied. Consequence: the guardian could not reach the instance that needed "
+                "it (tmux panes are unaffected). If it is a denied Automation grant: System "
+                "Settings → Privacy & Security → Automation → "
+                f"allow {binary} to control iTerm. Note the grant follows that exact binary, "
+                "so a uv/python upgrade that moves the path silently orphans a grant you "
+                "really did give. On some hosts (macOS 26+, an adhoc-signed uv/python with "
+                "no stable Team ID) the toggle will not persist and reverts to off — if it "
+                "does, iTerm rescue is not attainable here; run agents under tmux, which the "
+                "guardian rescues with no Automation grant at all. This alarm clears itself "
+                "on the next fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, "
+                "TRDD-9PDH8G0W, GH issues #92, #229."
+            )
+        elif probe_outcome == "timeout":
+            # TRDD-EZ3PMQYX "What (revised)" item 2: a call site's OWN "timeout"
+            # classification is stronger than the base branch's two-cause hedge — the
+            # call did not error and did not simply return empty, it ran past its
+            # deadline. High system load is the measured mechanism that fits (this
+            # card's 2026-08-13 load datum: loadavg 34.63 against a 15s bound). A
+            # timeout is not a denial, so no Automation-grant remedy is indicated here
+            # (the "only probe_outcome: error ⇒ the grant advice" rule from the card).
+            print(
+                findings_ledger.HUMAN_ONLY_DIRECTIVE +
+                "[janitor] OBSERVED: the global daemon sees iTerm running, but osascript "
+                "EXCEEDED its timeout enumerating sessions this scan (probe_outcome: "
+                "timeout, recorded by the call site itself) — not the usual two-cause "
+                "ambiguity a bare zero would be: the call did not error and did not return "
+                "empty, it simply ran too long. High system load is the measured mechanism "
+                "that fits (a sub-second osascript call can exceed a 15s deadline once "
+                "loadavg climbs into the tens; TRDD-EZ3PMQYX). No Automation-grant remedy "
+                "is indicated — a timeout is not a denial, and sending a human to System "
+                "Settings for a load-correlated hang would be a false lead."
+                f"{discriminated} "
+                "Consequence: the guardian could not use the iTerm channel THIS scan "
+                "(tmux panes are unaffected). This alarm clears itself on the next fleet "
+                "scan once sessions enumerate again. See TRDD-VQ4LX7ND, TRDD-EZ3PMQYX, "
+                "GH issues #92, #233, #236."
+            )
+        else:
+            print(
+                findings_ledger.HUMAN_ONLY_DIRECTIVE +
+                "[janitor] OBSERVED: the global daemon sees iTerm running but enumerated ZERO "
+                "iTerm sessions via osascript. A running iTerm always has at least one, so the "
+                "Apple Event did not come back — but this measurement alone CANNOT tell you why. "
+                "Two causes fit it equally: (a) macOS is denying Automation (Apple Events) "
+                "access, or (b) the osascript hung/timed out/failed for another reason. Absence "
+                "of a denial message in the logs is NOT evidence of a working grant — a denied "
+                "event that returns empty logs nothing either. POSITIVE evidence is the guardian "
+                "reaching an iTerm pane at all — EITHER a `FIRED rearm → iterm` line (it injected) "
+                "OR an `INPUT FIELD BUSY on iterm` line (it read the pane and declined to inject; "
+                "reading it required the Apple Event to answer). The busy/skip outcome is the "
+                "COMMON one on a healthy fleet, so judging by rearms alone ages a WORKING channel "
+                "into looking dead (janitor#261)."
+                f"{discriminated} "
+                "Consequence: the guardian cannot rescue an iTerm pane while the channel is down "
+                "(tmux panes are unaffected). Check the evidence age below before concluding it "
+                "has been down for long — an intermittent hang and a revoked grant look identical "
+                "in a single scan, and recent evidence means the grant itself is fine. If it is "
+                "(a): System Settings → Privacy & Security → Automation → "
+                f"allow {binary} to control iTerm. Note the grant follows that exact binary, so "
+                "a uv/python upgrade that moves the path silently orphans a grant you really "
+                "did give. On some hosts (macOS 26+, an adhoc-signed uv/python with no stable "
+                "Team ID) the toggle will not persist and reverts to off — if it does, iTerm "
+                "rescue is not attainable here; run agents under tmux, which the guardian "
+                "rescues with no Automation grant at all. This alarm clears itself on the next "
+                "fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, GH issues #92, #229."
+            )
         # Stamp the `surfaced-to-human` marker for /janitor-findings-style queries (the
         # local `acked` hash above already gates the print itself — this call is purely
         # so `findings_ledger.surfaced_to_human_status` can answer "reported-pending" for
