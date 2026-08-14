@@ -532,22 +532,60 @@ def _split_page(text: str) -> tuple[str | None, str]:
     return None, text  # unclosed fence → treat as no frontmatter (malformed)
 
 
-def _footer_heading_line(text: str) -> int | None:
-    """0-based line index of the EARLIEST footer heading — `## Applies to`, `## Governed
-    by`, `## See also`, or the Notes heading (any spelling
-    `memory_edit_verify._LESSONS_HEADING`'s own match accepts) — fence-aware, or None when
-    the page carries none of them. Mirrors the memgrep crate's `footer_section_line`
-    (janitor#250) so this precheck and `add-atom`'s insertion boundary can never disagree
-    about where the footer starts — if they drift, one of them relocates atoms the other
-    then flags as defects, forever.
+def _is_footer_heading(stripped: str) -> bool:
+    """True iff this already-lstripped heading line names a footer section.
 
     `## See also` joined the family from the reporter's THIRD reproduction (a USER-scope
     page whose only footer was See also). The governing rule is "ANY trailing footer that
     precedes Notes", not "the link law's two sections" — the first fix covered three
     headings only because it was written from the issue body, whose examples happened to
-    be `## Governed by` twice."""
+    be `## Governed by` twice.
+    """
+    low = stripped.lower()
+    heading_text = low.lstrip("#").strip()
+    return (
+        heading_text == "applies to"
+        or heading_text == "governed by"
+        or heading_text == "see also"
+        or "notes and lessons learned" in low
+        or "lessons learned" in low
+    )
+
+
+def _footer_heading_line(text: str) -> int | None:
+    """0-based line index where the page's TRAILING footer region begins, or None.
+
+    The footer is the maximal SUFFIX of the page made only of footer sections — `## Applies
+    to`, `## Governed by`, `## See also`, or the Notes heading (any spelling
+    `memory_edit_verify._LESSONS_HEADING` accepts). Fence-aware. Mirrors the memgrep crate's
+    `footer_section_line` (janitor#250) so this precheck and `add-atom`'s insertion boundary
+    can never disagree about where the footer starts — if they drift, one of them relocates
+    atoms the other then flags as defects, forever.
+
+    TRAILING, NOT EARLIEST (janitor#260). Both this and the Rust twin returned the FIRST
+    footer-ish heading found scanning forward, which silently assumed footer headings only
+    ever appear at the end of a page. They do not: `.claude/project/memory/
+    janitor-architecture.md` carries `## See also` at line 279 of 524, with ordinary content
+    sections and five atoms after it. Every one of those atoms was read as "inside the
+    footer" and the page was flagged `atom-after-footer` forever.
+
+    The cost was not cosmetic. `repair_has_work` gates the `[janitor-memory-repair]`
+    dispatch, so 13 PROJECT pages looked permanently repairable; the dispatched agent then
+    measured them with `memgrep lint`, found nothing, and declined — at ~250-300k tokens per
+    no-op. That is janitor#260, and it is the SECOND occurrence of the shape the docstring
+    above already warns about (janitor#227: this precheck and `memgrep lint` disagreeing, so
+    the repair chore re-dispatched forever). The first fix made the two agree on WHICH
+    headings are footers; they still disagreed with reality about WHERE the footer is.
+
+    Note the old implementation contradicted its own stated rule — the docstring said "ANY
+    TRAILING footer that precedes Notes" while the code took the earliest. The prose was
+    right and the code was wrong, which is why the bug survived a reading.
+    """
+    lines = text.splitlines()
     in_fence = False
-    for i, line in enumerate(text.splitlines()):
+    # (line index, is_footer) for every heading OUTSIDE a fence, in page order.
+    headings: list[tuple[int, bool]] = []
+    for i, line in enumerate(lines):
         stripped = line.lstrip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
             in_fence = not in_fence
@@ -555,17 +593,37 @@ def _footer_heading_line(text: str) -> int | None:
         if in_fence:
             continue
         if stripped.startswith("#"):
-            low = stripped.lower()
-            heading_text = low.lstrip("#").strip()
-            if (
-                heading_text == "applies to"
-                or heading_text == "governed by"
-                or heading_text == "see also"
-                or "notes and lessons learned" in low
-                or "lessons learned" in low
-            ):
-                return i
-    return None
+            headings.append((i, _is_footer_heading(stripped)))
+    if not headings or not headings[-1][1]:
+        # The page does not END in a footer section, so it has no trailing footer region.
+        # A footer heading earlier in the page is an ordinary mid-page section (the
+        # janitor-architecture.md case) and must not swallow everything after it.
+        return None
+    start = len(headings) - 1
+    while start > 0 and headings[start - 1][1]:
+        start -= 1
+    return headings[start][0]
+
+
+# REJECTED, and recorded so it is not re-attempted (janitor#260, tried 2026-08-14).
+#
+# The obvious next tightening is to break the trailing run when real content separates two
+# footer headings — `## Governed by` → seven atoms → `## See also` → atoms → `## Notes`, which
+# is the shape of the 34 pages this predicate still flags. It kills those flags. It is also
+# CIRCULAR, and the suite proved it within seconds: the janitor#250 defect IS "an atom spliced
+# into the trailing footer", so under a content-breaks-the-run rule the misplaced atom breaks
+# the very run that would have flagged it. The defect makes itself invisible, and the two
+# existing #250 regression tests went red.
+#
+# A rule that separates the two cases by DEGREE (one stray atom = defect, seven atoms + prose =
+# a real section) is not a rule, it is a threshold waiting to be wrong.
+#
+# The residual 34 pages are pre-#250 `add-atom` fossils and are arguably genuinely misplaced;
+# what makes them BURN is not this predicate's verdict but that the dispatched repair agent
+# arbitrates with `memgrep lint`, which does not know this rule at all. Any predicate the
+# arbiter does not share loops forever — janitor#227's shape, third occurrence. The fix is to
+# move `atom-after-footer` INTO `memgrep lint` and have this precheck defer to it, so gate and
+# arbiter cannot disagree. Tracked as the endgame on janitor#260.
 
 
 def repair_defect(text: str) -> str:

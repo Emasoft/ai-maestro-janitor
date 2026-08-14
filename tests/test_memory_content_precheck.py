@@ -868,6 +868,63 @@ def test_repair_defect_atom_after_footer_when_atom_lands_after_see_also(tmp_path
     assert mcp.repair_has_work(tmp_path) is True
 
 
+def test_a_mid_page_footer_heading_does_not_swallow_the_rest_of_the_page(tmp_path):
+    """janitor#260: the footer is the page's TRAILING footer run, not the FIRST footer-ish
+    heading found scanning forward.
+
+    `_footer_heading_line` returned the earliest match, which silently assumed footer headings
+    only ever appear at the end. `.claude/project/memory/janitor-architecture.md` carries
+    `## See also` at line 279 of 524, with ordinary content sections and five atoms after it —
+    so every one of those atoms read as "inside the footer" and the page was flagged
+    `atom-after-footer` permanently.
+
+    The cost was not cosmetic: `repair_has_work` gates the `[janitor-memory-repair]` dispatch,
+    so 13 PROJECT pages looked permanently repairable, the dispatched agent measured them with
+    `memgrep lint`, found nothing, and declined — at ~250-300k tokens per no-op. This is the
+    SECOND occurrence of the janitor#227 shape (precheck and memgrep disagreeing ⇒ the chore
+    re-dispatches forever); the first fix aligned WHICH headings are footers, this one aligns
+    WHERE the footer is.
+    """
+    # NOTE: `_shaped` appends the mandatory `## Notes and lessons learned` itself, so the body
+    # must NOT carry one — that trailing Notes IS the page's real footer here.
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        body=(
+            "Opening fact.\n\n"
+            "## See also\n- [[y]]\n\n"          # a MID-PAGE link section...
+            "## How it works\n"                  # ...followed by a real content section
+            "Body prose.\n\n"
+            "^real-atom [desc: legit, keywords: legit atom]\nAtom body."
+        ),
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == "", (
+        "an atom in a normal content section must not be read as 'inside the footer' just "
+        "because a link section appeared earlier on the page"
+    )
+    assert mcp.repair_has_work(tmp_path) is False
+
+
+def test_a_page_not_ending_in_a_footer_has_no_footer_region(tmp_path):
+    """If the page does not END in a footer section there is no trailing footer, so an earlier
+    footer-ish heading is an ordinary mid-page section and flags nothing.
+
+    `notes=False` because `_shaped`'s appended Notes section would itself become a trailing
+    footer and defeat the case under test.
+    """
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        notes=False,
+        body=(
+            "## Governed by\n- [[y]]\n\n"
+            "## Afterword\n"                     # a non-footer section is LAST
+            "^tail-atom [desc: tail, keywords: tail atom]\nTail body."
+        ),
+    )
+    assert mcp._footer_heading_line(p.read_text(encoding="utf-8")) is None
+
+
 def test_repair_defect_clean_when_atom_precedes_see_also(tmp_path):
     """The correctly-shaped page — atom(s) ABOVE `## See also` — is not flagged
     `atom-after-footer`."""
