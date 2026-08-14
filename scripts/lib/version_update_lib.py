@@ -25,7 +25,11 @@ Functions:
   - `do_auto_update_if_needed(plugin_root, log_writer)` — the wrapper
     the daemon task calls: reads cache state, compares to GitHub
     latest, runs `attempt_auto_update` when behind. Returns
-    (updated_bool, new_latest_installed_or_empty).
+    (updated_bool, new_latest_installed_or_empty, latest_published_or_empty).
+    The third element is the SAME `resolve_latest_published` call this
+    function already makes internally — callers thread it into
+    `certify_newest_if_clean` (TRDD-ZM5LZ24Y F1) instead of resolving it
+    a second time, so the periodic re-pin gate costs no extra network call.
 """
 
 from __future__ import annotations
@@ -331,14 +335,22 @@ def attempt_auto_update(log_writer: Callable[[str], None],
 def do_auto_update_if_needed(plugin_root: Path,
                              log_writer: Callable[[str], None],
                              update_log_path: Path | None = None,
-                             ) -> tuple[bool, str]:
+                             ) -> tuple[bool, str, str]:
     """Run the cache-vs-GitHub check + auto-update in one go.
 
     `plugin_root` is the current `<plugin>/<version>/` dir; its parent
     is the cache root we list versions from. Returns
-    `(updated_bool, latest_installed_after)` — the latest installed
-    version on disk AFTER the attempt, so callers can compare against
-    pre-state to decide whether to fire reload signals.
+    `(updated_bool, latest_installed_after, latest_published)` — the
+    latest installed version on disk AFTER the attempt (so callers can
+    compare against pre-state to decide whether to fire reload signals),
+    plus the GitHub `releases/latest` tag this call already resolved
+    (empty string when unresolvable — offline, no `gh`, no releases yet).
+
+    The third element exists so `task_version_update` (TRDD-ZM5LZ24Y F1)
+    can thread the ALREADY-FETCHED tag into `certify_newest_if_clean`'s
+    provenance gate without a second `gh api` call per fire — this
+    function calls `resolve_latest_published` exactly once, unconditionally,
+    on every invocation, regardless of which branch below returns.
 
     Designed for the daemon: it's safe to call every cadence, silent
     when nothing's behind, conservative on every failure mode.
@@ -349,15 +361,15 @@ def do_auto_update_if_needed(plugin_root: Path,
 
     latest_published = resolve_latest_published(plugin_root) or ""
     if not latest_published or not latest_installed:
-        return (False, latest_installed)
+        return (False, latest_installed, latest_published)
     if latest_published == latest_installed:
-        return (False, latest_installed)
+        return (False, latest_installed, latest_published)
     if _semver_tuple(latest_installed) >= _semver_tuple(latest_published):
         # Cache is at or ahead of GitHub — pre-release / dev cache. Silent.
-        return (False, latest_installed)
+        return (False, latest_installed, latest_published)
 
     if not attempt_auto_update(log_writer, update_log_path):
-        return (False, latest_installed)
+        return (False, latest_installed, latest_published)
 
     # Re-list to confirm the cache actually advanced; if not, treat as
     # failure (the `claude` CLI may have reported success without
@@ -369,8 +381,8 @@ def do_auto_update_if_needed(plugin_root: Path,
             "auto-update reported success but cache version did not advance — "
             "treating as failure",
         )
-        return (False, latest_installed)
-    return (True, new_latest)
+        return (False, latest_installed, latest_published)
+    return (True, new_latest, latest_published)
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +505,9 @@ def pin_good_version(version_dir: Path, version: str) -> bool:
     return True
 
 
-def certify_newest_if_clean(cache_parent: Path) -> str | None:
+def certify_newest_if_clean(
+    cache_parent: Path, published: str | None = None, *, force: bool = False,
+) -> str | None:
     """Best-effort C3 self-heal on the PERIODIC path (TRDD-ZM5LZ24Y).
 
     ROOT CAUSE this closes: `pin_good_version`'s only prior caller lived
@@ -524,8 +538,34 @@ def certify_newest_if_clean(cache_parent: Path) -> str | None:
     crash, never a partial/false pin. Mirrors `pin_good_version`'s own
     contract.
 
+    F1 PROVENANCE GATE (TRDD-ZM5LZ24Y, owner-directed 2026-08-14): `published`
+    is the GitHub `releases/latest` tag the CALLER already resolved this fire
+    (via `do_auto_update_if_needed`'s third return value — NEVER re-resolve it
+    here, that would add a second `gh api` call per heartbeat). The candidate
+    this function would otherwise certify (clean + runnable + non-quarantined,
+    i.e. exactly the version the stub would exec) is pinned ONLY when it
+    equals `published`. When `published` is None/empty (offline, no `gh`, no
+    releases yet) the gate FAILS CLOSED: certification is skipped entirely and
+    the EXISTING pin is left untouched — this never rejects a version, never
+    blocks a heartbeat, and never deletes an anchor; it only means the anchor
+    does not ADVANCE on a fire where the release channel could not be
+    consulted. This is a real strengthening over "trust whatever is newest on
+    disk": first trust now requires the release channel to agree, not merely
+    local cache write access. The already-pinned short-circuit below runs
+    BEFORE this gate (a steady-state fire that already matches costs nothing
+    and needs no tag at all).
+
+    F2 MANUAL OVERRIDE (`force=True`, TRDD-ZM5LZ24Y): the ONLY way to skip the
+    F1 gate — reserved for `/janitor-repin-integrity`, the human-invoked escape
+    hatch. It does NOT re-derive a second notion of "the version we trust": the
+    candidate still has to pass every OTHER predicate in this function
+    (runnable, non-quarantined, C2-clean) unchanged. The daemon's own periodic
+    call NEVER sets this; only a human running the command deliberately IS the
+    provenance F1 would otherwise require from the release channel.
+
     Returns the version string that was newly pinned, or None when there
-    was nothing to do (already current / unpinnable / not clean).
+    was nothing to do (already current / unpinnable / not clean / provenance
+    unconfirmed).
     """
     installed = list_installed_versions(cache_parent)
     if not installed:
@@ -560,8 +600,17 @@ def certify_newest_if_clean(cache_parent: Path) -> str | None:
         if mutated or missing or extra:
             continue  # C2 caught a live mismatch — never pin a dirty tree
         # This is the version the stub would exec, so this is what the anchor
-        # must name. Already correct ⇒ nothing to do.
+        # must name. Already correct ⇒ nothing to do (no tag needed for this
+        # steady-state no-op — it costs nothing and confirms nothing new).
         if pin is not None and pin.get("version") == version:
+            return None
+        # F1 provenance gate: certify only when the release channel names
+        # THIS EXACT candidate. Unresolvable/mismatched tag ⇒ fail CLOSED —
+        # skip pinning, leave the existing pin untouched. Never falls back to
+        # "newest on disk" here; that is precisely the weaker trust F1 closes.
+        # `force=True` (F2's manual override) is the ONLY bypass — see the
+        # docstring; every predicate ABOVE this line still applies unchanged.
+        if not force and (not published or version != published):
             return None
         return version if pin_good_version(version_dir, version) else None
     return None  # nothing on disk is both runnable and trustworthy — no opinion

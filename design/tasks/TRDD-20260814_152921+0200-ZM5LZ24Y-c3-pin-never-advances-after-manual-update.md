@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: todo
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-14T16:05:44+0200
+updated: 2026-08-14T17:28:26+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -193,6 +193,20 @@ difference from the daemon path is that it may bypass the F1 provenance gate, be
 a human running it deliberately IS the provenance; it must say so on stdout when it
 does, so an unattended reader can never mistake a human override for an automatic
 certification.
+
+**F1 + F2 SHIPPED 2026-08-14.** `do_auto_update_if_needed` now returns a third element
+(`latest_published`, the already-resolved GitHub tag — no second `gh` call), threaded into
+`certify_newest_if_clean(cache_parent, published)`, which certifies a candidate ONLY when it
+equals `published`; unresolvable/mismatched tag fails CLOSED (existing pin untouched, no
+heartbeat blocked). `daemon.py::task_version_update` passes `latest_published` unconditionally
+on every fire. The manual escape hatch is `certify_newest_if_clean(..., force=True)` — the SAME
+predicate, one bypass flag for the F1 gate only — wired up as `scripts/repin_integrity.py` +
+`skills/janitor-repin-integrity/SKILL.md` (`/janitor-repin-integrity`), which always prints the
+manual-override notice before certifying. Tests: `tests/test_version_update_daemon.py` gained 4
+F1-gate tests (open path, mismatch skip, unresolvable-tag fail-closed leaves prior pin untouched,
+empty-string tag treated identically to None) plus updated all pre-existing
+`certify_newest_if_clean`/`do_auto_update_if_needed` call sites for the new signatures — 30
+passed. `ruff` + `mypy` clean over the whole tree.
 
 ### F3 — an honest tension worth stating
 

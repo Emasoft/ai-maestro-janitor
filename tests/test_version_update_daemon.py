@@ -116,9 +116,10 @@ def test_do_auto_update_silent_when_cache_matches_github(
     )
     monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.0")
     logs: list[str] = []
-    updated, latest = vu.do_auto_update_if_needed(vdir, logs.append)
+    updated, latest, published = vu.do_auto_update_if_needed(vdir, logs.append)
     assert updated is False
     assert latest == "0.5.0"
+    assert published == "0.5.0"
     # No attempt_auto_update was invoked → no auto-update log line.
     assert not any("auto-update:" in line for line in logs)
 
@@ -135,7 +136,7 @@ def test_do_auto_update_silent_when_cache_ahead_of_github(
     (env / "cache" / "0.6.0").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.0")
     logs: list[str] = []
-    updated, _ = vu.do_auto_update_if_needed(vdir, logs.append)
+    updated, _, _ = vu.do_auto_update_if_needed(vdir, logs.append)
     assert updated is False
 
 
@@ -155,9 +156,10 @@ def test_do_auto_update_runs_when_cache_behind_github(
         return True
     monkeypatch.setattr(vu, "attempt_auto_update", _fake_attempt)
 
-    updated, latest = vu.do_auto_update_if_needed(vdir, lambda _m: None)
+    updated, latest, published = vu.do_auto_update_if_needed(vdir, lambda _m: None)
     assert updated is True
     assert latest == "0.5.1"
+    assert published == "0.5.1"
 
 
 def test_do_auto_update_treats_no_cache_advance_as_failure(
@@ -170,7 +172,7 @@ def test_do_auto_update_treats_no_cache_advance_as_failure(
     monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.1")
     monkeypatch.setattr(vu, "attempt_auto_update", lambda _log, _path=None: True)  # but no new dir
     logs: list[str] = []
-    updated, _ = vu.do_auto_update_if_needed(vdir, logs.append)
+    updated, _, _ = vu.do_auto_update_if_needed(vdir, logs.append)
     assert updated is False
     assert any("did not advance" in line for line in logs)
 
@@ -183,9 +185,10 @@ def test_do_auto_update_silent_when_attempt_returns_false(
     vdir = _make_plugin_root(cache_parent, "0.5.0", "https://github.com/Emasoft/ai-maestro-janitor")
     monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.1")
     monkeypatch.setattr(vu, "attempt_auto_update", lambda _log, _path=None: False)
-    updated, latest = vu.do_auto_update_if_needed(vdir, lambda _m: None)
+    updated, latest, published = vu.do_auto_update_if_needed(vdir, lambda _m: None)
     assert updated is False
     assert latest == "0.5.0"
+    assert published == "0.5.1"
 
 
 class _Proc:
@@ -379,13 +382,16 @@ def test_certify_newest_if_clean_pins_a_clean_uncertified_newest(
     """The core fix: a version installed OUTSIDE the daemon's own self-update
     branch (no prior pin at all) still gets certified once its manifest
     verifies clean — this is the periodic path `daemon.py` must call on
-    every fire, not only inside `if updated:`."""
+    every fire, not only inside `if updated:`. Passes `published="2.0.0"`
+    (F1's provenance gate) so this test isolates the C2/runnable/quarantine
+    logic from the gate — see the dedicated F1 tests below for the gate
+    itself."""
     monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
     cache_parent = tmp_path / "cache"
     _make_manifest(cache_parent / "2.0.0", clean=True)
 
     vu = _vu()
-    pinned = vu.certify_newest_if_clean(cache_parent)
+    pinned = vu.certify_newest_if_clean(cache_parent, "2.0.0")
 
     assert pinned == "2.0.0"
     pin = vu.read_last_good()
@@ -422,9 +428,11 @@ def test_certify_newest_if_clean_is_a_noop_when_already_current(
     _make_manifest(cache_parent / "4.0.0", clean=True)
 
     vu = _vu()
-    first = vu.certify_newest_if_clean(cache_parent)
+    first = vu.certify_newest_if_clean(cache_parent, "4.0.0")
     assert first == "4.0.0"
 
+    # The already-pinned short-circuit needs no tag at all (it costs nothing
+    # and confirms nothing new) — omitting `published` here proves that.
     second = vu.certify_newest_if_clean(cache_parent)
     assert second is None
     # Bind before subscripting: read_last_good() is `dict | None`, so indexing it
@@ -477,7 +485,7 @@ def test_certify_newest_if_clean_walks_past_a_quarantined_newest(
     vu = _vu()
     assert vu.add_quarantine("6.1.0", reason="proven bad in this test")
 
-    pinned = vu.certify_newest_if_clean(cache_parent)
+    pinned = vu.certify_newest_if_clean(cache_parent, "6.0.0")
 
     assert pinned == "6.0.0"
     pin = vu.read_last_good()
@@ -507,7 +515,7 @@ def test_certify_newest_if_clean_skips_a_newest_with_no_dispatch_entrypoint(
     )
 
     vu = _vu()
-    pinned = vu.certify_newest_if_clean(cache_parent)
+    pinned = vu.certify_newest_if_clean(cache_parent, "7.0.0")
 
     assert pinned == "7.0.0"
     pin = vu.read_last_good()
@@ -528,7 +536,7 @@ def test_certify_newest_if_clean_walks_down_past_a_dirty_newest(
     _make_manifest(cache_parent / "8.1.0", clean=False)
 
     vu = _vu()
-    pinned = vu.certify_newest_if_clean(cache_parent)
+    pinned = vu.certify_newest_if_clean(cache_parent, "8.0.0")
 
     assert pinned == "8.0.0"
     pin = vu.read_last_good()
@@ -560,6 +568,95 @@ def test_certify_newest_if_clean_noop_when_every_version_is_quarantined_or_unrun
     assert vu.add_quarantine("9.0.0", reason="proven bad in this test")
 
     pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned is None
+    assert vu.read_last_good() is None
+
+
+# ---------- F1 provenance gate (TRDD-ZM5LZ24Y, owner-directed 2026-08-14) --
+#
+# Certifying "whatever is newest on disk" (Option A alone) means first trust
+# is established by mere cache-write access. F1 requires the candidate to
+# also equal the GitHub `releases/latest` tag the daemon ALREADY resolved
+# this fire (via `do_auto_update_if_needed`'s third return value — no second
+# `gh api` call). Unresolvable/mismatched tag ⇒ fail CLOSED: skip pinning,
+# leave the prior pin exactly as it was.
+
+
+def test_certify_newest_if_clean_certifies_when_newest_equals_published_tag(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate's open path: the release channel agrees with the candidate."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "10.0.0", clean=True)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent, "10.0.0")
+
+    assert pinned == "10.0.0"
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "10.0.0"
+
+
+def test_certify_newest_if_clean_skips_when_newest_differs_from_published_tag(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate that is otherwise clean+runnable+non-quarantined must NOT
+    be certified when the release channel names a DIFFERENT tag — e.g. a
+    locally-built or mutated cache entry that never actually shipped."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "11.0.0", clean=True)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent, "11.5.0")
+
+    assert pinned is None
+    assert vu.read_last_good() is None
+
+
+def test_certify_newest_if_clean_fails_closed_when_tag_unresolvable_and_leaves_prior_pin(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Offline / no `gh` / no releases yet ⇒ `published` is None (or empty).
+    The gate must fail CLOSED: skip certifying a NEW candidate, and — the
+    part that matters most — leave an EXISTING pin completely untouched
+    rather than rejecting or clearing it. Fail-closed means "don't advance",
+    never "tear down what's already anchored"."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "12.0.0", clean=True)
+
+    vu = _vu()
+    # Establish a prior pin the way the gate's open path would.
+    first = vu.certify_newest_if_clean(cache_parent, "12.0.0")
+    assert first == "12.0.0"
+
+    # A newer version lands on disk, but this fire cannot resolve the tag
+    # (published=None — the unresolvable case, e.g. offline or no `gh`).
+    _make_manifest(cache_parent / "12.1.0", clean=True)
+    pinned = vu.certify_newest_if_clean(cache_parent, None)
+
+    assert pinned is None
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "12.0.0"  # unchanged — never torn down
+
+
+def test_certify_newest_if_clean_fails_closed_on_empty_string_tag_too(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`do_auto_update_if_needed` returns `""` (not `None`) for an
+    unresolvable tag — the gate must treat the empty string identically to
+    `None`, since that is the exact value the daemon threads through."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "13.0.0", clean=True)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent, "")
 
     assert pinned is None
     assert vu.read_last_good() is None

@@ -582,12 +582,12 @@ def task_version_update() -> None:
     def _log(msg: str) -> None:
         state.log_line("daemon", f"  {msg}")
 
-    updated, new_latest = False, ""
+    updated, new_latest, latest_published = False, "", ""
     with gs.marketplace_lock() as got:
         if not got:
             _log("version-update deferred (another marketplace op holds the lock)")
             return
-        updated, new_latest = vu.do_auto_update_if_needed(
+        updated, new_latest, latest_published = vu.do_auto_update_if_needed(
             plugin_root, _log, update_log_path=None,
         )
     if updated:
@@ -626,8 +626,18 @@ def task_version_update() -> None:
     # `certify_newest_if_clean` re-derives the newest CACHED version itself
     # and is a no-op when it is already pinned, so this costs nothing on a
     # steady-state fire and only does work when the pin has actually drifted.
+    #
+    # F1 (owner-directed 2026-08-14): pass the `latest_published` tag
+    # `do_auto_update_if_needed` ALREADY resolved above (its third return
+    # value) so the provenance gate costs no second `gh api` call — do NOT
+    # call `resolve_latest_published` again here. Empty string (unresolvable:
+    # offline, no `gh`, no releases yet) makes the gate fail CLOSED inside
+    # `certify_newest_if_clean` itself: the existing pin is left untouched,
+    # never advanced on a fire where the release channel could not confirm it.
     try:
-        newly_pinned = vu.certify_newest_if_clean(plugin_root.parent)
+        newly_pinned = vu.certify_newest_if_clean(
+            plugin_root.parent, latest_published or None,
+        )
     except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon
         state.log_line("daemon", f"  version-update: periodic re-pin skipped: {exc}")
     else:
