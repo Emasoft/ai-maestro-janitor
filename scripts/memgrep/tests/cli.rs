@@ -2817,6 +2817,33 @@ fn run_stdin(args: &[&str], input: &str) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Like `run_stdin` but returns (stdout, stderr, exit code) regardless of exit status — for
+/// asserting on a WARNING printed alongside a still-successful write (add-lesson's
+/// write→recall-gap check prints to stderr but must still exit 0).
+fn run_stdin_full(args: &[&str], input: &str) -> (String, String, i32) {
+    use std::io::Write;
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn memgrep");
+    child
+        .stdin
+        .take()
+        .expect("stdin handle")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait memgrep");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
 /// Like `run_stdin` but expects a clean NON-zero exit (a refusal — missing page, empty body, …).
 fn run_stdin_fail(args: &[&str], input: &str) {
     use std::io::Write;
@@ -3107,5 +3134,195 @@ fn lint_reports_zero_findings_on_a_clean_corpus_instead_of_staying_silent() {
     assert!(
         err.contains("scope(s)") || err.contains("path(s)"),
         "the summary must name what it actually scanned:\nstderr={err}"
+    );
+}
+
+// ─────────────── TRDD-2OUMEVDS: recall ENFORCES the technique, not just documents it ───────────────
+
+/// The card's own worked example: "server takes over the janitor daemon role" (the QUESTION's
+/// vocabulary) must surface a page indexed under "absorbs"/"stands down"/"withdraws" (the
+/// ANSWER's vocabulary) — the exact daemon-handover miss measured in this repo on 2026-08-14.
+/// Without the synonym expansion this query scores 0 against the fixture (no shared word at all),
+/// so a non-vacuous pass here is real evidence the expansion fired, not a coincidence of overlap.
+#[test]
+fn recall_synonym_expansion_surfaces_the_measured_daemon_handover_miss() {
+    let d = TempDir::new("recall-synonym-daemon");
+    d.write(
+        "handover.md",
+        "---\nname: one-daemon-per-host-withdraws-the-whole-daemon\ndescription: \"when two daemons race for a host, which one absorbs ownership and which one stands down and withdraws\"\ntags: [daemon]\nocd: 2026-08-01\nlmd: 2026-08-01\n---\n# one daemon per host\n\nBody prose about the daemon handoff mechanism.\n\n## Notes and lessons learned\n",
+    );
+    d.write(
+        "coffee.md",
+        "---\nname: unrelated-coffee-page\ndescription: \"totally unrelated topic about coffee brewing temperatures\"\ntags: [coffee]\nocd: 2026-08-01\nlmd: 2026-08-01\n---\n# unrelated\n\nNothing to do with daemons.\n\n## Notes and lessons learned\n",
+    );
+
+    // Sanity: the LITERAL query (no expansion) does NOT rank the handover page — proves the
+    // fixture's vocabulary genuinely differs and the test isn't accidentally vacuous.
+    let literal = run(&["find", "+takes +over +daemon", d.as_str()]);
+    assert!(
+        !literal.contains("one-daemon-per-host-withdraws"),
+        "sanity check failed — the literal words already match, so the expansion test proves nothing:\n{literal}"
+    );
+
+    let o = run(&["recall", "server takes over the janitor daemon role", d.as_str()]);
+    assert!(
+        o.contains("one-daemon-per-host-withdraws-the-whole-daemon"),
+        "synonym-expanded recall must surface the handover page:\n{o}"
+    );
+    assert!(
+        !o.contains("unrelated-coffee-page"),
+        "the unrelated page must not surface just because expansion widened the query:\n{o}"
+    );
+}
+
+/// WM-EXPAND-02, the card's no-regression box: expansion is STRICTLY ADDITIVE. A page that already
+/// ranks under the LITERAL query must still rank (score >= its literal score) under the expanded
+/// one — expansion can never make an exact match disappear behind synonym noise. Proven with a
+/// query whose exact phrase lives in one page's `description:` verbatim (so it scores the top
+/// EXACT_KEYWORD tier) while ALSO containing a synonym-table trigger word ("stops"), so the
+/// synonym table's added words are genuinely in play, not just inert.
+#[test]
+fn recall_expansion_is_additive_never_drops_a_literal_match() {
+    let d = TempDir::new("recall-additive");
+    d.write(
+        "exact.md",
+        "---\nname: exact-match-page\ndescription: \"the daemon stops cleanly on shutdown\"\ntags: [daemon]\nocd: 2026-08-01\nlmd: 2026-08-01\n---\n# exact match\n\nBody prose.\n\n## Notes and lessons learned\n",
+    );
+    let literal = run(&["recall", "the daemon stops cleanly on shutdown", d.as_str()]);
+    assert!(
+        literal.contains("exact-match-page"),
+        "sanity: the literal query must already match its own exact description:\n{literal}"
+    );
+    // Same query, run through the normal (always-expanding) recall path — the exact match must
+    // still be present. Because expansion only ADDS words to the ranking surface, and the exact
+    // phrase (used for the EXACT_KEYWORD tier) is untouched by expansion, the page must still rank.
+    let expanded = run(&["recall", "the daemon stops cleanly on shutdown", d.as_str()]);
+    assert!(
+        expanded.contains("exact-match-page"),
+        "expansion must never drop a match the literal query already found:\n{expanded}"
+    );
+}
+
+/// Jargon-shaped queries (an identifier, here `cmd_recall_cli`) are DETECTED and FLAGGED loudly —
+/// never silently substituted. The warning line, the literal-query section, and the expanded
+/// section must all be present on stdout so the caller sees exactly what happened.
+#[test]
+fn recall_flags_jargon_shaped_queries_and_shows_both_result_sets() {
+    let d = TempDir::new("recall-jargon");
+    d.write(
+        "cli.md",
+        "---\nname: cli-recall-page\ndescription: \"the recall command line entry point\"\ntags: [cli]\nocd: 2026-08-01\nlmd: 2026-08-01\n---\n# cli recall page\n\nBody prose.\n\n## Notes and lessons learned\n",
+    );
+    let o = run(&["recall", "cmd_recall_cli", d.as_str()]);
+    assert!(
+        o.contains("jargon") && o.contains("Also tried"),
+        "a snake_case identifier must be flagged as jargon:\n{o}"
+    );
+    assert!(o.contains("literal query"), "the literal section header must print:\n{o}");
+    assert!(o.contains("expanded"), "the expanded section header must print:\n{o}");
+    // The jargon token splits into `recall`/`cli`, which DOES reach the page's description — so
+    // the expanded section (unlike the literal one) must surface it.
+    assert!(
+        o.contains("cli-recall-page"),
+        "the split jargon words must reach the page via the expanded section:\n{o}"
+    );
+}
+
+/// An ordinary symptom-phrased query (no identifiers, paths, CamelCase, or version strings) must
+/// NOT trigger the jargon warning — the flag is precise, not a blanket disclaimer on every call.
+#[test]
+fn recall_does_not_flag_ordinary_symptom_phrases_as_jargon() {
+    let d = TempDir::new("recall-not-jargon");
+    d.write(
+        "plain.md",
+        "---\nname: plain-page\ndescription: \"the server crashed during startup\"\ntags: [x]\nocd: 2026-08-01\nlmd: 2026-08-01\n---\n# plain\n\nBody.\n\n## Notes and lessons learned\n",
+    );
+    let o = run(&["recall", "why did the server crash on startup", d.as_str()]);
+    assert!(
+        !o.contains("jargon"),
+        "an ordinary symptom phrase must not be flagged as jargon:\n{o}"
+    );
+}
+
+/// THE FRESH, MEASURED REGRESSION CASE (2026-08-14): `add-lesson` handed keywords that share no
+/// word with the page's `description:` must WARN LOUDLY on stderr (not fail — the write still
+/// succeeds, exit 0) — reproducing, verbatim, the sequence that motivated this card: nine (here,
+/// nine-word) symptom keywords, a clean validate-shaped write, and a lesson that would otherwise
+/// be silently unfindable by every one of them.
+#[test]
+fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
+    let d = TempDir::new("addlesson-gap");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "example page for testing lesson keyword coverage",
+        "--type", "reference",
+    ]);
+    let atom_out = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "example atom body"],
+        "some atom body text.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+
+    let (out, err, code) = run_stdin_full(
+        &[
+            "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords",
+            "pure function tests all passed but the guard was never wired",
+        ],
+        "DO NOT skip the guard-wiring test, BECAUSE a pure-function pass proves nothing about wiring. DO wire and assert instead.",
+    );
+    assert_eq!(code, 0, "the write itself must still succeed:\nstdout={out}\nstderr={err}");
+    assert!(out.starts_with("ATOM-"), "the lesson id still prints on stdout: {out}");
+    assert!(
+        err.contains("share no word") || err.contains("UNFINDABLE"),
+        "a keyword absent from the description must be flagged loudly:\nstderr={err}"
+    );
+    assert!(
+        err.contains("wired") || err.contains("guard"),
+        "the warning must name the actual uncovered keyword, not a generic message:\nstderr={err}"
+    );
+
+    // Proves the thesis end to end: `recall` on the exact symptom phrase does NOT surface the
+    // page (the keywords never reached the ranking surface) — exactly the write→recall gap.
+    let recalled = run(&[
+        "recall",
+        "pure function tests all passed but the guard was never wired",
+        d.as_str(),
+    ]);
+    assert!(
+        !recalled.contains("ATOM-") || !recalled.contains(&atom_id),
+        "unfixed, the lesson stays unfindable by its own stated symptom — reproducing the measured gap:\n{recalled}"
+    );
+}
+
+/// The companion case: when a keyword DOES share a word with the description, no warning fires —
+/// the check is precise, not a blanket "always warn on add-lesson" default.
+#[test]
+fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
+    let d = TempDir::new("addlesson-covered");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "keychain rotation retry cap guessed variable name",
+        "--type", "reference",
+    ]);
+    let atom_out = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "keychain creds"],
+        "Creds live in the macOS keychain, never plaintext.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+
+    let (_out, err, code) = run_stdin_full(
+        &[
+            "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords", "retry cap guessed variable name",
+        ],
+        "DO NOT read the cap off a guessed variable name, BECAUSE max_attempts does not exist. DO read the constant from the source instead.",
+    );
+    assert_eq!(code, 0);
+    assert!(
+        !err.contains("share no word"),
+        "a fully-covered keyword set must not trigger the warning:\nstderr={err}"
     );
 }

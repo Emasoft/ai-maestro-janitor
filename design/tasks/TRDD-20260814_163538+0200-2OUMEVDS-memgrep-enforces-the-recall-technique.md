@@ -17,8 +17,22 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
 
-USER directive, 2026-08-14. Not yet started. Design below is the starting point, not
-a settled spec — the synonym source (item 2) is the open question.
+USER directive, 2026-08-14. Implemented in `scripts/memgrep/src/memory.rs` (query
+expansion + jargon detection in `cmd_recall_cli`; the write→recall-gap warning in
+`cmd_add_lesson_cli`) plus regression tests in `tests/cli.rs` and pure-function unit
+tests in `memory.rs`'s `mod tests`. All 6 acceptance boxes ticked.
+
+**Open question resolved (deliberately, not by default):** shipped the HAND TABLE
+(7 entries, each traceable to a miss named in this card's own misses table), NOT the
+corpus-mined or query-log-mined alternative. Reason: the mined approaches both need
+query-logging infrastructure (a privacy surface the card itself flags as "worth
+thinking about before adding") that does not exist yet and is out of this card's
+scope — building it would be a separate TRDD. The hand table is honest about what it
+is (7 small entries, not a general thesaurus) and is proven not to regress recall via
+`recall_expansion_is_additive_never_drops_a_literal_match` /
+`expand_never_removes_a_literal_word_or_touches_the_phrase`. Growing it beyond
+observed misses (the "do not invent" instruction) is left to future cards that
+report a *new* real miss, exactly as this card's own table was built.
 
 ## The problem, stated as a mechanism rather than a complaint
 
@@ -77,22 +91,31 @@ query teaches nothing and hides its own behaviour.
 
 ## Acceptance criteria
 
-- [ ] A bundled synonym table, domain-first, with each entry traceable to a real observed
+- [x] A bundled synonym table, domain-first, with each entry traceable to a real observed
       miss rather than invented.
-- [ ] `recall` expands the query through it before ranking.
-- [ ] Jargon-shaped queries are detected and flagged loudly, with the expanded query shown
+- [x] `recall` expands the query through it before ranking.
+- [x] Jargon-shaped queries are detected and flagged loudly, with the expanded query shown
       and both result sets printed. No silent rewriting.
-- [ ] A regression test using THIS session's real misses: querying "server takes over the
+- [x] A regression test using THIS session's real misses: querying "server takes over the
       janitor daemon role" must surface `one-daemon-per-host-withdraws-the-whole-daemon`
       and `janitor-daemon-handover-unowned-chores`, which the literal query did not rank
-      first.
-- [ ] Expansion never DROPS a result the unexpanded query would have returned — strictly
-      additive, so it cannot make recall worse.
-- [ ] **`add-lesson` refuses (or loudly warns) when the `--keywords` it is handed do not
+      first. (Implemented against a synthetic fixture built from the same two pages'
+      real `description:` text — the live USER-scope corpus is never touched by a test,
+      per RULE 0 / the write constraints.)
+- [x] Expansion never DROPS a result the unexpanded query would have returned — strictly
+      additive, so it cannot make recall worse. Proven at BOTH layers: a pure-function
+      unit test (`expand_never_removes_a_literal_word_or_touches_the_phrase`) that fails
+      immediately if `expand()` ever replaced `words` instead of extending it, plus a
+      CLI-level regression.
+- [x] **`add-lesson` refuses (or loudly warns) when the `--keywords` it is handed do not
       appear in the page's `description:`, and offers to extend it.** Earned empirically
-      on 2026-08-14, not theorised — see "The write→recall gap" below.
-- [ ] `cargo test` in `scripts/memgrep` green; `uv run ruff check scripts tests` and
-      `uv run mypy scripts/ --ignore-missing-imports` clean.
+      on 2026-08-14, not theorised — see "The write→recall gap" below. Implemented as a
+      loud stderr warning (write still succeeds — the keywords remain useful as this
+      lesson's own atom-level surface); regression test reproduces the exact 9-keyword
+      measured sequence.
+- [x] `cargo test` in `scripts/memgrep` green (205 unit + 144 integration, 0 failed);
+      `uv run ruff check scripts tests` and `uv run mypy scripts/ --ignore-missing-imports`
+      clean.
 
 ## The write→recall gap — measured 2026-08-14, the strongest case for this card
 

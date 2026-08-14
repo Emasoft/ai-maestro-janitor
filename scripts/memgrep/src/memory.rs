@@ -3109,6 +3109,41 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     }
     let text = read_page_for_write(&a.page)?;
 
+    // WRITE→RECALL GAP CHECK (TRDD-2OUMEVDS): `recall` ranks EXCLUSIVELY on
+    // `description`+`title`+`tags` — never the lesson keywords. Measured for real on 2026-08-14:
+    // `add-lesson` handed 9 symptom keywords validated clean, linted clean, exited 0, and the
+    // lesson was unfindable by every one of them because the page's `description:` never mentioned
+    // them. Three green signals, one silent failure. Warn LOUDLY here (not a hard fail — the
+    // keywords still serve as this lesson's OWN atom-level surface for `find`/exact-id lookups, so
+    // refusing outright would block a legitimate write) whenever a keyword shares no content-word
+    // with the page's description, and name the exact keyword + the fix.
+    let page_fm = md::parse_frontmatter(&text);
+    let page_description = page_fm
+        .get("description")
+        .or_else(|| page_fm.get("summary"))
+        .cloned()
+        .unwrap_or_default();
+    let desc_words: HashSet<String> = content_words(&page_description).into_iter().collect();
+    let uncovered: Vec<&String> = keywords
+        .iter()
+        .filter(|kw| {
+            let kw_words = content_words(kw);
+            !kw_words.is_empty() && !kw_words.iter().any(|w| desc_words.contains(w))
+        })
+        .collect();
+    if !uncovered.is_empty() {
+        eprintln!(
+            "\u{26a0} add-lesson: keyword(s) {} share no word with {}'s `description:` \
+            (currently: \"{}\"). `recall` ranks on description+title+tags ONLY, so a lesson \
+            reachable solely through these keywords is UNFINDABLE by symptom search — extend \
+            `description:` to cover them (e.g. `memgrep edit` the frontmatter), or expect this \
+            lesson to surface only via `memgrep find`/an exact atom-id lookup.",
+            uncovered.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "),
+            rel(&a.page),
+            page_description,
+        );
+    }
+
     // Resolve the target atom to its body extent ON THIS PAGE. `atom` accepts the `^name` sigil form.
     let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
     let atom_query_matches = |id: &str| atom_id_matches(id, query);
@@ -5824,6 +5859,106 @@ const W_PHRASE_IN_KEYWORD: i64 = 100; // the query appears contiguously inside a
 const W_ALL_WORDS: i64 = 10; // every query word is present somewhere on the surface
 const W_WORD: i64 = 1; // per individual word present
 
+/// Domain synonym table (TRDD-2OUMEVDS): recall ranks on the SYMPTOM vocabulary
+/// (`description`+`title`+`tags`), which is routinely NOT the vocabulary a page's author used
+/// when describing the fix. Each entry here is traceable to a REAL recall miss measured in this
+/// repo's own session on 2026-08-14 (see the TRDD body's misses table) — NOT an invented
+/// thesaurus entry. Keep it that way: an unearned synonym adds noise to a short ranking surface
+/// and degrades every future query, which is exactly the failure this card exists to avoid.
+/// Each key is a CONTIGUOUS run of content-words (post-stopword-strip, matching `RecallQuery.phrase`
+/// ordering) so multi-word misses ("takes over") are anchored precisely, not on either word alone.
+const SYNONYMS: &[(&[&str], &[&str])] = &[
+    // miss: query said "the server takes over the daemon role" — pages said "absorbs" / "claims"
+    (&["takes", "over"], &["absorbs", "claims", "owns", "charge"]),
+    // miss: query said "the daemon stops/sleeps" — pages said "stands down" / "withdraws" / "yields"
+    (&["stops"], &["stands", "down", "withdraws", "suppressed", "yields"]),
+    (&["sleeps"], &["stands", "down", "withdraws", "suppressed", "yields"]),
+    // miss: query said "dead/gone" — pages said "absent" / "died" / "not respawned" / "stale"
+    (&["dead"], &["absent", "died", "respawned", "stale"]),
+    (&["gone"], &["absent", "died", "respawned", "stale"]),
+    // miss: "the test wrote it" (a test polluted shared state) — pages said "pollution" / "leak" /
+    // "escaped isolation" (content-word order after stopword strip: "test", "wrote")
+    (&["test", "wrote"], &["pollution", "leak", "escaped", "isolation"]),
+    // miss: "who wrote this file" (provenance question) — pages said "attribution" / "provenance" /
+    // "breadcrumb" (content-word order after stopword strip: "wrote", "file")
+    (&["wrote", "file"], &["attribution", "provenance", "breadcrumb"]),
+];
+
+/// Look up every `SYNONYMS` key that occurs as a contiguous run inside `phrase`, and return the
+/// UNION of their synonym words (deduped). Pure lookup — no mutation, so callers decide whether/how
+/// to merge the result, which is what keeps expansion provably additive (WM-EXPAND-02: see
+/// `recall_expansion_is_additive_never_drops_a_literal_match` in the test module).
+fn synonym_expansion(phrase: &[String]) -> Vec<String> {
+    let mut extra = Vec::new();
+    for (key, syns) in SYNONYMS {
+        let key_words: Vec<String> = key.iter().map(|s| s.to_string()).collect();
+        if contains_contiguous(phrase, &key_words) {
+            extra.extend(syns.iter().map(|s| s.to_string()));
+        }
+    }
+    extra
+}
+
+/// Does `raw_query` look like it is written in the ANSWER's jargon — an identifier, a path, or a
+/// version string — rather than a symptom description? Checked token-by-token on the RAW query
+/// (before stopword-stripping), because the jargon shape (`snake_case`, `CamelCase`, `a/b/c`,
+/// `pkg::item`, `v1.2.3`) lives in the surface punctuation `content_words` throws away.
+fn looks_like_jargon(raw_query: &str) -> bool {
+    raw_query.split_whitespace().any(|tok| {
+        let core = tok.trim_matches(|c: char| !c.is_alphanumeric() && !"_./:".contains(c));
+        !core.is_empty()
+            && (core.contains('_')
+                || core.contains('/')
+                || core.contains("::")
+                || is_camel_case(core)
+                || is_version_like(core))
+    })
+}
+
+/// True when `s` has a lowercase letter immediately followed by an uppercase one (`fooBar`,
+/// `readNote`) — the shape of an identifier, not English prose (a capitalized sentence word like
+/// "How" doesn't trigger: there is no lower-then-upper transition inside it).
+fn is_camel_case(s: &str) -> bool {
+    s.chars()
+        .zip(s.chars().skip(1))
+        .any(|(a, b)| a.is_ascii_lowercase() && b.is_ascii_uppercase())
+}
+
+/// True when `s` (optionally `v`-prefixed) is a dotted run of digit groups (`1.2.3`, `v2.4.0`) — a
+/// version string, never a symptom phrase.
+fn is_version_like(s: &str) -> bool {
+    let s = s.strip_prefix('v').unwrap_or(s);
+    let parts: Vec<&str> = s.split('.').collect();
+    parts.len() >= 2 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Split one jargon-shaped token into its component words — `snake_case`/`kebab-case`/`path/like`
+/// on separators, `CamelCase` on a lower→upper boundary — so a jargon query still reaches a page
+/// indexed under the SPELLED-OUT symptom words (`cmd_recall_cli` → `cmd`, `recall`, `cli`).
+fn split_jargon_token(tok: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for c in tok.chars() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower && !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+        cur.push(c.to_ascii_lowercase());
+        prev_lower = c.is_lowercase();
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words.into_iter().filter(|w| w.len() >= 2).collect()
+}
+
 impl RecallQuery {
     fn parse(query: &str) -> Result<Self> {
         let phrase = content_words(query);
@@ -5836,6 +5971,23 @@ impl RecallQuery {
         words.sort();
         words.dedup();
         Ok(Self { words, phrase })
+    }
+
+    /// Widen `self` with the domain synonym table (always) and, when `jargon`, with each raw query
+    /// token's split-apart sub-words too. STRICTLY ADDITIVE: `phrase` (the exact/contiguous tiers'
+    /// input) is untouched and every original word survives in the result, so any candidate that
+    /// scored under `self` scores AT LEAST as high under the expansion — see WM-EXPAND-02.
+    fn expand(&self, raw_query: &str, jargon: bool) -> Self {
+        let mut words = self.words.clone();
+        words.extend(synonym_expansion(&self.phrase));
+        if jargon {
+            for tok in raw_query.split_whitespace() {
+                words.extend(split_jargon_token(tok));
+            }
+        }
+        words.sort();
+        words.dedup();
+        Self { words, phrase: self.phrase.clone() }
     }
 
     /// The TIERED score of one candidate's symptom surface. 0 ⇒ no surface match at all, which is
@@ -6247,6 +6399,17 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
 
     let terms = RecallQuery::parse(&a.query)?;
 
+    // TECHNIQUE ENFORCEMENT (TRDD-2OUMEVDS): recall ranks on SYMPTOM vocabulary, and a query
+    // written in the ANSWER's jargon (an identifier, a path, a version string) rarely lives on that
+    // surface. Detected here so the flag is computed once and reused for both the warning line and
+    // the expansion below — never silently substituted, always shown alongside the literal query.
+    let jargon = looks_like_jargon(&a.query);
+    // QUERY EXPANSION: always widen through the domain synonym table (silent — this is the ordinary
+    // path and adding noise to every call's stdout would defeat the point); additionally split
+    // jargon-shaped tokens into their component words when jargon was detected. Additive only — see
+    // `RecallQuery::expand` and the `recall_expansion_is_additive_never_drops_a_literal_match` test.
+    let expanded = terms.expand(&a.query, jargon);
+
     // SOURCE SELECTION: with `--use-index`, use the persistent index when it EXISTS (else fall back
     // to the walk so a missing index is never wrong). Without the flag, auto-use a FRESH index (one
     // no corpus file is newer than) and otherwise walk — so results are ALWAYS correct even with a
@@ -6263,17 +6426,37 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
         // last reindex — a precise per-file `(size, mtime_ns)`/blob check, not a coarse timestamp).
         crate::index::is_fresh(&root, &collect_md(&a.paths, a.hidden))
     };
-
-    let all = if use_index {
-        match crate::index::open_existing(&root) {
-            Some(conn) => gather_from_index(&conn, &terms, a.include_superseded)?,
-            None => gather_from_walk(&a.paths, a.hidden, &terms, a.include_superseded),
-        }
-    } else {
-        gather_from_walk(&a.paths, a.hidden, &terms, a.include_superseded)
+    let gather = |q: &RecallQuery| -> Result<Vec<RecallScored>> {
+        Ok(if use_index {
+            match crate::index::open_existing(&root) {
+                Some(conn) => gather_from_index(&conn, q, a.include_superseded)?,
+                None => gather_from_walk(&a.paths, a.hidden, q, a.include_superseded),
+            }
+        } else {
+            gather_from_walk(&a.paths, a.hidden, q, a.include_superseded)
+        })
     };
 
-    finalize_recall(all, &a.as_finalize())
+    if jargon {
+        let extra: Vec<&str> = expanded
+            .words
+            .iter()
+            .filter(|w| !terms.words.contains(w))
+            .map(String::as_str)
+            .collect();
+        println!(
+            "\u{26a0} \"{}\" reads like the ANSWER's jargon (an identifier/path/version), not a \
+            symptom description — `recall` ranks on description+title+tags, where jargon rarely \
+            lives. Also tried: {}",
+            a.query,
+            if extra.is_empty() { "(no extra terms)".to_string() } else { extra.join(", ") }
+        );
+        println!("\n── literal query ──");
+        finalize_recall(gather(&terms)?, &a.as_finalize())?;
+        println!("\n── expanded (symptom-style) query ──");
+    }
+
+    finalize_recall(gather(&expanded)?, &a.as_finalize())
 }
 
 // ─────────────────────────── `memgrep find` (the +/- query DSL) ───────────────────────────
@@ -6797,6 +6980,70 @@ mod tests {
         RecallQuery::parse(query)
             .expect("query has content words")
             .score_surface("", "", keywords)
+    }
+
+    // ── TRDD-2OUMEVDS: expansion must be provably additive, structurally, not just by example ──
+
+    /// The no-regression box, proven at the PURE-FUNCTION level: `expand` must retain every
+    /// original word and leave `phrase` byte-identical (the exact/contiguous tiers key off
+    /// `phrase`, so if it changed those tiers could regress). Unlike a CLI-level "it still finds
+    /// the page" test, this FAILS IMMEDIATELY the moment `expand` ever REPLACES `words` instead of
+    /// extending it — the exact defect class this box exists to catch.
+    #[test]
+    fn expand_never_removes_a_literal_word_or_touches_the_phrase() {
+        for q in [
+            "the daemon takes over cleanly",
+            "server crashed on startup",
+            "cmd_recall_cli",
+            "a query with no synonym trigger at all",
+        ] {
+            let terms = RecallQuery::parse(q).expect("content words");
+            for jargon in [false, true] {
+                let expanded = terms.expand(q, jargon);
+                for w in &terms.words {
+                    assert!(
+                        expanded.words.contains(w),
+                        "expand({q:?}, jargon={jargon}) dropped literal word {w:?}"
+                    );
+                }
+                assert_eq!(
+                    terms.phrase, expanded.phrase,
+                    "expand({q:?}, jargon={jargon}) must never alter the exact-tier phrase"
+                );
+            }
+        }
+    }
+
+    /// Every `SYNONYMS` entry is traceable to a key that is itself reachable by `content_words`
+    /// (i.e. lowercase, no stopwords) — a key containing a stopword or mixed case could never match
+    /// a parsed query's `phrase`, silently making that table row dead weight.
+    #[test]
+    fn synonym_table_keys_are_all_reachable_content_words() {
+        for (key, syns) in SYNONYMS {
+            assert!(!key.is_empty(), "a synonym key must not be empty");
+            assert!(!syns.is_empty(), "a synonym entry must offer at least one word");
+            for w in key.iter().chain(syns.iter()) {
+                assert_eq!(
+                    *w,
+                    w.to_lowercase(),
+                    "synonym table entries must be lowercase (content_words lowercases): {w}"
+                );
+                assert!(
+                    !STOPWORDS.contains(w),
+                    "a stopword key/synonym can never be reached via content_words: {w}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn looks_like_jargon_flags_identifiers_paths_and_versions_not_prose() {
+        assert!(looks_like_jargon("cmd_recall_cli"));
+        assert!(looks_like_jargon("readNote"));
+        assert!(looks_like_jargon("scripts/memgrep/src/memory.rs"));
+        assert!(looks_like_jargon("bumped to v1.2.3"));
+        assert!(!looks_like_jargon("why did the server crash on startup"));
+        assert!(!looks_like_jargon("How does the daemon handoff work"));
     }
 
     #[test]
