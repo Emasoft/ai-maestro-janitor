@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-13T12:42:00+0200
+updated: 2026-08-15T00:26:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -14,10 +14,36 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-15
+
+### ⏵ INCIDENT 2026-08-15 — the feature shipped DARK and cost the owner ~7M tokens
+
+v3.3.0 shipped the wired SessionStart hook (`on-session-start-cold-cache-clear.py`, registered
+in hooks.json), but `external_clear.DEFAULT_ENABLED` is `False` BY THIS CARD'S OWN DESIGN
+("opt-in until one observed end-to-end unattended cycle"). Nothing on the owner's machine set
+`CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED`, and the `enabled()` refusal was SILENT (no
+log line), so when the owner updated the plugin and restarted the whole fleet onto expired
+caches expecting the feature, every session refused invisibly and paid the full cold re-read —
+~7M tokens. The defect was not the gate; it was (a) announcing the feature without stating the
+opt-in, and (b) a refusal that left no trace anywhere.
+
+Done in response, 2026-08-15:
+- `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED=true` added to `~/.claude/settings.json`
+  `env` — every NEW session on this machine is opted in (already-running sessions are not).
+- The `enabled()` refusal in the hook now logs one line naming the env var (repo edit, this
+  commit) — a dark feature is now distinguishable from a broken one.
+- Chain verified live with the switch on: enabled=True → transcript found → 325k ≥ 150k floor
+  → agentlens probe answered `False` (warm — correct for an active session) → verdict
+  `fire=False why='cache warm'`. Every stage answers; the only refusals left are legitimate.
+
+NEXT: the first genuine cold restart on this machine is the "one observed end-to-end unattended
+cycle" acceptance box. When it is observed, flipping `DEFAULT_ENABLED` to `True` is that box's
+payoff (per the constant's own comment). Do NOT flip it before then.
 
 **Column `todo` since 2026-08-12.** Nobody is working this — 0/5 acceptance, and the NEXT ACTION
 (wire the watcher) is known and concrete, so it is pullable rather than in progress.
+*(2026-08-15 correction: the watcher/hook IS wired and shipped in v3.3.0 — the remaining work is
+the observed-cycle acceptance + default flip above, not the wiring.)*
 
 *History, kept because the reasoning was sound and only the state moved:* this block opened with
 **"Column `dev` since 2026-08-06 … `todo → dev` skipped `design`/`dispatch` (mono-agent

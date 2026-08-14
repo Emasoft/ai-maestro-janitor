@@ -91,11 +91,22 @@ def main() -> int:
         import global_state as gs  # noqa: PLC0415 -- for the TCC-stable interpreter, see below
         import state  # noqa: PLC0415
 
-        if not ec.enabled():
-            return 0
         root = Path(cwd) if cwd else Path(os.environ.get("CLAUDE_PROJECT_DIR", "") or os.getcwd())
         state.set_project_dir_override(str(root))
         sd = state.state_dir()
+
+        # A disabled refusal MUST leave a trace (incident 2026-08-15: the feature shipped with
+        # DEFAULT_ENABLED=False, the owner restarted a whole fleet expecting it, and every
+        # session refused here SILENTLY — 7M tokens of cold re-reads with nothing anywhere
+        # saying "the switch is off". One log line per resume is what makes a dark feature
+        # distinguishable from a broken one.)
+        if not ec.enabled():
+            state.log_line(
+                "cold-cache-clear",
+                f"source={source} fire=False why=disabled "
+                f"(set {ec.ENABLED_ENV}=true to enable the cold-cache clear)",
+            )
+            return 0
 
         # Guard 2 — one fire per session id, whatever SessionStart does. `emit_once` returns
         # None on a repeat, which is exactly "already fired for this session".
