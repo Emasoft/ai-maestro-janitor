@@ -13,37 +13,37 @@ other — they agreed on half the fix and prescribed OPPOSITE things on the
 other half. It surfaced only because two titles happened to be read back to
 back on a 113-card board — luck, not process.
 
-The predicate: a PAIR of OPEN cards sharing an `external-refs:` entry that do
-NOT reference each other (in either card's `external-refs:` or body). Sharing
-a ref is NOT a contradiction — a parent and its derived task, a detector and
-its fix, legitimately cite the same issue — so this NEVER asserts the two
-cards disagree. It says only "these two may not know about each other";
-cross-referencing (once either side names the other) is the correct silencer.
+Two independent signals, run and reported together:
+
+1. **Shared `external-refs:`** — a PAIR of OPEN cards sharing an
+   `external-refs:` entry that do NOT reference each other (in either card's
+   `external-refs:` or body). Sharing a ref is NOT a contradiction — a parent
+   and its derived task, a detector and its fix, legitimately cite the same
+   issue — so this NEVER asserts the two cards disagree. It says only "these
+   two may not know about each other"; cross-referencing (once either side
+   names the other) is the correct silencer.
+2. **Shared rare vocabulary in title + STATE block** (TRDD-4EKZ81MV — closes
+   the blind spot signal (1) structurally cannot see: two cards that never
+   shared a ref at all). Two OPEN, non-cross-referenced cards whose title +
+   `## STATE` block (or, absent a STATE block, the whole body) share at
+   least `_MIN_SHARED_CONTENT_WORDS` words that are BOTH long enough to be
+   specific (`_MIN_WORD_LEN`) AND rare across the current board (appear on
+   at most `_rarity_threshold()` open cards). The rarity gate is what keeps
+   this sound: a word every card uses ("janitor", "detector", "board") has
+   high document frequency and is excluded regardless of length, so common
+   house vocabulary cannot manufacture a pair — only genuinely distinctive,
+   shared terms (e.g. "symlink" + "mechanism", or "iTerm" + "automation")
+   can. Requiring 2+ such words (not 1) additionally guards against a single
+   coincidental rare-word match between two unrelated cards.
 
 SURFACE-ONLY: this detector mutates ZERO TRDD files, ever. Zero model tokens
-— the whole check is a script pairing up `external-refs:` values. Terminal
-and archived/refused cards are excluded (a closed card cannot be re-litigated
-and the archived/refused folders are not scanned at all).
+— both signals are pure string/set operations over already-parsed frontmatter
+and body text. Terminal and archived/refused cards are excluded (a closed
+card cannot be re-litigated and the archived/refused folders are not scanned
+at all).
 
-KNOWN BLIND SPOT (TRDD-4EKZ81MV — read before trusting a silent run): this
-detector's ONLY signal is a shared `external-refs:` value. Two cards that
-never shared a ref — because one card cited nothing, or the two named
-different issue numbers for the same underlying defect, or the shared ref
-was only added AT THE SAME TIME the cards were cross-linked — are invisible
-to it, structurally, no matter how much house vocabulary or STATE-block
-overlap they share. Verified against the two real misses that motivated
-this card: at every point before TRDD-RG4IUZ6I and TRDD-3QIQ2E6J were
-cross-linked, their `external-refs:` never overlapped (`janitor#241` was
-added to 3QIQ2E6J in the SAME commit that added the TRDD-RG4IUZ6I
-cross-reference); TRDD-AZ6QRK0D and TRDD-JPL0JU86 never shared an
-`external-refs:` value at all, at creation or since. So an empty run of
-this detector means "no OPEN cards happen to share an untied ref" — it does
-NOT mean "no two cards are blind to each other". Closing that gap needs a
-new signal (content/title similarity, or shared touched-files — see the
-card for the ranked options) and a similarity threshold nobody has ratified
-yet; that is a design decision, not a fix folded into this detector.
-
-Slow-moving board hygiene — daily cadence; per-(ref, pair) seen-file dedupe.
+Slow-moving board hygiene — daily cadence; per-(signal, key, pair) seen-file
+dedupe.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from __future__ import annotations
 import itertools
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,6 +71,8 @@ _FM_EXTERNAL_REFS_RE = re.compile(r"^external-refs:[ \t]*(.+)$", re.MULTILINE)
 # just counted. Keeps the heartbeat line short on a board with many hits.
 _MAX_LISTED = 8
 
+_FM_TITLE_RE = re.compile(r"^title:[ \t]*(.+)$", re.MULTILINE)
+
 
 @dataclass
 class _Card:
@@ -79,6 +82,7 @@ class _Card:
     scope: str
     ext_refs: list[str] = field(default_factory=list)  # raw external-refs elements
     body: str = ""
+    title: str = ""
 
 
 def _normalize_ref(ref: str) -> str:
@@ -118,6 +122,124 @@ def _references(card: _Card, target_uid: str) -> bool:
     return any(uid.upper() == t for uid in trdd_common.extract_trdd_refs(card.body))
 
 
+# ── Signal 2: shared rare vocabulary (TRDD-4EKZ81MV) ──────────────────────
+#
+# Two cards that never shared an `external-refs:` value are structurally
+# invisible to signal 1 (see the module docstring). This signal keys on
+# distinctive shared WORDS in the title + STATE block instead of a shared
+# citation, so it fires on exactly the cases signal 1 cannot: a card with
+# NO external-refs at all, or two cards that named different issue numbers
+# for the same underlying defect.
+
+_MIN_WORD_LEN = 5  # below this, words are too generic to be specific evidence
+_MIN_SHARED_CONTENT_WORDS = 2  # a single coincidental rare word is not enough
+_RARITY_ABS_FLOOR = 2  # always allow a word seen on up to this many cards
+_RARITY_FRACTION = 0.03  # ...or this fraction of the open board, whichever is larger
+
+_WORD_RE = re.compile(r"[a-z][a-z0-9']*")
+
+# Generic English/house-vocabulary glue words that would otherwise slip past
+# the rarity gate on a SMALL board (few cards -> everything looks "rare" by
+# document-frequency alone). On the real, large board the rarity gate above
+# does most of the work; this list exists so the signal stays sound even on
+# a 2-3 card fixture where df-based rarity has no discriminating power yet.
+_CONTENT_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "about", "above", "after", "again", "against", "all", "also", "although",
+        "always", "among", "another", "anyone", "anything", "around", "because",
+        "before", "being", "below", "between", "board", "body", "bugfix", "cannot",
+        "card", "cards", "change", "changed", "changes", "close", "closed", "column",
+        "could", "detector", "detectors", "does", "doing", "down", "during", "each",
+        "either", "even", "every", "external", "false", "field", "file", "files",
+        "first", "found", "from", "given", "have", "having", "here", "however",
+        "instead", "into", "issue", "issues", "itself", "janitor", "just", "later",
+        "least", "logic", "maybe", "might", "more", "most", "much", "must", "never",
+        "next", "notes", "occur", "often", "once", "only", "open", "other", "over",
+        "owned", "owner", "pairs", "parse", "project", "quite", "ratio", "reads",
+        "ready", "refer", "refs", "scope", "session", "shall", "share", "shared",
+        "should", "signal", "since", "some", "state", "still", "such", "task",
+        "tasks", "test", "tests", "than", "that", "their", "them", "then", "there",
+        "these", "they", "this", "those", "though", "through", "title", "todo",
+        "trdd", "trdds", "true", "under", "until", "using", "value",
+        "very", "were", "what", "when", "where", "which", "while", "will", "with",
+        "within", "without", "would", "write", "wrote",
+    }
+)
+
+
+def _content_words(text: str) -> set[str]:
+    """Tokenize `text` into the SIGNIFICANT-word set used for the similarity gate.
+
+    Lowercased, `_MIN_WORD_LEN`+ chars, stopwords stripped. Deliberately not
+    stemmed/lemmatized — a false negative (missed plural/tense match) is
+    cheap here, a false positive from over-eager normalization is not.
+    """
+    words: set[str] = set()
+    for tok in _WORD_RE.findall(text.lower()):
+        if len(tok) < _MIN_WORD_LEN or tok in _CONTENT_STOPWORDS:
+            continue
+        words.add(tok)
+    return words
+
+
+def _similarity_text(card: _Card) -> str:
+    """The text signal 2 compares: title + STATE block, falling back to the
+    whole body when no `## STATE` heading exists (design-prose-only cards —
+    the iTerm trio is mostly this shape, per the card's evidence)."""
+    state_block = trdd_common.extract_state_block(card.body)
+    return card.title + "\n" + (state_block if state_block else card.body)
+
+
+def _rarity_threshold(total_cards: int) -> int:
+    """A word counts as "rare" iff it appears on at most this many open cards.
+
+    `_RARITY_ABS_FLOOR` keeps small boards usable (df-based rarity alone has
+    no power below a few dozen cards); `_RARITY_FRACTION` is what makes the
+    gate SCALE — on a 274-card board a word appearing on 3% of cards (≈8)
+    is still common house vocabulary, not a specific shared term.
+    """
+    return max(_RARITY_ABS_FLOOR, int(total_cards * _RARITY_FRACTION))
+
+
+def _find_content_similarity_pairs(
+    cards: dict[str, _Card],
+) -> dict[frozenset[str], set[str]]:
+    """Return {frozenset({uid_a, uid_b}): shared_rare_words} for every pair whose
+    shared rare-word count meets `_MIN_SHARED_CONTENT_WORDS`. Cross-referenced
+    pairs are NOT filtered here — the caller applies the same `_references`
+    silencer signal 1 uses, so both signals share one cross-link escape hatch.
+    """
+    card_words: dict[str, set[str]] = {
+        uid: _content_words(_similarity_text(card)) for uid, card in cards.items()
+    }
+    df: Counter[str] = Counter()
+    for words in card_words.values():
+        df.update(words)
+    threshold = _rarity_threshold(len(cards))
+    rare_words = {w for w, c in df.items() if c <= threshold}
+
+    # Inverted index restricted to rare words only — on a large board this
+    # keeps the pairing work proportional to how many cards share a
+    # DISTINCTIVE term, never O(cards^2) over the whole corpus.
+    word_to_uids: dict[str, list[str]] = {}
+    for uid, words in card_words.items():
+        for w in words & rare_words:
+            word_to_uids.setdefault(w, []).append(uid)
+
+    pair_shared: dict[frozenset[str], set[str]] = {}
+    for word, uids in word_to_uids.items():
+        if len(uids) < 2:
+            continue
+        for a, b in itertools.combinations(sorted(uids), 2):
+            pair_shared.setdefault(frozenset({a, b}), set()).add(word)
+
+    return {
+        pair: words
+        for pair, words in pair_shared.items()
+        if len(words) >= _MIN_SHARED_CONTENT_WORDS
+    }
+
+
 def _parse_card(path: Path, scope: str) -> _Card | None:
     """Parse one TRDD file into a `_Card`, or None when it has no usable id."""
     uid = trdd_common.extract_uid(path.name)
@@ -143,8 +265,10 @@ def _parse_card(path: Path, scope: str) -> _Card | None:
     rm = _FM_EXTERNAL_REFS_RE.search(fm.group(1))
     if rm:
         ext_refs = trdd_common.parse_flow_list(rm.group(1))
+    tm = _FM_TITLE_RE.search(fm.group(1))
+    title = tm.group(1).strip() if tm else ""
     body = text[fm.end():]
-    return _Card(uid=uid, scope=scope, ext_refs=ext_refs, body=body)
+    return _Card(uid=uid, scope=scope, ext_refs=ext_refs, body=body, title=title)
 
 
 def main() -> int:
@@ -218,10 +342,29 @@ def main() -> int:
             if _references(card_a, b) or _references(card_b, a):
                 continue
             dedupe_key = f"blindspot@{key}@{a}@{b}"
-            msg = f"TRDD-{a} & TRDD-{b} ({state.sanitize_for_drift_line(ref_display[key])})"
+            msg = f"TRDD-{a} & TRDD-{b} (shared ref: {state.sanitize_for_drift_line(ref_display[key])})"
             if dedupe.emit_once(seen, dedupe_key, msg) is not None:
                 new_pairs.append(msg)
                 new_keys.append(dedupe_key)
+
+    # Signal 2 (TRDD-4EKZ81MV): shared rare vocabulary, independent of any
+    # shared `external-refs:` value — this is what catches a card with no
+    # refs at all, or two cards that cited different issue numbers for the
+    # same underlying defect (signal 1 is structurally blind to both).
+    for pair, shared_words in _find_content_similarity_pairs(cards).items():
+        a, b = sorted(pair)
+        card_a, card_b = cards[a], cards[b]
+        # Same cross-link silencer as signal 1 — naming the other card is
+        # what clears BOTH signals, deliberately, so a maintainer has one
+        # remedy for either finding.
+        if _references(card_a, b) or _references(card_b, a):
+            continue
+        words_shown = ", ".join(sorted(shared_words)[:4])
+        dedupe_key = f"blindspot-content@{a}@{b}@{'-'.join(sorted(shared_words))}"
+        msg = f"TRDD-{a} & TRDD-{b} (shared vocabulary: {state.sanitize_for_drift_line(words_shown)})"
+        if dedupe.emit_once(seen, dedupe_key, msg) is not None:
+            new_pairs.append(msg)
+            new_keys.append(dedupe_key)
 
     if not new_pairs:
         state.rotate_log_if_big("trdd-cross-card-blindspot")
@@ -239,9 +382,9 @@ def main() -> int:
     if len(new_pairs) > _MAX_LISTED:
         shown += f", +{len(new_pairs) - _MAX_LISTED} more (re-reported next run)"
     print(
-        f"[trdd-cross-card-blindspot] {len(new_pairs)} pair(s) cite the same issue and may "
-        f"not know about each other — {shown}. SURFACE-ONLY (no TRDD mutated); "
-        f"consider cross-linking or confirm they agree."
+        f"[trdd-cross-card-blindspot] {len(new_pairs)} pair(s) may not know about each "
+        f"other — {shown}. SURFACE-ONLY (no TRDD mutated); consider cross-linking or "
+        f"confirm they agree."
     )
 
     state.rotate_log_if_big("trdd-cross-card-blindspot")

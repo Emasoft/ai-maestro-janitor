@@ -103,14 +103,34 @@ TRDD-ref, which would then re-trigger it forever).
 
 ## Acceptance
 
-- [ ] The detector reports the JPL0JU86 ⇄ AZ6QRK0D pair from the state both cards had BEFORE
+- [x] The detector reports the JPL0JU86 ⇄ AZ6QRK0D pair from the state both cards had BEFORE
       they were cross-linked on 2026-08-12 (the cross-link is now in the tree, so the fixture
       must reconstruct the pre-link frontmatter — testing against today's files would pass
-      for the wrong reason)
-- [ ] The detector reports at least one pair from the iTerm trio, INCLUDING the card that
-      carries no `external-refs:` at all
-- [ ] Falsified per-guard: each new signal proven by breaking it and watching a test go red
-- [ ] No regression in soundness — the `c4f11738` shared-TRDD-ref case still does NOT fire,
-      and a full board run does not manufacture pairs from shared house vocabulary
+      for the wrong reason). Implemented as signal 2 (content similarity over title +
+      `## STATE` block, gated on rare shared vocabulary). Verified by
+      `test_az6qrk0d_jpl0ju86_content_similarity_now_catches_prelink_state`, which
+      reconstructs the pre-link frontmatter (`external-refs:` unchanged, no cross-body
+      mention) and asserts the pair fires with `symlink` named as shared vocabulary.
+- [x] The detector reports at least one pair from the iTerm trio, INCLUDING the card that
+      carries no `external-refs:` at all. Verified by
+      `test_iterm_trio_content_similarity_catches_the_no_refs_card` — the no-refs card
+      pairs with the refs-bearing card on shared `iterm`/`automation`/`alarm`/`grant`
+      vocabulary; the third, unrelated card does not join either pair.
+- [x] Falsified per-guard: each new signal proven by breaking it and watching a test go red.
+      Two in-process falsifications (module loaded white-box, guard monkeypatched, restored
+      in a `finally`): `test_rarity_gate_falsified_without_it_common_words_pair_everything`
+      (forces `_rarity_threshold` to accept every word regardless of document frequency —
+      the guarded assertion holds, the forced-open assertion flips to firing, confirming
+      the rarity gate — not some other guard — was what suppressed the pair) and
+      `test_min_shared_words_gate_falsified_single_rare_word_would_pair_without_it`
+      (lowers `_MIN_SHARED_CONTENT_WORDS` from 2 to 1 — a single coincidental shared word
+      then pairs two otherwise-unrelated cards). Both restore the original guard and
+      re-assert the guarded behavior returns, so the test itself never ships red.
+- [x] No regression in soundness — the `c4f11738` shared-TRDD-ref case still does NOT fire
+      (`test_a_shared_trdd_ref_is_not_a_pair`, unchanged), and a full board run does not
+      manufacture pairs from shared house vocabulary
+      (`test_shared_house_vocabulary_across_many_cards_does_not_manufacture_a_pair` — two
+      cards sharing 2 words that are common across 5 total cards do NOT pair, because the
+      rarity gate filters words at or above document-frequency 2 on a 5-card board).
 
 ## Notes and lessons learned
