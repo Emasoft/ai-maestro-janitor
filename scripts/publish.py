@@ -167,6 +167,22 @@ def cprint(msg: str) -> None:
 # wedged suite an order of magnitude below anything a human would wait out.
 _TEST_SUITE_TIMEOUT_SEC = 3600
 
+# The ONE definition of how this plugin's suite is run. There are TWO call sites (the G4
+# gate and the step-3 runner, which differ only in their subprocess helper and their
+# browser-orphan cleanup), and on 2026-08-14 adding `-n auto` to one of them left the other
+# serial — the publish still took its full 21 minutes and the flag looked broken. A literal
+# duplicated across two sites is a single fact with two owners; the next edit updates one.
+#
+# `-n auto` shards across cores: MEASURED 1280.6s serial -> 164.8s sharded (7.8x) on 14
+# cores, 15,415 passed both ways. Safe because TRDD-TSTISOL1 removed the cross-test
+# pollution and conftest's write-guard fails LOUDLY on any escape into the real janitor
+# state dirs, so a shared-state hazard is a red test rather than a flake.
+#
+# `-x` is exitfirst; under xdist it stops the WORKERS, so a failing run can interleave
+# output from shards that were mid-flight. Exit status — all either call site branches
+# on — is unchanged.
+_PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto"]
+
 # Wall-clock bound for every remote-CPV invocation, for the same reason as above.
 # MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on
 # a quiet machine (437 files, a 15-language repo lint) — against the generic 300 s
@@ -1147,24 +1163,8 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}Every CPV plugin MUST ship tests.{NC}")
         return 1
     try:
-        # `-n auto` sharding, measured 2026-08-14: this suite is ~15.4k tests and ran SERIALLY
-        # at 986s on a 14-core machine — roughly half of a ~45-minute publish, with every core
-        # but one idle. `pytest-xdist` was already a declared dependency whose pyproject comment
-        # says it "shards it across cores", but NO invocation ever passed `-n`, so the plugin sat
-        # installed and dormant. A dependency is not a use.
-        #
-        # Safe here for the reason that comment records: TRDD-TSTISOL1 removed the cross-test
-        # pollution and conftest's write-guard fails LOUDLY on any test that escapes into the real
-        # janitor state dirs — so a shared-state hazard becomes a red test, not a flake. Do NOT
-        # copy this flag into a suite lacking those two guarantees; sharding a polluted suite
-        # converts a deterministic failure into an intermittent one, which is strictly worse.
-        #
-        # `-x` still means exitfirst; under xdist it stops the WORKERS, so a failing run can
-        # interleave output from shards that were mid-flight. The exit status is unchanged, which
-        # is what this gate branches on.
         te = subprocess.run(
-            ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto"],
-            cwd=str(root), timeout=_TEST_SUITE_TIMEOUT_SEC).returncode
+            _PYTEST_CMD, cwd=str(root), timeout=_TEST_SUITE_TIMEOUT_SEC).returncode
     except subprocess.TimeoutExpired:
         cprint(f"  {RED}BLOCKED: Tests timed out after {_TEST_SUITE_TIMEOUT_SEC}s.{NC}")
         return 1
@@ -1354,7 +1354,7 @@ def stage_tests(root: Path) -> None:
         sys.exit(1)
     baseline_browser_pids = _snapshot_browser_pids()
     try:
-        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False,
+        r = run(_PYTEST_CMD, cwd=root, check=False,
                 timeout=_TEST_SUITE_TIMEOUT_SEC)
     finally:
         killed = _cleanup_browser_orphans(baseline_browser_pids)
