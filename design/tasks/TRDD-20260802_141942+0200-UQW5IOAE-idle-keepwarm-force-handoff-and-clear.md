@@ -176,14 +176,87 @@ into a pane it does not own)?
 
 ## Acceptance
 
-- [ ] Advisor verdict read and its objections either implemented or explicitly refused in writing.
-- [ ] A gate whose neuter is measured: disabling it must let a protected case through in a test.
+- [x] Advisor verdict read and its objections either implemented or explicitly refused in
+      writing. **Done 2026-08-14 — see `## Advisor verdict` below.** Verdict was DO NOT SHIP
+      AS DESIGNED; every objection is answered there, and the boxes below were rewritten
+      because of it rather than merely ticked.
+- [ ] **(REWRITTEN per advisor.)** Two layers, because one is provably insufficient:
+      (a) PURE layer — mutation/neuter: disabling a veto must let a protected case through
+      in a test; (b) GATHER layer — input-liveness: a fixture transcript ending on an
+      unanswered `tool_use` must refuse END TO END. (b) is not optional. No mutation of a
+      pure function can detect an input that never arrives, and TRDD-OO301H7D was exactly
+      that bug — measured 2026-08-14, neutering the fix failed 1 of 54 tests, and the 53
+      that still passed were the pure-layer ones.
 - [ ] A test proving a session blocked on `ExitPlanMode` is NEVER cleared.
+      **BLOCKED until TRDD-OO301H7D lands** — it cannot be honestly ticked while the
+      external path discards `awaiting_user`. (OO301H7D shipped `fde1bf40`; re-verify this
+      box against the in-model nudge path specifically, which is a different path.)
 - [ ] A test proving `/clear` is not typed unless a verified handoff exists on disk.
-- [ ] Default-OFF until observed working on a real idle session, then flipped deliberately.
+- [ ] **(REPLACED per advisor — the old wording was unfalsifiable.)** Not "observed working
+      once": that proves one TRUE POSITIVE, while the risk on an irreversible action is a
+      FALSE positive, and this card's own data (10/45 candidates, all dead) says a live
+      firing may never occur — so the old criterion waited on an event that may not happen,
+      the very defect the STATE names. Instead: SHADOW MODE (log-only verdicts, every
+      would-fire audited) for N days with zero false positives, PLUS one staged end-to-end
+      drill on a sacrificial session proving handoff → `/clear` → bootstrap → old-transcript
+      resume actually recovers.
+
+## Advisor verdict — 2026-08-14 (Fable 5), and the answers
+
+**VERDICT: do NOT tick the boxes and ship as designed.** Recorded in full because box 1
+requires the objections answered in writing, not merely read.
+
+### The STATE block above is STALE in three load-bearing places — all three VERIFIED
+
+1. **The 350k size term was DROPPED**, owner directive 2026-08-04. Verified verbatim at
+   `scripts/lib/cold_cache_compact.py:223-231`: *"SIZE IS NOT A TERM … a threshold high
+   enough to never be met is a feature that does not exist."* Any reasoning in this card
+   that relies on a size gate is void.
+2. **The nudge INJECTS, it does not print**, same directive. Verified at
+   `scripts/dispatch.py:2102-2112`: printing made the lever depend on an attentive reader
+   *"on precisely the sessions that by definition have none. It never fired."*
+3. **"Never let the daemon type `/clear`" (lines 101-124) is SUPERSEDED** by TRDD-PXP08ZQC
+   plus the 2026-08-13 presence-removal directive. The daemon fleet-walks the external
+   watcher today — verified at `scripts/daemon.py:1935`. Two cards asserted opposite safety
+   doctrines over one lever; this one is the superseded side. **Do NOT carry lines 101-124
+   forward as current doctrine.**
+
+### The hole the review actually found — now fixed, separately
+
+`external_handoff_clear.py:187` computed `awaiting_user` and discarded it, and
+`should_clear_externally` had no parameter to receive it. So an 8-hour-parked plan approval
+satisfied `long-idle`, met no veto, and would be cleared.
+
+The bitter detail: **this card's own "Reuse, do not reinvent" list (line 169) already names
+`fleet_scan.awaiting_user_decision`.** The signal was known, correct, free, and dropped by a
+tuple unpack that named it `_await` — and the underscore convention announces "considered,
+doesn't matter", which is exactly what stops a reviewer looking twice.
+
+Filed and fixed as **TRDD-OO301H7D** (`fde1bf40`), not folded in here, because it is the
+EXTERNAL daemon path while this card is the IN-MODEL self-nudge path.
+
+### States the advisor says remain uncaught (open, not answered by OO301H7D)
+
+- A background agent running **longer than 30 minutes** — the `active_waiting` stamp this
+  card itself bounded to 30 min expires underneath it.
+- **Unsubmitted draft text** in the input field. Only the injector's empty-field read-back
+  catches it, and that is reliable on tmux only (`external_clear.py:1041-1046`).
+- **Conversation-only knowledge exceeding the 8 KB handoff budget.** Inherent. Mitigated
+  only if `--resume` on the old transcript is genuinely recoverable — *nobody has verified
+  that*, and this card should not ship until someone does.
+
+### Refused / deferred
+
+Nothing refused. The advisor's recommendation (1) shipped as OO301H7D; (2), (3) and this
+supersession record landed in the boxes above and this section. What remains open is
+genuinely open, and is listed rather than quietly closed.
 
 ## Approval log
 
+- 2026-08-14T18:10:00+0200 — Advisor verdict recorded; acceptance boxes 2 and 5 REWRITTEN
+  (box 5's old form was unfalsifiable), box 3 marked blocked on TRDD-OO301H7D. Card stays
+  `todo`: the verdict was DO NOT SHIP AS DESIGNED, and three STATE claims are now marked
+  superseded. No scope change.
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → todo by janitor-main-session. A WORK column
   asserts active work; nobody was working this (idle 10d). 0/5 acceptance, `blocked-by: []`, no
   external wait — just unstarted. No scope or acceptance changed.
