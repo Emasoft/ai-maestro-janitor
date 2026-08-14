@@ -230,9 +230,38 @@ def harness(tmp_path: Path):
                 pass
 
 
+# Every deadline in this file is WALL-CLOCK, and these tests spawn a REAL daemon
+# process and wait for it to do real work. Those numbers were tuned on an idle
+# machine, so under `pytest -n N` the same work competes with N-1 other workers
+# for CPU and blows a deadline that has nothing to do with correctness: measured
+# 2026-08-14, `test_daemon_marks_last_run_after_task` and
+# `test_daemon_sigterm_records_graceful_exit` both PASS in 6s serially and both
+# FAIL a 30s deadline under `-n 12`.
+#
+# The fix is generous ABSOLUTE headroom, not a load-derived one. Deriving the
+# factor from PYTEST_XDIST_WORKER_COUNT was the first attempt and it is wrong on
+# review: it couples the deadline to one specific runner, so under any other
+# parallel harness (or a loaded CI box running -n 1) the variable is unset, the
+# factor silently collapses to 1.0, and the flake returns with nothing to show
+# for it. A guard whose protection silently evaporates in the environment it was
+# written for is the same defect class this suite keeps finding elsewhere.
+#
+# Because `_wait_for` POLLS, a healthy test still returns the moment its
+# condition holds — the headroom costs nothing when things work, and is only
+# ever paid when something is genuinely broken.
+#
+# This is NOT a retry and NOT a sleep: a flaky gate is worse than a slow one,
+# because every "verified" claim made against it is weaker than it looks.
+_DEADLINE_SLACK = 4.0
+
+
 def _wait_for(predicate, timeout: float = 8.0, interval: float = 0.1) -> bool:
-    """Poll until `predicate()` returns truthy, or timeout. Return its value."""
-    deadline = time.time() + timeout
+    """Poll until `predicate()` returns truthy, or timeout. Return its value.
+
+    `timeout` is multiplied by `_DEADLINE_SLACK` (see above) so the same test is
+    not held to an idle-machine deadline while sibling workers saturate the CPU.
+    """
+    deadline = time.time() + timeout * _DEADLINE_SLACK
     while time.time() < deadline:
         v = predicate()
         if v:
