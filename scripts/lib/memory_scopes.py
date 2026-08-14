@@ -561,8 +561,147 @@ def sync_user_memory_mirror() -> str | None:
             primary.mkdir(parents=True, exist_ok=True)
             shutil.copytree(mirror, primary, dirs_exist_ok=True, ignore=_MIRROR_IGNORE)
             return "restored"
-    except OSError:
-        return None  # a backup hiccup must never break session start
+    except Exception:  # noqa: BLE001 -- a backup hiccup must never break session start
+        # DELIBERATELY broader than OSError. Both mirror calls in on-session-start.py are
+        # bare calls with no try/except of their own, so anything escaping here kills
+        # SESSION START for every project on this machine — an infinitely worse outcome
+        # than a skipped backup. `_early_log`'s docstring writes out the same reasoning: a
+        # fault in a best-effort safety net must never become the new way session start
+        # breaks. OSError alone left every non-OSError bug (a TypeError on a surprising
+        # path shape, a ValueError from a decode) as a session-start killer.
+        return None
+    return None
+
+
+# The LOCAL-design mirror dir NAME under the janitor's plugin DATA dir (sibling of the
+# USER-memory mirror above, same rationale: a place the harness's own housekeeping never
+# reaches). Per-project sub-namespaced by ``project_slug`` — see resolve_local_design_mirror_dir.
+_LOCAL_DESIGN_MIRROR_DIRNAME = "local-design-mirror"
+
+# design/ holds exactly these four lifecycle subdirs per the TRDD rules
+# (``trdd-approval-tiers.md`` / ``trdd-design-tasks.md``). Naming them explicitly — rather
+# than mirroring the whole ``design/`` tree — means only real TRDD ``*.md`` files are ever
+# copied, never some unrelated file a future convention drops next to them.
+_DESIGN_LIFECYCLE_SUBDIRS = ("proposals", "tasks", "archived", "refused")
+
+
+def resolve_local_design_dir_for(project_dir: str) -> Path:
+    """The LOCAL-scope TRDD ``design/`` dir of an EXPLICIT project path — sibling of
+    ``resolve_local_dir_for``'s ``memory/``, same harness slug rules. Not created."""
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "projects" / project_slug(project_dir) / "design"
+
+
+def resolve_local_design_dir() -> Path:
+    """The current project's LOCAL-scope TRDD ``design/`` dir. Not created."""
+    return resolve_local_design_dir_for(_project_dir())
+
+
+def resolve_local_design_mirror_dir() -> Path:
+    """The uninstall/cleanup-surviving MIRROR of the current project's LOCAL ``design/``
+    TRDDs: ``<plugin DATA dir>/local-design-mirror/<slug>/``.
+
+    ``~/.claude/projects/<slug>/`` also holds Claude Code's session ``.jsonl`` transcripts
+    and is swept by the harness's own ``cleanupPeriodDays`` housekeeping. CC 2.1.228 carved
+    ``memory/`` out of that sweep (after it was found deleting files inside it — the reason
+    ``resolve_user_mirror_dir``/``sync_user_memory_mirror`` exist), but ``design/`` got no
+    such carve-out and has no backup of its own — so a project's LOCAL TRDDs (proposals,
+    open tasks, the archive, refusals) are exposed to the exact same silent deletion
+    ``memory/`` used to suffer, with nothing protecting them. This mirror applies the same
+    pattern to that gap: kept OUTSIDE ``~/.claude/projects/`` (the sweep never reaches it),
+    synced on every session start, and used to RESTORE the primary if the sweep (or anything
+    else) empties it. Not created.
+    """
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    slug = project_slug(_project_dir())
+    return (
+        home / ".claude" / "plugins" / "data" / JANITOR_DATA_DIR_NAME
+        / _LOCAL_DESIGN_MIRROR_DIRNAME / slug
+    )
+
+
+def _dir_has_design_md(d: Path) -> bool:
+    """True iff ``d`` (a ``design/`` root) holds at least one ``*.md`` TRDD anywhere under
+    its four lifecycle subdirs. Decides the sync DIRECTION (mirrors ``_dir_has_memory``'s
+    role for the USER mirror) — an empty scaffold (subdirs exist, no ``.md`` inside) must
+    read as "nothing here" or a wipe could never be detected and restored from.
+    """
+    if not d.is_dir():
+        return False
+    for sub in _DESIGN_LIFECYCLE_SUBDIRS:
+        subdir = d / sub
+        if not subdir.is_dir():
+            continue
+        for p in subdir.rglob("*.md"):
+            if p.is_file():
+                return True
+    return False
+
+
+def _ignore_non_md(_dirpath: str, names: list[str]) -> list[str]:
+    """``shutil.copytree`` ignore-callback: skip every entry that is neither a directory
+    (so nested structure under a lifecycle subdir is preserved) nor a ``*.md`` file — the
+    design mirror carries TRDDs only, nothing else that might land next to them."""
+    skip: list[str] = []
+    for name in names:
+        full = os.path.join(_dirpath, name)
+        if os.path.isdir(full) or name.endswith(".md"):
+            continue
+        skip.append(name)
+    return skip
+
+
+def _copy_design_subdirs(src_root: Path, dst_root: Path) -> None:
+    """Copy each lifecycle subdir present under ``src_root`` into ``dst_root``, ``*.md``
+    files only, additive (never removes a file already at the destination — including one
+    the destination has that the source lacks)."""
+    for sub in _DESIGN_LIFECYCLE_SUBDIRS:
+        src = src_root / sub
+        if not src.is_dir():
+            continue
+        dst = dst_root / sub
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore_non_md)
+
+
+def sync_local_design_mirror() -> str | None:
+    """Keep the LOCAL-scope ``design/`` TRDD mirror in step with the current project's
+    primary (see ``resolve_local_design_mirror_dir`` for why this exists). Returns
+    ``"mirrored"`` / ``"restored"`` when it acted, else None.
+
+    Modelled directly on ``sync_user_memory_mirror`` — same two directions, same
+    additive-only / never-delete / fail-open discipline. It differs in scope (per-project
+    LOCAL ``design/``, not the cross-project USER memory corpus) and in content shape (TRDD
+    ``*.md`` files under four fixed lifecycle subdirs — no atom-id/supersession bookkeeping;
+    TRDDs don't have that concept, so there is no orphan-quarantine step here).
+
+    - **primary has TRDDs** -> SYNC primary->mirror (refresh the backup). Steady state.
+    - **primary EMPTY but mirror has TRDDs** -> RESTORE mirror->primary. Recovery path: the
+      harness swept ``design/`` (or anything else wiped it) and the mirror repopulates it.
+    - **neither has TRDDs** -> nothing to do (fresh project, or design/ never used LOCAL).
+
+    Additive (``copytree(dirs_exist_ok=True)``): NEVER deletes a file from either side, even
+    one present only on the other side. Best-effort — any OSError is swallowed so a mirror
+    hiccup can never break session start.
+    """
+    primary = resolve_local_design_dir()
+    mirror = resolve_local_design_mirror_dir()
+    try:
+        if _dir_has_design_md(primary):
+            _copy_design_subdirs(primary, mirror)
+            return "mirrored"
+        if _dir_has_design_md(mirror):
+            _copy_design_subdirs(mirror, primary)
+            return "restored"
+    except Exception:  # noqa: BLE001 -- a backup hiccup must never break session start
+        # DELIBERATELY broader than OSError. Both mirror calls in on-session-start.py are
+        # bare calls with no try/except of their own, so anything escaping here kills
+        # SESSION START for every project on this machine — an infinitely worse outcome
+        # than a skipped backup. `_early_log`'s docstring writes out the same reasoning: a
+        # fault in a best-effort safety net must never become the new way session start
+        # breaks. OSError alone left every non-OSError bug (a TypeError on a surprising
+        # path shape, a ValueError from a decode) as a session-start killer.
+        return None
     return None
 
 

