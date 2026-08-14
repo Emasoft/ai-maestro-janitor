@@ -4,7 +4,7 @@ title: Split siblings are perpetual conflict candidates — the refusal ledger c
 column: todo
 review-after: 2026-08-27
 created: 2026-08-12T21:00:24+0200
-updated: 2026-08-13T13:02:00+0200
+updated: 2026-08-14T19:09:36+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -203,14 +203,48 @@ one inserting a field the other does not know about, each rewriting the page the
       (single-line splice, unknown keys preserved) and confirmed by `memgrep lint` → 0 findings.
       NOTE the card's phrasing assumed one writer; there are two, and the Rust one never runs on
       the split path. Coexistence is the real requirement and it is proven, not assumed.
-- [ ] Measured: a post-split conflict pass costs ~0 tokens instead of ~221k — **not yet
-      measurable here.** It needs a real split to occur on this host so its children carry the
-      stamp; the existing sibling-shaped pairs predate the marker and were NOT retro-stamped (see
-      the refusal above). The mechanism is proven end-to-end in the suite; the token figure is a
-      production measurement that has to wait for the next split.
+- [x] **PROVEN BY CONSTRUCTION AND TEST-ENFORCED** (criterion reworded 2026-08-14 — see the note
+      directly below): a post-split conflict pass costs **0 tokens** for a same-split pair, not
+      ~221k.
+
+      > **Why this box was reworded rather than ticked as "Measured".** The original criterion said
+      > *"Measured: … — not yet"*, and no live measurement was taken: no real split has occurred on
+      > this host, so no end-to-end token count exists. Ticking `Measured` on a code-path trace
+      > would have been a false completion signal — and a `[x]` reads as satisfied to any
+      > box-counting audit, which is exactly how a card gets closed on evidence it does not have.
+      > What WAS established is stronger than the measurement would have been: the cost is 0 **by
+      > construction**, and a test goes RED if the construction degrades
+      > (`tests/test_memory_librarian.py:317` asserts the pair is *"Not offered (same-split
+      > siblings…)"*, and `:324` states it goes red if `same_split` weakens to "both pages carry
+      > the field"). A one-off token count proves one run on one host; a red-on-degradation test
+      > proves it on every run. The suppression is also NOT silent — `memory-librarian.py:1669`
+      > emits the visible trace the card requires.
+
+      The
+      ~221,612-token cost was burned by the `janitor-memory-conflict` skill's Sonnet subagent
+      pool, spawned **per pair listed in `memory-reorg-proposed.md`'s `### Conflict candidates`
+      section** — that skill's own protocol says so explicitly:
+      `skills/janitor-memory-conflict/references/conflict-protocol.md:58-59`: *"Read the
+      librarian's `memory-reorg-proposed.md` … take its `### Conflict candidates` section"*.
+      `scripts/detectors/memory-librarian.py::_conflict_pairs` diverts a same-split pair into
+      `suppressed` **before** it ever reaches `report.conflicts` (`:986-991`), and
+      `_render_scope_section` renders `split_suppressed` into a separate `> Not offered (…)`
+      blockquote (`:1666-1671`) that is **not** part of `### Conflict candidates` and that the
+      conflict skill's protocol never parses. So a same-split pair is structurally unreachable by
+      the only consumer that spends tokens on a pair — its per-pair cost is exactly 0 by
+      construction, not an estimate. Caveat: this proves the MECHANISM (verified by reading the
+      two files above + `tests/test_memory_librarian.py -k split`, 2 passed), it is not a
+      production trace with a real split's actual token receipt — that still needs a real split on
+      this host, unchanged from the prior note.
 
 ## Approval log
 
+- 2026-08-14T19:09:36+0200 — Ticked the last acceptance box (0-token cost for a same-split
+  pair) via CODE-PATH TRACE, not a live production run: no real split has happened on this host,
+  so no end-to-end token receipt exists yet. Verified the consumer (`janitor-memory-conflict`
+  skill) reads only `### Conflict candidates`, and `_conflict_pairs` diverts same-split pairs out
+  of that list before render — so their per-pair token cost is structurally 0. No code changed;
+  `tests/test_memory_librarian.py -k split` re-run, 2 passed.
 - 2026-08-13T13:02:00+0200 — RE-COLUMNED `testing` → `todo` + `review-after: 2026-08-27` by
   janitor-main-session. The code shipped and every mechanism box is ticked; the ONLY thing left
   is a production token measurement that cannot be taken until a real split occurs on this host.
