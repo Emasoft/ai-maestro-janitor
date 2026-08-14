@@ -33,6 +33,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import state
+
 # The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The CANONICAL
 # USER memory scope lives under it; see resolve_user_dir for why it is hard-coded rather
 # than read from ${CLAUDE_PLUGIN_DATA}. A ``--keep-data`` uninstall preserves it directly.
@@ -247,11 +249,58 @@ def resolve_local_dir() -> Path:
     return resolve_local_dir_for(_project_dir())
 
 
+# Directory NAMES a downward scan for `resolve_project_dir`'s fallback never descends
+# into — build/vendor dirs that can be huge and are never a repo root worth finding.
+# `.git` itself is excluded too (nothing useful nests below it). A trailing `_dev` dir
+# is excluded via a separate suffix check below (the project's own `*_dev` convention).
+_DOWNWARD_SCAN_SKIP_NAMES = frozenset({"node_modules", ".venv", ".git", "target", "_corpus_dev"})
+
+
+def _bounded_downward_dirs_with(start: Path, predicate, *, max_depth: int = 4) -> list[Path]:
+    """Breadth-first, depth-bounded downward search from ``start`` for directories
+    where ``predicate(d)`` is true. Skips ``_DOWNWARD_SCAN_SKIP_NAMES`` and any
+    ``*_dev`` directory, and stops at ``max_depth`` so a huge tree cannot hang a
+    heartbeat (janitor#263). Never raises — an unreadable directory is just skipped."""
+    hits: list[Path] = []
+    queue: list[tuple[Path, int]] = [(start, 0)]
+    while queue:
+        d, depth = queue.pop(0)
+        try:
+            if predicate(d):
+                hits.append(d)
+        except OSError:
+            pass
+        if depth >= max_depth:
+            continue
+        try:
+            children = sorted(p for p in d.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        for c in children:
+            if c.name in _DOWNWARD_SCAN_SKIP_NAMES or c.name.endswith("_dev"):
+                continue
+            queue.append((c, depth + 1))
+    return hits
+
+
 def resolve_project_dir() -> Path | None:
     """The PROJECT scope memory root ``<git-root>/.claude/project/memory/``, or
-    ``None`` when the cwd is not in a git repo. Resolved via
-    ``git rev-parse --show-toplevel`` so a worktree / sub-directory cwd still
-    finds the repo root (TRDD-c77dae09)."""
+    ``None`` when no repo can be resolved. Resolved via ``git rev-parse
+    --show-toplevel`` so a worktree / sub-directory cwd still finds the repo root
+    (TRDD-c77dae09).
+
+    ``git rev-parse`` only searches UPWARD. When the Claude project dir instead
+    CONTAINS one or more git repos as subdirectories (a workspace folder holding
+    checkouts — common on this machine), rev-parse finds nothing and PROJECT scope
+    used to vanish silently — the worst scope to lose quietly, since it is the
+    git-tracked, pushed, shared-with-every-contributor one (janitor#263). On that
+    failure we search DOWNWARD instead, bounded and cautious: an existing
+    ``.claude/project/memory/`` wins outright (it is already this project's own
+    scope), else a lone ``.git`` dir is used. A blind downward pick is unsafe with
+    multiple repos below — writing PROJECT memory into the wrong one is a real
+    cross-project leak — so more than one candidate refuses to guess and logs the
+    ambiguity instead of disappearing without a trace.
+    """
     proj = _project_dir() or None
     try:
         # Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock
@@ -265,10 +314,39 @@ def resolve_project_dir() -> Path | None:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None
-    if proc.returncode != 0:
+    if proc.returncode == 0:
+        top = proc.stdout.strip()
+        return (Path(top) / ".claude" / "project" / "memory") if top else None
+
+    start = Path(proj) if proj else None
+    if start is None or not start.is_dir():
         return None
-    top = proc.stdout.strip()
-    return (Path(top) / ".claude" / "project" / "memory") if top else None
+
+    mem_hits = _bounded_downward_dirs_with(
+        start, lambda d: (d / ".claude" / "project" / "memory").is_dir()
+    )
+    if len(mem_hits) == 1:
+        return mem_hits[0] / ".claude" / "project" / "memory"
+    if len(mem_hits) > 1:
+        state.log_line(
+            "memory-scopes",
+            f"resolve_project_dir: ambiguous PROJECT scope — {len(mem_hits)} existing "
+            f".claude/project/memory dirs found below {start} (git rev-parse found no "
+            "repo upward); refusing to guess, returning None",
+        )
+        return None
+
+    git_hits = _bounded_downward_dirs_with(start, lambda d: (d / ".git").exists())
+    if len(git_hits) == 1:
+        return git_hits[0] / ".claude" / "project" / "memory"
+    if len(git_hits) > 1:
+        state.log_line(
+            "memory-scopes",
+            f"resolve_project_dir: ambiguous PROJECT scope — {len(git_hits)} repos "
+            f"(.git) found below {start} (git rev-parse found no repo upward); "
+            "refusing to guess, returning None",
+        )
+    return None
 
 
 def _home() -> Path:

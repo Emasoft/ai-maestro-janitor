@@ -120,6 +120,100 @@ def test_resolve_project_dir_none_outside_repo(tmp_path, monkeypatch):
     assert msc.resolve_project_dir() is None
 
 
+def test_resolve_project_dir_downward_single_match(tmp_path, monkeypatch):
+    """CLAUDE_PROJECT_DIR CONTAINS a repo as a subdir (a workspace folder holding a
+    checkout) — `git rev-parse` finds nothing upward, so the fallback searches
+    downward. Exactly one existing `.claude/project/memory` below → it wins,
+    instead of PROJECT scope silently vanishing (janitor#263)."""
+    workspace = tmp_path / "workspace"
+    repo = workspace / "myrepo"
+    _git_init(repo)
+    mem = repo / ".claude" / "project" / "memory"
+    mem.mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+    got = msc.resolve_project_dir()
+    assert got is not None
+    assert got.resolve() == mem.resolve()
+
+
+def test_resolve_project_dir_downward_ambiguous_logs_and_returns_none(
+    tmp_path, monkeypatch
+):
+    """TWO existing PROJECT memory dirs below the workspace → refuse to guess which
+    repo owns PROJECT scope, return None, and LOG the ambiguity — the whole point
+    of janitor#263 is that this must never disappear silently."""
+    workspace = tmp_path / "workspace"
+    for name in ("repo-a", "repo-b"):
+        repo = workspace / name
+        _git_init(repo)
+        (repo / ".claude" / "project" / "memory").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+
+    assert msc.resolve_project_dir() is None
+
+    log_path = workspace / ".janitor" / "logs" / "memory-scopes.log"
+    assert log_path.is_file()
+    text = log_path.read_text()
+    assert "ambiguous" in text
+    assert "2 existing" in text
+
+
+def test_resolve_project_dir_downward_lone_repo_without_memory_yet(
+    tmp_path, monkeypatch
+):
+    """A workspace holding ONE repo that has no PROJECT memory dir yet still resolves
+    to that repo's memory PATH. This is the first-run case — if the fallback only
+    matched an EXISTING memory dir, PROJECT scope could never be created from a
+    workspace cwd, so the bug would look fixed while staying unfixable."""
+    workspace = tmp_path / "workspace"
+    repo = workspace / "myrepo"
+    _git_init(repo)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+    got = msc.resolve_project_dir()
+    assert got is not None
+    assert got.resolve() == (repo.resolve() / ".claude" / "project" / "memory")
+
+
+def test_resolve_project_dir_downward_ambiguous_repos_logs_and_returns_none(
+    tmp_path, monkeypatch
+):
+    """TWO repos below and NO memory dir in either → refuse to guess. Picking one
+    would write this project's shared, PUSHED memory into an unrelated repo."""
+    workspace = tmp_path / "workspace"
+    for name in ("repo-a", "repo-b"):
+        _git_init(workspace / name)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+
+    assert msc.resolve_project_dir() is None
+
+    text = (workspace / ".janitor" / "logs" / "memory-scopes.log").read_text()
+    assert "2 repos" in text
+
+
+def test_resolve_project_dir_downward_scan_is_depth_bounded(tmp_path, monkeypatch):
+    """A repo buried deeper than the scan's depth bound is NOT found. The bound is
+    what keeps this fallback from walking an arbitrarily large workspace on a
+    heartbeat — a test that only proves discovery would let the bound be deleted."""
+    workspace = tmp_path / "workspace"
+    _git_init(workspace / "a" / "b" / "c" / "d" / "deep-repo")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+    assert msc.resolve_project_dir() is None
+
+
+def test_resolve_project_dir_downward_skips_vendor_dirs(tmp_path, monkeypatch):
+    """A repo vendored under `node_modules/` is not this project's PROJECT scope —
+    it must not make the scan ambiguous, and must never be picked."""
+    workspace = tmp_path / "workspace"
+    _git_init(workspace / "myrepo")
+    _git_init(workspace / "node_modules" / "some-dep")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(workspace))
+    got = msc.resolve_project_dir()
+    assert got is not None
+    assert got.resolve() == (
+        (workspace / "myrepo").resolve() / ".claude" / "project" / "memory"
+    )
+
+
 # ---- resolve_scope_dirs ----------------------------------------------------
 
 def test_resolve_scope_dirs_existing_only_most_specific_first(
