@@ -1,9 +1,11 @@
 ---
 trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [SE7TP1EU]
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-14T17:31:38+0200
+updated: 2026-08-14T20:48:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -127,10 +129,22 @@ provide provenance it never had.
       "certify_newest_if_clean (TRDD-ZM5LZ24Y periodic re-pin)": pins a clean
       uncertified newest, refuses a dirty manifest, no-ops when already current,
       no-ops with no cached versions, no-ops with no shipped manifest.
-- [ ] `_check_last_good_pin` goes quiet on a machine where the fix has run. (Logical
-      consequence of the above — not separately re-verified against a live machine
-      in this pass; the unit tests cover the underlying pin-advance behavior the
-      detector reads.)
+- [ ] **RE-PHRASED 2026-08-14 — the original wording was unfalsifiable.** It read
+      "`_check_last_good_pin` goes quiet on a machine where the fix has run", and
+      silence cannot distinguish a satisfied invariant from a disabled check, an
+      unshipped check, or a crashed detector. Measured that day: the detector WAS
+      silent and every one of those wrong reasons applied — the source-tree copy
+      self-disables via the checkout guard, the shipped 3.2.0 has no such function,
+      and on an installed layout the guard suppresses it anyway (**TRDD-SE7TP1EU**).
+      Meanwhile the pin genuinely names `0.59.0` against a running `3.2.0`, so the
+      condition the box would have certified as absent is in fact present and
+      extreme.
+      **New requirement — a POSITIVE observation, never an absence:** this machine's
+      `integrity/last-good.json` is observed to NAME the running version, read
+      directly, after a daemon periodic fire. Blocked on TRDD-SE7TP1EU, since the
+      guard prevents the check from running on an installed layout at all.
+      (An agent must still NOT run `/janitor-repin-integrity` to satisfy this — see
+      the STATE block.)
 - [x] The `CLAUDE.md` manual-update rule cross-references this behaviour, so the
       two rules stop contradicting each other. (Done 2026-08-14: the CI-pass upgrade
       rule now names the stale-anchor side effect and cites this card, so the
