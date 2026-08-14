@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.1] — 2026-08-14
+
+### Bug Fixes
+
+- **memory:** A publish-globally symlink is a sanctioned escape, not drift (janitor#249) (c2686c0)
+- **cold-cache-clear:** A disabled refusal must leave a trace (TRDD-PXP08ZQC incident 2026-08-15) (e0f9605)
+- **memgrep:** A mid-line [^N]: is a reference, not a swallowed definition (janitor#270) (4a02d8e)
+- **presence:** Tri-state user_presence() — one boolean cannot serve injectors and the push gate (61667ef)
+- **integrity:** Publish the minted key by hardlink — visible only when complete (b9d9bb8)
+
+### Miscellaneous Tasks
+
+- Give pyright a venv, name any hanging test, probe memgrep candidates for executability (3678227)
+
+### Testing
+
+- **sandbox:** Gate macOS-only binaries so Linux CI asserts the guard's real contract (072d301)
+- **ci:** Pin the environment CI cannot supply — memgrep, claude, notify-send, the window var (run 31844013197 triage) (af47f6f)
 ## [3.3.0] — 2026-08-14
 
 ### Bug Fixes
@@ -313,6 +331,7 @@ All notable changes to this project will be documented in this file.
 - **repomap:** Refresh the project map — picks up classify_permitted/is_project_url_line (LFSWY0C6) and resolve_transcript/respawn_prompt_for (KTXZJC6E) (046cfe3)
 - Type-check tests/ too — 176 real errors had accumulated unseen there (450151d)
 - Run the test suite on every push — it only ran at release before (1b02a49)
+- Bump version to 3.3.0 (1ef20a2)
 
 ### Performance
 
