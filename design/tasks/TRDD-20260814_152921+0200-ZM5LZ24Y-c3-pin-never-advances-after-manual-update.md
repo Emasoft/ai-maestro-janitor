@@ -156,9 +156,22 @@ Measured before implementing (this is what the recommendation lacked):
   pin at all** — permanently the state this card exists to fix, just chosen
   deliberately instead of by accident.
 
-DECISION NEEDED: accept the offline stall (detector reports it) and refactor the
-return value to avoid a second `gh` call, or keep disk-presence first-trust. Do
-not implement either by inference from this text.
+**DECIDED 2026-08-14 (owner directive "all means all" — this is no longer parked):
+IMPLEMENT F1, fail-CLOSED, reusing the already-fetched tag.**
+
+Rationale, and why fail-closed is not the scary half it sounds like: "fail-closed"
+here means *skip pinning* — it LEAVES THE EXISTING PIN UNTOUCHED. It never rejects a
+version, never blocks a heartbeat, and never deletes an anchor. The only cost is that
+an offline or `gh`-less machine does not ADVANCE its pin, which the detector already
+reports in plain language. Weigh that against what disk-presence first-trust concedes:
+anyone who can write the version cache gets certified. Requiring the release channel
+to agree is a real strengthening for a cost that is visible and self-announcing.
+
+Implementation constraint that makes it nearly free: `do_auto_update_if_needed`
+ALREADY calls `resolve_latest_published` once per fire (`version_update_lib.py:350`)
+but returns the newest CACHED version instead. Refactor it to return the published tag
+as well and thread that into `certify_newest_if_clean` — **no second `gh` call**. Do
+NOT add one; a per-fire network call on the daemon path is its own defect.
 
 ### F2 — Option B's escape hatch was recommended AS A PAIR and was not shipped
 
@@ -166,6 +179,20 @@ The recommendation in "Decision required" was *"A, with B's command as an escape
 hatch"*. Only A shipped. A `/janitor-repin-integrity` command still has value with
 A in place: it is the manual recovery path when the daemon is down, and the only
 path at all if F1 lands fail-closed on a machine that cannot reach GitHub.
+
+**DECIDED 2026-08-14: SHIP IT, and ship it WITH F1, not after.** F1 makes F2 load-
+bearing rather than optional: once certification requires the release channel to
+agree, a machine that cannot reach GitHub has no way at all to advance its anchor
+without this command. Shipping F1 alone would convert a rare inconvenience into a
+dead end with no manual override. The two are one change.
+
+The command must re-use `certify_newest_if_clean`'s own predicate (runnable +
+non-quarantined + C2-clean) and NOT re-derive it — a second, subtly different notion
+of "the version we trust" is exactly how the quarantine defect got in. Its one
+difference from the daemon path is that it may bypass the F1 provenance gate, because
+a human running it deliberately IS the provenance; it must say so on stdout when it
+does, so an unattended reader can never mistake a human override for an automatic
+certification.
 
 ### F3 — an honest tension worth stating
 
