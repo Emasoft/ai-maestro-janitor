@@ -173,7 +173,11 @@ Extends the ≥2.1.198 sweep above. **Two genuine BREAKS found, both FIXED; two 
   the janitor's secret scanning (2.1.232 added them at the harness) — a LEVERAGE gap, not a break;
   the marketplace settings keys (`additionalMarketplaces`/`allowedMarketplaces`, owner wildcards) are
   read nowhere; `resolve_latest_published` is github.com-only now that GitLab marketplaces exist; and
-  `cache_prune`'s rmtree walk vs a `command`-source `mode: "link"` plugin dir wants checking.
+  `cache_prune` vs a `command`-source `mode: "link"` plugin dir is SETTLED, not open — two
+audit agents disagreed and the pessimistic one was WRONG. Measured directly: `shutil.rmtree`
+REFUSES a symlinked version dir (raises `OSError`, deletes nothing), the linked dev checkout
+survives byte-intact, and `apply_prune_plan` already records the refusal as `failed` rather
+than raising. No fix needed — do not "harden" this again.
 
 ## Notes and lessons learned
 
