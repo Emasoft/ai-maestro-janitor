@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect — /reload-plugins reloads ONLY plugin-bundled ones. Invoke on a [janitor-reload-skills] marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. SOFT by default (enqueues after the turn); --hard presses ESC first and never clears. Above 350k context it SHRINKS FIRST automatically (/clear then reload then re-arm then resume), because the reload breaks the prompt cache and would re-bill the whole window — so author the link-only handoff before invoking it at high context. Trigger with /janitor-reload-skills [--hard] [--shrink auto|never|force].
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills and commands take effect — /reload-plugins reloads ONLY plugin-bundled ones. Invoke on a [janitor-reload-skills] marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Above 350k context it shrinks FIRST automatically, since the reload breaks the prompt cache. Trigger with /janitor-reload-skills [--hard] [--shrink auto|never|force].
 ---
 
 # Janitor reload-skills

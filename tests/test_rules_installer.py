@@ -716,3 +716,44 @@ def test_every_skill_body_stays_under_the_context_token_cap():
         f"skills over the per-skill token cap ({_SKILL_TOKEN_CAP}): {over}. "
         "Move detail to that skill's references/ dir, do not grow the cap."
     )
+
+
+_SKILL_DESC_TOKEN_CAP = 200
+
+
+def _skill_description_claude_tokens(path: Path) -> int:
+    """Same measure as the body gate, applied to the frontmatter `description:` alone.
+
+    The value is read as a YAML scalar (it may be folded across lines) and whitespace is
+    collapsed before encoding, because CPV measures the STRING the harness ends up with,
+    not the source layout — a wrapped description and a single-line one of the same words
+    must score identically or this gate would disagree with the authority it stands in for.
+    """
+    src = path.read_text(encoding="utf-8")
+    m = re.search(r"^description:\s*(.*?)(?=\n[a-zA-Z-]+:\s|\n---)", src, flags=re.S | re.M)
+    if m is None:
+        return 0
+    desc = " ".join(m.group(1).split())
+    enc = tiktoken.get_encoding("o200k_base")
+    return math.ceil(len(enc.encode(desc)) * 1.3)
+
+
+def test_every_skill_description_stays_under_the_frontmatter_token_cap():
+    """Every skills/*/SKILL.md `description:` must stay under CPV's 200-Claude-token cap.
+
+    The BODY cap already had this local gate; the DESCRIPTION cap did not, and was enforced
+    only by CPV at publish time. On 2026-08-14 that cost a full publish: ~45 minutes of green
+    lint and 15,414 green tests, then a MAJOR at the CPV stage for ONE description at 214
+    tokens. Same lesson as TRDD-IAJS6M9Z, one field over: a limit whose only enforcement is
+    45 minutes away is a limit you discover by violating it.
+
+    Six descriptions currently sit within 10 tokens of the cap, so the next routine wording
+    edit is what this catches.
+    """
+    skills = sorted((_PROJECT_ROOT / "skills").glob("*/SKILL.md"))
+    measured = [(p.parent.name, _skill_description_claude_tokens(p)) for p in skills]
+    over = [(name, tokens) for name, tokens in measured if tokens > _SKILL_DESC_TOKEN_CAP]
+    assert not over, (
+        f"skill descriptions over the cap ({_SKILL_DESC_TOKEN_CAP}): {over}. "
+        "A description states WHEN to invoke the skill; move the how/why into the body."
+    )
