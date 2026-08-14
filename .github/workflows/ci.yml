@@ -76,12 +76,20 @@ jobs:
       # locally only because the developer's .venv already has them installed, so
       # dropping the flag fails on a clean runner and nowhere else.
       #
-      # `-n auto` matches how the suite is actually run. It is also why the
-      # deadlines in tests/test_daemon.py carry x4 slack (a0d3438e): those tests
-      # spawn a real daemon, and an idle-machine deadline fails under parallel
-      # load for reasons that have nothing to do with correctness.
+      # `-n auto` matches how the suite is actually run. `-m "not integration"`
+      # excludes the real-daemon-spawn tests (tests/test_daemon_integration.py,
+      # TRDD-ASA7EBJQ / janitor#245): they spawn a REAL long-lived daemon
+      # process and wait on wall-clock deadlines, which fails under parallel
+      # load for reasons that have nothing to do with correctness (measured:
+      # PASS in 6s serially, FAIL a 30s deadline under `-n 12`). They run
+      # below as their own serial step instead.
       - name: Pytest
-        run: uv run --extra dev pytest -q -n auto
+        run: uv run --extra dev pytest -q -n auto -m "not integration"
+
+      # The real-daemon-spawn integration suite — SERIAL (no -n), its own
+      # step, so it never competes with the parallel unit workers for CPU.
+      - name: Pytest (daemon integration, serial)
+        run: uv run --extra dev pytest -q -m integration
 
   validate:
     name: Validate

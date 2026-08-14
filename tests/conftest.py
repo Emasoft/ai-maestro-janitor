@@ -658,6 +658,13 @@ def pytest_configure(config: pytest.Config) -> None:
         "Pass no argument to allow all, and \"kill\" to allow signalling a process this test did "
         "not spawn. Deliberate friction: it makes a real machine-touching call visible in review.",
     )
+    config.addinivalue_line(
+        "markers",
+        "integration: spawns a REAL long-lived process (e.g. scripts/daemon.py) and waits on "
+        "wall-clock deadlines. Excluded from the parallel unit suite (`-m \"not integration\"`) "
+        "and run as its own SERIAL CI step — see .github/workflows/ci.yml and "
+        "TRDD-ASA7EBJQ / janitor#245.",
+    )
     global _SESSION_TMP
     for name in _ISOLATION_ENVS:
         _REAL_ENV[name] = os.environ.get(name)
