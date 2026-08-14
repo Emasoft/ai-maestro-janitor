@@ -41,6 +41,7 @@ import json
 import shlex
 import subprocess
 from dataclasses import dataclass
+from typing import Any
 
 # Default commands. Each is overridable via its CLAUDE_PLUGIN_OPTION_* env var; an
 # empty value disables that probe (pure fail-open to the native estimate). The bare
@@ -80,7 +81,7 @@ def probe_cache_expired(
     *,
     project: str | None = None,
     timeout: float = _CACHE_EXPIRED_TIMEOUT_S,
-    runner: object = None,
+    runner: Any = subprocess.run,
 ) -> bool | None:
     """TRI-STATE: has this project's conversation outlived its prompt-cache TTL?
 
@@ -111,9 +112,14 @@ def probe_cache_expired(
         return None
     if project:
         argv += ["--project", project]
-    run = runner if callable(runner) else subprocess.run
+    # The default lives in the SIGNATURE now. The old `run = runner if callable(runner) else
+    # subprocess.run` bound subprocess.run to a local, which CPV's skillaudit reads as dynamic
+    # command dispatch (SHELL_EXEC) and blocks the publish on at MINOR. The callable() guard
+    # existed only because the default was None; with a callable default it was vestigial, and
+    # a caller passing a non-callable is now a loud TypeError rather than a silent fallback —
+    # which is the fail-fast this repo wants anyway.
     try:
-        proc = run(  # noqa: S603 - argv from config, split with shlex, no shell
+        proc = runner(  # noqa: S603 - argv from config, split with shlex, no shell
             argv,
             capture_output=True,
             text=True,

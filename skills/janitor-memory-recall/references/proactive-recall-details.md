@@ -5,6 +5,15 @@ PROACTIVE-USE CONTRACT, the "two axes" recall pattern, the enriched recall flag
 list, and the worked examples. SKILL.md keeps only the operational core; this
 file is the "why" and the extended detail — read it on demand, not by default.
 
+## Table of Contents
+
+- [A PUSHED row is hop 1 already done for you — take hop 2](#a-pushed-row-is-hop-1-already-done-for-you--take-hop-2)
+- [The trigger is RECONSTRUCTION as well as RISK](#the-trigger-is-reconstruction-as-well-as-risk)
+- [Two axes, two recalls — why the CASE page and the METHODOLOGY page are separate](#two-axes-two-recalls--why-the-case-page-and-the-methodology-page-are-separate)
+- [Enriched recall — full flag reference](#enriched-recall--full-flag-reference)
+- [Worked examples](#worked-examples)
+- [The navigation contract — the full case for "don't over-read"](#the-navigation-contract--the-full-case-for-dont-over-read)
+
 ## A PUSHED row is hop 1 already done for you — take hop 2
 
 Every prompt may arrive with auto-surfaced `<date> <id> <description>` rows. They

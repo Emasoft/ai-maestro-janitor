@@ -80,12 +80,12 @@ a passing one, which is the exact failure mode this card exists to remove.
   change rather than a rider on someone else's.
 - 2026-08-12T14:13:41+0200 — COMPLETE by janitor-main-session. Implemented by a delegated
   lean-worker (`d31fd809`), then VERIFIED first-hand rather than on the worker's report:
-  * the gate is real — an oversized body makes it FAIL and the message names the offending
+  - the gate is real — an oversized body makes it FAIL and the message names the offending
     skill (re-falsified independently here, not just taken from the worker's claim, then the
     filler reverted and the tree confirmed clean);
-  * Option A was taken — `tiktoken` as a dev dep, exact parity with CPV (4999 / 4985 match
+  - Option A was taken — `tiktoken` as a dev dep, exact parity with CPV (4999 / 4985 match
     its reported numbers), no char-count proxy, no skip-when-missing;
-  * the editor's `Import "tiktoken" could not be resolved` (Pyright) is NOT a publish
+  - the editor's `Import "tiktoken" could not be resolved` (Pyright) is NOT a publish
     blocker: publish lints `scripts/` only, with `--ignore-missing-imports`, and
     `uv run mypy scripts` reports Success across 465 files. Checked because a type error in
     the lint gate would have blocked the next release — the diagnostic looked alarming and

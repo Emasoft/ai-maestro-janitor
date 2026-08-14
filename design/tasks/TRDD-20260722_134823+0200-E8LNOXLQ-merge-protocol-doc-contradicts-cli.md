@@ -82,11 +82,11 @@ holder's new content.
   (backburner, 21d untouched) and closed on evidence, NOT implemented: **the defect no longer
   exists.** Option 1 was taken by some later change to the reference doc, so the contradiction
   this card describes is gone. Verified at HEAD, both halves:
-  * `merge-protocol.md` now states "**a backlink holder canNOT ride along in the merge
+  - `merge-protocol.md` now states "**a backlink holder canNOT ride along in the merge
     transaction**", prescribes TWO transactions holder-FIRST, and explicitly retracts the old
     claim ("an earlier revision of this paragraph claimed holder rewrites were 'fine and
     expected'; that was never true of the code");
-  * the CLI check it contradicted is unchanged and still there
+  - the CLI check it contradicted is unchanged and still there
     (`memory_txn_cli.py`: "merge expects exactly ONE surviving page").
   Doc and code now agree, in the CLI's favour.
 
