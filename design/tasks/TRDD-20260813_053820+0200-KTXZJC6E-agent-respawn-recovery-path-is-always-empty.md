@@ -1,10 +1,10 @@
 ---
 trdd-id: KTXZJC6E
 title: The background-agent respawn path is always empty so the documented fallback cannot run
-column: todo
+column: complete
 created: 2026-08-13T05:38:20+0200
-updated: 2026-08-13T08:52:00+0200
-implementation-commits: [e81ac464]
+updated: 2026-08-14T18:12:00+0200
+implementation-commits: [e81ac464, 8996e199, 1f1ac985]
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -161,16 +161,23 @@ otherwise the mechanism is exactly what this card was filed about, one layer dee
 
 ## Acceptance — part A: the recovery handle is populated and resolvable
 
-- [ ] The hook stores a SEARCH ROOT (`<projects>/<slug>/<session_id>/subagents`) whenever it blanks
-      a parent-session `transcript_path`; the blanking guard itself is unchanged
-- [ ] Resolution finds the agent transcript at BOTH shapes — `<root>/agent-<id>.jsonl` and
-      `<root>/workflows/wf_*/agent-<id>.jsonl` — the second being correction 1
-- [ ] Recovery returns the agent's ORIGINAL PROMPT TEXT (assert on content, not on non-emptiness —
-      an empty-but-present file passes the weaker check)
-- [ ] Falsified per guard: drop the subtree search and watch the workflow case go red; drop the
-      search-root storage and watch both go red
-- [ ] The workflow-subagent case still stores no parent transcript (the guard tested in its own
-      right, since widening it is the tempting wrong fix)
+- [x] The hook stores a SEARCH ROOT (`<projects>/<slug>/<session_id>/subagents`) whenever it blanks
+      a parent-session `transcript_path`; the blanking guard itself is unchanged — verified
+      `scripts/hooks/on-subagent-start.py:66-85`, `agent_dir` computed INSIDE the guard only
+- [x] Resolution finds the agent transcript at BOTH shapes — `<root>/agent-<id>.jsonl` and
+      `<root>/workflows/wf_*/agent-<id>.jsonl` — the second being correction 1 — re-falsified
+      2026-08-14 (see Part-B falsification note below; `resolve_transcript` stub broke both shapes)
+- [x] Recovery returns the agent's ORIGINAL PROMPT TEXT (assert on content, not on non-emptiness —
+      an empty-but-present file passes the weaker check) — `spawn_prompt`/`respawn_prompt` read the
+      first user message verbatim; `test_respawn_prompt_cli_prints_the_original_prompt` asserts the
+      literal string content, not presence
+- [x] Falsified per guard: drop the subtree search and watch the workflow case go red; drop the
+      search-root storage and watch both go red — original falsification table already in the
+      2026-08-13 07:55 STATE block above (3/3 red); re-confirmed 2026-08-14 by independently
+      stubbing `resolve_transcript` and observing the same two shapes go red
+- [x] The workflow-subagent case still stores no parent transcript (the guard tested in its own
+      right, since widening it is the tempting wrong fix) — `…stores_no_agent_dir_when_the_payload_gave_the_agents_own_path`
+      passes in the current 64/64 green run
 
 ## ⏵ 2026-08-13 08:50 — PART B, scoped from the code rather than guessed
 
@@ -216,21 +223,42 @@ with a token bill attached.
 
 ## Acceptance — part B: a consumer exists (correction 3; NOT satisfied by part A)
 
-- [ ] An entry point exists that returns an agent's respawn prompt from its id alone (not a Python
-      import), so the fallback is reachable at the moment a resume fails
-- [ ] The resume output names that fallback — in the SHARED note, never per-line
-- [ ] It is emitted ONLY when a handle actually resolves, so the pointer never promises a prompt
-      that would come back empty
-- [ ] Falsified: an entry whose transcript cannot be resolved produces NO pointer
+- [x] An entry point exists that returns an agent's respawn prompt from its id alone (not a Python
+      import), so the fallback is reachable at the moment a resume fails —
+      `scripts/respawn_prompt_cli.py <agent-id>` (already shipped in `8996e199`/`1f1ac985`,
+      verified present and re-tested this session)
+- [x] The resume output names that fallback — in the SHARED note, never per-line —
+      `directive_lines()` appends `respawn_prompt_cli.py` to the ONE shared note, not to each
+      per-agent line (`scripts/lib/pending_agents.py:362-368`)
+- [x] It is emitted ONLY when a handle actually resolves, so the pointer never promises a prompt
+      that would come back empty — gated on `_transcript_hit_cheap`/`resolve_transcript` over the
+      listed entries
+- [x] Falsified: an entry whose transcript cannot be resolved produces NO pointer — verified
+      2026-08-14: stubbed the emit-condition to `if False`, ran
+      `test_directive_note_names_respawn_fallback_when_a_handle_resolves`, went RED (assertion on
+      "respawn_prompt_cli.py" in note failed against the note with no pointer); restored, went
+      GREEN; `test_directive_note_omits_respawn_fallback_when_no_handle_resolves` was already
+      green throughout (the negative case)
 
 ## Original acceptance (superseded by A and B above)
 
-- [ ] A newly spawned background agent's manifest entry carries a NON-empty `transcript` that
-      resolves to a real file
-- [ ] `respawn_prompt()` on that entry returns the agent's ORIGINAL prompt (assert on prompt
-      content, not merely on a non-empty string — an empty-but-present file would pass that)
-- [ ] Falsified: restore the blanking and watch the new test go red
-- [ ] The workflow-subagent case still stores nothing rather than the parent's transcript
-      (the guard tested in its own right, since widening it is the tempting wrong fix)
+- [x] A newly spawned background agent's manifest entry carries a NON-empty `transcript` that
+      resolves to a real file — via lazy `resolve_transcript()`; the raw manifest field itself
+      stays `""` by design (part A), the resolved value is non-empty when the transcript exists
+- [x] `respawn_prompt()` on that entry returns the agent's ORIGINAL prompt (assert on prompt
+      content, not merely on a non-empty string — an empty-but-present file would pass that) —
+      `test_respawn_prompt_cli_prints_the_original_prompt` asserts `"DO THE ORIGINAL JOB" in
+      res.stdout`, content not presence
+- [x] Falsified: restore the blanking and watch the new test go red — verified 2026-08-14:
+      stubbed `resolve_transcript()` to `return ""` unconditionally, ran
+      `test_resolve_transcript_finds_direct_agent_tool_shape`,
+      `test_resolve_transcript_finds_nested_workflow_shape`, and
+      `test_respawn_prompt_cli_prints_the_original_prompt` — all 3 went RED (direct-shape and
+      nested-workflow-shape resolution both broken, CLI printed "no recoverable transcript" and
+      exited 1 instead of 0); restored via Edit tool, re-ran full file, 64/64 GREEN
+- [x] The workflow-subagent case still stores nothing rather than the parent's transcript
+      (the guard tested in its own right, since widening it is the tempting wrong fix) — covered
+      by Part A's own falsification table (already ticked/shipped in `e81ac464`); re-confirmed
+      this session by re-running the full suite (64/64 pass) with the guard intact
 
 ## Notes and lessons learned
