@@ -1,9 +1,9 @@
 ---
 trdd-id: TVDK9Q1Y
 title: Test-isolation guard cannot see session-heartbeat writes so the full suite always exits 3
-column: todo
+column: cancelled
 created: 2026-08-14T16:20:26+0200
-updated: 2026-08-14T16:20:26+0200
+updated: 2026-08-14T16:52:00+0200
 current-owner: janitor-session
 task-type: infra
 project-id: ai-maestro-janitor
@@ -15,7 +15,51 @@ implementation-commits: []
 
 # The isolation guard cannot see session-heartbeat writes, so the full suite always exits 3
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
+## ⏵ STATE — CANCELLED 2026-08-14. THE PREMISE WAS FALSE. READ THIS FIRST.
+
+**There is no defect. The guard behaved correctly and there is no publish blocker.**
+Everything below this block was written from a WRONG diagnosis and is retained only as
+the audit trail; do not act on any of it.
+
+**What actually happened.** The suite exited 3 because of a `source-tree` mutation —
+`scripts/daemon.py`, `scripts/hooks/pre-compact-handoff.py`,
+`scripts/lib/version_update_lib.py` were EDITED BY ME AND MY WORKERS while the
+28-minute suite ran in the background. That is precisely the leak `source-tree` exists
+to catch, reported exactly as designed.
+
+The `plugin-data` / `usage-probe` writes I built this entire card on were printed under
+the guard's own heading **"Also seen, attributed to the LIVE daemon (not counted as
+failures)"**. They were correctly amnestied via `daemon_ticked` the whole time. The
+witness machinery was never broken.
+
+**ROOT CAUSE OF THE MISDIAGNOSIS — read this, it is the only durable value here.** I
+diagnosed from `tail`. The guard prints its DIAGNOSIS header first and the
+"also seen, not failures" detail LAST, so `tail -N` kept exactly the wrong end: I saw
+the amnestied lines and never saw the `REAL-STATE WRITE GUARD FAILED … [source-tree]`
+header 30 lines above. `~/.claude/rules/never-tail-on-error-messages.md` states this
+exact failure ("programs print the DIAGNOSIS first and the raw underlying error last,
+so `tail -N` keeps exactly the wrong end and you 'find' a defect the cut lines already
+explained") and was loaded in context throughout. Cost: this card, an advisor
+consultation with four addenda, and a multi-turn investigation with two refuted
+hypotheses — all downstream of one truncation.
+
+Two compounding errors worth naming separately, because each was independently
+sufficient to mislead:
+1. **Grepping for guesses instead of reading the output.** I grepped for an
+   attribution header and treated its absence as proof. It proves nothing: line 915 is
+   `if daemon_diffs and not diffs:`, so that header is SUPPRESSED whenever a hard diff
+   also exists — which was exactly the case.
+2. **Running the full suite while editing its guarded source tree.** A `source-tree`
+   failure is guaranteed under those conditions. The operational rule is simply: do not
+   run the full suite concurrently with source edits, and do not treat a run overlapping
+   edits as evidence of anything.
+
+**Residual, NOT a defect and NOT this card:** `_other_janitor_actor_live()`'s docstring
+names three actors while its implementation probes two. That divergence is real but
+LATENT — the amnesty here came from `daemon_ticked`, not from that probe. If it is ever
+worth tightening, it needs its own card with its own evidence, not this one's.
+
+<details><summary>Original (WRONG) premise, kept as audit trail</summary>
 
 - **This is a PUBLISH BLOCKER.** `scripts/publish.py` runs the full suite as a gate.
   The suite exits 3 on any armed developer machine, so nothing can publish from here
@@ -154,3 +198,5 @@ test leak; the negative tests in the acceptance criteria are what carry the proo
 
 Related: `[[janitor-keepalive-test-isolation-fsevents]]` (the prior incident and its three
 escaped isolation layers).
+
+</details>
