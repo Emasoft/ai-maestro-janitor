@@ -42,6 +42,15 @@ jobs:
       - name: Ruff check (all Python sources)
         run: uvx ruff check scripts/ tests/
 
+      # pyrightconfig.json points at `.venv` (venvPath/venv), which exists on a dev
+      # machine and NOT on a clean runner — without this sync, every `import pytest`
+      # in tests/ is unresolvable and the gate fails on 100+ phantom errors (first
+      # observed on run 31844013197, the job's first execution). `--extra dev` for
+      # the same reason as the Pytest step below: pytest/tiktoken live in the dev
+      # extras, and tests/ imports them.
+      - name: Sync deps so pyright can resolve imports
+        run: uv sync --extra dev
+
       # No path argument: pyrightconfig.json's `include` covers scripts/ AND tests/.
       # tests/ was outside this gate until 2026-08-13 — 176 real type errors had accumulated
       # there unseen, in the very files that are supposed to catch defects. A gate that skips the
@@ -83,8 +92,13 @@ jobs:
       # load for reasons that have nothing to do with correctness (measured:
       # PASS in 6s serially, FAIL a 30s deadline under `-n 12`). They run
       # below as their own serial step instead.
+      # `--timeout=300 --timeout-method=thread`: the job's first run (31844013197) hung
+      # SILENTLY at 99% for 22 minutes until timeout-minutes killed it, leaving no name
+      # for the hanging test. A per-test cap converts any future hang into a named
+      # failure. Thread method because signal-based timeouts do not fire inside xdist
+      # workers blocked in C calls.
       - name: Pytest
-        run: uv run --extra dev pytest -q -n auto -m "not integration"
+        run: uv run --extra dev pytest -q -n auto -m "not integration" --timeout=300 --timeout-method=thread
 
       # The real-daemon-spawn integration suite — SERIAL (no -n), its own
       # step, so it never competes with the parallel unit workers for CPU.

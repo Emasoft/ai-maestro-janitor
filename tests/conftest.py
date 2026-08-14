@@ -1012,13 +1012,33 @@ def _isolate_rotator_paths(request: pytest.FixtureRequest, monkeypatch: pytest.M
 _MEMGREP_CRATE_DIR = Path(__file__).resolve().parent.parent / "scripts" / "memgrep"
 
 
+def _memgrep_runs(path: str | Path) -> bool:
+    """The candidate actually EXECUTES on this platform (2s `--version` probe).
+
+    Existence + the x-bit is NOT enough (found 2026-08-15): `target/` travels with the
+    tree, so a checkout mounted into a different OS (mac binary in a Linux container, or
+    the reverse) presents an executable file that cannot run — and the resolver then hands
+    every e2e test a binary whose every invocation errors, which reads as dozens of
+    unrelated failures instead of one clear "wrong platform".
+    """
+    import subprocess as _subprocess
+
+    try:
+        proc = _subprocess.run(
+            [str(path), "--version"], capture_output=True, text=True, timeout=2
+        )
+        return proc.returncode == 0
+    except (OSError, _subprocess.TimeoutExpired):
+        return False
+
+
 def find_or_build_memgrep() -> str | None:
     """A `memgrep` matching THIS tree's sources, or None (callers then skip)."""
     import subprocess as _subprocess
 
     for rel in ("target/release/memgrep", "target/debug/memgrep"):
         cand = _MEMGREP_CRATE_DIR / rel
-        if cand.is_file() and os.access(cand, os.X_OK):
+        if cand.is_file() and os.access(cand, os.X_OK) and _memgrep_runs(cand):
             return str(cand)
     cargo = shutil.which("cargo")
     if cargo:
@@ -1032,10 +1052,16 @@ def find_or_build_memgrep() -> str | None:
             )
         except (_subprocess.CalledProcessError, _subprocess.TimeoutExpired, OSError):
             pass
-        built = _MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"
-        if built.is_file():
-            return str(built)
-    return shutil.which("memgrep")
+        # Cargo honors CARGO_TARGET_DIR; the tree-local path is only where output lands
+        # when that var is unset. Probe both, tree-local first.
+        candidates = [_MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"]
+        if os.environ.get("CARGO_TARGET_DIR"):
+            candidates.append(Path(os.environ["CARGO_TARGET_DIR"]) / "release" / "memgrep")
+        for built in candidates:
+            if built.is_file() and _memgrep_runs(built):
+                return str(built)
+    on_path = shutil.which("memgrep")
+    return on_path if on_path and _memgrep_runs(on_path) else None
 
 
 # Resolved once per session — importable by test modules (`from conftest import ...`).

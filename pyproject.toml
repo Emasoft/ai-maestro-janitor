@@ -85,5 +85,6 @@ dev = [
     # TRDD-TSTISOL1 removed the cross-test pollution, and conftest's write-guard fails loudly
     # on any test that escapes into the real janitor state dirs. Without those two, sharding
     # would have converted a deterministic suite into a flaky one.
+    "pytest-timeout",
     "pytest-xdist",
 ]
