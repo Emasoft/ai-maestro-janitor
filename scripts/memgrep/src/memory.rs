@@ -4010,21 +4010,23 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
         // by a human OR by the heartbeat that consumes it, so the summary is unconditional and
         // names the scopes it actually covered.
         eprintln!(
-            "memgrep lint: {} finding(s), none at or above {} ({})",
+            "memgrep lint: {} finding(s), none at or above {} ({}; {})",
             violations.len(),
             a.min_severity.label(),
-            scope_summary_label(&a.paths)
+            scope_summary_label(&a.paths),
+            cross_page_coverage_label(&a.paths)
         );
         Ok(())
     } else {
         // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The
         // count goes to stderr so it never pollutes the machine-parseable stdout violation list.
         eprintln!(
-            "memgrep lint: {} finding(s), {} at or above {} ({})",
+            "memgrep lint: {} finding(s), {} at or above {} ({}; {})",
             violations.len(),
             gating.len(),
             a.min_severity.label(),
-            scope_summary_label(&a.paths)
+            scope_summary_label(&a.paths),
+            cross_page_coverage_label(&a.paths)
         );
         std::process::exit(1);
     }
@@ -4116,6 +4118,38 @@ fn scope_layer(path: &Path) -> Option<ScopeLayer> {
 /// Canonicalizes each root before classifying — `scope_layer` matches on an absolute-path substring
 /// (`/.claude/project/memory`), so a RELATIVE root (`memgrep lint .claude/project/memory`, a real
 /// invocation shape) would otherwise silently fail to classify.
+/// The roots the LINK graph must be built over, given whatever the caller named (janitor#262).
+///
+/// A named DIRECTORY is already a root. A named FILE is widened to its owning scope root, because a
+/// cross-page invariant cannot be evaluated from one page: the reciprocity of `A → B` lives in B.
+/// `owning_scope_root` walks up to the `.memgrep` sidecar and otherwise falls back to the page's own
+/// directory, so this always resolves — there is no "no scope, checks skipped" case to report.
+///
+/// Cost is bounded by the scope, not the corpus: the widened root is the ONE scope containing the
+/// named page (~150 small files at the largest live scope), parsed by the same walk a scope-level
+/// lint already runs, well inside the PostToolUse hook's timeout.
+fn link_graph_roots(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for p in paths {
+        let root = if p.is_file() { owning_scope_root(p) } else { p.clone() };
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+/// What the run actually COVERED, appended to every summary line so a `0` can never be read as
+/// "nothing was checked" (janitor#262). Before this, a per-page run printed a bare `0 finding(s)`
+/// whether it had evaluated the cross-page rules or silently skipped them — and it was silently
+/// skipping them. Naming the roots makes the two outcomes different strings.
+fn cross_page_coverage_label(paths: &[PathBuf]) -> String {
+    let default_path = [PathBuf::from(".")];
+    let paths = if paths.is_empty() { &default_path[..] } else { paths };
+    let n = link_graph_roots(paths).len();
+    format!("cross-page checks over {n} scope root(s)")
+}
+
 fn scope_summary_label(paths: &[PathBuf]) -> String {
     // No positional args ⟹ the CLI defaults to the current dir (the same fallback `collect_md`
     // applies) — count it as the one path linted rather than reporting "0 path(s)".
@@ -4974,8 +5008,30 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
     // the TRDD-id8 alias. An edge A→B is one-sided iff B does NOT link back to A. We only consider
     // internal, RESOLVED, non-anchor edges to a DISTINCT note (a broken/external/anchor/self edge is
     // not a candidate). Each unordered (A,B) pair is reported once, at A's offending source line.
-    let g = build_graph(paths, hidden);
+    //
+    // THE GRAPH IS BUILT OVER THE SCOPE, NOT OVER `paths` (janitor#262). It used to take `paths`
+    // verbatim, so `memgrep lint <one-page.md>` collected exactly one file: its `[[wikilinks]]`
+    // could not resolve, every edge's `target` was None, the loop `continue`d, and the run printed
+    // a bare `0 finding(s)`. That is not "no violations" — it is "never evaluated", and the two are
+    // three identical words. It mattered because the installed memory protocol MANDATES that exact
+    // per-page form after EVERY edit, so following the rule precisely returned green on a page
+    // breaking THE LINK LAW, and the reciprocity debt accrued where only a scope-level run could
+    // see it — while the green result actively discouraged running one.
+    let graph_paths = link_graph_roots(paths);
+    let g = build_graph(&graph_paths, hidden);
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    // Widening the GRAPH must not widen the REPORT: `lint <page>` still answers about that page.
+    // A finding is kept only when its SOURCE is something the caller actually named — which works
+    // precisely because `link-one-sided` anchors on `e.from`, the page CARRYING the unreciprocated
+    // link. (Had it anchored on the page missing the backlink, this filter would hide every
+    // finding the editor can act on, and the fix would look like the bug.)
+    let named_files: BTreeSet<PathBuf> =
+        paths.iter().filter(|p| p.is_file()).map(|p| canon(p)).collect();
+    let named_dirs: Vec<PathBuf> =
+        paths.iter().filter(|p| !p.is_file()).map(|p| canon(p)).collect();
+    let requested = |src: &Path| -> bool {
+        named_files.contains(src) || named_dirs.iter().any(|d| src.starts_with(d))
+    };
     // Build the set of DIRECTED canonical (source, target) edges over all internal-resolved links.
     // Reciprocity of an edge A→B is then "is (B,A) also in this set?" — computed from the edges
     // directly, NOT from `g.backlinks` (whose values are the RAW, un-canonicalized source paths,
@@ -5003,7 +5059,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         if let (Some(from_s), Some(to_s)) = (scope_layer(&from_c), scope_layer(&to_c))
             && from_s != to_s
         {
-            if to_s.rank < from_s.rank {
+            if to_s.rank < from_s.rank && requested(&from_c) {
                 violations.push((
                     Severity::Error,
                     rel(&e.from),
@@ -5031,7 +5087,11 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
             } else {
                 (to_c.clone(), from_c.clone())
             };
-            if reported_pairs.insert(pair) {
+            // `requested` is tested BEFORE the dedup insert, deliberately. Consuming the pair on an
+            // edge we are not going to report would swallow the pair's OTHER direction — so a
+            // `lint <page>` could see A→B first (A not named, skipped, pair consumed) and then miss
+            // the B→A edge it was actually asked about.
+            if requested(&from_c) && reported_pairs.insert(pair) {
                 // WARN: both pages still resolve and nothing is lost — the graph is merely
                 // asymmetric. It is also the ONE class that cannot be fixed from a single page
                 // (the missing half lives in the OTHER file), so failing a write on it would block
@@ -7802,6 +7862,49 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             has_violation(&v, "one-sided link"),
             "a→b with no b→a must be reported as a one-sided link; got: {v:?}"
         );
+    }
+
+    /// janitor#262: the SAME defect, seen through the per-PAGE form the memory protocol mandates
+    /// after every edit. It used to return a bare `0 finding(s)` — not "clean", but "never
+    /// evaluated", which is the same three words. The graph widens to the page's scope; the REPORT
+    /// does not widen with it.
+    #[test]
+    fn lint_of_one_page_sees_the_link_law_but_reports_only_that_page() {
+        let dir = lint_tmpdir("onesided_perpage");
+        let a = dir.join("a.md");
+        let b = dir.join("b.md");
+        std::fs::write(
+            &a,
+            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             see [[b]]\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &b,
+            "---\nname: b\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             no back-link here.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+
+        // The page CARRYING the unreciprocated link reports it — this is the whole fix, and it
+        // works only because `link-one-sided` anchors on the source page.
+        let va = lint_paths(std::slice::from_ref(&a), false);
+        // The OTHER side stays quiet: widening the graph must not widen the report, or every
+        // per-page lint in the corpus would recite the whole scope's reciprocity debt.
+        let vb = lint_paths(std::slice::from_ref(&b), false);
+        // Two roots resolved for two files in one scope ⇒ the coverage label says ONE.
+        let label = cross_page_coverage_label(&[a.clone()]);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            has_violation(&va, "one-sided link"),
+            "lint of the linking page alone must see the LINK LAW; got: {va:?}"
+        );
+        assert!(
+            !has_violation(&vb, "one-sided link"),
+            "lint of the OTHER page must not inherit it; got: {vb:?}"
+        );
+        assert_eq!(label, "cross-page checks over 1 scope root(s)");
     }
 
     #[test]
