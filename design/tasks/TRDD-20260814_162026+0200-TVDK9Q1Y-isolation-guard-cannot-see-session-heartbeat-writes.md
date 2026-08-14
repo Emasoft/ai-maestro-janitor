@@ -95,10 +95,62 @@ direction.
       this card from becoming the next incident.
 - [ ] `uv run ruff check scripts tests` and `uv run mypy scripts/ --ignore-missing-imports` clean.
 
+## MEASURED 2026-08-14 — two hypotheses REFUTED, mechanism still open
+
+Recorded per the corpus lesson "file the reproduction as PROOF and the mechanism as an
+explicitly labelled HYPOTHESIS" — a maintainer's static reading can reach a different
+conclusion and argue with the mechanism instead of running the repro.
+
+**✓ VERIFIED (facts, reproducible):**
+- The daemon is ALIVE and ticking: `daemon.pid` = 90235, that pid is a live
+  `daemon_keepalive_entry.py --keepalive` running 2d05h; `daemon.heartbeat.ts` 0.4 min old.
+- `~/.aimaestro/server-liveness.json` is also fresh (0.4 min).
+- `daemon.log` contains **zero** `server-owns-host` lines — the daemon never stood down.
+- `daemon_ticked` is a PURE function over `(before, after)` snapshots; it does not resolve
+  paths itself. `_ISOLATION_ENVS` captures the real env, and `conftest.py:177-189` records
+  that the silent-env-probe class was already found and fixed TWICE for the server probe.
+
+**✗ REFUTED HYPOTHESIS 1 — "the host was in the unowned/handover state."** It was not: a
+live ticking daemon and a fresh server-liveness both existed, and nothing stood down. So
+this is NOT the `janitor-daemon-handover-unowned-chores` override hole.
+
+**✗ REFUTED HYPOTHESIS 2 — "`daemon_ticked` reads a monkeypatched env path and so sees no
+daemon inside the test process."** It cannot: the function is pure and its inputs are
+snapshotted from real paths.
+
+**? OPEN (hypothesis, NOT established) — why the amnesty did not fire.** With a live
+ticking daemon at both ends, `daemon_ticked` should be True, and the `usage-probe` amnesty
+should have applied — yet run 2 flagged `usage-probe` alone. One of these is false and the
+next session must determine WHICH before writing code:
+  (a) `daemon_ticked` returned False for a reason not yet identified;
+  (b) the `usage-probe` amnesty is not reached for that label/path in practice;
+  (c) the mutation is classified under a label whose amnesty never covered it.
+**Do not implement the witness work until this is answered** — a fix built on the wrong
+one of these greens the suite without addressing the cause, which is the failure this card
+was created to avoid.
+
+**SCOPE GUARD (advisor):** this card must stay inside `tests/`. Any edit outside `tests/`
+is the early signal that it has grown a production change, and the publish blocker then
+stays red while that refactor happens.
+
 ## Notes
 
 Surfaced while gating TRDD-ZM5LZ24Y. Advisor review located the docstring/implementation
 divergence; verified first-hand in source before filing.
+
+The class this belongs to is named in the corpus as `ATOM-4GQU-0C9J`: *a claimed chore
+transfers the ACT to the server but not the BREADCRUMB, so every janitor feature triggered
+by our own stamp goes dark on a server-owned host, invisibly.* The general cure is that
+ownership evidence must belong to the actor that TAKES OVER, not the one that withdraws —
+which is what `~/.aimaestro/server-liveness.json` already is. A sweep of other
+breadcrumb-keyed features is real and worth its own card; it is explicitly NOT this one.
+
+An evidence correction that applies to this card's own reasoning: `debug-a-timestamp-says-when-never-who`
+means "mtime moved during the run ⇒ the heartbeat wrote it" is NOT valid. What survives is
+(i) the non-determinism across identical runs, and (ii) mtimes advancing AFTER the run had
+ended — which uses the timestamp only for WHEN and derives WHO by exclusion, the suite no
+longer existing at that point. Note also that non-determinism alone does not exclude a RACY
+test leak; the negative tests in the acceptance criteria are what carry the proof burden.
 
 Related: `[[janitor-keepalive-test-isolation-fsevents]]` (the prior incident and its three
 escaped isolation layers).

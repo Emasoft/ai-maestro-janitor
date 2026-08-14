@@ -37,6 +37,50 @@ answer's jargon. Skipping recall means re-deriving — usually worse — what a 
 session already solved. After you solve the thing, close the loop: WRITE/UPDATE
 the owning page (`/janitor-memory-write`, `/janitor-memory-update`).
 
+### A PUSHED row is hop 1 already done for you — take hop 2
+
+Every prompt may arrive with auto-surfaced `<date> <id> <description>` rows. They
+are **not** ambient noise: they are a completed hop 1, delivered unasked. The
+standing failure is to skim them as decoration and then go derive the answer by
+hand.
+
+**Rule: when a pushed row's description matches the question you are holding RIGHT
+NOW, run `memgrep recall <that-id> "${ROOTS[@]}"` BEFORE you derive, brief, or
+assert anything.** One cheap call, and it either lands the answer or costs you a
+few hundred tokens. Re-derivation costs turns — and worse, produces a model built
+on your guesses that someone else then has to correct.
+
+Corollary: a row you have seen several fires in a row and still not opened is the
+single strongest signal in your context that you are about to redo finished work.
+
+### The trigger is RECONSTRUCTION as well as RISK
+
+The recall triggers people remember are destructive — *before publishing, deleting,
+force-pushing, rotating credentials*. Those are necessary and insufficient. The
+expensive failure mode is not damage, it is **reconstruction**: spending turns
+building an explanation the corpus already holds. Nothing is endangered, so no
+risk-shaped trigger fires, and the waste is invisible until someone corrects the
+model you derived.
+
+So recall ALSO fires on these, which are observable actions rather than abstract
+occasions (you can notice yourself doing them):
+
+| You are about to… | Recall first |
+|---|---|
+| brief another agent/advisor on how a subsystem works | yes — a brief built on your reconstruction propagates your errors into their answer |
+| assert a MECHANISM ("it behaves this way because…") | yes |
+| spend more than ~2 turns deriving a model of existing behaviour | yes |
+| explain an architecture to the user | yes |
+| write a design doc / TRDD about an existing subsystem | yes |
+
+The tell is the sentence forming in your head: *"the way this works is…"*. If you
+are about to say that about code you did not just read, recall first.
+
+**Delegating a decision does not exempt you.** Handing a design question to an
+advisor or subagent still requires recall BEFORE the handoff — you are choosing
+what facts they see, so an unrecalled brief silently caps the quality of their
+answer at the quality of your memory.
+
 ## Compose the scope roots (once)
 
 ```bash
