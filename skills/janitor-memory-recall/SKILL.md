@@ -12,18 +12,9 @@ description: RECALL — before working on a file or debugging/deciding, surface 
 RECALL is the FIND/READ leg of the memory wiki. It does two things the flat-note
 recall could not: it maps **the file you're about to touch → the functionality's
 hub page** (so you get the overview before you edit), and it lets you **navigate
-the wiki** — read the tip, then follow only the links the task needs. Read [the
-wikimem model](../janitor-memory-write/references/wikimem-model.md) for tiers,
-the See-also web, and the file→functionality mapping. The model doc's table of
-contents:
-
-- A wiki, not a pile — and collaborative like Wikipedia
-- The editorial decision flow (run this on any change worth remembering)
-- EXPAND and REDUCE — radiating suns vs receiving terminals
-- The three tiers (a page's role in the pyramid)
-- The edge model — EVERY link is bidirectional (the link law)
-- Page anatomy
-- Atoms — first-class body elements (block-properties)
+the wiki** — read the tip, then follow only the links the task needs. Full model
+(tiers, See-also web, file→functionality mapping):
+[wikimem model](../janitor-memory-write/references/wikimem-model.md).
 
 ## PROACTIVE-USE CONTRACT — recall FIRST, unprompted (commitment 1)
 
@@ -37,49 +28,12 @@ answer's jargon. Skipping recall means re-deriving — usually worse — what a 
 session already solved. After you solve the thing, close the loop: WRITE/UPDATE
 the owning page (`/janitor-memory-write`, `/janitor-memory-update`).
 
-### A PUSHED row is hop 1 already done for you — take hop 2
-
-Every prompt may arrive with auto-surfaced `<date> <id> <description>` rows. They
-are **not** ambient noise: they are a completed hop 1, delivered unasked. The
-standing failure is to skim them as decoration and then go derive the answer by
-hand.
-
-**Rule: when a pushed row's description matches the question you are holding RIGHT
-NOW, run `memgrep recall <that-id> "${ROOTS[@]}"` BEFORE you derive, brief, or
-assert anything.** One cheap call, and it either lands the answer or costs you a
-few hundred tokens. Re-derivation costs turns — and worse, produces a model built
-on your guesses that someone else then has to correct.
-
-Corollary: a row you have seen several fires in a row and still not opened is the
-single strongest signal in your context that you are about to redo finished work.
-
-### The trigger is RECONSTRUCTION as well as RISK
-
-The recall triggers people remember are destructive — *before publishing, deleting,
-force-pushing, rotating credentials*. Those are necessary and insufficient. The
-expensive failure mode is not damage, it is **reconstruction**: spending turns
-building an explanation the corpus already holds. Nothing is endangered, so no
-risk-shaped trigger fires, and the waste is invisible until someone corrects the
-model you derived.
-
-So recall ALSO fires on these, which are observable actions rather than abstract
-occasions (you can notice yourself doing them):
-
-| You are about to… | Recall first |
-|---|---|
-| brief another agent/advisor on how a subsystem works | yes — a brief built on your reconstruction propagates your errors into their answer |
-| assert a MECHANISM ("it behaves this way because…") | yes |
-| spend more than ~2 turns deriving a model of existing behaviour | yes |
-| explain an architecture to the user | yes |
-| write a design doc / TRDD about an existing subsystem | yes |
-
-The tell is the sentence forming in your head: *"the way this works is…"*. If you
-are about to say that about code you did not just read, recall first.
-
-**Delegating a decision does not exempt you.** Handing a design question to an
-advisor or subagent still requires recall BEFORE the handoff — you are choosing
-what facts they see, so an unrecalled brief silently caps the quality of their
-answer at the quality of your memory.
+A pushed `<date> <id> <description>` row that matches your current question is
+hop 1 already done — take hop 2 (`memgrep recall <that-id> "${ROOTS[@]}"`) before
+deriving anything by hand. Recall also fires on RECONSTRUCTION, not just risk —
+briefing another agent, asserting a mechanism, or explaining an architecture from
+memory instead of a fresh read. Full rationale + trigger table:
+[references/proactive-recall-details.md](references/proactive-recall-details.md).
 
 ## Compose the scope roots (once)
 
@@ -194,52 +148,34 @@ so one call yields the facts AND every WHY. `--no-notes` = body only;
 
 ## Two axes, two recalls: the CASE page and the METHODOLOGY page
 
-The corpus keeps them apart on purpose — a case page holds facts about ITS subject, and a
-transferable way of working (how to diagnose, verify, falsify; the reasoning traps) is owned by
-a methodology page such as `debugging-methodology`. That keeps a case page on-topic, but it
-also means **a symptom query alone will never surface the methodology**, because the
-methodology page does not mention your symptom.
-
-So when the task is DIAGNOSTIC (a bug, an outage, a mystery — not a lookup), recall on BOTH
-axes and read the top hit of each:
+A symptom query only ever surfaces the CASE page — a methodology page (e.g.
+`debugging-methodology`) never mentions your symptom, so it needs its own recall.
+When the task is DIAGNOSTIC (a bug, an outage, a mystery — not a lookup), recall
+on BOTH axes and read the top hit of each:
 
 ```bash
 memgrep recall "$SYMPTOM" "${ROOTS[@]}"                      # the CASE — what do we know about THIS?
 memgrep recall "debugging methodology verify falsify" "${ROOTS[@]}"   # the METHOD — how do we not fool ourselves?
 ```
 
-The second call is the cheap one that pays: the traps a methodology page records ("verify
-before you 'fix'", "absence of evidence is not evidence", "falsify each layer separately") are
-exactly the ones a session under pressure re-walks into. Recall them BEFORE the investigation,
-not while writing the post-mortem.
+Why the split, and why the second call pays for itself:
+[references/proactive-recall-details.md](references/proactive-recall-details.md).
 
 ## Enriched recall (verify with `memgrep recall --help`)
 
-- `--sort score|ocd|lmd` (default relevance), `--order asc|desc` — `--sort lmd`
-  for newest-touched first.
-- `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` — "what did we
-  decide about X last week".
-- `--top N` (default 10); `--use-index` forces the SQLite sidecar (auto-used when
-  fresh; results always correct).
-- `memgrep find "+TERM -TERM \"phrase\"" "${ROOTS[@]}"` — note-level boolean keyword
-  search; add `--only-notes` to search ONLY the lessons.
-
-```bash
-memgrep recall "$SYMPTOM" "${ROOTS[@]}" --sort lmd                # newest-touched first
-memgrep find "+rotator +keychain -widget" "${ROOTS[@]}"           # AND / exclude
-memgrep links --broken "${ROOTS[@]}"                              # context edges to fill (→ MEMORIZE/UPDATE)
-```
+`--sort score|ocd|lmd`, `--since`/`--until <ISO>` (`--date-field ocd|lmd`),
+`--top N`, `--use-index`; `memgrep find "+TERM -TERM \"phrase\"" "${ROOTS[@]}"`
+for note-level boolean search (`--only-notes` = lessons only). Full flag
+reference + examples:
+[references/proactive-recall-details.md](references/proactive-recall-details.md).
 
 ## The navigation contract (don't over-read)
 
-Surface the TIP, read what the task needs, follow links on demand. Reading an
-entire functionality's page tree "to be safe" defeats the wiki — its whole point
-is that context spend stays proportional to the task. One hub + the component +
-its two or three `## Governed by` rulers is the normal read. **Cache the suns:**
-a shared general page (style, protocol) is read ONCE and reused across every
-component it governs — so working across many components costs the governors only
-once, not per component. That cacheability is why the wiki abstracts shared rules
-into radiating pages instead of copying them into each element.
+Surface the TIP, read what the task needs, follow links on demand. One hub + the
+component + its two or three `## Governed by` rulers is the normal read — reading
+a whole functionality's page tree "to be safe" defeats the wiki's cost model.
+Full case for this + the "cache the suns" corollary:
+[references/proactive-recall-details.md](references/proactive-recall-details.md).
 
 ## Output
 
@@ -251,25 +187,8 @@ that is precisely the cost the two-hop shape exists to avoid.
 
 ## Examples
 
-<example>
-About to edit src/frontend/panels/Login.tsx
-→ Entry A: find the `frontend` hub (its globs own src/frontend/**), read it, go to
-  the [[login-panel]] component, read its `## Governed by` ([[style-system]],
-  [[dialog-forms]]) — load those rulers once — and skip the rest of the tree.
-</example>
-
-<example>
-User: the oauth rotator failed again and I had to log in manually
-→ Entry B: recall "oauth rotator failed had to log in manually" → ranked hits like
-  `oauth-rotator.md#rotate-cascade — rotate renew reauth keychain` (one exact fact,
-  read it at that anchor) interleaved with `keychain-creds.md — where the creds live`
-  (a whole page, lessons appended); read the few you need before touching it.
-</example>
-
-<example>
-User: what do we know about the frontend before I restyle the dialogs?
-→ Entry A from the `frontend` hub → descend into [[dialog-forms]] + [[style-system]].
-</example>
+Worked examples (file-anchored, symptom-anchored, and combined) live in
+[references/proactive-recall-details.md](references/proactive-recall-details.md).
 
 ## Scope
 
@@ -279,6 +198,9 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
 
 ## Resources
 
+- [references/proactive-recall-details.md](references/proactive-recall-details.md)
+  — full rationale for the PROACTIVE-USE CONTRACT, the two-axes recall pattern,
+  the enriched-recall flag reference, and the worked examples.
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
   — the wiki data model (tiers, file→functionality globs, See-also, the memgrep
   command map). Its table of contents:
