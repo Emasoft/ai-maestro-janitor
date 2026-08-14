@@ -200,7 +200,13 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
 
 - [references/proactive-recall-details.md](references/proactive-recall-details.md)
   — full rationale for the PROACTIVE-USE CONTRACT, the two-axes recall pattern,
-  the enriched-recall flag reference, and the worked examples.
+  the enriched-recall flag reference, and the worked examples. Its table of contents:
+  - A PUSHED row is hop 1 already done for you — take hop 2
+  - The trigger is RECONSTRUCTION as well as RISK
+  - Two axes, two recalls — why the CASE page and the METHODOLOGY page are separate
+  - Enriched recall — full flag reference
+  - Worked examples
+  - The navigation contract — the full case for "don't over-read"
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
   — the wiki data model (tiers, file→functionality globs, See-also, the memgrep
   command map). Its table of contents:
