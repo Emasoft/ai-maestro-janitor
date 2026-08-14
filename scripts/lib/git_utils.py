@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 # When this module is loaded by a PEP 723 detector, the detector prepends
 # scripts/lib/ to sys.path. When loaded any other way (tests, REPL),
@@ -144,8 +144,25 @@ def clear_stale_index_lock(
     *,
     min_age_s: float = 1800.0,
     ps_snapshot: Optional[str] = None,
-) -> str:
+) -> Literal[
+    "absent",
+    "held",
+    "no-probe",
+    "live-git",
+    "no-snapshot",
+    "too-young",
+    "raced",
+    "removed",
+    "error",
+]:
     """Remove an ORPHANED `<repo_root>/.git/index.lock`, never raises.
+
+    The return type is a `Literal` (TRDD-W0XT5B3B) so pyright/mypy police the
+    exhaustive vocabulary documented below for free, and so
+    `tests/test_git_optional_locks_guard.py`'s reachability meta-test can
+    extract the members via `ast` and demand each one be asserted by at
+    least one test — a fail-closed branch nothing asserts is
+    indistinguishable from deleted code (janitor#245's own lesson).
 
     Owner ruling (janitor#245 follow-up): prevention (GIT_OPTIONAL_LOCKS=0 on
     every reader, above) stops READERS from ever taking the lock — but it

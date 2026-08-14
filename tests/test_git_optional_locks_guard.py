@@ -363,6 +363,115 @@ def test_the_scanner_still_flags_git_config_get():
     assert visitor.findings, "git config --get is a read and must require protection"
 
 
+_TESTS_ROOT = _PROJECT_ROOT / "tests"
+
+
+def _literal_return_members(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """The string members of `func_node`'s `Literal[...]` (or
+    `typing.Literal[...]`) return annotation, in source order — `[]` if the
+    function has no such annotation (or the annotation isn't a `Literal`)."""
+    ann = func_node.returns
+    if ann is None or not isinstance(ann, ast.Subscript):
+        return []
+    base_name = _callee_name(ann.value).rsplit(".", 1)[-1]
+    if base_name != "Literal":
+        return []
+    sl = ann.slice
+    if isinstance(sl, ast.Index):  # pragma: no cover - py<3.9 AST shape
+        sl = sl.value  # type: ignore[attr-defined]
+    elts = sl.elts if isinstance(sl, ast.Tuple) else [sl]
+    return [e.value for e in elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+
+
+def _iter_literal_return_functions() -> dict[str, list[str]]:
+    """Every `scripts/` function with a `Literal[...]` return annotation,
+    mapped to `"rel/path.py::func_name" -> [members...]`."""
+    out: dict[str, list[str]] = {}
+    for path in _iter_scanned_files():
+        source = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+        rel_path = str(path.relative_to(_PROJECT_ROOT))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            members = _literal_return_members(node)
+            if members:
+                out[f"{rel_path}::{node.name}"] = members
+    return out
+
+
+def _missing_literal_assertions(tests_source: str, members: list[str]) -> list[str]:
+    """Which of `members` never appears as an asserted expected value
+    (`== "member"` / `== 'member'`) anywhere in the concatenated tests
+    source — i.e. a refusal reason no test can actually reach."""
+    missing = []
+    for member in members:
+        if f'== "{member}"' not in tests_source and f"== '{member}'" not in tests_source:
+            missing.append(member)
+    return missing
+
+
+def test_every_literal_return_member_is_asserted_by_some_test():
+    """Drift guard (TRDD-W0XT5B3B): every `Literal[...]`-returning guard
+    function under `scripts/` must have EVERY member of its Literal asserted
+    as an expected value somewhere under `tests/` — a refusal path with no
+    test asserting its outcome is mechanically indistinguishable from a
+    guard that never refuses (the janitor#245 lesson, generalised)."""
+    tests_source = "\n".join(
+        p.read_text(encoding="utf-8", errors="replace") for p in sorted(_TESTS_ROOT.glob("*.py"))
+    )
+    findings = []
+    for qualified_name, members in _iter_literal_return_functions().items():
+        missing = _missing_literal_assertions(tests_source, members)
+        if missing:
+            findings.append(f"{qualified_name}: unasserted Literal member(s) {missing!r}")
+    assert not findings, (
+        "Literal-returning guard function(s) with an unreachable-by-test "
+        "refusal path — add an `== \"<member>\"` assertion for each:\n"
+        + "\n".join(findings)
+    )
+
+
+def test_the_literal_reachability_scanner_actually_detects_a_gap():
+    """Self-check the meta-test is not a silent no-op: a Literal member with
+    no asserting `==` anywhere in the (fake) tests corpus must be flagged."""
+    missing = _missing_literal_assertions(
+        tests_source='assert outcome == "absent"\nassert outcome == "held"\n',
+        members=["absent", "held", "no-probe"],
+    )
+    assert missing == ["no-probe"], "the scanner must flag the unasserted member"
+
+
+def test_the_literal_reachability_scanner_accepts_full_coverage():
+    """Self-check the meta-test does not false-positive when every member of
+    a Literal return type has a matching `==` assertion somewhere."""
+    missing = _missing_literal_assertions(
+        tests_source="assert outcome == 'absent'\nassert outcome == \"held\"\n",
+        members=["absent", "held"],
+    )
+    assert missing == [], f"full coverage must not be flagged: {missing}"
+
+
+def test_the_literal_extractor_reads_a_real_literal_return_annotation():
+    """Self-check `_literal_return_members` correctly extracts a multi-member
+    `Literal[...]` return annotation from real source (not just documents its
+    intent) — and returns `[]` for an ordinary `-> str` function."""
+    source = (
+        "from typing import Literal\n\n"
+        "def guard() -> Literal['a', 'b', 'c']:\n"
+        "    return 'a'\n\n"
+        "def not_a_guard() -> str:\n"
+        "    return 'x'\n"
+    )
+    tree = ast.parse(source)
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert _literal_return_members(funcs["guard"]) == ["a", "b", "c"]
+    assert _literal_return_members(funcs["not_a_guard"]) == []
+
+
 def test_clear_stale_index_lock_has_a_production_caller():
     """`git_utils.clear_stale_index_lock` (the janitor#245 RECOVERY half) must be reachable from
     at least one `scripts/` file other than its own definition — otherwise the safe removal it
