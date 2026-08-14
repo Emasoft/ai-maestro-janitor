@@ -2901,7 +2901,7 @@ fn add_atom_round_trips_through_the_parser_and_index() {
 
     // The stored marker is the canonical `^id [desc:…, keywords:…, type:…, ocd:…, lmd:…]` shape.
     let text = std::fs::read_to_string(&page).unwrap();
-    assert!(text.contains(&format!("^{id} [desc:\"a summary, with a comma\", keywords: rate_limit resume 429_error, type: reference, ocd:")));
+    assert!(text.contains(&format!("^{id} [desc: \"a summary, with a comma\", keywords: rate_limit resume 429_error, type: reference, ocd: ")));
     // The atom landed BEFORE the notes section (its marker precedes the heading in the file).
     let mpos = text.find(&format!("^{id}")).unwrap();
     let npos = text.find("## Notes and lessons learned").unwrap();
@@ -2957,8 +2957,17 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
     // The `[^1]` anchor is on the atom's body, the canonical def is under the notes section.
     assert!(text.contains("[^1]"), "atom body carries the [^1] anchor:\n{text}");
     assert!(
-        text.contains(&format!("[^1]: [id:{lesson_id}, status:valid")),
+        text.contains(&format!("[^1]: [id: {lesson_id}, status: valid")),
         "canonical lesson def form:\n{text}"
+    );
+    // janitor#266 end-to-end: the atom marker and the lesson address in THIS page — written by two
+    // verbs minutes apart — must now be greppable with the SAME `lmd: <date>` pattern. The reported
+    // failure was that they were not, so a `grep -c "lmd: $today"` returned a confident 0.
+    let dated: Vec<&str> = text.lines().filter(|l| l.contains("lmd: ")).collect();
+    assert!(
+        dated.iter().any(|l| l.trim_start().starts_with('^'))
+            && dated.iter().any(|l| l.trim_start().starts_with("[^")),
+        "one `lmd: ` spelling must match the atom marker AND the lesson address:\n{text}"
     );
     // The lesson resolves by its keyword surface (the recall promise for lessons).
     let found = run(&["find", "+max_retries", d.as_str(), "--only-notes"]);

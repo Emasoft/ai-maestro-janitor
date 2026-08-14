@@ -2168,6 +2168,37 @@ fn sanitize_quoted_uncapped(raw: &str) -> String {
     flat.replace('"', "'")
 }
 
+/// THE canonical block-props spelling — `key: value` pairs joined by `, `, ONE space after every
+/// colon. Every writer that emits a `[...]` props block routes through here (janitor#266).
+///
+/// It exists because the separator, not the value, was the defect. Three writers each carried their
+/// own format string: the atom marker emitted `lmd: 2026-08-14` and the lesson `lmd:2026-08-14`,
+/// minutes apart in the same page, and the `--retire-atom` injection mixed BOTH inside one string
+/// (`, status: superseded, superseded-by:{id}`). A consumer matching one spelling then missed the
+/// other and returned a confident number either way: measured, `grep -c "lmd: $today"` reported 0 on
+/// pages whose lessons all carried today's date. The page FRONTMATTER already uses the spaced form,
+/// so spacing here is what makes ONE `lmd: <date>` grep correct across frontmatter, atoms and
+/// lessons alike.
+///
+/// VALUES ARE PASSED THROUGH VERBATIM, quoting included, because quoting is a per-field property
+/// this function must not guess: `desc` carries free prose and is quoted at both call sites, while
+/// dates and enums are bare. A caller wanting a quoted value passes one. After this change a
+/// `keywords: ` grep matches both the atom's bare list and the lesson's quoted one, which is why
+/// unifying the QUOTING too was deliberately NOT done — it would change the majority spelling of the
+/// corpus for no measured gain, and unquoting the lesson's list would newly expose a colon-bearing
+/// key-phrase (`TRDD-ABC:step_two` — the writer underscores spaces but keeps colons) to
+/// `parse_note_props`'s "a token containing `:` opens a new key" rule.
+///
+/// Pre-change pages keep their old spelling forever — the parser accepts both and a normalising
+/// rewrite would touch every atom and lesson in the corpus for a cosmetic gain.
+fn render_block_props(pairs: &[(&str, String)]) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Build the atom marker line `^<id> [<props>]` in the field order the corpus uses: optional `desc`,
 /// then `keywords` (mandatory), optional `type`, then `ocd`/`lmd`. Every field is generated here —
 /// the caller never writes raw props — so the shape is provably parseable (round-trip test proves
@@ -2180,19 +2211,19 @@ fn build_atom_marker(
     atom_type: Option<&str>,
     today: &str,
 ) -> String {
-    let mut props: Vec<String> = Vec::new();
+    let mut props: Vec<(&str, String)> = Vec::new();
     if let Some(d) = desc.map(str::trim).filter(|d| !d.is_empty()) {
-        props.push(format!("desc:\"{}\"", sanitize_quoted_value(d)));
+        props.push(("desc", format!("\"{}\"", sanitize_quoted_value(d))));
     }
-    props.push(format!("keywords: {}", keywords.join(" ")));
+    props.push(("keywords", keywords.join(" ")));
     if let Some(t) = atom_type.map(str::trim).filter(|t| !t.is_empty()) {
         // A `type` is a single-word enum in the corpus; guard anyway against a stray space breaking
         // the value into an array (only its first element is read by `first_val`).
-        props.push(format!("type: {}", t.split_whitespace().collect::<Vec<_>>().join("_")));
+        props.push(("type", t.split_whitespace().collect::<Vec<_>>().join("_")));
     }
-    props.push(format!("ocd: {today}"));
-    props.push(format!("lmd: {today}"));
-    format!("^{id} [{}]", props.join(", "))
+    props.push(("ocd", today.to_string()));
+    props.push(("lmd", today.to_string()));
+    format!("^{id} [{}]", render_block_props(&props))
 }
 
 /// The 0-based line index of the page's `## Notes and lessons learned` heading, fence-aware, or None.
@@ -2441,6 +2472,62 @@ fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Stamp the page's TOP-LEVEL frontmatter `lmd:` (or its documented alias `updated:`) with `today`.
+/// Returns `content` unchanged when there is no frontmatter to stamp.
+///
+/// janitor#265: nothing bumped this field. The only writer was page CREATION, so a page edited
+/// tonight kept asserting a date from eleven days ago — while the very same `add-lesson` call
+/// stamped the lesson it inserted with today. `ocd` is creation and stays untouched; `st_birthtime`
+/// is destroyed by the atomic tmp+rename (a rename installs a new inode) and `mtime` moves for any
+/// byte rewrite including a mirror sync, so `lmd` is the only content-recency signal this corpus
+/// has. The failure is worse than an absent field: an absent one reads as unknown and invites a
+/// check, while a confident `lmd: 2026-08-02` on a page written tonight is simply believed.
+///
+/// Called by the CONTENT verbs, NOT from `atomic_write_page`. The choke point also carries
+/// `new-page` (already today) and, more importantly, the `publish-globally` normalizer's own
+/// repair writes — a purely MECHANICAL pass that changes no fact. Bumping there would make `lmd`
+/// mean "some process touched the bytes", which is precisely the useless signal `mtime` already
+/// provides.
+///
+/// Only column-0 keys are considered, so a nested `metadata:` sub-key spelled `lmd` is never
+/// mistaken for the page's own.
+///
+/// A page carrying NEITHER key is left alone — this function MAINTAINS a field, it does not REPAIR
+/// a page. Inserting one here would make an `edit` that replaces a single word also rewrite the
+/// frontmatter, and it would give `page-no-lmd` a second owner in a different layer from the
+/// linter that already reports it. Two mechanisms for one defect is how they drift apart.
+fn bump_page_lmd(content: &str, today: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.first().map(|l| l.trim_end()) != Some("---") {
+        return content.to_string(); // no frontmatter — nothing this function may claim to maintain
+    }
+    let Some(close) = lines.iter().skip(1).position(|l| l.trim_end() == "---").map(|i| i + 1) else {
+        return content.to_string(); // unterminated frontmatter: a repair this function does not own
+    };
+    let trailing_newline = content.ends_with('\n');
+    let mut out: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+
+    // Prefer `lmd:`; fall back to the alias `updated:` so a page using the documented alternative
+    // spelling is maintained in place rather than growing a second, competing date field.
+    let key_at = |key: &str| {
+        (1..close).find(|&i| {
+            lines[i]
+                .strip_prefix(key)
+                .is_some_and(|rest| rest.starts_with(':'))
+        })
+    };
+    let Some(i) = key_at("lmd").or_else(|| key_at("updated")) else {
+        return content.to_string();
+    };
+    let key = out[i].split(':').next().unwrap_or("lmd").to_string();
+    out[i] = format!("{key}: {today}");
+    let mut joined = out.join("\n");
+    if trailing_newline {
+        joined.push('\n');
+    }
+    joined
+}
+
 /// Reindex the memory scope that owns `page` (its parent dir) after a write, so `recall`/`atom`
 /// resolve the new element from the FRESH index immediately. Incremental (`full=false`) — only the
 /// touched file is re-parsed. Best-effort in spirit but surfaced: a reindex failure is returned so
@@ -2580,7 +2667,7 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     let today = today_date();
     let marker = build_atom_marker(&id, &keywords, a.desc.as_deref(), a.atom_type.as_deref(), &today);
 
-    let out = insert_atom_block(&text, &marker, &body);
+    let out = bump_page_lmd(&insert_atom_block(&text, &marker, &body), &today);
     atomic_write_page(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{id}\t{}", rel(&a.page));
@@ -2853,17 +2940,24 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // ignored by the lesson parser) inserted only when given — the canonical fields are id/status/
     // keywords/ocd/lmd. Under --supersedes a `supersedes:<atom>` field records WHICH atom this lesson
     // corrects, so `memgrep lint` can enforce the embedded SUPERSEDED BODY (superseded-without-body).
-    let mut meta = format!("id:{lesson_id}, status:valid");
+    let mut props: Vec<(&str, String)> = vec![
+        ("id", lesson_id.clone()),
+        ("status", "valid".to_string()),
+    ];
     if a.supersedes {
-        meta.push_str(&format!(", supersedes:{query}"));
+        props.push(("supersedes", query.to_string()));
     }
     if let Some(d) = a.desc.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
-        meta.push_str(&format!(", desc:\"{}\"", sanitize_quoted_value(d)));
+        props.push(("desc", format!("\"{}\"", sanitize_quoted_value(d))));
     }
-    meta.push_str(&format!(
-        ", keywords:\"{}\", ocd:{today}, lmd:{today}",
-        keywords.join(" ")
-    ));
+    // `keywords` stays QUOTED here (see `render_block_props`): the lesson parser opens a new key on
+    // any whitespace token containing a colon, and a key-phrase may legitimately carry one
+    // (`TRDD-ABC:step_two`) since the writer underscores spaces but not colons. Only the SEPARATOR
+    // is unified — which is what the reported grep failure was about.
+    props.push(("keywords", format!("\"{}\"", keywords.join(" "))));
+    props.push(("ocd", today.clone()));
+    props.push(("lmd", today.clone()));
+    let meta = render_block_props(&props);
     let def_line = format!("[^{label}]: [{meta}] {lesson_text}");
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
@@ -2882,10 +2976,14 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
         && let Some((_s, end, _id, props_raw)) = first_block_property_marker(&lines[marker_idx])
         && !props_raw.contains("status:")
     {
-        lines[marker_idx].insert_str(
-            end - 1,
-            &format!(", status: superseded, superseded-by:{lesson_id}"),
-        );
+        // Through the shared renderer: this string used to carry BOTH spellings at once
+        // (`status: superseded` spaced, `superseded-by:{id}` not), inside a single format! —
+        // the clearest evidence that a per-site format string cannot hold a grammar (janitor#266).
+        let retire_props = render_block_props(&[
+            ("status", "superseded".to_string()),
+            ("superseded-by", lesson_id.clone()),
+        ]);
+        lines[marker_idx].insert_str(end - 1, &format!(", {retire_props}"));
     }
 
     // 2. Append the `[^N]:` definition inside the notes section. When the section exists, append at
@@ -2929,6 +3027,7 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     }
     let mut out = lines.join("\n");
     out.push('\n');
+    let out = bump_page_lmd(&out, &today);
 
     atomic_write_page(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
@@ -3416,9 +3515,15 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
 
     let r = migrate_compute(&from_text, &to_text, &a.atom)?;
 
+    // BOTH pages bump: a migration is a CONTENT change on each side — one page loses an atom and
+    // its lessons, the other gains them. This is not the mechanical class `bump_page_lmd` excludes.
+    let today = today_date();
+    let dest_text = bump_page_lmd(&r.dest_text, &today);
+    let source_text = bump_page_lmd(&r.source_text, &today);
+
     // Write B FIRST, then A (contract 5): a crash between leaves a recoverable duplicate, never a loss.
-    atomic_write_page(&a.to, &r.dest_text)?;
-    atomic_write_page(&a.from, &r.source_text)?;
+    atomic_write_page(&a.to, &dest_text)?;
+    atomic_write_page(&a.from, &source_text)?;
     reindex_owning_scope(&a.to, a.hidden)?;
     reindex_owning_scope(&a.from, a.hidden)?;
     println!(
@@ -3541,6 +3646,7 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
     } else {
         text.replacen(old.as_str(), new.as_str(), 1)
     };
+    let out = bump_page_lmd(&out, &today_date());
     atomic_write_page(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tedited ({count} replacement(s))", rel(&a.page));
@@ -8465,7 +8571,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let full = build_atom_marker("ATOM-AAAA-BBBB", &kw, Some("a summary"), Some("reference"), "2026-07-21");
         assert_eq!(
             full,
-            "^ATOM-AAAA-BBBB [desc:\"a summary\", keywords: alpha beta, type: reference, ocd: 2026-07-21, lmd: 2026-07-21]"
+            "^ATOM-AAAA-BBBB [desc: \"a summary\", keywords: alpha beta, type: reference, ocd: 2026-07-21, lmd: 2026-07-21]"
         );
         // Minimal form: no desc, no type — still parseable, keywords + dates only.
         let min = build_atom_marker("ATOM-CCCC-DDDD", &kw, None, None, "2026-07-21");
@@ -8475,7 +8581,97 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         );
         // A `"` inside desc would break quote-tracking — it is replaced with `'`.
         let q = build_atom_marker("ATOM-EEEE-FFFF", &kw, Some("say \"hi\" now"), None, "2026-07-21");
-        assert!(q.contains("desc:\"say 'hi' now\""), "embedded quotes sanitised: {q}");
+        assert!(q.contains("desc: \"say 'hi' now\""), "embedded quotes sanitised: {q}");
+        // The opening `[` must ABUT the first key. `memory_edit_verify.py`'s lesson-address
+        // stripper anchors on `\[(?:id|status|…):`, so a space after the bracket would make it
+        // stop recognising the block and fold a lesson's ADDRESS into its BODY.
+        assert!(min.contains("[keywords:"), "no space after the opening bracket: {min}");
+    }
+
+    /// janitor#266: one grammar, three writers. This asserts the SPELLING is uniform and that the
+    /// spelling ROUND-TRIPS — the atom form was already spaced, but the lesson bracket had never
+    /// carried a space after a colon before this change, so its parseability was asserted, not
+    /// proven, until this test ran.
+    #[test]
+    fn block_props_spelling_is_uniform_and_round_trips_through_the_lesson_parser() {
+        // The renderer itself: `key: value`, joined by `, `, values passed through verbatim.
+        assert_eq!(
+            render_block_props(&[
+                ("id", "ATOM-AAAA-BBBB".to_string()),
+                ("status", "valid".to_string()),
+                ("keywords", "\"alpha beta\"".to_string()),
+                ("ocd", "2026-07-21".to_string()),
+            ]),
+            "id: ATOM-AAAA-BBBB, status: valid, keywords: \"alpha beta\", ocd: 2026-07-21"
+        );
+
+        // ONE `lmd: <date>` grep must now be correct for the atom marker AND the lesson address —
+        // that equality is the whole defect (`grep -c "lmd: $today"` measured 0 on pages whose
+        // lessons all carried today).
+        let kw = vec!["alpha".to_string(), "beta".to_string()];
+        let atom = build_atom_marker("ATOM-AAAA-BBBB", &kw, None, None, "2026-07-21");
+        let lesson_meta = render_block_props(&[
+            ("id", "ATOM-CCCC-DDDD".to_string()),
+            ("status", "valid".to_string()),
+            ("keywords", format!("\"{}\"", kw.join(" "))),
+            ("ocd", "2026-07-21".to_string()),
+            ("lmd", "2026-07-21".to_string()),
+        ]);
+        assert!(atom.contains("lmd: 2026-07-21"), "atom: {atom}");
+        assert!(lesson_meta.contains("lmd: 2026-07-21"), "lesson: {lesson_meta}");
+        // …and a `keywords: ` grep matches both, even though the lesson quotes its list and the
+        // atom does not (quoting is deliberately NOT unified — see `render_block_props`).
+        assert!(atom.contains("keywords: ") && lesson_meta.contains("keywords: "));
+
+        // ROUND TRIP: the spaced lesson address must parse back to the same values.
+        let props = parse_note_props(&lesson_meta);
+        assert_eq!(props.get("id").map(Vec::as_slice), Some(&["ATOM-CCCC-DDDD".to_string()][..]));
+        assert_eq!(props.get("status").map(Vec::as_slice), Some(&["valid".to_string()][..]));
+        assert_eq!(props.get("lmd").map(Vec::as_slice), Some(&["2026-07-21".to_string()][..]));
+        // The quoted multi-word list survives as an ARRAY with the delimiting quotes stripped —
+        // the property that makes a lesson findable by keyword at all.
+        assert_eq!(props.get("keywords").map(Vec::as_slice), Some(&kw[..]));
+    }
+
+    /// janitor#265: `lmd` is the corpus's only content-recency signal, and nothing maintained it.
+    #[test]
+    fn bump_page_lmd_maintains_the_field_without_repairing_the_page() {
+        // The ordinary case: the stale date is replaced, `ocd` (creation) is NOT.
+        let page = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-08-02\n---\nbody\n";
+        let out = bump_page_lmd(page, "2026-08-14");
+        assert!(out.contains("lmd: 2026-08-14"), "{out}");
+        assert!(out.contains("ocd: 2026-01-01"), "ocd is creation, never bumped: {out}");
+        assert_eq!(out.matches("lmd:").count(), 1, "no second date field: {out}");
+        assert!(out.ends_with("body\n"), "trailing newline preserved: {out:?}");
+
+        // The documented ALIAS is maintained IN PLACE. Adding an `lmd:` beside an existing
+        // `updated:` would leave the page with two competing dates and no rule for which wins.
+        let aliased = bump_page_lmd("---\nname: p\nupdated: 2026-01-01\n---\nbody\n", "2026-08-14");
+        assert!(aliased.contains("updated: 2026-08-14"), "{aliased}");
+        assert!(!aliased.contains("lmd:"), "no competing second field: {aliased}");
+
+        // MAINTAIN, never REPAIR: a page with neither key is left byte-identical. `page-no-lmd`
+        // has exactly one owner (the linter), and an `edit` must not silently rewrite frontmatter
+        // the caller did not ask about.
+        let bare = "---\nname: p\n---\nbody\n";
+        assert_eq!(bump_page_lmd(bare, "2026-08-14"), bare);
+        let no_fm = "# just a heading\nlmd: 2026-01-01\n";
+        assert_eq!(bump_page_lmd(no_fm, "2026-08-14"), no_fm, "a body line is not frontmatter");
+        let unterminated = "---\nname: p\nlmd: 2026-01-01\n";
+        assert_eq!(bump_page_lmd(unterminated, "2026-08-14"), unterminated);
+
+        // Column 0 only — a NESTED key that happens to be spelled `lmd` belongs to `metadata`,
+        // not to the page, and stamping it would corrupt a value this function has no claim on.
+        let nested = "---\nname: p\nlmd: 2026-01-01\nmetadata:\n  lmd: keep-me\n---\nbody\n";
+        let out = bump_page_lmd(nested, "2026-08-14");
+        assert!(out.contains("  lmd: keep-me"), "nested key untouched: {out}");
+        assert!(out.contains("\nlmd: 2026-08-14\n"), "page key bumped: {out}");
+
+        // A `---` INSIDE the body is not the frontmatter terminator for the purposes of the scan:
+        // the first one after line 0 closes it, so a later horizontal rule cannot widen the window.
+        let hr = "---\nname: p\nlmd: 2026-01-01\n---\nbody\n---\nlmd: 2026-02-02\n";
+        let out = bump_page_lmd(hr, "2026-08-14");
+        assert!(out.contains("lmd: 2026-02-02"), "body line untouched: {out}");
     }
 
     #[test]
@@ -9734,8 +9930,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
 
         assert!(res.is_ok(), "edit must succeed: {res:?}");
-        let expected = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\npublish-globally: false\n---\ngoodbye world\n\n## Notes and lessons learned\n";
-        assert_eq!(content, expected, "the edit AND the normalization must both land, nothing else changed");
+        // `lmd` is now TODAY, not the page's stale `2026-01-02` (janitor#265). This assertion used
+        // to pin the stale value, i.e. the test encoded the defect: an edit that rewrote the body
+        // while leaving the page asserting a date from months earlier. `ocd` stays 2026-01-01 —
+        // creation is the one date in this corpus that still means what it says.
+        let today = today_date();
+        let expected = format!(
+            "---\nname: p\nocd: 2026-01-01\nlmd: {today}\ndescription: \"d\"\npublish-globally: false\n---\ngoodbye world\n\n## Notes and lessons learned\n"
+        );
+        assert_eq!(content, expected, "the edit, the bump AND the normalization must all land, nothing else changed");
     }
 
     // ── the owner's exact contract: N changes run N+1 convergence phases, never a batched pair ──
