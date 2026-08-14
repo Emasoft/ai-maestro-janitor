@@ -17,8 +17,12 @@ How it works:
     never raises). Re-checked each heartbeat until EVERY run for that SHA is terminal.
   * Notify — if any run's conclusion is a failure, print ONE drift line per failed run
     (deduped by run id). A printed drift line IS the notification the main Claude sees on
-    the heartbeat. Then stamp the SHA as checked (one notification per push). All-green,
-    or no run within the grace window, → silent + stamp.
+    the heartbeat. Then stamp the SHA as checked (one notification per push). If instead
+    every run settled clean (at least one actual `success`, none failed), print ONE success
+    line naming the `claude plugin update <plugin>@<marketplace> --scope user` upgrade
+    command (USER ask, CLAUDE.md "Working rules") — also stamped, so it fires once per push.
+    No run at all (nothing to report success OR failure about) within the grace window →
+    silent + stamp.
 
 Fail-open everywhere: not a git repo / no GitHub origin / no `gh` / not authed / network
 error → silent no-op (log only), retried on the next heartbeat. Runs in FULL mode only
@@ -71,9 +75,14 @@ def classify_ci_runs(
       * "wait"     — not resolvable yet (no runs but still within the grace window, OR a run
                      is still queued/in_progress/blocked and the max-wait window has not
                      elapsed) → re-check next heartbeat; do NOT stamp the SHA.
-      * "resolved" — every run is terminal and NONE failed, OR no run ever appeared and the
-                     grace window elapsed, OR the max-wait window elapsed with nothing failed
-                     → stamp the SHA, emit nothing.
+      * "resolved" — no run ever appeared and the grace window elapsed, OR the run set
+                     settled (or the max-wait window elapsed) with nothing failed AND no run
+                     actually concluded `success` (e.g. everything `skipped`/`neutral`, or a
+                     run stuck `queued` past max-wait) → stamp the SHA, emit nothing: there is
+                     no real CI outcome to report either way.
+      * "success"  — the run set settled (or the max-wait window elapsed) with nothing failed
+                     AND at least one run concluded `success` → stamp + emit ONE success line
+                     naming the upgrade command.
       * "failed"   — at least one run FAILED (and either the whole set settled, or the
                      max-wait window elapsed) → stamp + emit one drift line per failed run.
     """
@@ -98,6 +107,8 @@ def classify_ci_runs(
     failed = [r for r in runs if (r.get("conclusion") or "") in TERMINAL_FAIL]
     if failed:
         return ("failed", failed)
+    if any((r.get("conclusion") or "") == "success" for r in runs):
+        return ("success", [])
     return ("resolved", [])
 
 
@@ -129,6 +140,51 @@ def build_ci_failure_line(pushed_sha: str, branch: str, failed_runs: list[dict[s
     detail = ", ".join(parts)
     tail = f" — {url}" if url else ""
     return f"[ci-status] CI FAILED for {short} ({br}): {detail}{tail}"
+
+
+def build_ci_success_line(pushed_sha: str, branch: str, plugin_name: str, marketplace_name: str) -> str:
+    """Build the one-line success notification: names the upgrade command the USER asked for
+    (CLAUDE.md "Working rules" — "the moment the janitor reports the published plugin passed
+    CI, upgrade it locally"). `branch`/`plugin_name`/`marketplace_name` may come from
+    gh-derived or repo-file data, so each is sanitized like the failure line."""
+    short = pushed_sha[:9]
+    br = _clean(branch or "?")
+    plugin = _clean(plugin_name or "<plugin>")
+    market = _clean(marketplace_name or "<marketplace>")
+    cmd = f"claude plugin update {plugin}@{market} --scope user"
+    return f"[ci-status] CI PASSED for {short} ({br}) — upgrade now: {cmd}"
+
+
+def _resolve_plugin_identity(cwd: str) -> tuple[Optional[str], Optional[str]]:
+    """Best-effort, cheap (file-read only, no network) resolution of (plugin_name,
+    marketplace_name) from files already in the repo. Fail-open per field: a missing/
+    unparsable source yields None for that field rather than raising (this runs in the
+    heartbeat — never let a malformed local file break CI-success reporting)."""
+    plugin_name: Optional[str] = None
+    marketplace_name: Optional[str] = None
+    try:
+        raw = (Path(cwd) / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        data = json.loads(raw)
+        name = data.get("name") if isinstance(data, dict) else None
+        if isinstance(name, str) and name.strip():
+            plugin_name = name.strip()
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    try:
+        claude_md = (Path(cwd) / "CLAUDE.md").read_text(encoding="utf-8")
+        for line in claude_md.splitlines():
+            marker = "Marketplace (`"
+            idx = line.find(marker)
+            if idx == -1:
+                continue
+            rest = line[idx + len(marker) :]
+            end = rest.find("`")
+            if end > 0:
+                marketplace_name = rest[:end].strip()
+                break
+    except OSError:
+        pass
+    return plugin_name, marketplace_name
 
 
 def _git(args: list[str], cwd: str) -> Optional[str]:
@@ -259,8 +315,35 @@ def main() -> int:
             except Exception:  # noqa: BLE001 -- the mailbox must never break the alarm
                 pass
 
-    # "resolved" or a delivered failure → stamp so a future fire treats this SHA as done (one
-    # notification per push; a CI re-run on the SAME SHA is the user's own action).
+    if action == "success":
+        # Mirror the failed branch: print IS the delivery, ledger record is a durable
+        # side-effect. Branch comes from whichever run actually reports one (gh-derived,
+        # so it is sanitized inside build_ci_success_line like every other untrusted field).
+        branch = ""
+        for r in runs:
+            hb = str(r.get("headBranch") or "")
+            if hb:
+                branch = hb
+                break
+        plugin_name, marketplace_name = _resolve_plugin_identity(cwd)
+        line = build_ci_success_line(
+            pushed_sha, branch, plugin_name or "<plugin>", marketplace_name or "<marketplace>"
+        )
+        print(line)
+        try:
+            findings_ledger.record(
+                sev="LOW",
+                code="CI-PASSED",
+                src="ci-status",
+                msg=line,
+                ref=pushed_sha[:9],
+                now=now,
+            )
+        except Exception:  # noqa: BLE001 -- the mailbox must never break the notification
+            pass
+
+    # "resolved", "success", or a delivered failure → stamp so a future fire treats this SHA
+    # as done (one notification per push; a CI re-run on the SAME SHA is the user's own action).
     state.atomic_write(checked_file, pushed_sha)
     return 0
 
