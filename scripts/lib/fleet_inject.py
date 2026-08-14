@@ -428,6 +428,82 @@ def command_plan_field_busy(terminal: dict, plan: dict) -> bool:
     return not terminal_trigger.prompt_field_is_empty(text)
 
 
+# Every slash-command the janitor itself ever TYPES into a pane. A field showing exactly one of
+# these is our own unsubmitted send, not a foreign dialog — see `field_holds_our_command`.
+# Sourced from `_ACTION_COMMAND` (the recovery vocabulary) plus the fleet-stop and
+# model-fallback commands, so adding a recovery action cannot silently fall out of the set.
+def _our_command_vocabulary() -> frozenset[str]:
+    extra = {"/janitor-disarm", "/janitor-pause", "/clear", "/compact", "/reload-skills"}
+    return frozenset(v for v in _ACTION_COMMAND.values() if v) | extra
+
+
+def field_holds_our_command(pane_text: str | None) -> str:
+    """The janitor command a pane's input field is holding UNSUBMITTED, or "" if none.
+
+    THE THIRD CAUSE (janitor#261). `command_plan_field_busy` above asks one question — is the
+    field non-empty — and the daemon logs the answer as "a permission prompt or other text may
+    be showing". That enumeration names two causes and omits the one the janitor CREATES: a
+    command it typed itself, SOFT (no ESC, deliberately, so no in-flight turn is cut short),
+    that has not run yet.
+
+    It is self-perpetuating, which is what makes it compounding rather than transient: the field
+    is non-empty BECAUSE we typed into it, so the guardian declines, so nothing drains it, so it
+    stays non-empty — and the session that most needs rescuing is the one least able to receive
+    it. The blast radius grew on 2026-08-13, when janitor#257 moved the last four self-triggers
+    off the `USER_PRESENT` cancel: a pane that previously got nothing typed into it now gets the
+    command.
+
+    Matching against a CLOSED VOCABULARY rather than a sender-recorded ledger is deliberate
+    (advisor, 2026-08-14). A "what we last typed here" record would have to be written by every
+    typing path — `fleet_inject.fire`, both `terminal_trigger` send paths, `fleet_restart` — and
+    ONE missed writer silently reintroduces the exact bug, on top of staleness and pane-reuse
+    questions. The field content is already the record; it needs no second source of truth.
+
+    EXACT match only, after strip. A field holding our command plus anything else is a human
+    editing it, and must keep counting as busy.
+    """
+    text = (pane_text or "").strip()
+    if not text:
+        return ""
+    field = terminal_trigger.extract_prompt_field(pane_text or "")
+    candidate = (field or text).strip()
+    return candidate if candidate in _our_command_vocabulary() else ""
+
+
+def field_holds_our_queued_command(terminal: dict, plan: dict) -> str:
+    """The janitor command sitting UNSUBMITTED in this pane's field, or "" — the I/O wrapper
+    over `field_holds_our_command`.
+
+    Kept here rather than at the daemon call site so the pane READ and the vocabulary MATCH stay
+    on the same side of the module boundary: `daemon.py` does not import `terminal_trigger` at
+    all, and reaching for it there would add a dependency purely to re-implement this.
+    """
+    rt = _readback_identity(terminal, plan)
+    if rt is None or not terminal_trigger.channel_is_readable(rt):
+        return ""
+    return field_holds_our_command(terminal_trigger.read_pane_text(rt))
+
+
+def build_submit_plan(terminal: dict, plan: dict) -> dict | None:
+    """A plan that presses Enter ALONE into `terminal` — used to FINISH a send of ours that is
+    sitting unsubmitted, instead of declining forever because it is sitting there.
+
+    Enter is the minimal correct actuation here: the command is already in the field and is
+    already ours, so submitting types no new text and cannot concatenate onto a half-typed
+    line. Re-typing the command would risk exactly that.
+
+    `plan` is the injection we were ABOUT to fire; it is used only to resolve the same channel
+    the read-back used, so the Enter lands in the pane we actually read.
+    """
+    rt = _readback_identity(terminal, plan)
+    if rt is None:
+        return None
+    steps = terminal_trigger.build_submit_steps(rt)
+    if not steps:
+        return None
+    return {"channel": rt.get("kind", ""), "steps": steps, "delay_s": 0.0, "command": ""}
+
+
 def fire(plan: dict | None) -> bool:
     """Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
     False otherwise. Safe to call with None (a declined plan) → False.

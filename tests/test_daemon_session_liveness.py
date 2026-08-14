@@ -176,6 +176,64 @@ def test_field_busy_guard_gates_command_typing_never_esc(tmp_path, monkeypatch) 
     assert any(p["command"] == "/janitor-arm" and p["channel"] == "aimaestro" for p in fired)
 
 
+def test_field_busy_with_our_own_queued_command_submits_it(tmp_path, monkeypatch) -> None:
+    """janitor#261: the field is non-empty because WE typed into it, SOFT, and the command
+    never ran. Declining there is self-perpetuating — nothing else drains the field, so the
+    session that most needs rescuing becomes the one that can never receive it. The daemon
+    must instead recognise its OWN command and finish the send with Enter alone.
+
+    No cooldown is stamped on success: the field is now empty, so the next beat should be
+    free to run the real recovery rather than wait out a cooldown it did not need to spend.
+    """
+    import fleet_inject
+
+    fleet = [_inst("cron_dead", "/p/proj-b", {"tmux_pane": "%6"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    # The pane shows EXACTLY the command this plan was about to type — ours, unsubmitted.
+    monkeypatch.setattr(
+        fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("/janitor-arm")
+    )
+    daemon.task_session_liveness()
+
+    # Enter ALONE: a plan on the same channel that types no new text.
+    assert [p["channel"] for p in fired] == ["tmux"]
+    assert fired[0]["command"] == ""
+    assert "holds OUR unsubmitted '/janitor-arm'" in _log(tmp_path)
+    assert "INPUT FIELD BUSY" not in _log(tmp_path)
+
+    import recovery_audit as ra
+    assert "submitted_own_queued_command" in [r["outcome"] for r in ra.load_records()]
+    # NO per-instance state file at all ⇒ no cooldown was spent, so the very next beat is
+    # free to run the real recovery now that the field has been drained.
+    assert not daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-b").exists()
+
+
+def test_field_busy_with_our_command_that_cannot_be_submitted_declines(
+    tmp_path, monkeypatch
+) -> None:
+    """Same shape, but the Enter cannot be delivered. This beat TRIED and achieved nothing,
+    so it must stamp the cooldown like any other no-op decision — auditing without stamping
+    would re-decide and re-audit every 120 s forever (the unbounded-audit failure `_decline`
+    exists to prevent), and an unsubmittable field persists across beats by definition."""
+    import fleet_inject
+
+    fleet = [_inst("cron_dead", "/p/proj-b", {"tmux_pane": "%6"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: False)
+    monkeypatch.setattr(
+        fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("/janitor-arm")
+    )
+    daemon.task_session_liveness()
+
+    assert "could not submit" in _log(tmp_path)
+    st = json.loads(
+        daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-b").read_text()
+    )
+    assert st["last_audit"] == "own_queued_command_unsubmittable:rearm"
+    assert st["last_ts"]                # cooldown STAMPED — this beat is not repeated at 120 s
+    assert "attempts" not in st         # but no recovery attempt was consumed
+
+
 def test_crash_loop_alerts_once_then_stays_silent(tmp_path, monkeypatch) -> None:
     """A spent attempt budget (with an elapsed cooldown) trips the crash-loop guard:
     it never fires, alerts a human exactly ONCE, and stays silent thereafter."""

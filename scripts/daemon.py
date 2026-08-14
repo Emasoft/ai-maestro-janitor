@@ -1536,10 +1536,44 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # first; refuse ONLY when it is confirmed non-empty on a readable channel — see
         # `command_plan_field_busy` for why an unreadable channel stays permissive.
         if fleet_inject.command_plan_field_busy(inst.terminal, plan):
+            # janitor#261: BEFORE declining, ask WHOSE text is in the field. The busy check
+            # answers only "non-empty", and this log used to assert a cause it never tested —
+            # "a permission prompt or other text may be showing" — an enumeration that omits
+            # the one cause the janitor itself creates: a command WE typed, SOFT, that has not
+            # run. That omission is self-perpetuating: the field is non-empty because we typed
+            # into it, so we decline, so nothing drains it, so the session that most needs
+            # rescuing is the one least able to receive it.
+            ours = fleet_inject.field_holds_our_queued_command(inst.terminal, plan)
+            if ours:
+                # Finish our own send instead of blocking on it. Enter ALONE — the command is
+                # already in the field and is already ours, so this types no new text and
+                # cannot concatenate onto a line someone is editing.
+                submit = fleet_inject.build_submit_plan(inst.terminal, plan)
+                sent = fleet_inject.fire(submit) if submit else False
+                state.log_line(
+                    "daemon",
+                    f"session-liveness: {tag} field holds OUR unsubmitted {ours!r} on "
+                    f"{plan['channel']} — {'submitted it' if sent else 'could not submit'}; "
+                    f"not declining {action}",
+                )
+                if sent:
+                    # Audit only — deliberately NO cooldown stamp. The field should now be
+                    # empty, so the very next beat can run the real recovery instead of
+                    # waiting out a cooldown this beat did not need to spend.
+                    _audit(inst, "submitted_own_queued_command", action,
+                           str(plan["channel"]))
+                    continue
+                # Could NOT submit: this beat TRIED and achieved nothing, so it must stamp
+                # the cooldown like any other no-op decision. Auditing without stamping
+                # would re-decide and re-audit every 120 s forever — the unbounded-audit
+                # failure `_decline` exists to prevent (F9), and an unsubmittable field is
+                # by definition a condition that persists across beats.
+                _decline("own_queued_command_unsubmittable", action, str(plan["channel"]))
+                continue
             state.log_line(
                 "daemon",
                 f"session-liveness: {tag} INPUT FIELD BUSY on {plan['channel']} — would "
-                f"{action}; skipped (a permission prompt or other text may be showing)",
+                f"{action}; skipped (text is present that the janitor did not type)",
             )
             _decline("declined_field_busy", action, str(plan["channel"]))
             continue

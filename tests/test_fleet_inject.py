@@ -504,3 +504,66 @@ def test_command_plan_field_busy_permissive_when_read_fails(monkeypatch) -> None
     plan = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm")
     assert plan is not None
     assert fi.command_plan_field_busy({"tmux_pane": "%5"}, plan) is False
+
+
+# --- whose text is in the field? (janitor#261) -------------------------------------------
+
+
+def test_a_field_holding_exactly_our_command_is_recognised_as_ours() -> None:
+    """THE third cause. `command_plan_field_busy` answers only "non-empty", and the daemon
+    logged that as "a permission prompt or other text may be showing" — an enumeration naming
+    two causes and omitting the one the janitor CREATES: a command it typed itself, SOFT, that
+    has not run yet.
+
+    Self-perpetuating, which is what makes it compound: the field is non-empty BECAUSE we typed
+    into it, so the guardian declines, so nothing drains it, so the session that most needs
+    rescuing is the one least able to receive it. janitor#257 (2026-08-13) enlarged the
+    population by moving four self-triggers off the USER_PRESENT cancel — panes that previously
+    got nothing typed into them now get the command.
+    """
+    for cmd in ("/janitor-arm", "/reload-plugins --force", "/janitor-resume"):
+        assert fi.field_holds_our_command(_pane(cmd)) == cmd, cmd
+
+
+def test_a_field_holding_our_command_PLUS_anything_else_is_not_ours() -> None:
+    """EXACT match only. A field showing our command with extra text is a human editing it, and
+    must keep counting as busy — submitting there would run a line they were still writing."""
+    assert fi.field_holds_our_command(_pane("/janitor-arm and my half-typed thought")) == ""
+    assert fi.field_holds_our_command(_pane("why did /janitor-arm not run?")) == ""
+
+
+def test_a_foreign_dialog_is_never_mistaken_for_ours() -> None:
+    """The 2026-07-17 incident this whole guard exists for — the guardian typed /janitor-arm
+    into an open approval dialog. That must remain a decline."""
+    assert fi.field_holds_our_command(_pane("Do you want to proceed? (y/n)")) == ""
+    assert fi.field_holds_our_command(_pane("Allow this action?")) == ""
+
+
+def test_an_empty_or_unreadable_field_is_not_ours() -> None:
+    """Nothing to finish, and an unreadable channel must never be guessed at."""
+    assert fi.field_holds_our_command(_pane("")) == ""
+    assert fi.field_holds_our_command(None) == ""
+
+
+def test_the_vocabulary_is_derived_from_the_recovery_actions_not_hand_listed() -> None:
+    """Every command `action_to_command` can return must be in the set, so adding a recovery
+    action cannot silently fall out of it and resurrect the bug for that action alone."""
+    vocab = fi._our_command_vocabulary()
+    for action in fi._ACTION_COMMAND:
+        cmd = fi.action_to_command(action)
+        if cmd:
+            assert cmd in vocab, f"{action!r} -> {cmd!r} missing from the vocabulary"
+
+
+def test_submitting_our_own_command_types_no_new_text(monkeypatch) -> None:
+    """Enter ALONE is the minimal correct actuation: the command is already in the field and is
+    already ours, so finishing it cannot concatenate onto anything. Re-typing the command
+    could."""
+    plan = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm")
+    assert plan is not None
+    submit = fi.build_submit_plan({"tmux_pane": "%5"}, plan)
+    assert submit is not None
+    assert submit["command"] == "", "a submit plan must carry no command to type"
+    flat = " ".join(" ".join(s) for s in submit["steps"])
+    assert "/janitor-arm" not in flat, f"the submit plan must not re-type the command: {flat!r}"
+    assert "Enter" in flat or "write text" in flat
