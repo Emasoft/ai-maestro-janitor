@@ -945,11 +945,23 @@ def run_chained_inject(
     gate_baseline: int,
     pre_submit_first=None,
     gate_timeout_s: float = 180.0,
+    settle_between_s: float = 0.0,
     giveup_s: float | None = None,
     sleeper=time.sleep,
 ) -> tuple[bool, str]:
     """Type `first`, wait for the session it creates to actually EXIST, then type each of
     `then`. Every command is read back and verified before its Enter. Returns (ok, why).
+
+    `settle_between_s` pauses between consecutive `then` commands (default 0.0 — the
+    historical back-to-back behaviour). It exists for ONE reason, and it is a mitigation
+    rather than a gate: `inject_until_sent` verifies that a command was TYPED and
+    SUBMITTED, never that it FINISHED. Most built-ins are instant, but `/reload-plugins`
+    swaps the whole plugin registry and — measured, see `token_meter.py` and the
+    `claude-code-hook-types` memory — fires NO hook of any kind, so there is nothing
+    observable to gate on. Typing the next command into a mid-swap registry can have it
+    rejected as an unknown command while this chain still reports OK. A settle shrinks
+    that window; it cannot close it, which is why the reload chain ALSO re-checks the
+    arm state afterwards instead of trusting this pause.
 
     THIS IS THE WHOLE POINT OF THE REDESIGN. `clear_trigger` used to fire two INDEPENDENT
     delayed children — `/clear` at t=2s, the bootstrap at t=10s — each typing blind. Applying
@@ -986,7 +998,12 @@ def run_chained_inject(
         # session that needs a manual `/janitor-arm` beats silently arming the wrong one.
         return False, f"{first} submitted but no fresh session within {gate_timeout_s:.0f}s"
 
-    for cmd in then:
+    for i, cmd in enumerate(then):
+        # Settle AFTER the previous command's verified submit, before typing this one —
+        # see `settle_between_s` in the docstring. Skipped before the first item: the
+        # `_await_fresh_session` gate above is a real signal and needs no padding.
+        if i and settle_between_s > 0:
+            sleeper(settle_between_s)
         ok, why = inject_until_sent(
             terminal, cmd,
             type_fn=_runner(cmd), submit_fn=_submit, clear_fn=_clear,

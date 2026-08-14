@@ -38,9 +38,83 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+_SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPTS / "lib"))
+sys.path.insert(0, str(_SCRIPTS))  # sibling triggers (clear_trigger) live here, not in lib/
+import clear_trigger  # noqa: E402  -- the verified /clear chain we reuse for --shrink
 import state  # noqa: E402  -- the reload-ack rollback (janitor#257)
 import terminal_trigger  # noqa: E402
+import token_meter as tm  # noqa: E402  -- RELOAD_GUARD_DEFAULT_THRESHOLD, shared with dispatch
+
+RELOAD_CMD = "/reload-plugins --force"
+
+# Seconds between the post-clear `/reload-plugins` and the `/janitor-arm` that follows it.
+# `/reload-plugins` fires NO hook (measured — token_meter.py, `claude-code-hook-types`
+# memory), so its completion is UNOBSERVABLE and nothing can gate on it. If `/janitor-arm`
+# is dispatched into a mid-swap plugin registry it can be rejected as an unknown command
+# while the chain still reports OK — and since `/clear` destroyed the session-scoped cron,
+# that leaves a session both cleared AND unwakeable. This pause shrinks the window; it does
+# not close it, which is why the arm state is re-checked afterwards rather than assumed.
+RELOAD_SETTLE_S = 4.0
+
+# `auto` is the default: shrink ONLY above the same context threshold at which dispatch
+# already refuses to emit `[janitor-reload]`. Below it a reload is cheap and a `/clear`
+# would destroy the conversation to save nothing — at 320k, clearing to reach the ~305k
+# floor is negative value on the owner's own metric.
+SHRINK_MODES = ("auto", "never", "force")
+
+
+def shrink_threshold(env: dict[str, str] | None = None) -> int:
+    """The context-token threshold above which a reload shrinks first.
+
+    Reads the SAME env var and default as dispatch's reload guard, deliberately: the guard
+    and this decision must agree, or dispatch defers a reload that this script would have
+    handled cheaply (or vice versa) and the two disagree silently.
+    """
+    src = os.environ if env is None else env
+    return state.coerce_int(
+        src.get("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD"),
+        tm.RELOAD_GUARD_DEFAULT_THRESHOLD,
+        detector_name="reload-trigger",
+        var_name="CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD",
+    )
+
+
+def should_shrink(mode: str, *, context_tokens: int | None, threshold: int, hard: bool) -> bool:
+    """PURE. True iff this reload should `/clear` first. Tested without a terminal.
+
+    Three refusals, each deliberate and each failing toward the RECOVERABLE outcome — a
+    reload that costs tokens is recoverable, a `/clear` that destroys an un-handed-off
+    conversation is not:
+      - `--hard` NEVER shrinks. Hard means urgent (a security fix, a marker whose new code
+        must land now); a shrink adds a clear + re-arm + resume before the reload happens.
+      - an UNREADABLE context (`None`) never shrinks in `auto`. We refuse to clear on a
+        guess; the cost of being wrong is one expensive turn, versus a destroyed session.
+      - below the threshold never shrinks: the reload is already cheap there.
+    `force` overrides the threshold (but still not `--hard`) so the path stays testable and
+    a human can demand it.
+    """
+    if hard or mode == "never":
+        return False
+    if mode == "force":
+        return True
+    return context_tokens is not None and context_tokens >= threshold
+
+
+def _context_tokens() -> int | None:
+    """Live context size, or None when it cannot be read (never raises).
+
+    None is a REFUSAL to shrink in `auto` mode, not a zero — see `should_shrink`.
+    """
+    try:
+        import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
+
+        return cold_cache_compact.context_tokens_for(
+            cold_cache_compact.newest_transcript(state.project_root())
+        )
+    except Exception as exc:  # noqa: BLE001 -- an unreadable context must never break the reload
+        state.log_line("reload-trigger", f"context read failed, not shrinking: {exc}")
+        return None
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
 # `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
@@ -144,6 +218,20 @@ def main() -> int:
         "a reload is rarely that urgent, so this is opt-in",
     )
     ap.add_argument(
+        "--shrink",
+        choices=SHRINK_MODES,
+        default="auto",
+        help="shrink context (/clear + bootstrap) BEFORE reloading, so the cache-prefix "
+        "break lands on a near-floor context instead of a 500k one. auto (default) = only "
+        "above the reload-guard threshold; force = always; never = never. --hard implies never.",
+    )
+    ap.add_argument(
+        "--directive",
+        default="",
+        help="one-line resume pointer recorded for the post-clear auto-resume (shrink path "
+        "only; defaults to a pointer at the link-only agent-handoff.md)",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="print the plan, but do NOT fire osascript (for tests)",
@@ -153,6 +241,49 @@ def main() -> int:
     # command ENQUEUES and runs at the turn boundary — no in-flight work is lost.
     # A reload never justifies killing the caller's own turn; --hard restores ESC.
     esc_first = args.hard
+
+    # SHRINK-THEN-RELOAD (owner directive 2026-08-14). `/reload-plugins` breaks the
+    # prompt-cache prefix, so the next turn re-caches the WHOLE conversation at ~1.25x
+    # instead of reading it at ~0.1x — measured, and already documented at
+    # token_meter.RELOAD_GUARD_DEFAULT_THRESHOLD. Clearing FIRST makes that break land on a
+    # near-floor context. The reload is the FIRST bootstrap step, ahead of /janitor-arm,
+    # because between `/clear` and the first API turn there is no cache written yet: the
+    # reload there is not merely cheaper, it is FREE. Running it after arm would re-bill the
+    # freshly-written base at 1.25x on the very next turn.
+    #
+    # This also terminates a real deadlock. dispatch's reload guard defers `[janitor-reload]`
+    # above the same threshold on the assumption that "the context shrinks on its own" — which
+    # is false for an unattended session, so the reload deferred FOREVER and the session ran
+    # stale plugin code silently. Shrinking is what makes that deferral end.
+    ctx = _context_tokens() if args.shrink == "auto" else None
+    threshold = shrink_threshold()
+    if should_shrink(args.shrink, context_tokens=ctx, threshold=threshold, hard=args.hard):
+        then = [RELOAD_CMD, *clear_trigger.BOOTSTRAP_CMDS]
+        if args.dry_run:
+            print(f"DRY_RUN would chain /clear then {' -> '.join(then)} (context={ctx})")
+            return 0
+        directive = args.directive.strip() or (
+            "read .janitor/state/agent-handoff.md FIRST (link-only handoff — follow its "
+            "wikimem/TRDD links via memgrep recall on demand), then resume your prior "
+            "in-flight task. Plugins were reloaded during this clear."
+        )
+        spawned, why = clear_trigger.spawn_shrink_chain(
+            then=then,
+            directive=directive,
+            delay=args.delay,
+            settle_between_s=RELOAD_SETTLE_S,
+        )
+        if spawned:
+            state.log_line(
+                "reload-trigger",
+                f"shrink-then-reload chain spawned (context={ctx}, threshold={threshold})",
+            )
+            print("RELOAD_SHRINK_CHAIN_SPAWNED")
+            return 0
+        # The pane cannot be read back, so the chain cannot verify its own `/clear`. Fall
+        # through to a DIRECT reload rather than clearing blind: an expensive reload is
+        # recoverable, an unverifiable `/clear` is not.
+        state.log_line("reload-trigger", f"shrink unavailable ({why}) — reloading directly")
 
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH

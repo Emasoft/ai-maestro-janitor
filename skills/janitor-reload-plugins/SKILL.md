@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-plugins
-description: Run /reload-plugins --force for this Claude Code session so freshly auto-updated plugin hooks/skills take effect, without the human typing it. Invoke on a [janitor-reload] heartbeat marker, or when plugin code changed on disk and the session must pick it up. SOFT by default (enqueues after the turn); --hard interrupts now. ⚠ Do NOT reload at ≥350k context used — it breaks the prompt cache and re-bills the whole window next turn; shrink first via /janitor-handoff-and-clear, then reload. Trigger with /janitor-reload-plugins [--hard].
+description: Run /reload-plugins --force for this Claude Code session so freshly auto-updated plugin hooks/skills take effect, without the human typing it. Invoke on a [janitor-reload] heartbeat marker, or when plugin code changed on disk and the session must pick it up. SOFT by default (enqueues after the turn); --hard interrupts now and never clears. Above 350k context it SHRINKS FIRST automatically (/clear then reload then re-arm then resume), because the reload breaks the prompt cache and would re-bill the whole window — so author the link-only handoff before invoking it at high context. Trigger with /janitor-reload-plugins [--hard] [--shrink auto|never|force].
 ---
 
 # Janitor reload-plugins
@@ -29,26 +29,45 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
 - You changed plugin source on disk this session and need it live.
 - The user asks you to reload plugins.
 
-## ⚠ Do NOT reload at high context (≥350k tokens used)
+## High context shrinks FIRST — automatically (owner directive 2026-08-14)
 
 `/reload-plugins` swaps plugin code in place but **breaks the prompt-cache
 prefix** — so the next turn cannot re-use the cached context and re-caches the
 ENTIRE conversation at full write price (~1.25× the cheap 0.1× cache-read). At a
-low context that is negligible; at ≥350k tokens it is a large, avoidable cost.
+low context that is negligible; on a 500k session it is a ~500k weighted-token tax
+for one keystroke.
 
-So when the reload is not urgent and context is already ≥350k:
+This is no longer a rule you have to remember. `reload_trigger.py` defaults to
+`--shrink auto`: above the reload-guard threshold (350k, the same
+`CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD` dispatch uses) it clears
+first and reloads into the near-empty context, so the invalidation costs almost
+nothing. Below that threshold it reloads directly — clearing a 320k session to
+reach the ~305k floor would destroy the conversation to save nothing.
 
-1. **Shrink context first** — run `/janitor-handoff-and-clear` (a link-only
-   handoff then `/clear`, the cheapest steady-state shrink) or, if live scratch
-   isn't yet durably on disk, `/janitor-compact-context`.
-2. **Then reload** from the small post-shrink context, where the re-cache is cheap.
+The shrink chain is ordered **`/clear` → `/reload-plugins --force` →
+`/janitor-arm` → `/janitor-resume`**, and the reload's position is load-bearing:
+between `/clear` and the first API turn no prompt cache has been written yet, so
+the reload there invalidates *nothing*. Putting it after `/janitor-arm` would
+re-bill the freshly-written base at 1.25× on the very next turn.
 
-Reload immediately WITHOUT shrinking only when it is genuinely urgent (a
-`[janitor-reload]` marker whose new code you must pick up right now, or a security
-fix). The reload never loses the conversation — this is purely a cost guard, not a
-safety one, so a truly-needed reload always wins.
+**Because the shrink path runs `/clear`, which is UNRECOVERABLE, you MUST author
+the link-only handoff before invoking it at high context** — see step 0 below.
+The script warns (`HANDOFF_MISSING`) but deliberately does not refuse: refusing
+would leave the session running stale plugin code, trading a recoverable loss for
+an invisible one.
+
+`--hard` never shrinks. Hard means urgent (a security fix, a marker whose code
+must land now), and a shrink would put a clear + re-arm + resume in front of the
+very reload you need immediately.
 
 ## Instructions
+
+0. **If context may be at/above 350k, author the link-only handoff FIRST.** At that
+   size the script will `/clear`, which is unrecoverable — no scrollback, no summary.
+   Run `/janitor-write-handoff` (or write `.janitor/state/agent-handoff.md` yourself:
+   pointers only — TRDD ids, wikimem `[[links]]`, a `memgrep recall` hint — never
+   pasted content). Skip this only for `--hard`, which never clears. If the script
+   prints `HANDOFF_MISSING` you skipped a step that cannot be undone afterwards.
 
 1. **Run the backing script** (fires the detached /reload-plugins at this pane
    after a short delay). The default is SOFT (TRDD-0GPQROC1): the command is
@@ -69,10 +88,17 @@ safety one, so a truly-needed reload always wins.
    Read the one-word result:
    - `RELOAD_FIRED` → the reload is queued at your pane (iTerm or tmux); proceed to
      step 2.
+   - `RELOAD_SHRINK_CHAIN_SPAWNED` → context was above the threshold, so the verified
+     chain `/clear` → reload → `/janitor-arm` → `/janitor-resume` is queued instead.
+     The conversation WILL be cleared and then auto-resumed from your handoff; proceed
+     to step 2 exactly the same way.
    - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
      so self-trigger isn't available. Tell the user: *"Plugins were auto-updated —
      please run `/reload-plugins --force` now (auto-trigger works in iTerm and tmux)."*
      Then stop.
+
+   Add `--shrink never` to force a direct reload regardless of context, or
+   `--shrink force` to clear first even below the threshold.
 
 2. **END YOUR TURN IMMEDIATELY.** The script fired a *detached* keystroke sender
    that, after ~2 s, types `/reload-plugins --force` to your pane. In SOFT mode
@@ -99,6 +125,10 @@ when ONE of these holds:
   `/reload-plugins --force` at this pane: emit one short line (e.g. "Reloading
   plugins to pick up the update.") and END THE TURN IMMEDIATELY (call no more
   tools). STOP.
+- [ ] **RELOAD_SHRINK_CHAIN_SPAWNED** — context was above the threshold, so the
+  verified `/clear` → reload → re-arm → resume chain is queued. Say the session is
+  clearing and will auto-resume from the handoff, then END THE TURN IMMEDIATELY —
+  ending the turn is what lets the enqueued `/clear` run. STOP.
 - [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`
   unavailable: tell the user to run `/reload-plugins --force` manually, then STOP.
 

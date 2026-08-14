@@ -87,11 +87,22 @@ RESUME_CMD = "/janitor-resume"
 # Ordered: arm first (the cron must exist), resume second (it runs the dispatcher
 # stub which consumes the resume-after-clear.flag). Both enqueue back-to-back.
 _BOOTSTRAP_CMDS: tuple[str, ...] = (ARM_CMD, RESUME_CMD)
+# Public alias: other triggers compose their own bootstrap on top of this pair via
+# `spawn_shrink_chain`. Exported so they never open-code (ARM, RESUME) and silently
+# drift if the bootstrap ever gains a third step.
+BOOTSTRAP_CMDS: tuple[str, ...] = _BOOTSTRAP_CMDS
 # Every command this script types, in order. No longer passed to `injection_allowed` (the
 # presence cancel is gone) but kept as the one place the full set is named — the `clear` verb
 # in `user_intent._VERB_COMMANDS` exists to cover `/clear` from here.
 _ALL_CMDS: tuple[str, ...] = (CLEAR_CMD, *_BOOTSTRAP_CMDS)
-__all__ = ["CLEAR_CMD", "_ALL_CMDS", "check_handoff_concise", "plan_clear"]
+__all__ = [
+    "BOOTSTRAP_CMDS",
+    "CLEAR_CMD",
+    "_ALL_CMDS",
+    "check_handoff_concise",
+    "plan_clear",
+    "spawn_shrink_chain",
+]
 
 # INPUT-SAFETY (wikimem `claude-code-esc-input-semantics`, id:ATOM-ESC-REWIND): every
 # phase here is SOFT — a text-then-Enter send with NO leading ESC (esc_first=False in
@@ -358,6 +369,7 @@ def _run_chain_payload(payload_b64: str) -> int:
             then=list(data["then"]),
             gate_stamp=sd / _GATE_STAMP,
             gate_baseline=int(data["gate_baseline"]),
+            settle_between_s=float(data.get("settle_between_s", 0.0)),
             pre_submit_first=_persist_resume_state,
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
@@ -411,6 +423,64 @@ def _spawn_chain(payload: dict, *, env: dict[str, str] | None = None) -> None:
         start_new_session=True,
         env=env,
     )
+
+
+def spawn_shrink_chain(
+    *,
+    then: Sequence[str],
+    directive: str,
+    delay: float = 2.0,
+    settle_between_s: float = 0.0,
+) -> tuple[bool, str]:
+    """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
+
+    The public seam for other triggers that need to SHRINK before doing something expensive —
+    today `reload_trigger.py --shrink`, whose `/reload-plugins` breaks the prompt-cache prefix
+    and so should land on a near-floor context rather than a 500k one (owner directive
+    2026-08-14). It exists so those callers reuse THIS chain — the singleton lock, the
+    `clear-observed.ts` gate, and the write-resume-state-at-verified-submit ordering — instead
+    of growing a second, unverified `/clear` sender. A second sender is how you get two `/clear`
+    commands typed into one session, which is the failure `_CHAIN_LOCK` exists to prevent.
+
+    `then` REPLACES the default `[/janitor-arm, /janitor-resume]` bootstrap, so a caller that
+    drops either one strands the fresh session unarmed or unresumed. Callers should build on
+    `BOOTSTRAP_CMDS` rather than open-coding the pair.
+
+    Returns (False, why) when the pane cannot be read back; the caller must then fall back to
+    its own non-shrinking path rather than clear blind — an unverifiable `/clear` is the one
+    unrecoverable command in this system.
+    """
+    terminal = _this_terminal()
+    if not terminal_trigger.channel_is_readable(terminal):
+        return False, f"channel {terminal.get('kind', '?')!r} cannot be read back"
+
+    # WARN, never block (owner ruling via advisor 2026-08-14): the obligation to author a
+    # handoff belongs to the invoking SKILL, which knows what the session was doing. Refusing
+    # here would turn a missing handoff into a silently-skipped reload, and the session would
+    # keep running stale plugin code — trading a recoverable loss for an invisible one.
+    handoff = _read_handoff()
+    if handoff is None:
+        print(
+            "HANDOFF_MISSING no .janitor/state/agent-handoff.md — /clear is unrecoverable; "
+            "author the link-only handoff BEFORE shrinking",
+            file=sys.stderr,
+        )
+    else:
+        ok, reasons = check_handoff_concise(handoff)
+        if not ok:
+            print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}", file=sys.stderr)
+
+    _spawn_chain({
+        "delay": delay,
+        "terminal": terminal,
+        "first": CLEAR_CMD,
+        "then": list(then),
+        "state_dir": str(_project_root() / ".janitor" / "state"),
+        "gate_baseline": _gate_baseline(),
+        "directive": directive,
+        "settle_between_s": settle_between_s,
+    })
+    return True, "chain spawned"
 
 
 # Phase outcome constants — what _fire_phase reports back to main.

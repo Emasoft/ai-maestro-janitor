@@ -1462,12 +1462,26 @@ def _phase_plugin_reload() -> None:
         state.log_line("dispatch", f"[reload-guard] context read failed, failing open: {exc}")
         ctx = None
     if tm.reload_guard_should_block(ctx, threshold):
+        # NO LONGER A DEFERRAL (owner directive 2026-08-14). This used to `return` here and
+        # wait for a cheaper moment, on the stated assumption that "the context shrinks on
+        # its own and the reload lands cheaply then". That assumption is FALSE for exactly
+        # the sessions this plugin exists to serve: an unattended session above the threshold
+        # never shrinks by itself, so the reload deferred FOREVER and the session kept running
+        # stale plugin code — silently, because the ack is deliberately left unadvanced and
+        # nothing else reports it. A cost guard that never terminates is an availability bug.
+        #
+        # `reload_trigger.py` now defaults to `--shrink auto`: at/above this same threshold it
+        # runs the verified `/clear` chain and reloads into the near-empty context, so the
+        # expensive case the guard was protecting against no longer exists. We therefore EMIT
+        # and let the trigger — which is the only thing that can see the pane, the handoff and
+        # the urgency — make the call. The threshold read above is kept because it is what
+        # decides whether to warn here; the trigger reads the SAME env var so the two agree.
         state.log_line(
             "dispatch",
-            f"[reload-guard] deferred [janitor-reload]: context={ctx} >= threshold={threshold} "
-            "(ack left unadvanced; re-checked on the next fire)",
+            f"[reload-guard] context={ctx} >= threshold={threshold}: emitting [janitor-reload] "
+            "anyway — reload_trigger --shrink will /clear first so the cache break lands on a "
+            "near-floor context (was: deferred forever, which left sessions on stale code)",
         )
-        return
 
     state.atomic_write(acked_path, str(gen))
     _emit_decision("[janitor-reload]")  # D5: bare token, marks the fire non-quiet

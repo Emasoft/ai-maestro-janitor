@@ -303,9 +303,18 @@ def _patch_context_tokens(monkeypatch: pytest.MonkeyPatch, tokens) -> None:
     monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda *_a, **_k: "irrelevant.jsonl" if tokens is not None else None)
 
 
-def test_phase_plugin_reload_defers_above_threshold(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Context at/above the default 350000-token guard → NO marker, ack left
-    UNADVANCED (so the deferred generation is re-checked, not lost) — TRDD-Z582IKIR F1."""
+def test_phase_plugin_reload_emits_above_threshold_for_the_shrink_path(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Context at/above the guard → the marker IS emitted and the ack IS advanced.
+
+    REVERSED from the original TRDD-Z582IKIR F1 behaviour (owner directive 2026-08-14).
+    This used to defer and return. The deferral's own justification was that "the context
+    shrinks on its own and the reload lands cheaply then" — false for an unattended session,
+    which never shrinks by itself, so the reload deferred FOREVER and the session kept
+    running stale plugin code with nothing reporting it. `reload_trigger.py --shrink auto`
+    now `/clear`s first at this same threshold, so the expensive case the guard protected
+    against no longer exists and deferring only reintroduces the stale-code bug."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -315,9 +324,11 @@ def test_phase_plugin_reload_defers_above_threshold(env_isolation: dict, monkeyp
     _patch_context_tokens(monkeypatch, 500_000)
 
     out = _capture_stdout(dispatch._phase_plugin_reload)
-    assert out == "", f"a large context must defer, not emit, got {out!r}"
+    assert out.strip() == "[janitor-reload]", f"a large context must now emit, got {out!r}"
     acked_path = state.state_dir() / "reload-acked.ts"
-    assert not acked_path.is_file(), "a deferred fire must NOT advance the per-project ack"
+    assert acked_path.is_file(), "an emitted fire must advance the per-project ack"
+    log = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert "shrink" in log, "the high-context emission must record WHY it is safe to emit"
 
 
 def test_phase_plugin_reload_proceeds_below_threshold(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -347,9 +358,15 @@ def test_phase_plugin_reload_fails_open_on_unknown_context(env_isolation: dict, 
     assert out.strip() == "[janitor-reload]", f"unknown context must fail OPEN (reload proceeds), got {out!r}"
 
 
-def test_phase_plugin_reload_defer_then_recovers(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A deferred fire is re-checked on the NEXT fire: once context drops back below
-    the threshold (e.g. after a compaction), the SAME still-unacked generation reloads."""
+def test_phase_plugin_reload_never_waits_for_a_shrink_that_may_never_come(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even at a near-wall context the reload is emitted on the FIRST fire, not postponed.
+
+    This is the regression guard for the bug the old deferral WAS: it waited for the context
+    to shrink on its own, and on an unattended session nothing ever shrinks it, so a plugin
+    update — including a security fix — could sit unapplied indefinitely. The shrink now
+    happens inside the trigger, so waiting buys nothing and costs availability."""
     dispatch = _import_dispatch()
     import global_state as gs
 
@@ -357,17 +374,21 @@ def test_phase_plugin_reload_defer_then_recovers(env_isolation: dict, monkeypatc
     gs.set_reload_flag("plugin@mp")
 
     _patch_context_tokens(monkeypatch, 900_000)
-    assert _capture_stdout(dispatch._phase_plugin_reload) == "", "first fire (huge context) must defer"
-
-    _patch_context_tokens(monkeypatch, 50_000)
     out = _capture_stdout(dispatch._phase_plugin_reload)
-    assert out.strip() == "[janitor-reload]", "second fire (context shrank) must reload the still-pending generation"
+    assert out.strip() == "[janitor-reload]", (
+        "a 900k context must still emit on the first fire — the trigger shrinks before reloading"
+    )
 
 
 def test_phase_plugin_reload_honors_custom_threshold_env(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD overrides the 350000 default."""
+    """CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD still overrides the 350000
+    default — it now selects which side of the line the fire is LOGGED as, since the
+    marker is emitted either way and `reload_trigger.py` reads the SAME env var to decide
+    whether to `/clear` first. The two must agree, so this asserts the custom value is the
+    one dispatch actually used, not the default."""
     dispatch = _import_dispatch()
     import global_state as gs
+    import state
 
     gs.init_global_state()
     gs.set_reload_flag("plugin@mp")
@@ -375,7 +396,12 @@ def test_phase_plugin_reload_honors_custom_threshold_env(env_isolation: dict, mo
     _patch_context_tokens(monkeypatch, 60_000)  # below the DEFAULT but above this custom threshold
 
     out = _capture_stdout(dispatch._phase_plugin_reload)
-    assert out == "", f"a lowered threshold must defer at 60k, got {out!r}"
+    assert out.strip() == "[janitor-reload]", f"the marker is emitted either way, got {out!r}"
+    log = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert "threshold=50000" in log, (
+        "the custom threshold must be the one dispatch evaluated — if it silently used the "
+        "350000 default, dispatch and reload_trigger would disagree about when to shrink"
+    )
 
 
 def test_phase_plugin_reload_threshold_zero_disables_guard(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
