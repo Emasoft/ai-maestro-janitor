@@ -968,3 +968,66 @@ def test_inflight_gate_fails_open_on_a_corrupt_stamp(fixture, monkeypatch):
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert lines == ["[janitor-memory-split]"], out
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-JPL0JU86 / janitor#249 — a scope-escaping page is a COUNTABLE finding,
+# not a silent skip
+# --------------------------------------------------------------------------- #
+
+def _all_frequencies_zero(settings_dir: Path) -> None:
+    """Disable every intervention so the only line a fire can print is the
+    scope-escape surface — isolates the finding from marker noise."""
+    _write_settings(
+        settings_dir,
+        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
+        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+        retro_lesson_per_day=0.0,
+    )
+
+
+def test_scope_escaping_symlink_yields_exactly_one_finding(fixture):
+    """A page whose symlink escapes the scope root cannot ever be dispatched (M-10
+    refuses the write); left unreported that is a permanent silent abstention
+    (janitor#249). It must instead surface as exactly one `[memory-scope-escape]`
+    finding line."""
+    _all_frequencies_zero(fixture["settings"])
+    outside = fixture["project"] / "other-repo-memory"
+    outside.mkdir(parents=True, exist_ok=True)
+    (outside / "shared.md").write_text("---\nname: shared\n---\n\nfact\n", encoding="utf-8")
+    (fixture["local"] / "shared.md").symlink_to(outside / "shared.md")
+
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) == 1, out
+    assert lines[0].startswith("[memory-scope-escape] LOCAL/shared.md escapes its scope root"), out
+
+
+def test_scope_escaping_symlink_finding_is_deduped_across_fires(fixture):
+    """A second pass over the SAME unchanged corpus must not re-print the finding —
+    the TRANSIENT dedupe contract (say it once, not every fire) applies to a
+    STRUCTURAL finding exactly as it does to the mis-tier surface."""
+    _all_frequencies_zero(fixture["settings"])
+    outside = fixture["project"] / "other-repo-memory"
+    outside.mkdir(parents=True, exist_ok=True)
+    (outside / "shared.md").write_text("---\nname: shared\n---\n\nfact\n", encoding="utf-8")
+    (fixture["local"] / "shared.md").symlink_to(outside / "shared.md")
+
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    first = [ln for ln in _run(env).splitlines() if ln.strip()]
+    second = [ln for ln in _run(env).splitlines() if ln.strip()]
+    assert len(first) == 1, first
+    assert second == [], second
+
+
+def test_an_in_scope_symlink_yields_no_scope_escape_finding(fixture):
+    """An ordinary in-scope symlink alias is not an escape — the surface must not
+    cry wolf on pages a chore can perfectly well write."""
+    _all_frequencies_zero(fixture["settings"])
+    sub = fixture["local"] / "sub"
+    sub.mkdir(parents=True, exist_ok=True)
+    (sub / "real.md").write_text("---\nname: real\n---\n\nfact\n", encoding="utf-8")
+    (fixture["local"] / "alias.md").symlink_to(sub / "real.md")
+
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out

@@ -628,3 +628,42 @@ def test_an_unresolvable_path_counts_as_escaping(tmp_path):
     root.mkdir()
     (root / "dangling.md").symlink_to(tmp_path / "gone" / "nowhere.md")
     assert msc.iter_note_files(root) == []
+
+
+# --- TRDD-JPL0JU86: the excluded page must be reportable, not merely excluded -----
+
+
+def test_iter_escaping_note_files_finds_exactly_the_excluded_page(tmp_path):
+    """iter_note_files silently DROPS a scope-escaping symlink; iter_escaping_note_files
+    is the other half — it must find exactly that dropped page, so a caller can turn a
+    silent exclusion into a countable finding (janitor#249's actual defect)."""
+    root = tmp_path / "user-memory"
+    root.mkdir()
+    outside = tmp_path / "other-repo" / "memory"
+    outside.mkdir(parents=True)
+    (outside / "shared.md").write_text("---\nname: shared\n---\n\nfact\n", encoding="utf-8")
+    (root / "shared.md").symlink_to(outside / "shared.md")
+    (root / "own.md").write_text("---\nname: own\n---\n\nfact\n", encoding="utf-8")
+
+    escaping = [p.name for p in msc.iter_escaping_note_files(root)]
+    included = [p.name for p in msc.iter_note_files(root)]
+    assert escaping == ["shared.md"]
+    assert included == ["own.md"]
+    # The two lists partition the note files — nothing is double-counted or dropped
+    # from BOTH, which would be a silent skip in a different shape.
+    assert set(escaping) & set(included) == set()
+
+
+def test_iter_escaping_note_files_empty_when_nothing_escapes(tmp_path):
+    """A normal scope with an in-scope symlink alias reports zero escapes — the
+    surface must not cry wolf on ordinary pages."""
+    root = tmp_path / "mem"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "real.md").write_text("---\nname: real\n---\n\nfact\n", encoding="utf-8")
+    (root / "alias.md").symlink_to(root / "sub" / "real.md")
+    assert msc.iter_escaping_note_files(root) == []
+
+
+def test_iter_escaping_note_files_empty_for_missing_dir(tmp_path):
+    """Missing root -> empty, mirroring iter_note_files; never raises."""
+    assert msc.iter_escaping_note_files(tmp_path / "does-not-exist") == []

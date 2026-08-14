@@ -212,6 +212,34 @@ def escapes_root(path: Path, root: Path) -> bool:
         return True  # unresolvable ⇒ treat as escaping; never hand a chore a path we can't pin
 
 
+def iter_escaping_note_files(memdir: str | os.PathLike[str]) -> list[Path]:
+    """Every real memory NOTE under ``memdir`` that ``iter_note_files`` silently drops
+    because it ESCAPES the scope root — the STRUCTURAL half of janitor#249.
+
+    `iter_note_files` correctly excludes these from a chore's candidate list (a scope's
+    transaction cannot write outside its own root, M-10). But excluding them from the
+    lister and never reporting them anywhere are two different things: the page is
+    real, `is_note_file` says so, and it can NEVER become eligible from here — no
+    future content change clears a symlink escape. That is a STRUCTURAL refusal, not
+    the TRANSIENT "unchanged since last look" kind the dispatch fingerprint already
+    dedupes: it deserves exactly one countable finding, not permanent silence.
+
+    Same recursive `rglob` + `is_note_file` filter as `iter_note_files`; the only
+    difference is the `escapes_root` polarity. Returns ``[]`` for a missing/unreadable
+    root — mirrors `iter_note_files`, never raises.
+    """
+    root = Path(memdir)
+    if not root.is_dir():
+        return []
+    try:
+        return sorted(
+            p for p in root.rglob("*.md")
+            if p.is_file() and is_note_file(p) and escapes_root(p, root)
+        )
+    except OSError:
+        return []
+
+
 def project_slug(project_dir: str) -> str:
     """Harness per-project slug: the absolute path with every NON-ALPHANUMERIC char dashed.
 

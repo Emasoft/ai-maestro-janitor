@@ -3,7 +3,7 @@ trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
 column: todo
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-13T05:17:19+0200
+updated: 2026-08-14T17:14:43+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -138,10 +138,22 @@ lesson is indistinguishable from one that was captured nowhere. If it keeps cost
 investigations, the fix is for the exemption to consider a merge whose survivor gained a lesson
 citing the retired slug — not to file a TRDD nobody will read.
 
+## ⏵ 2026-08-14 — part (b) landed: structural refusals are now a countable finding
+
+`memory_scopes.iter_escaping_note_files()` (the inverse-polarity twin of `iter_note_files`)
+finds exactly the pages `iter_note_files` silently drops for escaping their scope root.
+`memory-maintenance.py::_surface_scope_escapes` prints one `[memory-scope-escape] SCOPE/name
+…` drift line per such page, deduped via the standard `dedupe.emit_once` seen-file (same
+once-per-page contract as `_surface_mistiered`/the mis-tier surface) — said once, not every
+fire, and never suppressed by a content change since it can never clear structurally. Wired
+into `_run()` right after `_surface_mistiered`. Part (a) — re-scoping the four live pages —
+is NOT done here (needs the AZ6QRK0D sequencing this card already flags; a live-store
+mutation is outside a bugfix's blast radius) and stays open below.
+
 ## Acceptance
 
 - [ ] The four symlinks are gone and the pages are maintainable from their new scope
-- [ ] A structurally-refused page produces a countable finding; a transient refusal still does not
-- [ ] Test: a scope-escaping symlink yields exactly one finding, and a second pass over the
+- [x] A structurally-refused page produces a countable finding; a transient refusal still does not
+- [x] Test: a scope-escaping symlink yields exactly one finding, and a second pass over the
       unchanged corpus does NOT duplicate it
 - [ ] #249 answered with the commit id

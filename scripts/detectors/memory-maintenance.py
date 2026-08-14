@@ -431,6 +431,41 @@ def _surface_mistiered(scopes: list[tuple[str, Path]], split_cap: int) -> None:
             pass
 
 
+def _surface_scope_escapes(scopes: list[tuple[str, Path]]) -> None:
+    """Print one drift line per page `iter_note_files` silently drops for escaping its scope
+    root — the STRUCTURAL half of janitor#249/TRDD-JPL0JU86.
+
+    `iter_note_files` is correct to exclude these from a chore's candidates (M-10: a scope's
+    transaction cannot write outside its own root) — but exclusion and silence are two
+    different bugs. No content change ever clears a symlink escape, so an excluded page is a
+    PERMANENT structural refusal, not the TRANSIENT "unchanged since last look" kind the
+    dispatch fingerprint already dedupes. Left unreported, "N of your pages are structurally
+    unmaintainable" is discoverable only by noticing a chore never touches them — exactly the
+    silent-abstention failure mode the issue is about.
+
+    Best-effort and never raises, same contract as `_surface_mistiered`: a fault in a REPORT
+    must not cost the maintenance pass it rides on.
+    """
+    try:
+        seen = state.state_dir() / "memory-scope-escape.seen"
+        for scope, root in scopes:
+            for path in memory_scopes.iter_escaping_note_files(root):
+                msg = (
+                    f"[memory-scope-escape] {scope}/{path.name} escapes its scope root "
+                    f"({root}) — no chore here can ever write it (M-10). Structural, not "
+                    f"transient: move the page to the scope it actually resolves into, or "
+                    f"re-point the link the other way."
+                )
+                line = dedupe.emit_once(seen, f"{scope}|{path.name}", msg)
+                if line:
+                    print(line, flush=True)
+    except Exception as exc:  # noqa: BLE001 — a report must never break the pass it rides on
+        try:
+            state.log_line("memory-maintenance", f"scope-escape surface skipped: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _run() -> int:
     # `--one-shot` is the dispatch.py contract; we accept it (and ignore other args)
     # so the detector is a drop-in roster member.
@@ -453,6 +488,12 @@ def _run() -> int:
     # it is reported HERE, for a `stat` plus 2 KB of frontmatter. Deduped by the standard
     # seen-file so it is said once per page, not every fire.
     _surface_mistiered(scopes, _split_max_bytes())
+
+    # The STRUCTURAL half of janitor#249: a page `iter_note_files` silently drops for
+    # escaping its scope root (a symlink into another scope) can never become eligible —
+    # no content change clears it. Same reporting contract as the mis-tier surface above:
+    # cheap, best-effort, deduped once-per-page so it is said once, not every fire.
+    _surface_scope_escapes(scopes)
 
     # Cheap pre-check OUTSIDE the lock: is anything due at all? Avoids taking the
     # flock on the overwhelmingly-common idle fire. (The authoritative check is
