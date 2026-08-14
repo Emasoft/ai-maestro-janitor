@@ -442,6 +442,28 @@ def _pid_cwd(pid: int) -> Optional[Path]:
     return None
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """True iff `pid` still exists RIGHT NOW (not at snapshot time).
+
+    `os.kill(pid, 0)` sends no signal — it only runs the kernel's
+    permission-and-existence check. `PermissionError` means the process exists but
+    belongs to another user, which is still ALIVE, so it must answer True: reading
+    "not mine" as "gone" would let another user's git process be ignored.
+
+    Any other OSError answers True as well — this feeds a fail-closed guard, so an
+    unexpected error must never be the thing that authorises a removal.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
 def _live_git_holds(ps_snapshot: str, repo_root: Path) -> bool:
     """True iff SOME live `git` process in `ps_snapshot` could be holding
     `repo_root`'s `.git/index.lock` — i.e. its cwd is inside `repo_root`, or
@@ -469,7 +491,22 @@ def _live_git_holds(ps_snapshot: str, repo_root: Path) -> bool:
     for pid in _live_git_pids(ps_snapshot):
         cwd = _pid_cwd(pid)
         if cwd is None:
-            return True  # fail closed: could not confirm this pid is elsewhere
+            # An UNRESOLVABLE cwd normally fails closed — but first separate the two
+            # reasons it can be unresolvable, because they are opposite verdicts:
+            #
+            #   * the pid EXITED between the snapshot and this lookup — it cannot hold
+            #     anything, so it must NOT block. `ps` output is a still photograph of a
+            #     moving table, and short-lived git invocations are the common case, not
+            #     an edge one. MEASURED 2026-08-14: a real commit was blocked by three
+            #     git pids (78759/78761/78762) that a `ps -p` a second later showed were
+            #     already gone — they were spawned by the very command being blocked.
+            #     Treating those as holders is the never-fires bug of the unscoped guard
+            #     in a subtler dress: on a busy machine transient gits are continuous.
+            #   * the pid is ALIVE and lsof was denied/timed out — genuinely unknown, so
+            #     it blocks, exactly as before.
+            if not _pid_is_alive(pid):
+                continue
+            return True  # fail closed: alive, and could not confirm it is elsewhere
         try:
             cwd.relative_to(root)
         except ValueError:

@@ -89,9 +89,14 @@ def test_removed_when_stale_and_no_git(tmp_path):
     assert not lock.exists()
 
 
-def test_kept_when_a_live_git_appears_in_the_snapshot(tmp_path):
-    """Even a very OLD lock is left alone if the snapshot shows a live git —
-    age alone must never override the live-process guard."""
+def test_kept_when_a_live_git_appears_in_the_snapshot(monkeypatch, tmp_path):
+    """Even a very OLD lock is left alone if the snapshot shows a live git with
+    an unresolvable cwd — age alone must never override the live-process
+    guard's fail-closed branch. The synthetic pid in `_PS_WITH_GIT` does not
+    exist on the real process table, so it must be pinned ALIVE here (a real
+    exited pid is covered separately by
+    test_a_git_pid_that_already_exited_does_not_block_removal)."""
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: True)
     lock = _make_lock(tmp_path, age_s=3600)
     outcome = git_utils.clear_stale_index_lock(tmp_path, min_age_s=60, ps_snapshot=_PS_WITH_GIT)
     assert outcome == "live-git"
@@ -150,8 +155,12 @@ def test_ungatherable_snapshot_removes_nothing(monkeypatch, tmp_path):
 
 
 def test_gathered_snapshot_showing_live_git_blocks_removal(monkeypatch, tmp_path):
-    """The gathered path honours guard 1 exactly as an injected snapshot does."""
+    """The gathered path honours guard 1 exactly as an injected snapshot does.
+    The synthetic pid in `_PS_WITH_GIT` does not exist on the real process
+    table, so it must be pinned ALIVE (with an unresolvable cwd) to exercise
+    the fail-closed branch this test is actually about."""
     monkeypatch.setattr(git_utils, "_gather_ps_snapshot", lambda: _PS_WITH_GIT)
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: True)
     lock = _make_lock(tmp_path, age_s=86400)
     outcome = git_utils.clear_stale_index_lock(tmp_path, min_age_s=60)
     assert outcome == "live-git"
@@ -179,6 +188,42 @@ def test_never_raises_on_a_missing_git_dir(tmp_path):
     assert outcome == "absent"
 
 
+def test_a_git_pid_that_already_exited_does_not_block_removal(monkeypatch, tmp_path):
+    """A pid in the snapshot that has since EXITED cannot hold anything, so an
+    unresolvable cwd must not be read as "might hold the lock".
+
+    MEASURED 2026-08-14: a real commit was refused because the ps snapshot listed
+    three git pids that a `ps -p` moments later showed were already gone — they had
+    been spawned by the very command being blocked. `ps` is a still photograph of a
+    moving table, and short-lived git invocations are the common case, so counting
+    them as holders reintroduces the never-fires bug in a subtler form."""
+    monkeypatch.setattr(git_utils, "_pid_cwd", lambda _: None)
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: False)
+    lock = _make_lock(tmp_path, age_s=3600)
+    outcome = git_utils.clear_stale_index_lock(tmp_path, min_age_s=60, ps_snapshot=_PS_WITH_GIT)
+    assert outcome == "removed"
+    assert not lock.exists()
+
+
+def test_a_LIVE_git_pid_with_unresolvable_cwd_still_blocks(monkeypatch, tmp_path):
+    """The other half: ALIVE plus an unresolvable cwd (lsof denied or timed out) is
+    genuinely unknown, and unknown must keep failing CLOSED."""
+    monkeypatch.setattr(git_utils, "_pid_cwd", lambda _: None)
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: True)
+    lock = _make_lock(tmp_path, age_s=3600)
+    outcome = git_utils.clear_stale_index_lock(tmp_path, min_age_s=60, ps_snapshot=_PS_WITH_GIT)
+    assert outcome == "live-git"
+    assert lock.exists()
+
+
+def test_pid_is_alive_agrees_with_reality():
+    """The real predicate: this process is alive; a pid that cannot exist is not."""
+    import os as _os
+
+    assert git_utils._pid_is_alive(_os.getpid()) is True
+    assert git_utils._pid_is_alive(2**22) is False
+
+
 def test_live_git_in_a_different_repo_does_not_block_removal(monkeypatch, tmp_path):
     """A git pid whose cwd is confirmed OUTSIDE this repo cannot be holding THIS repo's
     index.lock, so it must not block removal — the janitor#245 follow-up bug this module
@@ -203,9 +248,14 @@ def test_live_git_in_this_repo_blocks_removal(monkeypatch, tmp_path):
 
 
 def test_live_git_with_unresolvable_cwd_blocks_removal(monkeypatch, tmp_path):
-    """A git pid whose cwd could NOT be resolved (lsof failed, pid gone, permission denied)
-    fails CLOSED — treated as possibly holding the lock, never silently excluded."""
+    """A LIVE git pid whose cwd could NOT be resolved (lsof failed, permission denied)
+    fails CLOSED — treated as possibly holding the lock, never silently excluded.
+    The synthetic pid in `_PS_WITH_GIT` does not exist on the real process table,
+    so it must be pinned ALIVE here to exercise this branch (a pid that has
+    already EXITED is the separate, non-blocking case covered by
+    test_a_git_pid_that_already_exited_does_not_block_removal)."""
     monkeypatch.setattr(git_utils, "_pid_cwd", lambda _: None)
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: True)
     lock = _make_lock(tmp_path, age_s=300)
     outcome = git_utils.clear_stale_index_lock(tmp_path, min_age_s=60, ps_snapshot=_PS_WITH_GIT)
     assert outcome == "live-git"

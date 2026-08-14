@@ -27,10 +27,6 @@ _PS_NO_GIT = (
     " 9999  4242       00:03 uv run pytest -q\n"
 )
 
-# A snapshot WITH a live git process (e.g. a concurrent `git commit`), pid
-# 5150 — used to prove the lock survives when the guard fires.
-_PS_WITH_GIT = _PS_NO_GIT + " 5150  4242       00:01 git commit -m wip\n"
-
 
 def _run(project: Path, *, ps_snapshot: str = _PS_NO_GIT) -> subprocess.CompletedProcess[str]:
     env = {
@@ -102,7 +98,15 @@ def test_fresh_lock_is_left_alone_and_silent(tmp_path: Path) -> None:
 
 def test_lock_survives_when_a_live_git_process_is_in_the_snapshot(tmp_path: Path) -> None:
     """An old, stale-looking lock is left in place when the injected `ps` snapshot shows a
-    live `git` process — the live-git guard must still block removal via this seam."""
+    live process (in this repo's own cwd) tagged as `git` — the live-git guard must still
+    block removal via this seam.
+
+    Uses a GENUINELY alive process (a real `sleep 30` child, cwd == `project`) rather than a
+    synthetic pid — `git_utils._live_git_holds` now checks `_pid_is_alive` for any pid whose
+    cwd cannot be resolved, so a made-up pid that happens to not exist on the real process
+    table would be silently treated as exited and the guard would never fire. A real, live
+    pid whose cwd genuinely resolves inside the repo exercises the actual blocking condition
+    end to end (real `lsof` cwd lookup included), not just the fail-closed fallback."""
     project = tmp_path / "repo"
     project.mkdir()
     _git_init(project)
@@ -113,9 +117,15 @@ def test_lock_survives_when_a_live_git_process_is_in_the_snapshot(tmp_path: Path
 
     os.utime(lock, (stale_ts, stale_ts))
 
-    proc = _run(project, ps_snapshot=_PS_WITH_GIT)
-    assert proc.returncode == 0, proc.stderr
-    assert lock.exists(), "a live git process in the snapshot must block removal"
+    proc = subprocess.Popen(["sleep", "30"], cwd=str(project))
+    try:
+        ps_snapshot = _PS_NO_GIT + f" {proc.pid}  4242       00:01 git commit -m wip\n"
+        result = _run(project, ps_snapshot=ps_snapshot)
+        assert result.returncode == 0, result.stderr
+        assert lock.exists(), "a live git process in the snapshot must block removal"
+    finally:
+        proc.terminate()
+        proc.wait()
 
 
 def test_lock_held_open_by_a_process_is_left_alone_and_silent(tmp_path: Path) -> None:
