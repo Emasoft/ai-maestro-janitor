@@ -89,6 +89,13 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # Covered — explicit, TRDD-QKWU26ZG.
     "superseded-atom-above-delimiter": "repair",
     "superseded-atom-no-delimiter-heading": "repair",
+    # Covered — janitor#260 endgame, and the ONE code where "covered" was the whole point of
+    # adding it. The condition already had a chore GATE (`repair_defect`) but no ARBITER: the
+    # linter the repair agent consults could not see it, which is janitor#227's shape (a gate
+    # dispatching work its arbiter cannot confirm re-dispatches forever). Measured, not assumed:
+    # on a page whose ONLY defect is the placement, `repair_defect` returns 'atom-after-footer',
+    # and '' once the atom moves above the footer.
+    "atom-after-footer": "repair",
     # Orphaned — no scheduled chore's precheck detects the condition today.
     "atom-oversized": None,
     "lesson-uncited": None,
@@ -136,8 +143,12 @@ def test_classification_table_matches_the_source_exactly():
     assert not stale_in_table, (
         f"classified code(s) no longer exist in memory.rs: {sorted(stale_in_table)} — remove the row"
     )
-    # Sanity on the table's own shape: matches the issue's measured "~30 codes" total.
-    assert len(_CODE_COVERAGE) == 30
+    # A deliberate SPEED BUMP, not a redundant length check. The two set assertions above
+    # already force every code to be classified — but they pass silently when a commit adds a
+    # code AND its row together, which is precisely the moment someone should have to state
+    # whether a chore gate covers it. This constant is the one thing that fails then.
+    # 30 -> 31: `atom-after-footer` (janitor#260 endgame), classified `repair` on a measurement.
+    assert len(_CODE_COVERAGE) == 31
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():
