@@ -127,6 +127,54 @@ provide provenance it never had.
       on this machine at the same time, so a full pass here would have taken well
       over an hour of CPU contention rather than reflecting a real problem.
 
+## Follow-ups from adversarial review — NOT shipped, awaiting a decision
+
+Advisor review after Option A landed found one defect (fixed, `f6be3d15`) and two
+open recommendations. Both are recorded rather than quietly implemented, because
+each changes trust semantics and this card has already demonstrated the cost of
+shipping a security-path change without review.
+
+### F1 — provenance gate (advisor's recommendation; MEASURED, cost is real)
+
+Proposal: certify a version only when it equals `resolve_latest_published()`, and
+fail **CLOSED** (skip pinning) when that is unresolvable. Rationale: first trust
+would then require compromising the release channel, not merely local cache write
+— which is a genuine strengthening, since Option A currently establishes first
+trust from mere disk presence.
+
+Measured before implementing (this is what the recommendation lacked):
+
+- `resolve_latest_published` (`version_update_lib.py:205`) shells out to
+  `gh api repos/<slug>/releases/latest`, 5 s timeout. It is a **network call**.
+- It already runs once per periodic fire, inside `do_auto_update_if_needed`
+  (`:350`), so the gate need not add a second call — **except** that
+  `do_auto_update_if_needed` returns the newest **CACHED** version, not the
+  published tag. Its own tests prove this: when `attempt_auto_update` returns
+  False it yields `latest == "0.5.0"` while `resolve_latest_published` had
+  returned `"0.5.1"`. So reuse requires refactoring that return value.
+- **Fail-closed means an offline machine, or one without `gh`, never advances its
+  pin at all** — permanently the state this card exists to fix, just chosen
+  deliberately instead of by accident.
+
+DECISION NEEDED: accept the offline stall (detector reports it) and refactor the
+return value to avoid a second `gh` call, or keep disk-presence first-trust. Do
+not implement either by inference from this text.
+
+### F2 — Option B's escape hatch was recommended AS A PAIR and was not shipped
+
+The recommendation in "Decision required" was *"A, with B's command as an escape
+hatch"*. Only A shipped. A `/janitor-repin-integrity` command still has value with
+A in place: it is the manual recovery path when the daemon is down, and the only
+path at all if F1 lands fail-closed on a machine that cannot reach GitHub.
+
+### F3 — an honest tension worth stating
+
+The detector deliberately raises no ticket, on the reasoning that an agent must not
+re-certify the anchor it audits. Option A now has the DAEMON do exactly that
+re-certification. The surviving distinction is schedule-driven versus
+finding-triggered, which is real but narrower than the original phrasing implied.
+Anyone revisiting the no-ticket choice should weigh it on that narrower ground.
+
 ## Notes
 
 Found while auditing why `/reload-plugins` is needed for fleet updates
