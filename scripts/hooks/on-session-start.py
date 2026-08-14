@@ -348,7 +348,17 @@ def main() -> int:
             state.log_line("session-start", f"clear-observed stamp failed: {exc!r}")
             print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
 
-    if source in ("startup", "resume"):
+    # "fork" added for CC 2.1.214 ("SessionStart hooks now report source 'fork' when a
+    # session begins as a fork instead of 'resume'"). A fork is a NEW process that loaded
+    # the CURRENT plugins, exactly like startup/resume — so it must seed the ack too.
+    #
+    # This is not cosmetic. dispatch._phase_plugin_reload treats an ABSENT stamp as 0 and
+    # self-heals by emitting `[janitor-reload]` once. So before this line covered "fork", a
+    # forked session reloaded plugins it was already running — and since TRDD-VHPYSN56 a
+    # reload above the context threshold SHRINKS FIRST, meaning the fork would `/clear` the
+    # very conversation it was forked to preserve. A missing enum value became destructive
+    # by composition with a feature added months later.
+    if source in ("startup", "resume", "fork"):
         state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
         # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a
         # fresh process already carries the current non-plugin skills, so it should

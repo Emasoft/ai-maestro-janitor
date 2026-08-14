@@ -91,6 +91,14 @@ TRIGGER_RESUMED_COLD = "resumed-cold"
 # (shrink → SessionStart(compact) → shrink → …). Measured on this machine over the sessions
 # recorded so far: compact 38, resume 7, clear 3, startup 0 — so `compact` is not a theoretical
 # risk, it is the MOST COMMON source by a factor of five, and `startup` alone would never fire.
+# "fork" is EXCLUDED DELIBERATELY, not by oversight (reviewed 2026-08-14 against CC 2.1.214,
+# which made SessionStart report source "fork" instead of "resume" for a forked session).
+# These are the sources that mean "a genuine load-after-away", where a cold cache plus a big
+# context makes the next turn expensive. A fork is neither away nor cold — it is an immediate
+# copy of a live conversation into a background session (CC 2.1.212), created precisely to
+# KEEP that context. Auto-clearing it would destroy the thing the user forked to preserve.
+# If a fork should ever become eligible, that is a deliberate decision with a destructive
+# blast radius — make it one, do not add the string casually.
 RESUME_SOURCES = frozenset({"resume", "startup"})
 
 # The agentlensPro probe's command, overridable per the module's one integration pattern; an
