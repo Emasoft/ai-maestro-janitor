@@ -72,7 +72,12 @@ import token_meter  # noqa: E402  # latest_context_size — transcript-based occ
 # covers the mid band; the janitor adds exactly ONE pre-enforcement runway band.
 _DEFAULT_SUGGEST_PCT = 80
 _DEFAULT_HARDSTOP_PCT = 85
-_DEFAULT_WINDOW = 1_000_000
+# Resolved per-call (not a module constant) because it depends on the live environment:
+# CC 2.1.223's CLAUDE_CODE_DISABLE_1M_CONTEXT holds native-1M models to 200K, and assuming
+# 1M there under-reports occupancy ~5x, leaving THIS hook's >=85% guard silently inert.
+# See token_meter.default_window.
+def _default_window() -> int:
+    return token_meter.default_window()
 # Trigger/deny at most once per compaction episode: after a compact fires, the next turn
 # (post-resume) is normally well below the cap; the window also stops a /compact spam loop
 # AND a deny-after-resume stuck loop (if compaction didn't drop us below the cap we fall
@@ -475,7 +480,7 @@ def main() -> int:
     transcript = str(payload.get("transcript_path", "") or "")
     now = int(time.time())
 
-    window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _DEFAULT_WINDOW)
+    window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _default_window())
     try:
         pct, tokens, window, stale = _resolve_context(project_dir, session_id, transcript, window_default, now=now)
     except Exception:  # noqa: BLE001 — fail-open: a reading error must never block a tool

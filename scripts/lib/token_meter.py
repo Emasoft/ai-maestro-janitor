@@ -363,6 +363,32 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
 # cache-read (~0.1x) — on a large session that single reload is a ~500k+ weighted-token tax.
 RELOAD_GUARD_DEFAULT_THRESHOLD = 350_000
 
+# The FALLBACK context window, used only when no statusline snapshot is readable
+# (`resolve_context` prefers the snapshot, which carries the real window).
+NATIVE_1M_WINDOW = 1_000_000
+HELD_200K_WINDOW = 200_000
+
+
+def default_window(env: Optional[dict] = None) -> int:
+    """The fallback window to assume when the live one cannot be read.
+
+    CC 2.1.223 changed `CLAUDE_CODE_DISABLE_1M_CONTEXT` to hold EVERY model with a native
+    1M window to 200K via auto-compaction. Assuming 1M while the session is actually held
+    to 200K under-reports occupancy ~5x — a 190k session reads as 19% instead of 95%, so
+    the >=85% context watchdog never fires and the guard is silently INERT. Silent
+    inertness is the failure mode this project treats as a defect in its own right: a guard
+    that never fires is indistinguishable from a healthy session.
+
+    Falsy spellings are honored (`0`/`false`/`no`/`off`), matching CC's own fix in 2.1.221
+    for `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=0` not being honored — an env var that ignores
+    its own off-switch is worse than one that does not exist.
+    """
+    src = os.environ if env is None else env
+    raw = str(src.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "")).strip().lower()
+    if raw and raw not in {"0", "false", "no", "off"}:
+        return HELD_200K_WINDOW
+    return NATIVE_1M_WINDOW
+
 
 def reload_guard_should_block(tokens: Optional[int], threshold: int) -> bool:
     """True iff the janitor's auto-emitted `[janitor-reload]` should be DEFERRED now.

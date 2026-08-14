@@ -146,7 +146,9 @@ def _coerce_int(raw: str | None, default: int) -> int:
 
 # TRDD-TKNSTP82 A4 — default context-window size for `--live`, shared with the
 # context-watchdog hook via the same env var so the two surfaces never disagree.
-_CONTEXT_WINDOW_DEFAULT = 1_000_000
+# The fallback window is resolved per-call by token_meter.default_window() at the use site,
+# because it depends on the live environment (CC 2.1.223's CLAUDE_CODE_DISABLE_1M_CONTEXT
+# holds native-1M models to 200K). A module constant here would freeze the wrong answer.
 
 
 def _discover_transcript(project_dir: str) -> tuple[str, str] | None:
@@ -186,7 +188,9 @@ def _render_live(as_json: bool) -> int:
 
     transcript, session_id = discovered
     now = int(time.time())
-    window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _CONTEXT_WINDOW_DEFAULT)
+    window_default = _coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), token_meter.default_window()
+    )
     # Same compaction stamp the context-watchdog hook passes — without it `--live` would print a
     # PRE-compaction reading as the live one on the first turn after a compaction, reintroducing
     # exactly the hook/report drift this shared function exists to prevent (TRDD-G043V3V0).
