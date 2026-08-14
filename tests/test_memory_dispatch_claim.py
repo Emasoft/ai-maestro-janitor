@@ -117,3 +117,60 @@ def test_claimed_records_are_pruned_too(tmp_path, monkeypatch):
     mm._prune_old_pending()
     left = list(tmp_path.glob(f"{mm._CLAIMED_PREFIX}*.json"))
     assert len(left) == mm._PENDING_KEEP, f"claimed records not capped: {len(left)}"
+
+
+# --- the legacy single-slot mirror (janitor#264 part b) ---------------------------------
+
+
+def _mirror(sd: Path, p: Path) -> None:
+    """Mirror a per-dispatch record into the legacy single slot, byte-for-byte — exactly what
+    the scheduler does (`memory-maintenance.py::_write_pending` writes the same `text` twice)."""
+    (sd / mdc.LEGACY_NAME).write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def test_claiming_retires_the_legacy_mirror_of_that_dispatch(tmp_path):
+    """janitor#264(b): the mirror outlived every dispatch it described — reported still naming
+    `intervention: atomize` AFTER that pass completed (3 pages atomized, report written, lint
+    75 -> 35) — so a finished chore was indistinguishable from a pending one for anything
+    reading the legacy path, which the installed heartbeat-protocol rule still names."""
+    p = _dispatch(tmp_path, 1700000000, "atomize")
+    _mirror(tmp_path, p)
+
+    got = mdc.claim_one(tmp_path)
+
+    assert got is not None and got["intervention"] == "atomize"
+    assert not (tmp_path / mdc.LEGACY_NAME).exists(), (
+        "the mirror describes a dispatch that has now been claimed — leaving it makes a "
+        "completed chore look pending forever"
+    )
+
+
+def test_claiming_an_older_dispatch_leaves_a_newer_mirror_alone(tmp_path):
+    """The mirror always holds the NEWEST dispatch while claims run OLDEST-first, so clearing
+    it blindly would strand the newer assignment for every reader that only knows the legacy
+    path. Matching on dispatch_id is what makes that impossible."""
+    old = _dispatch(tmp_path, 1700000000, "atomize")
+    new = _dispatch(tmp_path, 1700009999, "split")
+    _mirror(tmp_path, new)  # the scheduler's mirror always describes the newest
+    assert old.exists()
+
+    got = mdc.claim_one(tmp_path)
+
+    assert got is not None and got["intervention"] == "atomize", "oldest-first is unchanged"
+    mirrored = json.loads((tmp_path / mdc.LEGACY_NAME).read_text(encoding="utf-8"))
+    assert mirrored["intervention"] == "split", (
+        "the mirror of a STILL-PENDING newer dispatch must survive an older claim"
+    )
+
+
+def test_retiring_the_mirror_did_not_make_it_claimable(tmp_path):
+    """Retiring must not quietly turn the legacy slot into a fallback SOURCE. Its single-slot
+    clobbering is the very bug per-dispatch records exist to fix (janitor#242), so a lone
+    mirror is still handed to nobody — and still not deleted, since it names work that no
+    per-dispatch record covers."""
+    (tmp_path / mdc.LEGACY_NAME).write_text(
+        json.dumps({"intervention": "repair", "scope": "LOCAL", "dispatch_id": "x"}),
+        encoding="utf-8")
+
+    assert mdc.claim_one(tmp_path) is None
+    assert (tmp_path / mdc.LEGACY_NAME).exists()

@@ -90,9 +90,48 @@ def claim_one(state_dir: Path) -> dict | None:
             os.rename(path, target)
         except OSError:
             continue  # lost the race (or it vanished) — try the next candidate
+        _retire_legacy_mirror(state_dir, payload.get("dispatch_id", ""))
         payload["claimed_path"] = str(target)
         return payload
     return None
+
+
+def _retire_legacy_mirror(state_dir: Path, dispatch_id: str) -> None:
+    """Remove the legacy single-slot mirror IFF it describes the dispatch just claimed.
+
+    The scheduler writes the same payload twice — once as `memory-maint-pending-<id>.json`
+    (claimable, per-dispatch) and once as `memory-maint-pending.json`, because the installed
+    `janitor-heartbeat-protocol` rule still names that fixed path and rules reach sessions on
+    their own schedule, not with this code. Nothing ever removed the mirror, so it outlived
+    every dispatch it described: janitor#264 reports it still naming `intervention: atomize`
+    AFTER that pass had completed — 3 pages atomized, report written, lint 75 -> 35 findings —
+    which makes a finished chore indistinguishable from a pending one for anything reading it.
+
+    MATCHED ON dispatch_id, never cleared blindly. The mirror always holds the NEWEST dispatch,
+    and the claim order is OLDEST-first, so claiming an older dispatch while a newer one is
+    still queued must leave the mirror alone — deleting it there would strand the newer
+    assignment for every reader that only knows the legacy path.
+
+    Deliberately NOT a second clearing mechanism (the shape the advisor warned against): this
+    is the existing claim path taking responsibility for the copy it renders obsolete. The
+    mirror stays UNCLAIMABLE — `claim_one` never hands it to an agent, because its
+    single-slot clobbering is exactly what per-dispatch files exist to fix (janitor#242).
+
+    Best-effort: a mirror we fail to remove is stale state, while a raise here would lose an
+    assignment already renamed out of the candidate list and unrecoverable for anyone else.
+    """
+    if not dispatch_id:
+        return
+    legacy = state_dir / LEGACY_NAME
+    try:
+        mirrored = json.loads(legacy.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(mirrored, dict) and mirrored.get("dispatch_id") == dispatch_id:
+        try:
+            legacy.unlink()
+        except OSError:
+            return
 
 
 def main() -> int:
