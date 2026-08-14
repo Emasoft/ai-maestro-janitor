@@ -25,9 +25,16 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
 3. **Scan with zizmor.** Capture text + SARIF:
 
    ```bash
-   # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
-   # at its first space and the report lands where nobody looks, reporting success.
-   MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+   # Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
+   # Two real failure modes, and each single-source form hits one: resolving from the CWD
+   # picks whichever nested repo the agent happens to be standing in, so two passes of one
+   # chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+   # into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
+   # both — the anchor is stable for the whole session, and `git -C` still resolves a
+   # worktree to its main checkout.
+   ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
+   MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+   MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
    REPORT_DIR="$MAIN_ROOT/reports/janitor-github-workflow-doctor"
    mkdir -p "$REPORT_DIR"
    TS="$(date +%Y%m%d_%H%M%S%z)"

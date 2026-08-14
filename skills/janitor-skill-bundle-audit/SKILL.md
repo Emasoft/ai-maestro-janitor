@@ -52,14 +52,18 @@ Parse `$ARGUMENTS` for any of (all optional):
 1. **Pre-flight checks**:
 
    ```bash
-   # Resolve project root (worktree-safe).
-   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-     # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
-     # at its first space and the report lands where nobody looks, reporting success.
-     PROJECT_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
-   else
-     PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-   fi
+   # Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
+   # Two real failure modes, and each single-source form hits one: resolving from the CWD
+   # picks whichever nested repo the agent happens to be standing in, so two passes of one
+   # chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+   # into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
+   # both — the anchor is stable for the whole session, and `git -C` still resolves a
+   # worktree to its main checkout.
+   # --porcelain: plain output is columns, so awk '{print $1}' truncates a repo path
+   # at its first space and the report lands where nobody looks, reporting success.
+   ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
+   PROJECT_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+   PROJECT_ROOT="${PROJECT_ROOT:-$ANCHOR}"
 
    # Self-scan guard.
    if [ -f "$PROJECT_ROOT/.claude-plugin/plugin.json" ] && \

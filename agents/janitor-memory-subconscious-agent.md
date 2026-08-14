@@ -108,7 +108,19 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 ```bash
 PASS=consolidate            # the pass you were launched for
 SLUG=local                  # scope / short subject
-MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+# CLAUDE_PROJECT_DIR is the stable anchor (janitor#264): the janitor's own launcher
+# sets it once per session, so every pass of a multi-pass run lands under the SAME
+# root regardless of which directory the agent's cwd happens to be in that turn.
+# Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
+# Two real failure modes, and each single-source form hits one: resolving from the CWD
+# picks whichever nested repo the agent happens to be standing in, so two passes of one
+# chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+# into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
+# both — the anchor is stable for the whole session, and `git -C` still resolves a
+# worktree to its main checkout.
+ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
+MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
 REPORT_DIR="$MAIN_ROOT/reports/janitor-memory-subconscious-agent"; mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
 printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"

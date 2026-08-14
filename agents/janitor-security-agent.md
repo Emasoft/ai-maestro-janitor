@@ -94,14 +94,24 @@ or one full-sweep, the skills' caps. Quality over volume; the next dispatch cove
 
 Do the WHOLE pass in your own context. Write the detailed report to
 `$MAIN_ROOT/reports/janitor-security-agent/<YYYYMMDD_HHMMSS±HHMM>-<domain>-<slug>.md`
-(resolve `$MAIN_ROOT` via `git worktree list --porcelain | sed -n '1s/^worktree //p'`). Return to your
+(resolve `$MAIN_ROOT` with the anchored block below — never a bare `git worktree list`, which
+resolves against the CWD and so splits one chore's reports across two trees). Return to your
 caller ONLY one line plus that report path — never raw findings, never file bodies, never a
 secret value.
 
 ```bash
 DOMAIN=workflow             # the domain you were launched for — a WORD, not digits
 SLUG=audit                  # short subject
-MAIN_ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+# Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
+# Two real failure modes, and each single-source form hits one: resolving from the CWD
+# picks whichever nested repo the agent happens to be standing in, so two passes of one
+# chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
+# into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
+# both — the anchor is stable for the whole session, and `git -C` still resolves a
+# worktree to its main checkout.
+ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
+MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
 REPORT_DIR="$MAIN_ROOT/reports/janitor-security-agent"; mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$DOMAIN-$SLUG.md"
 printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
