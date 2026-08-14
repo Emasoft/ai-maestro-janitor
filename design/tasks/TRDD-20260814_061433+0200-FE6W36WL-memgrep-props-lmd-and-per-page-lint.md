@@ -39,6 +39,24 @@ count against old pages a second time.
 **STILL OPEN (not this card's scope):** the installed `memgrep` binary is older than HEAD, so
 none of this is live until `cargo install --path scripts/memgrep` runs.
 
+**FOUND WHILE DOGFOODING — a residual `atom-after-footer` FP class, in BOTH implementations.**
+Running the new Rust check on a real USER page
+(`debugging-methodology-verify-before-concluding-cross-repo-probes-and-peer-reports.md`) flags
+two genuine body atoms at lines 109 and 127. Its headings are `## See also` (69) and
+`## Notes and lessons learned` (143) — nothing else. Both are footer-family, so the "maximal
+suffix of footer headings" walk starts the footer region at 69, even though 74 lines of real
+atoms sit between the two headings.
+
+The Python gate agrees exactly (0-based 68 = the Rust 1-based 69), so janitor#227's
+gate-vs-arbiter divergence is genuinely closed — this is a shared, faithful reproduction, NOT a
+port bug, and it predates the port.
+
+The rule computes the run over the HEADING LIST alone; it never asks whether content intervenes.
+A `## See also` with atoms after it is a mid-page section, not a trailing footer. The likely fix
+is to break the run when non-blank, non-heading content separates two footer headings — but that
+re-opens boundary semantics this card declares settled, so it must be a separate card WITH a
+before/after count on the live corpus, not an inline tweak. Do NOT "obviously fix" it in passing.
+
 **Design decisions already settled — do NOT re-litigate:**
 
 **Design decisions already settled — do NOT re-litigate:**
