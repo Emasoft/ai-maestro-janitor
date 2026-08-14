@@ -3,20 +3,43 @@ trdd-id: FE6W36WL
 title: memgrep trio — one block-props spelling, a bumped page lmd, and a per-page lint that can see cross-page rules
 column: dev
 created: 2026-08-14T06:14:33+0200
-updated: 2026-08-14T06:14:33+0200
+updated: 2026-08-14T07:41:00+0200
 current-owner: main
 task-type: bugfix
 external-refs: [janitor#266, janitor#265, janitor#262, janitor#260]
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [ae7f32a8, 22ed55f7, 88390fc2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
 
-**NEXT ACTION:** implement part A (one `render_block_props` in
-`scripts/memgrep/src/memory.rs`), then B, then C. Nothing is implemented yet; the whole
-value delivered so far is that all three defects are REPRODUCED and the design is SETTLED
-by measurement rather than argument.
+**ALL THREE PARTS ARE IMPLEMENTED, TESTED AND COMMITTED — LOCALLY ONLY.**
+
+| part | commit | verified by |
+|---|---|---|
+| A — one `render_block_props`, three writers | `ae7f32a8` | round-trip test; the spaced lesson bracket had never been emitted before |
+| B — `bump_page_lmd` in add-atom/add-lesson/edit/migrate | `ae7f32a8` | unit tests + the existing test that had ENCODED the bug now asserts the bump |
+| B-derived — `lmd` dropped from `corpus_digest` | `22ed55f7` | test asserts an lmd-only change does NOT churn, a description change DOES |
+| C — per-page lint sees cross-page rules | `88390fc2` | the original reproduction now reports; `cargo test` 194+136 green |
+
+**NEXT ACTION:** nothing on this card until the tree is PUSHED. The three GitHub issues stay
+OPEN deliberately — 222 commits are unpushed, so the fixes are not public and closing them
+would be a false claim. Close #266/#265/#262 only after the push, and when closing #266 say
+that pre-change pages keep the unspaced spelling forever, or someone will "fix" a wrong grep
+count against old pages a second time.
+
+**Measured after the fact, worth keeping:**
+- Every real page already carries `lmd:`/`updated:` — across all three live scopes (236 files)
+  the only five without it are `MEMORY.md` and `memory-reorg-proposed.md`, the index/report
+  family `lint_paths` already excludes. So "maintain, never repair" costs nothing in practice.
+- Per-page lint on the largest live scope (146 pages, DEBUG build): **0.69 s, 0 ERROR
+  findings** — the PostToolUse hook filters `ERROR ` only, so the pre-existing WARN cluster
+  cannot flood it. The cost objection to C was unfounded.
+
+**STILL OPEN (not this card's scope):** the installed `memgrep` binary is older than HEAD, so
+none of this is live until `cargo install --path scripts/memgrep` runs.
+
+**Design decisions already settled — do NOT re-litigate:**
 
 **Design decisions already settled — do NOT re-litigate:**
 
