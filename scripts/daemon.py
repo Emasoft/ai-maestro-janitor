@@ -616,6 +616,28 @@ def task_version_update() -> None:
         except Exception as exc:  # noqa: BLE001 — pinning must NEVER break self-update
             state.log_line("daemon", f"  version-update: last-good pin skipped: {exc}")
 
+    # TRDD-ZM5LZ24Y — Option A (self-healing pin). This call MUST run on
+    # every fire, NOT only inside `if updated:` above: the block above only
+    # certifies a version the DAEMON itself just installed. A version
+    # installed by a human/agent running `claude plugin update ... --scope
+    # user` (which this project's CLAUDE.md instructs on every CI pass)
+    # never goes through `if updated:` at all — that was the entire bug: the
+    # pin stayed frozen on whatever the daemon last self-updated to, forever.
+    # `certify_newest_if_clean` re-derives the newest CACHED version itself
+    # and is a no-op when it is already pinned, so this costs nothing on a
+    # steady-state fire and only does work when the pin has actually drifted.
+    try:
+        newly_pinned = vu.certify_newest_if_clean(plugin_root.parent)
+    except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon
+        state.log_line("daemon", f"  version-update: periodic re-pin skipped: {exc}")
+    else:
+        if newly_pinned:
+            state.log_line(
+                "daemon",
+                f"  version-update: periodic re-pin certified last-good="
+                f"{newly_pinned} (C3 manifest-HMAC trust anchor refreshed)",
+            )
+
 
 def task_oauth_rotator_supervisor() -> None:
     """Governance (alert-only) for the opt-in OAuth account rotator

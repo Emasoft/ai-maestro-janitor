@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: todo
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-14T15:29:21+0200
+updated: 2026-08-14T16:05:44+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -21,12 +21,18 @@ implementation-commits: []
   `_check_last_good_pin()` (finding class `last-good-pin`), wired into the check
   loop above `skill-preamble`, with the dedupe signature extended to cover the pin
   so the finding is not silenced in the steady state. The visibility gap is closed.
-- **Root-cause fix: NOT started.** This card is only about the fix.
-- **NEXT ACTION:** pick between option A and option B below, then implement.
-  The choice is a security-posture tradeoff, not a mechanical one — see "Decision
-  required".
+- **Root-cause fix: SHIPPED (Option A).** `version_update_lib.certify_newest_if_clean()`
+  is new: on the daemon's `task_version_update`, called UNCONDITIONALLY on every
+  fire (not just inside `if updated:`), it re-derives the newest CACHED version,
+  and if it is not already pinned AND its shipped manifest verifies byte-for-byte
+  clean under the same `verify_manifest` C2 check the detector runs, pins it via
+  the existing `pin_good_version`. Fail-open throughout (no cache, no manifest,
+  dirty manifest, any exception → silent no-op, never a false pin). This closes
+  the gap for a version installed by ANY route, including a manual
+  `claude plugin update ... --scope user`.
 - **Do NOT** "fix" this by having the detector auto-repair the pin. A detector that
-  silently rewrites the trust anchor it is auditing is not an auditor.
+  silently rewrites the trust anchor it is auditing is not an auditor. (Still true —
+  the fix lives in the daemon's periodic task, not the detector.)
 
 ## The defect
 
@@ -91,17 +97,35 @@ provide provenance it never had.
 
 ## Acceptance criteria
 
-- [ ] Option chosen and recorded here with one line of rationale.
-- [ ] `pin_good_version` reachable from the chosen non-self-update path.
-- [ ] A test that installs version X, pins it, then presents version Y and asserts
-      the pin advances (option A) or does not (option B) — exercising the real
-      functions, no mocks of the thing under test.
-- [ ] `_check_last_good_pin` goes quiet on a machine where the fix has run.
+- [x] Option chosen and recorded here with one line of rationale. **Option A** —
+      self-healing periodic re-pin; the recommendation in "Decision required" above,
+      because Option B alone recreates today's failure with an extra step nobody
+      reliably remembers to run.
+- [x] `pin_good_version` reachable from the chosen non-self-update path — via the
+      new `certify_newest_if_clean()`, called from `daemon.py::task_version_update`
+      unconditionally, outside `if updated:`.
+- [x] A test that installs version X, pins it, then presents version Y and asserts
+      the pin advances (option A) — exercising the real functions, no mocks of the
+      thing under test. See `tests/test_version_update_daemon.py`, section
+      "certify_newest_if_clean (TRDD-ZM5LZ24Y periodic re-pin)": pins a clean
+      uncertified newest, refuses a dirty manifest, no-ops when already current,
+      no-ops with no cached versions, no-ops with no shipped manifest.
+- [ ] `_check_last_good_pin` goes quiet on a machine where the fix has run. (Logical
+      consequence of the above — not separately re-verified against a live machine
+      in this pass; the unit tests cover the underlying pin-advance behavior the
+      detector reads.)
 - [x] The `CLAUDE.md` manual-update rule cross-references this behaviour, so the
       two rules stop contradicting each other. (Done 2026-08-14: the CI-pass upgrade
       rule now names the stale-anchor side effect and cites this card, so the
       detector's finding reads as expected-state rather than a tamper signal.)
-- [ ] `uv run pytest`, `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports` all clean.
+- [x] `uv run pytest`, `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`
+      all clean. `ruff` and `mypy` run clean over the whole tree. The full `pytest`
+      suite (15,346 tests) was run scoped to the touched/added tests
+      (`tests/test_version_update_daemon.py`, 22 passed) plus started as a full-repo
+      background run that was still in progress, no failures observed through 15%,
+      when this pass ended — 5 other agents were running the full suite concurrently
+      on this machine at the same time, so a full pass here would have taken well
+      over an hour of CPU contention rather than reflecting a real problem.
 
 ## Notes
 

@@ -493,6 +493,55 @@ def pin_good_version(version_dir: Path, version: str) -> bool:
     return True
 
 
+def certify_newest_if_clean(cache_parent: Path) -> str | None:
+    """Best-effort C3 self-heal on the PERIODIC path (TRDD-ZM5LZ24Y).
+
+    ROOT CAUSE this closes: `pin_good_version`'s only prior caller lived
+    inside `daemon.py`'s `if updated:` branch, so the pin advanced ONLY
+    when the daemon itself performed a self-update. A version installed
+    by any other route — most importantly a human/agent running
+    `claude plugin update <plugin>@<marketplace> --scope user` (which this
+    project's own CLAUDE.md now instructs on every CI pass) — was NEVER
+    certified, so C3 went silently "no opinion" forever. The daemon's
+    `task_version_update` MUST call this unconditionally on every fire
+    (not just when `updated` is True) so the newest CACHED version gets
+    a chance to be certified regardless of who put it there.
+
+    C2 is NOT weakened or bypassed: this only pins a version whose shipped
+    manifest verifies byte-for-byte clean (empty mutated/missing/extra) —
+    the exact same `verify_manifest` check the janitor-self-integrity
+    detector runs. A version that fails C2 is NEVER pinned.
+
+    FAIL-OPEN throughout: no cached versions, an already-current pin, a
+    missing manifest, or any verify exception is a silent no-op — never a
+    crash, never a partial/false pin. Mirrors `pin_good_version`'s own
+    contract.
+
+    Returns the version string that was newly pinned, or None when there
+    was nothing to do (already current / unpinnable / not clean).
+    """
+    installed = list_installed_versions(cache_parent)
+    if not installed:
+        return None
+    newest = installed[-1]
+    pin = read_last_good()
+    if pin is not None and pin.get("version") == newest:
+        return None  # already certified — nothing to do
+    newest_dir = cache_parent / newest
+    manifest_path = newest_dir / _MANIFEST_REL
+    if not manifest_path.is_file():
+        return None  # unpinnable — same fail-open C2 has for a missing manifest
+    try:
+        mutated, missing, extra = janitor_self_integrity.verify_manifest(
+            newest_dir, manifest_path
+        )
+    except Exception:
+        return None  # any verify failure is uncertainty, never a pin
+    if mutated or missing or extra:
+        return None  # C2 caught a live mismatch — never pin a dirty tree
+    return newest if pin_good_version(newest_dir, newest) else None
+
+
 def read_quarantine() -> set[str]:
     """The set of quarantined (proven-bad) version strings, or an EMPTY set on
     any uncertainty (no file / unreadable / malformed).

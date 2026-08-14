@@ -323,3 +323,124 @@ def test_malformed_registry_degrades_and_never_raises(env, tmp_path, monkeypatch
     p.write_text("{ not json", encoding="utf-8")
     assert _vu().registry_install_records() == []
     assert _vu().detect_install_scopes() == []
+
+
+# ---------- certify_newest_if_clean (TRDD-ZM5LZ24Y periodic re-pin) -------
+#
+# `pin_good_version`'s only prior caller lived inside `daemon.py`'s
+# `if updated:` branch, so a version installed by any OTHER route (a human
+# running `claude plugin update ... --scope user`) was never certified and
+# C3 went permanently "no opinion". `certify_newest_if_clean` is the
+# periodic-path fix: it re-derives the newest CACHED version itself and
+# pins it only when its shipped manifest verifies byte-for-byte clean
+# (the same C2 check the janitor-self-integrity detector runs) — so C2 is
+# never weakened, and every uncertainty is a silent no-op (fail-open).
+
+
+def _clean_manifest_json() -> str:
+    """A manifest asserting NO tracked files exist — matches a version dir
+    that ships none of `DEFAULT_MANIFEST_GLOBS` (README.md, CLAUDE.md,
+    skills/**/SKILL.md, ...), so `verify_manifest` reports it clean."""
+    return json.dumps({"version": 1, "files": {}})
+
+
+def _dirty_manifest_json() -> str:
+    """A manifest that claims `CLAUDE.md` exists with a known hash, while no
+    such file is written on disk — `verify_manifest` reports it as
+    `missing`, so the version must NOT be certified."""
+    return json.dumps({"version": 1, "files": {"CLAUDE.md": "deadbeef"}})
+
+
+def _make_manifest(version_dir: Path, *, clean: bool) -> None:
+    integrity_dir = version_dir / ".integrity"
+    integrity_dir.mkdir(parents=True, exist_ok=True)
+    blob = _clean_manifest_json() if clean else _dirty_manifest_json()
+    (integrity_dir / "manifest-sha256.json").write_text(blob, encoding="utf-8")
+
+
+def test_certify_newest_if_clean_pins_a_clean_uncertified_newest(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The core fix: a version installed OUTSIDE the daemon's own self-update
+    branch (no prior pin at all) still gets certified once its manifest
+    verifies clean — this is the periodic path `daemon.py` must call on
+    every fire, not only inside `if updated:`."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "2.0.0", clean=True)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned == "2.0.0"
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "2.0.0"
+
+
+def test_certify_newest_if_clean_never_pins_a_dirty_manifest(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A version whose manifest does NOT verify clean (C2 catches a
+    mismatch) must never be pinned — C3 must never certify what C2 itself
+    would reject."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "3.0.0", clean=False)
+
+    vu = _vu()
+    pinned = vu.certify_newest_if_clean(cache_parent)
+
+    assert pinned is None
+    assert vu.read_last_good() is None
+
+
+def test_certify_newest_if_clean_is_a_noop_when_already_current(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Steady-state fire: the newest cached version is already pinned, so
+    the function must do nothing (no re-write, no wasted work) — every
+    heartbeat calls this unconditionally, so the no-op path must be cheap
+    and side-effect-free."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "4.0.0", clean=True)
+
+    vu = _vu()
+    first = vu.certify_newest_if_clean(cache_parent)
+    assert first == "4.0.0"
+
+    second = vu.certify_newest_if_clean(cache_parent)
+    assert second is None
+    # Bind before subscripting: read_last_good() is `dict | None`, so indexing it
+    # directly raises TypeError on a regression instead of failing the assertion —
+    # which reports "unsubscriptable NoneType" rather than "the pin went missing".
+    pin = vu.read_last_good()
+    assert pin is not None
+    assert pin["version"] == "4.0.0"
+
+
+def test_certify_newest_if_clean_noop_with_no_cached_versions(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No cache dir at all (fresh machine, nothing installed yet) is
+    uncertainty, not a signal — fail-open, never a crash."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    vu = _vu()
+    assert vu.certify_newest_if_clean(tmp_path / "no-such-cache") is None
+    assert vu.read_last_good() is None
+
+
+def test_certify_newest_if_clean_noop_when_manifest_missing(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached version with no shipped `.integrity/manifest-sha256.json`
+    (an older release) is unpinnable — same fail-open C2 already has for a
+    missing manifest, never a crash and never a false pin."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    (cache_parent / "5.0.0").mkdir(parents=True)
+
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent) is None
+    assert vu.read_last_good() is None
