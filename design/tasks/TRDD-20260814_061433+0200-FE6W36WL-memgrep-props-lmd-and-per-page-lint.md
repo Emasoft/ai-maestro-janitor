@@ -1,9 +1,9 @@
 ---
 trdd-id: FE6W36WL
 title: memgrep trio — one block-props spelling, a bumped page lmd, and a per-page lint that can see cross-page rules
-column: dev
+column: complete
 created: 2026-08-14T06:14:33+0200
-updated: 2026-08-14T07:41:00+0200
+updated: 2026-08-14T16:24:00+0200
 current-owner: main
 task-type: bugfix
 external-refs: [janitor#266, janitor#265, janitor#262, janitor#260]
@@ -27,6 +27,15 @@ OPEN deliberately — 222 commits are unpushed, so the fixes are not public and 
 would be a false claim. Close #266/#265/#262 only after the push, and when closing #266 say
 that pre-change pages keep the unspaced spelling forever, or someone will "fix" a wrong grep
 count against old pages a second time.
+
+**COLUMN CORRECTED 2026-08-14T16:24 — `dev` → `complete`.** The work finished at 07:41 but
+the card kept asserting `dev`, so the board claimed someone was actively working it. That
+cost real effort: two lean-workers were dispatched at this card, both correctly read this
+STATE block, found NEXT ACTION = "nothing until pushed", and wrote nothing — and their
+silence was then misread as failure, nearly triggering a third attempt to redo committed
+work. **A card that stops moving must stop claiming otherwise; an untrue column is worse
+than an unstarted one, because it hides the truth from the only view anyone checks.**
+Awaiting `complete → publish`, which is where the issue-closing above belongs.
 
 **Measured after the fact, worth keeping:**
 - Every real page already carries `lmd:`/`updated:` — across all three live scopes (236 files)
