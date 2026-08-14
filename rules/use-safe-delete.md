@@ -10,18 +10,15 @@
 
 # Use the janitor's safe-delete for **risky** deletions
 
-When you delete a file or directory inside a project, decide first
-whether the deletion is *risky*. If it is, use the
-**ai-maestro-janitor `safe-delete`** entry point instead of `rm`,
-`rmdir`, `Path.unlink`, or `shutil.rmtree`. If it isn't, plain `rm`
-(or `rmdir`, `Path.unlink`, `shutil.rmtree`) is the right tool —
-do not push every deletion through `.trashcan/` or it will balloon.
+Deleting inside a project? Decide first whether it is *risky*; if so use
+**`safe-delete`** instead of `rm` / `rmdir` / `Path.unlink` /
+`shutil.rmtree`. If not, those are right — do not push every deletion
+through `.trashcan/` or it will balloon.
 
-`safe-delete` does not delete; it MOVES the targets into
-`<project_root>/.trashcan/<timestamp>/` (mirroring the original
-layout) plus a sibling `<timestamp>.txt` manifest listing every
-project-relative path that was moved. Recovery is then a single `mv`
-on any platform, no special tooling required.
+`safe-delete` does not delete: it MOVES targets into
+`<project_root>/.trashcan/<timestamp>/` (original layout mirrored) plus a
+sibling `<timestamp>.txt` manifest of every path moved, so recovery is
+one `mv` on any platform.
 
 ## Risk judgement (use this, not a checklist of paths)
 
@@ -45,6 +42,23 @@ the content back without human intervention?"**
 When in doubt, treat it as risky and use `safe-delete`. The cost of
 a false alarm is one extra `mv` on recovery; the cost of a
 mis-classified `rm` on real work is permanent loss.
+
+## Recoverable ⇒ **do NOT ask** (USER, 2026-08-14)
+
+This tool exists so an agent deletes **without stopping to ask**: in
+`.trashcan/` nothing is lost, so there is nothing left to authorize.
+Risky → `safe-delete` it and keep going (say in one line what moved
+where); regeneratable → `rm` it and keep going. **Ask only when the act
+cannot be made recoverable** — history rewrite, credential, remote or
+shared resource, anything outside the project tree.
+
+An ask on a recoverable delete is not caution, it is a stall: an
+unattended run (cron heartbeat, background agent, overnight session) has
+nobody to answer, so it protects no file and parks the task to buy a
+guarantee `.trashcan/` already gives free. This is RULE 0's own
+sanctioned form (commit first, `_dev/`, trashcan); its "ask before
+deleting untracked files" clause is aimed at *permanent loss*, not at a
+move with a manifest.
 
 ## Two ways to invoke
 
@@ -70,34 +84,15 @@ nothing is moved on partial failure.
 
 - The user explicitly typed `rm` / `rmdir` / `del` / `git clean`
   themselves. They have already made the call; do not second-guess.
-- The targets are clearly regeneratable artefacts (see the "Yes,
-  trivially recoverable" list above) — those don't belong in
-  `.trashcan/` and would balloon it.
-- The targets live OUTSIDE the project tree — system caches, OS
-  temp files, package-manager mirrors, etc. `safe-delete` will
-  refuse to move them anyway.
+- The targets are clearly regeneratable (list above) — they would
+  balloon `.trashcan/`.
+- The targets live OUTSIDE the project tree; `safe-delete` refuses
+  them anyway.
 
-## Why this exists
+## The trashcan itself
 
-`rm` is irreversible across crashes, partial successes, and
-surprised agents. For *risky* deletions — anything representing
-human work or whose status as "throwaway" is not obvious — the
-`.trashcan/` folder gives a recovery window without committing to
-git first. The folder is gitignored, survives `git clean -fdx` via
-two tracked markers (`.gitkeep` + `README.txt`), and is purged
-automatically by the `trashcan-purge` detector after
-`CLAUDE_PLUGIN_OPTION_TRASHCAN_MAX_AGE_DAYS` (default: 90 days).
-
-Recovery of a single file is just:
-
-```bash
-mv .trashcan/<timestamp>/<original-relative-path> <original-relative-path>
-```
-
-The manifest `.trashcan/<timestamp>.txt` lists every path so a bulk
-restore is a one-liner with `xargs`.
-
-The whole point of the risk gate is to keep `.trashcan/` small and
-useful: only the deletions that *would actually hurt to lose* end
-up there, so when something does go wrong the trashcan is short
-enough to scan by eye and the right candidate is obvious.
+Gitignored, survives `git clean -fdx` via two tracked markers
+(`.gitkeep` + `README.txt`), purged by the `trashcan-purge` detector
+after `CLAUDE_PLUGIN_OPTION_TRASHCAN_MAX_AGE_DAYS` (default 90).
+Recovery is `mv .trashcan/<timestamp>/<rel-path> <rel-path>`; the
+`<timestamp>.txt` manifest makes a bulk restore an `xargs` one-liner.
