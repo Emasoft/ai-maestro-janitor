@@ -48,6 +48,22 @@ signal — the tamper detector goes dark exactly when the tree has been touched 
 hand, which is not the moment you want it dark. That is worth a cheap defence, and
 it is why this card is corrected rather than withdrawn.
 
+**USER, same day — the guard fails in the OTHER direction too, and that half is
+worse.** "It is perfectly valid to publish a plugin that has no git at all." So a
+plugin SOURCE tree may legitimately carry no `.git`, and then
+`is_plugin_source_checkout()` returns False — meaning **`stage_closure` does not
+refuse the write**. That is the destructive direction: the TRDD-RYZCVVKA class
+(2026-07-11, this repo's closure reverted to the v0.39.0 release, surfaced only
+because a lost +x bit broke 22 tests) is re-openable against any git-less plugin
+checkout.
+
+`.git` is therefore a poor discriminator in BOTH directions — present on some
+installs, absent from some sources — which is a stronger argument for the
+location-based test than the one I originally filed. **Raise the write-guard half
+back up if it is ever confirmed reachable**; it is only `low` because
+`stage_closure`'s destination is the DATA dir in every current caller, so the guard
+is defence-in-depth rather than the sole barrier.
+
 **What does NOT survive:** any claim that self-integrity is inert in production, and
 the urgency that came with it. The "one predicate, two opposite failure directions"
 analysis stays a valid design observation, but it is no longer evidence of a live
