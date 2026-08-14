@@ -1,9 +1,7 @@
 ---
 trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
-column: blocked
-pre-block-column: testing
-blocked-by: [SE7TP1EU]
+column: testing
 created: 2026-08-14T15:29:21+0200
 updated: 2026-08-14T20:48:00+0200
 current-owner: janitor-session
@@ -141,8 +139,12 @@ provide provenance it never had.
       extreme.
       **New requirement — a POSITIVE observation, never an absence:** this machine's
       `integrity/last-good.json` is observed to NAME the running version, read
-      directly, after a daemon periodic fire. Blocked on TRDD-SE7TP1EU, since the
-      guard prevents the check from running on an installed layout at all.
+      directly, after a daemon periodic fire.
+      **SE7TP1EU no longer blocks this** (corrected same day): the guard misfired
+      only because that install had a stray `.git`; a clean re-clone has none, so
+      the check runs normally. What this box really waits on is the RELEASE — the
+      function landed in `a8982a03` and is not in the shipped 3.2.0, so there is
+      nothing on this machine yet that could advance the pin.
       (An agent must still NOT run `/janitor-repin-integrity` to satisfy this — see
       the STATE block.)
 - [x] The `CLAUDE.md` manual-update rule cross-references this behaviour, so the

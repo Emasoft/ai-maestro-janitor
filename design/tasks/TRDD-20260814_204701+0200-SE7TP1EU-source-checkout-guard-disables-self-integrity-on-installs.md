@@ -1,14 +1,14 @@
 ---
 trdd-id: SE7TP1EU
 title: One predicate answers two questions with opposite safe-failure directions
-column: todo
+column: backburner
 created: 2026-08-14T20:47:01+0200
-updated: 2026-08-14T20:47:01+0200
+updated: 2026-08-14T20:56:00+0200
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 approval-tier: 0
-severity: medium
+severity: low
 npt: []
 eht: []
 external-refs: [TRDD-ZM5LZ24Y, TRDD-RYZCVVKA]
@@ -16,6 +16,52 @@ implementation-commits: []
 ---
 
 # `is_plugin_source_checkout` cannot tell a dev tree from an installed plugin
+
+## ⚠ CORRECTION 2026-08-14, SAME DAY — the central claim below is FALSE
+
+**Severity drops from medium to LOW; this is a narrow fragility, not a universal
+defect.** The section below asserts the guard misfires on EVERY installed instance.
+It does not.
+
+The USER emptied `~/.claude/plugins/cache/` entirely and Claude Code re-cloned it
+(no crash — the install manifests live outside the cache and are authoritative).
+Re-measured on the FRESH clone:
+
+```
+no-git  MANIFEST  3.2.0
+```
+
+The freshly installed plugin dir carries `.claude-plugin/plugin.json` but **no
+`.git`**, and no ancestor has one either — so `is_plugin_source_checkout()` returns
+**False** and both self-integrity checks run exactly as designed on a normal
+install.
+
+The `.git` I measured in that directory was real (observed directly), but it was an
+**artifact of that one install**, not something the installer creates. My inference
+"the installer clones, therefore every cache dir is a git work tree" was wrong, and
+I generalized it from a single host without ever checking a clean one.
+
+**What survives, narrowly:** IF a cache dir acquires a `.git` by any route (a manual
+clone into the cache, a dev experiment, an older installer), the guard silently
+disables `_check_manifest` and `_check_last_good_pin` for that install, with no
+signal — the tamper detector goes dark exactly when the tree has been touched by
+hand, which is not the moment you want it dark. That is worth a cheap defence, and
+it is why this card is corrected rather than withdrawn.
+
+**What does NOT survive:** any claim that self-integrity is inert in production, and
+the urgency that came with it. The "one predicate, two opposite failure directions"
+analysis stays a valid design observation, but it is no longer evidence of a live
+outage.
+
+**The lesson, which is the reusable part:** I measured one host, found a startling
+result, and filed it as a general defect without testing a clean install — the
+cheapest possible control. A finding whose blast radius is "every machine" deserves
+at least one second machine, or one clean state, before it is written down as fact.
+
+---
+
+## The defect as originally filed (SUPERSEDED by the correction above — retained
+## verbatim as the record, do NOT act on it)
 
 ## The defect (MEASURED 2026-08-14, on this machine)
 
