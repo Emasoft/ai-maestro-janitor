@@ -2296,6 +2296,69 @@ fn footer_section_line(text: &str) -> Option<usize> {
     None
 }
 
+/// The 0-based line index where the page's TRAILING footer REGION begins, or `None` — the
+/// `atom-after-footer` lint boundary, DELIBERATELY DIFFERENT from `footer_section_line` above
+/// (janitor#260 endgame).
+///
+/// `footer_section_line` returns the EARLIEST footer-family heading, which is exactly right for
+/// `insert_atom_block`'s splice point (splice before any of them) but WRONG for deciding "is this
+/// atom misplaced after the footer": a footer-shaped heading that appears mid-page — e.g.
+/// `## See also` at line 279 of a 524-line page, followed by ordinary content and five more real
+/// atoms — is not a trailing footer at all, and the earliest-hit boundary would misclassify every
+/// atom after it as "inside the footer" forever. That is exactly the bug the Python twin
+/// (`memory_content_precheck._footer_heading_line`) carried and fixed for janitor#260: the correct
+/// boundary is the maximal SUFFIX of the page made only of footer-family headings — if the page
+/// does not END on one, it has no trailing footer region at all, so nothing after an earlier,
+/// mid-page footer-shaped heading is flagged.
+///
+/// Mirrors `_footer_heading_line` exactly (same heading family as `footer_section_line`, same
+/// fence-awareness, same trailing-run walk) so the Python precheck (the repair-chore GATE) and
+/// this linter (the repair-agent's ARBITER) can never disagree about where the footer starts —
+/// janitor#227's shape (gate and arbiter disagreeing loops the repair chore forever), here fixed
+/// by giving `atom-after-footer` exactly one owner: this function, called from `lint_paths` below.
+///
+/// One deliberate, non-divergent difference: the case fold here is ASCII-only (matching both
+/// sibling functions above) while Python's `.lower()` is Unicode-aware. The footer family is four
+/// fixed English phrases, so no heading exists that the two folds classify differently — but it is
+/// recorded rather than left implicit, because an unstated known difference is precisely what turns
+/// a "these two can never disagree" comment into a false one.
+fn footer_section_trailing_line(text: &str) -> Option<usize> {
+    let mut in_fence = false;
+    // (0-based line index, is_footer) for every heading OUTSIDE a fence, in page order.
+    let mut headings: Vec<(usize, bool)> = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if t.starts_with('#') {
+            let low = t.to_ascii_lowercase();
+            let heading_text = low.trim_start_matches('#').trim();
+            let is_footer = heading_text == "applies to"
+                || heading_text == "governed by"
+                || heading_text == "see also"
+                || low.contains("notes and lessons learned")
+                || low.contains("lessons learned");
+            headings.push((i, is_footer));
+        }
+    }
+    // The page must END in a footer heading for a trailing footer region to exist at all — a
+    // footer-shaped heading earlier in the page, with ordinary content following it, is an
+    // ordinary mid-page section and must not swallow everything written after it.
+    if !headings.last().map(|&(_, is_footer)| is_footer).unwrap_or(false) {
+        return None;
+    }
+    let mut start = headings.len() - 1;
+    while start > 0 && headings[start - 1].1 {
+        start -= 1;
+    }
+    Some(headings[start].0)
+}
+
 /// The 1-based line of the page's canonical `## Superseded` delimiter heading (TRDD-57WJL5L2),
 /// fence-aware, or `None` when the page carries no such heading. Exact spelling only, matched
 /// case-insensitively on the heading TEXT (the `##` level is fixed) — this is the ONE canonical
@@ -4697,6 +4760,11 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // the READABILITY layer that keeps the delimiter honest about what the metadata already says.
         let superseded_heading = superseded_heading_line(&text);
         let mut superseded_atom_lines: Vec<usize> = Vec::new();
+        // The page's TRAILING footer region (janitor#260 endgame — see `footer_section_trailing_line`'s
+        // own docstring for why this is NOT `footer_section_line`, which anchors `add-atom` instead).
+        // Computed once per page, outside the loop, so every atom on the page is judged against the
+        // same boundary.
+        let footer_trailing = footer_section_trailing_line(&text);
         for a in atoms_for_lint(&text) {
             atom_ids
                 .entry(a.id.clone())
@@ -4758,6 +4826,32 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "superseded-atom-above-delimiter",
                     ));
                 }
+            }
+            // `a.line` is 1-based, `footer_trailing` is 0-based — so `a.line > footer_start` is
+            // exactly "this marker's 0-based line (`a.line - 1`) is at or after the trailing
+            // footer's start", i.e. `memory_content_precheck._footer_heading_line`'s own
+            // `i >= footer_idx` (janitor#260), just re-expressed to avoid an unsigned `- 1`.
+            // WARN, matching the sibling superseded-delimiter checks above: nothing is lost or
+            // unresolvable (the atom still parses and still ranks), it is purely the splice-anchor
+            // convention (`insert_atom_block` / `add-atom`) drifting out of sync with where the
+            // atom actually landed — `--in "Governed by"`/`"See also"`/Notes then misreads it as
+            // belonging to that footer section instead of standing on its own.
+            if let Some(footer_start) = footer_trailing
+                && a.line > footer_start
+            {
+                violations.push((
+                    Severity::Warn,
+                    p.clone(),
+                    a.line,
+                    format!(
+                        "atom `^{}` sits AT OR AFTER the page's trailing footer region (starts \
+                         line {}) — a link-section lookup like `--in \"Governed by\"` misreads it \
+                         as part of that section; move it back above the footer",
+                        a.id,
+                        footer_start + 1
+                    ),
+                    "atom-after-footer",
+                ));
             }
             let missing = |key: &str| props.get(key).map(|v| v.is_empty()).unwrap_or(true);
             if missing("keywords") {
@@ -9221,6 +9315,115 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn footer_section_line_ignores_see_also_inside_fence() {
         let text = "# p\nbody\n```\n## See also\n```\nmore body\n";
         assert_eq!(footer_section_line(text), None);
+    }
+
+    // janitor#260 endgame — `footer_section_trailing_line` is the SEPARATE, trailing-RUN boundary
+    // the `atom-after-footer` lint check uses, deliberately different from `footer_section_line`
+    // (which stays the earliest-heading splice anchor for `add-atom`/`insert_atom_block`). See the
+    // function's own docstring for the janitor#260 postmortem this guards against.
+
+    #[test]
+    fn footer_section_trailing_line_matches_earliest_when_footer_is_a_single_run() {
+        // The common case — Applies to, Governed by, Notes, all contiguous at the end — has only
+        // ONE run, so trailing and earliest agree: both point at the run's first heading.
+        let text = "# p\nbody\n## Applies to\n- a\n## Governed by\n- b\n## Notes and lessons learned\n";
+        assert_eq!(footer_section_trailing_line(text), Some(2));
+        assert_eq!(footer_section_trailing_line(text), footer_section_line(text));
+    }
+
+    #[test]
+    fn footer_section_trailing_line_skips_a_mid_page_footer_shaped_heading() {
+        // The exact janitor#260 reproduction shape: `## See also` appears mid-page, followed by an
+        // ordinary content section and a real atom, before the page's actual trailing footer run.
+        // `footer_section_line` (earliest-hit) would wrongly return the `## See also` line; the
+        // trailing-run boundary must skip straight past it to the real footer at the end.
+        let text = "# p\nbody\n## See also\n- [[x]]\n## More content\n^ATOM-LIVE-0001 [keywords: k]\nlive fact.\n## Notes and lessons learned\n";
+        assert_eq!(footer_section_line(text), Some(2), "earliest-hit anchor is unaffected");
+        assert_eq!(
+            footer_section_trailing_line(text),
+            Some(7),
+            "trailing-run boundary must be the LAST heading (Notes), not the mid-page See also"
+        );
+    }
+
+    #[test]
+    fn footer_section_trailing_line_none_when_the_page_does_not_end_in_a_footer() {
+        // A footer-shaped heading earlier in the page, with ordinary content (no further footer
+        // heading) after it, has no TRAILING footer region at all — the page simply does not end
+        // on a footer, so nothing on it can be "after the footer".
+        let text = "# p\nbody\n## Governed by\n- a\n## More content\nprose that never becomes a footer\n";
+        assert_eq!(footer_section_trailing_line(text), None);
+    }
+
+    #[test]
+    fn footer_section_trailing_line_walks_back_over_the_whole_trailing_run() {
+        // Two consecutive footer headings at the end: the boundary is the FIRST of that trailing
+        // run (`## See also`), not the last (`## Notes and lessons learned`) — so an atom sitting
+        // between them is still caught as "after the footer".
+        let text = "# p\nbody\n## See also\n- [[x]]\n## Notes and lessons learned\n";
+        assert_eq!(footer_section_trailing_line(text), Some(2));
+    }
+
+    #[test]
+    fn footer_section_trailing_line_none_when_no_footer_at_all() {
+        assert_eq!(footer_section_trailing_line("# p\nno footer here\n"), None);
+    }
+
+    #[test]
+    fn footer_section_trailing_line_ignores_see_also_inside_fence() {
+        let text = "# p\nbody\n```\n## See also\n```\nmore body\n";
+        assert_eq!(footer_section_trailing_line(text), None);
+    }
+
+    #[test]
+    fn lint_flags_atom_after_the_trailing_footer_run() {
+        let dir = lint_tmpdir("atom_after_footer");
+        // An atom spliced AFTER the trailing `## Notes and lessons learned` heading — the
+        // pre-#250 `add-atom` fossil shape the endgame moves this check into the Rust linter for.
+        std::fs::write(
+            dir.join("bad.md"),
+            "---\nname: bad\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-LIVE-0001 [keywords: k]\nan ok fact.\n\n\
+             ## Notes and lessons learned\n\n\
+             ^ATOM-LIVE-0002 [keywords: k]\na misplaced fact.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !v.iter()
+                .any(|(_, _, _, m, c)| *c == "atom-after-footer" && m.contains("ATOM-LIVE-0001")),
+            "the atom BEFORE the footer must not be flagged; got: {v:?}"
+        );
+        assert!(
+            v.iter()
+                .any(|(_, _, _, m, c)| *c == "atom-after-footer" && m.contains("ATOM-LIVE-0002")),
+            "the atom AFTER the footer must be flagged; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_does_not_flag_atom_after_a_mid_page_footer_shaped_heading() {
+        // janitor#260 regression: `## See also` mid-page (with real content and a real atom after
+        // it) must NOT swallow everything that follows — only a genuinely TRAILING footer run may.
+        let dir = lint_tmpdir("atom_after_footer_midpage");
+        std::fs::write(
+            dir.join("ok.md"),
+            "---\nname: ok\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ## See also\n- [[x]]\n\n\
+             ## More content\n\n\
+             ^ATOM-LIVE-0003 [keywords: k]\na real fact after a mid-page See also.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !v.iter()
+                .any(|(_, _, _, m, c)| *c == "atom-after-footer" && m.contains("ATOM-LIVE-0003")),
+            "an atom after a MID-PAGE footer-shaped heading (not the trailing run) must not be \
+             flagged; got: {v:?}"
+        );
     }
 
     #[test]
