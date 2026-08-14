@@ -1,9 +1,10 @@
 ---
 trdd-id: W0XT5B3B
 title: Literal return types plus a refusal-reachability meta-test for every guard
-column: todo
+column: complete
 created: 2026-08-14T10:42:11+0200
-updated: 2026-08-14T10:42:11+0200
+updated: 2026-08-14T18:14:00+0200
+implementation-commits: [3eccb27a]
 current-owner: janitor-main-session
 task-type: infra
 approval-tier: 0

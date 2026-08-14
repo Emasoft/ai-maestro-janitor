@@ -1,9 +1,10 @@
 ---
 trdd-id: ASA7EBJQ
 title: Move real-daemon-spawn tests out of the parallel unit suite
-column: todo
+column: complete
 created: 2026-08-14T10:42:11+0200
-updated: 2026-08-14T10:42:11+0200
+updated: 2026-08-14T18:14:00+0200
+implementation-commits: [3cde6a87]
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0

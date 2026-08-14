@@ -1,9 +1,10 @@
 ---
 trdd-id: VIDVBMLC
 title: Real end-to-end scenario test for the stale index.lock guard
-column: todo
+column: complete
 created: 2026-08-14T10:42:11+0200
-updated: 2026-08-14T10:42:11+0200
+updated: 2026-08-14T18:14:00+0200
+implementation-commits: [3cde6a87]
 current-owner: janitor-main-session
 task-type: infra
 approval-tier: 0
