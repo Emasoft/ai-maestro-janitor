@@ -88,8 +88,34 @@ query teaches nothing and hides its own behaviour.
       first.
 - [ ] Expansion never DROPS a result the unexpanded query would have returned — strictly
       additive, so it cannot make recall worse.
+- [ ] **`add-lesson` refuses (or loudly warns) when the `--keywords` it is handed do not
+      appear in the page's `description:`, and offers to extend it.** Earned empirically
+      on 2026-08-14, not theorised — see "The write→recall gap" below.
 - [ ] `cargo test` in `scripts/memgrep` green; `uv run ruff check scripts tests` and
       `uv run mypy scripts/ --ignore-missing-imports` clean.
+
+## The write→recall gap — measured 2026-08-14, the strongest case for this card
+
+Writing the lesson that motivated this card demonstrated the thesis by failing.
+
+`memgrep add-lesson` was handed **nine** symptom key-phrases. It validated clean, linted
+clean (0 findings), printed an atom id, and exited 0. The lesson was nonetheless
+**unfindable by every one of those nine phrases** — because `recall` ranks on
+`description + title + tags`, and `add-lesson` does not touch `description:`.
+
+Three green signals, one silent failure. The protocol documents the trap in bold —
+*"APPENDING? EXTEND `description:` — ranking ignores the body; an added fact whose symptom
+the description lacks is unfindable"* — and the tool that creates the trap says nothing
+while creating it. The only reason it was caught is that a recall was run afterwards to
+PROVE the write, which nothing in the flow requires.
+
+That is the same shape as the card's thesis: the tool knows the invariant, the human is
+asked to remember it, and the failure is silent and green. `add-lesson` is the sharpest
+place to fix it because it has both halves in hand at write time — the keywords, and the
+description they must reach.
+
+(Fixed manually for that page by extending its `description:`; the lesson now ranks #1 on
+both the seeded phrasing and an unseeded rewording.)
 
 ## Open question — the synonym source
 
