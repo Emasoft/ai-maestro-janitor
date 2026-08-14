@@ -1,9 +1,9 @@
 ---
 trdd-id: OO301H7D
 title: The external clear computes the blocked-on-human signal and then discards it
-column: todo
+column: complete
 created: 2026-08-14T17:48:01+0200
-updated: 2026-08-14T17:48:01+0200
+updated: 2026-08-14T19:24:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -12,7 +12,7 @@ priority: 1
 severity: major
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [fde1bf40]
 ---
 
 # The external clear computes the blocked-on-human signal and then discards it
@@ -77,20 +77,40 @@ reader from looking.
 
 ## Acceptance criteria
 
-- [ ] `awaiting_user` reaches `should_clear_externally` and vetoes the clear.
-- [ ] `trailing_enqueues` is either used or its discard is justified in writing at
+All six VERIFIED first-hand against the source after `fde1bf40`, not ticked from the
+worker's report.
+
+- [x] `awaiting_user` reaches `should_clear_externally` and vetoes the clear.
+      `external_clear.py:941` declares it as a REQUIRED keyword param — deliberately
+      NOT defaulted, so mypy refuses a future call site that omits it and this exact
+      bug cannot silently return. Passed for real at `external_handoff_clear.py:228`.
+- [x] `trailing_enqueues` is either used or its discard is justified in writing at
       the call site (it was discarded on the same line, so it got no scrutiny either).
-- [ ] `--force` provably CANNOT override this veto (a test asserting the forced path
-      still refuses).
-- [ ] A test at the GATHER layer, not only the pure layer: a fixture transcript
+      Justified in writing at `external_handoff_clear.py:188-191`: it goes log-only,
+      with the reason stated.
+- [x] `--force` provably CANNOT override this veto (a test asserting the forced path
+      still refuses). `test_force_never_overrides_a_safety_veto` asserts
+      `forced.fire is False and forced.why == "awaiting-user"` — the specific REASON,
+      not merely that it did not fire, so the test cannot pass for the wrong cause.
+- [x] A test at the GATHER layer, not only the pure layer: a fixture transcript
       ending on an unanswered `tool_use` must refuse. The advisor's point is that no
       mutation of a pure function can catch an input that never arrives — the bug
       here is precisely an argument that is never passed, and a pure-function test
       suite is structurally blind to it.
-- [ ] The stale "user present" veto comment at `external_handoff_clear.py:242` is
-      corrected.
-- [ ] `uv run pytest`, `uv run ruff check scripts tests`,
-      `uv run mypy scripts/ --ignore-missing-imports` clean.
+      **PROVEN BY NEUTER, not assumed:** the wiring was deliberately broken and the
+      suite re-run — `test_awaiting_user_veto_reaches_the_watcher_end_to_end` went RED
+      with `ClearVerdict(fire=True, trigger='long-idle')`, i.e. the original bug
+      reproduced, while **53 of 54 tests still passed**. Every one of those 53 was a
+      pure-layer test. The file was then restored and verified net-zero. That ratio is
+      the measurement this card exists to record.
+- [x] The stale "user present" veto comment at `external_handoff_clear.py:242` is
+      corrected. It now states the opposite explicitly (`:261`): *"There is no separate
+      'user present' veto — that one was removed 2026-08-13"*. A comment asserting a
+      protection that does not exist is worse than no comment, because it stops the
+      next reader looking.
+- [x] `uv run pytest`, `uv run ruff check scripts tests`,
+      `uv run mypy scripts/ --ignore-missing-imports` clean. 54 passed; ruff clean;
+      mypy clean over 482 source files.
 
 ## Provenance
 
