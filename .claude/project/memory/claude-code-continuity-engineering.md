@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: hub
   functionality: continuity
+publish-globally: true
 ---
 
 **Claude Code continuity engineering** — the discipline of keeping an UNATTENDED fleet of

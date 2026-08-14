@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: continuity
+publish-globally: true
 ---
 
 The **continuity settings stack** — the `~/.claude/settings.json` entries the owner ratified

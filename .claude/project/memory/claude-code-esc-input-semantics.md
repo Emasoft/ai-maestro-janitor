@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: component
   functionality: continuity
+publish-globally: true
 ---
 
 The Claude Code interactive TUI input state machine — verified 2026-07-18 against

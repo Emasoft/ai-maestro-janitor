@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: continuity
+publish-globally: true
 ---
 
 **Plugin rollout staleness** — why a shipped fix is NOT live everywhere the moment it is
