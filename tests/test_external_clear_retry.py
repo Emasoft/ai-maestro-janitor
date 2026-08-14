@@ -15,6 +15,7 @@ that really slept through a 300 s backoff would be untestable, and one that mock
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -169,6 +170,128 @@ def test_the_backoff_never_exceeds_the_remaining_budget() -> None:
     _retry(clock, run, budget=12.0)
 
     assert clock.now() <= 1_000_000.0 + 12.0 + 0.001, "it must not sleep past the deadline"
+
+
+# ---------- the timeout/TTL/deadline ordering invariant (TRDD-YOZ9TS3W) --------------------
+
+
+def test_the_per_attempt_timeout_is_shorter_than_the_lease_ttl() -> None:
+    """The invariant the whole coupling depends on: a lease must never expire under a call that
+    is still legitimately running, or a fourth worker gets silently admitted while three are
+    still active, defeating the machine-wide concurrency cap with nothing reporting the breach.
+    Asserted as a RELATIONSHIP (not literal numbers) so it survives future re-tuning of either
+    constant — the two are now DERIVED from each other, but a future edit could still hand-pick
+    one of them back to a literal and silently break the ordering, which is exactly what this
+    test exists to catch."""
+    assert ec.DEFAULT_FLEET_LEASE_TTL_S > ec.LLM_EXT_TIMEOUT_S
+
+
+def test_the_summary_deadline_allows_more_than_one_attempt() -> None:
+    """A total deadline no bigger than one per-attempt budget makes the retry loop incoherent:
+    `classify_llm_ext_failure` treats every timeout as worth retrying, but if the deadline can't
+    outlast a single attempt, there is never a SECOND attempt to retry with. Asserted as a
+    relationship (not a literal): the deadline must clear at least 2 full per-attempt budgets,
+    with room left over — it is deliberately NOT an exact multiple of `LLM_EXT_TIMEOUT_S` (USER
+    directive, TRDD-YOZ9TS3W): an exact multiple leaves zero room for inter-attempt backoff and
+    lease acquisition, cutting the last attempt off mid-flight."""
+    assert ec.DEFAULT_SUMMARY_DEADLINE_S > 2 * ec.LLM_EXT_TIMEOUT_S
+    assert ec.DEFAULT_SUMMARY_DEADLINE_S % ec.LLM_EXT_TIMEOUT_S != 0
+
+
+def test_the_blocking_sessionstart_hook_timeout_covers_the_summary_deadline() -> None:
+    """The other half of the same class of drift (TRDD-YOZ9TS3W): the cold-cache-clear hook
+    BLOCKS on `summarize_with_retry` by design (owner, 2026-08-13), so if `hooks.json` kills it
+    at or before `ec.DEFAULT_SUMMARY_DEADLINE_S` elapses, Claude Code tears the hook down before
+    (or exactly as) the fallback path — compose the template handoff, fire the clear — gets to
+    run, and NO handoff is ever written. STRICTLY greater, not `>=` (USER directive): the
+    fallback-compose work happens AFTER the deadline expires, so equality still kills it at the
+    worst possible instant. This previously drifted silently (hooks.json said 120 s, a comment
+    claimed 600 s, the real deadline was 540 s) because nothing asserted the relationship between
+    the CONFIG file and the CODE constant. Reads the real `hooks.json`, not a hardcoded copy, so
+    either side drifting reddens this test."""
+    hooks_path = Path(__file__).resolve().parent.parent / "hooks" / "hooks.json"
+    hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+    matches = [
+        h
+        for entry in hooks["hooks"]["SessionStart"]
+        for h in entry["hooks"]
+        if "on-session-start-cold-cache-clear.py" in h.get("command", "")
+    ]
+    assert len(matches) == 1, "expected exactly one cold-cache-clear SessionStart hook entry"
+    assert matches[0]["timeout"] > ec.DEFAULT_SUMMARY_DEADLINE_S
+
+
+# ---------- the progress-observed retry gate (option B, TRDD-YOZ9TS3W) ---------------------
+
+
+def _stuck_progress_fn():
+    """Never changes — simulates a chunk whose checkpoint state never advances between tries."""
+    return lambda: 1.0
+
+
+def _advancing_progress_fn():
+    """A fresh value on every call — simulates a checkpoint that DOES advance between tries."""
+    calls = {"n": 0.0}
+
+    def fn() -> float:
+        calls["n"] += 1.0
+        return calls["n"]
+
+    return fn
+
+
+def test_a_chunk_stuck_past_the_budget_stops_after_two_timeouts_not_the_deadline() -> None:
+    """The defect this gate exists for: a chunk slower than `LLM_EXT_TIMEOUT_S` produces the
+    SAME timeout forever with a checkpoint that never advances. Without the gate this would
+    retry until the deadline, burning the whole budget on zero forward progress."""
+    clock = _Clock()
+    run = _attempts(_TRANSIENT)  # every attempt times out identically, forever
+
+    got = _retry(clock, run, budget=10_000.0, progress_fn=_stuck_progress_fn())
+
+    assert got.outcome == ec.OUTCOME_PERMANENT
+    assert "no progress" in got.detail
+    assert len(run.calls) == ec._NO_PROGRESS_TIMEOUT_GIVEUP  # type: ignore[attr-defined]
+
+
+def test_a_chunk_that_keeps_checkpointing_is_not_mistaken_for_stuck() -> None:
+    """The other half of the same gate: repeated timeouts whose checkpoint state DOES change
+    between attempts are real forward progress (a slow-but-moving chunk sequence), and must keep
+    being retried rather than tripping the same give-up as a truly stuck chunk."""
+    clock = _Clock()
+    run = _attempts(_TRANSIENT, _TRANSIENT, _TRANSIENT, _OK)
+
+    got = _retry(clock, run, progress_fn=_advancing_progress_fn())
+
+    assert got.outcome == ec.OUTCOME_OK, "advancing checkpoints must not trip the no-progress gate"
+    assert len(run.calls) == 4  # type: ignore[attr-defined]
+
+
+def test_the_progress_gate_is_off_by_default() -> None:
+    """`progress_fn` is opt-in — omitting it (the shape every pre-existing caller/test uses)
+    must reproduce the old unconditional-retry behaviour exactly, so a stuck-forever timeout
+    still retries to the deadline when no progress signal was supplied."""
+    clock = _Clock()
+    run = _attempts(_TRANSIENT)
+
+    got = _retry(clock, run, budget=50.0)
+
+    assert got.outcome == ec.OUTCOME_TRANSIENT
+    assert "deadline" in got.detail
+    assert len(run.calls) > ec._NO_PROGRESS_TIMEOUT_GIVEUP  # type: ignore[attr-defined]
+
+
+def test_a_non_timeout_transient_never_trips_the_no_progress_gate() -> None:
+    """A 429 or dropped connection already got an answer from the server — it is not 'still
+    running the same chunk', so it must never be treated as evidence of a stuck chunk, and it
+    must reset any timeout streak the gate was tracking."""
+    clock = _Clock()
+    network_drop = ec.SummaryAttempt(None, ec.OUTCOME_TRANSIENT, "socket hang up")
+    run = _attempts(_TRANSIENT, network_drop, _TRANSIENT, network_drop, _OK)
+
+    got = _retry(clock, run, progress_fn=_stuck_progress_fn())
+
+    assert got.outcome == ec.OUTCOME_OK, "alternating with non-timeout failures must not give up"
 
 
 # ---------- failure classification ---------------------------------------------------------

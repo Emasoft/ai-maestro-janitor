@@ -307,6 +307,10 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
             transcript,
             deadline=time.time() + ec.summary_deadline_s(),
             log=lambda m: state.log_line(_LOG, m),
+            # TRDD-YOZ9TS3W: engages the progress-observed retry gate so a chunk stuck past
+            # LLM_EXT_TIMEOUT_S is given up on instead of restarting the same doomed chunk until
+            # the deadline. None (llm-ext unresolvable) simply runs without the gate.
+            progress_fn=ec.llm_ext_progress_fn(),
         )
         summary = got.text
         if not summary:

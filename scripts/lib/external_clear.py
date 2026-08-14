@@ -146,7 +146,21 @@ def use_llm_ext() -> bool:
 # only and a stalled generation hung forever. A handoff composer that can hang is worse than
 # one that degrades, because the `/clear` it precedes never happens and the session simply
 # stops.
-LLM_EXT_TIMEOUT_S = 240
+#
+# SIZED AGAINST THE CLI'S OWN PER-ATTEMPT BUDGET, NOT THE MEAN (TRDD-YOZ9TS3W). llm-ext
+# checkpoints after every chunk and resumes on re-invocation, so this timeout only makes
+# progress when an attempt COMPLETES a chunk — a chunk slower than this value can never
+# finish, nothing is ever checkpointed, and every retry restarts the SAME doomed chunk until
+# `DEFAULT_SUMMARY_DEADLINE_S` runs out. 240s was sized against the ~180s MEAN end-to-end
+# transcript time the maintainer measured — but per-CHUNK time (queue contention, not size)
+# ranged 91s-1478s on free models, and the CLI's own `--chunk_timeout_s` default is 600s: the
+# server considers 600s one legitimate attempt, and we were killing our client at under half
+# that. 600s matches the CLI's own per-attempt allowance, so a normal (if slow) chunk is
+# finally given the time the CLI itself expects it to need. It cannot cover the full observed
+# tail (up to 1478s) — no timeout we can afford to hold a fleet lease for can — so a chunk that
+# is genuinely stuck past this budget is caught instead by the progress-observed retry gate in
+# `summarize_with_retry` (see `_NO_PROGRESS_TIMEOUT_GIVEUP` below), not by raising this further.
+LLM_EXT_TIMEOUT_S = 600
 
 
 def llm_ext_data_dir(binary: str) -> str:
@@ -178,6 +192,39 @@ def llm_ext_data_dir(binary: str) -> str:
     marketplace, plugin = parts[i + 1], parts[i + 2]
     data = Path.home() / ".claude" / "plugins" / "data" / f"{plugin}-{marketplace}"
     return str(data) if data.is_dir() else ""
+
+
+def _data_dir_fingerprint(data_dir: str) -> float:
+    """llm-ext's data dir mtime, or -1.0 if it cannot be read.
+
+    See `_NO_PROGRESS_TIMEOUT_GIVEUP` for why this is the progress signal: llm-ext's checkpoint
+    write is atomic tmp+rename, and a rename bumps the CONTAINING directory's mtime — so this
+    changes exactly when a chunk completes, without this codebase parsing or even naming the
+    checkpoint file. -1.0 (never equal to a real mtime) means "unknown", which the caller must
+    treat as "no evidence either way", not as "no progress".
+    """
+    try:
+        return Path(data_dir).stat().st_mtime
+    except OSError:
+        return -1.0
+
+
+def llm_ext_progress_fn() -> Callable[[], float] | None:
+    """The real progress signal for `summarize_with_retry`'s `progress_fn`, or None when llm-ext
+    cannot be resolved (the retry loop then simply runs without the gate — never guesses).
+
+    Deliberately NOT the retry loop's default: a default that auto-resolves the real binary
+    would make `summarize_with_retry`'s tests depend on whether llm-ext happens to be installed
+    on the machine running them. Production wiring calls this explicitly (see
+    `external_handoff_clear.py`); tests inject a fake `progress_fn` instead.
+    """
+    binary = shutil.which("llm-ext")
+    if not binary:
+        return None
+    data_dir = llm_ext_data_dir(binary)
+    if not data_dir:
+        return None
+    return lambda: _data_dir_fingerprint(data_dir)
 
 
 def run_llm_ext_summary(
@@ -252,10 +299,17 @@ FLEET_MAX_CONCURRENT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_FLEET_MAX_CONCUR
 # The owner's number. 3 concurrent free-tier requests is a load an endpoint sustains; 20 is not.
 DEFAULT_FLEET_MAX_CONCURRENT = 3
 FLEET_LEASE_TTL_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_FLEET_LEASE_TTL_S"
-# Comfortably over the ~180 s a run is expected to take AND over `LLM_EXT_TIMEOUT_S` (240 s), so
-# a lease never expires under a call that is still legitimately running — that would admit a
-# fourth worker while three are active, quietly defeating the cap.
-DEFAULT_FLEET_LEASE_TTL_S = 300
+# MUST exceed `LLM_EXT_TIMEOUT_S` — the ordering invariant is `per-attempt < lease TTL`, and it
+# holds BY CONSTRUCTION here (derived, not a second hand-picked literal) so it cannot drift out
+# of sync the way two independently-tuned constants can (TRDD-YOZ9TS3W: this file used to read
+# "comfortably over ... `LLM_EXT_TIMEOUT_S` (240 s)" beside a 300 s value — true only until
+# someone changed one side without the other). If the TTL ever expired UNDER a still-running
+# attempt, a fourth worker would be admitted while three are still active, silently defeating
+# the machine-wide 3-concurrent cap (owner, 2026-08-13) with nothing reporting the breach. The
+# margin (2 minutes) covers the lease-store I/O + fleet-poll latency around the subprocess call
+# itself, which is not counted in `LLM_EXT_TIMEOUT_S`.
+_FLEET_LEASE_TTL_MARGIN_S = 120
+DEFAULT_FLEET_LEASE_TTL_S = LLM_EXT_TIMEOUT_S + _FLEET_LEASE_TTL_MARGIN_S
 # How long to wait between attempts to take a lease. Short enough that a freed lease is claimed
 # promptly, long enough that waiting costs nothing measurable.
 FLEET_POLL_S = 5.0
@@ -287,13 +341,15 @@ SUMMARY_DEADLINE_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_SUMMARY_DEADLINE_S"
 # How long the whole summarize effort — lane waits, attempts and backoff together — may run
 # before the handoff degrades to the network-free template and the clear proceeds anyway.
 #
-# 540 s sits deliberately under the 600 s Claude Code allows a `command` hook by default: the
-# hook is the caller, and a deadline ABOVE the hook's timeout is not a longer retry budget, it
-# is a budget that gets killed mid-sleep with no handoff written and no clear fired. So the
-# ceiling is chosen against the harness's limit, not against how long an outage might last —
-# past this point the template fallback is strictly better than continuing to wait, because it
-# shrinks the session NOW using only what is already on disk.
-DEFAULT_SUMMARY_DEADLINE_S = 540
+# USER-DIRECTED ARITHMETIC (TRDD-YOZ9TS3W, superseding an earlier 3x-multiple choice): FOUR
+# attempts at `LLM_EXT_TIMEOUT_S` (600 s) = 2400 s, plus ~200 s margin for the inter-attempt
+# backoff (the `_BACKOFF_S` doubling) and fleet-lease acquisition between attempts. Deliberately
+# NOT an exact multiple of `LLM_EXT_TIMEOUT_S` (2400): a deadline equal to N x per-attempt leaves
+# ZERO room for anything BETWEEN attempts, so the 4th attempt would be cut off mid-flight by the
+# deadline before it could even start — losing the whole point of budgeting for 4 attempts. llm-ext
+# checkpoints per chunk and resumes on re-invocation, so each of the 4 attempts is real forward
+# progress, not 4 redundant tries at the same work.
+DEFAULT_SUMMARY_DEADLINE_S = 2600
 
 
 def summary_deadline_s() -> int:
@@ -471,6 +527,37 @@ _UNKNOWN_REPEAT_GIVEUP = 3
 # the lane's own spacing dominates and a longer sleep only delays the fallback.
 _BACKOFF_S = (5, 10, 20, 40, 80, 160, 300)
 
+# --- the progress-observed retry gate (option B, TRDD-YOZ9TS3W) ---------------------------
+#
+# `classify_llm_ext_failure` is right to treat EVERY timeout as retryable — that is exactly the
+# shape a stalled generation and a dead network both take, and the owner's contract ("even if it
+# disconnects from the internet for hours") demands retrying keep going. That reasoning breaks
+# down for one specific case it cannot see: a SINGLE chunk that is simply slower than
+# `LLM_EXT_TIMEOUT_S`. llm-ext checkpoints after every chunk and resumes on re-invocation, so if
+# the same chunk cannot finish inside the budget, every retry restarts that SAME chunk and burns
+# the whole `DEFAULT_SUMMARY_DEADLINE_S` for zero forward progress — indistinguishable from a
+# real outage at the classification layer (both are `timed_out=True`), but the fix is the
+# opposite: a real outage should keep being retried, a chunk that provably cannot progress should
+# not be retried at all.
+#
+# The distinguishing signal is external to `classify_llm_ext_failure` on purpose: whether
+# llm-ext's OWN checkpoint state changed between two consecutive timeouts. Its checkpoint write
+# is documented (this codebase's own audit, see the TRDD provenance) as atomic tmp+rename, and a
+# rename always bumps the CONTAINING DIRECTORY's mtime — so the data dir's own mtime is a cheap,
+# CLI-internals-free proxy for "did a chunk complete", without this codebase ever needing to name
+# or parse the checkpoint file itself (naming it would couple us to a file the CLI owns and may
+# rename or relocate).
+#
+# Scoped to TIMEOUT-classified outcomes only (never a 429/dropped-connection TRANSIENT, which
+# already got an answer from the server and is not "still running the same chunk") — this gate
+# must never second-guess the owner's "disconnected for hours" contract for those.
+#
+# 2, not `_UNKNOWN_REPEAT_GIVEUP`'s 3: an UNKNOWN retry costs milliseconds, so trying a third time
+# is nearly free. A stuck-timeout retry costs a full `LLM_EXT_TIMEOUT_S` (600 s) AND a fleet
+# lease, so confirming "stuck" a third time would spend 1800 s — the entire deadline — to learn
+# what two attempts already showed.
+_NO_PROGRESS_TIMEOUT_GIVEUP = 2
+
 
 @dataclass(frozen=True)
 class SummaryAttempt:
@@ -569,6 +656,7 @@ def summarize_with_retry(
     lane_dir: Path | None = None,
     jitter: Callable[[], float] | None = None,
     log: Callable[[str], Any] | None = None,
+    progress_fn: Callable[[], float] | None = None,
 ) -> SummaryAttempt:
     """Keep trying to summarize until it works, the deadline passes, or trying is pointless.
 
@@ -581,14 +669,17 @@ def summarize_with_retry(
     block a startup for hours to protect against a 700k-token turn, i.e. spend the thing it is
     saving.
 
-    Three stopping rules, in order:
+    Four stopping rules, in order:
       * OK — done.
       * PERMANENT — no binary / no data dir / no transcript. Attempt 100 fails exactly like
         attempt 1, so stop at once rather than sleeping through the whole budget.
       * UNKNOWN repeating identically `_UNKNOWN_REPEAT_GIVEUP` times — a broken invocation
         reproducing byte-for-byte. Anything that keeps CHANGING keeps being retried.
-    TRANSIENT never stops on its own: it retries until the deadline, which is what "disconnected
-    for hours" needs.
+      * TIMEOUT repeating `_NO_PROGRESS_TIMEOUT_GIVEUP` times with `progress_fn()` unchanged
+        between them — a chunk provably stuck past `LLM_EXT_TIMEOUT_S` (TRDD-YOZ9TS3W). Only
+        engaged when `progress_fn` is supplied; production wiring passes `llm_ext_progress_fn()`.
+    TRANSIENT otherwise never stops on its own: it retries until the deadline, which is what
+    "disconnected for hours" needs.
 
     Every attempt — including retries — holds a fleet lease while it runs, so at most
     `max_concurrent` llm-ext calls exist machine-wide and N sessions recovering from one outage
@@ -600,6 +691,12 @@ def summarize_with_retry(
     say: Callable[[str], Any] = log if log is not None else (lambda _msg: None)
     seen: dict[str, int] = {}
     last = SummaryAttempt(None, OUTCOME_TRANSIENT, "no attempt was made before the deadline")
+    # `progress_fn` is opt-in (see its docstring: a default that auto-resolves the real llm-ext
+    # data dir would make this loop's own tests depend on whether llm-ext happens to be installed
+    # on the machine running them). `stuck_timeouts` counts CONSECUTIVE timeouts observed with an
+    # unchanged fingerprint; any progress (or any non-timeout outcome) resets it to 0.
+    last_fingerprint: float | None = progress_fn() if progress_fn is not None else None
+    stuck_timeouts = 0
 
     for i in range(len(_BACKOFF_S) * 64):  # a bound, not a policy — `deadline` is the policy
         now = float(now_fn())
@@ -631,6 +728,37 @@ def summarize_with_retry(
             if seen[last.detail] >= _UNKNOWN_REPEAT_GIVEUP:
                 say(f"summary: identical failure x{seen[last.detail]} — {last.detail}; giving up")
                 return SummaryAttempt(None, OUTCOME_PERMANENT, f"repeated: {last.detail}")
+
+        # The progress-observed gate (option B, TRDD-YOZ9TS3W) — only for TIMEOUT-classified
+        # TRANSIENT outcomes, and only when `progress_fn` was supplied. A non-timeout TRANSIENT
+        # (429, dropped connection) already got an answer from the server, so it resets the
+        # counter rather than tripping it — the owner's "disconnected for hours" contract must
+        # keep retrying those unconditionally.
+        if progress_fn is not None:
+            is_timeout = (
+                last.outcome == OUTCOME_TRANSIENT and last.detail.startswith("timed out after")
+            )
+            if is_timeout:
+                new_fingerprint = progress_fn()
+                if (
+                    last_fingerprint is not None
+                    and new_fingerprint == last_fingerprint
+                    and new_fingerprint != -1.0
+                ):
+                    stuck_timeouts += 1
+                    if stuck_timeouts >= _NO_PROGRESS_TIMEOUT_GIVEUP:
+                        say(
+                            f"summary: {stuck_timeouts} timeouts with zero checkpoint progress — "
+                            "giving up rather than burning the deadline on a chunk that cannot "
+                            "finish"
+                        )
+                        return SummaryAttempt(None, OUTCOME_PERMANENT, f"no progress: {last.detail}")
+                else:
+                    stuck_timeouts = 0
+                last_fingerprint = new_fingerprint
+            else:
+                stuck_timeouts = 0
+                last_fingerprint = progress_fn()
 
         base = float(_BACKOFF_S[min(i, len(_BACKOFF_S) - 1)])
         # Jitter so a fleet that failed together does not retry together. The lane already

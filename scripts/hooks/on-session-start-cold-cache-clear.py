@@ -133,10 +133,21 @@ def main() -> int:
         # by a TURN, so the summarize must finish before one can start, which means waiting.
         #
         # The wait is bounded and the bound is chosen against the harness, not against hope:
-        # `ec.summary_deadline_s()` (540 s) sits under Claude Code's 600 s default `command`-hook
-        # timeout, and `hooks.json` states that timeout explicitly rather than relying on the
-        # default. Past the deadline the watcher composes the network-free template handoff and
-        # clears anyway, so the blocking window ends in a shrunk session either way.
+        # `hooks.json` states this hook's OWN `timeout:` explicitly (2800 s), and it MUST stay
+        # STRICTLY GREATER than `ec.DEFAULT_SUMMARY_DEADLINE_S` (2600 s) — NOT equal (USER
+        # directive, TRDD-YOZ9TS3W). Past the deadline the watcher's fallback path composes the
+        # network-free TEMPLATE handoff and fires the clear chain — and that compose-and-clear
+        # work happens AFTER the deadline expires, so it needs its OWN headroom on top of the
+        # deadline. 2800 = 2600 (the deadline) + ~200 s to run that fallback path to completion.
+        # If the hook's timeout equalled the deadline exactly, Claude Code would kill the hook at
+        # the very moment the fallback path begins — producing NO handoff and NO clear, which is
+        # the one failure mode this whole feature must never have. Do NOT "tidy" this to match
+        # the deadline exactly; the gap is load-bearing, not slack.
+        #
+        # (TRDD-YOZ9TS3W: this comment previously claimed the deadline "sits under Claude Code's
+        # 600 s default `command`-hook timeout", which was false — `hooks.json` declared 120 s
+        # here, far too short to let even one `LLM_EXT_TIMEOUT_S` attempt finish, and nobody had
+        # checked the actual config against the claim.)
         #
         # Blocking here does NOT stall the janitor's other SessionStart hooks: the docs state
         # that all matching hooks run in parallel, so the drift/TRDD/watchpath hooks proceed
