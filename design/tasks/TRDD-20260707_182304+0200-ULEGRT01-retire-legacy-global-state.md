@@ -1,11 +1,10 @@
 ---
 trdd-id: ULEGRT01
 title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82F)
-column: blocked
-blocked-by: [publish-of-7ceab3f]
-pre-block-column: planned
+column: planned
+blocked-by: []
 created: 2026-07-07T18:23:04+0200
-updated: 2026-07-11T14:45:00+0200
+updated: 2026-08-14T17:36:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
