@@ -1,10 +1,9 @@
 ---
 trdd-id: 3QIQ2E6J
 title: Split siblings are perpetual conflict candidates — the refusal ledger cannot fix this because the pages are genuinely new
-column: todo
-review-after: 2026-08-27
+column: complete
 created: 2026-08-12T21:00:24+0200
-updated: 2026-08-14T19:09:36+0200
+updated: 2026-08-16T01:56:45+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -17,6 +16,48 @@ external-refs: [TRDD-WP7TCRME, TRDD-RG4IUZ6I, janitor#241]
 ---
 
 # Split siblings re-litigate forever
+
+## ⏵ CLOSED 2026-08-16 — the production observation the card was parked for, and it is NOT what was expected
+
+The card was re-columned to `todo` with `review-after: 2026-08-27` because *"no real split has
+occurred on this host"*, leaving one thing outstanding: a live token measurement. **Real splits have
+now occurred** — 7 USER-scope pages carry `split-lineage:` across two events
+(`1f838bae…` ×3, `7e26449e…` ×4), written 2026-08-15 08:07 and 21:43/22:38. So the park has
+expired on its own terms and the observation can be made.
+
+**What the live run shows.** The librarian proposal written at 22:42 — after both splits — reports
+USER-scope `### Conflict candidates` as `(none)`, and renders **no** `> Not offered (same-split
+siblings…)` blockquote. `grep "suppressed as"` across every janitor log returns nothing: that line
+has never been emitted on this host.
+
+**Reading it honestly, which means not reading it as a win.** Silence here has two explanations and
+`ATOM-ZFUE-H8IZ` is explicit that silence cannot pick between them. The likely one is visible in
+`_conflict_pairs`' own docstring (`memory-librarian.py:936-945`): a candidate requires BOTH shared
+distinctive tokens AND *"an actual OPPOSING-CLAIM signal"* — an antonym split or a different number
+about the same subject — because the shared-TAG trigger was removed for issues #35/#38/#43. Split
+siblings are partitions of one page: they share subject vocabulary by construction and are
+**complementary, not contradictory**. So they most likely never became candidates at all, and the
+suppression path was never reached.
+
+**Consequences, stated plainly:**
+
+- The `~221,612 tokens for zero mutations` figure was measured on a corpus and a version where the
+  shared-tag trigger was still live. **This card's fix is not what is keeping that cost at zero on
+  this host today — the upstream contradiction requirement is.** Claiming otherwise on the strength
+  of a `(none)` would be crediting the belt for what the braces are doing.
+- The fix is still correct and still wanted. It covers the case the contradiction gate does NOT
+  exclude: two siblings that genuinely do differ on a number about the same subject — which a split
+  can easily produce, since it partitions one page's facts. That case is narrow, real, and now
+  handled.
+- Its production path is **unexercised**, not proven. The test at
+  `tests/test_memory_librarian.py:317` is the only thing that has ever driven it. That is a
+  weaker claim than the card's box 4 implies and is recorded here rather than left to be
+  rediscovered.
+
+Closing rather than re-parking: every acceptance box is genuinely met, the awaited event has
+happened, and the finding above is worth more as a written record than as a card that keeps
+asserting work nobody will do. A real token receipt would need a sibling pair that carries a
+contradiction signal — if that is ever wanted, it is a new card, not this one.
 
 ## ⏵ 2026-08-13 — IMPLEMENTED (producer + consumer). Retro-stamp REFUSED, with reasons.
 
@@ -239,6 +280,13 @@ one inserting a field the other does not know about, each rewriting the page the
 
 ## Approval log
 
+- 2026-08-16T01:56:45+0200 — COMPLETED by janitor-main-session, and `review-after: 2026-08-27`
+  REMOVED because the event it was snoozing for has happened: real splits exist on this host now.
+  The observation contradicts the card's expectation and is recorded in the closing block above —
+  the suppression path has never been reached in production, because the upstream contradiction
+  requirement already excludes complementary siblings. Recorded rather than smoothed over: a card
+  that closes by finding its own premise narrower than believed is more useful than one that
+  closes by confirming itself.
 - 2026-08-14T19:09:36+0200 — Ticked the last acceptance box (0-token cost for a same-split
   pair) via CODE-PATH TRACE, not a live production run: no real split has happened on this host,
   so no end-to-end token receipt exists yet. Verified the consumer (`janitor-memory-conflict`
