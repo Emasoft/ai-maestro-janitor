@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.3] — 2026-08-15
+
+### Documentation
+
+- **board:** Redact a committed home path in the 6CRC9SQQ card (janitor#274 item 2) (c3bdd4c)
+
+### Features
+
+- **model-fallback:** Owner-ratified TRUE-ERROR switch sequence (owner spec 2026-08-15) (d20e3e9)
 ## [3.3.2] — 2026-08-15
 
 ### Bug Fixes
@@ -18,6 +27,10 @@ All notable changes to this project will be documented in this file.
 
 - **rotator:** A model-scoped wall on the LIVE account now triggers rotation (owner report 2026-08-15) (f185e52)
 - **guard:** Deny gh publishes targeting a repo the gh auth user does not own (owner rule 2026-08-14) (def961f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.2 (10c74c8)
 ## [3.3.1] — 2026-08-14
 
 ### Bug Fixes
