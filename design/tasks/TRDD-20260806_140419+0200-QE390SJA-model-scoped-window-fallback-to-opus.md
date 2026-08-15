@@ -4,7 +4,7 @@ title: A model-scoped window limit stops the session while the account has headr
 column: backburner
 review-after: 2026-08-26
 created: 2026-08-06T14:04:19+0200
-updated: 2026-08-12T00:12:00+0200
+updated: 2026-08-15T16:41:35+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -14,6 +14,8 @@ implementation-commits: [d7d8e9c9, dd72291c, 70afff57, b08c2d64, 491a2c3a, 25105
 ---
 
 # Model-scoped window ⇒ switch model, don't rotate (janitor#222; owner failure report item 8)
+
+## ⏵ 2026-08-15 — THE REAL WALL ARRIVED and the ROTATION half was extended (`f185e521`), owner directive after the Fable continuity failure: a model-scoped wall on the LIVE account is now itself a rotation TRIGGER in `cmd_auto` (scoped>=90 while account<=90, via the same `model_fallback_verdict` gate) — rotate ONLY onto a scoped-clear target; with none, STAY PUT and leave the recovery to this card's `/model opus` detector (tiers 1b/degraded skipped on a scoped-only wall). The detector's own last acceptance box (a real observed switch) remains open: today's hung agents were `server_owned`, outside this detector's per-session scope, and the server leg is dark (see WKTD5JTC's 2026-08-15 note).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 

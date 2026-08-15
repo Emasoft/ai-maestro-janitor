@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: testing
 created: 2026-07-24T13:39:02+0200
-updated: 2026-08-13T06:01:12+0200
+updated: 2026-08-15T16:41:35+0200
 implementation-commits: [3517836b]
 current-owner: main
 task-type: feature
@@ -14,6 +14,8 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
 ---
 
 # Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
+
+## ⏵ 2026-08-15 — FIELD OBSERVATION (Fable-wall continuity failure): Phase 1 did not and COULD not act — every hung agent was `server_owned`, the exclusion working as designed. The ai-maestro server's own leg (its #J backend) ships DARK behind `AIM_FLEET_MODEL_FALLBACK=1` pending the USER's arm ruling (ai-maestro TRDD-DPPYVLVH), so the handoff landed on a dark receiver — the ATOM-4GQU-0C9J shape ("a claimed chore transfers the ACT but goes dark"). Escalated to the hub session + USER 2026-08-15; the janitor-side rotation half gained the scoped trigger the same day (`f185e521`, QE390SJA). Phase 1's standalone (#N) acceptance evidence is still what this card waits on.
 
 ## ⏵ 2026-08-13 — PHASE 1 SHIPPED (`3517836b`). Column `todo → testing`.
 
