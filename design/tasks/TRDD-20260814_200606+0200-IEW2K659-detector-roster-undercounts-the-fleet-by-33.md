@@ -35,9 +35,9 @@ next addition, because the defect was never the numbers — it was that *"an inv
 (registration is the authority — an unregistered file never runs) and fails naming every detector
 missing from a group bullet. Two deliberate design points, both measured rather than assumed:
 
-* membership is scoped to the `- *group:*` bullets, NOT the whole page — the whole-page form counted
+- membership is scoped to the `- *group:*` bullets, NOT the whole page — the whole-page form counted
   a superseded body / lesson / atom as documentation and was optimistic by exactly one;
-* a CONTROL test asserts the parser still finds >50 registrations, so a change to the tuple shape
+- a CONTROL test asserts the parser still finds >50 registrations, so a change to the tuple shape
   cannot make the scanner blind and declare the roster perfect at that moment.
 
 The guard's docstring states what it does NOT prove — that any description beside a name is true —
@@ -93,15 +93,20 @@ memory curator (`janitor-memory-subconscious-agent`), not to a code worker.
 
 ## Acceptance criteria
 
-- [ ] Every detector registered in `dispatch.py` appears in the grouped roster.
-- [ ] The count is DERIVED and stated with its measurement method, so the next
+- [x] Every detector registered in `dispatch.py` appears in the grouped roster.
+      All 73, enforced by `tests/test_detector_roster_completeness.py`.
+- [x] The count is DERIVED and stated with its measurement method, so the next
       reader can re-check it in one command rather than trusting the number.
-- [ ] `system-daemon-runaway` (TRDD-HK7IZ21Z) is in the observability group.
-- [ ] Something makes the next drift VISIBLE. A prose count that only a human can
+      The page now says "73 REGISTERED in `dispatch.py`" and states that the count is of
+      REGISTRATION tuples, not files, because a `.py` nothing registers never runs.
+- [x] `system-daemon-runaway` (TRDD-HK7IZ21Z) is in the observability group.
+- [x] Something makes the next drift VISIBLE. A prose count that only a human can
       falsify will rot again — the whole point of this card. Prefer a check that
       compares the rostered names against `dispatch.py`'s registrations and reports
       the difference, so the inventory acquires the failure signal it has never had.
-- [ ] `memgrep validate` + `memgrep lint` clean on the page.
+      Done exactly that way, plus a CONTROL test so a changed tuple shape cannot blind
+      the parser into declaring the roster perfect.
+- [x] `memgrep validate` + `memgrep lint` clean on the page.
 
 ## Notes and lessons learned
 
