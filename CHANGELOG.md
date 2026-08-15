@@ -2,11 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.5] — 2026-08-15
+
+### Bug Fixes
+
+- **cold-resume:** Answer the cache question with arithmetic, and find llm-ext where it lives (TRDD-CEWVQ8DG) (904ddef)
+
+### Documentation
+
+- **memory:** Record the cold-resume incident and move its shipped card to testing (TRDD-CEWVQ8DG) (14adabf)
+- **board:** Unblock the publish NIT and record the hub-armed receiver on WKTD5JTC (3f4d386)
 ## [3.3.4] — 2026-08-15
 
 ### Features
 
 - **stop-failure:** Route the StopFailure payload by error type (owner directive 2026-08-15 — use the events more) (b146a64)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.4 (6a4bfa1)
 ## [3.3.3] — 2026-08-15
 
 ### Documentation
