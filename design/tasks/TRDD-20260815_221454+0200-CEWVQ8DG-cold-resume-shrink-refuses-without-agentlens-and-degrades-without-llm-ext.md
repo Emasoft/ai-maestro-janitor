@@ -104,15 +104,15 @@ binary path, so an absolute plugin-cache path keeps working unchanged.
 
 ## Acceptance
 
-- [x] `cache_expired_by_age` returns True past the floor, None below it, None on unknown age, and
+* [x] `cache_expired_by_age` returns True past the floor, None below it, None on unknown age, and
       NEVER False.
-- [x] `resolve_cache_expired` prefers a probe verdict (True AND False) and only falls back on None.
-- [x] The floor uses the LONG TTL even when the configured/regime TTL is short.
-- [x] `resolve_llm_ext` finds the binary with an empty PATH, picks the newest version numerically,
+* [x] `resolve_cache_expired` prefers a probe verdict (True AND False) and only falls back on None.
+* [x] The floor uses the LONG TTL even when the configured/regime TTL is short.
+* [x] `resolve_llm_ext` finds the binary with an empty PATH, picks the newest version numerically,
       and returns "" when genuinely absent.
-- [x] The hook passes the age-derived verdict into the gate.
-- [x] ruff + mypy clean; full pytest suite green.
-- [ ] Field proof on the next real cold resume: `fire=True trigger=resumed-cold` AND
+* [x] The hook passes the age-derived verdict into the gate.
+* [x] ruff + mypy clean; full pytest suite green.
+* [ ] Field proof on the next real cold resume: `fire=True trigger=resumed-cold` AND
       `summary: ok` (not `permanent`) in the logs.
 
 ## Notes

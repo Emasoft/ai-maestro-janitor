@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: testing
 created: 2026-07-24T13:39:02+0200
-updated: 2026-08-15T16:41:35+0200
+updated: 2026-08-15T23:05:00+0200
 implementation-commits: [3517836b]
 current-owner: main
 task-type: feature
@@ -14,6 +14,8 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
 ---
 
 # Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
+
+## ⏵ 2026-08-15 (evening) — THE DARK RECEIVER IS NOW LIVE. The ai-maestro server session reports `AIM_FLEET_MODEL_FALLBACK=1` applied and verified on the live pm2 process (their commit 56047fa5; card ai-maestro TRDD-DPPYVLVH proposal→dev). The USER approved it FIRST-HAND in that session — not through this session's relay, which they correctly refused to treat as approval. So the `server_owned` exclusion no longer hands off to a backend that ships dark, and the ATOM-4GQU-0C9J failure shape recorded in the field observation below is closed ON THE HUB SIDE. Their FIRST switch stays human-watched (the watchdog must log `model-fallback SWITCHED … confirmed=true` AND the pane statusline must flip Fable→Opus); as of tonight that is still PENDING a live Fable agent, because their fleet is hibernated (`could not read 10 pane(s)` — only 3 tmux sessions, none an agent), and they are explicitly NOT recording it verified until both signals are observed. They have also mirrored the janitor's scoped-window rotation and the TRUE-ERROR switch ordering server-side (their TRDD-IZ6KU37Y), reading our shipped implementation read-only. **Phase 1's standalone (#N) acceptance evidence remains what THIS card waits on** — the hub's arming does not satisfy it.
 
 ## ⏵ 2026-08-15 — FIELD OBSERVATION (Fable-wall continuity failure): Phase 1 did not and COULD not act — every hung agent was `server_owned`, the exclusion working as designed. The ai-maestro server's own leg (its #J backend) ships DARK behind `AIM_FLEET_MODEL_FALLBACK=1` pending the USER's arm ruling (ai-maestro TRDD-DPPYVLVH), so the handoff landed on a dark receiver — the ATOM-4GQU-0C9J shape ("a claimed chore transfers the ACT but goes dark"). Escalated to the hub session + USER 2026-08-15; the janitor-side rotation half gained the scoped trigger the same day (`f185e521`, QE390SJA). Phase 1's standalone (#N) acceptance evidence is still what this card waits on.
 
