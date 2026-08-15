@@ -20,6 +20,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,8 +32,13 @@ DETECTOR = (
 )
 
 
-def _load_blindspot_module():
+def _load_blindspot_module() -> Any:
     """Load the detector as an importable module for white-box unit tests.
+
+    Returns `Any`, deliberately: the falsification tests below ASSIGN to the module's
+    attributes (break the gate, observe, restore), and pyright rejects attribute
+    assignment on `ModuleType` — 4 errors on the first CI run where pyright had a real
+    venv (31850287797). The dynamic typing is the point of a white-box loader.
 
     The detector's filename has hyphens (it is invoked as a script, not
     imported normally elsewhere), so it needs `importlib.util` the same way
