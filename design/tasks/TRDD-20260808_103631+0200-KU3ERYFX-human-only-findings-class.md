@@ -1,9 +1,9 @@
 ---
 trdd-id: KU3ERYFX
 title: Human-only findings class — an alarm only a human can act on must say so and emit once
-column: todo
+column: complete
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-13T05:11:55+0200
+updated: 2026-08-16T01:53:53+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -79,4 +79,9 @@ premise, observed rather than argued, five days after filing.
 - [x] Ledger distinguishes never-reported vs surfaced-pending —
       `findings_ledger.surfaced_to_human_status` / `mark_surfaced_to_human` /
       `clear_surfaced_to_human`, tested in `tests/test_findings_ledger.py`.
-- [ ] #234 answered when it ships — PUBLISH-GATED, left open.
+- [x] #234 answered when it ships — already done, and not by this session: CLOSED 2026-08-12T12:50Z
+      with *"VERIFIED FIXED … `_phase_iterm_automation_alarm` now emits once per session and
+      acknowledges by content hash"*. The box outlived the work it was waiting on. Re-verified the
+      mechanism first-hand before ticking rather than trusting the comment:
+      `findings_ledger.py:58` defines `HUMAN_ONLY_DIRECTIVE`, `:246` `mark_surfaced_to_human`,
+      `:279` `surfaced_to_human_status`.

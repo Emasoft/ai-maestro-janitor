@@ -1,9 +1,9 @@
 ---
 trdd-id: 9PDH8G0W
 title: iTerm alarm — the unconditional-negative discriminator (rescue warranted, exercised, failed)
-column: todo
+column: complete
 created: 2026-08-08T09:02:04+0200
-updated: 2026-08-08T09:02:04+0200
+updated: 2026-08-16T01:53:53+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -51,7 +51,11 @@ strictly stronger negative available that removes the confound instead of ageing
 - [x] The hard-negative text names both facts (warranted + zero enumeration) and drops the
       System-Settings remedy only if that remains honest (it does not — keep remedy, drop
       the "cannot tell you why" ambiguity clause instead)
-- [ ] #92 updated when it ships
+- [x] #92 updated when it ships — comment `#issuecomment-5304813279`, 2026-08-16. Framed as an
+      UPDATE and the issue left OPEN on purpose: this card removes the diagnostic ambiguity, it
+      does not touch the macOS 26 grant-persistence defect #92 is actually about. Closing #92 on
+      the strength of this work would have retired a live, unsolved problem on the evidence of a
+      different one.
 
 ## Notes
 
