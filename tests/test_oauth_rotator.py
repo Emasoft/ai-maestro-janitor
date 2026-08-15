@@ -838,8 +838,16 @@ def test_cmd_auto_rotates_on_401_token_rejected(tmp_path: Path, monkeypatch: pyt
 
 def _scoped_usage(five: float, seven: float, *, fable: float | None = None) -> dict:
     """Account windows, plus an OPTIONAL model-scoped weekly window for `Fable 5` — the shape
-    /api/oauth/usage emits since Anthropic moved scoped limits into `limits[]`."""
-    data: dict = {"five_hour": {"utilization": five}, "seven_day": {"utilization": seven}}
+    /api/oauth/usage emits since Anthropic moved scoped limits into `limits[]`.
+
+    `resets_at` is carried on BOTH account windows because every live payload carries it
+    (verified 2026-08-15) and `token_burn.windows_from_usage` SKIPS a window without one —
+    which would make `model_fallback_verdict`'s "headroom must be PROVEN" gate read this
+    fixture as headroom-unproven and silently disable the scoped rotation trigger under test."""
+    reset_5h = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 2 * 3600))
+    reset_7d = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3 * 86400))
+    data: dict = {"five_hour": {"utilization": five, "resets_at": reset_5h},
+                  "seven_day": {"utilization": seven, "resets_at": reset_7d}}
     if fable is not None:
         resets = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3 * 86400))
         data["limits"] = [{
@@ -907,6 +915,63 @@ def test_cmd_auto_still_rotates_when_every_target_is_spent_on_the_model_in_use(
     rotator.cmd_auto()
     assert [s[0] for s in switches] == ["spent@x"]
     assert "7d/Fable" in switches[0][2], "the reason must name the window it could not fix"
+
+
+def test_cmd_auto_rotates_on_a_scoped_wall_alone_to_a_scoped_clear_target(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner failure report 2026-08-15: the live account's 5h/7d are FINE (40/50) but its
+    Fable window is spent (95%) — before the scoped trigger, cmd_auto read this as 'within
+    limits' and every Fable session wedged. It must now rotate, and ONLY onto the target
+    with Fable headroom (preserving Fable), never the fuller-but-Fable-spent one."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent, clean = _blob("SPENT", expires_ms=_ms_in(50)), _blob("CLEAN", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent, "clean@x": clean},
+        usage={"LIVE": (200, _scoped_usage(40.0, 50.0, fable=95.0)),
+               "SPENT": (200, _scoped_usage(20.0, 20.0, fable=99.0)),
+               "CLEAN": (200, _scoped_usage(10.0, 10.0))},
+    )
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["clean@x"]
+    assert "+SCOPED[7d/Fable" in switches[0][2], "the reason must name the scoped trigger"
+
+
+def test_cmd_auto_scoped_only_wall_stays_put_when_no_target_has_model_headroom(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half of the 2026-08-15 directive: a scoped-ONLY wall whose every alternate
+    is spent on the SAME model must NOT rotate (tier 1b would trade one Fable wall for the
+    same wall and burn the dwell window) — the remedy is `/model opus`, owned by the
+    model-fallback detector, so the credential stays where that detector's verdict is true.
+    Contrast with test_cmd_auto_still_rotates_when_every_target_is_spent_on_the_model_in_use,
+    where the ACCOUNT is exhausted and 1b correctly rotates anyway."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent = _blob("SPENT", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent},
+        usage={"LIVE": (200, _scoped_usage(40.0, 50.0, fable=95.0)),
+               "SPENT": (200, _scoped_usage(20.0, 20.0, fable=99.0))},
+    )
+    rotator.cmd_auto()
+    assert switches == [], "a scoped-only wall with no scoped-clear target must not rotate"
+
+
+def test_cmd_auto_scoped_window_below_the_bar_does_not_trigger(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CONTROL for the scoped trigger: same fleet, Fable merely WARM (60% < the 90 bar) and
+    the account fine — no rotation may fire. Proves the trigger is the threshold, not the
+    mere presence of a scoped window."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    clean = _blob("CLEAN", expires_ms=_ms_in(50))
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"clean@x": clean},
+        usage={"LIVE": (200, _scoped_usage(40.0, 50.0, fable=60.0)),
+               "CLEAN": (200, _scoped_usage(10.0, 10.0))},
+    )
+    rotator.cmd_auto()
+    assert switches == []
 
 
 def test_cmd_auto_degraded_rotates_when_api_down_and_live_expired(

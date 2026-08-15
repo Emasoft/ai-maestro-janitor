@@ -325,6 +325,17 @@ SAFE_5H = float(os.environ.get("ROTATOR_SAFE_5H", "97"))
 SAFE_7D = float(os.environ.get("ROTATOR_SAFE_7D", "99"))
 # Anti-thrash: minimum seconds between two auto-switches.
 MIN_DWELL_S = float(os.environ.get("ROTATOR_MIN_DWELL_S", "60"))
+# Model-scoped rotation trigger (owner failure report 2026-08-15): a LIVE account whose
+# window for ONE model (e.g. Fable) is spent while the account itself has headroom used to
+# read as "within limits" here — cmd_auto only ever consulted 5h/7d — so nothing rotated,
+# and every session running that model wedged in CC's retry loop until a human intervened.
+# The bars mirror the model-fallback detector's _SCOPED_HIGH/_ACCOUNT_HEADROOM
+# (scripts/detectors/model-fallback.py): both sides consume the SAME pure gate
+# (token_burn.model_fallback_verdict), so one pair of numbers is one policy — the rotator
+# rotates when a scoped-clear alternate exists, the detector types `/model opus` when none
+# does; a threshold gap between them would open a dead zone where neither acts.
+SCOPED_SWITCH_AT = float(os.environ.get("ROTATOR_SCOPED_SWITCH_AT", "90"))
+SCOPED_ACCOUNT_HEADROOM = float(os.environ.get("ROTATOR_SCOPED_ACCOUNT_HEADROOM", "90"))
 # F2 expiry ladder (TRDD-7100178d, blocker 5): a token within this many hours of its LOCAL
 # expiresAt (or already past it) counts as dead/dying. API-INDEPENDENT — read straight off the
 # blob — so rotation can fire even when /api/oauth/usage is unreachable. Default 0.5h headroom;
@@ -1866,6 +1877,7 @@ def cmd_auto() -> int:
     # (debounced — it can be a transient endpoint throttle); 401/403 is the server rejecting a
     # dead token; a local-expiry hit is an API-independent death signal that lets us rotate even
     # when /usage is unreachable (the user's "must work even if the API is not reachable").
+    scoped_only = False  # True ⇒ `near` tripped SOLELY on a model-scoped window (see below)
     if live_status == 429:
         streak = int(state.get("live_429_streak", 0)) + 1
         state["live_429_streak"] = streak
@@ -1902,6 +1914,26 @@ def cmd_auto() -> int:
             if burn_why:
                 near = True
                 live_desc += " +BURN[%s]" % burn_why
+        if not near:
+            # MODEL-SCOPED trigger (owner failure report 2026-08-15, TRDD-QE390SJA's missing
+            # rotation half): the account's 5h/7d are fine, but a window for ONE model —
+            # Fable, in the incident — is spent, which stalls every session running that
+            # model exactly as hard as an account wall. Reuses the SAME pure gate as the
+            # model-fallback detector (fresh-sample gate satisfied with 0: we just probed
+            # live_data ourselves this tick). Fail-open by construction: any unknown in the
+            # payload makes the verdict None and the pre-existing behavior stands unchanged.
+            # `scoped_only` marks that the ONLY exhaustion is per-model, which the tier
+            # logic below uses to rotate ONLY onto a scoped-clear target — a rotation onto
+            # a target spent on the same model would trade one wall for the same wall.
+            mf = token_burn.model_fallback_verdict(
+                live_data or {}, int(time.time()),
+                scoped_high=SCOPED_SWITCH_AT, account_headroom=SCOPED_ACCOUNT_HEADROOM,
+                snapshot_age_s=0,
+            )
+            if mf:
+                near = True
+                scoped_only = True
+                live_desc += " +SCOPED[%s=%.0f%%]" % (mf["scoped_label"], mf["scoped_util"])
     elif live_status in (401, 403):
         near = True  # server REJECTED the token (expired/invalid) — authoritative death signal
         live_desc = "token REJECTED (HTTP %d) — expired/invalid" % live_status
@@ -2095,6 +2127,23 @@ def cmd_auto() -> int:
         reason = "live %s %s -> rotate" % (live_email or "(live)", live_desc)
         _switch_blob(target_email, target_blob, reason)
         _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)" % (live_email or "(live)", target_email, bfh, bsd, reason))
+        return 0
+    # SCOPED-ONLY wall with no scoped-clear target: STOP HERE, before tiers 1b and 2.
+    # Every usage-confirmed alternate is spent on the same model (or unusable), while the
+    # account we already sit on has PROVEN headroom on every other model (that proof is what
+    # set `scoped_only`). A 1b/degraded rotation here would burn the dwell window and trade
+    # one Fable wall for the same Fable wall — the remedy is a MODEL switch, which the
+    # model-fallback detector owns (scripts/detectors/model-fallback.py types `/model opus`);
+    # staying put keeps the credential exactly where that detector's own verdict is already
+    # true. Owner directive 2026-08-15: rotate to preserve Fable when an alternate has Fable
+    # headroom; when none does, change the model instead of rotating.
+    if scoped_only and best is None:
+        detail = (" [%s]" % "; ".join(verdicts)) if verdicts else ""
+        _decide(
+            "auto: live %s %s — model-scoped wall only, and no alternate has headroom on that "
+            "model; staying put (model fallback owns the recovery: /model opus)%s"
+            % (live_email or "(live)", live_desc, detail)
+        )
         return 0
     # 1b) Every usage-confirmed target is spent on the model this session is running. Rotate
     # onto the best of them ANYWAY: their account windows are below safe, so the rotation
