@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.2] — 2026-08-15
+
+### Bug Fixes
+
+- **ci:** The two v3.3.1 reds — white-box loader typed Any, full history for check5's probe (c68340d)
+- **git-guard:** Widen the lsof probe window 5s -> 15s — load turned 'held' into 'no-probe' (7894e6e)
+
+### Documentation
+
+- **board:** 2026-08-15 Fable-wall field notes on WKTD5JTC + QE390SJA (TRDD-QE390SJA) (8258ba6)
+- **memory:** 2026-08-15 Fable-wall incident atom on the rotator page (ATOM-PH7Z-4FY8) (c2bd51f)
+
+### Features
+
+- **rotator:** A model-scoped wall on the LIVE account now triggers rotation (owner report 2026-08-15) (f185e52)
+- **guard:** Deny gh publishes targeting a repo the gh auth user does not own (owner rule 2026-08-14) (def961f)
 ## [3.3.1] — 2026-08-14
 
 ### Bug Fixes
@@ -15,6 +31,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Give pyright a venv, name any hanging test, probe memgrep candidates for executability (3678227)
+- Bump version to 3.3.1 (b4dbbb3)
 
 ### Testing
 
