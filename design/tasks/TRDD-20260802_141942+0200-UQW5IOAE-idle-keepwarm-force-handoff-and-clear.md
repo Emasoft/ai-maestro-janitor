@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-12T15:39:16+0200
+updated: 2026-08-16T01:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -191,7 +191,19 @@ into a pane it does not own)?
       **BLOCKED until TRDD-OO301H7D lands** — it cannot be honestly ticked while the
       external path discards `awaiting_user`. (OO301H7D shipped `fde1bf40`; re-verify this
       box against the in-model nudge path specifically, which is a different path.)
-- [ ] A test proving `/clear` is not typed unless a verified handoff exists on disk.
+- [x] A test proving `/clear` is not typed unless a verified handoff exists on disk.
+      **Done 2026-08-16 — `tests/test_external_clear_never_clears_without_handoff.py`.** Two
+      end-to-end assertions on the real `main()`, per this card's own advisor verdict that a pure
+      mutation cannot catch a wiring defect: (a) a spy on `_fire` proves the handoff is on disk
+      AND non-empty *at the moment the chain is spawned* — both events happening is not the same
+      as the right one happening first, and an after-the-fact check could not tell them apart;
+      (b) an `atomic_write` that raises proves the chain is never spawned at all. The invariant
+      holds today by CONSTRUCTION (atomic_write raises; the write is a plain statement before
+      `_fire`), which is precisely why it needed pinning: it is protected by the ABSENCE of a
+      try/except, and wrapping a fallible write in one is the most natural "hardening" a future
+      session would apply — silently turning a failed handoff into a destructive clear while
+      every other test stayed green. Both tests are self-proving: (a) fails if `_fire` is never
+      reached, (b) fails if `main()` never reaches the write.
 - [ ] **(REPLACED per advisor — the old wording was unfalsifiable.)** Not "observed working
       once": that proves one TRUE POSITIVE, while the risk on an irreversible action is a
       FALSE positive, and this card's own data (10/45 candidates, all dead) says a live
