@@ -122,6 +122,61 @@ def test_handoff_survives_a_failed_summary(tmp_path) -> None:
     assert "do the thing" in text
 
 
+def test_the_composer_targets_the_budget_the_checker_enforces() -> None:
+    """The producer and its checker must agree, or the contract is decorative.
+
+    MEASURED DRIFT (TRDD-PXP08ZQC): `compose_handoff` defaulted to 8192 while
+    `clear_trigger.check_handoff_concise` enforced 4096, and the caller passed neither — so every
+    full handoff aimed at a budget the contract rejects. A real one shipped at 4571 bytes: over
+    the limit, under the composer's target, logged as `['too-large']` and injected anyway.
+
+    Asserted as a CONSTANT EQUALITY rather than only behaviourally, because two independently
+    tuned numbers drift silently the moment someone changes one side — the same failure this file
+    already carries a lesson about for the fleet-lease TTL.
+    """
+    import inspect
+
+    import clear_trigger  # noqa: PLC0415 -- a script, imported only by this assertion
+
+    default = inspect.signature(ec.compose_handoff).parameters["max_bytes"].default
+    assert default == clear_trigger._HANDOFF_MAX_BYTES == ec.HANDOFF_MAX_BYTES, (
+        f"composer default ({default}) and enforced contract "
+        f"({clear_trigger._HANDOFF_MAX_BYTES}) disagree — a handoff composed with defaults would "
+        "violate the check that gates it."
+    )
+
+
+def test_a_REALISTIC_handoff_passes_the_contract_with_defaults() -> None:
+    """The regression the toy fixture could not catch.
+
+    `test_external_handoff_clear.py::test_composed_handoff_satisfies_the_concision_contract`
+    exercised ONE card and no transcript, so its handoff was far too small to reach either budget
+    and passed under both — green while production was violating the contract. This composes a
+    handoff the size a real project produces (many cards, commits, findings, a long tail and an
+    oversized summary) and asserts the SHIPPED defaults keep it inside the contract.
+    """
+    import clear_trigger  # noqa: PLC0415
+
+    inputs = ec.HandoffInputs(
+        cards=[(f"CARD{i:04d}", "dev", f"A card with a reasonably long descriptive title {i}")
+               for i in range(12)],
+        commits=[(f"abc{i:04d}", f"feat(area): a commit subject of realistic length {i}")
+                 for i in range(10)],
+        findings=[f"HIGH something notable happened in subsystem {i}" for i in range(8)],
+        memory_dir=".claude/project/memory",
+        trigger=ec.TRIGGER_RESUMED_COLD,
+    )
+    text = ec.compose_handoff(
+        inputs,
+        now_iso="2026-08-16T00:50:00+0200",
+        summary="S" * 40_000,
+        tail=[f"USER: a message of some length, number {i}" for i in range(300)],
+    )
+
+    ok, reasons = clear_trigger.check_handoff_concise(text)
+    assert ok, f"a realistic handoff violates the contract it is gated by: {reasons}"
+
+
 def test_whole_payload_respects_one_budget(tmp_path) -> None:
     """Three 'small' parts add up — the budget is over the WHOLE injection, not per part."""
     text = ec.compose_handoff(

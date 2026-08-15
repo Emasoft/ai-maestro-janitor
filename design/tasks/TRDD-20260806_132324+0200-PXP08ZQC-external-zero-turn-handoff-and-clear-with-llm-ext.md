@@ -1,9 +1,9 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: todo
+column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-15T00:26:00+0200
+updated: 2026-08-16T00:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -222,14 +222,44 @@ the right moment (before the next turn executes).
 
 ## Acceptance
 
-- [ ] watcher fires only on user-absent-per-rules AND (next-fire-misses OR long-idle), never on
+- [x] watcher fires only on user-absent-per-rules AND (next-fire-misses OR long-idle), never on
       unknown idle; over-threshold applies only when the context is measurable (see STATE)
-- [ ] handoff written by llm-ext with ZERO main-model tokens (or template fallback), passes
+- [x] handoff written by llm-ext with ZERO main-model tokens (or template fallback), passes
       check_handoff_concise
-- [ ] /clear + bootstrap land via run_chained_inject with no model turn before them
+- [x] /clear + bootstrap land via run_chained_inject with no model turn before them
 - [ ] one observed end-to-end unattended cycle: big idle session → external handoff →
       clear → re-arm → resume, with the verify harness PASS table
+      — the CYCLE was observed 2026-08-15 (below); the `handoff_clear_verify.py` PASS table was NOT
+      captured, so this stays open on that half alone
 - [ ] cost note: measured per-cycle cost vs today's per-fire cache-miss write
+
+## ⏵ 2026-08-15/16 — OBSERVED IN PRODUCTION, and it found two real defects
+
+The watcher fired for real at **21:29:58** on this project: `trigger=resumed-cold`,
+`context=431357`, handoff composed and written, `/clear` typed, and the fresh session bootstrapped
+and resumed from `.janitor/state/agent-handoff.md` — the cycle this card is about, with zero model
+turns in front of it. That is boxes 1 and 3 satisfied by observation rather than by argument.
+
+It also surfaced two defects that the toy fixtures could not, both now fixed:
+
+1. **The handoff had no summary.** `summary: permanent — llm-ext is not on PATH; not retrying` —
+   the CLI lives in a plugin-cache bin dir that an interactive profile puts on PATH and a
+   hook-spawned child never inherits. Fixed in TRDD-CEWVQ8DG (`resolve_llm_ext`, shipped v3.3.6).
+2. **The handoff VIOLATED the contract it is gated by.** The same fire logged
+   `handoff violates the concision contract: ['too-large']` and injected it anyway. Cause:
+   `compose_handoff` defaulted to **8192** while `clear_trigger.check_handoff_concise` enforces
+   **4096**, and the caller passed neither — a producer and its checker tuned independently, which
+   is the second time this file has paid for that (see `_FLEET_LEASE_TTL_MARGIN_S`). Both composers
+   now default to one `HANDOFF_MAX_BYTES` constant.
+
+**Why no test caught #2, which is the more useful half.** The existing guard
+(`test_composed_handoff_satisfies_the_concision_contract`) composes ONE card and no transcript, so
+its handoff is far too small to reach either budget and passes under both — green while production
+violated the contract. The new `test_a_REALISTIC_handoff_passes_the_contract_with_defaults` uses a
+handoff the size a real project produces, and the fix is proven by measurement rather than
+assertion: the same input at the old default yields **8184 bytes, `['too-large']`** — the exact
+reason string from the production log — and **3883 bytes, passing** at the new one. A constant-
+equality test now pins producer and checker together so they cannot drift apart again.
 
 ## Pointers
 

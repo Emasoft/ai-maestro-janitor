@@ -84,6 +84,21 @@ DEFAULT_TTL_MINUTES = 5
 # acting would destroy a live session's context to save nothing. Same clock, opposite asymmetry.
 CERTAIN_EXPIRY_FLOOR_MINUTES = 60
 
+# The byte budget for the WHOLE injected handoff. It MIRRORS the contract
+# `clear_trigger.check_handoff_concise` actually ENFORCES (`_HANDOFF_MAX_BYTES`), and the two
+# must stay equal — `tests/test_external_clear_llm_ext.py` asserts exactly that, because this is
+# the second time in this file's history that a producer and its checker were tuned
+# independently (see `_FLEET_LEASE_TTL_MARGIN_S` for the first).
+#
+# MEASURED DRIFT, 2026-08-15 (TRDD-PXP08ZQC): `compose_handoff` defaulted to 8192 — DOUBLE what
+# the checker allows — while `compose_template_handoff` already used 4096 and documented itself
+# as passing "by construction". The caller passed neither, so every full handoff targeted a
+# budget the contract rejects, and a real one shipped at 4571 bytes: over the limit, under the
+# composer's target, logged as `handoff violates the concision contract: ['too-large']` and
+# injected anyway. A bloated handoff refills the context the /clear just emptied, which is the
+# entire thing this feature exists to avoid.
+HANDOFF_MAX_BYTES = 4096
+
 _TTL_REGIME_FILE = "ttl-regime.json"
 
 # Trigger names — returned in the verdict and written to the log, so a fire can always be
@@ -115,6 +130,7 @@ CACHE_EXPIRED_COMMAND_ENV = "CLAUDE_PLUGIN_OPTION_HEARTBEAT_CACHE_EXPIRED_COMMAN
 
 __all__ = [
     "ClearVerdict",
+    "HANDOFF_MAX_BYTES",
     "cache_certainly_expired",
     "cache_expired_by_age",
     "compose_handoff",
@@ -915,7 +931,7 @@ def compose_handoff(
     now_iso: str,
     summary: str | None,
     tail: Sequence[str] = (),
-    max_bytes: int = 8192,
+    max_bytes: int = HANDOFF_MAX_BYTES,
 ) -> str:
     """The full injected payload: scriptable facts + llm-ext summary + a TRUNCATED tail.
 
@@ -1364,7 +1380,9 @@ class HandoffInputs:
     context_tokens: int | None = None
 
 
-def compose_template_handoff(inputs: HandoffInputs, *, now_iso: str, max_bytes: int = 4096) -> str:
+def compose_template_handoff(
+    inputs: HandoffInputs, *, now_iso: str, max_bytes: int = HANDOFF_MAX_BYTES
+) -> str:
     """PURE. Build a link-only handoff from on-disk facts, with ZERO model tokens.
 
     It must satisfy `clear_trigger.check_handoff_concise` BY CONSTRUCTION, because the thing it
