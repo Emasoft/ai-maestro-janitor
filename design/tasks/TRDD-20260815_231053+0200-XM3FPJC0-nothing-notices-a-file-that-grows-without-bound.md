@@ -47,9 +47,26 @@ existed, holding 570,525 lines of tracebacks (11,045 `URLError` + 1,918 `OSError
 writer. The gap closed on its first real run, and the `/tmp` → `/private/tmp` realpath dedupe was
 confirmed live (one entry per inode, not two).
 
-**NEXT ACTION.** Watch one real hourly fire in a session that did not run it by hand, and confirm
-the re-alert policy behaves over time: a static file named once, a growing one re-announced only
-after it doubles.
+**RE-ALERT POLICY VERIFIED LIVE (2026-08-15 23:47), on real files rather than fixtures.** A second
+invocation ~25 minutes after the first re-reported ONLY the file that had grown —
+`statusline-debug.log`, 279.2 KB → 635.6 KB, past the 2× gate, and the line named the growth — while
+staying SILENT on `state_blocks.txt` and the 42 MB `statusline-error.log`, both unchanged since the
+first run. That is exactly the designed behaviour: a static file is named once, a balloon keeps
+announcing itself.
+
+Be precise about what this is NOT: both runs were MANUAL invocations at a lowered threshold, so the
+autonomous hourly fire (and the state file surviving between two dispatcher-driven runs) is still
+unobserved. The policy is proven; the scheduling is not.
+
+**SHIPPED in v3.3.6** after three gates caught real defects the local suite could not: the git mode
+was 100644 so CI's `./scripts/detectors/<name>.py` would never have executed it (the test reads the
+mode GIT RECORDS, and the file was untracked during the full-suite run, so it passed truthfully);
+and the CI-parity preflight refused on bandit B108 for the `/tmp/claude` literal — annotated as a
+verified false positive, because B108 guards the WRITE side and this detector only rglobs and stats,
+skipping symlinks, which is the CWE-377 vector itself.
+
+**NEXT ACTION.** Observe one autonomous hourly fire in a session that did not run it by hand, and
+confirm the state file carries the re-alert baseline across dispatcher-driven runs.
 
 ## Design
 
