@@ -122,6 +122,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # the user is mid-task. Skipped silently when reports/screenshots/ is
     # absent, which is the common case on non-UI projects.
     ("screenshot-purge", 3600, "CLAUDE_PLUGIN_OPTION_SCREENSHOT_PURGE_INTERVAL"),
+    # runaway-file-growth runs hourly (TRDD-XM3FPJC0): a balloon takes hours or days to
+    # matter, and the detector walks a filesystem tree — a tighter cadence would make it
+    # the FS churn it exists to report. Silent no-op when the scan roots are absent.
+    ("runaway-file-growth", 3600, "CLAUDE_PLUGIN_OPTION_RUNAWAY_FILE_GROWTH_INTERVAL"),
     # v0.4.0 additions:
     ("remote-credentials", 3600, "CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL"),
     ("stale-stash", 86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
@@ -584,6 +588,7 @@ _ADVISORY_DETECTORS = frozenset({
     "why-in-commits", "subagent-report", "stale-task", "stale-stash", "dirty-tree",
     "stale-index-lock",
     "worktree-janitor", "trashcan-purge", "reports-purge", "screenshot-purge",
+    "runaway-file-growth",
     "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
     "oauth-cookie-reminder", "oauth-beacon-refresh",
 })

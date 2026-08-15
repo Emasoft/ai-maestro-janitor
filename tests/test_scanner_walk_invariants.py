@@ -45,6 +45,11 @@ _EXEMPT = {
     "agent-context-integrity.py": "asks 'what does the agent LOAD?', not 'what does the repo "
                                   "SHIP?' — a gitignored CLAUDE.md is still auto-loaded into "
                                   "every session, so it is still poisonable (janitor#167)",
+    "runaway-file-growth.py": "asks 'what is EATING THE DISK?', not 'what does the repo SHIP?' "
+                              "— it walks configured roots outside the repo entirely (default "
+                              "/tmp/claude), and the balloons it hunts are logs, caches and "
+                              "temp files, i.e. gitignored by nature. Filtering would silence "
+                              "it on precisely the files it exists to name (TRDD-XM3FPJC0)",
 }
 # NB `trashcan-purge.py` is deliberately absent: it uses `iterdir()` on one directory, not
 # a recursive walk, so it never had the exposure. Listing it would imply a risk it does not
