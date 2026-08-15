@@ -3,7 +3,7 @@ trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
 column: todo
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-14T19:30:48+0200
+updated: 2026-08-16T01:35:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -317,4 +317,15 @@ being cancelled rather than accepted.
       exception so a "make R11 consistent everywhere" edit cannot reintroduce the
       contradiction. Falsified: reworded "lean-worker"→"cheaper" in all three sources and
       exactly those 3 failed; reverted, 50 pass, ruff clean.
-- [ ] Released, and CLI-verified installed (tag-vs-cache file diff, 0 missing)
+- [x] Released, and CLI-verified installed (tag-vs-cache file diff, 0 missing)
+      **VERIFIED 2026-08-16 on v3.3.7.** Released: tag + GitHub release, with the Release,
+      memgrep-release-binaries and main CI workflows all `completed success`. Installed: the
+      cache carries `3.3.7`, and the diff run by the method ATOM-1F78-3R1G prescribes —
+      `git ls-tree -r --name-only v3.3.7 | sort` vs `find <cache-dir> -type f` — reports
+      **1639 tag files, 0 missing**. The 99 cache-side extras are benign: `.git` internals of
+      the shallow clone plus runtime `__pycache__` `.pyc` files, neither of which the tag ships.
+      The janitor#232 failure signature was checked BY NAME rather than inferred from the zero,
+      because that incident's whole point is that a partial install still LOADS: `agents/` (3),
+      `commands/` (3), `hooks/` (1), `skills/` (88), `scripts/` (599), `.claude-plugin/` (1) all
+      present, and `.integrity/manifest-sha256.json` present — a missing manifest on an installed
+      root is itself a finding since v2.7.2 (ATOM-8WQI-G751).
