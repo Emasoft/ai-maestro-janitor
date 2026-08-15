@@ -1,9 +1,9 @@
 ---
 trdd-id: HYV0SOC6
 title: exfil-webhook-sink is a known-domain blocklist wearing the name of an exfiltration detector
-column: todo
+column: complete
 created: 2026-08-13T09:09:30+0200
-updated: 2026-08-14T07:52:00+0200
+updated: 2026-08-16T00:41:00+0200
 current-owner: janitor-main-session
 task-type: security
 approval-tier: 0
@@ -152,14 +152,44 @@ where the reverse is true.
 ## Acceptance
 
 - [x] A decision is recorded among A/B/C/D — **superseded by the USER ruling above**
-- [ ] The structural rule ships, with its recall AND per-population FP re-measured post-janitor#254
-- [ ] The verification ladder is implemented, and each rung has a test proving it can KILL a
+- [x] The structural rule ships, with its recall AND per-population FP re-measured post-janitor#254
+- [x] The verification ladder is implemented, and each rung has a test proving it can KILL a
       candidate the trigger raised
-- [ ] A verified exfil finding pushes to the user AND lands in the findings ledger; an unverified
+- [x] A verified exfil finding pushes to the user AND lands in the findings ledger; an unverified
       one lands in the ledger ONLY, and a test proves the unverified path pushes nothing
-- [ ] If a rule ships: recall AND per-population FP are re-measured by `agent_context_bench.py`,
+- [x] If a rule ships: recall AND per-population FP are re-measured by `agent_context_bench.py`,
       and `COVERAGE.md` is regenerated so the claim matches the measurement
-- [ ] If C ships: no rule id or description in `agent_config_patterns` claims coverage broader than
+- [x] If C ships: no rule id or description in `agent_config_patterns` claims coverage broader than
       its pattern delivers
+
+## ⏵ CLOSED 2026-08-16 — four boxes were already satisfied; one genuinely was not
+
+Audited each box against the code rather than against the card, because the card had sat in `todo`
+while the work landed — the shipped-but-not-closed drift `trdd-state-reconciliation` exists to catch.
+
+Already done and VERIFIED first-hand:
+
+- the structural rule ships as `exfil-structural-probe` (`agent_config_patterns.py`), detecting
+  UNMASKED exactly as the ruling requires, with `COVERAGE.md` carrying the measured **3/8 · weak**
+  — the claim matches the measurement instead of the old `FALSIFIED 0/8`;
+- the ladder ships as `exfil_verify.verify_exfil_candidate`, wired into
+  `agent-context-integrity.py::_route_exfil_candidate`, and `tests/test_exfil_verify.py` proves
+  **each of the four rungs can KILL a candidate the trigger raised** (loopback sink, incident
+  post-mortem, bare-word "credential", fixture path) plus that a real attack clears all four;
+- option C shipped: the denylist rule now reads *"Known exfiltration-sink **DOMAIN** in agent
+  body"*, so the rule list no longer implies coverage the pattern cannot deliver.
+
+**The gap was the ROUTING test, and it was a real one.** `_route_exfil_candidate` appeared in no
+test at all: the ladder was proven, but nothing proved it was wired to the right branch — and a
+perfect verifier attached to the wrong branch alarms on everything while every ladder test stays
+green. `tests/test_exfil_alarm_routing.py` now pins all three halves of the ruling: a VERIFIED
+candidate is recorded HIGH **and** returns a line (the only thing that reaches a human), an
+UNVERIFIED one returns `""`, and — asserted separately on purpose — an unverified one is **still
+recorded** at LOW naming the rung that killed it. That last assertion is not redundant: a router
+that simply dropped unverified candidates would pass a "pushes nothing" test while reintroducing
+the denylist's 0/8 blindness through the back door.
+
+The tests drive the REAL scanner and the REAL verifier — the Finding comes from `acp.scan_text`,
+never hand-built — so they cannot pass on a span the trigger would never raise.
 
 ## Notes and lessons learned
