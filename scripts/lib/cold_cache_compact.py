@@ -300,6 +300,25 @@ def context_tokens_for(transcript_path: str | os.PathLike[str] | None) -> int | 
         return None
 
 
+def transcript_age_s(transcript: Path | None, *, now: int) -> int | None:
+    """Seconds since a transcript last changed — the PROMPT-CACHE clock — or None when unknown.
+
+    RAW mtime by design, not a "substantive" age that discounts trailing heartbeat enqueues: a
+    heartbeat fire is a real API request and refreshes the cache even though it is not substantive
+    work. A substantive age would therefore claim the cache had expired while 5-minute beats were
+    keeping it hot — and the caller would clear a warm session for nothing.
+
+    Best-effort; never raises. Clamped at 0 so a clock skew reads as "just now" rather than as a
+    negative age that would compare as fresh forever.
+    """
+    if transcript is None:
+        return None
+    try:
+        return max(0, now - int(transcript.stat().st_mtime))
+    except OSError:
+        return None
+
+
 def newest_transcript(project_dir: str | os.PathLike[str] | None) -> Path | None:
     """The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
     hook payload: transcripts live at `~/.claude/projects/<slug>/<session>.jsonl` (slug via the

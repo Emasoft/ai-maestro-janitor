@@ -114,14 +114,31 @@ def main() -> int:
         already = dedupe.emit_once(sd / _FIRED_STAMP, key, "x") is None
 
         newest = cold_cache_compact.newest_transcript(root)
+        now = int(time.time())
+        # The probe answers when it can and WINS when it does; elapsed time is the fallback that
+        # makes this lever reachable at all on a host without agentlensPro (TRDD-CEWVQ8DG). Before
+        # this, an abstaining probe logged `why=cache state unknown — not clearing` and a whole
+        # fleet of cold resumes each paid a full cache-creation write on its first turn.
+        cache_expired = (
+            None
+            if already
+            else ec.resolve_cache_expired(
+                # The ONE subprocess, and only once the local facts have failed to refuse. It costs
+                # a bounded ~20 s worst case, which is why it must not run on the `compact` path
+                # above.
+                ec.cache_certainly_expired(root),
+                last_turn_age_s=cold_cache_compact.transcript_age_s(newest, now=now),
+                ttl_minutes=ec.read_ttl_minutes(sd),
+            )
+        )
         verdict = ec.should_clear_on_resume(
             source=source,
-            # The ONE subprocess, and only once the local facts have failed to refuse. It costs a
-            # bounded ~20 s worst case, which is why it must not run on the `compact` path above.
-            cache_expired=None if already else ec.cache_certainly_expired(root),
+            cache_expired=cache_expired,
             context_tokens=cold_cache_compact.context_tokens_for(newest),
             min_context=ec.min_context_tokens(),
-            in_cooldown=cold_cache_compact.clear_in_cooldown(sd, now=int(time.time())),
+            # `now`, not a second `time.time()`: one decision reads one clock, so the age and the
+            # cooldown can never be judged against instants that straddle a second boundary.
+            in_cooldown=cold_cache_compact.clear_in_cooldown(sd, now=now),
             already_fired_this_session=already,
         )
         state.log_line(

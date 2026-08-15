@@ -75,6 +75,14 @@ DEFAULT_HEADROOM_SECONDS = 60
 # miss" → toward acting. That is the safe direction here: the cost of a spurious clear on an
 # abandoned session is one re-read of a link-only handoff.
 DEFAULT_TTL_MINUTES = 5
+# The LONGEST prompt-cache TTL the platform offers. Past it no cache survives under ANY regime, so
+# an age beyond this is CERTAINTY rather than an estimate — which is the only thing that may
+# authorize an unrecoverable `/clear` (TRDD-CEWVQ8DG).
+#
+# Deliberately NOT `DEFAULT_TTL_MINUTES`. The short TTL is the right bias for
+# `next_fire_misses_cache`, which predicts a COST and should err toward acting; here erring toward
+# acting would destroy a live session's context to save nothing. Same clock, opposite asymmetry.
+CERTAIN_EXPIRY_FLOOR_MINUTES = 60
 
 _TTL_REGIME_FILE = "ttl-regime.json"
 
@@ -108,6 +116,7 @@ CACHE_EXPIRED_COMMAND_ENV = "CLAUDE_PLUGIN_OPTION_HEARTBEAT_CACHE_EXPIRED_COMMAN
 __all__ = [
     "ClearVerdict",
     "cache_certainly_expired",
+    "cache_expired_by_age",
     "compose_handoff",
     "compose_template_handoff",
     "enabled",
@@ -118,6 +127,8 @@ __all__ = [
     "min_context_tokens",
     "next_fire_misses_cache",
     "read_ttl_minutes",
+    "resolve_cache_expired",
+    "resolve_llm_ext",
     "seconds_until_next_fire",
     "should_clear_externally",
     "terminal_from_record",
@@ -194,6 +205,52 @@ def llm_ext_data_dir(binary: str) -> str:
     return str(data) if data.is_dir() else ""
 
 
+def _version_key(name: str) -> tuple[int, ...]:
+    """A sortable numeric tuple for a version directory name; a non-numeric part sorts as 0.
+
+    Never raises: an odd directory name costs one candidate, not the whole lookup.
+    """
+    out: list[int] = []
+    for part in name.split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def resolve_llm_ext() -> str:
+    """Absolute path to the llm-ext CLI, or "" when it genuinely is not installed.
+
+    `shutil.which` ALONE IS NOT ENOUGH, and that is MEASURED, not theoretical (TRDD-CEWVQ8DG). The
+    CLI ships inside ANOTHER plugin and lives at
+    `~/.claude/plugins/cache/<marketplace>/llm-externalizer/<version>/bin/llm-ext` — a directory an
+    interactive shell carries on PATH because the user's profile put it there, and a hook-spawned
+    detached child does not. So every cold-resume handoff on this machine degraded to the template
+    (`summary: permanent — llm-ext is not on PATH; not retrying`) while the binary sat exactly
+    where this function now looks. Resolving by the install's OWN documented layout — the same
+    convention `llm_ext_data_dir` already reads in reverse — removes the dependency on whose
+    environment happens to be inherited.
+
+    PATH still wins when it answers, so an operator who put a specific build there keeps control.
+
+    Versions are ordered by PARSED NUMERIC TUPLE, never lexicographically: as strings "9.0.0"
+    sorts ABOVE "13.5.1", which would pin the oldest install forever and silently strand every
+    later fix. Ties break on the path so the choice is deterministic across runs.
+    """
+    found = shutil.which("llm-ext")
+    if found:
+        return found
+    try:
+        cache = Path.home() / ".claude" / "plugins" / "cache"
+        candidates = [
+            (_version_key(c.parent.parent.name), str(c))
+            for c in cache.glob("*/llm-externalizer/*/bin/llm-ext")
+            if c.is_file()
+        ]
+    except OSError:  # an unreadable home must degrade to "absent", never raise into a clear
+        return ""
+    return max(candidates)[1] if candidates else ""
+
+
 def _data_dir_fingerprint(data_dir: str) -> float:
     """llm-ext's data dir mtime, or -1.0 if it cannot be read.
 
@@ -218,7 +275,7 @@ def llm_ext_progress_fn() -> Callable[[], float] | None:
     on the machine running them. Production wiring calls this explicitly (see
     `external_handoff_clear.py`); tests inject a fake `progress_fn` instead.
     """
-    binary = shutil.which("llm-ext")
+    binary = resolve_llm_ext()
     if not binary:
         return None
     data_dir = llm_ext_data_dir(binary)
@@ -281,7 +338,7 @@ def run_llm_ext_summary(
     unresolvable data dir, non-zero exit, timeout, empty output — arrives here as the same
     answer, and the handoff still gets written.
     """
-    binary = shutil.which("llm-ext")
+    binary = resolve_llm_ext()
     if not binary or not transcript or not Path(transcript).is_file():
         return None
     data_dir = llm_ext_data_dir(binary)
@@ -640,9 +697,12 @@ def attempt_llm_ext_summary(
     an unplugged network indistinguishable from an uninstalled binary, and those want opposite
     responses.
     """
-    binary = shutil.which("llm-ext")
+    binary = resolve_llm_ext()
     if not binary:
-        return SummaryAttempt(None, OUTCOME_PERMANENT, "llm-ext is not on PATH")
+        # "not installed", NOT "not on PATH": PATH is no longer the criterion, and the old wording
+        # is the exact string in the incident logs — keeping it would make a fixed host
+        # indistinguishable from a broken one in the next post-mortem.
+        return SummaryAttempt(None, OUTCOME_PERMANENT, "llm-ext is not installed")
     if not transcript or not Path(transcript).is_file():
         return SummaryAttempt(None, OUTCOME_PERMANENT, "no readable transcript")
     data_dir = llm_ext_data_dir(binary)
@@ -1071,6 +1131,50 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
     """
     command = os.environ.get(CACHE_EXPIRED_COMMAND_ENV, alp.DEFAULT_CACHE_EXPIRED_COMMAND)
     return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
+
+
+def cache_expired_by_age(last_turn_age_s: int | None, *, ttl_minutes: int) -> bool | None:
+    """PURE. `True` when elapsed time ALONE makes cache expiry certain; `None` when it does not.
+
+    THE DEFECT THIS CLOSES (TRDD-CEWVQ8DG, measured): `should_clear_on_resume` demands
+    `cache_expired is True`, and its only source was `cache_certainly_expired` — a probe of the
+    OPTIONAL agentlensPro CLI. On any host without it the probe abstains, the gate refuses
+    (`why=cache state unknown — not clearing`), and a fleet of cold resumes each pays a full
+    cache-creation write on its first turn. A lever reachable only when a third-party tool happens
+    to be installed is the shape this codebase has already shipped twice and warns about twice:
+    "a threshold high enough to never be met is a feature that does not exist".
+
+    Elapsed time answers the same question without asking anyone: past `CERTAIN_EXPIRY_FLOOR_MINUTES`
+    no prompt cache survives, so the age IS the verdict.
+
+    **It never returns `False`**, and that is the load-bearing asymmetry rather than an oversight.
+    "Not yet certainly dead" is not "alive": a `False` here would override a probe that said the
+    cache HAD expired, converting a working signal into a refusal — the very failure being fixed.
+    Only `True` (certain) and `None` (unknown) are expressible, so this can add certainty and can
+    never remove it.
+    """
+    if last_turn_age_s is None:
+        return None
+    floor = max(int(ttl_minutes), CERTAIN_EXPIRY_FLOOR_MINUTES)
+    return True if last_turn_age_s >= floor * 60 else None
+
+
+def resolve_cache_expired(
+    probe: bool | None, *, last_turn_age_s: int | None, ttl_minutes: int
+) -> bool | None:
+    """The cache-expiry verdict: the probe when it can answer, elapsed time when it cannot.
+
+    ORDER IS THE SAFETY ARGUMENT. A probe that answered — `True` OR `False` — is taken verbatim,
+    because it observes the cache directly and this arithmetic only bounds it. In particular a
+    `False` (warm) survives an ancient transcript mtime: clearing there would throw away a LIVE
+    cache and destroy the context for nothing. Only a `None` falls through.
+
+    So the composition is strictly ADDITIVE — it can turn "unknown" into "certainly expired", and
+    can never turn "warm" into a clear.
+    """
+    if probe is not None:
+        return probe
+    return cache_expired_by_age(last_turn_age_s, ttl_minutes=ttl_minutes)
 
 
 @dataclass(frozen=True)
