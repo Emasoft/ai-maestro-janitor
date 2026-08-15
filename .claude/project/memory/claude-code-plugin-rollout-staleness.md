@@ -1,8 +1,8 @@
 ---
 name: claude-code-plugin-rollout-staleness
-description: "the fix is published but the bug keeps happening / a session still injects the old behavior after the plugin updated / which sessions run stale hooks / an installed rule file went BACKWARD to an older version's content / why did /compact fire at the old threshold after the release — plugin code is SESSION-LOADED and a running session is a ghost of the old version until it reloads"
+description: "the fix is published but the bug keeps happening / a session still injects the old behavior after the plugin updated / which sessions run stale hooks / an installed rule file went BACKWARD to an older version's content / why did /compact fire at the old threshold after the release / the fix is merged but the installed binary or rule is still the old one / cargo install left memgrep stale / memgrep --version reports the wrong commit — plugin code is SESSION-LOADED and a running session is a ghost of the old version until it reloads, and anything that INSTALLS (a Rust crate, a rule file, the plugin cache) needs its own delivery check on PATH"
 ocd: 2026-07-18
-lmd: 2026-07-31
+lmd: 2026-08-15
 metadata:
   node_type: memory
   type: project
@@ -100,6 +100,27 @@ So the janitor's convergence chain is NOT the suspect: cache update, reload-gene
 To establish which plugin version a session is ACTUALLY running, grep its transcript for `Base directory for this skill:` and read the version out of the PATH. That line is emitted at load time by the thing that did the loading, so it is evidence; a claim-state or install-registry helper describes INTENT and can disagree with what a live session holds.
 
 Learned the expensive way on the same investigation: I first concluded the daemon had "stood down" for server-claimed update chores because `claimed_chores()` listed them — then found the daemon's own log showed it RAN the chore, with zero yield lines anywhere. The published root cause had to be withdrawn. An API that reports ownership is not a record of execution.
+
+
+^ATOM-S5YC-CCW4 [desc: "Merged is not delivered: for anything that INSTALLS (a Rust crate, a rule file, a plugin) check the artifact on PATH, and do not trust its own version stamp", keywords: cargo_install_stale memgrep_version_wrong_sha merged_is_not_delivered installed_binary_older_than_the_fix build_stamp_lies rule_file_shipped_but_not_installed feature_works_in_repo_but_not_on_this_machine, type: reference, ocd: 2026-08-15, lmd: 2026-08-15]
+
+**Merged is not delivered, and a version stamp is not evidence.** Anything that INSTALLS has a
+second hop after the merge, and the janitor has three of them: the bundled `memgrep` crate
+(`cargo install --path scripts/memgrep`), the global rules in `~/.claude/rules/`, and the plugin
+cache itself. On 2026-08-16 two cards were closed with every acceptance box green while their code
+had NOT reached this host by any test's reckoning — the check that settled it was invoking the
+artifact on PATH, never re-reading the repo.
+
+Worse, the artifact can lie about itself: `memgrep --version` reported `a685cca, 2026-08-07` for a
+binary that demonstrably contained code committed 2026-08-14, because `build.rs` watched `.git/HEAD`
+— a file a commit never writes — so the stamp froze at each checkout's FIRST build (TRDD-9XMPS8OZ,
+fixed in `a698f163`). A frozen stamp is worse than none: it answers confidently in exactly the
+situation it exists for.
+
+So the delivery check is behavioural, in this order: run the thing by its BARE COMMAND NAME (a
+repo-relative `./target/...` passes while PATH resolves elsewhere), assert on OUTPUT or a string
+only the new code contains, and treat a self-reported version as a hint to corroborate — never as
+the proof.
 
 ## See also
 
