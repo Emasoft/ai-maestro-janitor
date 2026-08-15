@@ -152,6 +152,26 @@ def test_a_real_path_entry_still_wins(tmp_path, monkeypatch) -> None:
     assert ec.resolve_llm_ext() == str(shim)
 
 
+def test_an_absent_cli_reports_the_exact_permanent_detail(tmp_path, monkeypatch) -> None:
+    """The guardrail for the CI break this file's own rename caused (TRDD-CEWVQ8DG).
+
+    `test_external_clear_retry.py` asserts this detail against a SET of three, because WHICH
+    precondition fires depends on the host — so on a machine where llm-ext IS installed it reaches
+    the transcript branch and a renamed string sails through review. CI, with no llm-ext, caught it.
+
+    This pins the string DETERMINISTICALLY by making absence the fixture, so the next rename fails
+    on the machine that made it rather than twenty minutes later in CI.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    got = ec.attempt_llm_ext_summary(str(transcript))
+    assert got.outcome == ec.OUTCOME_PERMANENT
+    assert got.detail == "llm-ext is not installed"
+
+
 def test_the_summary_attempt_no_longer_reports_not_on_path(tmp_path, monkeypatch) -> None:
     """The regression pin for D2: a plugin-cache-only install must produce a SUMMARY, not a
     permanent 'not on PATH' that skips every retry and degrades the handoff."""

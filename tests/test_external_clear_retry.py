@@ -55,7 +55,7 @@ def _attempts(*outcomes: ec.SummaryAttempt):
 
 _OK = ec.SummaryAttempt("a real summary", ec.OUTCOME_OK)
 _TRANSIENT = ec.SummaryAttempt(None, ec.OUTCOME_TRANSIENT, "timed out after 240s")
-_PERMANENT = ec.SummaryAttempt(None, ec.OUTCOME_PERMANENT, "llm-ext is not on PATH")
+_PERMANENT = ec.SummaryAttempt(None, ec.OUTCOME_PERMANENT, "llm-ext is not installed")
 
 
 def _retry(clock: _Clock, attempt, *, budget: float = 540.0, **kw):
@@ -497,8 +497,13 @@ def test_an_install_time_precondition_is_permanent_not_transient() -> None:
 
     assert got.outcome == ec.OUTCOME_PERMANENT
     assert got.text is None
+    # "is not installed", not the old "is not on PATH": since TRDD-CEWVQ8DG the CLI is resolved
+    # by its plugin-cache layout too, so PATH is no longer the criterion. This set is what makes
+    # the test environment-tolerant — WHICH precondition fires depends on the host — and that is
+    # also why the rename escaped local review: on a machine where llm-ext IS installed this
+    # reaches the transcript branch and never sees the renamed string. CI, with no llm-ext, did.
     assert got.detail in {
-        "llm-ext is not on PATH",
+        "llm-ext is not installed",
         "no readable transcript",
         "llm-ext data dir unresolvable",
     }, got.detail
