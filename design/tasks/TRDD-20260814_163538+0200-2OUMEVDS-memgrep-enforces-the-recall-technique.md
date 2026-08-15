@@ -1,16 +1,16 @@
 ---
 trdd-id: 2OUMEVDS
 title: memgrep should ENFORCE the recall technique rather than document it
-column: todo
+column: complete
 created: 2026-08-14T16:35:38+0200
-updated: 2026-08-14T16:35:38+0200
+updated: 2026-08-16T01:48:40+0200
 current-owner: janitor-session
 task-type: feature
 project-id: ai-maestro-janitor
 approval-tier: 0
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [9f1876f1]
 ---
 
 # memgrep should ENFORCE the recall technique, not document it
@@ -155,3 +155,22 @@ Complements the skill-side change committed alongside this card (pushed rows are
 already done; the trigger taxonomy now covers RECONSTRUCTION as well as RISK). That
 change is documentation and will therefore decay exactly like the advice already in
 `--help`. This card is the version that cannot decay, which is why it exists.
+
+## ⏵ CLOSED 2026-08-16 — and the DELIVERY check is what mattered
+
+All seven boxes were already ticked. Before closing, the one thing no box asked was checked:
+**had the feature reached the binary anyone on this host actually runs?** `memgrep` is a bundled
+Rust crate installed with `cargo install --path scripts/memgrep`, so a merged commit is not a
+delivered one — the same shape as TRDD-KVS6K7P9's half-migrated rule window, closed the same day.
+
+It had been delivered (the installed binary carries `9f1876f1`'s literal warning string), but
+`memgrep --version` claimed otherwise — `a685cca, 2026-08-07` for a binary containing code from
+2026-08-14. That reading was itself a bug, now fixed and tracked as **TRDD-9XMPS8OZ**: the
+janitor#164 build stamp was frozen at each checkout's first build, so the tool built to expose a
+stale install answered confidently and wrongly. Verified after the fix: installed stamp `a698f16`
+== HEAD, and `memgrep recall` on a real corpus returns the expansion-ranked results.
+
+So this card ships as claimed. The lesson it leaves is not about synonyms: **a green box means
+merged, and for anything that installs — a Rust crate, a rule file, a plugin — merged and
+delivered are different claims.** Checking the second is what surfaced a nine-day-old defect in a
+different feature entirely.

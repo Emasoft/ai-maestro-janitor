@@ -1,9 +1,9 @@
 ---
 trdd-id: 9XMPS8OZ
 title: The memgrep build stamp freezes at the first build — the staleness detector reports a confident wrong provenance
-column: dev
+column: complete
 created: 2026-08-16T01:40:39+0200
-updated: 2026-08-16T01:40:39+0200
+updated: 2026-08-16T01:48:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -14,7 +14,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [janitor#164, TRDD-2OUMEVDS]
-implementation-commits: []
+implementation-commits: [a9d067d3, a698f163]
 ---
 
 # `memgrep --version` reports the commit the crate was FIRST built at, forever
@@ -101,17 +101,42 @@ build failure.
 
 ## Acceptance
 
-- [ ] `build.rs` watches the RESOLVED ref, not only `.git/HEAD`, and emits only paths that exist.
-- [ ] A test proves the PREMISE the fix rests on, in a real temp git repo: `git commit` leaves
-      `.git/HEAD`'s mtime unchanged while the resolved ref's mtime advances. This is the fact the
-      original code got wrong, and it is checkable without building anything.
-- [ ] A test proves `build.rs` acts on that premise — it emits a `rerun-if-changed` for the
-      resolved ref path. Its docstring must state what it does NOT prove (it cannot observe cargo's
-      fingerprint, only the instruction handed to cargo).
-- [ ] The fallback is preserved: no `.git` ⇒ `unknown`, build still succeeds.
-- [ ] `cargo test` in `scripts/memgrep` green; `uv run pytest` green; ruff + mypy clean.
-- [ ] janitor#164 gets a follow-up comment — it was closed as fixed and the mechanism it shipped
-      does not work.
+- [x] `build.rs` watches the RESOLVED ref, not only `.git/HEAD` — `watch_targets()` in `a698f163`.
+      Existence handling ended up ASYMMETRIC rather than "only paths that exist" as first drafted;
+      the reasoning is in the fix section above and the asymmetry is the load-bearing part.
+- [x] A test proves the PREMISE, in a real temp git repo — `tests/test_memgrep_build_stamp_premise.py::
+      test_a_commit_does_not_touch_git_HEAD_but_does_touch_the_resolved_ref`. Deterministic without
+      sleeps: both files are backdated to a fixed instant before the commit, so the assertion does
+      not depend on filesystem timestamp granularity.
+- [x] A test proves `build.rs` acts on that premise, and its docstring states what it cannot see
+      (cargo's fingerprint). **Falsified**: with the old line restored it named it verbatim —
+      *"build.rs is back to watching a hard-coded <git-dir>/HEAD (['rerun-if-changed={git_dir}/HEAD'])"*.
+- [x] Fallback preserved — by construction, and stated as such rather than claimed as tested: the
+      `git_output(...) -> None -> "unknown"` path is untouched, and with git absent `watch_targets()`
+      returns empty, which restores cargo's default (re-run when any package file changes) — the
+      same behaviour the old code had in that environment.
+- [x] `cargo test` 207 unit + 145 integration, 0 failed; `uv run pytest` on the new file 2 passed;
+      `uv run ruff check scripts tests` and `uv run mypy scripts/ --ignore-missing-imports` clean.
+- [x] janitor#164 answered — comment `#issuecomment-5304797157`, recording that the mechanism it
+      closed on was inert from the day it landed, and why the existing shape-test could not see it.
+
+## ⏵ DONE 2026-08-16 — end-to-end, including DELIVERY
+
+The strongest evidence is not a test: **the stamp now tracks HEAD with no manual rebuild.** After
+`a698f163`, a plain `cargo install --path scripts/memgrep` produced `memgrep 0.1.0 (a698f16,
+2026-08-16)` against HEAD `a698f16` — verified through the bare command name on PATH, not a
+repo-relative binary, because a repo-relative check passes happily while the user's PATH resolves
+elsewhere.
+
+**The falsification is reproducible from history.** `a9d067d3` deliberately carries the tests
+WITHOUT the fix, so checking it out and running `cargo test --test cli version_stamp_names` shows
+the real failure: *"reports commit \"d2bda4e\" but this build is at HEAD \"a9d067d\""*. That
+ordering was chosen so nobody has to take the red on trust.
+
+**What this does NOT prove:** that other hosts' installed binaries are current. This card fixes the
+INSTRUMENT; it does not check the fleet. Any machine that ran `cargo install` before `a698f163`
+still holds a frozen stamp until its next rebuild, and its `--version` will keep lying in the
+meantime — the reading to distrust is specifically a sha OLDER than the crate's newest commit.
 
 ## Notes and lessons learned
 
