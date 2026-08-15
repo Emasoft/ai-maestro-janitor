@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.7] — 2026-08-15
+
+### Bug Fixes
+
+- **handoff:** Compose against the budget the contract enforces (TRDD-PXP08ZQC) (cac8b55)
+
+### Documentation
+
+- **board:** Record the live re-alert proof and the v3.3.6 gate findings on XM3FPJC0 (b182411)
+- **roster:** Document all 73 detectors and defend the inventory with a test (TRDD-IEW2K659) (eb0cdfe)
+- **board:** Tick IEW2K659's own acceptance boxes and unmix its list markers (1094f42)
+
+### Testing
+
+- **exfil:** Pin the alarm/ledger routing and close HYV0SOC6 (8f8b032)
 ## [3.3.6] — 2026-08-15
 
 ### Bug Fixes
@@ -13,6 +28,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **detector:** Name a file that grows without bound (TRDD-XM3FPJC0) (199f548)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.6 (74ec122)
 ## [3.3.5] — 2026-08-15
 
 ### Bug Fixes
