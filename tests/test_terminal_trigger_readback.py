@@ -955,3 +955,46 @@ def test_confirm_model_switch_is_three_state() -> None:
     assert tt.confirm_model_switch(_badge("Opus 5"), "opus") is True
     assert tt.confirm_model_switch(_badge("Fable 5"), "opus") is False
     assert tt.confirm_model_switch("no badge anywhere in this capture", "opus") is None
+
+
+_MENU_PANE = "some output\n❯ 1. Yes, switch the model\n  2. No, keep retrying\n"
+
+
+def test_true_error_switch_submits_then_escs_then_confirms_the_detected_menu(monkeypatch) -> None:
+    """The owner-ratified TRUE-ERROR order (2026-08-15, watched at the real Fable wall) in
+    one trace: the command is typed AND submitted FIRST, the ESC comes after that submit,
+    and a SECOND Enter is sent only once the Ask-user menu (numbered-choice rows) is read
+    back on the pane — command → Enter → Escape → Enter, exactly two Enters."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([_pane(""), _pane("/model opus"), _MENU_PANE])
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=5.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: next(reads, _MENU_PANE), is_typing=lambda _t: False,
+    )
+    assert ok is True and "menu confirmed" in why
+    joined = " | ".join(calls)
+    enters = [i for i, c in enumerate(calls) if "Enter" in c]
+    assert len(enters) == 2, f"exactly two Enters (submit + menu confirm): {calls!r}"
+    assert joined.index("/model opus") < joined.index("Enter"), f"command before its submit: {calls!r}"
+    esc_at = next(i for i, c in enumerate(calls) if "Escape" in c)
+    assert enters[0] < esc_at < enters[1], f"Escape must sit between the two Enters: {calls!r}"
+
+
+def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch) -> None:
+    """The safety half of the same contract: if the Ask-user menu never appears within the
+    wait window, NO second Enter is sent — a blind Enter into an unexpected open menu is
+    the one destructive keystroke this family can emit. The command itself still reports
+    sent, so the caller's three-state badge confirm decides the truth downstream."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([_pane(""), _pane("/model opus")])
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=3.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
+    )
+    assert ok is True and "no ask-user menu" in why
+    assert sum(1 for c in calls if "Enter" in c) == 1, f"only the submit Enter is allowed: {calls!r}"
+    assert any("Escape" in c for c in calls), f"the ESC after the submit is mandatory: {calls!r}"

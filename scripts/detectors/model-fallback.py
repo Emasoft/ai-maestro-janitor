@@ -41,6 +41,7 @@ sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 import findings_ledger  # noqa: E402
 import model_fallback as mfb  # noqa: E402
 import rotator_usage  # noqa: E402
+import session_liveness  # noqa: E402
 import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 import token_burn  # noqa: E402
@@ -126,8 +127,17 @@ def main() -> int:
         return 0
 
     command = str(plan["command"])
+    # SEQUENCE IS STATE-DEPENDENT (owner spec 2026-08-15, from watching the real wall):
+    # a pane in the TRUE error state (CC's retry signature on screen) gets
+    # command+Enter → ESC → wait-for-Ask-user-menu → Enter; an idle pane keeps the
+    # original ESC-first type-and-submit. ESC-first on an erroring pane ends the turn
+    # before the command exists and the menu then swallows the slash command.
+    true_error = bool(pane) and session_liveness.is_retry_wedge(pane or "")
     try:
-        sent, why = terminal_trigger.send_verified(terminal, command, esc_first=True)
+        if true_error:
+            sent, why = terminal_trigger.send_model_switch_true_error(terminal, command)
+        else:
+            sent, why = terminal_trigger.send_verified(terminal, command, esc_first=True)
     except Exception as exc:  # noqa: BLE001 — an injection fault must not break the heartbeat
         state.log_line(_LOG, f"inject raised: {exc!r}")
         return 0

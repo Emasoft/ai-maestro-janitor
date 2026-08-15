@@ -176,3 +176,75 @@ def test_detector_exits_silently_when_explicitly_disabled(tmp_path: Path) -> Non
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "", f"disabled detector must be silent, got: {proc.stdout!r}"
+
+
+def _load_detector():
+    """In-process load of the hyphen-named detector so its routing can be spied on."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(
+        "mf_det_routing", _ROOT / "scripts" / "detectors" / "model-fallback.py"
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
+    """Fake every gate up to the injection so main() reaches the sequence choice with
+    `pane_text` on the pane, and spy on BOTH injection entry points."""
+    called: dict[str, list] = {"true_error": [], "verified": []}
+    monkeypatch.setattr(det.state, "init_state", lambda: None)
+    monkeypatch.setattr(det.state, "log_line", lambda *a, **k: None)
+    monkeypatch.setattr(det.state, "rotate_log_if_big", lambda *a, **k: None)
+    monkeypatch.setattr(det.mfb, "enabled", lambda: True)
+    monkeypatch.setattr(det, "_live_account", lambda: {"usage": {}, "sample_age_s": 0, "is_live": True})
+    monkeypatch.setattr(
+        det.token_burn, "model_fallback_verdict",
+        lambda *a, **k: {"model": "Fable", "scoped_label": "7d/Fable", "scoped_util": 98.0,
+                         "account_max_util": 40.0, "resets_at_epoch": None},
+    )
+    monkeypatch.setattr(det, "_this_terminal", lambda: {"kind": "tmux", "pane": "%1"})
+    monkeypatch.setattr(det.terminal_trigger, "read_pane_text", lambda _t: pane_text)
+    monkeypatch.setattr(det.mfb, "fallback_target", lambda: "opus")
+    monkeypatch.setattr(
+        det.mfb, "plan_model_fallback",
+        lambda **k: {"act": True, "command": "/model opus", "reason": "test"},
+    )
+    monkeypatch.setattr(
+        det.terminal_trigger, "send_model_switch_true_error",
+        lambda t, c, **k: (called["true_error"].append(c), (True, "sent; ask-user menu confirmed"))[1],
+    )
+    monkeypatch.setattr(
+        det.terminal_trigger, "send_verified",
+        lambda t, c, **k: (called["verified"].append(c), (True, "sent"))[1],
+    )
+    monkeypatch.setattr(det.terminal_trigger, "confirm_model_switch", lambda *a: True)
+    monkeypatch.setattr(det, "_stamp_switch", lambda _n: None)
+    monkeypatch.setattr(det, "_last_switch_ts", lambda: 0)
+    monkeypatch.setattr(det.findings_ledger, "record", lambda **k: None)
+    return called
+
+
+def test_a_true_error_pane_routes_to_the_owner_ratified_sequence(monkeypatch, capsys) -> None:
+    """Owner spec 2026-08-15: a pane showing CC's live retry signature must get the
+    command+Enter → ESC → wait-for-menu → Enter sequence, NOT the idle ESC-first one."""
+    det = _load_detector()
+    called = _wire_acting_detector(
+        det, monkeypatch, "⏳ Rate limited · Retrying in 3s · attempt 12/300\n"
+    )
+    assert det.main() == 0
+    assert called["true_error"] == ["/model opus"], "the true-error sequence must be chosen"
+    assert called["verified"] == [], "the idle ESC-first path must NOT fire on an erroring pane"
+
+
+def test_an_idle_pane_keeps_the_esc_first_sequence(monkeypatch, capsys) -> None:
+    """CONTROL for the routing: no retry signature on the pane ⇒ the original ESC-first
+    verified injection stands — proving the router keys on the pane state, not on the
+    verdict alone."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    assert det.main() == 0
+    assert called["verified"] == ["/model opus"], "idle pane must keep the ESC-first path"
+    assert called["true_error"] == [], "the true-error sequence must not fire on an idle pane"

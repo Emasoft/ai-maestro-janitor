@@ -957,6 +957,64 @@ def send_verified(
     )
 
 
+def send_model_switch_true_error(
+    terminal: Mapping[str, str],
+    command: str,
+    *,
+    menu_wait_s: float = 10.0,
+    poll_s: float = 1.0,
+    giveup_s: float | None = None,
+    sleeper=time.sleep,
+    reader=None,
+    is_typing=None,
+) -> tuple[bool, str]:
+    """The OWNER-RATIFIED actuation for a model switch while the session is in a TRUE error
+    state (owner, 2026-08-15, specified from watching the real Fable wall by hand):
+
+        `/model opus` + Enter  →  ESC  →  wait for the Ask-user menu  →  Enter
+
+    This ORDER is the point, and it is the opposite of `send_verified(esc_first=True)`:
+    in the erroring/retrying state the input field is still usable, so the switch command
+    is typed and submitted FIRST; the ESC then ends the erroring turn; Claude Code responds
+    with an Ask-user menu, and one Enter confirms it. ESC-first would end the turn before
+    the command exists, and the menu that follows would swallow the slash command entirely
+    (a slash command typed into a menu does nothing useful — this module's oldest
+    janitor#222 lesson).
+
+    The confirming Enter is sent ONLY when the menu is actually detected on screen
+    (`_CHOICE_ROW_RE` — the numbered-choice row shape), NEVER blind on a timer: the one
+    destructive keystroke in this family is an Enter into an unexpected open menu (e.g.
+    the rewind menu), so an undetected menu within `menu_wait_s` means we stop after the
+    ESC and report it — the caller's three-state badge confirm still tells the truth
+    downstream. Returns (sent, why); `sent` reflects the COMMAND injection only.
+    """
+    sent, why = send_verified(
+        terminal, command, esc_first=False,
+        giveup_s=giveup_s, sleeper=sleeper, reader=reader, is_typing=is_typing,
+    )
+    if not sent:
+        return False, why
+    esc = build_esc_only_steps(terminal)
+    if esc:
+        _run_steps(esc)
+    read_fn = reader if reader is not None else read_pane_text
+    waited = 0.0
+    while waited < menu_wait_s:
+        try:
+            pane = read_fn(terminal)
+        except Exception:  # noqa: BLE001 — a flaky read must not abort the wait loop
+            pane = None
+        if pane and any(_CHOICE_ROW_RE.match(line) for line in pane.splitlines()):
+            submit = build_submit_steps(terminal)
+            if submit:
+                _run_steps(submit)
+                return True, "sent; ask-user menu confirmed"
+            return True, "sent; ask-user menu seen but channel lost its submit builder"
+        sleeper(poll_s)
+        waited += poll_s
+    return True, "sent+esc; no ask-user menu appeared within %.0fs (no blind Enter sent)" % menu_wait_s
+
+
 def run_chained_inject(
     terminal: Mapping[str, str],
     *,
