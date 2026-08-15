@@ -19,10 +19,37 @@ degrade (no resume cue) than block the session on a plugin misconfig.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 from pathlib import Path
+
+
+def _read_payload() -> dict:
+    """The hook's stdin JSON, or {} on ANY problem — a malformed/absent payload must
+    degrade to the pre-payload behavior, never block or crash the one hook that owns the
+    resume-cue capture. The isatty guard is for a bare manual run: CC always pipes stdin,
+    but `python on-stop-failure.py` from a terminal would otherwise hang on the read."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return {}
+        data = json.loads(sys.stdin.read() or "{}")
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 — payload parsing must never break the flag write
+        return {}
+
+
+def _error_fields(payload: dict) -> tuple[str, str]:
+    """(error_type, trimmed_message) from the payload, tolerant to BOTH field spellings.
+
+    MEASURED 2026-08-15 on CC 2.1.233 (a real captured StopFailure fire, model_not_found):
+    the live fields are `error` and `last_assistant_message` — NOT the `error_type` /
+    `error_message` the docs summary (and our own memory page) claimed. Both spellings are
+    read so a future rename degrades to working instead of to "unknown"."""
+    etype = payload.get("error") or payload.get("error_type") or "unknown"
+    msg = payload.get("last_assistant_message") or payload.get("error_message") or ""
+    return (str(etype)[:64], str(msg)[:300])
 
 
 def main() -> int:
@@ -47,6 +74,9 @@ def main() -> int:
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     from lib import state  # noqa: E402  -- local package, not PyPI
 
+    payload = _read_payload()
+    etype, emsg = _error_fields(payload)
+
     state.init_state()
     flag = state.state_dir() / "rate-limited.flag"
     flag.touch()
@@ -54,8 +84,41 @@ def main() -> int:
     state.atomic_write(state.state_dir() / "rate-limited-since.ts", str(now))
     state.log_line(
         "stop-failure",
-        "rate-limit captured; dispatch will emit resume cue on next heartbeat fire",
+        f"turn-ending API error captured (type={etype}); dispatch will emit resume cue on next heartbeat fire",
     )
+
+    # Typed event record + per-type routing (owner directive 2026-08-15: "use the events
+    # more"). ALL best-effort, STRICTLY AFTER the critical flag write — the flag is this
+    # hook's one hard contract and stays UNCONDITIONAL for every error type: the resume
+    # loop is bounded and self-correcting even for non-window errors (an auth-dead token
+    # is rotated by the daemon's next <=60s tick, after which the resume succeeds).
+    try:
+        from lib import findings_ledger, token_meter  # noqa: E402  -- local package
+
+        # The capped-JSONL appender is generic despite its exhaustion-flavored name; this
+        # record is what lets dispatch / model-fallback route on the NAMED error later
+        # (Phase B: a rate_limit message naming the exhausted model is an API-independent
+        # scoped-wall signal, valuable exactly when the usage probe is unreachable).
+        token_meter.append_exhaustion_event(
+            state.state_dir() / "stop-failure-events.jsonl",
+            {"ts": now, "error": etype, "msg": emsg},
+        )
+        if etype == "billing_error":
+            # Not a window and not a token: no rotation or reset will fix it — a human must.
+            findings_ledger.record(
+                sev="HIGH", code="STOP-FAILURE-BILLING", src="stop-failure",
+                msg="turn ended with billing_error — no window reset or rotation can clear this; human action needed",
+                ref="-", now=now,
+            )
+        elif etype in ("authentication_failed", "oauth_org_not_allowed"):
+            # A credential death, not a limit: the "waiting for a window to reset" framing
+            # would be a lie here — name the real fix so the log reads true.
+            state.log_line(
+                "stop-failure",
+                f"{etype}: credential rejected — rotation (daemon's next tick) is the fix, not a window reset",
+            )
+    except Exception:  # noqa: BLE001 -- routing/telemetry MUST NOT break the resume-cue capture
+        pass
 
     # Best-effort — STRICTLY AFTER the critical flag write above, wrapped so a logging
     # bug can NEVER break the resume-cue capture (this hook's one hard contract). Snapshot
