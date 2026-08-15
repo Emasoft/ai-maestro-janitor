@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.4] — 2026-08-15
+
+### Features
+
+- **stop-failure:** Route the StopFailure payload by error type (owner directive 2026-08-15 — use the events more) (b146a64)
 ## [3.3.3] — 2026-08-15
 
 ### Documentation
@@ -11,6 +16,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **model-fallback:** Owner-ratified TRUE-ERROR switch sequence (owner spec 2026-08-15) (d20e3e9)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.3 (286c8c1)
 ## [3.3.2] — 2026-08-15
 
 ### Bug Fixes
