@@ -1,9 +1,9 @@
 ---
 trdd-id: IEW2K659
 title: The documented detector roster names 39 of 72 detectors — a silently rotting inventory
-column: todo
+column: complete
 created: 2026-08-14T20:06:06+0200
-updated: 2026-08-14T20:06:06+0200
+updated: 2026-08-16T00:22:00+0200
 current-owner: janitor-session
 task-type: docs
 project-id: ai-maestro-janitor
@@ -15,6 +15,38 @@ implementation-commits: []
 ---
 
 # The documented detector roster names 39 of 72 detectors
+
+## ⏵ DONE 2026-08-16 — reconciled AND defended by a test
+
+Re-measured before acting (the card's figures were two days old): **73 registered, 45 documented,
+29 missing** — 28 absent outright plus `agent-context-integrity`, which a whole-page grep counted as
+documented on the strength of a passing mention while it belonged to no group at all. All 29 are now
+in group bullets with a one-line description of what each DETECTS, sourced from each detector's own
+docstring rather than from its name.
+
+A **`memory` group** was added (8th): 6 detectors (`memory-maintenance`, `memory-librarian`,
+`memgrep-index-health`, `wikimem-syntax`, `memorize-nudge`, `orphaned-memory-maint`) had no honest
+home among the 7 and were being forced into "observability". `memory-scope-leak` deliberately stayed
+in supply-chain/security — it is a data-leak guard on a PUSHED corpus, not upkeep.
+
+**The card's real diagnosis is what got fixed.** Reconciling again would have decayed again on the
+next addition, because the defect was never the numbers — it was that *"an inventory has no test"*.
+`tests/test_detector_roster_completeness.py` now parses the REGISTRATION tuples in `dispatch.py`
+(registration is the authority — an unregistered file never runs) and fails naming every detector
+missing from a group bullet. Two deliberate design points, both measured rather than assumed:
+
+* membership is scoped to the `- *group:*` bullets, NOT the whole page — the whole-page form counted
+  a superseded body / lesson / atom as documentation and was optimistic by exactly one;
+* a CONTROL test asserts the parser still finds >50 registrations, so a change to the tuple shape
+  cannot make the scanner blind and declare the roster perfect at that moment.
+
+The guard's docstring states what it does NOT prove — that any description beside a name is true —
+per the USER lesson `a-doc-guard-that-asserts-a-mention-cannot-see-a-stale-claim`, so its green
+cannot be over-read.
+
+Stale recall surfaces were fixed too, since they are what ranking actually reads: the page
+`description:` and the atom `desc:`/keywords still said "39". The wrong count survives as dated
+lessons `[^2]`/`[^3]` — corrected, never deleted.
 
 ## The defect (MEASURED 2026-08-14, not estimated)
 
