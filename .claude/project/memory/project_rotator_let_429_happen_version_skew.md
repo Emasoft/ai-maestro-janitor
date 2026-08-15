@@ -73,6 +73,14 @@ also [[oauth-rotation-renew-reauth]] (the component overview; this page is the
 incident record behind its 429 lesson) and `[[project_janitor_cc_changelog_currency]]`
 (the rate-limit MENU that freezes the session on 429 — why rotation must be proactive).
 
+
+^ATOM-PH7Z-4FY8 [desc:"2026-08-15 Fable-wall continuity failure: why nothing rotated or fell back, and the scoped rotation trigger that fixed the janitor half", keywords: fable_exhausted_no_rotation model_scoped_window_rotation_trigger agents_hung_on_fable scoped-only_wall_stay_put rotate_to_account_with_fable_headroom server_owned_handoff_dark model_fallback_did_not_fire, type: project, ocd: 2026-08-15, lmd: 2026-08-15]
+
+2026-08-15 Fable-wall incident (owner: "total continuity failure"). Three stacked causes, only one a janitor code gap:
+(1) `cmd_auto` had NO rotation trigger for a MODEL-scoped wall — Fable spent while 5h/7d fine read as "within limits". Fixed in `f185e521`: it reuses `token_burn.model_fallback_verdict` (scoped>=90, account<=90, `ROTATOR_SCOPED_SWITCH_AT`/`ROTATOR_SCOPED_ACCOUNT_HEADROOM`); a scoped-only wall rotates ONLY onto a scoped-clear target (preserve Fable), and with none it STAYS PUT — tiers 1b/degraded are skipped because they would trade one Fable wall for the same wall — leaving `/model opus` to the model-fallback detector.
+(2) Every hung agent was `server_owned`, so the janitor's shipped wedge-ESC recovery (WKTD5JTC, in v3.3.1) and the per-session fallback detector correctly stood down — and the ai-maestro server's receiving leg ships DARK behind `AIM_FLEET_MODEL_FALLBACK=1` pending the USER ruling (ai-maestro TRDD-DPPYVLVH). A handoff to a dark receiver is a silent no-op; escalated to the hub 2026-08-15.
+(3) `oauth-health` from a NON-daemon CLI process reports every slot `status=latched refresh=no` — that is the keychain fail-closed latch, NOT slot death; only the daemon's own alerts describe real slot health.
+
 ## Notes and lessons learned
 
 (none yet)
