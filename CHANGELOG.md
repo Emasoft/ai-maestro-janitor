@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.6] — 2026-08-15
+
+### Bug Fixes
+
+- **tests:** Repair the v3.3.5 CI break my own rename caused, and guard the category (TRDD-CEWVQ8DG) (feb2d4c)
+- **detector:** Make runaway-file-growth executable in git (TRDD-XM3FPJC0) (3b85963)
+- **detector:** Annotate the B108 false positive on the scan root (TRDD-XM3FPJC0) (d92a135)
+
+### Features
+
+- **detector:** Name a file that grows without bound (TRDD-XM3FPJC0) (199f548)
 ## [3.3.5] — 2026-08-15
 
 ### Bug Fixes
@@ -12,6 +23,10 @@ All notable changes to this project will be documented in this file.
 
 - **memory:** Record the cold-resume incident and move its shipped card to testing (TRDD-CEWVQ8DG) (14adabf)
 - **board:** Unblock the publish NIT and record the hub-armed receiver on WKTD5JTC (3f4d386)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.5 (f0d2122)
 ## [3.3.4] — 2026-08-15
 
 ### Features
