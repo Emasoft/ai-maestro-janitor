@@ -3,7 +3,7 @@ trdd-id: RG4IUZ6I
 title: A split must carry conflict refusals forward — page-name keys die with the page
 column: todo
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-13T04:19:51+0200
+updated: 2026-08-16T01:56:45+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -14,6 +14,30 @@ external-refs: [janitor#241, janitor#227, TRDD-3QIQ2E6J]
 ---
 
 # A split must carry conflict refusals forward
+
+## ⏵ STATE — 2026-08-16: TRDD-3QIQ2E6J is now `complete`. Only item 3 remains, and item 2's premise shrank.
+
+Fact update, no decision taken. Since the block below was written:
+
+- **Item 2 SHIPPED** under TRDD-3QIQ2E6J (sibling suppression via an explicit `split-lineage:`
+  marker), and that card has closed. Nothing here to build.
+- **Item 1 remains forbidden** on 3QIQ2E6J's argument, which this card already conceded.
+- **Item 3 (headroom-aware split sizing) is still the only unshipped piece**, and still exists
+  nowhere else. It is ordinary in-scope work; it does not need the supersession decision.
+- **The supersede-this-card resolution is STILL a USER call** — force-supersede is non-exempt
+  (Tier 2). It has not been taken and must not be taken here.
+
+**One thing changed that weakens this card's own framing, and it should be known before anyone
+picks item 3 up as urgent.** Measured 2026-08-16 on this host, where real splits now exist (7
+pages, 2 lineage ids): the librarian reports zero USER-scope conflict candidates and has never
+logged a suppression. `_conflict_pairs` requires an OPPOSING-CLAIM signal on top of shared
+vocabulary (the shared-tag trigger was removed for #35/#38/#43), and split siblings are
+complementary by construction — so the "flagged forever, O(n²) sibling pairs" mechanism this card
+describes is **not** what is happening today. The 221,612-token measurement predates that gate.
+
+Item 3 is therefore still worth doing for its own reason — a sibling 279 B under the cap
+guarantees its own re-split, which churns lineage and wastes a pass — but not for the
+re-litigation cost this card was filed on. See TRDD-3QIQ2E6J's closing block for the full reading.
 
 ## ⏵ STATE — 2026-08-13: THIS CARD CONFLICTS WITH TRDD-3QIQ2E6J. Do not build item 1.
 
