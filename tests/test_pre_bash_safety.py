@@ -511,3 +511,76 @@ def test_gh_api_reads_are_still_not_publications() -> None:
     assert _outbound("gh api repos/Emasoft/x/issues/9") is None
     assert _outbound("gh api user --jq .login") is None
     assert _outbound("gh api repos/Emasoft/x/releases/latest --jq .tag_name") is None
+
+
+# ── Foreign-repo publish guard (owner directive 2026-08-14) ─────────────────────────────
+
+def _foreign_repo(cmd: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pbs2", _HOOK)
+    assert spec and spec.loader
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.check_foreign_repo_publish(cmd)
+
+
+def test_gh_publish_to_foreign_owner_via_repo_flag_is_denied() -> None:
+    """`--repo OWNER/NAME` naming a repo owned by someone other than the gh auth user must
+    be caught — the shared identity makes this indistinguishable from the owner posting."""
+    cmd = 'gh issue create --repo someoneelse/theirproject --title "hi" --body "hi"'
+    reason = _foreign_repo(cmd)
+    assert reason is not None and "someoneelse/theirproject" in reason
+
+
+def test_gh_publish_to_own_repo_via_repo_flag_is_allowed() -> None:
+    """The control: `--repo emasoft/...` (the allowed owner) must stay silent, or every
+    normal publish in this repo's own workflow would be denied."""
+    cmd = 'gh issue create --repo emasoft/ai-maestro-janitor --title "hi" --body "hi"'
+    assert _foreign_repo(cmd) is None
+
+
+def test_gh_publish_foreign_via_dash_r_short_flag_is_denied() -> None:
+    """`-R OWNER/NAME` is the short-flag spelling of `--repo` and must be caught the same way."""
+    cmd = 'gh pr comment 4 -R someoneelse/theirproject --body "hi"'
+    reason = _foreign_repo(cmd)
+    assert reason is not None and "someoneelse/theirproject" in reason
+
+
+def test_gh_api_publish_to_foreign_repos_path_is_denied() -> None:
+    """`gh api repos/OWNER/NAME/...` naming a foreign owner must be caught even though it
+    carries no `--repo`/`-R` flag at all — the target lives in the path itself."""
+    cmd = 'gh api repos/someoneelse/theirproject/issues/9/comments -f body="hi"'
+    reason = _foreign_repo(cmd)
+    assert reason is not None and "someoneelse/theirproject" in reason
+
+
+def test_gh_publish_foreign_via_full_url_is_denied() -> None:
+    """A full `https://github.com/OWNER/NAME` URL is another valid way to name the target
+    repo on a `gh` command line and must be recognised the same way as `--repo`."""
+    cmd = 'gh issue create --repo https://github.com/someoneelse/theirproject --body "hi"'
+    reason = _foreign_repo(cmd)
+    assert reason is not None and "someoneelse/theirproject" in reason
+
+
+def test_gh_publish_with_no_explicit_repo_target_is_allowed() -> None:
+    """No `--repo`/`-R`/URL/`repos/` path at all means the command operates on the CWD's
+    own repo — out of scope for this guard, which only judges EXPLICIT targets."""
+    cmd = 'gh issue create --title "hi" --body "hi"'
+    assert _foreign_repo(cmd) is None
+
+
+def test_gh_publish_owner_match_is_case_insensitive() -> None:
+    """`--repo Emasoft/x` (capitalized) must match the allowed owner the same as the
+    lowercase spelling — GitHub owner names are case-insensitive."""
+    cmd = 'gh issue create --repo Emasoft/ai-maestro-janitor --title "hi" --body "hi"'
+    assert _foreign_repo(cmd) is None
+
+
+def test_foreign_repo_url_inside_the_body_is_content_not_a_destination() -> None:
+    """A publish to the OWN repo whose body merely LINKS a foreign repo must pass: the URL is
+    payload content, not a target — flagging it would redden routine cross-references."""
+    cmd = (
+        "gh issue create --repo emasoft/ai-maestro-janitor --title t --body "
+        '"see https://github.com/anthropics/claude-code/issues/123 for context"'
+    )
+    assert _foreign_repo(cmd) is None

@@ -322,6 +322,90 @@ def check_outbound_publication(command: str) -> str | None:
     return None
 
 
+# ── Foreign-repo publish guard (owner directive 2026-08-14) ─────────────────────────────
+# All agents on this machine share ONE human `gh` auth identity. A `gh issue create` /
+# `gh pr comment` / `gh api repos/OWNER/NAME/...` that targets a repo NOT owned by that
+# identity is indistinguishable, to anyone reading it, from the owner personally posting
+# on someone else's repo — there is no "acting on behalf of project X" signal GitHub can
+# show a reader. `check_outbound_publication` above already stops PII/mentions LEAKING
+# OUT of a publish; this guard stops the publish from landing on the WRONG repo at all,
+# which is a distinct failure mode the mention/PII checks cannot see (the payload can be
+# perfectly clean and still be posted somewhere it has no business being posted).
+#
+# Only fires when the command names an EXPLICIT target repo (`--repo`, `-R`, a full
+# `https://github.com/...` URL, or a `gh api repos/OWNER/NAME/...` path). No explicit
+# target means the command operates on the CWD's own repo — out of scope for this guard;
+# `gh`'s own remote resolution decides that, and this hook has no cheap way to learn what
+# repo a working directory is checked out against without shelling out again.
+_REPO_TARGET_PATTERNS = (
+    re.compile(r"--repo[\s=]([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)"),
+    re.compile(r"(?<![A-Za-z0-9])-R[\s=]([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)"),
+    re.compile(r"https://github\.com/([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)"),
+    re.compile(r"\bgh\s+api\b[^|;\n]*?\brepos/([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._-]+)"),
+)
+_ALLOWED_OWNER: str | None = None
+
+
+def _resolve_allowed_owner() -> str:
+    """Resolve the repo-owner allowed to receive `gh` publish commands.
+
+    WHY `~/.config/gh/hosts.yml` and not `gh api user`: this hook runs inside a fail-open
+    ~3s PreToolUse budget (see the module docstring) — a network round trip has no place
+    here, and gh's own auth config already carries the answer on disk, plain text, no
+    `yaml` import needed. Falls back to `_ALLOWED_MENTION` ("emasoft") on ANY parse
+    failure — consistent with the mention guard above, and fail-open per this file's own
+    discipline (parse uncertainty never escalates to a deny). Cached in a module global:
+    the config does not change mid-session, and re-parsing it on every Bash call this
+    hook fires on would be pure waste.
+    """
+    global _ALLOWED_OWNER
+    if _ALLOWED_OWNER is not None:
+        return _ALLOWED_OWNER
+    owner = _ALLOWED_MENTION
+    try:
+        hosts_path = os.path.expanduser("~/.config/gh/hosts.yml")
+        with open(hosts_path, encoding="utf-8") as fh:
+            content = fh.read()
+        block = re.search(r"^github\.com:\s*\n((?:[ \t]+.*\n?)*)", content, re.MULTILINE)
+        if block:
+            m = re.search(r"^\s*user:\s*(\S+)\s*$", block.group(1), re.MULTILINE)
+            if m:
+                owner = m.group(1).strip().strip("\"'")
+    except OSError:
+        pass  # fail-open: keep the _ALLOWED_MENTION fallback
+    _ALLOWED_OWNER = owner
+    return owner
+
+
+def check_foreign_repo_publish(command: str) -> str | None:
+    """Deny a `gh` publish whose EXPLICIT target repo is not owned by the gh auth user.
+
+    Targets are extracted from the command HEAD only — the text before the payload starts
+    (first heredoc `<<`, `--body`, `--field`/`--raw-field`, or a bare `-b`/`-f`/`-F`).
+    A repo URL or a quoted `--repo` example INSIDE the body is content being posted, not a
+    destination — an issue on our own repo that links someone else's repo is routine, and
+    flagging it is exactly the false positive that gets a guard switched off (the same
+    reasoning as the code-span strip in the mention guard above)."""
+    if not _GH_PUBLISH_RE.search(command):
+        return None
+    head = re.split(r"<<|--body\b|--raw-field\b|--field\b|\s-[bfF]\s", command, maxsplit=1)[0]
+    allowed = _resolve_allowed_owner()
+    foreign: list[str] = []
+    for pat in _REPO_TARGET_PATTERNS:
+        for m in pat.finditer(head):
+            owner, name = m.group(1), m.group(2)
+            target = f"{owner}/{name}"
+            if owner.lower() != allowed.lower() and target not in foreign:
+                foreign.append(target)
+    if not foreign:
+        return None
+    return (
+        f"this gh command publishes to {foreign[0]}, which is not owned by the gh auth "
+        f"user ({allowed}) — the shared identity means a stray post is indistinguishable "
+        "from the owner speaking; get explicit user approval or drop the target."
+    )
+
+
 def main() -> int:
     if not _is_truthy_env(
         "CLAUDE_PLUGIN_OPTION_PRE_BASH_SAFETY_ENABLED", False,
@@ -343,6 +427,7 @@ def main() -> int:
         check_compositional_exfil(cmd)
         or check_sensitive_write(cmd)
         or check_outbound_publication(cmd)
+        or check_foreign_repo_publish(cmd)
     )
     if reason is None:
         return 0  # silent allow
