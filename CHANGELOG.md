@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.8] — 2026-08-15
+
+### Documentation
+
+- **board:** CLI-verify the v3.3.7 install against its tag (TRDD-G4BCRUP7) (54b262f)
+
+### Testing
+
+- **clear:** Pin that /clear is never typed without a handoff on disk (TRDD-UQW5IOAE) (4310081)
 ## [3.3.7] — 2026-08-15
 
 ### Bug Fixes
@@ -13,6 +22,10 @@ All notable changes to this project will be documented in this file.
 - **board:** Record the live re-alert proof and the v3.3.6 gate findings on XM3FPJC0 (b182411)
 - **roster:** Document all 73 detectors and defend the inventory with a test (TRDD-IEW2K659) (eb0cdfe)
 - **board:** Tick IEW2K659's own acceptance boxes and unmix its list markers (1094f42)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.7 (9aa5eda)
 
 ### Testing
 
