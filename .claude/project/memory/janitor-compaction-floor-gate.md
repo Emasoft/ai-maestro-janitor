@@ -38,6 +38,19 @@ returns `(None, None, None, False)` — when the entry predates it. Omission, no
 when that file is ABSENT — the fallback was the branch that could not report staleness. Check for
 that file before theorising; a session with a snapshot never had this bug.
 
+
+^ATOM-KBU2-58YM [desc:"the cold-resume shrink refused on 'cache state unknown' and its handoff had no summary — a gate fed only by an OPTIONAL tool is unreachable, and a CLI in a plugin-cache bin dir is invisible to a hook ", keywords: cache_state_unknown_not_clearing cold_resume_did_not_shrink every_session_paid_a_full_cache_write_on_its_first_turn llm-ext_is_not_on_PATH handoff_degraded_to_the_template summary_permanent_not_retrying agentlensPro_absent_so_the_clear_never_fires which_llm-ext_fails_in_a_hook, type: reference, ocd: 2026-08-15, lmd: 2026-08-15]
+
+Two defects made the cold-resume shrink LOOK implemented while doing nothing useful (TRDD-CEWVQ8DG, fixed in `904ddef4`); both were found in `.janitor/logs/`, not by reading code.
+
+**A gate whose only input is an OPTIONAL tool is unreachable.** `should_clear_on_resume` requires `cache_expired is True`, and its only source was a probe of the agentlensPro CLI. Where that tool is absent the probe abstains, so the verdict was `why=cache state unknown — not clearing` and a whole fleet of cold resumes each paid a full cache-creation write on its first turn. The fix is not to relax the veto — `/clear` is unrecoverable — but to ANSWER THE SAME QUESTION with a measurement that needs no third party: elapsed time. Past `max(ttl, 60min)` no prompt cache survives, so the age IS the verdict. `cache_expired_by_age` returns **True or None, never False**: "not yet certainly dead" is not "alive", and a False would override a probe that said expired, re-creating the refusal being fixed. `resolve_cache_expired` consults the probe FIRST, so a warm probe still beats an ancient mtime and a live cache is never thrown away.
+
+The two clocks read the SAME elapsed time with OPPOSITE asymmetries, which is why the floor is its own constant: `next_fire_misses_cache` predicts a COST and uses the SHORT TTL (5 min) to err toward acting; this gate authorizes a DESTRUCTIVE act and uses the LONG one (60 min) to act only where certainty is real.
+
+**A CLI that ships inside another plugin is invisible to `shutil.which` in a hook child.** llm-ext lives at `~/.claude/plugins/cache/<marketplace>/llm-externalizer/<version>/bin/llm-ext` — a dir the user's interactive PROFILE puts on PATH, which a hook-spawned detached child never inherits. So `summary: permanent — llm-ext is not on PATH; not retrying` fired on every cold resume and each handoff silently degraded to the link-only template. Resolve by the install's OWN layout (the convention `llm_ext_data_dir` already reads in reverse), PATH first so an operator keeps control, and order versions by PARSED NUMERIC TUPLE — as strings `"9.0.0"` sorts above `"13.5.1"` and would pin the oldest install forever.
+
+**Verify a PATH-dependent fix under the environment that FAILED, not your shell**: `env -i HOME=$HOME PATH=/usr/bin:/bin <interpreter> -c '...'` reproduces the hook child. An interactive shell finds the binary and proves nothing.
+
 ## Governed by
 
 - [[debugging-methodology]] — the general discipline this incident fed back into (a claim asserted

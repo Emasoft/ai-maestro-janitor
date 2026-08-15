@@ -1,11 +1,12 @@
 ---
 trdd-id: CEWVQ8DG
 title: The cold-resume shrink refuses when agentlensPro cannot answer and degrades to a template because llm-ext is not on the hook PATH
-column: dev
+column: testing
 created: 2026-08-15T22:14:54+0200
-updated: 2026-08-15T22:14:54+0200
+updated: 2026-08-15T22:41:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
+implementation-commits: [904ddef4]
 scope: project
 approval-tier: 0
 severity: high
@@ -58,7 +59,16 @@ they were working on."*
 * The hook blocks rather than detaching (2800 s vs the 2600 s deadline), so a fire really does
   land before the first turn. The ordering is sound; the gate was the problem.
 
-**NEXT ACTION.** Ship both fixes with tests (below), then verify on the next real cold resume that
+**SHIPPED 2026-08-15 in `904ddef4`; column `dev → testing`.** Both fixes are in, with 16 tests, a
+green full suite (15462 passed / 0 failed) and clean ruff+mypy. Two field checks were run on this
+machine rather than only in fixtures: `resolve_llm_ext()` under `env -i PATH=/usr/bin:/bin` (the
+exact hook-child condition that failed) resolves the real 13.5.1 binary AND its correct data dir;
+and the gate against this project's live state returns `None` for an active session (16 s idle),
+still honours a warm probe over an ancient mtime, and returns `True` for a simulated 3 h idle —
+the refusal that burned the fleet. What remains is only the FIELD proof below, which needs a real
+cold resume to occur.
+
+**NEXT ACTION.** Verify on the next real cold resume that
 `cold-cache-clear.log` shows `fire=True` with `trigger=resumed-cold` and `external-clear.log` shows
 `summary: ok`, not `permanent`.
 
