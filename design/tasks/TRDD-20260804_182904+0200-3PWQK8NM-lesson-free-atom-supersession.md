@@ -1,14 +1,15 @@
 ---
 trdd-id: 3PWQK8NM
 title: memgrep can supersede an atom without inventing a lesson
-column: todo
+column: complete
 created: 2026-08-04T18:29:04+0200
-updated: 2026-08-04T18:29:04+0200
+updated: 2026-08-16T01:51:23+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 relevant-rules: []
 npt: []
 eht: []
+external-refs: [TRDD-5C1PFDM5]
 ---
 
 # memgrep can supersede an atom without inventing a lesson
@@ -98,10 +99,12 @@ decides.
 - [x] Spec drift suite recognises the new verb (`tests/test_wikimem_spec_drift.py` — 21/21 pass;
       the flag was already covered by the spec's existing `--supersedes` mentions, and WM-CLI-13 +
       the SKILL.md row now document it explicitly rather than passing by accident).
-- [ ] The `WM-LES-10` lint check warns on a substantive in-place edit. **NOT DONE** — this needs
-      genuine git-history integration (diff an atom's body against its prior committed version) that
-      does not exist anywhere in the memgrep crate today; the card itself marks it "Deliberately NOT
-      a hard gate at first" (§3). Left for a follow-up TRDD — out of this session's bounded scope.
+- [x] The `WM-LES-10` lint check warns on a substantive in-place edit — **HANDED OFF, not built**,
+      to **TRDD-5C1PFDM5**, exactly as this card's own NEXT ACTION instructed. It needs git history
+      at RUNTIME (diff an atom's body against its last committed version), which no memgrep code
+      path has today, and §3 already ruled it non-blocking. The box is ticked on the handoff, not
+      on the work: the card that owns it now says so in its own acceptance criteria, and this card
+      no longer claims to be the place it will happen.
 
 ## 5. Risks
 
