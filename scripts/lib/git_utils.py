@@ -128,7 +128,13 @@ def _lock_is_held(lock_path: Path) -> Optional[bool]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            # 15s, not 5s: on a saturated host (measured 2026-08-15 — a full 16-way
+            # xdist run pushed a ~0.7s idle lsof past 5s) the shorter timeout turned
+            # a real held lock into "no-probe". Fail-closed kept that SAFE, but a
+            # probe that goes UNKNOWN under ordinary load has no margin; the sole
+            # production caller is a heartbeat detector with a 120s budget, so the
+            # wider window costs nothing it can't afford.
+            timeout=15,
         )
     except (OSError, subprocess.SubprocessError):
         return None
