@@ -1,9 +1,9 @@
 ---
 trdd-id: KVS6K7P9
 title: memory-maint-pending is a single slot — per-dispatch state plus a per-root in-flight gate
-column: todo
+column: complete
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-13T04:10:05+0200
+updated: 2026-08-16T01:38:34+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -143,12 +143,44 @@ does not ship a per-project gate believing the USER corpus is covered.
       and nothing to re-read. A guard against a state that can no longer occur is dead weight.
       **The residual risk is NOT id mismatch — it is an agent that never claims at all**, which
       is the next box.
-- [ ] Heartbeat-protocol rule + memory skills on the per-dispatch contract, with **no
-      half-migrated window** — repo side DONE (`rules/janitor-heartbeat-protocol.md:46` orders the
-      claim step and forbids the legacy slot), but the window is **OPEN ON THIS HOST**: the
-      INSTALLED `~/.claude/rules/janitor-heartbeat-protocol.md:39` still names the legacy slot,
-      because installed rules come from the plugin cache. Agents therefore still take the old
-      single-slot path and the #242 clobber remains reachable here. Closes on publish (a USER
-      decision) — do NOT hand-edit the installed copy.
-- [ ] #242 answered when it ships (#140 noted — the deferred dispatch also prevents the
-      third ~189k abstain recurrence pattern)
+- [x] Heartbeat-protocol rule + memory skills on the per-dispatch contract, with **no
+      half-migrated window** — the window that was OPEN on 2026-08-13 is now CLOSED, and it closed
+      exactly the predicted way: by a publish, not a hand-edit. Verified first-hand 2026-08-16:
+      `diff rules/janitor-heartbeat-protocol.md ~/.claude/rules/janitor-heartbeat-protocol.md`
+      differs by ONE line, the installer's `<!-- ai-maestro-janitor:rule-stamp -->` comment — the
+      rule TEXT is byte-identical, and the installed copy's marker row orders the claim step and
+      says *"do NOT read the legacy `memory-maint-pending.json` slot"*. All 7 chore skills name
+      `memory_dispatch_claim` and ban the legacy slot in the same breath.
+      Test-enforced, not merely present: `tests/test_memory_chore_claim_step.py` asserts the ban
+      per skill and `tests/test_heartbeat_protocol_rule.py:215` asserts the rule row's exact
+      wording — 44 passed with `test_memory_dispatch_claim.py`.
+      **What this does NOT prove:** it is one host. A machine still running a pre-3.3.0 install
+      reads the old rule text; nothing here can observe that, and nothing should — the mirror is
+      what covers it, and it is self-retiring (below).
+- [x] #242 answered when it ships — CLOSED 2026-08-14T22:10Z with a verification comment naming
+      `memory_dispatch_claim.claim_one` and the atomic `os.rename`, posted by the AUTONOMOUS peer
+      agent under the shared owner auth. #140 and #238 are likewise CLOSED. Confirmed by reading
+      the issues, not from the card's own claim.
+
+## ⏵ CLOSING NOTE 2026-08-16 — the legacy mirror is deliberate, and its removal is NOT residual work
+
+The obvious last step looks like deleting the dual-write at
+`scripts/detectors/memory-maintenance.py:254` — the standing "no backward-compatibility code" rule
+points straight at it. **Do not.** Read `memory_dispatch_claim._retire_legacy_mirror` (`:99-132`)
+first: the mirror is not an un-swept leftover, it is a record with a defined lifecycle that the
+claimer deletes **iff the mirror describes the dispatch just claimed** — so it disappears on
+consumption rather than accumulating, and `claim_one` refuses to treat it as a fallback
+(`:155-160` explicitly: *"The legacy single slot is NOT a fallback"*). Its remaining job is the one
+this host cannot see: an agent on an older install whose rule text still names the fixed path.
+Deleting the write would strand that agent with no assignment at all, converting a covered case
+into a silent no-op, and `tests/test_heartbeat_protocol_rule.py:78` would go red.
+
+## Approval log
+
+- 2026-08-16T01:38:34+0200 — COMPLETED by janitor-main-session (tier 0, own scope). Both remaining
+  boxes were already satisfied by work that had shipped; nothing new was built. This card was
+  **shipped-but-not-closed** — it sat at `column: todo` asserting open work while its last blocker
+  (a publish) had landed two days earlier. That is the failure the kanban drain rule names: an
+  untrue column hides a finished card as effectively as it hides a stalled one. Found by
+  re-verifying the card's premise against the tree before picking it up, which is the only step
+  that distinguishes the two.
