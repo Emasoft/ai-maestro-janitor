@@ -50,7 +50,15 @@ DEFAULT_MIN_BYTES = 100 * 1024 * 1024  # 100 MB — well above any healthy log, 
 # `/tmp/claude` is where the measured balloon lived: the Claude ecosystem's shared temp dir, which
 # several tools append to and NO tool prunes. Deliberately a short list — a detector that walks
 # large trees every hour becomes the FS churn it exists to report.
-DEFAULT_ROOTS = ("/tmp/claude",)
+# nosec B108 - this is a READ-ONLY SCAN ROOT, never a file this code creates. B108/CWE-377 exists
+# for the write side: a program that CREATES a predictable temp path can be beaten to it by a
+# symlink planted between check and open. Nothing here opens, creates, or writes anything — the
+# scan is `rglob` + `stat`, and `scan_roots` explicitly SKIPS symlinks, which is the very vector
+# the rule guards. Deliberately NOT "fixed" with `tempfile.gettempdir()`: on macOS TMPDIR is a
+# per-user /var/folders path, so that would silently point the detector at a directory the Claude
+# ecosystem does not use and quietly cover NOTHING — the exact "green but covering nothing"
+# failure `test_scanner_walk_invariants` was written about. The literal is the correct value.
+DEFAULT_ROOTS = ("/tmp/claude",)  # nosec B108
 # Re-alert only after this much growth. Without it an hourly detector repeats the same line
 # forever, and a guard that cries the same wolf every hour is one the reader learns to skip.
 DEFAULT_GROWTH_FACTOR = 2.0
