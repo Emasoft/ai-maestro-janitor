@@ -71,7 +71,7 @@ which was the exact thing in doubt.
 | stale in-memory module (imported before an update) | **No.** `harness_backend.py` mtime 19:06 predates the daemon's 20:43 start |
 | memoized claim/liveness result | **No.** `server_runs_chores()` documents "No memo"; `server_capabilities()` re-reads per call |
 | env override in the daemon's environment | **No.** `ps eww -p 30605` shows no `JANITOR_AIMAESTRO_*` override |
-| daemon HOME / `_liveness_path()` divergence | **No.** `HOME=/Users/emanuelesabetta`, identical to the shell's |
+| daemon HOME / `_liveness_path()` divergence | **No.** `HOME=~`, identical to the shell's |
 | chore-name vs task-name mismatch | **No.** The daemon's own `_build_tasks()` + `_yielded_task_names()` return all five names exactly |
 
 **Dead end — do not repeat:** `lsof -p <daemon-pid>` shows no log file held open, because
