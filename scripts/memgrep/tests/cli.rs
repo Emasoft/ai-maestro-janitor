@@ -192,6 +192,60 @@ fn version_output_carries_a_build_stamp_beyond_the_bare_crate_version() {
     }
 }
 
+/// TRDD-9XMPS8OZ: the stamp must name THIS commit, not merely be well-shaped.
+///
+/// The test above checks the stamp's SHAPE and is green against a stamp frozen at any
+/// commit — which is how the real defect survived from janitor#164 until 2026-08-16.
+/// `build.rs` watched `<git-dir>/HEAD`, a file that holds the constant `ref: refs/heads/…`
+/// and that a commit never writes, so cargo never re-ran it and every build reported the
+/// commit that was HEAD the FIRST time the crate was built in that checkout. Measured on
+/// this host: the binary carried code committed 2026-08-14 while `--version` said
+/// `a685cca, 2026-08-07`. A stamp that exists to expose a stale binary was itself the
+/// stale thing, and it answered confidently.
+///
+/// This assertion cannot be satisfied by a frozen stamp: `cargo test` builds the binary
+/// immediately before running it, so with the watch list fixed the sha is necessarily the
+/// current HEAD, and with the bug present it drifts the moment HEAD moves.
+///
+/// SKIPS (does not fail) when git is unavailable or the sha is the documented `unknown`
+/// fallback — a source tarball with no `.git` is a supported build environment, and this
+/// test must not turn that into a failure.
+#[test]
+fn version_stamp_names_the_commit_this_binary_was_actually_built_from() {
+    let head = match Command::new("git").args(["rev-parse", "--short=7", "HEAD"]).output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return, // no git here — nothing to compare against
+    };
+    if head.is_empty() {
+        return;
+    }
+
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .arg("--version")
+        .output()
+        .expect("failed to run memgrep --version");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let line = stdout.trim();
+    let inside = line
+        .rsplit_once('(')
+        .map(|(_, rest)| rest.trim_end_matches(')'))
+        .unwrap_or("");
+    let stamped_sha = inside.split(", ").next().unwrap_or("").trim();
+
+    if stamped_sha == "unknown" {
+        return; // fail-open build environment, documented in build.rs
+    }
+    assert_eq!(
+        stamped_sha, head,
+        "`--version` reports commit {stamped_sha:?} but this build is at HEAD {head:?}. The \
+         build stamp has frozen: build.rs is not being re-run when the branch ref moves, so \
+         every binary from this checkout will keep claiming an old provenance. Check the \
+         `cargo:rerun-if-changed` list in build.rs — watching `.git/HEAD` alone is the bug, \
+         because a commit writes the RESOLVED ref, not HEAD."
+    );
+}
+
 /// janitor#127: `memgrep help` used to SUCCEED silently as a literal grep for the word "help"
 /// (exit 0, plausible-looking output) — the discovery convention every other CLI (git/cargo/npm)
 /// honors instead reads as "this tool has no subcommands". `help` must now behave like `--help`.
