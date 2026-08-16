@@ -3,7 +3,7 @@ trdd-id: XM3FPJC0
 title: Nothing notices a file that grows without bound — 231 MB of debug log accumulated for 11 days unseen
 column: testing
 created: 2026-08-15T23:10:53+0200
-updated: 2026-08-15T23:38:00+0200
+updated: 2026-08-16T06:22:45+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -67,6 +67,33 @@ skipping symlinks, which is the CWE-377 vector itself.
 
 **NEXT ACTION.** Observe one autonomous hourly fire in a session that did not run it by hand, and
 confirm the state file carries the re-alert baseline across dispatcher-driven runs.
+
+### SOAK 2026-08-16 06:22 — first half MET; the second half is UNSATISFIABLE AS WRITTEN
+
+**Autonomous fire: OBSERVED.** `.janitor/state/last-run-runaway-file-growth.ts` = `1786853512` =
+**2026-08-16T06:11:52**, in a session started ~05:56 that never invoked the detector by hand —
+a dispatcher-driven fire on the registered hourly cadence (`dispatch.py:128`, 3600 s). That half
+is done and does not need re-observing.
+
+**Baseline persistence: NOT PROVEN, and waiting will not prove it.** `runaway-file-growth.json`
+is `{}` — two bytes — because nothing on this host is currently at or above the 100 MB threshold
+(the balloon that motivated the card is gone). An empty dict surviving a run is not evidence that
+a RECORDED SIZE survives one: the write path for a populated baseline is never exercised, so the
+observation would pass identically if that path were broken.
+
+**This criterion has the exact defect UQW5IOAE's Fable-advisor verdict named on that card**: it
+waits on an EVENT (a ≥100 MB file appearing) that may never occur, and "observed once" would
+prove one true positive while the risk here is the re-alert baseline silently NOT persisting.
+Replace it with a falsifiable one before this card can leave `testing`:
+
+- seed the state file with a recorded realpath→size entry, invoke the detector **through the
+  dispatcher path** twice, and assert the entry is still there and suppresses a re-alert at an
+  unchanged size — mutating the persistence write must fail that test;
+- keep the autonomous-fire observation above as the wiring half, since it is already met.
+
+Not rewritten as a checkbox here because the acceptance list is fully ticked; this is the gate
+between `testing` and `complete`, and it is now stated so the next session does not sit waiting
+for a balloon that may never come.
 
 ## Design
 
