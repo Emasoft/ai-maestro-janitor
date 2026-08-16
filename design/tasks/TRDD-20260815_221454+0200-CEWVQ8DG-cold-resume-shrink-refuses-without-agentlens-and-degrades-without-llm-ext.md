@@ -3,7 +3,7 @@ trdd-id: CEWVQ8DG
 title: The cold-resume shrink refuses when agentlensPro cannot answer and degrades to a template because llm-ext is not on the hook PATH
 column: testing
 created: 2026-08-15T22:14:54+0200
-updated: 2026-08-16T06:28:21+0200
+updated: 2026-08-16T16:36:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 implementation-commits: [904ddef4]
@@ -105,6 +105,101 @@ currently names the failure without naming the input that caused it, so a reader
 outside-the-layout PATH hit from a missing data dir — the same "unreachable vs silent" distinction
 TRDD-ZM5LZ24Y had to add instrumentation for. Then decide whether `which` should still win when its
 answer defeats data-dir derivation.
+
+### SUPERSEDED 2026-08-16 11:23 — the refusal is REMOVED, not instrumented
+
+The user directed contacting the llm-externalizer project; its session replied with the decisive
+fact, **verified first-hand on the installed 13.5.1 build before acting** (decide-on-facts):
+`launcher.mjs:274` reads `process.env.CLAUDE_PLUGIN_DATA || deriveDataDirFromLayout()` — the
+launcher performs the SAME cache-layout derivation this codebase was doing, from its own resolved
+path, where it is authoritative and every caller can only guess. Live test:
+`env -u CLAUDE_PLUGIN_DATA llm-ext --help` → rc 0.
+
+So `attempt_llm_ext_summary` no longer derives, no longer refuses, and **REMOVES**
+`CLAUDE_PLUGIN_DATA` from the child env rather than merely not setting it — in a janitor
+hook/daemon child that variable names the JANITOR's data dir, the env var WINS over the launcher's
+derivation, and inheriting it would self-install llm-ext's native module into the wrong plugin's
+store. The `data dir unresolvable` outcome no longer exists; the launcher's own named error
+(stderr) now covers the one genuine remaining gap (a PATH build outside the cache layout), and the
+existing rc/stderr classification handles it.
+
+The instrumentation ask above is therefore moot — the input that needed naming is now named by the
+component that owns it. The remaining exit gate for this card is unchanged: one real cold resume
+whose `external-clear.log` shows `summary: ok`.
+
+### QUEUED FOLLOW-UP — llm-ext's NEXT release moves the ground again (peer notice 2026-08-16)
+
+The llm-externalizer session's second reply supersedes its first: as of their commit `f338112`
+(on their `main`, **NOT yet published** — the cached 13.5.1 we exec still has the old launcher),
+native deps pin to `~/.llm-externalizer/native` (`LLM_EXT_CONFIG_DIR` override) and
+**`CLAUDE_PLUGIN_DATA` is no longer read at all**.
+
+Our env-strip stays CORRECT under both builds (13.5.1 self-derives; the new build ignores the
+var). But TWO things break or become dead the release lands, and nothing will announce it:
+
+1. **`llm_ext_progress_fn` will silently watch a DEAD directory.** It fingerprints the data-dir
+   mtime as the retry loop's progress signal; the new build's checkpoints land under
+   `~/.llm-externalizer`, so the gate would read "no progress" forever on a working summarize.
+   Repoint it at `LLM_EXT_CONFIG_DIR` / `~/.llm-externalizer` when the release ships.
+2. **`llm_ext_data_dir` becomes fully dead code** (its last consumer is #1) — delete it then,
+   per the peer's explicit ask, not before (the installed 13.5.1 still writes checkpoints to the
+   plugin data dir, so deleting early breaks the progress gate TODAY).
+
+Also flagged by the peer, filed as their issue rather than worked here: first-run self-install
+(`npm ci` into the shared deps dir) is unguarded against concurrency, and the janitor can
+genuinely race it — the daemon's long-idle compose and an interactive handoff can exec llm-ext in
+the same minute after an upgrade.
+
+### REGRESSION FOUND AND FIXED 2026-08-16 — the warm-cancel probe made the idle lever unreachable
+
+Earlier the same day, per an owner directive, the `/clear` injection chain gained a
+`still_wanted` hook: while the pane is busy it re-asks agentlensPro every 8 s whether the cache
+is still expired and CANCELS the `/clear` the moment the cache reads WARM (the user's own turn
+rebuilt it, so clearing would destroy a live context). The 30 s inject give-up was raised to a
+3600 s ceiling at the same time.
+
+**DEFECT.** That probe was wired to EVERY trigger. Measured result — six consecutive
+`long-idle` fires cancelled, e.g.
+`[2026-08-16T15:55:05+0200] fired: trigger=long-idle — nothing but heartbeats for 9000s`
+immediately followed by `inject cancelled: cache is WARM again`. 100% veto rate; the lever was
+unreachable.
+
+**CAUSE.** `long-idle` fires BECAUSE heartbeats are the only activity, and a ~5-minute heartbeat
+cadence against a 1 h TTL keeps the prompt cache warm by construction. A warm cache is that
+trigger's NORMAL, HEALTHY state, not a reason to stand down. The same is true of
+`next-fire-misses`, which is predictive and fires while the cache is deliberately still warm.
+This is the exact failure the docstring of `external_clear.next_fire_misses_cache` already
+warned about: asking whether the cache is *already* cold makes the lever unreachable whenever
+the cadence is faster than the TTL.
+
+**FIX.** The chain payload now carries `cache_gated`, set by `external_handoff_clear._fire` to
+`trigger in {resumed-cold, cache-certain-expired}`; `clear_trigger._run_chain_payload` arms the
+`still_wanted` probe only when that key is true. An absent key means no gate, so the two
+in-model/CLI `_spawn_chain` sites are unaffected and keep their pre-existing behaviour plus the
+longer patience ceiling.
+
+**Deliberately NOT added:** a second predicate asking "has a real non-heartbeat turn happened
+since the verdict?", which is the semantically correct cancel for an idleness trigger. The
+3600 s ceiling and the busy-pane deferral bound the case; add the predicate only if a long-idle
+clear is ever observed landing on a user who had just returned. This is an explicit open risk,
+not a closed question.
+
+Two regression tests pin both directions in `tests/test_external_handoff_clear.py`.
+
+**Separate finding — test-isolation leak, also fixed.** `tests/test_inject_still_wanted.py` was
+writing its fixture strings into the REAL `.janitor/logs/terminal_trigger.log`, because the
+repo's autouse test isolation covers HOME and the global-state dirs but NOT
+`CLAUDE_PROJECT_DIR`, which is what `state.log_line` resolves the project log from. The string
+`inject cancelled: cache went warm` had landed in the live log three times and read there as
+production evidence. Fixed with a module-scoped autouse fixture redirecting
+`CLAUDE_PROJECT_DIR`; proven by the log staying at 504 lines across a run that previously grew
+it by 2.
+
+**QUEUED FOLLOW-UP above — both items now resolved, not just tracked.** Item 1 (repoint the
+progress fingerprint away from the plugin data dir) is DONE — `llm_ext_state_dir()` reads
+`LLM_EXT_CONFIG_DIR` / `~/.llm-externalizer` plus `/session-summary-checkpoints`, and
+`llm_ext_progress_fn()` uses it. Item 2 (delete `llm_ext_data_dir` once its last consumer goes)
+is being executed by another worker in this same pass.
 
 ## Design
 

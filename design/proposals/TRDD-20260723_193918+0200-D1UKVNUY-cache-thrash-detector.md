@@ -53,7 +53,7 @@ when a session is pathologically expensive by a signal the %-gauge is blind to:
 
 ## Redacted UPSTREAM issue draft (ready to post ONLY on owner confirmation — 23blocks-OS/ai-maestro)
 
-> _Posted by the Claude developing **ai-maestro-janitor** (via the shared @owner gh auth)._
+> _Posted by the Claude developing **ai-maestro-janitor** (via the shared `@owner` gh auth)._
 >
 > **Design observation: `server.mjs` OAuth-rotator tick is gated-OFF by default while downstream
 > consumers yield to the server → rotation can become ownerless.**

@@ -269,3 +269,82 @@ def test_force_never_overrides_a_safety_veto():
         assert why.startswith(("idle ", "no-headroom"))
     for why in safety:
         assert not why.startswith(("idle ", "no-headroom")), why
+
+
+# --- _fire: the warm-cancel gate is trigger-scoped ----------------------------
+
+
+def _captured_payload(monkeypatch, tmp_path: Path, trigger: str) -> dict:
+    """Run `_fire` with the chain spawn and the fired-stamp both replaced, and return the
+    payload it built. Real function, real payload — only the two side effects are stubbed."""
+    import clear_trigger
+    import cold_cache_compact
+
+    seen: dict = {}
+    monkeypatch.setattr(clear_trigger, "_spawn_chain",
+                        lambda payload, env=None: seen.update(payload))
+    monkeypatch.setattr(cold_cache_compact, "mark_clear_fired", lambda sd, now=0: None)
+    sd = tmp_path / ".janitor" / "state"
+    ehc._fire(tmp_path, sd, {"kind": "tmux", "pane": "%1"}, 0, trigger=trigger)
+    return seen
+
+
+def test_a_cold_cache_trigger_arms_the_warm_cancel_probe(tmp_path, monkeypatch):
+    """`resumed-cold` and `cache-certain-expired` fire BECAUSE the cache went cold, so a cache
+    that warms up again while the pane is busy genuinely retires the /clear."""
+    _project(tmp_path)
+    for trigger in (ec.TRIGGER_RESUMED_COLD, ec.TRIGGER_CACHE_CERTAIN_EXPIRED):
+        assert _captured_payload(monkeypatch, tmp_path, trigger)["cache_gated"] is True, trigger
+
+
+def test_idle_and_predictive_triggers_do_not_arm_the_warm_cancel_probe(tmp_path, monkeypatch):
+    """The regression this test exists for (2026-08-16): `long-idle` and `next-fire-misses`
+    fire while heartbeats keep the cache WARM — that is their normal, healthy state. Arming
+    the "still expired?" probe on them cancelled every single fire, six in a row, making the
+    long-idle lever unreachable exactly as `external_clear.next_fire_misses_cache` warns."""
+    _project(tmp_path)
+    for trigger in (ec.TRIGGER_LONG_IDLE, ec.TRIGGER_NEXT_FIRE_MISSES, ""):
+        assert _captured_payload(monkeypatch, tmp_path, trigger)["cache_gated"] is False, trigger
+
+
+# --- came_back_since: the cancel that falsifies EVERY trigger's premise -------
+
+
+def test_a_real_turn_after_the_verdict_retires_the_clear():
+    """The gap ai-maestro's review closed (2026-08-16). Every trigger that fires this chain
+    rests on "no real work is happening here"; a substantive turn after the verdict falsifies
+    that, and for `long-idle` it is the ONLY thing that does — a warm cache never contradicted
+    idleness. The 1h ceiling cannot cover this: it bounds how long a wrong verdict may WAIT,
+    not the verdict BECOMING wrong, and /clear has no undo."""
+    import clear_trigger as ct
+
+    now, verdict = 10_000, 9_000
+    # idle 500s ⇒ last real turn at 9_500, AFTER the verdict ⇒ the user is back.
+    assert ct.came_back_since(verdict, 500, now) is True
+    # idle 2_000s ⇒ last real turn at 8_000, BEFORE the verdict ⇒ still the idle session.
+    assert ct.came_back_since(verdict, 2_000, now) is False
+
+
+def test_a_turn_in_the_verdicts_own_second_is_not_a_comeback():
+    """Strictly greater, not >=. The turn the verdict was computed FROM lands in the same
+    second; `>=` would cancel every chain the instant it was fired — the same 100%-veto shape
+    the cache probe had."""
+    import clear_trigger as ct
+
+    assert ct.came_back_since(9_000, 1_000, 10_000) is False
+
+
+def test_a_missing_verdict_timestamp_disables_the_comeback_cancel():
+    """0/absent means the payload predates this field. Disable the cancel rather than invent a
+    reference point: a wrong pin cancels either every chain or none, both silently."""
+    import clear_trigger as ct
+
+    assert ct.came_back_since(0, 1, 10_000) is False
+
+
+def test_the_payload_carries_the_verdict_timestamp(tmp_path, monkeypatch):
+    """Wiring: without this the predicate above is unreachable in production."""
+    _project(tmp_path)
+    payload = _captured_payload(monkeypatch, tmp_path, ec.TRIGGER_LONG_IDLE)
+    assert payload["verdict_ts"] == 0  # _fire was called with now=0 in the helper
+    assert "verdict_ts" in payload

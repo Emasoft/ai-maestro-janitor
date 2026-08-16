@@ -305,7 +305,30 @@ def _fire(script: str) -> None:
 # submit instead of a wall clock.
 
 _GATE_STAMP = "clear-observed.ts"
+
+# The chain's /clear injection ceiling. NOT the default 30 s inject give-up: the chain now
+# carries a `still_wanted` cache probe (owner directive 2026-08-16) that cancels the moment
+# agentlensPro reports the cache WARM, so the CONDITION is the terminator and this clock is
+# only the backstop for the probe's "unknown" answers. An hour of 8 s retries against a busy
+# pane with a still-cold cache is exactly the patience the feature needs — the give-up at 30 s
+# is what left this session un-shrunk for 4+ hours on 2026-08-16.
+_CLEAR_CHAIN_GIVEUP_S = 3600.0
 _CHAIN_LOCK = "clear-chain.lock"
+
+
+def came_back_since(verdict_ts: int, idle_s: int, now: int) -> bool:
+    """PURE. Did a SUBSTANTIVE turn land after the clear was decided?
+
+    `idle_s` is heartbeat-excluding (`fleet_scan.transcript_activity`), so `now - idle_s` is the
+    moment of the last real turn. Strictly greater, not `>=`: a turn in the SAME second as the
+    verdict is what the verdict itself was computed from, and `>=` would cancel every chain the
+    instant it was fired.
+
+    A false `True` costs one skipped shrink; a false `False` clears a live context with no undo.
+    """
+    if verdict_ts <= 0:
+        return False
+    return (now - idle_s) > verdict_ts
 
 
 def _gate_baseline() -> int:
@@ -351,6 +374,10 @@ def _run_chain_payload(payload_b64: str) -> int:
         return 0
 
     directive = data["directive"]
+    # Epoch seconds at which the firing verdict was REACHED. 0/absent disables the
+    # came-back cancel rather than faking a reference point — a wrong pin would either
+    # cancel every chain or none, and both failures are silent.
+    verdict_ts = int(data.get("verdict_ts") or 0)
     persisted = {"done": False}
 
     def _persist_resume_state() -> None:
@@ -362,6 +389,78 @@ def _run_chain_payload(payload_b64: str) -> int:
         _write_clear_marker(directive)
         persisted["done"] = True
 
+    def _clear_still_wanted() -> tuple[bool, str]:
+        # Owner directive 2026-08-16: while the pane is busy (the user is typing), do NOT give
+        # up on a 30 s clock — keep retrying at the 8 s cadence, but RE-ASK agentlensPro every
+        # round whether this project's cache is still expired, and CANCEL the /clear the moment
+        # it reports WARM: the user's own turn rebuilt the cache, so clearing now would destroy
+        # a LIVE context for nothing.
+        #
+        # ONLY a definite False cancels. True (still expired) keeps waiting — that IS the
+        # window the clear exists for. None (probe absent / unable) ALSO keeps waiting: the
+        # chain was fired on a verdict that was valid when made, and cancelling on ignorance is
+        # how this lever has gone silently dead before (external_clear's own log records the
+        # "cache state unknown — not clearing" epoch). The safety ceiling below bounds the
+        # None case; the warm case self-cancels here.
+        try:
+            import external_clear  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            verdict = external_clear.cache_certainly_expired(
+                os.environ.get("CLAUDE_PROJECT_DIR") or None
+            )
+        except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
+            return True, "cache probe unavailable — continuing"
+        if verdict is False:
+            return False, "cache is WARM again — a /clear now would destroy a live context"
+        return True, "cache still expired" if verdict is True else "cache state unknown — continuing"
+
+    def _user_came_back() -> tuple[bool, str]:
+        # The SECOND cancel, and the one that applies to EVERY trigger. A cancel condition must
+        # falsify the TRIGGER'S OWN PREMISE, and every rule that fires this chain rests on "no
+        # real work is happening here". A substantive turn AFTER the verdict falsifies that
+        # exactly — for `long-idle` it is the only thing that does, since a warm cache never
+        # contradicted idleness (that mistake vetoed 6 of 6 fires on 2026-08-16).
+        #
+        # The ceiling below is a TIMEOUT, not protection: it bounds how long a wrong verdict may
+        # wait, but it cannot notice the verdict BECOMING wrong. Only this can, and /clear has no
+        # undo — no scrollback, no summary — so the loss it prevents is a user's whole context.
+        #
+        # Pinned to the VERDICT TIMESTAMP, never to "is the pane busy right now". Busy-now is
+        # what the injection deferral already handles; re-asking it here would add a second veto
+        # with the same unreachability disease this hook just cured. `transcript_activity`
+        # excludes heartbeats (`substantive_age_from_tail`) — the very distinction the long-idle
+        # trigger is computed from, so the two can never disagree about what "activity" means.
+        if not verdict_ts:
+            return True, "no verdict timestamp — continuing"
+        try:
+            import fleet_scan  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            idle_s, _enq, _await = fleet_scan.transcript_activity(
+                os.environ.get("CLAUDE_PROJECT_DIR") or ".", int(time.time())
+            )
+        except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
+            return True, "activity probe unavailable — continuing"
+        if idle_s is None:
+            # Unknown idleness never authorizes the destructive action upstream either
+            # (`should_clear_externally` vetoes on it), but here the /clear is ALREADY
+            # authorized, so ignorance keeps waiting rather than cancelling — same asymmetry the
+            # cache probe uses, for the same reason.
+            return True, "idle age unknown — continuing"
+        if came_back_since(verdict_ts, idle_s, int(time.time())):
+            return False, (f"the session took a real turn {idle_s}s ago, after this clear was "
+                           "decided — the user is back")
+        return True, f"still idle ({idle_s}s, no turn since the verdict)"
+
+    def _still_wanted() -> tuple[bool, str]:
+        """Both cancels. The activity check runs for EVERY trigger; the cache check only for a
+        chain fired BECAUSE the cache was cold."""
+        back_ok, back_why = _user_came_back()
+        if not back_ok:
+            return False, back_why
+        if not data.get("cache_gated"):
+            return True, back_why
+        return _clear_still_wanted()
+
     try:
         ok, why = terminal_trigger.run_chained_inject(
             data["terminal"],
@@ -371,6 +470,18 @@ def _run_chain_payload(payload_b64: str) -> int:
             gate_baseline=int(data["gate_baseline"]),
             settle_between_s=float(data.get("settle_between_s", 0.0)),
             pre_submit_first=_persist_resume_state,
+            # The condition is the terminator; the clock is only a backstop. One hour, not the
+            # default 30 s: a busy pane with a still-cold cache is exactly the state worth
+            # outwaiting, and the warm-cancel above fires the moment the session takes a turn.
+            giveup_s=_CLEAR_CHAIN_GIVEUP_S,
+            # Two cancels, deliberately different in scope (see the two closures above):
+            # the ACTIVITY check runs for every trigger; the CACHE check only when `cache_gated`
+            # says coldness is what fired us. A warm cache is the NORMAL state of the other
+            # triggers — `long-idle` and `next-fire-misses` fire while heartbeats keep the prefix
+            # warm (cadence < TTL) — so gating those on "still expired" cancelled them 100% of
+            # the time: six long-idle fires in a row on 2026-08-16, the exact unreachability
+            # `external_clear.next_fire_misses_cache`'s docstring warns about.
+            still_wanted=_still_wanted,
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
         if not ok:

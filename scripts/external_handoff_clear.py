@@ -325,7 +325,7 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
     return text, reasons
 
 
-def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int) -> None:
+def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str = "") -> None:
     """Spawn `clear_trigger`'s verified chain against the RECORDED pane.
 
     `CLAUDE_PROJECT_DIR` is set for the child because `clear_trigger._project_root()` reads it,
@@ -352,6 +352,13 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int) -> None:
             "with no model turn — follow its wikimem/TRDD links via memgrep recall on "
             "demand), then resume your prior in-flight task."
         ),
+        # Let the chain's warm-cancel probe run ONLY when coldness is what fired us. The other
+        # two triggers are idleness/prediction rules that fire with the cache deliberately warm.
+        "cache_gated": trigger in (ec.TRIGGER_CACHE_CERTAIN_EXPIRED, ec.TRIGGER_RESUMED_COLD),
+        # The reference point for the came-back cancel, which applies to EVERY trigger: a
+        # substantive turn newer than this retires the clear. `now` is the same clock the
+        # verdict was computed against, so the two can never drift apart.
+        "verdict_ts": int(now),
     }, env=child_env)
     # STAMP AT SPAWN, unlike the in-model lever which stamps only on a confirmed send.
     # The difference is real, not a relaxation: there, a refused send meant the USER WAS
@@ -419,7 +426,7 @@ def main() -> int:
         return 0
 
     state.atomic_write(sd / "agent-handoff.md", text)
-    _fire(root, sd, terminal, now)
+    _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")
     return 0
