@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-16T05:45:00+0200
+updated: 2026-08-16T06:50:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -108,6 +108,23 @@ install at user scope, then on the next **janitor-owned** `version-update` fire 
 for `version-update: C3 re-pin declined`. That single line closes the diagnosis. If NO decline line
 ever appears while the anchor stays stale, the chore is never running janitor-side at all and the
 answer is the absorption hole above — which is then its own card, not this one.
+
+**BEFORE reading that absence as the answer, CHECK TWO PRECONDITIONS — otherwise it means nothing.**
+Verified 2026-08-16 06:50: v3.3.10 (carrying the instrumentation) is INSTALLED, the anchor is still
+`0.59.0`, and there is NO decline line — yet that is not evidence of anything, because both
+preconditions fail:
+
+1. **The DAEMON must be running the new code.** `claude plugin update` prints *"Restart to apply
+   changes"*; the long-lived daemon keeps executing the version it started with. A decline line
+   cannot exist until a daemon process that started AFTER the install runs the chore. Check the
+   `started (pid=…)` line in `daemon.log` against the install time.
+2. **A JANITOR-owned `version-update` fire must have happened since then.** The whole current
+   `daemon.log` contains exactly ONE (`2026-08-15T19:10`); every daemon start since 08-11 yields the
+   chore to the server. Absence of a decline line is therefore the EXPECTED reading, and it
+   distinguishes nothing.
+
+So the honest state is **PENDING**, not negative. Only an absence observed while BOTH preconditions
+hold is evidence for the absorption hole.
 
 ## The defect
 
