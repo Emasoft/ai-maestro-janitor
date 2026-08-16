@@ -10,7 +10,7 @@ project-id: ai-maestro-janitor
 approval-tier: 0
 npt: []
 eht: []
-implementation-commits: [a8982a03]
+implementation-commits: [a8982a03, 11e925c0]
 ---
 
 # C3 last-good pin never advances after a manual `claude plugin update`
@@ -89,11 +89,25 @@ candidate did not match it, or the C2 manifest check declined. `certify_newest_i
 the pinned version or `None` and logs nothing on the decline paths, so from outside the two are
 indistinguishable.
 
-**NEXT ACTION** (do this before anything else on this card): add one `state.log_line` on each
-decline branch of `certify_newest_if_clean` naming WHICH predicate refused (no candidate /
-quarantined / C2-dirty / provenance-missing / provenance-mismatch). It is a fail-open best-effort
-function whose entire failure surface is currently silent, which is why a soak cannot close it.
-Then the next janitor-owned `version-update` fire answers the question by itself.
+**INSTRUMENTATION: SHIPPED (`11e925c0`, 2026-08-16).** `certify_newest_if_clean` gained an optional
+`log` callable emitting ONE line per decline, named per predicate (not runnable / quarantined / no
+manifest / C2-dirty / provenance-unresolvable / provenance-MISMATCH / write failed), and
+`daemon.py` passes its own logger. The steady state stays silent on purpose, and only the NEWEST
+candidate's refusal is reported — see the commit for why both choices are deliberate. No gate was
+weakened; the only new behaviour is a string. 5 tests, each asserting on output that exists only
+because of the change.
+
+Refuted en route, recorded so nobody re-derives it: the F1 comparison `version != published`
+looks like a guaranteed mismatch (`releases/latest` returns `v3.3.9`, a cache dir is `3.3.9`) —
+but `resolve_latest_published` already strips the leading `v`. It is correct, and "fixing" it
+would have introduced a bug.
+
+**NEXT ACTION — no code, just wait and read.** This change is inert until INSTALLED, so: publish,
+install at user scope, then on the next **janitor-owned** `version-update` fire (i.e. one where
+`daemon.log` does NOT show `chore-coordination: yielding … 'version-update'`) grep `daemon.log`
+for `version-update: C3 re-pin declined`. That single line closes the diagnosis. If NO decline line
+ever appears while the anchor stays stale, the chore is never running janitor-side at all and the
+answer is the absorption hole above — which is then its own card, not this one.
 
 ## The defect
 
