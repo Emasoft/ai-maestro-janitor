@@ -1,9 +1,11 @@
 ---
 trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by: [AZ6QRK0D]
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-14T17:14:43+0200
+updated: 2026-08-16T02:10:31+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -152,8 +154,21 @@ mutation is outside a bugfix's blast radius) and stays open below.
 
 ## Acceptance
 
-- [ ] The four symlinks are gone and the pages are maintainable from their new scope
+- [ ] The four symlinks are gone and the pages are maintainable from their new scope — **GATED ON
+      A USER DECISION, not on work.** This box presumes option B (move the pages). The competing
+      option A (keep the symlink, teach the chores to follow it) would rewrite it instead of
+      satisfying it, so building either way now would be picking the answer. The two options and
+      their real costs are written up on TRDD-AZ6QRK0D, which is in `human_review` for exactly
+      this call — hence `blocked-by: [AZ6QRK0D]`.
 - [x] A structurally-refused page produces a countable finding; a transient refusal still does not
 - [x] Test: a scope-escaping symlink yields exactly one finding, and a second pass over the
       unchanged corpus does NOT duplicate it
-- [ ] #249 answered with the commit id
+- [x] #249 answered with the commit id — `#issuecomment-5304878173`. The earlier close (2026-08-14)
+      named the mechanism but not the commit, which is what this box actually asked for: it is
+      **`2295a5c6`**, *"a scope-escaping page is a finding, not silence"*, introducing BOTH
+      `memory_scopes.iter_escaping_note_files` and `memory-maintenance._surface_scope_escapes`
+      (`:434`, wired at `:513`); `fba278d4` then declared `publish-globally` on the four pages.
+      The comment also corrects the record: what shipped is the VISIBILITY half. The pages are
+      still unmaintainable from USER scope — proven by running `_ensure_rel_inside`, not by
+      reading it — so this issue's own ask (stop abstaining silently) is met while the underlying
+      condition is unchanged.

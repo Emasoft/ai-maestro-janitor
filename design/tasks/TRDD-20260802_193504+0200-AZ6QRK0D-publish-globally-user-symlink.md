@@ -1,9 +1,7 @@
 ---
 trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
-column: blocked
-pre-block-column: todo
-blocked-by: [JPL0JU86]
+column: human_review
 created: 2026-08-02T19:35:04+0200
 updated: 2026-08-16T02:10:31+0200
 current-owner: janitor-session
@@ -18,13 +16,15 @@ eht: []
 implementation-commits: []
 ---
 
-## ⏵ 2026-08-16 — RE-COLUMNED `todo` → `blocked`, and the breakage is now PROVEN, not argued
+## ⏵ 2026-08-16 — RE-COLUMNED `todo` → `human_review`, and the breakage is now PROVEN, not argued
 
-**Why the column moved.** This card cannot be worked by anyone: its next step is an architecture
-decision the card itself reserves to the USER ("Do not resolve it by editing either card"). Sitting
-at `todo` claimed it was ready to pick up, which is the untrue-column failure — a stalled card that
-looks handled. `blocked-by: JPL0JU86` names the card carrying the opposing ratified verdict; the
-real gate is the USER call the two cards jointly frame, and closing either one requires it.
+**Why the column moved, and why not to `blocked`.** This card cannot be worked by anyone: its next
+step is an architecture decision the card itself reserves to the USER ("Do not resolve it by
+editing either card"). Sitting at `todo` claimed it was ready to pick up — the untrue-column
+failure, a stalled card that looks handled. `blocked` was the wrong correction: `blocked-by:` names
+a CARD, and no card unblocks this one — a human does. `human_review` is the ratified column for
+exactly that, so this card is now the DECISION SITE, and TRDD-JPL0JU86 (the opposing verdict, whose
+last box needs the same call) is `blocked-by: [AZ6QRK0D]` rather than the reverse.
 
 **The claim "those pages are permanently unmaintainable" was verified first-hand, by running the
 guard rather than reading it.** `memory_txn._ensure_rel_inside` resolves `scope_root / rel` and
