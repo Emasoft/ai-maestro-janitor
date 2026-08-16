@@ -401,7 +401,15 @@ def iterm_rescue_warranted(fleet: "list[Instance]") -> bool:
 
 
 def iterm_only_exposure(fleet: "list[Instance]") -> tuple[int, int]:
-    """(instances whose ONLY possible rescue channel is iTerm, total scanned). PURE.
+    """(instances the guardian has NO usable channel for, total scanned). PURE.
+
+    NAMED for the iTerm case it is consumed in, but the predicate is deliberately weaker than
+    the name: it counts instances with no tmux, ai-maestro, or Linux-GUI channel. While the
+    iTerm path is down `iterm_by_tty` is empty, so a genuinely iTerm-hosted instance and one
+    whose terminal could not be resolved at all present the SAME empty channel set. The
+    reachability claim ("the guardian cannot reach these") holds for both; the identity claim
+    ("these are on iTerm") holds for only one. The alarm therefore reports reachability, and
+    callers must not upgrade this number into a statement about which terminal they run under.
 
     Deliberately a DIFFERENT predicate from `iterm_rescue_warranted`, which is the same
     channel test AND `diagnosis == "cron_dead"`. That one answers "did a rescue fail just

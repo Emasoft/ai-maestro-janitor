@@ -1913,8 +1913,14 @@ def test_iterm_alarm_names_how_many_instances_have_no_channel_but_iterm(
     dispatch._phase_iterm_automation_alarm()
     out = capsys.readouterr().out
 
-    assert "3 of 11 scanned instance(s) have NO channel but iTerm" in out, (
+    assert "3 of 11 scanned instance(s) have NO channel the guardian can use" in out, (
         f"the alarm must size the exposure it asks the human to fix; got: {out!r}"
+    )
+    assert "but iTerm" not in out, (
+        "the clause must NOT claim those instances are iTerm-hosted: while the iTerm path is "
+        "down, a genuinely iTerm-hosted instance and one whose terminal could not be resolved "
+        "are indistinguishable, so only the reachability claim is supportable. "
+        f"got: {out!r}"
     )
 
 

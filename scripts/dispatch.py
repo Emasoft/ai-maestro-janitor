@@ -1694,16 +1694,23 @@ def _phase_iterm_automation_alarm() -> None:
         if exposure_pair is not None:
             n_exposed, n_total = exposure_pair
             if n_exposed:
+                # WORDING IS DELIBERATE: "no channel the guardian can use", NOT "iTerm-hosted".
+                # While the iTerm path is down, `iterm_by_tty` is empty, so an instance that is
+                # genuinely iTerm-hosted and one whose terminal simply could not be resolved are
+                # INDISTINGUISHABLE — both present an empty channel set. The operational claim
+                # (the guardian cannot reach them) is true of both; the identity claim (they are
+                # on iTerm) is true of only one, and is not ours to make from this evidence.
                 exposure = (
-                    f" SCOPE: {n_exposed} of {n_total} scanned instance(s) have NO channel "
-                    "but iTerm, so they are unrescuable for as long as this lasts — those "
-                    "are the ones to move under tmux first."
+                    f" SCOPE: {n_exposed} of {n_total} scanned instance(s) have NO channel the "
+                    "guardian can use — no tmux pane, no ai-maestro session — so they are "
+                    "unreachable for as long as this lasts. Those are the ones to move under "
+                    "tmux first."
                 )
             else:
                 exposure = (
-                    f" SCOPE: none of the {n_total} scanned instance(s) depend on iTerm "
-                    "alone — every one has a tmux or ai-maestro channel, so nothing is "
-                    "currently unrescuable even though the iTerm path is down."
+                    f" SCOPE: all {n_total} scanned instance(s) still have a tmux or "
+                    "ai-maestro channel, so nothing is currently unreachable even though the "
+                    "iTerm path is down."
                 )
         binary = (
             f"the PYTHON RUNTIME that made the call ({state.sanitize_for_drift_line(interpreter)})"
