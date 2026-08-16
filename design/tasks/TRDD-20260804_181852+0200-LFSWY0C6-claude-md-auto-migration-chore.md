@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-13T11:35:00+0200
+updated: 2026-08-16T02:46:00+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,39 @@ eht: []
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+
+## ⏵ 2026-08-16 — THE "ZERO WORK TODAY" PREMISE HAS EXPIRED, and the way it expired is the card's own argument
+
+**Re-checked, still NOT STARTED:** `grep claudemd scripts/detectors/memory-maintenance.py` → nothing,
+and no `[janitor-memory-claudemd]` marker is routed anywhere. The 2026-08-04 STATE block is accurate.
+
+**But the 08-13 pre-check no longer holds.** That block measured `claudemd_slim check` →
+*"conforming and fresh"* and concluded the chore would migrate nothing. Measured 2026-08-16:
+
+```text
+claudemd-slim: wikimem index is STALE vs the corpus (run scripts/claudemd_slim.py index)
+```
+
+**I caused it, this session, by doing ordinary correct work** — adding two atoms to
+`janitor-tool-call-cost-law`, one to `claude-code-plugin-rollout-staleness`, and extending both
+pages' `description:` fields. Nothing unusual; exactly the memory maintenance the corpus is for.
+Three days from "fresh" to "stale" with no narrative added at all is the empirical answer to
+whether this needs automating: the drift arrives as a side effect of the system working normally,
+not from anyone being careless.
+
+**I am deliberately NOT running `claudemd_slim.py index` from this session, and the reason belongs
+on this card.** `CLAUDE.md` is injected into the prompt prefix, so editing it mid-session breaks
+the cache and costs a full re-write — TRDD-IJ94O8YD measured that at **150,824 cache_creation
+tokens** on the days it fires. Paying that for a digest refresh, in a long session, is the exact
+trade that card exists to stop. The work is right; the TIMING is wrong, and the timing is free to
+change. Left for a session boundary and recorded in `.janitor/state/agent-handoff.md`.
+
+**Design consequence for §2, and it sharpens the spec rather than just noting a cost.** Routing the
+chore to a subagent does not dodge the cache write: the parent re-reads `CLAUDE.md` on its next
+turn regardless of which context edited the file. So the chore's scheduling must treat a `CLAUDE.md`
+write as an EXPENSIVE, BATCHED event — one write per accumulated drift, ideally at a session
+boundary — not as a per-detection repair. A chore that faithfully re-indexes on every corpus change
+would convert this card's own token argument into a recurring bill.
 
 ## ⏵ 2026-08-13 — PRE-CHECK BEFORE BUILDING: the chore has ZERO work today. Build it in two halves.
 
