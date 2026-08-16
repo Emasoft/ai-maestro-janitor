@@ -1,9 +1,11 @@
 ---
 trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by: [JPL0JU86]
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-13T11:55:00+0200
+updated: 2026-08-16T02:10:31+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -15,6 +17,48 @@ npt: []
 eht: []
 implementation-commits: []
 ---
+
+## ⏵ 2026-08-16 — RE-COLUMNED `todo` → `blocked`, and the breakage is now PROVEN, not argued
+
+**Why the column moved.** This card cannot be worked by anyone: its next step is an architecture
+decision the card itself reserves to the USER ("Do not resolve it by editing either card"). Sitting
+at `todo` claimed it was ready to pick up, which is the untrue-column failure — a stalled card that
+looks handled. `blocked-by: JPL0JU86` names the card carrying the opposing ratified verdict; the
+real gate is the USER call the two cards jointly frame, and closing either one requires it.
+
+**The claim "those pages are permanently unmaintainable" was verified first-hand, by running the
+guard rather than reading it.** `memory_txn._ensure_rel_inside` resolves `scope_root / rel` and
+rejects anything that lands outside — and `resolve()` collapses symlink hops, so a
+`publish-globally` page reached from the USER root tunnels into the PROJECT tree and is refused:
+
+```text
+REFUSED  from USER scope: claude-code-plugin-rollout-staleness.md -> MemoryTxnError
+WRITABLE from USER scope: user-global-overview.md
+```
+
+The guard is CORRECT — it is a scope-escape defense, and weakening it to admit these pages would
+open the one module allowed to delete memory files to arbitrary paths. The symlink DIRECTION is
+what makes the pages unwritable, which is exactly JPL0JU86's point.
+
+**Current live state, measured 2026-08-16:** 4 PROJECT pages carry `publish-globally: true`
+(`claude-code-continuity-engineering`, `-settings`, `claude-code-esc-input-semantics`,
+`claude-code-plugin-rollout-staleness`) and the USER root holds exactly 4 matching symlinks — zero
+drift, the normalizer is doing its job. All 4 are unmaintainable from USER scope. They remain
+fully maintainable from PROJECT scope: this session edited
+`claude-code-plugin-rollout-staleness.md` tonight through `memgrep add-atom`/`edit` at its PROJECT
+path, and validate/lint came back clean. So the damage is bounded — it is loss of USER-scope
+chore coverage, not loss of the pages.
+
+**The decision, stated so it can be answered in one line** (do NOT resolve it here):
+
+- **A — keep the symlink, exempt it.** Teach the USER-scope chores to follow a `publish-globally`
+  symlink to its PROJECT home and edit it there. Preserves one copy and the current normalizer.
+  Cost: every chore must learn a special case, and M-10 must stay untouched, so the exemption
+  lives in the callers rather than the guard.
+- **B — move the page to USER scope, leave a pointer at the PROJECT end.** JPL0JU86's verdict
+  ("MOVE them, do not link them"). Chores work with no special case. Cost: the page leaves the
+  PROJECT repo, so it stops being git-tracked and shared with cloners — which is the property
+  `publish-globally` pages were given for.
 
 ## ⏵ 2026-08-13 11:55 — THE MECHANISM ALREADY SHIPPED, AND IT SHIPPED IN THE FORBIDDEN DIRECTION
 
