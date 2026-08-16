@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-16T01:20:00+0200
+updated: 2026-08-16T06:17:58+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -17,6 +17,22 @@ implementation-commits: [d2a5204, 67802e0]
 **Not started. FABLE-ADVISOR VERDICT RECEIVED 2026-08-02 — it RE-SCOPES this card. Read the
 verdict section below BEFORE the design notes further down, which were written on a premise that
 turned out to be false.**
+
+> **DO NOT close this card on the strength of the 2026-08-14 board triage.**
+> `reports/trdd-triage/20260814_171024+0200-todo-planned.md` classifies UQW5IOAE
+> **DONE-UNCLOSED** with the next action "move to `complete`; no code work left". **That is
+> wrong now, and checked 2026-08-16 it was already going stale as it was written**: the triage
+> is timestamped 17:10 on 2026-08-14, and the Fable-advisor verdict recorded below — **do NOT
+> ship as designed** — landed the same day and caused three acceptance boxes to be REWRITTEN,
+> not ticked. One of them now demands a shadow-mode soak plus a staged end-to-end drill, which
+> is days of evidence, not a column move.
+>
+> Recorded here rather than left in the report because a report is EVIDENCE and a board move is
+> a DECISION: acting on that row would have closed a card the advisor had just blocked, and the
+> only thing standing between those two facts was noticing their timestamps. Citing the report
+> by name here is also what tells `report-to-trdd-drift` the report was consumed — it clears on
+> a TRDD naming the basename, so the honest way to silence it is to say what the report was
+> right and wrong about.
 
 ### ✅ STEP 1 DONE — ROOT CAUSE FOUND AND FIXED (`d2a5204`). This card may not be needed.
 
