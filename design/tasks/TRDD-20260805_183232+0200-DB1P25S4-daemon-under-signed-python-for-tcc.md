@@ -159,7 +159,15 @@ THE CODE FIX (one change-set, next session, fresh context):
 3. `_restart_decision` roll-forward checks the quarantine (janitor#211's exact ask).
 
 DONE THIS SESSION (hot-apply, owner-directed):
-- [x] plist ProgramArguments switched to the framework python3.12 (backup kept beside it)
+- [x] plist ProgramArguments switched off the adhoc `uv` identity (backup kept beside it).
+      **WORDING CORRECTED 2026-08-16 — this line said "the framework python3.12" and that is NOT
+      what shipped.** The later, ratified box below records the CORRECTION: `resolve_interpreter`
+      prefers the **MANAGED** interpreter first, explicitly "not the framework probe". The live
+      plist therefore names `~/.local/share/uv/python/cpython-3.12-…/bin/python3.12`, which is
+      correct. Fixed because the stale wording actively misleads: reading it beside the live plist
+      (and a python.org framework that IS installed here) reads as a reverted migration, and it
+      caused exactly that false conclusion on TRDD-EZ3PMQYX today before the correction box was
+      found.
 - [x] old uv-identity daemon stopped; agent bootstrapped; daemon verified under the signed python
 
 REMAINING (the durable half — code, so a restage/reinstall does not revert the hot fix):

@@ -41,16 +41,33 @@ findings block and not a commit.
    long-lived — the change cannot be exercised until it next restarts, and there is no
    `iterm-automation-blocked.flag` here to drive the branch either. Building two unverifiable
    layers at once is how a "fix" ships that nobody can show works.
-4. **INDEPENDENT FINDING, and it bears directly on the alarm's advice.** The installed plist's
-   `ProgramArguments[0]` is still a **uv-managed** interpreter
-   (`~/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12`), even though a
-   `com.ai-maestro-janitor.daemon.plist.bak-pre-signed-python-20260805` backup exists — i.e. the
-   signed-python migration (TRDD-DB1P25S4) was either reverted or never completed on this host.
-   That matters because the alarm tells the human to grant Automation to *that exact binary*, and
-   a uv-managed python is the grantee whose path moves on upgrade and whose adhoc signature will
-   not persist a grant on macOS 26+. **The remedy this card wants to branch away from is, on this
-   host, being aimed at the worst possible grantee.** Worth its own card or a check on
-   TRDD-DB1P25S4 before anyone re-tunes the alarm text.
+4. ~~**INDEPENDENT FINDING:** the plist still names a uv-managed interpreter, so the
+   signed-python migration reverted or never completed.~~ **WRONG — RETRACTED 2026-08-16 03:26,
+   ~6 minutes after I wrote it. Checked TRDD-DB1P25S4 instead of stopping at the plist.**
+
+   The live plist DOES name `~/.local/share/uv/python/cpython-3.12-…/bin/python3.12`, and a
+   python.org framework 3.12 IS installed on this host, so the two together looked like a
+   half-done migration. They are not. DB1P25S4's box records an explicit **CORRECTION**:
+   `resolve_interpreter` picks the **managed interpreter FIRST — "not the framework probe this
+   line originally asked for"** (2026-08-06). Preferring the uv-managed CPython is the ratified
+   design, not drift. The `.bak-pre-signed-python-20260805` backup names `/opt/homebrew/bin/uv`,
+   which is the identity the migration moved AWAY from — so the backup is evidence the migration
+   RAN, not that it reverted.
+
+   And the end-to-end proof is already on that card: **OBSERVED 2026-08-13**, a live
+   `fleet_scan.gather_fleet` returned **23 instances with `iterm_session_id` resolved**. The grant
+   applies under this interpreter. Consistent with there being no `iterm-automation-blocked.flag`
+   on disk right now.
+
+   **What actually remains is a wording inconsistency INSIDE DB1P25S4**, not a machine-state
+   problem: its earlier box still says "switched to the framework python3.12" while the later,
+   ratified box says managed-first. Harmless to the running system, misleading to the next reader
+   — which is exactly how I was misled.
+
+   **The lesson, and the reason this retraction is kept rather than deleted:** I read one artifact
+   (the plist), recognised a shape I had a story for, and wrote the story into a commit message
+   before reading the card that owned the subject. The check that would have caught it cost one
+   `grep` on a TRDD id.
 
 ## ⏵ 2026-08-14 17:45 — THE `dispatch.py` SURFACING GAP IS PARTIALLY CLOSED (stays `todo`)
 
