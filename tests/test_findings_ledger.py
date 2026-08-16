@@ -332,3 +332,50 @@ def test_corrupt_lines_are_skipped_not_fatal(_isolate: Path) -> None:
     fl.record(sev="HIGH", code="G-2", src="d", msg="good two", now=200)
     lines, total = fl.unread_entries(None)
     assert total == 2 and "G-2" in lines[0] and "G-1" in lines[1]
+
+
+# ---------- 7. the measurement's age (TRDD-D6RDPZIU) ----------
+#
+# A finding is recorded once and may be SURFACED much later — by the unread block on the
+# next session, or by `/janitor-findings` days on. Without an age on the line, that later
+# reading is indistinguishable from a fresh measurement. Measured 2026-08-16: a
+# `system-daemon-runaway` line reporting "CPU 390%" was surfaced while the named process
+# sat at 5.3% and a re-run of the detector produced nothing at all.
+
+
+def test_the_drift_line_says_when_the_finding_was_measured(_isolate: Path) -> None:
+    """End-to-end through the REAL record → render path, not a hand-built dict: a finding
+    recorded now surfaces as `just now`. Driving `record` is the point — the bug was that
+    `record` stored `ts` and the renderer never read it, so a test that formats its own
+    entry would have passed against the defect."""
+    line = fl.record(sev="HIGH", code="AGE-1", src="detector", msg="fresh finding")
+    assert line is not None
+    assert line.endswith("just now"), (
+        f"a freshly recorded finding must date itself on the line the human reads: {line!r}"
+    )
+
+
+def test_an_old_finding_is_not_presented_as_a_current_one(_isolate: Path) -> None:
+    """The incident's exact shape: an entry measured hours/days ago, surfaced later. The
+    age is rendered from the stored `ts`, so the reader can tell it is history."""
+    fl.record(sev="HIGH", code="AGE-2", src="detector", msg="stale finding", now=1_000_000)
+    entry = _entries(None)[-1]
+    assert fl.render_line(entry, now=1_000_000 + 7200).endswith("2h ago")
+    assert fl.render_line(entry, now=1_000_000 + 3 * 86400).endswith("3d ago")
+    assert fl.render_line(entry, now=1_000_000 + 600).endswith("10m ago")
+
+
+def test_an_unusable_timestamp_says_so_instead_of_going_quiet(_isolate: Path) -> None:
+    """An entry comes off DISK, where anything could have written it, so a missing or
+    malformed `ts` is reachable without a bug. It must render an EXPLICIT unknown: an
+    omitted age would read as 'fresh', which is the same ambiguity the age exists to
+    remove (ATOM-ZFUE-H8IZ — silence cannot distinguish clean from did-not-look).
+
+    A backwards clock (an NTP step, a restored ledger, a hand-edited entry) is the same
+    case: a negative delta must never print as a measurement from the future."""
+    base = {"sev": "HIGH", "code": "AGE-3", "src": "d", "msg": "m", "ref": "-"}
+    for bad in ({}, {"ts": None}, {"ts": "1700000000"}, {"ts": True}):
+        assert fl.render_line({**base, **bad}, now=1_000_000).endswith("age unknown"), (
+            f"an unusable ts must render an explicit unknown, not nothing: {bad!r}"
+        )
+    assert fl.render_line({**base, "ts": 2_000_000}, now=1_000_000).endswith("age unknown")

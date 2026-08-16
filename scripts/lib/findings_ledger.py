@@ -130,10 +130,49 @@ def _is_current_project(project_dir: str | os.PathLike[str] | None) -> bool:
         return False
 
 
-def render_line(entry: dict) -> str:
+def _age_phrase(entry: dict, now: int) -> str:
+    """How long ago the finding was MEASURED (TRDD-D6RDPZIU).
+
+    Rendered on every line, unconditionally — never only when the finding is "old enough
+    to matter". Shown sometimes, its absence would mean either "fresh" or "no timestamp",
+    and a reader cannot tell those apart; that is the same ambiguity one level down
+    (`ATOM-ZFUE-H8IZ`).
+
+    A missing or malformed `ts` therefore renders an explicit unknown rather than nothing.
+    Entries come off disk where any process could have written them, so this is reachable
+    without a bug anywhere in the janitor.
+    """
+    raw = entry.get("ts")
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return "age unknown"
+    delta = now - int(raw)
+    # A clock that went backwards (NTP step, a restored file, a hand-edited entry) must not
+    # print a negative age as if it were a measurement from the future.
+    if delta < 0:
+        return "age unknown"
+    if delta < 90:
+        return "just now"
+    if delta < 3600:
+        return f"{delta // 60}m ago"
+    if delta < 86400:
+        return f"{delta // 3600}h ago"
+    return f"{delta // 86400}d ago"
+
+
+def render_line(entry: dict, *, now: Optional[int] = None) -> str:
     """One greppable session line for a ledger entry. Values were sanitized at record
     time, but render defensively anyway — an entry may come off DISK, where any process
-    could have written it."""
+    could have written it.
+
+    Carries the measurement's AGE. Without it a finding resurfaced hours later reads as a
+    current measurement: on 2026-08-16 a `system-daemon-runaway` line reporting "CPU 390%"
+    was surfaced while that process measured 5.3%, and re-running the detector produced
+    nothing — the alarm was an old finding in the present tense. The age goes at the END
+    because every existing assertion and grep keys on the `[findings] <sev> <code>` head.
+    """
+    import time  # noqa: PLC0415 -- stdlib, keep module import-light (same as `record`)
+
+    stamp = int(time.time()) if now is None else int(now)
     sev = _clean(entry.get("sev", ""), 12)
     code = _clean(entry.get("code", ""), 24)
     src = _clean(entry.get("src", ""), 32)
@@ -146,7 +185,7 @@ def render_line(entry: dict) -> str:
     # ours, the content is theirs, and the two can no longer be confused.
     if entry.get("actor") == HUMAN_ONLY_ACTOR:
         msg = HUMAN_ONLY_DIRECTIVE + msg
-    return f"[findings] {sev} {code} ({src}): {msg} — ref {ref}"
+    return f"[findings] {sev} {code} ({src}): {msg} — ref {ref} — {_age_phrase(entry, stamp)}"
 
 
 def record(
