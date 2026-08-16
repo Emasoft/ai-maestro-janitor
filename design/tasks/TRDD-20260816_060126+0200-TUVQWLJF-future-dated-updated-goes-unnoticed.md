@@ -3,7 +3,7 @@ trdd-id: TUVQWLJF
 title: A hand-typed future-dated updated field pins a card to the top of the board and nothing notices
 column: dev
 created: 2026-08-16T06:01:26+0200
-updated: 2026-08-16T06:01:26+0200
+updated: 2026-08-16T06:50:39+0200
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -64,6 +64,19 @@ Open design points, sent to the advisor before implementing:
 ## Acceptance criteria
 
 - [ ] Advisor verdict recorded here with the tolerance chosen and one line of rationale
+      **ATTEMPT LOG — the consultation itself is the thing failing on this host.**
+      Attempt 1 (06:02, full prompt: read `trdd-drift.py` + `trdd_common.py`, 5 questions) ran
+      **34 min** with no verdict and was killed. Attempt 2 (06:36, deliberately narrowed to ONE
+      file, 4 questions, ≤250 words) was still running at 13 min. A THIRD `fable-advisor:advisor`
+      from an earlier, since-cleared session was found running **4 h** and killed — its answer had
+      nowhere to land.
+      **Not diagnosed as a wedge — that is a claim I cannot make yet**; slow and hung look
+      identical from outside, which is the same "absence proves nothing" trap as ZM5LZ24Y. What IS
+      measured: three consultations on this host, zero verdicts. If attempt 2 also returns nothing,
+      implement under the advisor rule's own escape clause (proceed with an explicit written note
+      that consultation failed) rather than leave a one-predicate detector change parked behind an
+      unreliable gate — a mandatory-consultation rule that can only stall is a stall generator, and
+      the board rule says a card that stops moving must say so out loud.
 - [ ] The check ships in `trdd-drift.py` (or the home the verdict names), fail-open on parse
 - [ ] A test asserting a future-stamped fixture FIRES and a correctly-stamped one does NOT
 - [ ] A test asserting the dedupe key re-fires on a *different* offending value
