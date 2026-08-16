@@ -3,7 +3,7 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-16T21:01:16+0200
+updated: 2026-08-16T23:02:16+0200
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
@@ -88,6 +88,30 @@ retracted mechanism.
 - [ ] Pid-existence at report time is audited and fixed if absent.
 - [ ] A fresh runaway tally is built; the old one is not consulted.
 - [ ] Any threshold change cites the window decision from (3).
+
+## THE LESSON OF THE NIGHT — the alarm named both dimensions and we debated one
+
+The detector's own string was:
+
+    a process RAM/CPU runaway; investigate before it exhausts the host
+
+**It named RAM and CPU from the very first fire.** Four sessions then spent an evening on
+the CPU half — lifetime average or decaying, sustained or bursty, artifact or real,
+over-reporting or under-reporting — while **the RAM half sat in the same sentence being the
+actual answer**, and "exhausts the host" turned out to be literal.
+
+**When an alert names two dimensions, a debate that settles on one has not narrowed the
+problem — it has DROPPED HALF OF IT.** Nothing in the evening's argument was wrong about
+CPU; it was simply an investigation of a symptom conducted next to a printed statement of
+the cause.
+
+And the aggravating detail, which the owner named and I agree with: **the parenthetical did
+more damage than the false mechanism.** `(a lifetime average, not a live sample)` made four
+sessions confident they were debating the RIGHT dimension. A wrong explanation attached to a
+correct alarm does not merely mislead about its subject — it certifies the subject as the
+thing worth discussing.
+
+The detector was right the whole time, in both dimensions, on the first fire.
 
 ## Notes
 
@@ -203,9 +227,43 @@ historically QUIET**, not only against one that has cooled. The existing test co
 ever exercises the over-reporting direction, so it would pass a gate that is blind in the
 direction that produces silence. A guard nobody has watched fail is not a guard.
 
-## The RAM half — RAISED AND THEN REFUTED, same evening
+## The RAM half — raised, "refuted", then CONFIRMED. The refutation was wrong.
 
-**REFUTED. There is no memory finding. Do not carry this forward.**
+**⚠ THE "REFUTED" VERDICT BELOW IS ITSELF RETRACTED. THERE IS A REAL MEMORY DEFECT, AND IT
+IS THE ROOT CAUSE OF THE CPU BEHAVIOUR THIS ENTIRE CARD IS ABOUT.**
+
+The owner found two hard V8 OOM crashes in the server log:
+
+    FATAL ERROR: Ineffective mark-compacts near heap limit
+                 Allocation failed - JavaScript heap out of memory
+    Mark-Compact (reduce) 6135.0 (6191.4) -> 6135.0 (6191.1) MB,
+            average mu = 0.042, current mu = 0.000
+
+Cap 6144 MB, heap at 6135, Mark-Compact reclaimed **zero bytes**, mutator utilization
+**4.2%** — i.e. the process spent ~96% of its time in GC, achieving nothing. **That is
+where the "unexplained" CPU came from.** The CPU load four sessions spent an evening
+characterising was the SHADOW of the memory defect, not a separate phenomenon.
+
+**Corroboration I already had and misread:** I observed the pid change 26449 → 27917 and
+recorded it as "the server restarted". An OOM crash is exactly what produces a new pid. The
+evidence was in my own measurement and I read it as routine.
+
+**Why three sessions independently measured the heap correctly and all concluded "no
+leak":** each sampled over a 60–100 s window and saw a clean GC sawtooth below the ceiling.
+**A sawtooth below the ceiling says nothing about whether the FLOOR is rising toward it.**
+I then reproduced the same trap while checking this: my own three samples read
+2.77 → 2.68 → 2.59 GB, FALLING, over 40 s — a series that would have "confirmed" no-leak
+for a fourth time. A peer re-measured after reporting `2628 → 2541 falling` and got 2732 MB
+fifteen minutes later, above both earlier samples.
+
+**The methodological lesson, which is the durable part:** the correct window for a leak is
+set by the phenomenon (hours, or crash-to-crash), not by the observer's patience. A short
+window applied to a slow process does not return a weak answer — it returns a CONFIDENT
+WRONG one, and it does so repeatedly and consistently, which reads as corroboration.
+
+The superseded verdict follows, kept so the reasoning that produced it stays visible:
+
+**~~REFUTED. There is no memory finding. Do not carry this forward.~~**
 
 It was raised because `ps` RSS read 2.07 GB and then 2.17 GB about an hour apart and `top`
 printed a growth marker (`1798M+`). Both readings were single samples an hour apart, which
