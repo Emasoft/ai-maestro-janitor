@@ -1,9 +1,9 @@
 ---
 trdd-id: RG4IUZ6I
 title: A split must carry conflict refusals forward — page-name keys die with the page
-column: todo
+column: human_review
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-16T01:56:45+0200
+updated: 2026-08-16T02:39:50+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -14,6 +14,50 @@ external-refs: [janitor#241, janitor#227, TRDD-3QIQ2E6J]
 ---
 
 # A split must carry conflict refusals forward
+
+## ⏵ STATE — 2026-08-16 02:39: ITEM 3 JUDGED NOT WORTH BUILDING. Card → `human_review`; nothing buildable is left.
+
+**Advisor consultation FAILED and is recorded as such rather than skipped.** A
+`fable-advisor:advisor` agent was dispatched at 01:35 with the full design question (hard gate vs
+advisory, which legitimate splits it would break, feedback-loop risk, where the threshold should
+live). It ran **one hour** without returning and the janitor's own agent-liveness window expired
+it. The verdict below is therefore MINE, taken under the rule's explicit-note clause — not an
+advisor-backed one, and it should be re-examined if anyone ever gets that verdict.
+
+### The verdict: do NOT add a headroom gate to `verify_split`
+
+1. **A hard gate is disproportionate to what it buys.** `split_converged` today fails only pages
+   OVER the cap. Requiring ≤90% makes a currently-legal 91% page abort an otherwise-correct
+   transaction. The repo's own lesson from TRDD-3QIQ2E6J ("the producer is the transaction, NOT
+   the skill") argues for enforcement — but that lesson was about a STAMP, which only ever adds
+   information and cannot fail a legitimate split. A gate rejects work, and the two cases do not
+   carry the same burden of proof.
+2. **The `unsplittable` escape hatch cannot be reused honestly.** It means "over the cap and
+   atomic". Pressing it into service for "under the cap but tight" would make an agent flag pages
+   that are not over the cap at all, and conflating two conditions in one flag is how the next
+   reader mis-implements both.
+3. **The justification measurably shrank tonight, and this is the decisive part.** Item 3's stated
+   value was preventing the guaranteed re-split that "re-voids today's refusals" — but measured
+   2026-08-16 on this host, split siblings never reach the conflict path at all: `_conflict_pairs`
+   requires an OPPOSING-CLAIM signal on top of shared vocabulary and siblings are complementary by
+   construction, so nothing has ever been suppressed and no refusal is being re-voided. What
+   remains of the cost is "a near-cap sibling gets re-split sooner", which churns `split-lineage`
+   and wastes a pass. Real, small, and self-limiting.
+4. **The middle option needs an API change it does not earn.** An advisory (report-don't-fail)
+   result is the shape this codebase uses elsewhere — `split_converged` returns `(ok, oversized)`,
+   `_conflict_pairs` returns `(conflicts, split_suppressed)`. But `verify_split` returns
+   `(ok, reasons)` and a non-empty `reasons` ABORTS, so an advisory needs a third channel plumbed
+   through `memory_txn_cli._verify_split` and its caller. That is a real change to a ratified
+   verification path in exchange for a cost item 3 can no longer show is being paid.
+
+**So there is no buildable work left on this card.** Item 1 is forbidden, item 2 shipped under
+TRDD-3QIQ2E6J (now `complete`), and item 3 is judged not worth its cost on current evidence. The
+only thing outstanding is the supersede-this-card decision, which is a USER call (force-supersede
+is Tier 2, non-exempt) — so `human_review` is the honest column, alongside AZ6QRK0D and WN7M829Y.
+
+**If the decision is to keep the card alive, the cheapest correct form of item 3 is a line in the
+split skill after all** — not because prose is sufficient in general, but because the cost it
+guards against is now small enough that skill-level guidance is proportionate to it.
 
 ## ⏵ STATE — 2026-08-16: TRDD-3QIQ2E6J is now `complete`. Only item 3 remains, and item 2's premise shrank.
 
