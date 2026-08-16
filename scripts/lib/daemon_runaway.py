@@ -10,9 +10,11 @@ machine (a real runaway is, by definition, not something a test suite should hav
 reproduce).
 
 `parse_ps_rows` turns `ps -axo pid,ppid,rss,%cpu,comm` TEXT into rows; `classify_runaway`
-turns rows + a disk-free reading into `Finding`s. Both are pure functions of their
-inputs — the detector script owns every side effect (spawning `ps`, reading
-`os.statvfs`, printing, dedup state).
+turns rows + a disk-free reading into `Finding`s; `sustained_findings` then drops the
+CPU findings that have not held across consecutive fires. All three are pure functions
+of their inputs — the detector script owns every side effect (spawning `ps`, reading
+`os.statvfs`, printing, dedup state, and PERSISTING the streak map `sustained_findings`
+returns).
 """
 
 from __future__ import annotations
@@ -125,23 +127,102 @@ def classify_runaway(
     return findings, disk_danger
 
 
-def format_drift_line(findings: list[Finding], disk_danger: bool, disk_free_pct: float | None) -> str | None:
+def finding_key(finding: Finding) -> str:
+    """The identity a CPU streak is counted against: pid AND command, never pid alone.
+
+    The OS recycles pids, so a streak keyed on the number alone could be inherited by
+    an unrelated process that happened to reuse it — which would alarm on that new
+    process's very FIRST high sample, precisely the single-sample bug the streak
+    exists to prevent.
+    """
+    return f"{finding.pid}:{finding.command}"
+
+
+def sustained_findings(
+    findings: list[Finding],
+    prior_streaks: dict[str, int],
+    min_streak: int = 2,
+) -> tuple[list[Finding], dict[str, int]]:
+    """PURE gate: drop CPU findings that have not held across `min_streak` fires.
+
+    WHY only CPU: on macOS `ps %cpu` is a decaying average over the process's
+    LIFETIME, not an instantaneous reading, so a burst that already ENDED keeps a high
+    number and reads as an ongoing emergency (TRDD-8QSLYMGU — fired twice in one night
+    on a process a `top -l 2` cross-check put at 5.3% and 0.8%). Requiring the
+    condition to hold on consecutive fires is the only thing that distinguishes
+    "still burning" from "burned earlier"; raising the threshold instead would silence
+    real slow burns without fixing the false ones.
+
+    WHY NOT RSS — the single most important line here: `ps` RSS is an instantaneous
+    LEVEL (a process at 5 GB is at 5 GB right now, with no history baked in), so it
+    needs no persistence to be interpretable. RSS findings therefore pass through
+    UNGATED, deliberately: the incident this detector exists for (TRDD-ZNN0UK5K,
+    fseventsd at 39 GB) was an RSS finding, and the tempting symmetry of gating both
+    kinds would have delayed the one alarm that mattered by a full cadence.
+
+    Returns `(reportable, streaks)`. `streaks` counts ONLY the CPU findings present in
+    THIS call — a key absent from `findings` is DROPPED rather than carried at its old
+    count, which is what makes an ended burst stop counting instead of resuming its
+    streak days later. The caller MUST persist `streaks` even when `reportable` is
+    empty, or a first-fire CPU finding is forgotten and the streak can never reach
+    `min_streak` at all.
+    """
+    reportable: list[Finding] = []
+    streaks: dict[str, int] = {}
+    for finding in findings:
+        if finding.kind != "cpu":
+            reportable.append(finding)
+            continue
+        key = finding_key(finding)
+        streak = prior_streaks.get(key, 0) + 1
+        streaks[key] = streak
+        if streak >= min_streak:
+            reportable.append(finding)
+    return reportable, streaks
+
+
+def format_drift_line(
+    findings: list[Finding],
+    disk_danger: bool,
+    disk_free_pct: float | None,
+    streaks: dict[str, int] | None = None,
+) -> str | None:
     """Render ONE concise drift line for the worst finding, or None when there is
     nothing to report. Pure formatting — no truncation/sanitization here (the caller
     still runs it through `state.sanitize_for_drift_line` because `command` ultimately
-    derives from an OS-reported string, not a hardcoded constant)."""
+    derives from an OS-reported string, not a hardcoded constant).
+
+    `streaks` is `sustained_findings`' map; when it carries the worst finding's key the
+    CPU branch names how many consecutive checks the condition held for.
+    """
     if not findings:
         return None
     worst = findings[0]
     if worst.kind == "rss":
         metric = f"RSS {worst.rss_mb / 1024.0:.1f}GB"
     else:
-        metric = f"CPU {worst.pcpu:.0f}%"
+        # NAME THE WINDOW. A reader who cross-checks a "CPU 161%" alarm with `top` and
+        # sees 0.8% otherwise concludes the janitor is lying — which is exactly the
+        # reaction the ungated version produced. Both numbers are correct; they measure
+        # different things, and only the alarm can say which one it reported.
+        held = (streaks or {}).get(finding_key(worst))
+        window = "a lifetime average, not a live sample"
+        if held is not None and held > 1:
+            window += f"; over the bar on {held} consecutive checks"
+        metric = f"CPU {worst.pcpu:.0f}% ({window})"
     watched_txt = " (a known FS-churn/Spotlight daemon)" if worst.is_watched else ""
     extra = f" — {len(findings) - 1} more process(es) also over threshold" if len(findings) > 1 else ""
     disk_txt = ""
     if disk_danger and disk_free_pct is not None:
-        disk_txt = f" + disk {100.0 - disk_free_pct:.0f}% full — likely the amplifier turning FS churn into a balloon"
+        disk_txt = f" + disk {100.0 - disk_free_pct:.0f}% full"
+        # Only the RSS branch claims disk pressure AMPLIFIES the finding — that is the
+        # parent incident's actual mechanism (FS churn on a near-full disk ballooning
+        # RSS). A near-full disk does not make a CPU average worse, and pairing the two
+        # manufactured a compound emergency out of two independent non-events, both of
+        # which had been true and harmless all night (TRDD-8QSLYMGU). For CPU the disk
+        # is REPORTED, never escalated on.
+        if worst.kind == "rss":
+            disk_txt += " — likely the amplifier turning FS churn into a balloon"
     return (
         f"[system-daemon-runaway] {worst.command} (pid {worst.pid}) {metric}{watched_txt}"
         f"{disk_txt}{extra} — a process RAM/CPU runaway; investigate before it exhausts the host."

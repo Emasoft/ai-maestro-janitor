@@ -148,6 +148,128 @@ def test_format_drift_line_none_when_no_findings() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The CPU persistence gate (TRDD-8QSLYMGU) — pure layer
+#
+# `ps %cpu` is a decaying LIFETIME average on macOS, so a burst that already ended
+# still reads high. These pin that a CPU finding must hold across fires, that an RSS
+# finding must NOT (it is an instantaneous level, and the parent incident was RSS), and
+# that an ended burst's streak is dropped rather than resumed.
+# --------------------------------------------------------------------------- #
+
+# A single process pegging CPU without ballooning RSS — the false-positive shape that
+# fired twice in one night on a process `top -l 2` measured at 5.3% and 0.8%.
+_PS_CPU_BURST = "74805 1 512000 161.0 /usr/local/bin/node\n"
+
+
+def _cpu_finding(text: str = _PS_CPU_BURST) -> list[dr.Finding]:
+    findings, _ = dr.classify_runaway(_rows(text), disk_free_pct=50.0, cpu_threshold_pct=90.0)
+    assert [f.kind for f in findings] == ["cpu"]  # guard the fixture, not the behaviour
+    return findings
+
+
+def test_cpu_finding_is_silent_on_its_first_fire() -> None:
+    """One high-%cpu sample is NOT reportable — but it IS remembered, or the streak
+    could never grow and a genuinely sustained burn would stay silent forever."""
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {}, min_streak=2)
+    assert reportable == []
+    assert streaks == {"74805:node": 1}
+
+
+def test_cpu_finding_alarms_once_the_streak_is_met() -> None:
+    """The same process still over the bar on the next fire IS reported, and the
+    returned streak carries the count the drift line quotes."""
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 1}, min_streak=2)
+    assert [f.command for f in reportable] == ["node"]
+    assert streaks == {"74805:node": 2}
+
+
+def test_a_burst_that_ended_is_dropped_and_must_start_over() -> None:
+    """THE falsification for this whole card: over threshold on fire 1, under it on
+    fire 2. Fire 2 must DROP the key (not carry it), so when the process crosses again
+    on fire 3 it starts from 1 and stays silent — an ended burst can never be summed
+    with a later one into a fake 'sustained' alarm."""
+    _, after_fire1 = dr.sustained_findings(_cpu_finding(), {}, min_streak=2)
+    assert after_fire1 == {"74805:node": 1}
+
+    # Fire 2: the burst is over, so classify_runaway produces nothing at all.
+    quiet_reportable, after_fire2 = dr.sustained_findings([], after_fire1, min_streak=2)
+    assert quiet_reportable == []
+    assert after_fire2 == {}, "an absent key must be dropped, never carried at its old count"
+
+    # Fire 3: it crosses again — but this is a NEW episode, so it is silent again.
+    reportable, after_fire3 = dr.sustained_findings(_cpu_finding(), after_fire2, min_streak=2)
+    assert reportable == []
+    assert after_fire3 == {"74805:node": 1}
+
+
+def test_rss_finding_alarms_on_the_first_fire_and_is_never_streaked() -> None:
+    """The one asymmetry that matters. RSS is an instantaneous LEVEL, and the incident
+    this detector exists for (TRDD-ZNN0UK5K, fseventsd at 39 GB) was an RSS finding —
+    gating it behind a second fire would have delayed the only alarm that mattered by a
+    full cadence. So it passes on fire 1, and contributes no streak key at all."""
+    text = f"4242 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/fseventsd\n"
+    findings, _ = dr.classify_runaway(_rows(text), disk_free_pct=50.0, rss_threshold_mb=4096.0)
+    reportable, streaks = dr.sustained_findings(findings, {}, min_streak=2)
+    assert [f.kind for f in reportable] == ["rss"]
+    assert streaks == {}
+
+
+def test_streak_key_carries_the_command_so_a_recycled_pid_cannot_inherit_it() -> None:
+    """Pids are recycled. A streak keyed on the number alone would let an unrelated new
+    process inherit a dead one's history and alarm on its very first sample — the exact
+    single-sample bug the gate exists to prevent."""
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:some-dead-tool": 1}, min_streak=2)
+    assert reportable == []
+    assert streaks == {"74805:node": 1}
+
+
+def test_cpu_drift_line_names_the_metrics_window() -> None:
+    """A reader who cross-checks with `top` and sees 0.8% must be able to reconcile the
+    two numbers from the line itself, instead of concluding the detector is lying."""
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 2}, min_streak=2)
+    line = dr.format_drift_line(reportable, False, 50.0, streaks=streaks)
+    assert line is not None
+    assert "lifetime average, not a live sample" in line
+    assert "over the bar on 3 consecutive checks" in line
+
+
+def test_cpu_drift_line_reports_disk_pressure_without_escalating_on_it() -> None:
+    """A near-full disk does not make a CPU average worse. Pairing them manufactured a
+    compound emergency out of two independent non-events that had both been true and
+    harmless all night — so for CPU the disk is stated, never called an amplifier."""
+    reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 1}, min_streak=2)
+    line = dr.format_drift_line(reportable, True, 4.0, streaks=streaks)
+    assert line is not None
+    assert "disk 96% full" in line
+    assert "amplifier" not in line
+
+
+def test_rss_drift_line_still_calls_disk_pressure_the_amplifier() -> None:
+    """The negative of the test above: for RSS the amplification claim is the parent
+    incident's real mechanism (FS churn on a near-full disk ballooning RSS), so the fix
+    to the CPU wording must not strip it from the branch where it is true."""
+    text = f"4242 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/fseventsd\n"
+    findings, _ = dr.classify_runaway(_rows(text), disk_free_pct=4.0, rss_threshold_mb=4096.0)
+    line = dr.format_drift_line(findings, True, 4.0)
+    assert line is not None
+    assert "amplifier" in line
+
+
+def test_a_sustained_fseventsd_shaped_cpu_burn_still_alarms() -> None:
+    """The case the detector exists for must survive the fix: a daemon over the bar on
+    every sample for days reaches the streak immediately and keeps alarming."""
+    text = "88 1 200000 240.0 /usr/sbin/fseventsd\n"
+    findings, _ = dr.classify_runaway(_rows(text), disk_free_pct=50.0, cpu_threshold_pct=90.0)
+    streaks: dict[str, int] = {}
+    reported: list[int] = []
+    for _ in range(5):  # five consecutive fires, always over the bar
+        reportable, streaks = dr.sustained_findings(findings, streaks, min_streak=2)
+        reported.append(len(reportable))
+    assert reported == [0, 1, 1, 1, 1]
+    assert streaks == {"88:fseventsd": 5}
+
+
+# --------------------------------------------------------------------------- #
 # The detector script itself, as a real subprocess (JANITOR_PS_SNAPSHOT seam)
 # --------------------------------------------------------------------------- #
 
@@ -209,3 +331,65 @@ def test_empty_snapshot_is_silent_not_a_crash(tmp_path: Path) -> None:
     proc = _run(tmp_path, ps_snapshot="")
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+# --------------------------------------------------------------------------- #
+# The CPU persistence gate, end to end — the streak really is PERSISTED across
+# separate processes, which is the half the pure tests cannot prove.
+# --------------------------------------------------------------------------- #
+
+
+def _streak_file(project: Path) -> Path:
+    return project / ".janitor" / "state" / "system-daemon-runaway-streaks.json"
+
+
+def _out(proc: subprocess.CompletedProcess[str]) -> str:
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip()
+
+
+def test_cpu_runaway_needs_two_fires_end_to_end(tmp_path: Path) -> None:
+    """Two REAL detector processes against the same state dir: the first is silent and
+    leaves a streak of 1 on disk, the second reads it back and alarms. Proves the map is
+    written even when nothing is reported — without that write the streak could never
+    grow past 1 and this alarm would never fire at all."""
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
+    assert _streak_file(tmp_path).read_text() == '{"74805:node": 1}'
+
+    line = _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST))
+    assert line.startswith("[system-daemon-runaway] node ")
+    assert "lifetime average, not a live sample" in line
+    assert "over the bar on 2 consecutive checks" in line
+
+
+def test_cpu_burst_that_ends_never_alarms_end_to_end(tmp_path: Path) -> None:
+    """The false positive this card is about, reproduced across three real fires: over
+    the bar, then quiet, then over the bar again. The middle fire must erase the streak
+    from disk, so the third starts over and the alarm never fires."""
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
+    assert _out(_run(tmp_path, ps_snapshot=_PS_QUIET)) == ""
+    assert _streak_file(tmp_path).read_text() == "{}"
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
+
+
+def test_rss_runaway_alarms_on_the_very_first_fire_end_to_end(tmp_path: Path) -> None:
+    """The asymmetry, proven against the real script: one fire, one alarm, and no streak
+    key — because delaying a 39 GB balloon by a cadence is the harm this fix must not
+    cause. (`_PS_QUIET`'s low-RSS rows keep this the only finding.)"""
+    text = f"4242 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/fseventsd\n"
+    line = _out(_run(tmp_path, ps_snapshot=text))
+    assert line.startswith("[system-daemon-runaway] fseventsd ")
+    assert "lifetime average" not in line  # RSS is instantaneous; no window caveat
+    assert _streak_file(tmp_path).read_text() == "{}"
+
+
+def test_corrupt_streak_file_degrades_to_no_history_not_a_crash(tmp_path: Path) -> None:
+    """A hand-edited or half-written state file must cost at most one extra fire, never
+    a crash and never a bogus count fed straight into the gate."""
+    streaks = _streak_file(tmp_path)
+    streaks.parent.mkdir(parents=True, exist_ok=True)
+    streaks.write_text('{"74805:node": "not-an-int", "bad": tru')  # truncated + wrong type
+
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)) == ""
+    assert streaks.read_text() == '{"74805:node": 1}'
+    assert _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST)).startswith("[system-daemon-runaway] node ")

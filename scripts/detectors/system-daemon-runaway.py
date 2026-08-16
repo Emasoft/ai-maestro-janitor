@@ -28,6 +28,14 @@ detector's own `uv run` invocation is structurally impossible. `parse_ps_rows` /
 snapshot text, so the thresholds are provable against a captured fixture instead of
 the live machine.
 
+THE CPU PERSISTENCE GATE (TRDD-8QSLYMGU): `ps %cpu` is a decaying average over the
+process's LIFETIME, so a burst that already ENDED still reads high and alarmed twice in
+one night on a process `top -l 2` put at 5.3% / 0.8%. A CPU finding is therefore only
+reported once it has held across consecutive fires, counted in
+`system-daemon-runaway-streaks.json` (this file is the whole reason the detector keeps
+state beyond dedupe). RSS findings are NOT gated — RSS is an instantaneous level and
+the parent incident was an RSS finding, so gating it would delay the alarm that matters.
+
 Opt-out: CLAUDE_PLUGIN_OPTION_SYSTEM_DAEMON_RUNAWAY_ENABLED=false (default enabled —
 this is a safety net for host-crashing runaways, not a hygiene nag). Cadence ~600s
 via the dispatch.py roster. Fail-open throughout: any error (no `ps`, unparseable
@@ -42,6 +50,7 @@ this detector deterministically regardless of what is actually running on the ho
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -99,6 +108,36 @@ def _coerce_float(raw: str | None, default: float) -> float:
     return val if val > 0 else default
 
 
+def _load_streaks(path: Path) -> dict[str, int]:
+    """The persisted CPU streak map, or {} on ANY problem (missing, unreadable, not
+    JSON, not an object). Entries are validated individually — a hand-edited or
+    half-migrated file must degrade to "no history" (one extra fire before a real
+    alarm) rather than crash a fail-open detector or, worse, feed a bogus count
+    straight into the gate. `bool` is rejected explicitly because it IS an `int` in
+    Python, so `True` would silently pass as a streak of 1."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: val
+        for key, val in raw.items()
+        if isinstance(key, str) and isinstance(val, int) and not isinstance(val, bool) and val > 0
+    }
+
+
+def _save_streaks(path: Path, streaks: dict[str, int]) -> None:
+    """Persist the streak map atomically. A write failure is swallowed: the cost is one
+    delayed alarm on the next fire, whereas raising here would take down the whole
+    heartbeat over a detector's bookkeeping."""
+    try:
+        state.atomic_write(path, json.dumps(streaks, sort_keys=True))
+    except OSError:
+        pass
+
+
 def main() -> int:
     state.init_state()
 
@@ -107,10 +146,17 @@ def main() -> int:
 
     ps_text = _gather_ps_snapshot()
     seen = state.state_dir() / "system-daemon-runaway-seen.txt"
+    streak_file = state.state_dir() / "system-daemon-runaway-streaks.json"
     if ps_text is None:
         # Could not gather a snapshot at all — fail open (no findings), and forget any
         # prior dedupe key so a genuine runaway re-emits once `ps` is available again
         # rather than staying silently deduped against a stale bucket.
+        #
+        # The streak map is deliberately left UNTOUCHED here: a failed snapshot is not
+        # evidence that a burst ended, and clearing it would reset a legitimate streak
+        # on a transient `ps` hiccup, delaying a real alarm. Carrying it costs at most
+        # one fire's worth of staleness, which errs toward alarming — the correct
+        # direction for a safety net.
         dedupe.emit_forget(seen, "runaway")
         return 0
 
@@ -146,7 +192,16 @@ def main() -> int:
         cpu_threshold_pct=cpu_threshold_pct,
     )
 
-    if not findings:
+    # Gate the CPU findings on persistence (RSS passes straight through) and persist the
+    # new streak map UNCONDITIONALLY — including when `reportable` is empty. A CPU
+    # finding on its first fire is not reported but MUST be remembered, or the streak
+    # can never reach the minimum and a genuinely sustained burn would stay silent
+    # forever. Writing here also DROPS the keys absent from this snapshot, which is what
+    # makes an ended burst stop counting instead of resuming its streak days later.
+    reportable, streaks = dr.sustained_findings(findings, _load_streaks(streak_file))
+    _save_streaks(streak_file, streaks)
+
+    if not reportable:
         # Nothing over the bar this beat — forget the dedupe key so a FUTURE runaway
         # (even by the same process/command) re-arms instead of staying deduped
         # against an episode that already cleared.
@@ -154,8 +209,8 @@ def main() -> int:
         state.rotate_log_if_big(_LOG)
         return 0
 
-    line = dr.format_drift_line(findings, disk_danger, disk_free_pct)
-    if line is None:  # pragma: no cover — unreachable when findings is non-empty
+    line = dr.format_drift_line(reportable, disk_danger, disk_free_pct, streaks=streaks)
+    if line is None:  # pragma: no cover — unreachable when reportable is non-empty
         return 0
 
     emitted = dedupe.emit_once(seen, "runaway", line)
