@@ -28,9 +28,12 @@ detector's own `uv run` invocation is structurally impossible. `parse_ps_rows` /
 snapshot text, so the thresholds are provable against a captured fixture instead of
 the live machine.
 
-THE CPU PERSISTENCE GATE (TRDD-8QSLYMGU): `ps %cpu` is a decaying average over the
-process's LIFETIME, so a burst that already ENDED still reads high and alarmed twice in
-one night on a process `top -l 2` put at 5.3% / 0.8%. A CPU finding is therefore only
+THE CPU PERSISTENCE GATE (TRDD-8QSLYMGU, corrected by TRDD-JEEQCHFG): `ps %cpu` is a
+decaying average over UP TO A MINUTE of previous real time (`man ps`) — NOT over the
+process's lifetime, as this comment claimed until 2026-08-16. One sample therefore
+cannot separate a 60-second spike from sustained load; both read high while the window
+is hot. Consecutive fires are 600 s apart, so their windows do not overlap and a CPU
+finding is only
 reported once it has held across consecutive fires, counted in
 `system-daemon-runaway-streaks.json` (this file is the whole reason the detector keeps
 state beyond dedupe). RSS findings are NOT gated — RSS is an instantaneous level and

@@ -145,13 +145,28 @@ def sustained_findings(
 ) -> tuple[list[Finding], dict[str, int]]:
     """PURE gate: drop CPU findings that have not held across `min_streak` fires.
 
-    WHY only CPU: on macOS `ps %cpu` is a decaying average over the process's
-    LIFETIME, not an instantaneous reading, so a burst that already ENDED keeps a high
-    number and reads as an ongoing emergency (TRDD-8QSLYMGU — fired twice in one night
-    on a process a `top -l 2` cross-check put at 5.3% and 0.8%). Requiring the
-    condition to hold on consecutive fires is the only thing that distinguishes
-    "still burning" from "burned earlier"; raising the threshold instead would silence
-    real slow burns without fixing the false ones.
+    WHY only CPU: on macOS `ps %cpu` is a decaying average over UP TO A MINUTE of
+    previous real time (`man ps`), not an instantaneous reading. So ONE sample cannot
+    tell a 60-second spike from sustained load — both present the same number while the
+    window is hot. It is NOT a lifetime average: a burst that ended decays away within
+    about a minute (measured 2026-08-16: a pid went 100.2 -> 5.0 in minutes, and %cpu
+    differed from time/etime by ~1800x on another).
+
+    That correction matters for what this gate is FOR. Consecutive fires are 600 s
+    apart (`dispatch.py`), so two fires sample windows that do not overlap at all —
+    genuinely independent samples, not one smoothed window read twice. Requiring the
+    condition to hold across them is therefore a real test of PERSISTENCE, and it is
+    what separates a minute-long spike from a process that is still burning ten minutes
+    later. Raising the threshold instead would silence real slow burns without fixing
+    the spikes.
+
+    HISTORICAL, and do not restore it: this docstring used to claim %cpu was a lifetime
+    average, so "a burst that already ENDED keeps a high number". That mechanism was
+    invented, not measured, and TRDD-8QSLYMGU was filed on it. The `top -l 2`
+    cross-checks that appeared to confirm it (5.3%, 0.8%) were never like-for-like — a
+    ~1-second delta against a ~1-minute average — so they refuted nothing. Superseded by
+    TRDD-JEEQCHFG. On the corrected reading, some alarms the fleet dismissed as false
+    positives were probably CORRECT.
 
     WHY NOT RSS — the single most important line here: `ps` RSS is an instantaneous
     LEVEL (a process at 5 GB is at 5 GB right now, with no history baked in), so it

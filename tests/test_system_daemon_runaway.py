@@ -150,8 +150,11 @@ def test_format_drift_line_none_when_no_findings() -> None:
 # --------------------------------------------------------------------------- #
 # The CPU persistence gate (TRDD-8QSLYMGU) — pure layer
 #
-# `ps %cpu` is a decaying LIFETIME average on macOS, so a burst that already ended
-# still reads high. These pin that a CPU finding must hold across fires, that an RSS
+# `ps %cpu` is a decaying average over UP TO A MINUTE on macOS (`man ps`) — NOT a
+# lifetime average, as this comment said until 2026-08-16. So one sample cannot tell a
+# 60-second spike from sustained load. Fires are 600 s apart, so their windows do not
+# overlap and holding across them is a real persistence test.
+# These pin that a CPU finding must hold across fires, that an RSS
 # finding must NOT (it is an instantaneous level, and the parent incident was RSS), and
 # that an ended burst's streak is dropped rather than resumed.
 # --------------------------------------------------------------------------- #
