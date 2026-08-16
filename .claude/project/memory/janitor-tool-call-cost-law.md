@@ -1,12 +1,13 @@
 ---
 name: janitor-tool-call-cost-law
-description: "why did the re-arm/arm cost so many tokens / is the dynamic cadence actually saving anything or is it wasting more than it saves / how much does one tool call cost / the heartbeat keeps re-arming itself"
+description: "why did the re-arm/arm cost so many tokens / is the dynamic cadence actually saving anything or is it wasting more than it saves / how much does one tool call cost / the heartbeat keeps re-arming itself / why did one ordinary turn cost 500k cache_creation tokens / a cache break I cannot explain / an msg[N] block-changed fingerprint blames the wrong message"
 ocd: 2026-07-14
-lmd: 2026-07-17
+lmd: 2026-08-16
 metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 ^tool-call-cost-law [desc: every_tool_round_trip_rereads_the_whole_context_and_is_billed_for_it, keywords: how_much_does_one_tool_call_cost_in_a_claude_code_turn cost_equals_tool_calls_times_context_times_0.1 why_is_a_six_step_skill_expensive, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
@@ -61,6 +62,35 @@ rebuilds) — a LOCAL-scope note records a session that made exactly that mistak
 NOT linked: this page is PROJECT scope and therefore pushed, so naming a machine-private page would
 publish that name to every cloner. Downward references exist for precisely this reason.
 
+
+
+^ATOM-E98O-SQZG [desc: "A large cache_creation on an ordinary turn is usually client-side: one measured break came from cache_control moving off the previous last message, not from any edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved why_did_one_turn_cost_500k_tokens prompt_cache_orphaned, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
+
+**A large `cache_creation` on an ordinary turn is usually NOT something you did.** Measured on this
+repo's own traces 2026-08-13 (report under `reports/ij94o8yd/`): two consecutive calls 51 s apart
+went 553,919 cache_read → **535,371 cache_creation**, with 816 of 925 body parts BYTE-IDENTICAL.
+The first divergence was a message whose visible text was identical in both — the only delta was
+that `"cache_control":{"type":"ephemeral","ttl":"1h"}`, present on it in the earlier request, was
+gone in the later one (762 → 714 bytes, exactly the annotation's length). The marker rides the
+currently-LAST message and moves as the conversation grows: client-side Claude Code behaviour, not
+a plugin, rule file, or hook, and not preventable from one. The causal step is SUPPORTED, not
+proven — the diff shows the annotation removed; where it went was never confirmed.
+
+Practical order when a spike appears: rule out the expected causes first (cold start, compaction,
+append-only growth), then look for an avoidable one. Editing an injected instruction file
+mid-session IS avoidable and costs ~150k, but it is EPISODIC — it shows up in a measurement window
+only when rules were actually edited — and it is not the dominant term.
+
+
+^ATOM-UND7-X0OB [desc: "Distrust an msg[N] cache-break fingerprint: absolute-index diffing reports a change on ordinary conversation growth — corroborate by sha before acting", keywords: msg_index_N_block_changed unclassified_cache_break cache_break_fingerprint_is_wrong usertext_block_changed_at_pos classifier_blames_the_wrong_message, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
+
+**Distrust an `msg[N] <block> changed` cache-break fingerprint before acting on it.** Scanning this
+machine's retained traces for `messages[363]` found 786 "changes" across 59 sessions. Checking one
+directly: the earlier body's `messages[363]` reappears UNCHANGED at `messages[364]` in the later
+body — same sha. The array simply grew, so a classifier that diffs the SAME absolute index reports
+a change on essentially every turn of every long session, whether or not a cache break occurred.
+Corroborate by sha at shifted indices before believing the actor string names the culprit.
+
 ## See also
 
 - [[janitor-beat-tasks-and-limitations]] — the measured per-fire cost that this law predicts.
@@ -70,6 +100,36 @@ publish that name to every cloner. Downward references exist for precisely this 
   all (context size is the cost multiplier); that page owns when compacting is worth it, and
   the post-compaction FLOOR that caps how much it can ever buy back.
 
+
+## Superseded
+
+
+^ATOM-Q6AN-1PDO [desc: "Diagnosing a big cache_creation spike: an msg[N] fingerprint is often an index-shift artifact, and one real break came from cache_control moving, not from edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved msg_index_N_block_changed unclassified_cache_break why_did_one_turn_cost_500k_tokens prompt_cache_orphaned, type: reference, ocd: 2026-08-16, lmd: 2026-08-16, status: superseded, superseded-by: ATOM-E98O-SQZG]
+
+**A large `cache_creation` on an ordinary turn is usually NOT something you did.** Measured on
+this repo's own traces 2026-08-13 (report under `reports/ij94o8yd/`), reconstructing real request
+bodies from agentlensPro's CAS store after the raw bodies had rotated away:
+
+Two consecutive calls 51 s apart went 553,919 cache_read → **535,371 cache_creation**, with 816 of
+925 body parts BYTE-IDENTICAL. The first divergence was a message whose visible text was identical
+in both requests — the only delta was that `"cache_control":{"type":"ephemeral","ttl":"1h"}`,
+present on it in the earlier request, was gone in the later one (762 → 714 bytes, exactly the
+annotation's length). The marker rides the currently-LAST message and moves as the conversation
+grows. That is client-side Claude Code behaviour: nothing in a plugin, a rule file, or a hook
+caused it, and nothing in one can prevent it. (The causal step is supported, not proven — the diff
+shows the annotation removed; where it went was never confirmed.)
+
+**And distrust an `msg[N] <block> changed` fingerprint before acting on it.** Scanning for
+`messages[363]` found 786 "changes" across 59 sessions. Checking one directly: the earlier body's
+`messages[363]` reappears UNCHANGED at `messages[364]` in the later body — same sha. The array
+grew, so a classifier diffing the SAME absolute index reports a change on essentially every turn
+of every long session, whether or not a cache break occurred. Corroborate by sha before believing
+the actor string.
+
+**Practical order when a spike appears:** classify the expected causes first (cold start,
+compaction, append-only growth), and only then look for an avoidable one. Editing an injected
+instruction file mid-session IS avoidable and costs ~150k — but it is EPISODIC (it appears in a
+measurement window only when rules were actually edited) and it is not the dominant term.
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG05-0013, status:valid, keywords:"optimizer_actuation_billed_at_model_rate price_the_actuation_not_steady_state hysteresis_or_negative_value", ocd:2026-07-14, lmd:2026-07-14] An optimizer whose control loop runs through the MODEL is

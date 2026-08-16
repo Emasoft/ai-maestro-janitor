@@ -3,7 +3,7 @@ trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
 column: todo
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-13T13:33:00+0200
+updated: 2026-08-16T02:15:20+0200
 current-owner: unassigned
 task-type: refactor
 approval-tier: 0
@@ -110,10 +110,37 @@ only has to be sampled before it ages out, the way the first window's rules edit
       refuting the law rather than blessing it. Revised finding: the cost is EPISODIC (fires on
       rules-edit days, ~150k tokens) and is NOT the dominant avoidable cause. See the dated
       section above and the raw JSON in `reports/ij94o8yd/`.
-- [ ] **NEW, and now the bigger prize:** localise the UNCLASSIFIED 453,881-token break
-      (`msg[363] system`, 39.5% of classified breaks). Until its mechanism is known this card is
-      optimising the smaller of two costs. Do NOT guess it — agentlenspro could not localise it
-      from the prefix diff, so only the raw adjacent-body diff settles it.
+- [x] **The UNCLASSIFIED 453,881-token break — ANSWERED 2026-08-13, recorded 2026-08-16.** The
+      forensic diff completed and its report
+      (`reports/ij94o8yd/20260813_forensics-unclassified-cache-break.md`) sat unread for three
+      days while this box still said "do not guess it". Verdict, in the order that matters:
+
+      1. **The pinned incident: CANNOT DETERMINE.** `~/.agentlens/otel-bodies/` had rotated to
+         empty, `break_cause`/`culprit_fingerprint` are 100% NULL across all 5,730 `api_calls`
+         rows (the classifier computes them transiently and never writes them back), and no row
+         carries 453,881 cache_creation tokens. The box asked for the exact call and the exact
+         call is gone.
+      2. **A COMPARABLE break in the same session was fully diffed**, reconstructed from the
+         surviving CAS store: 553,919 cache_read → 535,371 cache_creation across two calls 51 s
+         apart, with parts 0–815 of 925 byte-identical. The first divergence is one message whose
+         VISIBLE TEXT IS IDENTICAL in both — the only delta is that
+         `"cache_control":{"type":"ephemeral","ttl":"1h"}` present on it in the earlier request is
+         absent in the later one (762 → 714 bytes, exactly the annotation's length).
+      3. So the mechanism is a **FOURTH** one, none of this card's three hypotheses: **sliding
+         `cache_control` breakpoint relocation** — the marker is carried by the currently-last
+         message and moves off the old one as the conversation grows. **Not ours to fix.** It is
+         client-side behaviour of Claude Code itself, not the janitor editing instruction files.
+      4. **`msg[N]` fingerprints are partly an artifact.** Scanning for `messages[363]` found 786
+         "changes" across 59 sessions, and a direct sha check showed the earlier body's
+         `messages[363]` reappearing UNCHANGED at `messages[364]` in the later one — the array
+         grew, so absolute-index diffing reports a change on ordinary turns. Treat any
+         `msg[N] <block>` actor string as suspect until corroborated.
+
+      **What I did NOT verify first-hand, stated so it is not read as settled:** the causal step
+      in (3). The report proves the annotation was removed; it says the marker was *"presumably"*
+      placed on the new last message and did not confirm where it went. If Claude Code keeps more
+      than one breakpoint, removal alone would not orphan the prefix, and the true cause would
+      still be open. The byte-level diff is solid; the causal attribution built on it is not.
 
       **ATTEMPT 1 (2026-08-13 ~12:3x–13:2x) — ABANDONED, no result.** A background lean-worker
       was dispatched to diff the captured bodies. It ran ~45 min without returning and was
@@ -173,7 +200,13 @@ only has to be sampled before it ages out, the way the first window's rules edit
       again: the dominant avoidable cost is a HARNESS behaviour, not instruction-file hygiene.
       Candidate (a) — a re-rendering `<system-reminder>` — is NOT what this diff shows.
 - [ ] A stated rule for WHERE rule/CLAUDE.md edits happen, with the exception for an urgent fix
-      spelled out rather than implied
+      spelled out rather than implied — **RE-SCOPED 2026-08-16, and deliberately not built yet.**
+      Both surviving boxes were written when this card believed instruction-file edits were the
+      dominant avoidable cost. Two measurements later that is false: the cost is EPISODIC (~150k
+      on rules-edit days, absent otherwise) and the larger break is a client-side mechanism the
+      janitor cannot influence. Enforcement machinery for the smaller, self-limiting cost is not
+      obviously worth its own maintenance burden — that is a scope judgement, and building it
+      first and asking later is how a card outgrows its evidence.
 - [ ] Whatever the rule is, it is enforced by something that runs — not only written down
       (this corpus's own lesson: a fix reaches the sites it is wired into, not the sites it
-      claims)
+      claims). Gated on the box above being decided, not on effort.
