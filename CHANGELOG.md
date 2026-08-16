@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.11] — 2026-08-16
+
+### Bug Fixes
+
+- **trdd-drift:** Report an `updated:` stamp that is in the future (TRDD-TUVQWLJF) (fe8590c)
+
+### Documentation
+
+- **memory:** A publish-gate timeout has a THIRD cause — host saturation (1470ba5)
+- **design:** ZM5LZ24Y — an absent decline line proves nothing until 2 preconditions hold (836a314)
+- **design:** G4BCRUP7 C2 audit — candidate cleared, inventory built, box stays open (b1f7f0e)
+- **design:** G4BCRUP7 — the C2 inventory is COMPLETE; the 9-site gap was my own grep (f36f350)
+- **design:** G4BCRUP7 C2 audit CLOSED — 75 drift lines, zero violations (8c02c04)
+- **design:** 9MCGBPR7 CLOSED; ZM5LZ24Y preconditions measured; 3 fabricated timestamps corrected (3779955)
+- **design:** Add TRDD-TUVQWLJF — a future-dated updated: pins a card to the top of the board unnoticed (3c11437)
+- **design:** G4BCRUP7 CLOSED — 16/16 rows swept, no manual bootstrap beyond the known three (852f619)
+- **design:** UQW5IOAE — refuse the triage row that would have closed it, and say why (a015b8f)
+- **design:** XM3FPJC0 soak — autonomous fire OBSERVED; the other half cannot be observed at all (29c4bbe)
+- **design:** CEWVQ8DG field check FAILS its second half — the fix moved the failure, not removed it (058d6a9)
+- **design:** Add TRDD-PGN5XSHA — a KILLED subagent stays pending and the directive says resume it (74bbfdb)
+- **design:** TUVQWLJF — log the advisor attempts on the card the advisor is blocking (eaf7c44)
+- **design:** TUVQWLJF dev -> testing — all 5 boxes ticked, fe8590c3 recorded (8d59e3c)
+- **design:** XM3FPJC0 — match the file's asterisk bullets (MD004, publish blocker) (1b5f3e7)
 ## [3.3.10] — 2026-08-16
 
 ### Bug Fixes
@@ -23,6 +46,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **c3:** Name WHICH predicate declined a re-pin (TRDD-ZM5LZ24Y) (11e925c)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.10 (ec75e09)
 ## [3.3.9] — 2026-08-16
 
 ### Bug Fixes
