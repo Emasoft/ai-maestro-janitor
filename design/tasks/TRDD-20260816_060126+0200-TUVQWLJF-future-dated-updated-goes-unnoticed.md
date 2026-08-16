@@ -1,9 +1,9 @@
 ---
 trdd-id: TUVQWLJF
 title: A hand-typed future-dated updated field pins a card to the top of the board and nothing notices
-column: dev
+column: testing
 created: 2026-08-16T06:01:26+0200
-updated: 2026-08-16T06:50:39+0200
+updated: 2026-08-16T07:15:30+0200
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -12,7 +12,7 @@ relevant-rules: []
 npt: []
 eht: []
 blocked-by: []
-implementation-commits: []
+implementation-commits: [fe8590c3]
 ---
 
 # A hand-typed future-dated `updated:` pins a card to the top of the board and nothing notices
@@ -77,11 +77,68 @@ Open design points, sent to the advisor before implementing:
       that consultation failed) rather than leave a one-predicate detector change parked behind an
       unreliable gate — a mandatory-consultation rule that can only stall is a stall generator, and
       the board rule says a card that stops moving must say so out loud.
-- [ ] The check ships in `trdd-drift.py` (or the home the verdict names), fail-open on parse
-- [ ] A test asserting a future-stamped fixture FIRES and a correctly-stamped one does NOT
-- [ ] A test asserting the dedupe key re-fires on a *different* offending value
-- [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
-      all clean
+      **OUTCOME: attempt 2 was killed at 23 min, still with no verdict. Consultation FAILED —
+      three attempts, zero answers — so this shipped under the advisor rule's escape clause, and
+      the four decisions below are MINE, recorded with their rationale so the advisor (or a
+      reader) can overturn any of them against a stated argument rather than a shrug.**
+
+      1. **Home: colocate in `trdd-drift.py`**, with the parser in `trdd_common.py` beside
+         `FM_CREATED_RE`. The detector already walks every TRDD in BOTH scopes, already reads the
+         head, already dedupes, already prints `[trdd-drift]`. A separate detector would duplicate
+         that whole walk for one predicate, and a second walk is a second thing to keep in step.
+      2. **Tolerance: 300 s.** The mandated format carries an explicit UTC offset, so timezone is
+         not what the tolerance absorbs — CLOCK SKEW between contributors is, because PROJECT
+         TRDDs are pushed. Past ~5 min on an NTP-synced host the skew is itself worth surfacing.
+         Two orders of magnitude below the +77/+79 min errors measured.
+      3. **Dedupe key carries the VALUE** (`future-updated@<uid>@<value>`), unlike the file's
+         other once-per-card keys: a corrected card stops matching, and a SECOND bad stamp is a
+         new key rather than being swallowed. A card someone is actively mis-editing is exactly
+         where a once-forever key fails.
+      4. **Checked BEFORE the active-column filter**, so terminal cards are audited. Rule §12
+         freezes a terminal TRDD's body but still permits `updated:` to change, and 240 of ~300
+         cards here are `complete`/`published` — filtering first would exempt the majority of the
+         board from the one check about board ordering.
+- [x] The check ships in `trdd-drift.py` (or the home the verdict names), fail-open on parse —
+      `trdd_common.future_updated()` (pure) + the emit block in `trdd-drift.py`; unparseable,
+      missing, naive (offset-less) and calendar-invalid values all return None
+- [x] A test asserting a future-stamped fixture FIRES and a correctly-stamped one does NOT —
+      `tests/test_trdd_drift_future_updated.py`, end to end through the real detector as a
+      subprocess. **The first version of this assertion was WRONG and is worth recording:** it
+      read `"TRDD-BBBBBBBB" not in out`, which failed against CORRECT behaviour, because the
+      honest control card is also 100 days old and `column: todo`, so it legitimately earns the
+      ORDINARY staleness line. Asserting on whole stdout conflated two findings; the test now
+      asserts line-wise on the FUTURE lines only.
+- [x] A test asserting the dedupe key re-fires on a *different* offending value — same file:
+      report, re-run silent on the unchanged value, then a new value fires again
+- [x] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+      all clean — ruff and mypy clean over the whole tree (485 files); 13 new tests pass and the
+      279-test `-k trdd` selection is green; full-suite run recorded in the commit
+
+## The check has a DETECTION WINDOW — found by measuring, not by reasoning
+
+Non-vacuity was proven against the real corpus rather than a fixture, and the proof exposed a
+limitation worth stating plainly.
+
+Replaying the pre-correction `G4BCRUP7` body (`git show 8c02c047:…`, carrying the fabricated
+`updated: 2026-08-16T07:05:00+0200`) through the real detector produced **nothing** — because by
+then the wall clock read `07:06:42`. The stamp was no longer in the future. Re-stamping the same
+real card two hours ahead fired it immediately:
+
+```
+[trdd-drift] TRDD-G4BCRUP7 updated='2026-08-16T09:06:42+0200' is in the FUTURE — …
+```
+
+So: **a fabricated stamp is only catchable until the clock overtakes it.** Tonight's +77 min
+errors had a ~77-minute window; after that they are invisible to this check forever, sitting at
+the top of the board looking ordinary. The check prevents the fresh mistake; it cannot audit the
+corpus for old ones.
+
+The complementary check — compare `updated:` against the timestamp of the commit that WROTE it —
+has no window, and is how all three were actually found today (`git log -1 --format=%ad`). It is
+deliberately NOT built here: it needs git per card, which this detector's hot loop avoids, and it
+belongs in a reconciliation pass rather than a per-heartbeat sweep. Filed as a note rather than a
+card because nothing is currently mis-stamped; if a fourth instance appears, that is the fix to
+build, and this paragraph is the reason not to re-derive it.
 
 ## Explicitly NOT in scope
 
