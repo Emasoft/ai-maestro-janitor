@@ -660,3 +660,100 @@ def test_certify_newest_if_clean_fails_closed_on_empty_string_tag_too(
 
     assert pinned is None
     assert vu.read_last_good() is None
+
+
+# --------------------------------------------------------------------------- #
+# `log=` — naming WHICH predicate declined (TRDD-ZM5LZ24Y)
+#
+# Every decline path used to be a bare `continue`/`return None`, so a fire that
+# RAN and refused was byte-indistinguishable from a fire that never ran. That is
+# what stalled the card's soak: the anchor was stale, a janitor-owned fire had
+# demonstrably run, and nothing on disk could say which gate had refused.
+# --------------------------------------------------------------------------- #
+
+
+def test_decline_log_names_the_provenance_gate(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A C2-clean, runnable, unquarantined newest that the release channel does not
+    confirm must SAY so — this is the exact state the stalled soak was in, and the
+    one an operator cannot otherwise tell apart from 'the chore never fired'."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "2.0.0", clean=True)
+
+    said: list[str] = []
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent, None, log=said.append) is None
+    assert len(said) == 1
+    assert "provenance" in said[0]
+    assert "could not be resolved" in said[0]
+    assert "2.0.0" in said[0]
+
+
+def test_decline_log_names_a_provenance_MISMATCH_distinctly(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unresolvable tag and a tag naming a DIFFERENT version are separate
+    diagnoses (offline vs the cache running ahead of the release channel), so the
+    line must distinguish them rather than collapse both into 'provenance'."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "2.0.0", clean=True)
+
+    said: list[str] = []
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent, "1.9.0", log=said.append) is None
+    assert len(said) == 1
+    assert "names 1.9.0" in said[0]
+    assert "could not be resolved" not in said[0]
+
+
+def test_decline_log_names_the_dirty_manifest_and_its_counts(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A C2-dirty tree must be named as such — 'the pin did not advance' and 'the
+    tree the pin would cover is tampered' demand opposite responses."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "3.0.0", clean=False)
+
+    said: list[str] = []
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent, "3.0.0", log=said.append) is None
+    assert len(said) == 1
+    assert "C2 dirty" in said[0] and "3.0.0" in said[0]
+
+
+def test_the_steady_state_is_deliberately_silent(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pin already naming the running version is the COMMON case, on every
+    fire forever. Logging it would drown the decline lines this instrumentation
+    exists to surface — the failure mode that made the silence necessary in the
+    first place, inverted."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "2.0.0", clean=True)
+
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent, "2.0.0") == "2.0.0"  # first fire pins
+
+    said: list[str] = []
+    assert vu.certify_newest_if_clean(cache_parent, "2.0.0", log=said.append) is None
+    assert said == []
+
+
+def test_logging_is_opt_in_and_absent_log_changes_no_behaviour(
+    env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`log` defaults to None, and every existing caller omits it. The decline
+    paths must stay total no-ops without it — instrumentation that can crash a
+    fail-open trust function is worse than no instrumentation."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    cache_parent = tmp_path / "cache"
+    _make_manifest(cache_parent / "3.0.0", clean=False)
+
+    vu = _vu()
+    assert vu.certify_newest_if_clean(cache_parent, "3.0.0") is None
+    assert vu.read_last_good() is None

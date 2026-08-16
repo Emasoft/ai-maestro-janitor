@@ -507,6 +507,7 @@ def pin_good_version(version_dir: Path, version: str) -> bool:
 
 def certify_newest_if_clean(
     cache_parent: Path, published: str | None = None, *, force: bool = False,
+    log: Callable[[str], None] | None = None,
 ) -> str | None:
     """Best-effort C3 self-heal on the PERIODIC path (TRDD-ZM5LZ24Y).
 
@@ -563,20 +564,39 @@ def certify_newest_if_clean(
     call NEVER sets this; only a human running the command deliberately IS the
     provenance F1 would otherwise require from the release channel.
 
+    `log` (optional) receives ONE line naming WHICH predicate refused when this
+    function declines to pin. Added after a soak could not close TRDD-ZM5LZ24Y:
+    the anchor was stale, a janitor-owned `version-update` fire had demonstrably
+    run, and the pin still had not advanced — but every decline path here is a
+    bare `continue`/`return None`, so from outside "no candidate", "C2-dirty" and
+    "provenance unconfirmed" are indistinguishable. A fail-open best-effort
+    function whose whole failure surface is silent cannot be diagnosed from its
+    output, only from instrumentation. The STEADY STATE (pin already correct) is
+    deliberately NOT logged — it is the common case and would drown the signal.
+
     Returns the version string that was newly pinned, or None when there
     was nothing to do (already current / unpinnable / not clean / provenance
     unconfirmed).
     """
+    def _say(reason: str) -> None:
+        if log is not None:
+            log(reason)
+
     installed = list_installed_versions(cache_parent)
     if not installed:
         return None
     quarantined = read_quarantine()
     pin = read_last_good()
+    # Why the NEWEST candidate was refused. Only the newest is recorded: the walk
+    # examines every cached version, so logging each would emit a dozen lines per
+    # fire, and it is the newest refusal that explains why the anchor is stale.
+    declined: str | None = None
     for version in reversed(installed):  # newest-first, mirroring the stub's walk
         version_dir = cache_parent / version
         # (1) RUNNABLE. The stub only ever execs a version that has this entry
         # point, so one without it can never be the version under the anchor.
         if not (version_dir / "scripts" / "dispatch.py").is_file():
+            declined = declined or f"{version}: not runnable (no scripts/dispatch.py)"
             continue
         # (2) NOT QUARANTINED. Certifying a quarantined version is not merely
         # useless, it is ACTIVELY HARMFUL and self-perpetuating: the stub SKIPS a
@@ -586,19 +606,28 @@ def certify_newest_if_clean(
         # fire, permanently recreating the stale-pin state this whole function
         # exists to cure. The self-heal would become the disease.
         if version in quarantined:
+            declined = declined or f"{version}: quarantined"
             continue
         # (3) C2 CLEAN — unchanged and never weakened.
         manifest_path = version_dir / _MANIFEST_REL
         if not manifest_path.is_file():
-            continue  # unpinnable — same fail-open C2 has for a missing manifest
+            # unpinnable — same fail-open C2 has for a missing manifest
+            declined = declined or f"{version}: no shipped manifest at {_MANIFEST_REL}"
+            continue
         try:
             mutated, missing, extra = janitor_self_integrity.verify_manifest(
                 version_dir, manifest_path
             )
-        except Exception:
-            continue  # any verify failure is uncertainty, never a pin
+        except Exception as exc:  # noqa: BLE001 — any verify failure is uncertainty, never a pin
+            declined = declined or f"{version}: C2 verify raised {type(exc).__name__}"
+            continue
         if mutated or missing or extra:
-            continue  # C2 caught a live mismatch — never pin a dirty tree
+            # C2 caught a live mismatch — never pin a dirty tree
+            declined = declined or (
+                f"{version}: C2 dirty (mutated={len(mutated)} missing={len(missing)} "
+                f"extra={len(extra)})"
+            )
+            continue
         # This is the version the stub would exec, so this is what the anchor
         # must name. Already correct ⇒ nothing to do (no tag needed for this
         # steady-state no-op — it costs nothing and confirms nothing new).
@@ -611,9 +640,22 @@ def certify_newest_if_clean(
         # `force=True` (F2's manual override) is the ONLY bypass — see the
         # docstring; every predicate ABOVE this line still applies unchanged.
         if not force and (not published or version != published):
+            _say(
+                f"C3 re-pin declined — {version} is the version the stub would exec and it "
+                "is C2-clean, but F1 provenance " + (
+                    "could not be resolved this fire (offline / no gh / no releases)"
+                    if not published else f"names {published}"
+                ) + "; failing closed, the existing pin is left untouched"
+            )
             return None
-        return version if pin_good_version(version_dir, version) else None
-    return None  # nothing on disk is both runnable and trustworthy — no opinion
+        if pin_good_version(version_dir, version):
+            return version
+        _say(f"C3 re-pin declined — {version} passed every gate but pin_good_version failed to write")
+        return None
+    # nothing on disk is both runnable and trustworthy — no opinion
+    if declined is not None:
+        _say(f"C3 re-pin declined — no cached version is runnable AND trustworthy; newest refusal: {declined}")
+    return None
 
 
 def read_quarantine() -> set[str]:

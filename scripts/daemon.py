@@ -635,8 +635,12 @@ def task_version_update() -> None:
     # `certify_newest_if_clean` itself: the existing pin is left untouched,
     # never advanced on a fire where the release channel could not confirm it.
     try:
+        # `log=` makes the DECLINE paths visible. Without it a fire that ran and
+        # refused to pin is byte-indistinguishable from a fire that never ran, which
+        # is exactly why TRDD-ZM5LZ24Y's soak could not be closed from the outside.
         newly_pinned = vu.certify_newest_if_clean(
             plugin_root.parent, latest_published or None,
+            log=lambda msg: state.log_line("daemon", f"  version-update: {msg}"),
         )
     except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon
         state.log_line("daemon", f"  version-update: periodic re-pin skipped: {exc}")
