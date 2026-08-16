@@ -3,7 +3,7 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-16T20:52:52+0200
+updated: 2026-08-16T20:57:32+0200
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
@@ -122,14 +122,56 @@ alarm that stays QUIET during a real runaway trains nothing at all, because ther
 nothing to observe. The second failure is undetectable from the outside, which is why it
 survived unnoticed while the first was being argued about all evening.
 
-**Consequence for the fix:** whatever replaces the current gate must be validated against a
-process that is live-hot but historically quiet, not only against one that has cooled. The
-existing test corpus only ever exercises the over-reporting direction.
+### Quantified: the number measures AGE, not load
 
-## The RAM half, unexamined by anyone
+From `cumulative_after = (C·T + r·t)/(T + t)`, with this process's own figures
+(T = 11,510 s elapsed, C = 100.0%, r = 286% live). Verified by recomputation:
 
-The alarm says "RAM/CPU runaway" and every discussion so far has been about CPU. `ps` RSS
-on this pid read 2.07 GB and then 2.17 GB roughly an hour apart, and `top` printed `1798M+`
-(the `+` denoting growth). That is TWO POINTS, not a trend — named here so it is not lost,
-NOT concluded. If it is a leak it is a separate finding with a separate owner (the process
-belongs to llm-externalizer, not to this repo).
+| burst at 286% | cumulative reads |
+|---|---|
+| 1 min | **100.96%** |
+| 5 min | 104.72% |
+| 10 min | 109.22% |
+| 30 min | 125.15% |
+| 60 min | 144.32% |
+
+**+1.00 percentage point costs ~62 s of 286% load** — a sensitivity of ~0.97 pp/min that
+decays as `1/elapsed`.
+
+**The decisive row is not in the table.** The *same* 1-minute burst on a **5-minute-old**
+process reads **131.0%**, against **100.96%** on this 3-hour-old one. Identical live
+behaviour, a 30-point spread, determined by nothing but uptime. Past the first few minutes
+the figure is not measuring load at all — **it is measuring age**. That is why no threshold
+can work: there is no value that separates a hot young process from a hot old one, because
+the metric does not distinguish them.
+
+**Consequence for the fix — a test-design requirement, not a nice-to-have:** whatever
+replaces the current gate MUST be validated against a process that is **live-hot but
+historically QUIET**, not only against one that has cooled. The existing test corpus only
+ever exercises the over-reporting direction, so it would pass a gate that is blind in the
+direction that produces silence. A guard nobody has watched fail is not a guard.
+
+## The RAM half — RAISED AND THEN REFUTED, same evening
+
+**REFUTED. There is no memory finding. Do not carry this forward.**
+
+It was raised because `ps` RSS read 2.07 GB and then 2.17 GB about an hour apart and `top`
+printed a growth marker (`1798M+`). Both readings were single samples an hour apart, which
+is a difference, not a trend.
+
+The owner then took the actual series: **six samples over 75 s, net −117 MB**, oscillating
+2220–2337 MB against a 6144 MB cap (~36%). That is a GC sawtooth on a healthy heap. The
+growth marker was one point of an oscillation.
+
+**The lesson is in HOW it was raised, and it is the sharper half.** Whoever raised it wrote
+the correct caveat — *"two points, not a trend"* — and surfaced the claim to multiple
+sessions anyway, as did I when I copied it onto this card. **A caveat is not a substitute
+for the second measurement; it only makes an unfounded claim feel responsible.** The
+honest options were to take the series, or to say nothing. Writing "I have not verified
+this" and publishing it anyway is how an unfounded claim acquires a citation — which is
+precisely the mechanism that produced the lifetime-average error this whole card exists to
+correct.
+
+(Attribution, since it was got wrong twice before anyone checked: pid 26449 is
+`AgentlensPro/standalone/server.js` and TRDD-MFSUMOJ9 is **AgentlensPro's** card, not
+llm-externalizer's.)
