@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.10] — 2026-08-16
+
+### Bug Fixes
+
+- **system-daemon-runaway:** Gate CPU findings on persistence (TRDD-8QSLYMGU) (540ee8e)
+
+### Documentation
+
+- **kanban:** EZ3PMQYX — probe the launchd branch before building it, and the probe killed the obvious predicate (ef1412e)
+- RETRACT the signed-python "reverted migration" claim — it was wrong, and fix the wording that caused it (4292d5b)
+- **memory:** A findings COUNT is only comparable within one linter version (a64ac18)
+- File TRDD-8QSLYMGU — the runaway alarm fires on a lifetime average with no persistence test (6b2a5dd)
+- **design:** Settle TRDD-8QSLYMGU's shape before coding — gate CPU, never RSS (59458f8)
+- **design:** Close TRDD-8QSLYMGU — CPU persistence gate shipped in 540ee8ed (c582580)
+- **design:** ZM5LZ24Y soak — the C3 anchor cannot advance on a server-owned host (e500259)
+- **design:** ZM5LZ24Y — instrumentation shipped in 11e925c0; next action is to read one log line (61b3f2d)
+- **claude-md:** The stale C3 pin is not transient on a server-owned host (cbfa77c)
+
+### Features
+
+- **c3:** Name WHICH predicate declined a re-pin (TRDD-ZM5LZ24Y) (11e925c)
 ## [3.3.9] — 2026-08-16
 
 ### Bug Fixes
@@ -32,6 +53,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **iterm-alarm:** Size the exposure the tmux remedy asks a human to fix (TRDD-EZ3PMQYX) (e4f82cb)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.9 (efff300)
 
 ### Testing
 
@@ -929,6 +954,13 @@ All notable changes to this project will be documented in this file.
 - **209:** Fragment the fake token literal per the secret-hygiene gate (fab6666)
 ## [2.4.0] — 2026-08-05
 
+### Miscellaneous Tasks
+
+- Align version to the remote's 2.3.1 before re-cutting the release (4175e59)
+- README badge to 2.3.1 — completes the version alignment (31ea21d)
+- Bump version to 2.4.0 (c48fe81)
+## [2.3.1] — 2026-08-05
+
 ### Bug Fixes
 
 - **trdd:** A DONE next-action line no longer masks the pending ones (TRDD-N7NZOYAK) (77b9ba2)
@@ -1178,9 +1210,6 @@ All notable changes to this project will be documented in this file.
 - Lock pyyaml in the dev extra (follow-up to #207 — the resolution moved with pyproject and the publish gate refuses a dirty tree) ([#208](https://github.com/Emasoft/ai-maestro-janitor/issues/208)) (b33c55a)
 - Bump version to 2.4.0 (2482bfe)
 - Bump version to 2.3.1 (cf0de33)
-- Align version to the remote's 2.3.1 before re-cutting the release (4175e59)
-- README badge to 2.3.1 — completes the version alignment (31ea21d)
-- Bump version to 2.4.0 (c48fe81)
 
 ### Revert
 
