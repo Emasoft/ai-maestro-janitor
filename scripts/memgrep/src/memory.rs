@@ -4980,7 +4980,19 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 ));
             }
             let props = parse_block_props(&a.props_raw);
-            if status_from_props(&props) == "superseded" {
+            // TRDD-3K8SVX2H. The BODY of a superseded atom is frozen history: the supersession
+            // protocol preserves it verbatim precisely so a reader can see what the fact used to
+            // say, and editing it to satisfy a linter destroys the only thing supersession exists
+            // to keep. So BODY-SHAPE findings must not be raised against it — they would be
+            // unsatisfiable by construction, and a permanent finding nobody may act on teaches
+            // readers to skip findings, which costs more than the debt it reports.
+            //
+            // THE BOUNDARY, stated once so the next rule added here inherits it: the frozen thing
+            // is the BODY. The PROPS block is metadata, not the historical claim, so integrity
+            // rules over props (`atom-bad-ocd`, `atom-bad-lmd`, `atom-dropped-props`) still apply
+            // to superseded atoms — those are repairable without rewriting what the atom asserted.
+            let atom_is_superseded = status_from_props(&props) == "superseded";
+            if atom_is_superseded {
                 superseded_atom_lines.push(a.line);
                 // WARN: memgrep already excludes this atom from search by its `status:` prop, so
                 // nothing is lost or unresolvable — this is purely the READABILITY convention (atoms
@@ -5064,7 +5076,8 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 }
             }
             let (marker_line, body_chars) = (a.line, a.body_chars);
-            if atom_budget > 0 && body_chars > atom_budget {
+            // `!atom_is_superseded` — a body-shape rule, see the boundary note above.
+            if atom_budget > 0 && body_chars > atom_budget && !atom_is_superseded {
                 // INFO (demoted from Warn, janitor#200): nothing is lost or unresolvable — the
                 // atom works, it is just doing the job of several. Fixing it needs SEMANTIC
                 // decomposition (which facts split where), which is never mechanical, and no
@@ -8615,6 +8628,43 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             severity_of(&v, "decompose it into"),
             Some(Severity::Info),
             "atom-oversized must be INFO, not WARN — no chore gate can ever act on it (janitor#200)"
+        );
+    }
+
+    /// TRDD-3K8SVX2H: a SUPERSEDED atom's body is frozen history, so a body-shape finding against
+    /// it is unsatisfiable — the supersession protocol forbids editing it. Observed live: after
+    /// decomposing an oversized atom the sanctioned way (`add-atom --supersedes`), the page was
+    /// left with one permanent finding, and it was on the historical copy rather than on either
+    /// replacement.
+    ///
+    /// BOTH atoms in this fixture are oversized, and only one is superseded — so the test cannot
+    /// pass by the rule going silent. The control half is the point: an exemption that also
+    /// suppressed live atoms would make every page look clean, which is a worse failure than the
+    /// one being fixed.
+    #[test]
+    fn lint_skips_oversized_on_a_superseded_atom_but_not_on_a_live_one() {
+        let dir = lint_tmpdir("oversized-superseded");
+        let big_body = "word ".repeat(400); // ~2000 chars > the 1500 default budget
+        std::fs::write(
+            dir.join("n.md"),
+            format!(
+                "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                 ^live [keywords: k]\n{big_body}\n\n\
+                 ## Superseded\n\n\
+                 ^old [keywords: k, status: superseded, superseded-by: live]\n{big_body}\n\n\
+                 ## Notes and lessons learned\n"
+            ),
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        let oversized: Vec<_> = v.iter().filter(|(_, _, _, _, c)| *c == "atom-oversized").collect();
+        assert_eq!(
+            oversized.len(),
+            1,
+            "exactly the LIVE oversized atom must be reported — the superseded one's body is \
+             frozen by the supersession protocol, so a finding on it can never be acted on; \
+             got: {oversized:?}"
         );
     }
 

@@ -1,9 +1,9 @@
 ---
 trdd-id: 3K8SVX2H
 title: memgrep lint reports content-shape findings on superseded atom bodies, which the protocol forbids editing
-column: todo
+column: complete
 created: 2026-08-16T02:17:12+0200
-updated: 2026-08-16T02:17:12+0200
+updated: 2026-08-16T02:25:40+0200
 current-owner: unassigned
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -65,14 +65,24 @@ exemptions — a per-rule exemption list is how the next rule gets forgotten.
 
 ## Acceptance
 
-- [ ] Content-shape findings are not reported against bodies under `## Superseded`; the boundary
-      between "content shape" and "integrity" is stated in the code, not implied by which rules
-      happened to be exempted.
-- [ ] A live atom of the same size still reports — falsify by shrinking the live one and growing
-      the superseded one, and check the count moves the right way.
-- [ ] `janitor-tool-call-cost-law.md` lints clean (it is the natural fixture: one superseded
-      oversized atom, two compliant live ones).
-- [ ] `cargo test` in `scripts/memgrep` green.
+- [x] Content-shape findings are not reported against a superseded body, and the boundary is
+      stated in the code. **Keyed on `status: superseded` in the atom's own props, NOT on sitting
+      under the `## Superseded` heading** — the atom declares itself historical, so the check does
+      not depend on where it was placed, and the lint pass already computed that flag one screen
+      above the size check. The boundary written into the comment: **the frozen thing is the BODY**;
+      the PROPS block is metadata, so integrity rules over props (`atom-bad-ocd`, `atom-bad-lmd`,
+      `atom-dropped-props`) still apply — those are repairable without rewriting what the atom
+      asserted. Stated once so the next body-shape rule added there inherits it.
+- [x] A live atom of the same size still reports — done **stronger than this box asked**. Rather
+      than resizing one atom, the fixture makes BOTH atoms oversized and marks only one superseded,
+      so the test cannot pass by the rule going silent: without the guard it reports 2, with it 1.
+      An exemption that also suppressed live atoms would make every page look clean, which is a
+      worse failure than the one being fixed.
+- [x] `janitor-tool-call-cost-law.md` lints clean — **0 findings** (was 1 INFO on the superseded
+      body). Corpus-wide the delta is exactly 1: PROJECT `atom-oversized` 4 → 3, USER 11 → 11,
+      which is the confirmation that the change is narrow and suppressed nothing else.
+- [x] `cargo test` in `scripts/memgrep` green — 208 unit + 145 integration, 0 failed. Rebuilt and
+      reinstalled, so the fix is on this host and not merely merged: `memgrep 0.1.0 (b51c588, …)`.
 
 ## Notes and lessons learned
 
