@@ -3,7 +3,7 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-14T17:45:10+0200
+updated: 2026-08-16T02:32:34+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -141,12 +141,59 @@ published as a stronger conclusion than they supported.
 ## Acceptance
 
 - [ ] Payload round-trip + branch tests (launchd text has NO System Settings trip; session
-      text unchanged)
-- [ ] Flag includes rearm-evidence age; absent evidence → field absent, not 0
-- [ ] The 0/254-vs-56 provenance stays cited in code comment or docstring
-- [ ] **Host-type surfacing (#240 ask 2 + #235):** the alarm names how many currently-scanned
-      claude instances are iTerm-hosted (the unprotected set) — fleet_scan already resolves
-      per-instance terminal identity, so "unreadable" and "healthy" stop looking identical to
-      a fleet-continuity reader; the launchd branch states the operational guidance plainly
-      (run fleet agents under tmux — rescued with no grant, moots #92 for them, #240 ask 3)
-- [ ] #233 #235 #236 #237 answered when it ships (#92 updated, #240 noted)
+      text unchanged) — **THE CARD'S CORE THESIS, AND STILL THE ONLY THING UNBUILT.** Checked
+      2026-08-16: the alarm mentions launchd in prose (`dispatch.py:1674`, `:1713`) but never
+      BRANCHES on it, and no `launch_context` field exists on the flag. So a launchd-spawned
+      daemon is still told to go grant Automation to a binary the grant cannot help — the exact
+      thing the title says must stop. Needs the daemon's own launch context recorded on the
+      flag, then a branch that DROPS the System Settings remedy rather than caveating it.
+      NEXT ACTION for whoever picks this up; the exposure plumbing shipped above is the
+      template (pure predicate → late compare-and-write patch → fail-open reader → clause).
+- [x] Flag includes rearm-evidence age; absent evidence → field absent, not 0 — shipped
+      (`fleet_scan.py:232` the parameter, `:263-264` the guarded write). The absent-not-zero half
+      holds BY CONSTRUCTION: the key is only assigned inside `if rearm_evidence_age_s is not
+      None`, so there is no code path that can write a 0 standing in for "unknown". Verified by
+      reading it, 2026-08-16.
+- [x] The 0/254-vs-56 provenance stays cited in code comment or docstring — `fleet_scan.py:208`,
+      verbatim: *"…0 times in 254 beats while a session-spawned daemon resolved 56
+      (TRDD-VQ4LX7ND)"*.
+- [x] **Host-type surfacing (#240 ask 2 + #235) — SHIPPED 2026-08-16, and it turned out much
+      smaller than the 08-14 note estimated.** That note called it "a SEPARATE, larger ask"
+      needing new plumbing. It needed almost none: `iterm_rescue_warranted` already evaluates
+      the exact channel predicate, as `any()`. The count is the same test with `sum()`.
+
+      What the alarm now says, when the flag carries it: *"SCOPE: 3 of 11 scanned instance(s)
+      have NO channel but iTerm, so they are unrescuable for as long as this lasts — those are
+      the ones to move under tmux first."* That turns the existing tmux advice from a
+      suggestion into a sized one, which is the whole of #240 ask 2.
+
+      **Deliberately a DIFFERENT predicate from `rescue_warranted`**, and this is the design
+      point rather than an implementation detail: that one is channel-test AND
+      `diagnosis == "cron_dead"` — "did a rescue fail just now". This one drops the diagnosis —
+      "how many are one stall away from being unrescuable". Counting only the cron_dead ones
+      would report ZERO on a fully-exposed fleet right up until the first casualty, i.e. it
+      would go quiet exactly while the guidance was still preventive.
+
+      `fleet_scan.iterm_only_exposure` (pure) → `record_iterm_host_exposure` (late
+      compare-and-write patch, same discipline and same reasons as `record_iterm_rescue_
+      warranted`) → `iterm_automation_host_exposure` (fail-open reader) → the alarm clause.
+
+      **An unmeasured exposure renders NOTHING, never "0 exposed"** — a pre-upgrade flag, or a
+      nonsensical pair like 7-of-3, yields no SCOPE clause at all. A missing measurement
+      shown as a reassuring zero would make the alarm worse than silent on exactly the hosts
+      that never measured. Bools are rejected too (a bool IS an int, so `true` would have read
+      as the count 1). Tests: `test_iterm_alarm_names_how_many_instances_have_no_channel_but_iterm`,
+      `test_iterm_alarm_omits_the_scope_clause_when_the_flag_predates_the_field`,
+      `test_exposure_counts_iterm_only_instances_regardless_of_diagnosis`,
+      `test_host_exposure_reader_returns_none_rather_than_a_misleading_zero`. Falsified by
+      dropping the clause from the f-string — the wiring test reddens, which is the
+      TRDD-OO301H7D failure (a value computed and never passed) this repo has hit before.
+
+      **What this does NOT prove: the production path is UNEXERCISED.** There is no
+      `iterm-automation-blocked.flag` on this host right now, so the alarm is not firing and
+      the clause has only ever been driven by tests. Recorded rather than left implicit.
+- [x] #233 #235 #236 #237 answered when it ships — **MOOT, verified rather than assumed.** All
+      four are CLOSED (three on 2026-08-12, #233 on 08-08), as is #240. #92 was updated
+      2026-08-16 (`#issuecomment-5304813279`) under TRDD-9PDH8G0W. Posting fresh comments on
+      five closed threads would be noise, not an answer — the debt this box tracked was
+      settled by whoever closed them.

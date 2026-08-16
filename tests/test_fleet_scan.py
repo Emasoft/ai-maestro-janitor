@@ -588,6 +588,52 @@ def test_rescue_warranted_false_on_an_empty_fleet() -> None:
     assert fs.iterm_rescue_warranted([]) is False
 
 
+# ---------------------------------------------------------------------------
+# TRDD-EZ3PMQYX (janitor#235, #240 ask 2) — HOW MUCH is at stake. Deliberately a
+# different question from rescue_warranted above: that one asks "did a rescue fail
+# just now", this one asks "how many are one stall away from being unrescuable",
+# which is what the run-under-tmux remedy actually acts on.
+# ---------------------------------------------------------------------------
+def test_exposure_counts_iterm_only_instances_regardless_of_diagnosis() -> None:
+    """The distinction from `rescue_warranted`, made explicit: a HEALTHY instance with no
+    other channel is still exposed. Counting only the cron_dead ones would report zero on a
+    fully-exposed fleet right up until the first casualty — which is exactly the moment the
+    guidance stops being preventive."""
+    fleet = [
+        _mk_instance(diagnosis="healthy", terminal={}),                        # exposed
+        _mk_instance(diagnosis="cron_dead", terminal={}),                      # exposed
+        _mk_instance(diagnosis="healthy", terminal={"tmux_pane": "%3"}),       # safe
+        _mk_instance(diagnosis="healthy", terminal={"aimaestro_session": "a"}),  # safe
+        _mk_instance(diagnosis="cron_dead", terminal={"linux_gui_channel": "x"}),  # safe
+    ]
+    assert fs.iterm_only_exposure(fleet) == (2, 5)
+    # Only ONE of those two is rescue-warranted — the predicates must not collapse.
+    assert fs.iterm_rescue_warranted(fleet) is True
+
+
+def test_exposure_on_an_empty_fleet_is_zero_of_zero() -> None:
+    assert fs.iterm_only_exposure([]) == (0, 0)
+
+
+def test_host_exposure_reader_returns_none_rather_than_a_misleading_zero() -> None:
+    """`None` and `(0, n)` mean different things and must never be confused: `None` is "not
+    measured", `(0, n)` is "measured, nobody exposed". The alarm renders nothing for the
+    first and a reassuring sentence for the second, so a reader on a pre-upgrade host must
+    not be told everything is fine.
+
+    A nonsensical pair is also `None`: an alarm that says "7 of 3 sessions" spends its
+    credibility on the one line a human reads."""
+    assert fs.iterm_automation_host_exposure('{"interpreter": "/x"}') is None  # pre-upgrade
+    assert fs.iterm_automation_host_exposure("not json at all") is None
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": 7, "fleet_total": 3}') is None
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": -1, "fleet_total": 3}') is None
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": "2", "fleet_total": 3}') is None
+    # A bool IS an int in Python — `true` must not read as the count 1.
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": true, "fleet_total": 3}') is None
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": 0, "fleet_total": 4}') == (0, 4)
+    assert fs.iterm_automation_host_exposure('{"iterm_only_count": 2, "fleet_total": 4}') == (2, 4)
+
+
 def test_record_and_read_rescue_warranted_round_trips(
     tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
 ) -> None:

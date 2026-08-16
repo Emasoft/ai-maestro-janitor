@@ -1896,6 +1896,53 @@ def test_iterm_alarm_rescue_warranted_outranks_the_timeout_branch(
     assert "probe_outcome: timeout" not in out
 
 
+def test_iterm_alarm_names_how_many_instances_have_no_channel_but_iterm(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """TRDD-EZ3PMQYX (janitor#235/#240 ask 2): the alarm recommends moving agents to tmux,
+    which is WORK — so it must say how much is at stake, not just that something is wrong."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "iterm-automation-blocked.flag").write_text(
+        '{"interpreter": "/x", "rescue_warranted": true, "iterm_only_count": 3, '
+        '"fleet_total": 11}',
+        encoding="utf-8",
+    )
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    out = capsys.readouterr().out
+
+    assert "3 of 11 scanned instance(s) have NO channel but iTerm" in out, (
+        f"the alarm must size the exposure it asks the human to fix; got: {out!r}"
+    )
+
+
+def test_iterm_alarm_omits_the_scope_clause_when_the_flag_predates_the_field(
+    env_isolation: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """The misreading that would make this worse than silence: an ABSENT measurement must
+    not render as a reassuring "0 exposed". A flag written before this field existed — or
+    one carrying a nonsensical pair — gets no SCOPE clause at all, so a human never reads
+    "nothing is at risk" from a host that simply never measured it."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    for payload in (
+        '{"interpreter": "/x", "rescue_warranted": true}',  # pre-upgrade flag
+        '{"interpreter": "/x", "rescue_warranted": true, "iterm_only_count": 7, '
+        '"fleet_total": 3}',  # 7 of 3 — writer and reader disagree
+    ):
+        (gdir / "iterm-automation-blocked.flag").write_text(payload, encoding="utf-8")
+        dispatch = _import_dispatch()
+        dispatch._phase_iterm_automation_alarm()
+        out = capsys.readouterr().out
+        assert "UNCONDITIONAL NEGATIVE" in out, f"the alarm itself must still fire: {out!r}"
+        assert "SCOPE:" not in out, (
+            f"an unmeasured or impossible exposure must render NOTHING, not a zero; "
+            f"payload={payload!r} got: {out!r}"
+        )
+
+
 def test_iterm_alarm_error_probe_outcome_keeps_the_base_alarm(
     env_isolation: dict, capsys: pytest.CaptureFixture
 ) -> None:

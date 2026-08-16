@@ -400,6 +400,63 @@ def iterm_rescue_warranted(fleet: "list[Instance]") -> bool:
     )
 
 
+def iterm_only_exposure(fleet: "list[Instance]") -> tuple[int, int]:
+    """(instances whose ONLY possible rescue channel is iTerm, total scanned). PURE.
+
+    Deliberately a DIFFERENT predicate from `iterm_rescue_warranted`, which is the same
+    channel test AND `diagnosis == "cron_dead"`. That one answers "did a rescue fail just
+    now"; this one answers "how many are one stall away from being unrescuable" — which is
+    what the operational remedy (run them under tmux) actually acts on. A fleet can be
+    perfectly healthy this beat and still be fully exposed, and the alarm should say so
+    rather than wait for the first casualty to make it visible.
+
+    The total is carried alongside because the count alone is unreadable: "3 exposed" reads
+    as a crisis at a fleet of 3 and as a footnote at a fleet of 40.
+    """
+    exposed = sum(
+        1
+        for inst in fleet
+        if "tmux_pane" not in inst.terminal
+        and "aimaestro_session" not in inst.terminal
+        and "linux_gui_channel" not in inst.terminal
+    )
+    return (exposed, len(fleet))
+
+
+def record_iterm_host_exposure(exposure: tuple[int, int]) -> None:
+    """Patch this beat's iTerm-blocked flag with `iterm_only_exposure`'s pair
+    (TRDD-EZ3PMQYX). Same late-patch discipline and the same reasons as
+    `record_iterm_rescue_warranted` — the fact is only known once `gather_fleet`'s
+    per-instance loop has run, and the early write cannot be deferred without blinding
+    `capture_pane_text`'s same-beat decline (TRDD-WKTD5JTC).
+
+    Compare-and-write on BOTH fields together, so an unchanged fleet causes no rewrite and
+    therefore no ack churn. Best-effort: a scan must never break because this patch failed.
+    """
+    try:
+        import global_state as gs  # local import — mirrors record_iterm_rescue_warranted
+
+        exposed, total = exposure
+        flag = gs.global_state_dir() / ITERM_TCC_FLAG
+        try:
+            raw = flag.read_text(encoding="utf-8")
+        except OSError:
+            return  # nothing to patch — absent (condition cleared) or unreadable
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return  # legacy/pre-JSON content — leave it; the next full rewrite fixes it
+        if not isinstance(data, dict):
+            return
+        if data.get("iterm_only_count") == exposed and data.get("fleet_total") == total:
+            return  # unchanged — no rewrite, no ack churn
+        data["iterm_only_count"] = exposed
+        data["fleet_total"] = total
+        state.atomic_write(flag, json.dumps(data, sort_keys=True))
+    except Exception:  # noqa: BLE001 -- advisory; must never break the scan
+        pass
+
+
 def record_iterm_rescue_warranted(warranted: bool) -> None:
     """Patch the iTerm-automation-blocked flag `record_iterm_automation_state` already
     wrote THIS beat with whether the SAME scan's diagnoses warrant the unconditional-
@@ -478,6 +535,34 @@ def iterm_automation_rearm_evidence_age_s(raw: str) -> int | None:
         return None
     value = data.get("rearm_evidence_age_s")
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def iterm_automation_host_exposure(raw: str) -> tuple[int, int] | None:
+    """How many scanned instances had NO channel but iTerm, out of how many total
+    (TRDD-EZ3PMQYX, janitor#235/#240) — or ``None`` when the flag does not carry it.
+
+    ``None`` is distinct from ``(0, n)``: the field is patched in after the initial write,
+    so a pre-upgrade flag must never be misread as "nobody is exposed". PURE, fail-open.
+
+    Rejects a nonsensical pair rather than surfacing it: a count above the total, or either
+    value negative, means the writer and the reader disagree about what was measured, and an
+    alarm that says "7 of 3 sessions" destroys its own credibility on the one line a human
+    reads. Better to omit the clause than to print a number that cannot be true.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    exposed, total = data.get("iterm_only_count"), data.get("fleet_total")
+    if not isinstance(exposed, int) or not isinstance(total, int):
+        return None
+    if isinstance(exposed, bool) or isinstance(total, bool):
+        return None  # a bool IS an int in Python; it is not a count
+    if exposed < 0 or total < 0 or exposed > total:
+        return None
+    return (exposed, total)
 
 
 def iterm_automation_rescue_warranted(raw: str) -> bool | None:
@@ -1209,6 +1294,10 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
         # later patch rather than a field on the early `record_iterm_automation_state`
         # write above (TRDD-9PDH8G0W).
         record_iterm_rescue_warranted(iterm_rescue_warranted(fleet))
+        # TRDD-EZ3PMQYX: same late-patch reason, different question — not "did a rescue
+        # fail this beat" but "how many instances have no other channel at all", which is
+        # what the run-under-tmux remedy acts on.
+        record_iterm_host_exposure(iterm_only_exposure(fleet))
     return fleet
 
 

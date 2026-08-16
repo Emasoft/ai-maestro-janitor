@@ -1606,11 +1606,15 @@ def _phase_iterm_automation_alarm() -> None:
             # a0dfb901; this is the "nobody reads them yet" gap that card's STATE block
             # names as the remaining NEXT ACTION).
             probe_outcome = fleet_scan.iterm_automation_probe_outcome(raw_flag)
+            # TRDD-EZ3PMQYX: read here, with the other flag fields, so it shares this
+            # block's single import — a later read would be outside `fleet_scan`'s binding.
+            exposure_pair = fleet_scan.iterm_automation_host_exposure(raw_flag)
         except ImportError:
             interpreter = ""
             second_view = ""
             rescue_warranted = None
             probe_outcome = ""
+            exposure_pair = None
         rearm_epoch: int | None = None
         try:
             for log_name in ("daemon.log", "daemon.log.1"):
@@ -1677,6 +1681,30 @@ def _phase_iterm_automation_alarm() -> None:
         # on macOS 26+ the toggle may not persist) and its path moves on upgrade, silently
         # orphaning a grant that was correctly given. That is what TRDD-DB1P25S4 proposes to
         # end by running the daemon under a signed python.org build.
+        # TRDD-EZ3PMQYX (janitor#235, #240 ask 2): say HOW MUCH is at stake, because the
+        # remedy this alarm recommends — run agents under tmux — is work, and a human
+        # deciding whether to do it needs the size of the exposure, not just its existence.
+        # The pair is written by `record_iterm_host_exposure` from the same scan.
+        #
+        # `None` (a pre-upgrade flag, or a nonsensical pair the reader rejects) yields an
+        # EMPTY clause rather than "0 exposed": absence of a measurement must never render
+        # as a reassuring zero, which is the one misreading that would make the alarm worse
+        # than silent on exactly the hosts whose flag predates this field.
+        exposure = ""
+        if exposure_pair is not None:
+            n_exposed, n_total = exposure_pair
+            if n_exposed:
+                exposure = (
+                    f" SCOPE: {n_exposed} of {n_total} scanned instance(s) have NO channel "
+                    "but iTerm, so they are unrescuable for as long as this lasts — those "
+                    "are the ones to move under tmux first."
+                )
+            else:
+                exposure = (
+                    f" SCOPE: none of the {n_total} scanned instance(s) depend on iTerm "
+                    "alone — every one has a tmux or ai-maestro channel, so nothing is "
+                    "currently unrescuable even though the iTerm path is down."
+                )
         binary = (
             f"the PYTHON RUNTIME that made the call ({state.sanitize_for_drift_line(interpreter)})"
             if interpreter
@@ -1718,7 +1746,8 @@ def _phase_iterm_automation_alarm() -> None:
                 "really did give. On some hosts (macOS 26+, an adhoc-signed uv/python with "
                 "no stable Team ID) the toggle will not persist and reverts to off — if it "
                 "does, iTerm rescue is not attainable here; run agents under tmux, which the "
-                "guardian rescues with no Automation grant at all. This alarm clears itself "
+                "guardian rescues with no Automation grant at all."
+                f"{exposure} This alarm clears itself "
                 "on the next fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, "
                 "TRDD-9PDH8G0W, GH issues #92, #229."
             )
