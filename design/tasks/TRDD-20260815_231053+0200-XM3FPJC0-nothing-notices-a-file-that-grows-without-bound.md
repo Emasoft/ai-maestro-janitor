@@ -86,10 +86,10 @@ waits on an EVENT (a ≥100 MB file appearing) that may never occur, and "observ
 prove one true positive while the risk here is the re-alert baseline silently NOT persisting.
 Replace it with a falsifiable one before this card can leave `testing`:
 
-- seed the state file with a recorded realpath→size entry, invoke the detector **through the
+* seed the state file with a recorded realpath→size entry, invoke the detector **through the
   dispatcher path** twice, and assert the entry is still there and suppresses a re-alert at an
   unchanged size — mutating the persistence write must fail that test;
-- keep the autonomous-fire observation above as the wiring half, since it is already met.
+* keep the autonomous-fire observation above as the wiring half, since it is already met.
 
 Not rewritten as a checkbox here because the acceptance list is fully ticked; this is the gate
 between `testing` and `complete`, and it is now stated so the next session does not sit waiting
