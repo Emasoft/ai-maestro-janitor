@@ -104,7 +104,12 @@ def test_the_handoff_is_on_disk_before_the_clear_chain_is_spawned(tmp_path, monk
     root, sd = _firing_project(tmp_path, monkeypatch)
     seen: dict = {}
 
-    def _spy_fire(_root, _sd, _terminal, _now):
+    # Mirrors `_fire`'s real signature, `trigger` included. A spy that silently accepted
+    # **kwargs would keep passing if the production signature drifted again — the point of
+    # spying here is the ORDERING, and a spy that cannot be called is the only honest way to
+    # learn the thing it stands in for has changed.
+    def _spy_fire(_root, _sd, _terminal, _now, trigger=""):
+        del trigger  # not part of this test's claim; named so the call shape is exact
         handoff = sd / "agent-handoff.md"
         seen["existed_at_fire"] = handoff.is_file()
         seen["bytes_at_fire"] = handoff.stat().st_size if handoff.is_file() else 0
