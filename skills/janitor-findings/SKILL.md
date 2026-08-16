@@ -35,6 +35,12 @@ Surface its stdout to the user verbatim. The verbs:
 | `show <ref>` | resolve the finding's BODY: `T-…` → the ticket (open or closed); `TRDD-…` → the proposal/task TRDD file, verbatim. Read-only. |
 | `ack` | advance the cursor — mark everything currently recorded as read (stops re-surfacing at session start). |
 
+**Every line ends with the AGE OF THE MEASUREMENT** (`— 4m ago`, `— 3d ago`), because a finding is
+recorded once and may be surfaced much later: without it, an old alarm reads as a live one. Check
+that age before acting — a "CPU 390%" line was once surfaced here while the named process sat at
+5.3%. `age unknown` means the entry carries no usable timestamp (a hand-written or pre-upgrade
+line), never "just now": an absent measurement is deliberately not rendered as a reassuring zero.
+
 ## Scope
 
 OWN project only — this reads the current project's ledger, never another project's (the per-project
