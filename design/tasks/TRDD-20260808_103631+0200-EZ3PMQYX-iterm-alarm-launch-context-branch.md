@@ -15,6 +15,43 @@ external-refs: [janitor#92, janitor#233, janitor#235, janitor#236, janitor#237, 
 
 # iTerm alarm — distinguish error from timeout at the call site; never recommend a remedy against live success evidence
 
+## ⏵ 2026-08-16 03:20 — FOUR FACTS FOR THE LAUNCHD BRANCH, measured on this host. The obvious predicate is WRONG.
+
+Probed before building, and the probe killed the naive implementation — which is why this is a
+findings block and not a commit.
+
+1. **The thesis applies HERE, it is not hypothetical.** `~/Library/LaunchAgents/` carries
+   `com.ai-maestro-janitor.daemon.plist` (`Label: com.ai-maestro-janitor.daemon`,
+   `KeepAlive: True`), and the live daemon (pid 29903, up 2h18m, logging normally) has
+   **PPID = 1**. So on this machine the daemon IS launchd-spawned and the alarm's
+   System-Settings remedy is the futile advice this card is about.
+2. **`PPID == 1` IS NOT A SUFFICIENT DISCRIMINATOR — do not implement it.** A double-forked,
+   session-spawned daemon is also reparented to 1. That is precisely the case this card contrasts
+   launchd with (the 0/254-vs-56 provenance at `fleet_scan.py:208`), so the one predicate that
+   looks obvious cannot tell the two apart and would mislabel every detached session daemon as
+   launchd-spawned.
+3. **The correct discriminator is the daemon's OWN environment at boot.** launchd sets
+   `XPC_SERVICE_NAME` to the job label in the process it spawns; a double-forked child inherits
+   its parent's environment instead. So the daemon should read `os.environ.get("XPC_SERVICE_NAME")`
+   at startup and record the answer into `global_state` — exact, one dict lookup, and it needs no
+   cross-process introspection (reading another process's env is not portable and `ps -E` is
+   restricted). The flag patch then reads that recorded value, exactly like `rescue_warranted` and
+   `iterm_only_count`.
+   **Why this was not built tonight:** it changes the daemon's BOOT path, and the daemon is
+   long-lived — the change cannot be exercised until it next restarts, and there is no
+   `iterm-automation-blocked.flag` here to drive the branch either. Building two unverifiable
+   layers at once is how a "fix" ships that nobody can show works.
+4. **INDEPENDENT FINDING, and it bears directly on the alarm's advice.** The installed plist's
+   `ProgramArguments[0]` is still a **uv-managed** interpreter
+   (`~/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12`), even though a
+   `com.ai-maestro-janitor.daemon.plist.bak-pre-signed-python-20260805` backup exists — i.e. the
+   signed-python migration (TRDD-DB1P25S4) was either reverted or never completed on this host.
+   That matters because the alarm tells the human to grant Automation to *that exact binary*, and
+   a uv-managed python is the grantee whose path moves on upgrade and whose adhoc signature will
+   not persist a grant on macOS 26+. **The remedy this card wants to branch away from is, on this
+   host, being aimed at the worst possible grantee.** Worth its own card or a check on
+   TRDD-DB1P25S4 before anyone re-tunes the alarm text.
+
 ## ⏵ 2026-08-14 17:45 — THE `dispatch.py` SURFACING GAP IS PARTIALLY CLOSED (stays `todo`)
 
 Did the narrow, well-defined half of the NEXT ACTION the 2026-08-13 entry named: `dispatch.py`'s
