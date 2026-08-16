@@ -3,7 +3,7 @@ trdd-id: 8QSLYMGU
 title: The runaway alarm fires on a lifetime-average CPU sample with no persistence requirement, so a finished burst reads as an ongoing emergency
 column: todo
 created: 2026-08-16T04:29:41+0200
-updated: 2026-08-16T04:29:41+0200
+updated: 2026-08-16T04:35:00+0200
 current-owner: unassigned
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -70,6 +70,40 @@ host, all night, every sample. That is the sustained signal a persistence requir
    night with **81–83 G free and zero swap**; pairing it with a CPU spike manufactures a compound
    emergency out of two non-events. Report it, do not escalate on it.
 
+## ⏵ DESIGN SETTLED 2026-08-16 04:35 — read this before writing code
+
+Traced the call path first. Cadence is **600 s** (`dispatch.py:479`), so a streak of 2 means the
+condition held for ~10 minutes — the right order of magnitude for "sustained, not a burst".
+
+**GATE CPU ONLY. Do NOT gate RSS — that would delay a real memory emergency.** `ps` RSS is an
+instantaneous LEVEL (a process at 5 GB is at 5 GB right now); `%cpu` is the lifetime average this
+card is about. `classify_runaway` already separates the two kinds, and the parent incident
+(TRDD-ZNN0UK5K, fseventsd at 39 GB) was an **RSS** finding — gating it behind two fires would have
+delayed the one alarm that mattered by ten minutes. This is the single most important line here.
+
+**Keep `classify_runaway` PURE; put the streak in the DETECTOR, which already owns state.** The
+codebase's split is pure-verdict / impure-caller and this must not break it:
+
+```python
+# daemon_runaway.py — PURE
+def sustained_findings(findings, prior_streaks, min_streak=2) -> (list[Finding], dict[str, int])
+```
+- RSS findings pass through **ungated**.
+- CPU findings increment `prior_streaks[key]`; reported only at `>= min_streak`.
+- Keys absent this fire are **dropped** from the returned map — that is what makes an ended burst
+  stop counting, and it is the behaviour the falsification test must pin.
+- Key is `f"{pid}:{command}"`, never pid alone: pids are recycled.
+
+**Detector wiring** (`system-daemon-runaway.py::main`, after `classify_runaway` at `:141`): read
+the streak map from a new JSON state file, call the helper, **persist the new map even when the
+gated list is empty** (otherwise the streak can never reach 2), then use the gated list for the
+drift line. The existing `dedupe.emit_forget` on "nothing to report" still applies to the GATED
+result.
+
+**Text change** in `format_drift_line`: the CPU branch must say the metric is a lifetime average
+and that it held across N fires. The RSS branch keeps its present wording — it is instantaneous
+and its urgency is real.
+
 ## Acceptance
 
 - [ ] A single high-`%cpu` sample on an otherwise-idle process does NOT alarm; a sustained one does.
@@ -79,6 +113,8 @@ host, all night, every sample. That is the sustained signal a persistence requir
       explainable rather than evidence the detector is lying.
 - [ ] `fseventsd`-shaped input (sustained, days long) still alarms — the case the detector exists
       for must not be lost to the fix.
+- [ ] An **RSS** finding still alarms on the FIRST fire — explicitly tested, because the tempting
+      symmetry ("gate both kinds") would have delayed TRDD-ZNN0UK5K's 39 GB emergency by 10 min.
 - [ ] `uv run pytest` green; ruff + mypy clean.
 
 ## Notes and lessons learned
