@@ -3,7 +3,7 @@ trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
 column: todo
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-16T01:35:00+0200
+updated: 2026-08-16T07:05:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -297,10 +297,41 @@ being cancelled rather than accepted.
       unticked rather than guessed at without a fresh full-table sweep.
 - [ ] C2 audit: every drift line that ASKS the model to do something a script could do is
       either converted to a script action or justified in writing on this card
-      **NOT attempted this pass** (out of scope for the time budget). One candidate on record:
-      `scripts/detectors/project-plugins-update.py:214-235` prints a `git commit` command for
-      the model to run — plausibly justified (git-tracked file, deliberate
-      no-auto-commit-on-user's-behalf policy) but not adjudicated here.
+      **STILL OPEN, but no longer unattempted — 2026-08-16 advanced it in three concrete ways.**
+
+      **(a) The one recorded candidate is CLEARED, on source, not on its line numbers.**
+      `project-plugins-update.py` no longer asks the model to commit anything: it commits
+      `.claude/settings.json` ITSELF (`_commit_settings`), and prints only when the commit was
+      REFUSED by `_commit_blocked_reason` (mid-merge / mid-rebase / mid-cherry-pick / detached
+      HEAD) or when it failed. Neither is a C2 violation — a script must not resolve a
+      half-finished rebase, and a silent failure would be worse than a line. **The recorded
+      range `214-235` had drifted onto an unrelated read-only helper (`_resolve_git_dir`)**, so
+      a reader trusting the citation would have adjudicated the wrong code. Cite behaviour, not
+      line numbers, in a card that outlives several releases.
+
+      **(b) A full inventory now exists** —
+      `reports/c2-drift-audit/20260816_053513+0200-c2-drift-line-sweep.md`: **75 command- or
+      action-instructing drift lines across 69 detector files.** Coverage caveat, stated
+      because it matters: the sweep reports 113 `print(` sites examined while `grep -c` counts
+      **122** occurrences in `scripts/detectors/*.py`. The gap is unexplained; treat the
+      inventory as near-complete, not exhaustive, and reconcile the 9 before ticking.
+
+      **(c) Why my own first pass was nearly useless, which is the reusable part.** Two grep
+      sweeps over imperative verb phrasings found **6** sites; the exhaustive per-site read
+      found 75. The reason is structural: most detectors emit `print(line)` where `line` was
+      assembled elsewhere (`r.line`, a `hint`/`fix_hint` variable), so **the imperative text is
+      never adjacent to the `print(`** and no grep over emission sites can see it. Any future
+      pass must resolve the variable, not scan the call site.
+
+      **REMAINING WORK, now small and specific:** the 75 fall into ~7 recurring classes
+      (approval gates `approve the fix with: {command}`; `/janitor-*-agent` dispatch for
+      judgement work; `claude plugin *` which PRRD S2.1 FORBIDS automating — single writer,
+      issue #7; `git add`/`rm --cached`/`stash` on the USER's own files, which RULE 0 forbids
+      the janitor doing unasked; interactive browser logins; session-only actions like
+      `/compact`; and human trust judgements on untrusted binaries/repos). Justify per CLASS,
+      not per line — but **verify each class's members before asserting it**: only 6 of the 75
+      were read first-hand here, and this card's own standing rule is *do NOT close a row on
+      the strength of a grep hit*. The remaining 69 are second-hand and unadjudicated.
 - [x] R11's suggestion text actually names lean-workers / cheap subagents — **VERIFIED
       REACHABLE AND NOW PINNED.** Three surfaces, all wired: `token-usage-anomaly.py:147`
       (unconditional inside the alarm f-string; roster `dispatch.py:446`),
