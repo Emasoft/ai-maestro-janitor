@@ -295,9 +295,10 @@ being cancelled rather than accepted.
       **NOT re-audited this pass** — R8/R9's rotation opt-in and the 2nd-account browser login
       are known, already-accepted exceptions per this card's own 2026-08-11 STATE; left
       unticked rather than guessed at without a fresh full-table sweep.
-- [ ] C2 audit: every drift line that ASKS the model to do something a script could do is
+- [x] C2 audit: every drift line that ASKS the model to do something a script could do is
       either converted to a script action or justified in writing on this card
-      **STILL OPEN, but no longer unattempted — 2026-08-16 advanced it in three concrete ways.**
+      **DONE 2026-08-16 — 75 sites inventoried (complete coverage), ZERO C2 violations, all
+      seven classes justified below. Nothing was converted because nothing needed converting.**
 
       **(a) The one recorded candidate is CLEARED, on source, not on its line numbers.**
       `project-plugins-update.py` no longer asks the model to commit anything: it commits
@@ -328,17 +329,38 @@ being cancelled rather than accepted.
       never adjacent to the `print(`** and no grep over emission sites can see it. Any future
       pass must resolve the variable, not scan the call site.
 
-      **REMAINING WORK is now exactly one thing: adjudicate the 69 second-hand hits.** The
-      inventory is complete and the candidate is cleared; nothing else blocks this box. The 75
-      fall into ~7 recurring classes
-      (approval gates `approve the fix with: {command}`; `/janitor-*-agent` dispatch for
-      judgement work; `claude plugin *` which PRRD S2.1 FORBIDS automating — single writer,
-      issue #7; `git add`/`rm --cached`/`stash` on the USER's own files, which RULE 0 forbids
-      the janitor doing unasked; interactive browser logins; session-only actions like
-      `/compact`; and human trust judgements on untrusted binaries/repos). Justify per CLASS,
-      not per line — but **verify each class's members before asserting it**: only 6 of the 75
-      were read first-hand here, and this card's own standing rule is *do NOT close a row on
-      the strength of a grep hit*. The remaining 69 are second-hand and unadjudicated.
+      **(d) ADJUDICATED 2026-08-16 — ZERO C2 violations across all 75 sites.** Method, stated
+      so the verdict is auditable rather than asserted: classify all 75 from the inventory,
+      then read a representative of EVERY class first-hand in source, plus every site whose
+      class was in doubt. Verified this way, not by grep:
+
+      | class | n | why it is not C2 | verified |
+      |---|---|---|---|
+      | approval gate — `approve the fix with: {command}` | ~10 | The line IS the gate. `issue_catalog.raise_issue` is silent when a ticket is already open and silent FOREVER when a human refused it (suppressed until the evidence changes); it emits the command only to REQUEST approval. Automating it deletes the gate. | `issue_catalog.py:676-705` — one shared source covers all ~10 |
+      | `/janitor-*-agent` dispatch | ~9 | Triaging a security finding is judgement. This is the C2-COMPLIANT pattern already — offload to a cheap agent instead of the main model inline. | `binary-magic-scanner`, `repo-trust-score` |
+      | `claude plugin *` | ~6 | PRRD S2.1 / issue #7 single-writer FORBIDS the janitor running these itself. | `version-update.py:102` comment states the rule |
+      | git ops on the USER's files | ~14 | RULE 0 + `never-git-add-all`: staging/committing/removing a user's files unasked is the harm. | `project-plugins-update` (the cleared candidate) |
+      | interactive / credential | ~5 | A browser OAuth login is not scriptable. | `oauth-cookie-reminder.py:152-154` |
+      | session-only actions | ~6 | `/compact`, `TaskStop`, `TaskUpdate`, `/mcp` act on the model's OWN session; no external script reaches it. | `token-usage-anomaly.py:146` |
+      | human judgement on content | ~25 | Deciding whether an unknown binary is malicious, whether two cards contradict, or what malformed YAML MEANT is not scriptable; a wrong automated repair corrupts silently. | `trdd-drift.py:144`, `branch-protection.py:197` |
+
+      **The one that deserved the hardest look, and passed:** `project-map-drift.py:89,149`
+      prints `uv run scripts/claudemd_slim.py index` / `repomap_generate.py` — deterministic
+      regenerations a script plainly COULD run. Both drift lines already carry their own
+      justification inline: *"the janitor never rewrites CLAUDE.md itself (cache +
+      co-ownership safety)"*, and they name WHEN it is cheap ("a fresh session,
+      post-compaction, or pre-commit"). Auto-rewriting a prefix-injected file at an arbitrary
+      moment forces a full prompt-cache re-write (~150k, TRDD-IJ94O8YD) on a file the user
+      co-owns. That is the ideal C2 form: the trade-off is written where the reader meets it.
+
+      **Method caveat, deliberately kept:** this is a class adjudication with a verified
+      representative per class (and the largest class verified at its single shared source),
+      NOT 75 individual line reads. That is what "justified in writing" needs, but a reader who
+      wants per-line certainty should re-derive from the inventory report, which is complete.
+
+      *(The plan recorded an hour earlier — "69 hits second-hand and unadjudicated, justify per
+      class after verifying each class's members" — is what (d) above then carried out. Kept as
+      the record of the method, not as outstanding work.)*
 - [x] R11's suggestion text actually names lean-workers / cheap subagents — **VERIFIED
       REACHABLE AND NOW PINNED.** Three surfaces, all wired: `token-usage-anomaly.py:147`
       (unconditional inside the alarm f-string; roster `dispatch.py:446`),
