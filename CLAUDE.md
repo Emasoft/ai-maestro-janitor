@@ -46,10 +46,17 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
   `claude plugin update <plugin>@<marketplace> --scope user`. A green CI that nobody
   installs changes nothing on this machine. Known side effect: this manual path does
   not itself advance the C3 last-good integrity pin, so `janitor-self-integrity` may
-  report the anchor not covering the running version until the daemon's next
-  periodic fire re-certifies it (TRDD-ZM5LZ24Y). Transient, not a tamper signal — but
-  if it PERSISTS across several fires, the running version could not be certified
-  (quarantined, C2-dirty, or the daemon is down), and that IS worth investigating.
+  report the anchor not covering the running version until a **janitor-owned**
+  `version-update` fire re-certifies it (TRDD-ZM5LZ24Y). **Not a tamper signal, and on
+  this host not transient either** — measured 2026-08-16: the anchor still named
+  `0.59.0` (pinned 2026-07-21) while 3.3.9 ran, because `daemon.log` logs
+  `chore-coordination: yielding to active ai-maestro server: [… 'version-update']` on
+  every daemon start, and the C3 self-heal has only ever had one caller — the
+  janitor's own `task_version_update`. While the server owns that chore the fire never
+  comes. So do NOT wait it out, and do NOT read a frozen `version-update.last-run.ts`
+  as a dead daemon (for an absorbed chore a frozen janitor stamp is exactly what
+  healthy server-side execution looks like). Diagnose instead: grep `daemon.log` for
+  `version-update: C3 re-pin declined`, which names the refusing predicate outright.
 - **Every janitor-armed session on this machine must end up on the new version.** Prefer a
   path that does NOT require `/reload-plugins`, which breaks the prompt-cache prefix and
   re-bills the whole window (see TRDD-VHPYSN56); the cron stub already auto-rolls to the
@@ -110,7 +117,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7afd8a8549c0 generated=2026-08-14T06:52:18+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=1a74460aff97 generated=2026-08-16T05:05:28+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -138,7 +145,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
   - [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
   - [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
-  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the 39 janitor detectors by group
+  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (73 registered as of 2026-08-16)
   - [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
   - [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
 
