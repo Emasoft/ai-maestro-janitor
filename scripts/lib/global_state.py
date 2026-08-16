@@ -1770,7 +1770,17 @@ def _is_adhoc_signed(path: str) -> bool:
 
 
 def _signed_python_candidates() -> list[str]:
-    """Interpreter paths to try, best TCC identity first. PURE (no filesystem access)."""
+    """Interpreter paths to try, best TCC identity first.
+
+    `JANITOR_SIGNED_PYTHON_CANDIDATES` (colon-separated; may be set EMPTY) replaces the
+    built-in list. It exists because the built-ins are ABSOLUTE paths that no fake-HOME /
+    restricted-PATH test harness can hide — without the override, every hermetic test of the
+    lower rungs (uv find, the `uv run` shim) silently resolves the real host's framework
+    python instead, which is exactly how the 5-test breakage of 2026-08-16 happened.
+    """
+    override = os.environ.get("JANITOR_SIGNED_PYTHON_CANDIDATES")
+    if override is not None:
+        return [c for c in override.split(":") if c]
     pin = _MANAGED_PYTHON_PIN
     return [
         # python.org framework build — Developer-ID signed, stable path AND identity.

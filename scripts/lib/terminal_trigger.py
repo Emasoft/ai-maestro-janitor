@@ -620,10 +620,21 @@ def inject_until_sent(
     giveup_s: float | None = None,
     reader=read_pane_text,
     is_typing=None,
+    still_wanted=None,
     sleeper=time.sleep,
     clock=time.monotonic,
 ) -> tuple[bool, str]:
     """Keep trying until the command is actually SENT. Returns (sent, why).
+
+    `still_wanted` (optional): a zero-arg callable returning `(bool, why)`, re-asked on EVERY
+    iteration — i.e. at the same 8 s cadence as the typing deferral (owner directive
+    2026-08-16). `(False, why)` cancels the injection outright with a loud log line. This is
+    how a caller whose command is only valid under a CONDITION (the /clear chain: "the prompt
+    cache is still expired") keeps deferring past a busy pane without a wall clock deciding
+    for it: the condition, not the deadline, is the natural terminator, and `giveup_s` demotes
+    to a safety ceiling. Checked BEFORE the typing probe on purpose — a command that is no
+    longer wanted must cancel even while the user types, not wait for the pane to free up
+    first.
 
     THE THREE RULES (owner, 2026-08-02 — these REPLACE the old presence-cancel entirely):
 
@@ -677,6 +688,12 @@ def inject_until_sent(
         if clock() >= deadline or max_iters <= 0:
             state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
             return False, f"gave up after {giveup_s:.0f}s ({last})"
+
+        if still_wanted is not None:
+            wanted, wanted_why = still_wanted()
+            if not wanted:
+                state.log_line("terminal_trigger", f"inject cancelled: {wanted_why}")
+                return False, f"cancelled — {wanted_why}"
 
         if typing_probe(terminal):
             last = f"user typed within {quiet_s:.0f}s — deferring"
@@ -1026,6 +1043,7 @@ def run_chained_inject(
     gate_timeout_s: float = 180.0,
     settle_between_s: float = 0.0,
     giveup_s: float | None = None,
+    still_wanted=None,
     sleeper=time.sleep,
 ) -> tuple[bool, str]:
     """Type `first`, wait for the session it creates to actually EXIST, then type each of
@@ -1063,10 +1081,15 @@ def run_chained_inject(
 
     _runner, _submit, _clear = _step_runners(terminal)
 
+    # `still_wanted` gates the FIRST command ONLY, deliberately. Before `first` is submitted,
+    # cancelling is free — nothing happened. AFTER it (the /clear landed), the bootstrap
+    # commands MUST run regardless of any condition change: cancelling mid-chain strands a
+    # cleared session unarmed and unresumable, the exact outcome this chain exists to prevent.
     ok, why = inject_until_sent(
         terminal, first,
         type_fn=_runner(first), submit_fn=_submit, clear_fn=_clear,
-        pre_submit=pre_submit_first, giveup_s=giveup_s, sleeper=sleeper,
+        pre_submit=pre_submit_first, giveup_s=giveup_s, still_wanted=still_wanted,
+        sleeper=sleeper,
     )
     if not ok:
         return False, f"{first} not sent: {why}"

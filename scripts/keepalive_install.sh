@@ -88,12 +88,17 @@ _is_adhoc_signed() {
   codesign -dv "$1" 2>&1 | grep -qE 'Signature=adhoc|adhoc,linker-signed'
 }
 resolve_interpreter() {
-  local uv_bin="" p mp c
+  local uv_bin="" p mp c cand_list
   # 1. Stably-signed runtimes at known absolute paths, best identity first.
-  for c in \
-    "/Library/Frameworks/Python.framework/Versions/$MANAGED_PYTHON_PIN/bin/python$MANAGED_PYTHON_PIN" \
-    "/usr/local/bin/python$MANAGED_PYTHON_PIN" \
-    /usr/bin/python3; do
+  #    JANITOR_SIGNED_PYTHON_CANDIDATES (colon-separated, may be set EMPTY) replaces the
+  #    built-ins — absolute paths defeat fake-HOME test harnesses, so hermetic tests of the
+  #    lower rungs need this injectable (mirrors global_state._signed_python_candidates).
+  if [ -n "${JANITOR_SIGNED_PYTHON_CANDIDATES+x}" ]; then
+    cand_list="$(printf '%s' "$JANITOR_SIGNED_PYTHON_CANDIDATES" | tr ':' ' ')"
+  else
+    cand_list="/Library/Frameworks/Python.framework/Versions/$MANAGED_PYTHON_PIN/bin/python$MANAGED_PYTHON_PIN /usr/local/bin/python$MANAGED_PYTHON_PIN /usr/bin/python3"
+  fi
+  for c in $cand_list; do
     [ -x "$c" ] || continue
     _is_adhoc_signed "$c" && continue
     printf '%s' "$c"

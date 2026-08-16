@@ -33,29 +33,76 @@ class _Proc:
         self.returncode, self.stdout, self.stderr = rc, out, ""
 
 
-# --- the data dir, which is another plugin's and cannot be guessed -----------------
+# --- llm-ext's data dir is ITS OWN business, not ours ------------------------------
+#
+# The caller-side derivation these tests pinned is GONE (2026-08-16). The launcher resolves its
+# own store — 13.5.1 self-derives from its resolved path, 13.5.2+ pins `~/.llm-externalizer`
+# (`LLM_EXT_CONFIG_DIR`) and does not read CLAUDE_PLUGIN_DATA at all — and the component that
+# owns the layout is authoritative where every caller could only guess. Guessing was not
+# hypothetical harm: our derivation refused for any binary outside the cache layout and turned
+# that refusal into `permanent — llm-ext data dir unresolvable`, which degraded EVERY
+# daemon-context handoff to the template seven times on 2026-08-16 alone (TRDD-CEWVQ8DG).
+#
+# What replaced them: `test_the_child_env_STRIPS_our_own_plugin_data` below. The env var must be
+# REMOVED rather than merely unset by us — in a janitor hook/daemon child it names the JANITOR's
+# store, and on 13.5.1 an inherited value WINS over the launcher's own derivation, which would
+# self-install llm-ext's native module into the wrong plugin's directory.
 
 
-def test_data_dir_is_derived_from_the_binarys_own_marketplace(tmp_path, monkeypatch) -> None:
-    """Two llm-externalizer stores exist on a real host; the binary's path picks the right one.
+def test_the_child_env_STRIPS_our_own_plugin_data(tmp_path, monkeypatch) -> None:
+    """We must not hand llm-ext a CLAUDE_PLUGIN_DATA we inherited — it points at OUR store."""
+    t = tmp_path / "s.jsonl"
+    t.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(ec.shutil, "which", lambda _n: "/x/cache/m/llm-externalizer/1/bin/llm-ext")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", "/the/JANITORS/store")
+    seen: dict = {}
 
-    Guessing installs a second copy of a native module into the wrong store, so this must be
-    derived, never hardcoded.
+    def _run(cmd, **kw):
+        seen["env"] = kw.get("env") or {}
+        return _Proc(0, "a summary")
+
+    assert ec.run_llm_ext_summary(str(t), runner=_run) == "a summary"
+    assert "CLAUDE_PLUGIN_DATA" not in seen["env"], (
+        "inherited CLAUDE_PLUGIN_DATA names the JANITOR's data dir and beats the launcher's own "
+        "resolution — llm-ext would install its native module into the wrong plugin's store"
+    )
+
+
+def test_the_progress_signal_watches_the_CHECKPOINT_SUBDIR_not_the_config_root(
+    tmp_path, monkeypatch
+) -> None:
+    """The gate must watch `session-summary-checkpoints/`, never the config root.
+
+    llm-ext's `saveCheckpoint()` writes `<name>.tmp` and renames it inside that subdir once per
+    completed chunk, so only the SUBDIR's mtime ticks per chunk; the root's moves solely when a
+    top-level entry appears or disappears. Watching the root yields a signal that never advances
+    during a healthy summarize — the retry gate then abandons every chunk at its no-progress
+    timeout and handoffs silently degrade to the template.
+
+    Asserted as the exact path rather than behaviourally because the failure is INVISIBLE: both
+    directories exist, both are readable, and a fingerprint on the wrong one looks perfectly
+    healthy right up until it reports stalled work that is not stalled.
     """
-    home = tmp_path
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    want = home / ".claude" / "plugins" / "data" / "llm-externalizer-emasoft-plugins"
-    want.mkdir(parents=True)
-    (home / ".claude" / "plugins" / "data" / "llm-externalizer-inline").mkdir()
-    binary = home / ".claude/plugins/cache/emasoft-plugins/llm-externalizer/12.0.0/bin/llm-ext"
-    binary.parent.mkdir(parents=True)
-    binary.touch()
-    assert ec.llm_ext_data_dir(str(binary)) == str(want)
+    root = tmp_path / "llm-ext-state"
+    (root / "session-summary-checkpoints").mkdir(parents=True)
+    monkeypatch.setenv("LLM_EXT_CONFIG_DIR", str(root))
+    assert ec.llm_ext_state_dir() == str(root / "session-summary-checkpoints")
+    assert ec.llm_ext_state_dir() != str(root), "the config ROOT is a dead per-chunk signal"
 
 
-def test_data_dir_returns_empty_for_an_unexpected_layout(tmp_path) -> None:
-    """An unrecognised path yields "" so the caller DEGRADES rather than inventing a directory."""
-    assert ec.llm_ext_data_dir(str(tmp_path / "usr" / "local" / "bin" / "llm-ext")) == ""
+def test_the_progress_signal_is_ABSENT_rather_than_wrong_before_any_checkpoint(
+    tmp_path, monkeypatch
+) -> None:
+    """No checkpoint subdir yet ⇒ "" ⇒ the retry loop runs UNGATED.
+
+    The alternative — returning the root as a fallback — would substitute a signal that cannot
+    tick for one that is merely missing, and the loop would treat healthy work as stalled. No
+    gate is strictly better than a lying gate.
+    """
+    root = tmp_path / "llm-ext-state"
+    root.mkdir()  # config root exists, but llm-ext has never checkpointed here
+    monkeypatch.setenv("LLM_EXT_CONFIG_DIR", str(root))
+    assert ec.llm_ext_state_dir() == ""
 
 
 # --- every CLI failure mode must arrive as None -----------------------------------
@@ -65,7 +112,6 @@ def test_summary_is_none_when_the_cli_exits_non_zero(tmp_path, monkeypatch) -> N
     t = tmp_path / "s.jsonl"
     t.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(ec.shutil, "which", lambda _n: "/x/cache/m/llm-externalizer/1/bin/llm-ext")
-    monkeypatch.setattr(ec, "llm_ext_data_dir", lambda _b: "/data")
     assert ec.run_llm_ext_summary(str(t), runner=lambda *a, **k: _Proc(1, "junk")) is None
 
 
@@ -74,7 +120,6 @@ def test_summary_is_none_on_timeout_rather_than_raising(tmp_path, monkeypatch) -
     t = tmp_path / "s.jsonl"
     t.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(ec.shutil, "which", lambda _n: "/x/cache/m/llm-externalizer/1/bin/llm-ext")
-    monkeypatch.setattr(ec, "llm_ext_data_dir", lambda _b: "/data")
 
     def _boom(*_a, **_k):
         raise subprocess.TimeoutExpired(cmd="llm-ext", timeout=1)
@@ -82,30 +127,26 @@ def test_summary_is_none_on_timeout_rather_than_raising(tmp_path, monkeypatch) -
     assert ec.run_llm_ext_summary(str(t), runner=_boom) is None
 
 
-def test_summary_is_none_when_the_data_dir_cannot_be_resolved(tmp_path, monkeypatch) -> None:
-    """Without CLAUDE_PLUGIN_DATA the launcher dies before doing any work — do not even call."""
-    t = tmp_path / "s.jsonl"
-    t.write_text("{}\n", encoding="utf-8")
-    monkeypatch.setattr(ec.shutil, "which", lambda _n: "/weird/llm-ext")
-    monkeypatch.setattr(ec, "llm_ext_data_dir", lambda _b: "")
-    called = []
-    ec.run_llm_ext_summary(str(t), runner=lambda *a, **k: called.append(1) or _Proc(0, "x"))
-    assert not called, "must not invoke the CLI when its data dir is unknown"
+# (Two tests deleted 2026-08-16, not lost: `test_summary_is_none_when_the_data_dir_cannot_be_
+# resolved` pinned the refuse-without-data-dir behaviour, and `test_summary_passes_the_data_dir_
+# in_the_child_env` pinned passing CLAUDE_PLUGIN_DATA. Both pinned the CALLER-side derivation
+# that produced the `permanent — llm-ext data dir unresolvable` field failure. The launcher owns
+# its store now; the replacement contract — invoke unconditionally, STRIP the inherited var —
+# is `test_the_child_env_STRIPS_our_own_plugin_data` above. The `--stdout` flag assertion the
+# second test carried moves here:)
 
 
-def test_summary_passes_the_data_dir_in_the_child_env(tmp_path, monkeypatch) -> None:
+def test_summary_reads_stdout_not_a_report_path(tmp_path, monkeypatch) -> None:
     t = tmp_path / "s.jsonl"
     t.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(ec.shutil, "which", lambda _n: "/x/cache/m/llm-externalizer/1/bin/llm-ext")
-    monkeypatch.setattr(ec, "llm_ext_data_dir", lambda _b: "/data/llm-ext")
     seen: dict = {}
 
     def _run(cmd, **kw):
-        seen["cmd"], seen["env"] = cmd, kw.get("env") or {}
+        seen["cmd"] = cmd
         return _Proc(0, "a summary")
 
     assert ec.run_llm_ext_summary(str(t), runner=_run) == "a summary"
-    assert seen["env"].get("CLAUDE_PLUGIN_DATA") == "/data/llm-ext"
     assert "--stdout" in seen["cmd"], "must read the TEXT, not a report path still being written"
 
 

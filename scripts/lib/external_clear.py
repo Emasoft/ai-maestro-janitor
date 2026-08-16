@@ -136,7 +136,6 @@ __all__ = [
     "compose_handoff",
     "compose_template_handoff",
     "enabled",
-    "llm_ext_data_dir",
     "recent_messages",
     "run_llm_ext_summary",
     "headroom_seconds",
@@ -190,37 +189,6 @@ def use_llm_ext() -> bool:
 LLM_EXT_TIMEOUT_S = 600
 
 
-def llm_ext_data_dir(binary: str) -> str:
-    """The `CLAUDE_PLUGIN_DATA` value llm-externalizer needs, DERIVED from its own path.
-
-    Without this set the launcher dies before doing any work:
-
-        FATAL: native module 'better-sqlite3' is missing AND CLAUDE_PLUGIN_DATA is unset.
-        The launcher cannot self-install without a persistent data directory.
-
-    A janitor hook or detached child is exactly that context. Worse, the value is ANOTHER
-    plugin's data dir and this host carries two candidates
-    (`llm-externalizer-emasoft-plugins`, `llm-externalizer-inline`), so it cannot be guessed
-    and picking wrong self-installs a second copy of a native module.
-
-    Derived rather than hardcoded: the harness lays plugins out as
-    `…/cache/<marketplace>/<plugin>/<version>/bin/llm-ext` and names the data dir
-    `<plugin>-<marketplace>` — the same convention as this plugin's own
-    `ai-maestro-janitor-ai-maestro-plugins`. So the binary that will actually run tells us
-    which store belongs to it, and a reinstall under a different marketplace keeps working.
-    Returns "" when the path does not match, so the caller degrades instead of inventing one.
-    """
-    parts = Path(binary).resolve().parts
-    if "cache" not in parts:
-        return ""
-    i = parts.index("cache")
-    if len(parts) < i + 3:
-        return ""
-    marketplace, plugin = parts[i + 1], parts[i + 2]
-    data = Path.home() / ".claude" / "plugins" / "data" / f"{plugin}-{marketplace}"
-    return str(data) if data.is_dir() else ""
-
-
 def _version_key(name: str) -> tuple[int, ...]:
     """A sortable numeric tuple for a version directory name; a non-numeric part sorts as 0.
 
@@ -243,7 +211,7 @@ def resolve_llm_ext() -> str:
     detached child does not. So every cold-resume handoff on this machine degraded to the template
     (`summary: permanent — llm-ext is not on PATH; not retrying`) while the binary sat exactly
     where this function now looks. Resolving by the install's OWN documented layout — the same
-    convention `llm_ext_data_dir` already reads in reverse — removes the dependency on whose
+    `cache/<marketplace>/<plugin>/<version>/…` convention — removes the dependency on whose
     environment happens to be inherited.
 
     PATH still wins when it answers, so an operator who put a specific build there keeps control.
@@ -291,13 +259,54 @@ def llm_ext_progress_fn() -> Callable[[], float] | None:
     on the machine running them. Production wiring calls this explicitly (see
     `external_handoff_clear.py`); tests inject a fake `progress_fn` instead.
     """
-    binary = resolve_llm_ext()
-    if not binary:
+    if not resolve_llm_ext():
         return None
-    data_dir = llm_ext_data_dir(binary)
+    data_dir = llm_ext_state_dir()
     if not data_dir:
         return None
     return lambda: _data_dir_fingerprint(data_dir)
+
+
+# WHERE llm-ext's per-chunk progress is actually observable.
+#
+# `LLM_EXT_CONFIG_DIR` else `~/.llm-externalizer` is exactly the resolution llm-ext's own
+# `getConfigDir()` performs, and the maintainer confirmed it is PUBLIC and stable (documented in
+# their README + setup docs) — so this asks the same question the tool asks rather than assuming
+# a path.
+#
+# BUT THE ROOT IS THE WRONG DIRECTORY TO WATCH, and that correction came from the llm-externalizer
+# maintainer after this code first pointed at it. Checkpoints land in the
+# `session-summary-checkpoints/` SUBDIR (`saveCheckpoint()`: mkdir, write `<name>.tmp`, rename —
+# once per completed chunk, tmp and target in that same dir). Only that subdir's mtime advances
+# per chunk; the ROOT's moves solely when a top-level entry is added or removed. Verified here
+# 2026-08-16: the subdir holds one file per summarized transcript, the newest written 11:45 by our
+# own run.
+#
+# A WRONG PROGRESS SIGNAL IS WORSE THAN NONE — it does not fail loudly, it reports "no progress"
+# during a perfectly healthy summarize, and the retry gate then abandons every chunk at its
+# no-progress timeout while handoffs quietly degrade to the template. That is exactly the
+# indistinguishable-from-fixed failure this whole card chased.
+#
+# Also corrected while here: this codebase previously fingerprinted the llm-externalizer
+# PLUGIN-DATA dir, and the maintainer's `f338112` did NOT move checkpoints out of it — that commit
+# only relocated the native deps, and `getConfigDir()` already resolved to `~/.llm-externalizer`
+# beforehand. So the old fingerprint was never watching checkpoint writes at all: it was a proxy
+# that happened to tick for unrelated reasons, and it never named the thing it claimed to measure.
+_LLM_EXT_STATE_ENV = "LLM_EXT_CONFIG_DIR"
+_LLM_EXT_STATE_DEFAULT = "~/.llm-externalizer"
+_LLM_EXT_CHECKPOINT_SUBDIR = "session-summary-checkpoints"
+
+
+def llm_ext_state_dir() -> str:
+    """The directory whose mtime advances once per COMPLETED summarize chunk, or "".
+
+    Returns the checkpoint subdir, never the config root — see the block above for why the root
+    is a dead signal. "" when it does not exist yet (llm-ext has never checkpointed here), which
+    the caller reads as "no gate", never as "no progress".
+    """
+    raw = os.environ.get(_LLM_EXT_STATE_ENV, "").strip() or _LLM_EXT_STATE_DEFAULT
+    path = Path(raw).expanduser() / _LLM_EXT_CHECKPOINT_SUBDIR
+    return str(path) if path.is_dir() else ""
 
 
 def _default_runner(
@@ -357,10 +366,11 @@ def run_llm_ext_summary(
     binary = resolve_llm_ext()
     if not binary or not transcript or not Path(transcript).is_file():
         return None
-    data_dir = llm_ext_data_dir(binary)
-    if not data_dir:
-        return None
-    env = dict(os.environ, CLAUDE_PLUGIN_DATA=data_dir)
+    # Same contract as `attempt_llm_ext_summary`: the launcher owns its own data dir (13.5.1
+    # self-derives, 13.5.2+ pins `~/.llm-externalizer` and ignores the var), so REMOVE
+    # CLAUDE_PLUGIN_DATA rather than setting it — inherited from a janitor child it names the
+    # JANITOR's store and would win over the launcher's own resolution.
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_DATA"}
     try:
         proc = runner(
             [binary, "session-summary", "--stdout", "--transcript", transcript],
@@ -721,10 +731,18 @@ def attempt_llm_ext_summary(
         return SummaryAttempt(None, OUTCOME_PERMANENT, "llm-ext is not installed")
     if not transcript or not Path(transcript).is_file():
         return SummaryAttempt(None, OUTCOME_PERMANENT, "no readable transcript")
-    data_dir = llm_ext_data_dir(binary)
-    if not data_dir:
-        return SummaryAttempt(None, OUTCOME_PERMANENT, "llm-ext data dir unresolvable")
-    env = dict(os.environ, CLAUDE_PLUGIN_DATA=data_dir)
+    # DO NOT derive llm-ext's data dir here, and DO NOT pass ours through. The launcher
+    # self-resolves it since 13.5.x — verified on the installed build 2026-08-16
+    # (launcher.mjs:274 `process.env.CLAUDE_PLUGIN_DATA || deriveDataDirFromLayout()`, the
+    # same cache-layout derivation this file used to do, confirmed by the llm-externalizer
+    # session) — and the launcher deriving from its OWN resolved path is authoritative where
+    # every caller can only guess. The env var must be REMOVED, not merely left alone: in a
+    # janitor hook/daemon child CLAUDE_PLUGIN_DATA names the JANITOR's data dir, and the env
+    # var WINS over the launcher's derivation, so inheriting it would self-install llm-ext's
+    # native module into the wrong plugin's store. This replaces the old caller-side refusal
+    # ("llm-ext data dir unresolvable"), which degraded every daemon-context handoff to the
+    # template — the CEWVQ8DG field failure, 7 occurrences on 2026-08-16 alone.
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_DATA"}
     try:
         proc = runner(
             [binary, "session-summary", "--stdout", "--transcript", transcript],

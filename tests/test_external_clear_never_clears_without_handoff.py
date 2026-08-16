@@ -46,14 +46,22 @@ def _firing_project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     """A project the watcher will actually decide to clear, with a recorded pane.
 
     Every veto is satisfied with REAL inputs rather than by stubbing the gate: a long-idle
-    transcript that does not end on an unanswered question, the feature switched on, and the
-    agentlensPro probe disabled so no subprocess is spawned.
+    transcript that does not end on an unanswered question, the feature switched on, and both
+    external subprocesses (the agentlensPro probe and the llm-ext summariser) switched OFF so
+    nothing machine-touching is spawned.
     """
     import memory_scopes  # noqa: PLC0415
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv(ec.ENABLED_ENV, "true")
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no third-party probe
+    # The llm-ext summariser is OFF for the same reason the probe is, and the omission was a
+    # real leak: these tests spawned the machine's REAL llm-ext against a pytest tmp transcript,
+    # which the suite's allow-list correctly refused (SandboxViolation) — after which the retry
+    # loop slept its way through the backoff, making the file slow as well as impure. Nothing
+    # here asserts anything about summarisation: the subject is the ORDER of the handoff write
+    # versus the chain spawn, and `compose_handoff` produces the template handoff without it.
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "false")
     monkeypatch.setenv(ec.MIN_CONTEXT_ENV, "0")  # size must not veto
 
     import cold_cache_compact  # noqa: PLC0415

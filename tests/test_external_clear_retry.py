@@ -502,10 +502,12 @@ def test_an_install_time_precondition_is_permanent_not_transient() -> None:
     # the test environment-tolerant — WHICH precondition fires depends on the host — and that is
     # also why the rename escaped local review: on a machine where llm-ext IS installed this
     # reaches the transcript branch and never sees the renamed string. CI, with no llm-ext, did.
+    # "data dir unresolvable" was REMOVED from this set 2026-08-16: the launcher self-derives
+    # its data dir since 13.5.x, so the caller-side refusal no longer exists — it was the
+    # CEWVQ8DG field failure (every daemon-context handoff degraded to the template).
     assert got.detail in {
         "llm-ext is not installed",
         "no readable transcript",
-        "llm-ext data dir unresolvable",
     }, got.detail
 
 

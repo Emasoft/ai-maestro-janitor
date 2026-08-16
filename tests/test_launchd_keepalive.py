@@ -437,10 +437,14 @@ def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
 
 
 # ── Interpreter resolution both ways (TRDD-DB1P25S4) ─────────────────────────
-# TCC persists an Automation grant only against a STABLE binary identity, so the
-# baked interpreter must be uv's MANAGED CPython when one resolves; the `uv run`
-# shim (an ephemeral per-spawn binary no grant can stick to) is the LAST resort.
-# Hermetic: a curated PATH (no python*) + a scripted fake `uv` control the outcome.
+# TCC persists an Automation grant only against a STABLE binary IDENTITY (2026-08-16
+# correction: a stable PATH is not enough — uv's managed CPython is ad-hoc signed with
+# Identifier=-, so the grant never sticks to it). The baked interpreter ladder is now:
+# operator override → signed absolute candidates (python.org framework / /usr/bin/python3)
+# → identity-checked PATH → uv's managed find → the `uv run` shim dead last (an ephemeral
+# per-spawn binary no grant can EVER stick to). Hermetic: a curated PATH (no python*), a
+# scripted fake `uv`, and JANITOR_SIGNED_PYTHON_CANDIDATES set EMPTY to erase the absolute
+# candidates a fake HOME cannot hide.
 
 
 def _fakebin(tmp_path: Path, uv_body: str) -> Path:
@@ -467,6 +471,12 @@ def _run_installer_with_path(fake_home: Path, fakebin: Path) -> None:
         "HOME": str(fake_home),
         "PATH": str(fakebin),
         "KEEPALIVE_SKIP_ACTIVATION": "1",
+        # Set-but-EMPTY: erase the resolver's built-in ABSOLUTE-path candidates
+        # (/Library/Frameworks/…, /usr/bin/python3). A curated PATH cannot hide those — they
+        # are probed by path, not looked up — so without this every hermetic test of the
+        # lower rungs (uv find, the uv-run shim) silently resolved the real host's framework
+        # python instead. Caught as 2 installer-test failures on 2026-08-16.
+        "JANITOR_SIGNED_PYTHON_CANDIDATES": "",
     }
     env.pop("XDG_CONFIG_HOME", None)
     proc = subprocess.run(
@@ -495,11 +505,14 @@ def _baked_interpreter_tokens(fake_home: Path, plat: str) -> list[str]:
 
 
 @pytest.mark.real_subprocess("bash")
-def test_config_bakes_managed_python_first(tmp_path: Path) -> None:
-    """Rendering, way 1: `uv python find --system --managed-python <pin>` resolves → THAT
-    absolute path (the stable, TCC-grantable identity) is the whole baked interpreter —
-    never the `uv run` shim. The find must carry both flags: `--system` is load-bearing
-    (without it a project's .venv wins), `--managed-python` pins the stable install."""
+def test_config_bakes_managed_python_when_no_signed_runtime_exists(tmp_path: Path) -> None:
+    """Rendering: with NO signed candidate and NO python on PATH, `uv python find --system
+    --managed-python <pin>` is the next rung → THAT absolute path is the whole baked
+    interpreter — still never the `uv run` shim. Since the 2026-08-16 identity correction
+    this is a LAST-RESORT rung (ad-hoc signed, grant unlikely to stick), not the preferred
+    one — but it must keep working: a host with no python.org/Apple runtime is better off
+    with a daemon that runs and logs its denial than with none. The find must carry both
+    flags: `--system` is load-bearing (without it a project's .venv wins)."""
     plat = launchd_keepalive.current_platform()
     if plat == "other":
         pytest.skip(f"no OS keepalive on {sys.platform}")

@@ -1125,29 +1125,32 @@ def _daemon_spawn_spy(gs, calls: list[list[str]], *, fail_first: bool = False): 
     return fake_popen
 
 
-def test_spawn_prefers_managed_interpreter(
+def test_spawn_prefers_the_automation_interpreter(
     state_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """spawn_daemon_detached launches daemon.py under the MANAGED interpreter when one
-    resolves — the daemon (and its osascript children, which inherit sys.executable) then
-    carry the TCC-granted stable identity instead of the ungrantable uv shim."""
+    """spawn_daemon_detached launches daemon.py under `automation_python_path()` — a STABLY
+    SIGNED runtime, so the daemon (and its osascript children, which inherit sys.executable)
+    carry an identity a TCC Automation grant can actually bind to. Patches the RESOLVER, not
+    `_managed_python_path`: since the 2026-08-16 identity correction the spawn site consults
+    `automation_python_path()`, and patching the old helper left the real host resolver live —
+    exactly how these three tests caught the (intended) contract change."""
     gs = _gs()
     calls: list[list[str]] = []
-    monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
+    monkeypatch.setattr(gs, "automation_python_path", lambda: "/stable/python3.12")
     monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][0] == "/stable/python3.12"
     assert calls[0][1].endswith("daemon.py")
 
 
-def test_spawn_falls_back_to_uv_run_without_managed(
+def test_spawn_falls_back_to_uv_run_without_any_interpreter(
     state_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No managed interpreter → `uv run --script` remains the launcher (a running daemon
-    beats none, even under the ephemeral identity)."""
+    """No resolvable interpreter at all → `uv run --script` remains the launcher of last
+    resort (a running daemon beats none, even under the ephemeral, ungrantable identity)."""
     gs = _gs()
     calls: list[list[str]] = []
-    monkeypatch.setattr(gs, "_managed_python_path", lambda: None)
+    monkeypatch.setattr(gs, "automation_python_path", lambda: None)
     monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][:4] == ["uv", "run", "--script", "--quiet"]
@@ -1157,10 +1160,10 @@ def test_spawn_skips_failing_launcher(
     state_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launcher that cannot exec (OSError) is skipped, not fatal — the next candidate
-    in the managed → uv-run → sys.executable ladder is tried."""
+    in the signed-interpreter → uv-run → sys.executable ladder is tried."""
     gs = _gs()
     calls: list[list[str]] = []
-    monkeypatch.setattr(gs, "_managed_python_path", lambda: "/stable/python3.12")
+    monkeypatch.setattr(gs, "automation_python_path", lambda: "/stable/python3.12")
     monkeypatch.setattr(gs.subprocess, "Popen", _daemon_spawn_spy(gs, calls, fail_first=True))
     assert gs.spawn_daemon_detached() == 4242
     assert calls[0][0] == "/stable/python3.12"
