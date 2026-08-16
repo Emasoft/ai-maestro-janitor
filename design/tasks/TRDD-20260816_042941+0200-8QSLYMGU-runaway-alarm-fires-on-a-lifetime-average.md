@@ -1,9 +1,9 @@
 ---
 trdd-id: 8QSLYMGU
 title: The runaway alarm fires on a lifetime-average CPU sample with no persistence requirement, so a finished burst reads as an ongoing emergency
-column: todo
+column: complete
 created: 2026-08-16T04:29:41+0200
-updated: 2026-08-16T04:35:00+0200
+updated: 2026-08-16T05:34:00+0200
 current-owner: unassigned
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -14,7 +14,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-HK7IZ21Z, TRDD-D6RDPZIU]
-implementation-commits: []
+implementation-commits: [540ee8ed]
 ---
 
 # A burst that ended reads as "investigate before it exhausts the host"
@@ -106,16 +106,29 @@ and its urgency is real.
 
 ## Acceptance
 
-- [ ] A single high-`%cpu` sample on an otherwise-idle process does NOT alarm; a sustained one does.
-- [ ] Falsified against the real shape: a fixture whose process is over threshold on fire 1 and
-      under it on fire 2 stays silent, while one over threshold on every fire alarms.
-- [ ] The alarm text states the metric's window, so an instantaneous cross-check that disagrees is
-      explainable rather than evidence the detector is lying.
-- [ ] `fseventsd`-shaped input (sustained, days long) still alarms — the case the detector exists
-      for must not be lost to the fix.
-- [ ] An **RSS** finding still alarms on the FIRST fire — explicitly tested, because the tempting
-      symmetry ("gate both kinds") would have delayed TRDD-ZNN0UK5K's 39 GB emergency by 10 min.
-- [ ] `uv run pytest` green; ruff + mypy clean.
+- [x] A single high-`%cpu` sample on an otherwise-idle process does NOT alarm; a sustained one does.
+      `test_cpu_finding_is_silent_on_its_first_fire` + `..._alarms_once_the_streak_is_met`, and
+      end-to-end across two REAL detector processes in `test_cpu_runaway_needs_two_fires_end_to_end`.
+- [x] Falsified against the real shape: over threshold on fire 1, quiet on fire 2, over again on
+      fire 3 — silent throughout, because fire 2 DROPS the key rather than carrying it
+      (`test_a_burst_that_ended_is_dropped_and_must_start_over`, and the same three fires as real
+      subprocesses in `test_cpu_burst_that_ends_never_alarms_end_to_end`). Independently falsified
+      by running the new helper at `min_streak=1`, which reproduces the old behaviour exactly
+      (1 reported vs 0) — so the gate, not something incidental, is what suppresses the burst.
+- [x] The alarm text states the metric's window: `CPU 161% (a lifetime average, not a live sample;
+      over the bar on 3 consecutive checks)`.
+- [x] `fseventsd`-shaped input still alarms — `test_a_sustained_fseventsd_shaped_cpu_burn_still_alarms`
+      pins five consecutive fires reporting `[0, 1, 1, 1, 1]` (silent once, then every fire).
+- [x] An **RSS** finding still alarms on the FIRST fire, and contributes NO streak key at all —
+      `test_rss_finding_alarms_on_the_first_fire_and_is_never_streaked` plus the real-subprocess
+      `test_rss_runaway_alarms_on_the_very_first_fire_end_to_end`.
+- [x] `uv run pytest` green; ruff + mypy clean.
+
+Also delivered, from design item 3: the disk clause no longer escalates on a CPU finding (it is
+reported, not called an amplifier), with the RSS branch keeping the wording where the amplification
+claim is actually true — pinned in both directions by
+`test_cpu_drift_line_reports_disk_pressure_without_escalating_on_it` and
+`test_rss_drift_line_still_calls_disk_pressure_the_amplifier`.
 
 ## Notes and lessons learned
 
@@ -123,3 +136,23 @@ Found by verifying an alarm instead of acting on it, twice. The first verificati
 TRDD-D6RDPZIU (where it surfaced a different bug — undated findings); this card is what remained
 once that one was fixed and the alarm STILL did not reproduce. Two independent defects were
 wearing the same symptom, and fixing the first made the second visible.
+
+**Autopsy — why the bug existed at all.** Nothing here was carelessly written: `classify_runaway`
+was correct, tested, and pure; the threshold was reasonable; the fixture-driven tests all passed.
+The defect lived entirely in the GAP between what `ps %cpu` measures and what a single sample of it
+was taken to mean. No test could have caught it, because every test fed the detector one snapshot —
+and one snapshot is exactly the input on which a lifetime average and a live sample are
+indistinguishable. **The category is "a metric whose meaning depends on a window the code never
+records"**, and the guardrail against it is procedural, not a test: when thresholding a metric, ask
+what interval it covers before choosing whether one sample may trip it. Captured for reuse beyond
+this repo as `ATOM-I2EH-TDH7` on the USER-scope page
+`debugging-methodology-verify-before-concluding-instrumentation`.
+
+**The trap that nearly got taken, recorded because it was tempting and wrong.** The obvious
+symmetry — "the fix is a persistence gate, so gate both metrics" — would have been a REGRESSION,
+not a tidier fix. RSS is an instantaneous level, and the incident this whole detector exists for
+(TRDD-ZNN0UK5K, fseventsd at 39 GB) was an RSS finding: gating it would have delayed the one alarm
+that mattered by a full 600 s cadence, to buy nothing. Consistency between two metrics is only a
+virtue when they measure the same KIND of thing. `test_rss_finding_alarms_on_the_first_fire_and_is_never_streaked`
+and its end-to-end sibling exist specifically so a later "cleanup" cannot quietly restore the
+symmetry.
