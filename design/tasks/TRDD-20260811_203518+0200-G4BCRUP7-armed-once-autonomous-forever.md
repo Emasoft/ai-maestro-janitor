@@ -1,9 +1,9 @@
 ---
 trdd-id: G4BCRUP7
 title: Armed once means autonomous forever — the 16-capability contract, audited and closed
-column: todo
+column: complete
 created: 2026-08-11T20:35:18+0200
-updated: 2026-08-16T05:45:28+0200
+updated: 2026-08-16T06:05:32+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -290,11 +290,30 @@ being cancelled rather than accepted.
       session still gets ESC-only fired. R6's literal "answered with the default option" is
       NOT met for `ExitPlanMode`/`AskUserQuestion` — that is a deliberate refuse-and-page-human
       design (`daemon.py:1398-1440`), reported honestly rather than silently ticked as full.
-- [ ] No capability in the table requires a manual bootstrap, opt-in command, or re-arm on a
+- [x] No capability in the table requires a manual bootstrap, opt-in command, or re-arm on a
       fresh install — or, where one is unavoidable, `/janitor-arm` performs it
-      **NOT re-audited this pass** — R8/R9's rotation opt-in and the 2nd-account browser login
-      are known, already-accepted exceptions per this card's own 2026-08-11 STATE; left
-      unticked rather than guessed at without a fresh full-table sweep.
+      **SWEPT 2026-08-16, all 16 rows, verdict per row backed by a file:line** —
+      `reports/small-cards/20260816_060412+0200-g4bcrup7-bootstrap-sweep.md`.
+      **14 AUTONOMOUS · 1 ARM-PERFORMED (R1 — the arm IS the carve-out this box grants) ·
+      0 newly-found manual bootstrap · 0 unverified.** The only manual steps that surfaced are
+      the ones this card already names and accepts: R8's rotation opt-in, the second-account
+      OAuth **browser** login (no CLI can complete an interactive OAuth flow — this one is not
+      automatable, not merely un-automated), and R10's `FLEET_HARD_RESTART_ENABLED` default-OFF.
+
+      **R10 stays OFF deliberately and that is NOT a gap in this box.** Enabling it kills a
+      wedged session's in-memory conversation, which is an owner policy call, not a mechanical
+      default — having `/janitor-arm` flip it would DELETE the decision point rather than
+      automate a bootstrap step. It is carded separately (the A5 hard-restart-rungs card, itself
+      `blocked` on ai-maestro#102), which is where it belongs.
+
+      **Four claims re-verified first-hand rather than taken from the sweep**, because a sweep is
+      evidence and not a decision: `fleet_restart.py:136` (`…FLEET_HARD_RESTART_ENABLED", "0"` —
+      OFF) · `daemon.py:1270` (`is_truthy_env(…SESSION_LIVENESS_ENABLED, True)` — ON) ·
+      `memory_settings.py:51-58` (all seven passes `1`/day) · and R7, where the sweep's cited
+      evidence was **imprecise** — it reported "grep shows a `True` default" while its grep only
+      showed the env-var NAME and a docstring. The default is real, at
+      `model_fallback.py:61` → `state.is_truthy_env(_ENABLED_ENV, True)`. Right conclusion,
+      wrong proof; the proof is what a later reader will re-check, so it is recorded here.
 - [x] C2 audit: every drift line that ASKS the model to do something a script could do is
       either converted to a script action or justified in writing on this card
       **DONE 2026-08-16 — 75 sites inventoried (complete coverage), ZERO C2 violations, all
