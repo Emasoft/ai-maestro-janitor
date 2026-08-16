@@ -3,7 +3,7 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-16T18:40:00+0200
+updated: 2026-08-16T20:52:52+0200
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
@@ -58,11 +58,22 @@ retracted mechanism.
    adjusted.** Every entry was classified by comparing `ps %cpu` (a ~1-minute average)
    against `top -l 2` (a ~1-second delta). Those are not comparable, so 167% and 2.7% can
    both be true of the same bursty process. Re-measure from zero.
-2. **Some dismissed alarms were probably CORRECT.** The discriminating test is whether the
-   lifetime ratio and the reported `%cpu` AGREE: a burst makes them diverge, sustained load
-   makes them converge. Observed on JumpConnect pid 3459 — 1348 s CPU over 1379 s wall,
-   ~98% of a core for 23 minutes, both figures agreeing. That is a plausibly real runaway
-   that was written off.
+2. **Some dismissed alarms were probably CORRECT.** Observed on JumpConnect pid 3459 —
+   1348 s CPU over 1379 s wall, ~98% of a core for 23 minutes. Also on pid 26449, confirmed
+   by three observers.
+
+   **CORRECTED LATER THE SAME EVENING — do not use the test this item originally gave.** It
+   said the discriminator is whether the lifetime ratio and the reported `%cpu` AGREE. That
+   is unreliable, and my own measurement below breaks it: pid 26449 showed a cumulative of
+   **100.0%** against an interval of **286%**. A cumulative ratio saturates near its
+   historical mean and cannot exceed the core-count it has averaged, so on a long-lived
+   process it "agrees" with any high reading by construction — a degenerate test that
+   confirms whatever it is shown.
+
+   **The only ground truth is INTERVAL DIFFERENCING**: read `ps -o time=` twice across a
+   known wall-clock gap and divide. Everything else on offer — `%cpu`, `time/etime`,
+   `top -l 2` — is an average over some window, and the entire failure of this investigation
+   was comparing two such windows as though they measured the same thing.
 3. **UNANSWERED, and the real design question underneath all of this: is ~1 minute the
    right window for a runaway alarm at a 600 s cadence?** Nobody has scoped it. A one-minute
    average sampled every ten minutes can miss a nine-minute burn entirely, and can fire on a
@@ -84,3 +95,41 @@ Origin of the correction: the ai-maestro session, which originated the false mec
 then came back to refute it against its own interest. Both directions of that exchange —
 their retraction, and my refutation of their follow-up claim about the streak gate — were
 settled by re-measuring rather than by argument.
+
+## The retracted mechanism fails in BOTH directions (measured 2026-08-16 evening)
+
+Everything argued earlier assumed the false mechanism OVER-reports ("a burst that already
+ENDED still reads high"). It also UNDER-reports, and that direction is worse because it
+produces SILENCE rather than noise.
+
+Same pid (26449), one hour apart, three observers:
+
+| when | cumulative (`time/etime`) | interval (differencing) | truth |
+|---|---|---|---|
+| earlier | 96.0% | **6.4%** | had STOPPED — cumulative OVER-reported |
+| later | 99.3% | **191%** | ~1.9 cores live — cumulative UNDER-reported |
+| my own check, 10 s window | **100.0%** | **286%** | ~2.9 cores live — under-reported ~3x |
+
+**The structural reason, which is why this is not a tuning problem:** the cumulative
+figure is CPU-time / elapsed over the process's whole life — here 11,511 s over 11,510 s.
+After three hours the denominator is so large that no live excursion can move it. It is a
+heavily damped average pinned near its historical mean, so it cannot track a spike in
+either direction: it stays high after a burst ends, and it stays low while a new burst
+runs. A detector keyed on it reports ~100% for a process doing 286%.
+
+An alarm that cries wolf trains dismissal — which is what happened to this fleet today. An
+alarm that stays QUIET during a real runaway trains nothing at all, because there is
+nothing to observe. The second failure is undetectable from the outside, which is why it
+survived unnoticed while the first was being argued about all evening.
+
+**Consequence for the fix:** whatever replaces the current gate must be validated against a
+process that is live-hot but historically quiet, not only against one that has cooled. The
+existing test corpus only ever exercises the over-reporting direction.
+
+## The RAM half, unexamined by anyone
+
+The alarm says "RAM/CPU runaway" and every discussion so far has been about CPU. `ps` RSS
+on this pid read 2.07 GB and then 2.17 GB roughly an hour apart, and `top` printed `1798M+`
+(the `+` denoting growth). That is TWO POINTS, not a trend — named here so it is not lost,
+NOT concluded. If it is a leak it is a separate finding with a separate owner (the process
+belongs to llm-externalizer, not to this repo).
