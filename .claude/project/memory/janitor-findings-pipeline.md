@@ -1,13 +1,14 @@
 ---
 name: janitor-findings-pipeline
-description: "where do janitor findings/drift lines actually get recorded / what is the findings ledger / where does a sev>=HIGH finding get pushed to a human / what does janitor-findings show / findings-ledger.ndjsonl format / notify.py human channel gates / how does SessionStart surface unread findings"
+description: "where do janitor findings/drift lines actually get recorded / what is the findings ledger / where does a sev>=HIGH finding get pushed to a human / what does janitor-findings show / findings-ledger.ndjsonl format / notify.py human channel gates / how does SessionStart surface unread findings / the lint count jumped and the corpus looks like it is rotting / are two findings counts even comparable"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-08-16
 metadata:
   node_type: memory
   type: project
   tier: component
   functionality: findings-pipeline
+publish-globally: false
 ---
 
 # janitor-findings-pipeline
@@ -28,6 +29,25 @@ metadata:
   sev ≥ HIGH + content-hash dedupe + 24 h cap with one-per-day digest fold) — wired to
   supervisor alerts, the F4 keychain-degradation probe, task-quarantine entry, and the
   fleet github-config digest.
+
+
+^ATOM-HJGX-SQLI [desc: "A lint/findings COUNT is only comparable within one linter version — check what the older binary could emit before reading a jump as decay", keywords: lint_count_jumped findings_exploded corpus_is_rotting_fast 240_findings_vs_50 count_comparison_across_versions did_the_memory_corpus_decay, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
+
+**A findings COUNT is only comparable within ONE version of the thing that counts.** On
+2026-08-16 the heartbeat reported `memgrep lint: 240 finding(s)` against a card's 50 from three
+days earlier — a 5× jump that reads as the corpus rotting. It was not. The linter had been
+upgraded in between (11 crate commits), and `git merge-base --is-ancestor <feature-commit>
+<old-binary-sha>` showed the OLD binary could not emit `publish-globally-missing`,
+`atom-after-footer`, or the cross-page form of `link-one-sided` at all: **135 of the 240 were
+structurally invisible three days earlier.** Newly VISIBLE debt, not new debt.
+
+Only two codes were comparable, and they are the ones that carried the real signal:
+`atom-oversized` 12→15 (refilling, nothing drains it) and `lesson-uncited` 23→23 (flat).
+
+**The check is cheap and it is the whole discipline:** before reading a count as a trend, ask what
+the EARLIER measurement could see. `memgrep --version` carries the build's commit for exactly this
+(janitor#164), and `git merge-base --is-ancestor` answers "was this rule even present then" in one
+command. A trend drawn across an instrument change is not a trend.
 
 ## Governed by
 
