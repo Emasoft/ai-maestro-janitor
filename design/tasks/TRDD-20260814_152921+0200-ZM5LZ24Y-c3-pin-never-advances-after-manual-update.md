@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-16T06:50:00+0200
+updated: 2026-08-16T05:58:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -110,7 +110,9 @@ ever appears while the anchor stays stale, the chore is never running janitor-si
 answer is the absorption hole above — which is then its own card, not this one.
 
 **BEFORE reading that absence as the answer, CHECK TWO PRECONDITIONS — otherwise it means nothing.**
-Verified 2026-08-16 06:50: v3.3.10 (carrying the instrumentation) is INSTALLED, the anchor is still
+Verified 2026-08-16 05:33 (this line first said "06:50" — a HAND-TYPED stamp, ~77 min ahead of the
+real clock; the commit that wrote it, `836a3143`, is timestamped 05:33:47): v3.3.10 (carrying the
+instrumentation) is INSTALLED, the anchor is still
 `0.59.0`, and there is NO decline line — yet that is not evidence of anything, because both
 preconditions fail:
 
@@ -125,6 +127,28 @@ preconditions fail:
 
 So the honest state is **PENDING**, not negative. Only an absence observed while BOTH preconditions
 hold is evidence for the absorption hole.
+
+### PRECONDITIONS MEASURED 2026-08-16 05:57 — both FALSE, and #1 flips on its own
+
+Read-only; `/janitor-repin-integrity` was NOT run.
+
+| precondition | measurement | verdict |
+|---|---|---|
+| 1. daemon running the NEW code | live daemon `pid=12823`, `started 2026-08-16T05:30:57`; `cache/…/ai-maestro-janitor/3.3.10` mtime **05:33** | **FALSE** — the daemon predates the install by ~2 min, so it is still executing 3.3.9 |
+| 2. a JANITOR-owned `version-update` fire since | whole `daemon.log` holds exactly ONE (`2026-08-15T19:10:34`, 5 s, pid 53721) — before the install; the 05:30:58 start again logs `yielding … 'version-update'` | **FALSE** |
+
+So the still-absent `C3 re-pin declined` line remains **evidence of nothing**, exactly as the guard
+above predicted. Two consequences worth stating because they are not symmetric:
+
+- **#1 self-heals.** Observed daemon starts 23:14 → 01:00 → 03:24 → 05:31 give a ~1.5–2.3 h restart
+  cadence, so a process running 3.3.10 arrives without anyone doing anything. Do NOT restart the
+  daemon by hand to hurry it — a hand-restart is a different experiment (it proves the code path
+  works when forced, not that the periodic path reaches it).
+- **#2 does not.** It is gated on the ai-maestro server RELEASING `version-update`, which nothing in
+  this repo controls. If the next janitor-owned fire never comes, the answer is the absorption hole
+  and it belongs to its own card — the instrumentation shipped in `11e925c0` lives inside
+  `task_version_update`, so on this host it is **unreachable code**, not silent code. That is the
+  sharper way to say it, and it is what a future session should test next: reachability, not output.
 
 ## The defect
 

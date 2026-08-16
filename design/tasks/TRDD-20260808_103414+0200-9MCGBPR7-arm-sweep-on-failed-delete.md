@@ -1,17 +1,16 @@
 ---
 trdd-id: 9MCGBPR7
 title: janitor-arm — a failed CronDelete of the prior id must trigger the sweep
-column: blocked
-pre-block-column: todo
+column: complete
 created: 2026-08-08T10:34:14+0200
-updated: 2026-08-13T00:31:00+0200
+updated: 2026-08-16T05:59:01+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
 relevant-rules: []
 npt: []
 eht: []
-blocked-by: [publish-of-7c933b18]
+blocked-by: []
 implementation-commits: [7c933b18]
 external-refs: [janitor#239]
 ---
@@ -56,9 +55,26 @@ leaked Y. In case 1: the sweep runs once per fresh session and finds nothing.
       already covered the mechanism, but a reader hitting a crashed arm looks in Error handling,
       not in the step that did not run. Added there with the cost named (two live heartbeats,
       both firing forever, each a full model turn)
-- [ ] janitor#239 answered when it ships — the only remaining item, and it cannot be done before
-      the publish: telling the reporter it is fixed while the fix ships in no released version
-      would be false
+- [x] janitor#239 answered when it ships — **done 2026-08-16**
+      (`issues/239#issuecomment-5305622387`). The box was written this way for a reason and the
+      reason held: the 2026-08-12 reply said "Fixed in `7c933b18`" while `7c933b18` was on `main`
+      and in **no tag** — v3.3.0, the first release containing it, was tagged 2026-08-14, two days
+      LATER. So the follow-up names the released version rather than the commit, and says plainly
+      that the earlier claim was premature. A "fixed" the reporter cannot install is not a fix.
+
+## Closing measurement 2026-08-16 — the blocker was cleared and nobody noticed
+
+`blocked-by: [publish-of-7c933b18]` had been satisfied since **v3.3.0 (2026-08-14)** — two
+releases and two days before this card was looked at. The card kept asserting `blocked` the whole
+time, which is the stall shape `the-kanban-is-a-pipeline-that-must-drain` describes: a blocker
+phrased as an EVENT (`publish-of-<sha>`) has no owner watching for it, so it stays "blocked" until
+someone re-derives it by hand (`git tag --contains <sha>`). A blocker naming another TRDD at least
+moves when that card moves; an event-shaped one never does.
+
+Also verified first-hand this session rather than from the card: the installed
+`3.3.10/skills/janitor-arm/SKILL.md` carries BOTH the step-2 not-found→sweep fallback and the
+Error-handling paragraph on the interrupted arm — read during a live `/janitor-arm`, which then
+exercised the fast path (targeted delete of `191c5769` succeeded, 4 calls, no sweep).
 
 ## What this card actually needed on 2026-08-13
 
