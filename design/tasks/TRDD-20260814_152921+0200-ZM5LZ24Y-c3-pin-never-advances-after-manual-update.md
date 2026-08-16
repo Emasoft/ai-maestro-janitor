@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-14T20:48:00+0200
+updated: 2026-08-16T05:45:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -15,7 +15,7 @@ implementation-commits: [a8982a03]
 
 # C3 last-good pin never advances after a manual `claude plugin update`
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-14
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-16
 
 - **Detector: SHIPPED.** `scripts/detectors/janitor-self-integrity.py` gained
   `_check_last_good_pin()` (finding class `last-good-pin`), wired into the check
@@ -50,6 +50,50 @@ implementation-commits: [a8982a03]
   semantic is that the person invoking it supplies the provenance the F1 gate would
   otherwise demand from the release channel. An agent running it launders exactly
   that trust and would tick the box with a fabricated signal.
+
+### SOAK OBSERVATION 2026-08-16 05:45 — the box is still OPEN, and now we know why
+
+v3.3.9 was installed manually this session, which is exactly this card's soak condition, so
+the anchor was measured first-hand (read-only throughout — `/janitor-repin-integrity` was NOT
+run, per the prohibition above).
+
+| measured | value |
+|---|---|
+| `version_update_lib.read_last_good()` | `version: 0.59.0`, file mtime **2026-07-21 20:44** |
+| newest cached / running | **3.3.9** (installed 2026-08-16 03:30) |
+| `_check_last_good_pin` predicate | `pinned != running` ⇒ **WOULD report** — box NOT satisfied |
+| `releases/latest` | `v3.3.9` — equals the candidate, so **F1 provenance is satisfiable** |
+| `integrity/quarantine.json` | `["0.33.0","0.34.0"]` — 3.3.9 **not** quarantined |
+| `certify_newest_if_clean` present in 3.2.0/3.3.7/3.3.8/3.3.9 | yes — the fix IS in every cached version |
+
+**The blocker is chore ABSORPTION, and it is lesson [2] of `janitor-daemon-handover-unowned-chores`
+happening again.** `daemon.log` logs, on EVERY daemon start (08-11 → 08-16, four consecutive
+starts): `chore-coordination: yielding to active ai-maestro server: [… 'version-update']`. The
+janitor's `task_version_update` is the ONLY caller of `certify_newest_if_clean`, so on a host where
+the server has absorbed that chore the C3 anchor has no periodic opportunity to advance **at all** —
+the server runs the update, but the pin is janitor-private state the server knows nothing about.
+This is not a transient "until the daemon's next periodic fire" as CLAUDE.md describes; on this
+host that fire never comes.
+
+**Do NOT re-derive the frozen-stamp part.** `version-update.last-run.ts` is frozen at 2026-07-25 and
+that is CORRECT, not a fault — lesson [1] of the same page: a janitor `*.last-run.ts` only moves
+when the JANITOR runs the chore, so for an absorbed chore a frozen stamp is what healthy
+server-side execution looks like. I read it as "22 days dead" before recalling the page, and it was
+wrong; the daemon is alive and ran four other tasks within minutes of the measurement.
+
+**ONE DATA POINT REMAINS UNEXPLAINED, and it needs instrumentation, not more reading.** At
+`2026-08-15T19:10:34` the janitor DID run `version-update` (5 s, background pid 53721) — after the
+fix shipped, with a cached version that carries it — and the pin still did not advance. Absorption
+alone does not account for that fire. Either the F1 gate found no `published` tag that fire, or the
+candidate did not match it, or the C2 manifest check declined. `certify_newest_if_clean` returns
+the pinned version or `None` and logs nothing on the decline paths, so from outside the two are
+indistinguishable.
+
+**NEXT ACTION** (do this before anything else on this card): add one `state.log_line` on each
+decline branch of `certify_newest_if_clean` naming WHICH predicate refused (no candidate /
+quarantined / C2-dirty / provenance-missing / provenance-mismatch). It is a fail-open best-effort
+function whose entire failure surface is currently silent, which is why a soak cannot close it.
+Then the next janitor-owned `version-update` fire answers the question by itself.
 
 ## The defect
 
