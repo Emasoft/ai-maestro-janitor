@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 try:  # hooks put scripts/ on sys.path → package import
@@ -225,6 +226,7 @@ FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", r
 FM_STATUS_RE = re.compile(r"^status:[ \t]*(.+)$", re.MULTILINE)
 FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
 FM_CREATED_RE = re.compile(r"^created:[ \t]*(.+)$", re.MULTILINE)
+FM_UPDATED_RE = re.compile(r"^updated:[ \t]*(.+)$", re.MULTILINE)
 FM_BLOCKED_BY_RE = re.compile(r"^blocked-by:[ \t]*(.+)$", re.MULTILINE)
 FM_IMPL_COMMITS_RE = re.compile(r"^implementation-commits:[ \t]*(.+)$", re.MULTILINE)
 # `npt:` (Necessary Prerequisite Tasks) — a card that must finish these BEFORE `dev` is
@@ -419,6 +421,41 @@ def frontmatter_defect_for(path: Path) -> str | None:
     except (FileNotFoundError, OSError):
         return None
     return frontmatter_defect(head)
+
+
+# The ISO form the TRDD rule mandates for `created:`/`updated:` — `date +%Y-%m-%dT%H:%M:%S%z`.
+# The offset is REQUIRED by that format, which is what makes the comparison below absolute and
+# timezone-free: a naive value simply fails to parse and is passed over.
+_UPDATED_FMT = "%Y-%m-%dT%H:%M:%S%z"
+
+
+def future_updated(head: str, now_epoch: int, tolerance_s: int) -> str | None:
+    """The raw `updated:` value when it is MORE THAN `tolerance_s` in the future, else None. PURE.
+
+    `updated:` is the field the board sorts on, so a value ahead of the real clock pins its card
+    to the top permanently, and it is read as "when was this last measured" — a stamp 77 minutes
+    ahead makes every downstream inference from it wrong. Measured 2026-08-16: three cards carried
+    HAND-TYPED stamps at +77/+79 minutes, all at round minutes (`:50:00`, `:05:00`), against the
+    commits that wrote them. Nothing in the codebase read this field until now, which is precisely
+    why nothing validated it.
+
+    FAIL OPEN on anything unparseable — a missing, malformed, or differently-formatted value
+    returns None rather than a second finding. `frontmatter_defect` already owns "this frontmatter
+    is unreadable"; a date this cannot parse is not evidence the card is wrong, and a detector that
+    fires on both would report one defect twice.
+
+    NEVER auto-corrects, and the caller must not either: rewriting the field a check is auditing
+    destroys the only evidence that it was wrong.
+    """
+    m = FM_UPDATED_RE.search(head or "")
+    if m is None:
+        return None
+    raw = m.group(1).strip()
+    try:
+        stamp = int(datetime.strptime(raw, _UPDATED_FMT).timestamp())
+    except (ValueError, OverflowError, OSError):
+        return None
+    return raw if stamp - now_epoch > tolerance_s else None
 
 
 # ── TRDD id references in free text ──────────────────────────────────────────

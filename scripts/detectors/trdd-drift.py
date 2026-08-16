@@ -35,6 +35,17 @@ _ACTIVE_COLUMNS = trdd_common.ACTIVE_COLUMNS
 # Status values (v1 frontmatter / legacy body) that warrant a drift nudge.
 _DRIFT_ACTIVE_STATUSES = frozenset({"not-started", "in-progress"})
 
+# How far ahead of NOW an `updated:` stamp may sit before it is reported.
+#
+# 5 minutes, and the number is doing real work in both directions. Timezone is NOT the risk the
+# tolerance absorbs — the mandated format carries an explicit UTC offset, so the comparison is
+# absolute — it absorbs CLOCK SKEW between contributors, because PROJECT TRDDs are git-tracked and
+# pushed. Beyond ~5 minutes on an NTP-synced host the skew is itself a defect worth surfacing.
+# Wide enough to swallow ordinary jitter and a card stamped the instant before this runs; far
+# below the +77 and +79 minute errors actually measured, so the cases that motivated the check are
+# caught with two orders of magnitude of margin.
+_FUTURE_UPDATED_TOLERANCE_S = 300
+
 # `review-after: YYYY-MM-DD` — a DELIBERATE park, honoured until that date.
 _REVIEW_AFTER_RE = re.compile(r"^review-after:\s*(\d{4})-(\d{2})-(\d{2})\s*$", re.MULTILINE)
 
@@ -143,6 +154,42 @@ def main() -> int:
                 if line is not None:
                     print(line)
             continue
+
+        # ── future `updated:` ────────────────────────────────────────────────────────
+        # Checked BEFORE the active-column filter, deliberately: a future stamp corrupts the
+        # board's sort order no matter which column the card sits in, and a TERMINAL card is not
+        # exempt — rule §12 freezes a terminal TRDD's BODY but explicitly still allows `updated:`
+        # to change, so this finding is actionable there too. Filtering it behind the active set
+        # would leave the 169 `complete` cards permanently unauditable on the one field that
+        # orders the board.
+        #
+        # This is the FIRST consumer of `updated:` in this detector — staleness is judged from git
+        # commit time (`_last_touched_epoch`), never from the frontmatter — and that is exactly why
+        # nothing validated the field: it had no reader.
+        try:
+            fm_head = f.read_text(encoding="utf-8")[:4096]
+        except OSError:
+            fm_head = ""
+        bad_stamp = trdd_common.future_updated(fm_head, now, _FUTURE_UPDATED_TOLERANCE_S)
+        if bad_stamp is not None:
+            uid = trdd_common.extract_uid(f.name)
+            if uid is not None:
+                tag = " (local)" if scope == trdd_common.LOCAL else ""
+                # The offending value is in the dedupe key, NOT just the message: the other
+                # findings here key on `<kind>@<uid>` and so report a card once and never again,
+                # which would swallow a SECOND bad stamp written after the first was fixed. A
+                # corrected card simply stops matching; a newly-broken one is a new key.
+                line = dedupe.emit_once(
+                    seen,
+                    f"future-updated@{uid}@{bad_stamp}",
+                    f"[trdd-drift] TRDD-{uid[:8]}{tag} updated='"
+                    f"{state.sanitize_for_drift_line(bad_stamp)}' is in the FUTURE — the board "
+                    f"sorts on this field, so the card outranks every honest one. Regenerate it "
+                    f"with `date +%Y-%m-%dT%H:%M:%S%z`.",
+                )
+                if line is not None:
+                    print(line)
+
         # `column:` WINS whenever present (issue #135). A v2 card's column is its state, so
         # a v1 `status:` alongside one is legacy residue, not a second opinion — and the OR
         # this replaced let that residue override a TERMINAL column, reporting a frozen
