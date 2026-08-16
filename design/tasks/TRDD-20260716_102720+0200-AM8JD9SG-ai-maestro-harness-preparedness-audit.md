@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-14T18:22:00+0200
+updated: 2026-08-16T02:43:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -268,5 +268,40 @@ opt-in. Each cluster may become its own child TRDD once the ai-maestro API surfa
 - The 7 deferred: each needs its own reproducer + a design decision + (for F6/F7) reading the
   ai-maestro server/CLI API before any janitor-side change. Do NOT patch fleet-stop/disarm/recovery
   code blind — a wrong fix here bills real money or corrupts a live agent session.
+
+## Acceptance — added 2026-08-16, because this card had NONE for a month
+
+A `severity: major` card open since 2026-07-16 with **zero acceptance boxes** cannot be finished:
+nothing states what "done" is, so every pass re-reads 272 lines and re-derives the answer. That is
+the same defect the roster card (TRDD-IEW2K659) was filed for — an artifact with no failure signal.
+One box per finding, so the card becomes drivable by someone who has not read the audit.
+
+**Method, and its limit.** Status below is from `grep -rn "AM8JD9SG F[0-9]" scripts/` — a code
+comment citing a finding proves that finding was ADDRESSED AT THAT SITE. It does not prove the
+finding is fully resolved, and it cannot see a fix that landed without citing the id. Treat a
+`[x]` here as "shipped, verify the scope before closing", never as an audit.
+
+- [x] **F2** delivery honesty on a frozen target — `fleet_stop.py` cites it (narrow case).
+- [x] **F5** exact-workdir tie refuses instead of guessing — `terminal_trigger.py`.
+- [x] **F6** daemon-context tag visibility — `harness_backend.py` + `fleet_inject.py`.
+- [x] **F8** partial multi-command delivery no longer triggers a duplicating full-fallback.
+- [x] **F9** ai-maestro self-trigger send is **DETACHED** — `terminal_trigger.py:1331` names the
+      finding and the fix: only the resolution (`list --json`, 5 s cap) is synchronous; the
+      per-command POSTs (~6 s each, 11–17 s inline for a multi-command handoff) now run detached.
+      **The card still lists F9 as deferred and describes a 5 s `hooks.json` PreToolUse budget that
+      no longer exists** — the registered PreToolUse timeouts are 3 s today. Shipped, unrecorded.
+- [x] **F10** a server-managed pane prefers the server's own channel over raw keystrokes —
+      `fleet_inject.py`.
+- [ ] **F1** injected-prompt provenance (the audit's own highest-severity root cause) — an AMP
+      message or CLI injection is indistinguishable from a human typing, so it forges user-presence
+      and user-intent. Needs a prompt-provenance root of trust; the card records this as USER/server
+      scope, not janitor-side.
+- [ ] **F3** transcript freshness is conflated with human presence.
+- [ ] **F4** the self-compact presence gate is HOST-wide, not per-pane.
+- [ ] **F7** hard-restart rungs bypass the ai-maestro server lifecycle — must use
+      `hibernate`→`wake` (LIFECYCLE), never `restart` (DRIVE, revoked by R42).
+- [ ] **F11** R42.5 compliance — the guardian must not cross-inject.
+- [ ] The card's own status block is reconciled with the code on each pass, or this list rots the
+      way the "2 fixed, 8 deferred" summary did: it was four findings out of date.
 
 ## Notes and lessons learned
