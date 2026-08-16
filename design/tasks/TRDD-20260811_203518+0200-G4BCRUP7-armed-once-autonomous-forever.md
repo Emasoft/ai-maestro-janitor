@@ -311,10 +311,15 @@ being cancelled rather than accepted.
 
       **(b) A full inventory now exists** —
       `reports/c2-drift-audit/20260816_053513+0200-c2-drift-line-sweep.md`: **75 command- or
-      action-instructing drift lines across 69 detector files.** Coverage caveat, stated
-      because it matters: the sweep reports 113 `print(` sites examined while `grep -c` counts
-      **122** occurrences in `scripts/detectors/*.py`. The gap is unexplained; treat the
-      inventory as near-complete, not exhaustive, and reconcile the 9 before ticking.
+      action-instructing drift lines across 69 detector files.** **COVERAGE IS COMPLETE —
+      113/113, reconciled 2026-08-16.** I first read the gap as 9 sites (113 examined vs a
+      `grep -c "print("` count of 122) and recorded it as unexplained; both halves of that were
+      wrong. `grep -c` counts matching LINES, and — the real error — the pattern `print(` is a
+      SUBSTRING match, so it also caught 8 `*fingerprint(` calls
+      (`_server_fingerprint`, `_candidate_fingerprint`, `read_dispatch_fingerprint`, …). A
+      word-boundary grep gives **114**, and the one remaining difference is `ci-status.py:296`,
+      a COMMENT that mentions `print()` and was rightly excluded. 114 − 1 = 113. Nothing is
+      missing from the inventory.
 
       **(c) Why my own first pass was nearly useless, which is the reusable part.** Two grep
       sweeps over imperative verb phrasings found **6** sites; the exhaustive per-site read
@@ -323,7 +328,9 @@ being cancelled rather than accepted.
       never adjacent to the `print(`** and no grep over emission sites can see it. Any future
       pass must resolve the variable, not scan the call site.
 
-      **REMAINING WORK, now small and specific:** the 75 fall into ~7 recurring classes
+      **REMAINING WORK is now exactly one thing: adjudicate the 69 second-hand hits.** The
+      inventory is complete and the candidate is cleared; nothing else blocks this box. The 75
+      fall into ~7 recurring classes
       (approval gates `approve the fix with: {command}`; `/janitor-*-agent` dispatch for
       judgement work; `claude plugin *` which PRRD S2.1 FORBIDS automating — single writer,
       issue #7; `git add`/`rm --cached`/`stash` on the USER's own files, which RULE 0 forbids
