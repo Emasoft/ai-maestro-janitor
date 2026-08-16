@@ -3,7 +3,7 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-16T20:57:32+0200
+updated: 2026-08-16T21:01:16+0200
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
@@ -110,19 +110,71 @@ Same pid (26449), one hour apart, three observers:
 | later | 99.3% | **191%** | ~1.9 cores live — cumulative UNDER-reported |
 | my own check, 10 s window | **100.0%** | **286%** | ~2.9 cores live — under-reported ~3x |
 
-**The structural reason, which is why this is not a tuning problem:** the cumulative
-figure is CPU-time / elapsed over the process's whole life — here 11,511 s over 11,510 s.
-After three hours the denominator is so large that no live excursion can move it. It is a
-heavily damped average pinned near its historical mean, so it cannot track a spike in
-either direction: it stays high after a burst ends, and it stays low while a new burst
-runs. A detector keyed on it reports ~100% for a process doing 286%.
+**The structural reason** the CUMULATIVE column behaves that way: `time/etime` over the
+process's whole life — here 11,511 s over 11,510 s — has a denominator so large after three
+hours that no live excursion can move it. It is pinned near its historical mean and cannot
+track a spike in either direction.
+
+**⚠ BUT THAT IS NOT THIS DETECTOR'S METRIC.** `daemon_runaway.parse_ps_rows` reads
+`ps -axo pid,ppid,rss,%cpu,comm` — it consults `%cpu`, never `time/etime`. So the cumulative
+column above is context about the PROCESS, not a description of the alarm's input, and any
+sentence of the form "a detector keyed on it reports X" does not apply here. That
+conflation is retracted in full below.
+
+What the table DOES establish, and this survives: the process was genuinely sustained at
+the later readings, by interval differencing, which is the one method that is ground truth.
 
 An alarm that cries wolf trains dismissal — which is what happened to this fleet today. An
 alarm that stays QUIET during a real runaway trains nothing at all, because there is
 nothing to observe. The second failure is undetectable from the outside, which is why it
 survived unnoticed while the first was being argued about all evening.
 
-### Quantified: the number measures AGE, not load
+### ⚠ RETRACTED — the section below is about `time/etime`, NOT about what the detector reads
+
+**Everything in "Quantified: the number measures AGE" is FALSE OF `%cpu` and false of this
+detector.** It is true arithmetic about the LIFETIME RATIO (`time/etime`), relabelled as
+though it described `%cpu`. Kept, struck, because how it got here is the finding.
+
+**Refuted in ONE ROW, no timing needed** — if `%cpu` were the lifetime ratio, the two must
+be equal in the same row:
+
+    pid 26449   reported %cpu = 10.3
+                time/etime    = 12,084.44 s / 11,975 s = 100.9%
+                DIFFERENCE    = 90.6 points
+
+(A peer measured the same row shape independently at a 58.8-point gap, and dynamically:
+`%cpu` swinging 90.8 → 122.2 → 95.5 while `time/etime` moved 100.32 → 100.34 → 100.49.
+Nothing saturated swings 30 points in 20 s.)
+
+**And the decisive fact I should have checked before writing a line of it:** this detector
+parses `ps -axo pid,ppid,rss,%cpu,comm` (`daemon_runaway.parse_ps_rows`). It reads **`%cpu`**.
+It has never read `time/etime`. So the saturation analysis was not merely mislabelled — it
+was arithmetic about a number this codebase does not consult.
+
+**WHAT INVERTS, and why this is not pedantic.** Under the retracted model a LOW reading
+(`%cpu` 10.3) means "pinned near its historical mean, tells you nothing — discard it".
+Under the truth it means **the process genuinely dropped to ~0.1 core during that minute**.
+That is real signal, and the false model instructs the reader to throw it away. Threshold
+logic sits directly on top of this reading.
+
+**How it reached a durable card — the mechanism, which is the actual lesson.** This is the
+SAME fabricated claim retracted earlier on this very card (see "What 8QSLYMGU got wrong"),
+re-adopted hours later under a different name, by both parties, inside the correction to
+it. The card contradicted itself and neither of us noticed: §"What 8QSLYMGU got wrong"
+proves `%cpu` ≠ `time/etime` with pid 607 (99.0 reported vs 0.055% lifetime, ~1800x), and
+then this section reasons as if they were the same quantity.
+
+Two properties made it invisible:
+* **Retracting a claim does not immunise you against re-adopting it renamed.** Only
+  re-checking the premise does. The correction was written down, in the same document, and
+  did not fire.
+* **A wrong mechanism whose PRACTICAL ADVICE matches the right one meets no resistance
+  anywhere downstream.** Both models say "use interval differencing", so every check
+  passed, nothing contradicted it, and each reader added confidence instead of scrutiny.
+  That is how the original lifetime-average error reached six sessions — and how this one
+  reached a card whose subject IS that error.
+
+### ~~Quantified: the number measures AGE, not load~~ (RETRACTED — see above; true of `time/etime`, false of `%cpu`)
 
 From `cumulative_after = (C·T + r·t)/(T + t)`, with this process's own figures
 (T = 11,510 s elapsed, C = 100.0%, r = 286% live). Verified by recomputation:
