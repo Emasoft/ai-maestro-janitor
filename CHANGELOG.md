@@ -2,11 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.9] — 2026-08-16
+
+### Bug Fixes
+
+- **memgrep:** The build stamp watched a file a commit never writes (TRDD-9XMPS8OZ) (a698f16)
+- **findings:** Date every finding line — a resurfaced alarm read as a current measurement (TRDD-D6RDPZIU) (d692074)
+- **memgrep:** Lint must not raise a body-shape finding on a superseded atom (TRDD-3K8SVX2H) (d54b755)
+- **iterm-alarm:** The SCOPE clause claimed more than the evidence supports (TRDD-EZ3PMQYX) (580d134)
+
+### Documentation
+
+- **kanban:** Close TRDD-KVS6K7P9 — per-dispatch memory dispatch state is fully shipped (d2bda4e)
+- **kanban:** Close TRDD-9XMPS8OZ and TRDD-2OUMEVDS (4259e72)
+- **memory:** Merged is not delivered — the PATH check, and why a version stamp is not proof (fb10881)
+- **kanban:** Close TRDD-3PWQK8NM, hand its one open item to TRDD-5C1PFDM5 (f996e7c)
+- **kanban:** Close TRDD-9PDH8G0W and TRDD-KU3ERYFX — both were publish-gated on an answer already owed (1b47fbd)
+- **kanban:** Close TRDD-3QIQ2E6J — the awaited split happened, and it disproved the expectation (52a63bf)
+- **kanban:** Refresh TRDD-RG4IUZ6I state — 3QIQ2E6J closed, and this card's framing shrank (1ef9897)
+- **kanban:** AZ6QRK0D todo -> blocked, and prove the breakage instead of arguing it (1a4c28c)
+- **kanban:** AZ6QRK0D -> human_review as the decision site, JPL0JU86 -> blocked behind it (cc3c15b)
+- **cache:** Record the forensic verdict IJ94O8YD was waiting on, and file TRDD-3K8SVX2H (53c76b5)
+- **kanban:** WN7M829Y -> human_review, and correct the 240-findings headline (b51c588)
+- **kanban:** RG4IUZ6I -> human_review; item 3 judged not worth building, advisor failure recorded (a98b087)
+- **kanban:** Give AM8JD9SG acceptance criteria — it had none for a month, and its status was 4 findings stale (ef35bd2)
+- **kanban:** LFSWY0C6's "zero work today" premise expired — and how it expired is the card's own argument (b3dd249)
+- **skill:** Janitor-findings documents the measurement age it now renders (2403e24)
+
+### Features
+
+- **iterm-alarm:** Size the exposure the tmux remedy asks a human to fix (TRDD-EZ3PMQYX) (e4f82cb)
+
+### Testing
+
+- **memgrep:** Pin the build stamp to the commit it claims (TRDD-9XMPS8OZ) (a9d067d)
 ## [3.3.8] — 2026-08-15
 
 ### Documentation
 
 - **board:** CLI-verify the v3.3.7 install against its tag (TRDD-G4BCRUP7) (54b262f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.8 (cfa9a37)
 
 ### Testing
 
