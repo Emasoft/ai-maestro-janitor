@@ -1,15 +1,55 @@
 ---
 trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
-column: todo
+column: human_review
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-13T13:56:00+0200
+updated: 2026-08-16T02:19:48+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
 relevant-rules: [1]
 npt: [DOJ2LE1G]
 ---
+
+## ⏵ STATE — 2026-08-16: FOURTH MEASUREMENT, and most of the apparent explosion is NOT decay
+
+**Re-columned `todo` → `human_review`.** The 2026-08-13 block below already concluded that all
+three candidate fixes are USER/design calls and that "the card should stop being scheduled as if it
+will converge". Leaving it in `todo` kept scheduling it exactly that way. It is a decision card now;
+`human_review` is the ratified column for that.
+
+**The heartbeat reports `memgrep lint: 240 finding(s)` against this card's 50 three days ago. Do
+NOT read that as 5× decay — I upgraded the linter tonight.** The binary the 2026-08-13 measurement
+used was `a685cca` (2026-08-07); tonight's is `a698f16`, 13 crate commits later (TRDD-9XMPS8OZ).
+Checked which codes that binary could even emit, with `git merge-base --is-ancestor`:
+
+| code | PROJECT | USER | comparable to 08-13? |
+|---|---|---|---|
+| `publish-globally-missing` | 44 | 0 | **NO** — introduced by `9ddb3cf7`, not in the old binary |
+| `atom-after-footer` | 40 | 51 | **NO** — moved to the Rust linter in `5c09ffdc`, not in the old binary |
+| `link-one-sided` | 0 | 67 | **NO** — the rule existed, but `88390fc2` ("per-page lint can finally see the cross-page rules") is not in the old binary |
+| `lesson-uncited` | 8 | 15 | yes — **23 → 23, flat** |
+| `atom-oversized` | 4 | 11 | yes — **12 → 15, refilled** |
+
+So **135 of the 240 findings were structurally invisible three days ago**. They are newly VISIBLE
+debt, not newly created debt, and any "the corpus is rotting fast" conclusion drawn from the
+headline number is an artifact of measuring with a better instrument.
+
+**What survives the correction, and it is the card's own thesis:** `atom-oversized` went 12 → 15
+with nothing draining it, and `lesson-uncited` sat exactly flat at 23. Neither converges on its
+own. That is the third independent confirmation, and it is now made on a like-for-like basis rather
+than on a total that changed meaning underneath it.
+
+**Related, filed tonight: TRDD-3K8SVX2H.** Part of the `atom-oversized` count is unfixable by
+construction — `lint` reports it against bodies under `## Superseded`, which the protocol forbids
+editing. Any option chosen below should net that class out first, or the backlog it is measured
+against can never reach zero.
+
+**Method note worth keeping.** Two of the three wrong turns in taking this measurement were the
+harness, not the data: `memgrep lint` writes findings to **stderr** (a `2>/dev/null` silently
+produced an empty, clean-looking result), and in zsh a shell variable named `path` is tied to
+`$PATH`, so `dir=${s#*:}` works while `path=${s#*:}` destroys the environment mid-loop. A
+measurement that comes back suspiciously clean deserves the harness checked before the conclusion.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-08-13
 
