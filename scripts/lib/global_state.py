@@ -1719,9 +1719,85 @@ def daemon_script_path() -> Path:
 
 
 # TRDD-DB1P25S4: the python version the janitor pins everywhere (uv venv, CI, the
-# owner's granted interpreter). `_managed_python_path` resolves uv's MANAGED CPython
-# for this pin — the FIXED-path interpreter a macOS TCC Automation grant can stick to.
+# owner's granted interpreter).
 _MANAGED_PYTHON_PIN = "3.12"
+
+# ── the interpreter that may drive osascript ────────────────────────────────────────
+#
+# **A STABLE PATH IS NOT A STABLE IDENTITY, and TCC binds to the IDENTITY.** This is the
+# correction to the reasoning `_managed_python_path` still records below, made after the
+# OWNER said (repeatedly) that uv must not launch anything that controls iTerm, and then
+# measured with `codesign -dv` on 2026-08-16:
+#
+#   uv-managed 3.12   Identifier=-        Signature=adhoc (linker-signed)  TeamIdentifier=not set
+#   homebrew 3.12     Identifier=python3-5555…  Signature=adhoc            TeamIdentifier=not set
+#   /usr/bin/python3  Identifier=com.apple.dt.xcode_select.tool-shim-public — Apple-signed
+#   python.org 3.12   Identifier=python3  real signature                   TeamIdentifier=BMM5U3QVKW
+#
+# An **ad-hoc** binary has `Identifier=-` — there is no durable client identity for TCC to
+# remember, so the Automation toggle either refuses to persist or silently stops applying.
+# The previous fix (ephemeral `uv run --script` shim → uv's MANAGED CPython) removed the
+# PATH churn and stopped there, concluding a fixed path was sufficient. It is not, and the
+# symptom that survived it is exactly the one the fix was meant to end: `osascript`
+# enumerating ZERO iTerm sessions from the launchd daemon while the same script, run from a
+# session-parented process on the same host in the same minute, returned 34.
+#
+# So: prefer a **stably signed** runtime, and keep uv's managed CPython only as the last
+# resort (better than nothing — it at least logs its own denial).
+_ADHOC_MARKERS = ("Signature=adhoc", "adhoc,linker-signed")
+
+
+def _is_adhoc_signed(path: str) -> bool:
+    """True iff `codesign` reports an AD-HOC signature for `path` (no durable TCC identity).
+
+    FAIL-OPEN — returns False when codesign is missing, times out, or errors. An unknown
+    signature must not disqualify a candidate: the ordered list below is already
+    best-first, so falling back to plain ordering is strictly better than resolving to
+    nothing and spawning no watcher at all.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["codesign", "-dv", path],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    blob = (proc.stderr or "") + (proc.stdout or "")
+    return any(m in blob for m in _ADHOC_MARKERS)
+
+
+def _signed_python_candidates() -> list[str]:
+    """Interpreter paths to try, best TCC identity first. PURE (no filesystem access)."""
+    pin = _MANAGED_PYTHON_PIN
+    return [
+        # python.org framework build — Developer-ID signed, stable path AND identity.
+        f"/Library/Frameworks/Python.framework/Versions/{pin}/bin/python{pin}",
+        f"/usr/local/bin/python{pin}",  # the symlink that same installer creates
+        "/usr/bin/python3",  # Apple's shim: stable identifier, always present
+    ]
+
+
+def automation_python_path() -> Optional[str]:
+    """The interpreter to launch anything that drives osascript, or None.
+
+    Ordered by TCC durability, NOT by convenience. A PATH lookup alone is unsafe here: on
+    this host `command -v python3.12` resolves to a project `.venv/bin/python3.12`, which is
+    ad-hoc signed — a cwd-dependent, ungrantable identity, the very trap `--system` was
+    added to `uv python find` to avoid.
+    """
+    for cand in _signed_python_candidates():
+        if os.path.isfile(cand) and os.access(cand, os.X_OK) and not _is_adhoc_signed(cand):
+            return cand
+    for name in (f"python{_MANAGED_PYTHON_PIN}", "python3"):
+        found = shutil.which(name)
+        if found and not _is_adhoc_signed(found):
+            return found
+    # LAST RESORT: uv's managed CPython. Ad-hoc signed, so Automation will likely be denied
+    # — but it runs, and a denial that gets logged beats a watcher that never spawned.
+    return _managed_python_path()
 
 
 def _managed_python_path() -> Optional[str]:
@@ -1777,13 +1853,14 @@ def spawn_daemon_detached() -> Optional[int]:
     races for the singleton flock; only one wins and continues the loop,
     the rest exit immediately on flock failure.
 
-    Interpreter choice (TRDD-DB1P25S4): prefer uv's MANAGED CPython so the daemon —
-    and every osascript child it spawns, since its children inherit
-    `sys.executable` — carries the STABLE binary identity the user's TCC Automation
-    grant is attached to. `uv run --script` is only the fallback: it mints an
-    ephemeral, ungrantable python shim per spawn (see `_managed_python_path`). The
-    daemon's import closure is stdlib-only BY DESIGN (keepalive staging), so plain
-    python runs it unchanged; uv was ever only a launcher convenience.
+    Interpreter choice: `automation_python_path()` — a **stably signed** runtime, because
+    the daemon and every osascript child it spawns inherit this binary's identity, and TCC
+    attaches the Automation grant to that identity. uv's managed CPython is now the LAST
+    resort, not the first choice: it is ad-hoc signed (`Identifier=-`), so the grant has
+    nothing durable to bind to. See `automation_python_path` for the measured signatures and
+    why the earlier "stable PATH is enough" reasoning was insufficient. The daemon's import
+    closure is stdlib-only BY DESIGN (keepalive staging), so any plain python runs it
+    unchanged; uv was ever only a launcher convenience.
     """
     init_global_state()
     state.atomic_write(_spawn_marker_path(), str(int(time.time())))
@@ -1793,7 +1870,7 @@ def spawn_daemon_detached() -> Optional[int]:
         state.log_line("daemon", f"daemon script missing at {script} — cannot spawn")
         return None
     candidates: list[list[str]] = []
-    managed = _managed_python_path()
+    managed = automation_python_path()
     if managed:
         candidates.append([managed, str(script)])
     # `uv run --script` still resolves the PEP 723 header on hosts without a managed

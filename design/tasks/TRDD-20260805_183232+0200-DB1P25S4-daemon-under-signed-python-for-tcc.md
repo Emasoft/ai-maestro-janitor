@@ -4,7 +4,7 @@ title: Run the daemon under the signed python.org 3.12 so the existing iTerm Aut
 column: human_review
 pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-13T14:33:00+0200
+updated: 2026-08-16T10:57:15+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -87,6 +87,38 @@ fake-uv plist-rendering tests); test_daemon+test_dispatch_phases 148 pass; ruff+
 NOTE the earlier REMAINING wording "resolve a SIGNED python (probe the framework path
 first)" was SUPERSEDED by the same-evening CORRECTION: the implemented target is uv's
 MANAGED interpreter; the framework python is reachable via the `python3` discovery rung.
+
+> **⚠ THE SUPERSESSION ABOVE WAS WRONG, AND THE ORIGINAL WORDING WAS RIGHT — reverted
+> 2026-08-16 on the OWNER's direction ("you cannot use uv to launch the scripts that control
+> iTerm; only python3 or python3.12 directly") plus a `codesign -dv` measurement:**
+>
+> | interpreter | Identifier | Signature | TeamIdentifier |
+> |---|---|---|---|
+> | uv-managed 3.12 (what this card chose) | `-` | **adhoc**, linker-signed | not set |
+> | homebrew 3.12 | `python3-5555…` | **adhoc** | not set |
+> | python.org framework 3.12 | `python3` | real (9002) | **BMM5U3QVKW** |
+>
+> **A stable PATH is not a stable IDENTITY, and TCC binds to the identity.** This card
+> correctly killed `uv run --script`'s ephemeral per-spawn shim, then concluded that a fixed
+> path was the whole requirement. It is not: an ad-hoc binary has `Identifier=-`, so there is
+> nothing durable for TCC to remember and the owner's grant silently stops applying. The
+> symptom therefore OUTLIVED the fix — measured 2026-08-16, the launchd daemon's osascript
+> enumerated **0** iTerm sessions while the same script from a session-parented process on the
+> same host in the same minute returned **34**.
+>
+> Implemented as `global_state.automation_python_path()` (signed-first, uv-managed last) and
+> the mirrored ladder in `keepalive_install.sh::resolve_interpreter`; the live plist now names
+> the framework build. The "framework python is reachable via the `python3` rung" reasoning was
+> also unsafe on its own: `command -v python3.12` inside this repo resolves to
+> `.venv/bin/python3.12`, which is ad-hoc AND cwd-dependent — so PATH hits are identity-checked
+> now, not trusted by name.
+>
+> **The lesson worth keeping:** this correction was reverted once already. TRDD-EZ3PMQYX
+> observed on 2026-08-16 03:20 that the plist named a uv interpreter and called it a half-done
+> migration — which was TRUE — then retracted it 6 minutes later because this card said
+> managed-first was ratified. A card asserting a conclusion out-argued a fresh measurement. When
+> a live observation and a written ratification disagree, re-measure before deferring to the
+> document.
 
 STILL OPEN: (a) observe a fleet scan enumerate iTerm sessions post-restart (the VQ4LX7ND
 alarm clears end-to-end); (b) publish, then resolution notes on GH#92 + TRDD-VQ4LX7ND.

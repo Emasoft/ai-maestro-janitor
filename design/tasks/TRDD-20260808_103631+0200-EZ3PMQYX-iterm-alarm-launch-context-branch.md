@@ -3,7 +3,7 @@ trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
 column: todo
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-16T02:32:34+0200
+updated: 2026-08-16T10:58:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -41,9 +41,27 @@ findings block and not a commit.
    long-lived — the change cannot be exercised until it next restarts, and there is no
    `iterm-automation-blocked.flag` here to drive the branch either. Building two unverifiable
    layers at once is how a "fix" ships that nobody can show works.
-4. ~~**INDEPENDENT FINDING:** the plist still names a uv-managed interpreter, so the
-   signed-python migration reverted or never completed.~~ **WRONG — RETRACTED 2026-08-16 03:26,
-   ~6 minutes after I wrote it. Checked TRDD-DB1P25S4 instead of stopping at the plist.**
+4. **INDEPENDENT FINDING (2026-08-16 03:20): the plist still names a uv-managed interpreter, so
+   the signed-python migration never completed.** — **THE RETRACTION BELOW WAS ITSELF WRONG.
+   UN-RETRACTED 2026-08-16 10:57: the original finding was CORRECT and is now fixed.**
+
+   The owner stated it directly — *"you cannot use uv to launch the scripts that control iTerm;
+   only python3 or python3.12 directly"* — and `codesign -dv` shows why: uv's managed CPython is
+   **ad-hoc** signed with `Identifier=-`, while python.org's framework 3.12 carries
+   TeamIdentifier `BMM5U3QVKW`. TCC binds an Automation grant to the code-signing IDENTITY, so a
+   fixed path with no durable identity cannot hold one. Fixed in
+   `global_state.automation_python_path()` + `keepalive_install.sh::resolve_interpreter`; the
+   live plist now names the framework build. Full record on TRDD-DB1P25S4.
+
+   **Why this matters beyond the bug:** the retraction below is a case of a written ratification
+   out-arguing a fresh measurement. I looked at the live plist, saw the truth, then read a card
+   that said the opposite and un-saw it — in six minutes, without re-measuring either claim. The
+   retraction's own closing lesson ("read the card that owns the subject") is exactly half a
+   lesson: the card WAS read, and the card was wrong. Reading the owning card is how you find
+   the disagreement; **re-measuring is how you resolve it.**
+
+   ~~**WRONG — RETRACTED 2026-08-16 03:26, ~6 minutes after I wrote it. Checked TRDD-DB1P25S4
+   instead of stopping at the plist.**~~ (retained verbatim below as the record of the mistake)
 
    The live plist DOES name `~/.local/share/uv/python/cpython-3.12-…/bin/python3.12`, and a
    python.org framework 3.12 IS installed on this host, so the two together looked like a

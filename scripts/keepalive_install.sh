@@ -72,8 +72,43 @@ detect_platform() {
 # caller fails LOUD and still writes a shebang-fallback config (fail-OPEN: a
 # missing-interpreter host is no worse off than before D-α).
 MANAGED_PYTHON_PIN="3.12" # keep in step with global_state._MANAGED_PYTHON_PIN
+
+# A STABLE PATH IS NOT A STABLE IDENTITY, and macOS TCC binds an Automation grant to the
+# IDENTITY. Measured with `codesign -dv` on 2026-08-16: uv's managed CPython is
+# `Signature=adhoc` with `Identifier=-`, i.e. nothing durable for TCC to remember, while
+# python.org's framework build carries TeamIdentifier BMM5U3QVKW. The daemon this plist
+# launches drives osascript against iTerm, so it MUST run under a signed runtime — the
+# OWNER has said so repeatedly, and the measurement agrees. Ad-hoc candidates are skipped,
+# uv's managed CPython drops to a last resort, and `uv run --script` stays last of all
+# (its ephemeral per-spawn shim can never be granted at all).
+#
+# FAIL-OPEN on an unreadable signature: `codesign` missing or erroring means "unknown", not
+# "disqualified" — the list below is already best-first, so plain ordering still wins.
+_is_adhoc_signed() {
+  codesign -dv "$1" 2>&1 | grep -qE 'Signature=adhoc|adhoc,linker-signed'
+}
 resolve_interpreter() {
-  local uv_bin="" p mp
+  local uv_bin="" p mp c
+  # 1. Stably-signed runtimes at known absolute paths, best identity first.
+  for c in \
+    "/Library/Frameworks/Python.framework/Versions/$MANAGED_PYTHON_PIN/bin/python$MANAGED_PYTHON_PIN" \
+    "/usr/local/bin/python$MANAGED_PYTHON_PIN" \
+    /usr/bin/python3; do
+    [ -x "$c" ] || continue
+    _is_adhoc_signed "$c" && continue
+    printf '%s' "$c"
+    return 0
+  done
+  # 2. PATH lookups, still identity-checked — `command -v python3.12` inside a project
+  #    resolves to its `.venv/bin/python3.12`, which is ad-hoc signed and cwd-dependent.
+  for c in "python$MANAGED_PYTHON_PIN" python3 python3.13 python3.11 python3.10 python; do
+    if p="$(command -v "$c" 2>/dev/null)" && [ -n "$p" ] && [ -x "$p" ]; then
+      _is_adhoc_signed "$p" && continue
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  # 3. LAST RESORTS — ad-hoc, so Automation will likely be denied, but it RUNS and logs.
   if p="$(command -v uv 2>/dev/null)" && [ -n "$p" ]; then
     uv_bin="$p"
     if mp="$("$uv_bin" python find --system --managed-python "$MANAGED_PYTHON_PIN" 2>/dev/null)" &&
@@ -82,7 +117,6 @@ resolve_interpreter() {
       return 0
     fi
   fi
-  local c
   for c in python3 python3.13 python3.12 python3.11 python3.10 python; do
     if p="$(command -v "$c" 2>/dev/null)" && [ -n "$p" ]; then
       printf '%s' "$p"

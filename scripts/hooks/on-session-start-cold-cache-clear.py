@@ -185,15 +185,16 @@ def main() -> int:
         # abandoned-session one (which requires a long idle age that a just-loaded session
         # can never have).
         #
-        # LAUNCHED UNDER THE MANAGED INTERPRETER, NEVER `uv run` (TRDD-DB1P25S4 / GH#92). This
-        # child's whole purpose is to drive osascript to type into iTerm, and macOS TCC persists
-        # an Automation grant against a STABLE client binary. `uv run --script` mints a fresh
-        # ephemeral `~/.cache/uv/builds-v0/.tmpXXXX/bin/python` on every respawn, so the grant
-        # can never attach to the same client twice and every injection is denied — uv is a
-        # LAUNCHER, and a launcher can never be the grantee. Falling back to `uv` when no managed
-        # interpreter resolves is deliberate: a watcher that runs and gets denied at least logs
-        # the denial, where no watcher at all is silent.
-        managed = gs._managed_python_path()
+        # LAUNCHED UNDER A STABLY SIGNED INTERPRETER, NEVER `uv` (TRDD-DB1P25S4 / GH#92, and
+        # the 2026-08-16 correction in `global_state.automation_python_path`). This child's
+        # whole purpose is to drive osascript to type into iTerm, and macOS TCC persists an
+        # Automation grant against a stable client IDENTITY — not merely a stable path. uv is a
+        # LAUNCHER and a launcher can never be the grantee; worse, uv's managed CPython is
+        # itself ad-hoc signed (`Identifier=-`), so pointing at it directly still leaves TCC
+        # nothing durable to bind. Falling back when nothing better resolves is deliberate: a
+        # watcher that runs and gets denied at least logs the denial, where no watcher at all
+        # is silent.
+        managed = gs.automation_python_path()
         argv = (
             [managed, str(watcher)]
             if managed
