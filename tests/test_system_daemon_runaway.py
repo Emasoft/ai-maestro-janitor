@@ -229,7 +229,7 @@ def test_cpu_drift_line_names_the_metrics_window() -> None:
     reportable, streaks = dr.sustained_findings(_cpu_finding(), {"74805:node": 2}, min_streak=2)
     line = dr.format_drift_line(reportable, False, 50.0, streaks=streaks)
     assert line is not None
-    assert "lifetime average, not a live sample" in line
+    assert "~1-minute decaying average" in line
     assert "over the bar on 3 consecutive checks" in line
 
 
@@ -358,7 +358,7 @@ def test_cpu_runaway_needs_two_fires_end_to_end(tmp_path: Path) -> None:
 
     line = _out(_run(tmp_path, ps_snapshot=_PS_CPU_BURST))
     assert line.startswith("[system-daemon-runaway] node ")
-    assert "lifetime average, not a live sample" in line
+    assert "~1-minute decaying average" in line
     assert "over the bar on 2 consecutive checks" in line
 
 
@@ -379,7 +379,7 @@ def test_rss_runaway_alarms_on_the_very_first_fire_end_to_end(tmp_path: Path) ->
     text = f"4242 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/fseventsd\n"
     line = _out(_run(tmp_path, ps_snapshot=text))
     assert line.startswith("[system-daemon-runaway] fseventsd ")
-    assert "lifetime average" not in line  # RSS is instantaneous; no window caveat
+    assert "decaying average" not in line  # RSS is instantaneous; no window caveat
     assert _streak_file(tmp_path).read_text() == "{}"
 
 

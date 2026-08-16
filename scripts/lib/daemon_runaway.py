@@ -206,7 +206,15 @@ def format_drift_line(
         # reaction the ungated version produced. Both numbers are correct; they measure
         # different things, and only the alarm can say which one it reported.
         held = (streaks or {}).get(finding_key(worst))
-        window = "a lifetime average, not a live sample"
+        # MEASURED 2026-08-16, correcting a FALSE claim this line shipped from 3.3.9:
+        # it said "a lifetime average, not a live sample". `man ps` says %cpu is "a
+        # decaying average over up to a minute of previous (real) time", and three
+        # measurements agree with the man page against the old text — %cpu != time/etime
+        # (99.0% vs 0.055% on one pid, ~1800x apart); %cpu MATCHES consumption computed
+        # from cpu_time deltas; and %cpu DECAYS (100.2 -> 5.0 within minutes, which a
+        # 13-day denominator forbids). The old wording also told the reader the number
+        # was meaningless, which is a reliable way to get the next REAL runaway dismissed.
+        window = "a ~1-minute decaying average; a live delta may differ on a bursty process"
         if held is not None and held > 1:
             window += f"; over the bar on {held} consecutive checks"
         metric = f"CPU {worst.pcpu:.0f}% ({window})"
