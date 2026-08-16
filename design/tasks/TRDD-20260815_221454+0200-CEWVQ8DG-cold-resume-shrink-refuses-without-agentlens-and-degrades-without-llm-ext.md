@@ -3,7 +3,7 @@ trdd-id: CEWVQ8DG
 title: The cold-resume shrink refuses when agentlensPro cannot answer and degrades to a template because llm-ext is not on the hook PATH
 column: testing
 created: 2026-08-15T22:14:54+0200
-updated: 2026-08-15T22:41:00+0200
+updated: 2026-08-16T06:28:21+0200
 current-owner: janitor-main-session
 task-type: bugfix
 implementation-commits: [904ddef4]
@@ -71,6 +71,40 @@ cold resume to occur.
 **NEXT ACTION.** Verify on the next real cold resume that
 `cold-cache-clear.log` shows `fire=True` with `trigger=resumed-cold` and `external-clear.log` shows
 `summary: ok`, not `permanent`.
+
+### FIELD CHECK 2026-08-16 06:28 — half PASSED, half **FAILED**. Do not close this card.
+
+| half of the NEXT ACTION | result |
+|---|---|
+| `cold-cache-clear.log`: `fire=True trigger=resumed-cold` | **PASS** — `2026-08-15T21:29:58 [s:f6b2ee4a] source=resume fire=True trigger=resumed-cold why=resumed on a dead cache (context=431357)` |
+| `external-clear.log`: `summary: ok` | **FAIL** — three refusals today, session `e88bb088`, at `00:53:34`, `05:11:29`, `05:16:44`: `summary: permanent — llm-ext data dir unresolvable; not retrying` |
+
+**The failure string CHANGED, and that is the informative part.** Pre-fix it read `llm-ext is not
+on PATH` (still in this log at `2026-08-15T21:29:58`). Today it reads **`data dir unresolvable`** —
+so `resolve_llm_ext` is answering (the half this card fixed) and `llm_ext_data_dir` is the half
+now refusing. The fix moved the failure; it did not remove it.
+
+**NOT reproducible from the current tree + host state — measured, both environments:** interactive
+PATH → `shutil.which` returns the cache binary; `env -i PATH=/usr/bin:/bin` → `which` returns
+`None`, the glob fallback finds `…/cache/emasoft-plugins/llm-externalizer/13.5.1/bin/llm-ext`, and
+`llm_ext_data_dir` returns the real `…/data/llm-externalizer-emasoft-plugins` in BOTH. So the
+refusal cannot be re-derived by rerunning it here, which is exactly why the next step is
+instrumentation and not another observation.
+
+**The reachable path that produces this exact string while the binary resolves** (stated as a
+hypothesis, not a diagnosis): `resolve_llm_ext` lets `shutil.which` **win first** — deliberately,
+"so an operator who put a specific build there keeps control" — while `llm_ext_data_dir` refuses
+ANY binary whose resolved path is not `…/cache/<marketplace>/<plugin>/…`. A PATH-provided
+`llm-ext` outside the plugin layout therefore yields *resolved binary + empty data dir* → permanent
+refusal. The docstring's escape hatch and the derivation are in tension; nothing today reconciles
+them.
+
+**NEXT ACTION (replaces the above).** One line of instrumentation settles it and no further waiting
+will: log the RESOLVED BINARY PATH alongside the `data dir unresolvable` refusal. The refusal
+currently names the failure without naming the input that caused it, so a reader cannot tell an
+outside-the-layout PATH hit from a missing data dir — the same "unreachable vs silent" distinction
+TRDD-ZM5LZ24Y had to add instrumentation for. Then decide whether `which` should still win when its
+answer defeats data-dir derivation.
 
 ## Design
 
