@@ -84,10 +84,10 @@ retracted mechanism.
 
 ## Acceptance
 
-- [ ] The window question (3) is answered with a measurement, not an argument.
-- [ ] Pid-existence at report time is audited and fixed if absent.
-- [ ] A fresh runaway tally is built; the old one is not consulted.
-- [ ] Any threshold change cites the window decision from (3).
+* [ ] The window question (3) is answered with a measurement, not an argument.
+* [ ] Pid-existence at report time is audited and fixed if absent.
+* [ ] A fresh runaway tally is built; the old one is not consulted.
+* [ ] Any threshold change cites the window decision from (3).
 
 ## THE LESSON OF THE NIGHT — the alarm named both dimensions and we debated one
 
