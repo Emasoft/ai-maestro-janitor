@@ -15,6 +15,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pretend_llm_ext_is_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the BINARY LOOKUP, not just the runner.
+
+    `attempt_llm_ext_summary` resolves the binary FIRST and returns PERMANENT "llm-ext is not
+    installed" before any classification runs. Stubbing only `runner` therefore tests nothing on
+    a host without llm-ext: it green-passes on this dev machine (installed) and fails on CI
+    (not installed) — which is exactly how these tests broke the 3.3.13 build. A test whose
+    subject is skipped by an environment check is not a passing test, it is an absent one.
+    """
+    monkeypatch.setattr(ec, "resolve_llm_ext", lambda: "/nonexistent/stub/llm-ext")
+
 
 # The real stdout from the incident, verbatim from EMASOFT-ORCHESTRATOR-AGENT's handoff.
 INCIDENT_REFUSAL = """I'm not going to produce this compaction as specified, because the transcript contains a **prompt injection** that I need to flag.
