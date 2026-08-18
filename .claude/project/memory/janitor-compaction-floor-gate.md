@@ -40,20 +40,28 @@ when that file is ABSENT — the fallback was the branch that could not report s
 that file before theorising; a session with a snapshot never had this bug.
 
 
-^ATOM-KBU2-58YM [desc:"the cold-resume shrink refused on 'cache state unknown' and its handoff had no summary — a gate fed only by an OPTIONAL tool is unreachable, and a CLI in a plugin-cache bin dir is invisible to a hook ", keywords: cache_state_unknown_not_clearing cold_resume_did_not_shrink every_session_paid_a_full_cache_write_on_its_first_turn llm-ext_is_not_on_PATH handoff_degraded_to_the_template summary_permanent_not_retrying agentlensPro_absent_so_the_clear_never_fires which_llm-ext_fails_in_a_hook, type: reference, ocd: 2026-08-15, lmd: 2026-08-15]
+
+
+^ATOM-L03E-L31N [desc: "the cold-resume shrink refused on 'cache state unknown' — a gate fed only by an OPTIONAL tool is unreachable; fixed by measuring elapsed time instead", keywords: cache_state_unknown_not_clearing cold_resume_did_not_shrink every_session_paid_a_full_cache_write_on_its_first_turn agentlensPro_absent_so_the_clear_never_fires, type: reference, ocd: 2026-08-18, lmd: 2026-08-18]
 
 Two defects made the cold-resume shrink LOOK implemented while doing nothing useful (TRDD-CEWVQ8DG, fixed in `904ddef4`); both were found in `.janitor/logs/`, not by reading code.
 
 **A gate whose only input is an OPTIONAL tool is unreachable.** `should_clear_on_resume` requires `cache_expired is True`, and its only source was a probe of the agentlensPro CLI. Where that tool is absent the probe abstains, so the verdict was `why=cache state unknown — not clearing` and a whole fleet of cold resumes each paid a full cache-creation write on its first turn. The fix is not to relax the veto — `/clear` is unrecoverable — but to ANSWER THE SAME QUESTION with a measurement that needs no third party: elapsed time. Past `max(ttl, 60min)` no prompt cache survives, so the age IS the verdict. `cache_expired_by_age` returns **True or None, never False**: "not yet certainly dead" is not "alive", and a False would override a probe that said expired, re-creating the refusal being fixed. `resolve_cache_expired` consults the probe FIRST, so a warm probe still beats an ancient mtime and a live cache is never thrown away.
 
+
+^ATOM-PKZU-XTVT [desc: "why next_fire_misses_cache and this floor gate use opposite TTL asymmetries despite reading the same elapsed time", keywords: next_fire_misses_cache_vs_this_gate opposite_TTL_asymmetries_same_elapsed_time why_5_min_vs_60_min_TTL, type: reference, ocd: 2026-08-18, lmd: 2026-08-18]
+
 The two clocks read the SAME elapsed time with OPPOSITE asymmetries, which is why the floor is its own constant: `next_fire_misses_cache` predicts a COST and uses the SHORT TTL (5 min) to err toward acting; this gate authorizes a DESTRUCTIVE act and uses the LONG one (60 min) to act only where certainty is real.
+
+
+^ATOM-F9K2-BPPQ [desc: "a CLI in a plugin-cache bin dir is invisible to shutil.which in a hook child — verify a PATH-dependent fix under the environment that failed, not your shell", keywords: llm-ext_is_not_on_PATH handoff_degraded_to_the_template summary_permanent_not_retrying which_llm-ext_fails_in_a_hook verify_PATH_dependent_fix_under_env_-i, type: reference, ocd: 2026-08-18, lmd: 2026-08-18]
 
 **A CLI that ships inside another plugin is invisible to `shutil.which` in a hook child.** llm-ext lives at `~/.claude/plugins/cache/<marketplace>/llm-externalizer/<version>/bin/llm-ext` — a dir the user's interactive PROFILE puts on PATH, which a hook-spawned detached child never inherits. So `summary: permanent — llm-ext is not on PATH; not retrying` fired on every cold resume and each handoff silently degraded to the link-only template. Resolve by the install's OWN layout (the convention `llm_ext_data_dir` already reads in reverse), PATH first so an operator keeps control, and order versions by PARSED NUMERIC TUPLE — as strings `"9.0.0"` sorts above `"13.5.1"` and would pin the oldest install forever.
 
 **Verify a PATH-dependent fix under the environment that FAILED, not your shell**: `env -i HOME=$HOME PATH=/usr/bin:/bin <interpreter> -c '...'` reproduces the hook child. An interactive shell finds the binary and proves nothing.
 
 
-^ATOM-MK02-SA6C [desc: "the handoff that authorised a destructive clear was never validated — 'summary: ok' only ever meant the process printed something", keywords: handoff_was_a_refusal compaction_cleared_my_session_and_the_handoff_was_useless summary_ok_but_the_summary_was_garbage model_refused_the_compaction agent-handoff.md_contains_a_lecture externalized_compaction_lost_my_work exit_0_but_wrong_output llm-ext_returned_a_refusal, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+^ATOM-V42V-4CJO [desc: "on 2026-08-18 the externalized compaction cleared a live session and left a REFUSAL in its handoff — the whole validation was 'out or None'", keywords: handoff_was_a_refusal compaction_cleared_my_session_and_the_handoff_was_useless model_refused_the_compaction exit_0_but_wrong_output llm-ext_returned_a_refusal, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 On 2026-08-18 the externalized compaction cleared a live session and left a REFUSAL in its
 handoff. Every mechanical step was correct — cold-cache gate opened, the hook BLOCKED on the
@@ -61,6 +69,9 @@ watcher, the chain typed `/clear` — and the log said `summary: ok on attempt 1
 not summarised: it declined the compaction as a prompt injection and lectured about this plugin,
 on exit 0 with non-empty stdout. The whole validation of the artifact that authorises destroying
 a context was `out or None`.
+
+
+^ATOM-3LYT-GMKT [desc: "the fix classifies a refusal as UNKNOWN with a constant detail and degrades to a link-only handoff; the match is anchored to the first line, not anywhere in the text", keywords: summary_ok_but_the_summary_was_garbage agent-handoff.md_contains_a_lecture looks_like_refusal_fix blockquote_not_stripped, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 **A zero exit says the CLI ran. It says nothing about whether the text is a summary.** The fix
 (3.3.13, `_looks_like_refusal`) classifies a refusal as UNKNOWN with a CONSTANT detail — the
@@ -71,6 +82,9 @@ clears. The clear is never held hostage to summary quality; that was always the 
 The match is ANCHORED to the first line, NOT "anywhere in the first N chars": a legitimate
 summary OF this incident opens by QUOTING the refusal. Blockquote `>` is deliberately not
 stripped — a leading `>` is evidence of quoting, the opposite of refusing.
+
+
+^ATOM-1EV0-XCON [desc: "3.3.14 added evidence capture on every failed attempt; blast radius measured 1/19 poisoned handoffs, upstream cause is llm-externalizer's driver.ts prompt wording", keywords: compaction_failed_could_not_be_answered_without_a_repro evidence_transcript_path_bytes_rc_elapsed blast_radius_poisoned_handoffs driver.ts_prompt_reads_as_injection, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 3.3.14 added the other half: until then stderr was read into a local and DROPPED on every
 zero-exit path, and stdout was dropped on every non-OK path, so "the compaction failed" could
@@ -212,6 +226,50 @@ Measuring beats reasoning on this one. With a probed 60-min cache TTL and a `*/5
 
 `session_liveness.capture_terminal_identity` and `fleet_restart.recorded_terminal` emit the FLEET shape `{iterm_session_id, tmux_pane}`. `terminal_trigger` and `clear_trigger._this_terminal` consume a DIFFERENT shape, `{kind, pane|session_id}`. Passing the former straight to the latter yields `kind=""`, and every builder treats an unknown kind as "unsupported channel" — so the injection SILENTLY does nothing and reports success. `external_clear.terminal_from_record` is the adapter (tmux preferred, because its pane can be read back, which is what lets the chain VERIFY a command before submitting it). Second trap in the same conversion: `ITERM_SESSION_ID` is recorded VERBATIM as `<tty>:<UUID>`, so the UUID must be split off or `clear_trigger._UUID_RE` rejects the whole string and refuses to build the osascript at all.
 
+
+## Superseded
+
+
+^ATOM-MK02-SA6C [desc: "the handoff that authorised a destructive clear was never validated — 'summary: ok' only ever meant the process printed something", keywords: handoff_was_a_refusal compaction_cleared_my_session_and_the_handoff_was_useless summary_ok_but_the_summary_was_garbage model_refused_the_compaction agent-handoff.md_contains_a_lecture externalized_compaction_lost_my_work exit_0_but_wrong_output llm-ext_returned_a_refusal, type: project, ocd: 2026-08-18, lmd: 2026-08-18, status: superseded, superseded-by: ATOM-V42V-4CJO]
+
+On 2026-08-18 the externalized compaction cleared a live session and left a REFUSAL in its
+handoff. Every mechanical step was correct — cold-cache gate opened, the hook BLOCKED on the
+watcher, the chain typed `/clear` — and the log said `summary: ok on attempt 1`. The model had
+not summarised: it declined the compaction as a prompt injection and lectured about this plugin,
+on exit 0 with non-empty stdout. The whole validation of the artifact that authorises destroying
+a context was `out or None`.
+
+**A zero exit says the CLI ran. It says nothing about whether the text is a summary.** The fix
+(3.3.13, `_looks_like_refusal`) classifies a refusal as UNKNOWN with a CONSTANT detail — the
+retry bound counts identical details, so prose in the detail would silently make it unbounded —
+and the pre-existing degrade-to-template path then writes an honest link-only handoff and still
+clears. The clear is never held hostage to summary quality; that was always the design.
+
+The match is ANCHORED to the first line, NOT "anywhere in the first N chars": a legitimate
+summary OF this incident opens by QUOTING the refusal. Blockquote `>` is deliberately not
+stripped — a leading `>` is evidence of quoting, the opposite of refusing.
+
+3.3.14 added the other half: until then stderr was read into a local and DROPPED on every
+zero-exit path, and stdout was dropped on every non-OK path, so "the compaction failed" could
+not be answered without a repro. Each attempt now carries `evidence` (transcript path + bytes,
+rc, elapsed, both-ends excerpts of both streams), logged the moment it fails.
+
+Blast radius measured across 19 project handoffs on this host: 1 poisoned. Full record:
+TRDD-IFZQ98BA. The upstream half is llm-externalizer's `driver.ts:996-997` prompt, whose
+"Your output REPLACES the transcript ... it is a handoff, not a report" reads as injection-shaped
+to a safety-tuned model; that reword is theirs, and they have it.
+
+^ATOM-KBU2-58YM [desc:"the cold-resume shrink refused on 'cache state unknown' and its handoff had no summary — a gate fed only by an OPTIONAL tool is unreachable, and a CLI in a plugin-cache bin dir is invisible to a hook ", keywords: cache_state_unknown_not_clearing cold_resume_did_not_shrink every_session_paid_a_full_cache_write_on_its_first_turn llm-ext_is_not_on_PATH handoff_degraded_to_the_template summary_permanent_not_retrying agentlensPro_absent_so_the_clear_never_fires which_llm-ext_fails_in_a_hook, type: reference, ocd: 2026-08-15, lmd: 2026-08-15, status: superseded, superseded-by: ATOM-L03E-L31N]
+
+Two defects made the cold-resume shrink LOOK implemented while doing nothing useful (TRDD-CEWVQ8DG, fixed in `904ddef4`); both were found in `.janitor/logs/`, not by reading code.
+
+**A gate whose only input is an OPTIONAL tool is unreachable.** `should_clear_on_resume` requires `cache_expired is True`, and its only source was a probe of the agentlensPro CLI. Where that tool is absent the probe abstains, so the verdict was `why=cache state unknown — not clearing` and a whole fleet of cold resumes each paid a full cache-creation write on its first turn. The fix is not to relax the veto — `/clear` is unrecoverable — but to ANSWER THE SAME QUESTION with a measurement that needs no third party: elapsed time. Past `max(ttl, 60min)` no prompt cache survives, so the age IS the verdict. `cache_expired_by_age` returns **True or None, never False**: "not yet certainly dead" is not "alive", and a False would override a probe that said expired, re-creating the refusal being fixed. `resolve_cache_expired` consults the probe FIRST, so a warm probe still beats an ancient mtime and a live cache is never thrown away.
+
+The two clocks read the SAME elapsed time with OPPOSITE asymmetries, which is why the floor is its own constant: `next_fire_misses_cache` predicts a COST and uses the SHORT TTL (5 min) to err toward acting; this gate authorizes a DESTRUCTIVE act and uses the LONG one (60 min) to act only where certainty is real.
+
+**A CLI that ships inside another plugin is invisible to `shutil.which` in a hook child.** llm-ext lives at `~/.claude/plugins/cache/<marketplace>/llm-externalizer/<version>/bin/llm-ext` — a dir the user's interactive PROFILE puts on PATH, which a hook-spawned detached child never inherits. So `summary: permanent — llm-ext is not on PATH; not retrying` fired on every cold resume and each handoff silently degraded to the link-only template. Resolve by the install's OWN layout (the convention `llm_ext_data_dir` already reads in reverse), PATH first so an operator keeps control, and order versions by PARSED NUMERIC TUPLE — as strings `"9.0.0"` sorts above `"13.5.1"` and would pin the oldest install forever.
+
+**Verify a PATH-dependent fix under the environment that FAILED, not your shell**: `env -i HOME=$HOME PATH=/usr/bin:/bin <interpreter> -c '...'` reproduces the hook child. An interactive shell finds the binary and proves nothing.
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-CMPF-LOOP, status:valid, keywords:"self_limiting_claim_was_false claimed_it_stops_without_measuring termination_claim_in_docstring", ocd:2026-07-17, lmd:2026-07-17]

@@ -2,12 +2,13 @@
 name: janitor-detector-and-hook-roster
 description: "full list of the janitor detectors by group (73 registered as of 2026-08-16) / how many detectors are there / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py / why does the token-spike advisory never fire / TURN_OUTPUT knob has no effect"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-08-18
 metadata:
   node_type: memory
   type: reference
   tier: component
   functionality: detector-and-hook-roster
+publish-globally: false
 ---
 
 # janitor-detector-and-hook-roster
@@ -111,13 +112,19 @@ GH-REPLY MONITOR below; it lives outside `scripts/hooks/` because it belongs to 
 subsystem, not to the heartbeat.
 
 
-^ATOM-8ANO-T80F [desc:"agent-context-integrity's 21 rules catch ~28% of realistic poisoned context files — measured 2026-08-12 against a blind corpus, not assumed", keywords: does_agent-context-integrity_actually_catch_poisoning detector_recall_unknown how_good_are_the_scan_text_rules measuring_a_security_detector's_coverage blind_corpus_red_team poisoned_CLAUDE.md_not_detected, type: project, ocd: 2026-08-12, lmd: 2026-08-12]
+
+
+^ATOM-NARU-DPF4 [desc: "agent-context-integrity's scan_text rules measured at ~28% recall on 87 blind-authored samples across 10 of 21 claimed classes", keywords: does_agent-context-integrity_actually_catch_poisoning detector_recall_unknown how_good_are_the_scan_text_rules, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 The `agent_config_patterns.scan_text` rules that guard auto-loaded context files were never
 measured until 2026-08-12; the answer is **~28% recall** (any rule firing) on 87 blind-authored
 samples across 10 of the 21 claimed classes — so roughly seven in ten realistic poisoned files
 produce NO finding, and the best single class reaches 56%. Bench: `scripts/agent_context_bench.py`,
 corpus + baseline under `tests/agent_context_bench/` (janitor#226, commit `c06a44b9`).
+
+
+^ATOM-7B1B-RX8T [desc: "the corpus was authored BLIND so the measurement is meaningful; two recurring failure shapes are closed verb enumeration and rigid literal adjacency", keywords: measuring_a_security_detector's_coverage blind_corpus_red_team closed_verb_enumeration rigid_adjacency_to_a_literal domain_blocklist_cannot_catch_a_novel_domain, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
 The measurement is only meaningful because the corpus was authored BLIND — an external model got
 the attack classes BY INTENT ONLY and never saw the regexes; a corpus derived from the patterns
 measures the author's consistency with themselves and scores near 100%. Two failure shapes are
@@ -127,12 +134,64 @@ literal (it wants the verb next to `the user`, so "do not mention this in any ou
 the user" evades it by ~45 characters of ordinary prose). A domain BLOCKLIST like
 `exfil-webhook-sink` cannot catch a novel domain at all, which is a scope limit no tuning fixes —
 say so in the docs rather than shipping a rule that gestures at the broader class.
+
+
+^ATOM-PRUF-Y44L [desc: "never tune a pattern against the samples that exposed it — use the dev/holdout split; see janitor-findings-pipeline for where findings land", keywords: do_not_tune_against_the_samples_that_exposed_it split_of_dev_holdout, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
 Do NOT tune a pattern against the samples that exposed it: that converts recall from
 generalisation into fit. `split_of()` splits the corpus dev/holdout for exactly this.
 See [[janitor-findings-pipeline]] for where these findings land.
 
 
-^ATOM-T1UU-0DNF [desc:"agent-context-integrity false-positives at 19% and every case is a doc DESCRIBING an attack to prohibit it — measured 2026-08-12, tracked in janitor#254", keywords: detector_flagged_my_security_policy false_positive_on_prohibition_text agent-context-integrity_fires_on_a_doc_describing_an_attack post-mortem_flagged_as_injection test_fixture_flagged_as_poisoning, type: project, ocd: 2026-08-12, lmd: 2026-08-12]
+^ATOM-TV6I-CCIO [desc: "agent-context-integrity false-positives at 19% — all three cases are a doc describing an attack in order to prohibit, narrate, or fixture it", keywords: detector_flagged_my_security_policy false_positive_on_prohibition_text agent-context-integrity_fires_on_a_doc_describing_an_attack post-mortem_flagged_as_injection test_fixture_flagged_as_poisoning, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
+Measured 2026-08-12 alongside the recall figure: `scan_text`'s false-positive rate is **19%**
+(3 of 16 blind-authored benign controls), and all three are the SAME shape — a file that
+describes an attack in order to prohibit, narrate, or fixture it. Concretely: a security policy
+documenting prompt injection fired `prompt-injection-multilingual`; an incident post-mortem
+fired `sensitive-secret-ref`; a clearly-labelled test fixture fired
+`prompt-injection-multilingual`. janitor#167 landed FP hardening for prohibition text and
+negation context, so whatever that covers, it does NOT cover prose ABOUT the attack, past-tense
+narrative, or a file that declares itself a fixture. Tracked in janitor#254 (FP half) — kept out
+of janitor#226 by that issue's own scope rule (coverage only).
+
+
+^ATOM-4SNY-SOW4 [desc: "paired with ~28% recall, the FP channel flags the docs that warn about attacks; gate on whether the string is an object of discussion, not an imperative", keywords: why_this_matters_more_than_ordinary_noise self_referential_security_docs discriminating_feature_object_of_discussion_vs_imperative, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
+**Why this matters more than ordinary noise:** paired with ~28% recall it means the channel
+misses most real attacks while flagging the documentation that warns about them, which is how a
+reader learns to dismiss the one channel guarding auto-loaded context. It is self-referential —
+THIS repo's own security docs trip it, as would any project that documents these attack classes.
+The discriminating feature to gate on is that the attack string appears as the OBJECT OF
+DISCUSSION ("this document describes", "we observed", "example", "fixture"), not as an imperative
+addressed to the agent; a document-level frame is a cheaper signal than per-line negation.
+
+
+^ATOM-Z18Y-WQ7U [desc: "do not tune against the three FP samples alone — that fixes the samples, not the class; use the bench's dev/holdout split", keywords: do_not_tune_against_those_three_samples_alone use_the_bench_dev_holdout_split, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
+Do NOT tune against those three samples alone — that fixes the samples, not the class; use the
+bench's dev/holdout split.
+
+## Governed by
+
+- [[janitor-architecture]] — the architecture hub; this page is the detailed roster
+  behind its abbreviated detector/pattern-library/hooks summaries.
+
+## See also
+
+- [[janitor-gh-reply-monitor]] — the `gh-reply-watch` detector's own subsystem page
+  (replies to threads this project opened, distinct from `github-issues-watch` above).
+
+
+^ATOM-NBGE-HWP7 [desc:"a CLAUDE.md that arrives already poisoned needs no execution at all — three deliberate convention breaks in agent-context-integrity follow from that", keywords: can_a_poisoned_CLAUDE.md_attack_me_without_running_anything is_a_gitignored_CLAUDE.md_safe why_does_this_detector_report_on_the_very_first_run injection_arrived_via_a_merged_PR_or_a_clone agent_context_poisoning_vector, ocd: 2026-08-04, lmd: 2026-08-04]
+
+Agent context is poisoned three ways: a dependency postinstall WRITES `CLAUDE.md` (caught by `ai-context-poisoning`), an MCP response carries a hostile payload (caught by `post-mcp-response-sanitizer`), or the context file ARRIVES ALREADY POISONED via a clone, a pull, or a merged PR. The third was the unwatched one and is the cheapest: it needs NO EXECUTION — no install script, no server, no command — because `CLAUDE.md` is read into every session automatically, so the hostile line is ACTED ON before any detector could report it. `agent-context-integrity` (janitor#167) covers it. Three deliberate convention breaks follow from that vector, each of which looks like a bug until you see why: (1) NO silent first-fire baseline, unlike every other watcher here — a file poisoned BEFORE the janitor arrived is still poisoned, so adopting current state as clean is the silent-disable shape; content-hash dedupe stops the nagging instead. (2) NO gitignore filter, the documented exception to janitor#99 — that rule asks "what does the repo SHIP?", this one asks "what does the agent LOAD?", and a gitignored `CLAUDE.md` is still auto-loaded. (3) EVERY emitted byte is sanitized, because this detector quotes attacker-controlled text into heartbeat stdout, where the model reads lines as instructions — a poisoned file containing a bare marker must arrive defanged. See [[janitor-findings-pipeline]] for where its findings land.
+
+
+## Superseded
+
+
+^ATOM-T1UU-0DNF [desc:"agent-context-integrity false-positives at 19% and every case is a doc DESCRIBING an attack to prohibit it — measured 2026-08-12, tracked in janitor#254", keywords: detector_flagged_my_security_policy false_positive_on_prohibition_text agent-context-integrity_fires_on_a_doc_describing_an_attack post-mortem_flagged_as_injection test_fixture_flagged_as_poisoning, type: project, ocd: 2026-08-12, lmd: 2026-08-12, status: superseded, superseded-by: ATOM-TV6I-CCIO]
 
 Measured 2026-08-12 alongside the recall figure: `scan_text`'s false-positive rate is **19%**
 (3 of 16 blind-authored benign controls), and all three are the SAME shape — a file that
@@ -153,21 +212,25 @@ addressed to the agent; a document-level frame is a cheaper signal than per-line
 Do NOT tune against those three samples alone — that fixes the samples, not the class; use the
 bench's dev/holdout split.
 
-## Governed by
+^ATOM-8ANO-T80F [desc:"agent-context-integrity's 21 rules catch ~28% of realistic poisoned context files — measured 2026-08-12 against a blind corpus, not assumed", keywords: does_agent-context-integrity_actually_catch_poisoning detector_recall_unknown how_good_are_the_scan_text_rules measuring_a_security_detector's_coverage blind_corpus_red_team poisoned_CLAUDE.md_not_detected, type: project, ocd: 2026-08-12, lmd: 2026-08-12, status: superseded, superseded-by: ATOM-NARU-DPF4]
 
-- [[janitor-architecture]] — the architecture hub; this page is the detailed roster
-  behind its abbreviated detector/pattern-library/hooks summaries.
-
-## See also
-
-- [[janitor-gh-reply-monitor]] — the `gh-reply-watch` detector's own subsystem page
-  (replies to threads this project opened, distinct from `github-issues-watch` above).
-
-
-^ATOM-NBGE-HWP7 [desc:"a CLAUDE.md that arrives already poisoned needs no execution at all — three deliberate convention breaks in agent-context-integrity follow from that", keywords: can_a_poisoned_CLAUDE.md_attack_me_without_running_anything is_a_gitignored_CLAUDE.md_safe why_does_this_detector_report_on_the_very_first_run injection_arrived_via_a_merged_PR_or_a_clone agent_context_poisoning_vector, ocd: 2026-08-04, lmd: 2026-08-04]
-
-Agent context is poisoned three ways: a dependency postinstall WRITES `CLAUDE.md` (caught by `ai-context-poisoning`), an MCP response carries a hostile payload (caught by `post-mcp-response-sanitizer`), or the context file ARRIVES ALREADY POISONED via a clone, a pull, or a merged PR. The third was the unwatched one and is the cheapest: it needs NO EXECUTION — no install script, no server, no command — because `CLAUDE.md` is read into every session automatically, so the hostile line is ACTED ON before any detector could report it. `agent-context-integrity` (janitor#167) covers it. Three deliberate convention breaks follow from that vector, each of which looks like a bug until you see why: (1) NO silent first-fire baseline, unlike every other watcher here — a file poisoned BEFORE the janitor arrived is still poisoned, so adopting current state as clean is the silent-disable shape; content-hash dedupe stops the nagging instead. (2) NO gitignore filter, the documented exception to janitor#99 — that rule asks "what does the repo SHIP?", this one asks "what does the agent LOAD?", and a gitignored `CLAUDE.md` is still auto-loaded. (3) EVERY emitted byte is sanitized, because this detector quotes attacker-controlled text into heartbeat stdout, where the model reads lines as instructions — a poisoned file containing a bare marker must arrive defanged. See [[janitor-findings-pipeline]] for where its findings land.
-
+The `agent_config_patterns.scan_text` rules that guard auto-loaded context files were never
+measured until 2026-08-12; the answer is **~28% recall** (any rule firing) on 87 blind-authored
+samples across 10 of the 21 claimed classes — so roughly seven in ten realistic poisoned files
+produce NO finding, and the best single class reaches 56%. Bench: `scripts/agent_context_bench.py`,
+corpus + baseline under `tests/agent_context_bench/` (janitor#226, commit `c06a44b9`).
+The measurement is only meaningful because the corpus was authored BLIND — an external model got
+the attack classes BY INTENT ONLY and never saw the regexes; a corpus derived from the patterns
+measures the author's consistency with themselves and scores near 100%. Two failure shapes are
+concrete and recurring in these rules: a CLOSED VERB ENUMERATION (`concealment-directive` knows
+`tell/inform/notify/mention/show` but not `report`/`omit`/`suppress`), and RIGID ADJACENCY to a
+literal (it wants the verb next to `the user`, so "do not mention this in any output visible to
+the user" evades it by ~45 characters of ordinary prose). A domain BLOCKLIST like
+`exfil-webhook-sink` cannot catch a novel domain at all, which is a scope limit no tuning fixes —
+say so in the docs rather than shipping a rule that gestures at the broader class.
+Do NOT tune a pattern against the samples that exposed it: that converts recall from
+generalisation into fit. `split_of()` splits the corpus dev/holdout for exactly this.
+See [[janitor-findings-pipeline]] for where these findings land.
 ## Notes and lessons learned
 
 [^1]: [id: LESSON-NBGE-TKBUDGET-KNOBS, status: current, keywords: TURN_OUTPUT_has_no_effect token_budget_advisory_knob_ignored why_does_the_token_spike_advisory_never_fire baseline_relative_advisory_bar setting_TURN_OUTPUT_HARD_to_0_did_not_silence_output roster_documented_a_deleted_knob, ocd: 2026-08-11, lmd: 2026-08-11]
