@@ -181,7 +181,10 @@ _TEST_SUITE_TIMEOUT_SEC = 3600
 # `-x` is exitfirst; under xdist it stops the WORKERS, so a failing run can interleave
 # output from shards that were mid-flight. Exit status — all either call site branches
 # on — is unchanged.
-_PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto"]
+# --dist loadgroup: identical to the default `load` for ungrouped tests, but honours
+# `xdist_group` markers — tests/test_state_cache_isolation.py's a/b pair is order- and
+# process-dependent and broke a publish when plain `load` split it across workers.
+_PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto", "--dist", "loadgroup"]
 
 # Wall-clock bound for every remote-CPV invocation, for the same reason as above.
 # MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on

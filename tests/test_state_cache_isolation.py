@@ -29,6 +29,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+# The a/b pair is ORDER- and PROCESS-dependent (`_SEEN` is per-worker module state), and
+# xdist's default `load` scheduling gives no file affinity — on 2026-08-18 a publish gate
+# died on gw5 getting test_b without test_a. This marker plus `--dist loadgroup` (set in
+# publish.py and ci.yml) pins the trio to one worker; a bare `-n auto` run without
+# loadgroup can still split them, so keep the flag next to every `-n` this suite gets.
+pytestmark = pytest.mark.xdist_group("state-cache-isolation")
+
 _SEEN: dict[str, Path] = {}
 
 

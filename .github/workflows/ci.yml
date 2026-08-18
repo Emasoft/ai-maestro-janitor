@@ -105,7 +105,10 @@ jobs:
       # failure. Thread method because signal-based timeouts do not fire inside xdist
       # workers blocked in C calls.
       - name: Pytest
-        run: uv run --extra dev pytest -q -n auto -m "not integration" --timeout=300 --timeout-method=thread
+        # --dist loadgroup: same as the default `load` for ungrouped tests, but keeps
+        # xdist_group-marked tests (the order-dependent state-cache-isolation pair) on
+        # one worker — plain `load` split them and failed a publish gate on 2026-08-18.
+        run: uv run --extra dev pytest -q -n auto --dist loadgroup -m "not integration" --timeout=300 --timeout-method=thread
 
       # The real-daemon-spawn integration suite — SERIAL (no -n), its own
       # step, so it never competes with the parallel unit workers for CPU.
