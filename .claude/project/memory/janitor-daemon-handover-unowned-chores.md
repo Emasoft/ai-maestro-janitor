@@ -2,12 +2,13 @@
 name: janitor-daemon-handover-unowned-chores
 description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone / daemon.heartbeat.ts is hours stale and the spawn-attempt stamp is days old / the daemon starts and then exits after about one second / daemon.log says stopping server-owns-host / os-keepalive activate then uninstall on every spawn / should I force the janitor daemon back up"
 ocd: 2026-07-29
-lmd: 2026-08-01
+lmd: 2026-08-18
 metadata:
   node_type: memory
   type: project
   tier: component
   functionality: daemon-ownership
+publish-globally: false
 ---
 
 ^one-daemon-per-host-withdraws-the-whole-daemon [desc: "a live ai-maestro server makes the janitor withdraw its ENTIRE daemon, not just the absorbed chores", keywords: all_chore_stamps_frozen_at_the_same_age daemon_pid_missing_but_no_kill_switch recent_spawn_count_zero_while_heartbeat_fires ensure_daemon_running_returns_without_spawning server_owns_host_guard one_daemon_per_host, type: project, ocd: 2026-07-29, lmd: 2026-07-29]
@@ -55,6 +56,11 @@ membership before drawing any conclusion. Tracked as ai-maestro#103 (the running
 question) and as the open scope decision on TRDD-5ZVS1DDP: either §7.2 stops being
 all-or-nothing (daemon lives, yields only claimed chores), or the remaining six are absorbed
 deliberately and advertised in `capabilities`.
+
+
+^ATOM-KYRU-GT5O [desc: "Rev-8 contract: executor-declared staleness bounds (claim-bounds.json, widen-only, fail-open); github-config-audit joined the absorbed set", keywords: claimed_chore_stale_false_alarm server_cadence_differs_from_janitor_roster claim-bounds.json widen-only_declared_bound github-config-audit_yields_to_server absorbed_set_changed rev_8_contract chore_stamp_bound_table, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
+Ratified 2026-08-18 (both sessions under the USER's delegation; janitor ARCHITECTURE.md §9 rev 8; server mirror docs/claimed-chores-contract.md @ eccbd02a; thread ai-maestro#126). The claimed-chore watchdog no longer trusts only the JANITOR roster cadence for a chore the SERVER executes: the executor declares its own bound in ~/.claude/janitor-control/claim-bounds.json and claimed-chore-stale reads it FAIL-OPEN, with widen-only enforcement in claimed_chore_watch.stale_threshold — a declaration can only RAISE a bound, because honouring a narrower one would let the other side's config manufacture false positives (janitor#225 mirrored). Same round: github-config-audit JOINED SERVER_ABSORBED_TASKS (janitor#274 — the server has stamped it since 2026-08-05), so it is class-2 absorbed, no longer class-4 janitor-internal; its declared 14400s bound is below the 64800s roster default and widen-only deliberately ignores it.
 
 ## Governed by
 
