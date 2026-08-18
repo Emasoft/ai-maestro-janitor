@@ -526,8 +526,24 @@ def _spawn_chain(payload: dict, *, env: dict[str, str] | None = None) -> None:
     override never touches `os.environ`). Scoping it to the child keeps the parent clean.
     """
     blob = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    # THE CHAIN CHILD IS THE PROCESS THAT SENDS APPLEEVENTS, so its interpreter must be the
+    # stably-signed automation one, NEVER inherited blindly (owner directive 2026-08-16,
+    # reaffirmed 2026-08-18: uv is a launcher and must not appear anywhere in the
+    # iTerm-control chain). `sys.executable` is correct when the WATCHER spawned us (it
+    # already runs under `automation_python_path()`), but wrong when this script is invoked
+    # via `uv run` (a skill / the CLI lever): the child would inherit uv's managed CPython,
+    # whose TCC grant pins a version-specific path and is silently orphaned by the next
+    # `uv python` upgrade. Resolving at THIS chokepoint covers every caller at once.
+    # Fallback to sys.executable when nothing resolves: a chain that runs and gets denied
+    # at least logs the denial, where no chain at all is silent.
+    try:
+        import global_state as _gs  # noqa: PLC0415 -- lazy; scripts/lib is on path
+
+        _automation_py = _gs.automation_python_path() or sys.executable
+    except Exception:  # noqa: BLE001 -- interpreter resolution must never kill the chain
+        _automation_py = sys.executable
     subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
-        [sys.executable, str(Path(__file__).resolve()), "--__chain", blob],
+        [_automation_py, str(Path(__file__).resolve()), "--__chain", blob],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
