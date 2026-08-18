@@ -271,7 +271,7 @@ def _symbol_absent_at_head(token: str, root: Path) -> bool:
 _DEFINITION_RE = r"^[[:space:]]*(def |class |async def ){0}[^A-Za-z0-9_]|^{0}[[:space:]]*[:=]"
 
 
-def _symbol_in_history(token: str, root: Path) -> bool | None:
+def _symbol_in_history(token: str, root: Path, *, timeout_s: float = 30) -> bool | None:
     """True/False iff `token` was once DEFINED as a module-level symbol in `scripts/` history,
     or **None when that could not be determined** (git missing, timeout, non-zero exit).
 
@@ -330,7 +330,15 @@ def _symbol_in_history(token: str, root: Path) -> bool | None:
         # exactly the permanently-silent class the note above records for the `-S`/`-G` flag
         # bug. Distinguishing the two is TRDD-worthy on its own; widening the window first
         # removes the trigger.
-        timeout=30,
+        #
+        # `timeout_s` is a PARAMETER (2026-08-18) because raising this constant is a losing
+        # game: 8s failed a publish, 30s failed the next one under heavier load (the suite's
+        # 14 workers plus an unrelated runaway eating ~5 cores pushed the 0.3s idle call past
+        # 30s — verified in this detector's own log, "subprocess timed out after 30s" twice).
+        # 30s stays the PRODUCTION bound (the heartbeat must abstain rather than stall); the
+        # real-history tests pass a hang-only bound instead, because their subject is the -G
+        # regex semantics, not this timeout policy — that policy has its own stubbed test.
+        timeout=timeout_s,
         detector_name="trdd-state-reconciliation",
     )
     if proc is None or proc.returncode != 0:

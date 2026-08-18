@@ -736,6 +736,17 @@ def _sym_in_history():
     return mod
 
 
+# These two probe REAL git history, so they inherit the machine's load: the production
+# 30s bound abstained (None) under the publish suite's 14 workers plus an unrelated
+# runaway process, and the strict `is True`/`is False` asserts read the abstain as a wrong
+# answer — blocking the 3.3.16 publish (detector log: "subprocess timed out after 30s",
+# twice, 18:42). Their subject is the -G regex SEMANTICS, so they pass a hang-only bound
+# (the timeout POLICY has its own stubbed test below), and they share an xdist group so
+# they never race each other's full-history scans on two workers.
+_HANG_ONLY_TIMEOUT_S = 300
+
+
+@pytest.mark.xdist_group("real-git-history-probes")
 def test_ordinary_words_are_not_symbols(tmp_path):
     """The reported failure: `queue` (another system's AMP verb) and `modified` (a memory
     frontmatter field) were both flagged as deleted symbols, because `git log -S` matches a
@@ -748,16 +759,21 @@ def test_ordinary_words_are_not_symbols(tmp_path):
         # lookup could not RUN (timeout, git missing), and `assert not None` passes, so the
         # loose form is satisfied by a check that never executed. A negative test that a dead
         # check can satisfy proves nothing about the code it names.
-        assert mod._symbol_in_history(word, root) is False, f"{word!r} is prose, not a symbol"
+        assert mod._symbol_in_history(word, root, timeout_s=_HANG_ONLY_TIMEOUT_S) is False, (
+            f"{word!r} is prose, not a symbol"
+        )
 
 
+@pytest.mark.xdist_group("real-git-history-probes")
 def test_real_deleted_symbols_are_still_found(tmp_path):
     """The fix must not buy a zero FP rate by making the check never fire — the failure mode
     this repo keeps hitting. These are real definitions in this repo's own history."""
     mod = _sym_in_history()
     root = Path(__file__).resolve().parent.parent
     for sym in ("_phase_self_budget", "_symbol_in_history", "emit_once"):
-        assert mod._symbol_in_history(sym, root) is True, f"{sym!r} was defined here, must be found"
+        assert mod._symbol_in_history(sym, root, timeout_s=_HANG_ONLY_TIMEOUT_S) is True, (
+            f"{sym!r} was defined here, must be found"
+        )
 
 
 def test_an_undetermined_lookup_is_none_not_false(monkeypatch):
