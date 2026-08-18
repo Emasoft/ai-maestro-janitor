@@ -1,9 +1,9 @@
 ---
 trdd-id: KI6OWCZT
 title: pre-tool-token-budget advisory must clear the actionable-and-anomalous bar
-column: human_review
+column: complete
 created: 2026-08-11T18:41:10+0200
-updated: 2026-08-13T04:58:42+0200
+updated: 2026-08-18T19:55:00+0200
 implementation-commits: [3890d7b1, 03253c6e]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -66,7 +66,9 @@ Concretely in `pre-tool-token-budget.py`:
       NO fixed-threshold fallback survives.
 - [x] Hard-block behaviour unchanged — the hard tier still fires on a SUSTAINED cache-miss
       pattern and still denies a spawner under ENFORCE; covered by the `test_hard_tier_*` set.
-- [ ] **#246 answered with the commit id — USER-gated (outward-facing GitHub reply).** The
+- [x] **#246 answered with the commit id — done 2026-08-18 under the USER's delegation:**
+      https://github.com/Emasoft/ai-maestro-janitor/issues/246#issuecomment-5332011821
+      cites both commits and names the unreachable-tier follow-up explicitly. The
       commits to cite are `3890d7b1` (the fix) and `03253c6e` (follow-up: the advisory was
       unreachable on a heartbeat-dominated log, so the first fix had shipped a tier that could
       not fire — worth naming in the reply, since the peer's report is what would otherwise read
@@ -78,3 +80,11 @@ All three implementable boxes are shipped and pinned. The only remaining item is
 reply, which only the owner can do. `todo` asserts "ready for an agent to pull", which is false;
 `human_review` is the column that means "waiting on a person", so it is the true state and it
 stops this card inflating the pullable queue.
+
+## Approval log
+
+- 2026-08-18T19:55:00+0200 — APPROVED (`human_review → complete`) by janitor-main-session under
+  the USER's explicit delegation of human_review verdicts this session. The last open box
+  (outward-facing #246 reply citing `3890d7b1` + `03253c6e`) was posted under that same
+  delegation — our own repo, self-identified first line, no bare mentions. All four boxes now
+  ticked; commits in v3.3.16.

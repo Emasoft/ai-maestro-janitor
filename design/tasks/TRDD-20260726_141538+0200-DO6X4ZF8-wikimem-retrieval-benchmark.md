@@ -1,9 +1,9 @@
 ---
 trdd-id: DO6X4ZF8
 title: Wikimem retrieval benchmark — accuracy and end-to-end token cost, with a committed baseline
-column: human_review
+column: published
 created: 2026-07-26T14:15:38+0200
-updated: 2026-08-02T13:05:35+0200
+updated: 2026-08-18T19:52:15+0200
 current-owner: 2f5bc976
 task-type: infra
 approval-tier: 0
@@ -109,5 +109,15 @@ fact?*, and it is what makes the layered design provable instead of merely plaus
 
 - Absolute billing accuracy. The estimator is a *relative* instrument; it is not a cost oracle.
 - Benchmarking the live corpus in the gate (it is not reproducible).
+
+## Approval log
+
+- 2026-08-18T19:52:15+0200 — APPROVED (`human_review → published`) by janitor-main-session under
+  the USER's explicit delegation of human_review verdicts this session. Instrument + two frozen
+  corpora + committed baselines shipped and gating in CI; ai_review re-verified at then-current
+  HEAD (all `no change`, cargo 127, pytest 14,109, ruff 0); the mispairing defect found in
+  review was fixed in `f0ef029`, not deferred. All implementation commits are ancestors of the
+  published v3.3.16 (CI green, installed) and `release-via: publish`, so recorded as
+  `published` directly. Follow-ups (#25, #29, #31) remain separate TRDDs' work by design.
 
 ## Notes and lessons learned

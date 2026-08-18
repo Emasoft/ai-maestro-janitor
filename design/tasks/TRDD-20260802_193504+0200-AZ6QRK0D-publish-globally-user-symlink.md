@@ -1,9 +1,9 @@
 ---
 trdd-id: AZ6QRK0D
 title: Publish-globally pages get a real USER-scope symlink mechanism
-column: human_review
+column: published
 created: 2026-08-02T19:35:04+0200
-updated: 2026-08-16T02:10:31+0200
+updated: 2026-08-18T20:01:00+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -220,5 +220,25 @@ publishing must run the privacy scan first — a page with machine-private conte
 - Round-trip: mark a page `published-globally` → publish → visible in USER-scope recall from a
   different project root → unpublish → gone; lint flags the inconsistent states.
 - A page with an absolute `$HOME` path refuses to publish (privacy gate).
+  **AMENDED by the 2026-08-18 verdict below:** the enforcement point is the
+  `memory-scope-leak` detector (async heartbeat flag + human fix), not a write-time refusal
+  inside the Rust publish path — option 3 of the STATE's three, chosen deliberately.
+
+## Approval log
+
+- 2026-08-18T20:01:00+0200 — DECIDED + CLOSED (`human_review → published`) by
+  janitor-main-session under the USER's explicit delegation of open decisions this session.
+  The escalated privacy-gate design choice is settled as **option 3 — the gate lives in the
+  Python layer**: `memory-scope-leak.py` already scans EVERY page in the PROJECT memory dir
+  (publish-globally pages included) with the full `privacy_scan` catalogues + entropy gate on
+  each heartbeat (verified in the detector source today). Option 1 rejected — porting the
+  catalogues to Rust forks the detection logic into two languages that drift silently.
+  Option 2 rejected — a process spawn inside every page write plus an unsolvable
+  scanner-missing failure mode. The accepted trade is the card's own: the USER-scope symlink
+  can exist briefly before the next heartbeat objects, and that exposure is bounded — the
+  symlink is not a git push, while the real push surface (the PROJECT commit) is exactly what
+  the detector polices. Everything else on the card shipped in v3.3.16
+  (`memory.rs::apply_publish_globally_fix` + normalization bracket, ~70 tests);
+  `release-via: publish` terminal reached → recorded as `published`.
 
 ## Notes and lessons learned

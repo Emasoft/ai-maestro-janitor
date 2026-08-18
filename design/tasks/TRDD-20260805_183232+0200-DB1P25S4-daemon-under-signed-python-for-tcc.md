@@ -1,10 +1,10 @@
 ---
 trdd-id: DB1P25S4
 title: Run the daemon under the signed python.org 3.12 so the existing iTerm Automation grant applies
-column: human_review
+column: published
 pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-08-16T10:57:15+0200
+updated: 2026-08-18T20:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -241,3 +241,13 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
   (observe a fleet scan enumerate iTerm sessions post-restart; post resolution notes on GH#92 +
   TRDD-VQ4LX7ND), and the GitHub half is the user's to post. Surfaced by a board-drift audit,
   then verified against git rather than taken from the audit's report.
+- 2026-08-18T20:05:00+0200 — CLOSED (`human_review → published`) by janitor-main-session under
+  the USER's explicit delegation of open decisions this session. Both STILL-OPEN items are now
+  done and verified first-hand: (a) the launchd daemon (pid 64131, framework
+  `/Library/Frameworks/Python.framework/.../python3.12` — the signed identity this card's
+  title asked for) fired `session-liveness: esc_nudge → iterm` at 19:53:58 today, i.e. it
+  enumerates AND drives iTerm end-to-end, closing the VQ4LX7ND alarm class; (b) the signed-
+  first ladder (`48c524af`, `automation_python_path` + the mirrored
+  `keepalive_install.sh::resolve_interpreter`) is in the published v3.3.16 (CI green,
+  installed), the resolution note is posted on GH#92 (now closed) and appended to
+  TRDD-VQ4LX7ND's approval log. Terminal release state reached → `published`.

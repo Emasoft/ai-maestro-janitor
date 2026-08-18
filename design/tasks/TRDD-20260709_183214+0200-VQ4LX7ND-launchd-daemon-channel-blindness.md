@@ -268,3 +268,11 @@ as an empty string.[^1]
   channel. (Third instance the same hour: I wrote a commit SHA into this very
   footnote before the commit existed.) Corrected in v0.35.6;
   `test_aimaestro_cli_is_deliberately_not_a_tracked_injection_tool` pins it.
+
+## Approval log
+
+- 2026-08-18T20:04:00+0200 — RESOLUTION NOTE (append-only; column unchanged) by
+  janitor-main-session: the TCC half (the "TCC absent" in this card's title) is now resolved
+  end-to-end by TRDD-DB1P25S4 — signed-identity interpreter ladder (`48c524af`, v3.3.16), live
+  proof today: the launchd daemon under the framework python3.12 fired `esc_nudge → iterm` at
+  19:53:58. GH#92 closed with the full record.

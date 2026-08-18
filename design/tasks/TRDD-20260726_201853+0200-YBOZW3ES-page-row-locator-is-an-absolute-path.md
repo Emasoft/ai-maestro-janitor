@@ -1,9 +1,9 @@
 ---
 trdd-id: YBOZW3ES
 title: A page result's locator is an absolute path — the single most expensive field recall prints
-column: human_review
+column: published
 created: 2026-07-26T20:18:53+0200
-updated: 2026-08-02T13:05:35+0200
+updated: 2026-08-18T19:52:15+0200
 current-owner: 2f5bc976
 task-type: refactor
 approval-tier: 0
@@ -94,5 +94,14 @@ the qualified form only when the name is not unique in the searched set.
 That TRDD delivered the benchmark and the layered output; this is a change the instrument makes
 visible, not a defect in it. Keeping it separate is what lets DO6X4ZF8 close — an instrument that
 stays open until every improvement it reveals is shipped never closes at all.
+
+## Approval log
+
+- 2026-08-18T19:52:15+0200 — APPROVED (`human_review → published`) by janitor-main-session under
+  the USER's explicit delegation of human_review verdicts this session. Shipped in `5ed8155`,
+  ai_review passed 2026-08-02 against the LIVE corpus (zero `/Users/` paths in recall output),
+  retrieval gate `no change` on both corpora, nothing known-broken. `release-via: publish` and
+  `5ed8155` is an ancestor of the published v3.3.16 (CI green, installed), so the terminal
+  release state is already reached — recorded as `published` directly.
 
 ## Notes and lessons learned

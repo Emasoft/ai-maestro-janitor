@@ -481,6 +481,65 @@ owns. No new janitor↔server *file* contract is needed — this rides the PTY t
 holds; §8 is a behavior request, and the shared `is_retry_wedge` regex is the only artifact both
 sides must keep identical.
 
+## 9. Claimed-chore alignment contract — the chore⇄token⇄stamp⇄bound table (round 4, 2026-08-18)
+
+**Why (TRDD-6CRC9SQQ; incident janitor#221).** Rev 4 made the claim BINARY: a fresh
+`server-liveness.json` claims ALL absorbed chores. What it did not pin is the EVIDENCE
+vocabulary: which completion stamp each claimed chore writes, and how stale that stamp may go
+before someone alarms. The janitor's `claimed-chore-stale` watchdog (v2.5.0,
+`lib/claimed_chore_watch.py`) closes the observability half, but today it derives every bound
+from the JANITOR's roster cadence — for a claimed chore that is the NON-executor's cadence, the
+exact class the fleet has measured producing deterministic false "wedged" alerts (and the same
+class this repo's CLAUDE.md documents for `version-update`: a frozen janitor stamp is what
+healthy server-side execution looks like when the server's own cadence differs). The fix is the
+executor declaring its own bound — this table plus one small file.
+
+**9.1 The table (janitor side of the contract; the server repo mirrors it).**
+
+| chore | claim token (informational since rev 4) | completion stamp (the evidence channel, ai-maestro#111) | janitor cadence | default bound `max(3×c, c+600)` |
+|---|---|---|---|---|
+| `oauth-rotator-tick` | `oauth-rotator-tick` | `~/.claude/janitor-control/oauth-rotator-tick.last-run.ts` | 60 s | 660 s |
+| `oauth-rotator-supervisor` | `oauth-rotator-supervisor` | `~/.claude/janitor-control/oauth-rotator-supervisor.last-run.ts` | 600 s | 1 800 s |
+| `marketplace-refresh` | `marketplace-refresh` | `~/.claude/janitor-control/marketplace-refresh.last-run.ts` | 3 600 s | 10 800 s |
+| `user-plugins-update` | `user-plugins-update` | `~/.claude/janitor-control/user-plugins-update.last-run.ts` | 3 600 s | 10 800 s |
+| `version-update` | `version-update` | `~/.claude/janitor-control/version-update.last-run.ts` | 21 600 s | 64 800 s |
+
+Sources of truth: chore names + cadences `harness_backend.GLOBAL_CHORES`; absorbed set
+`harness_backend.SERVER_ABSORBED_TASKS`; bound formula + floor
+`claimed_chore_watch.stale_bound_s` / `DEFAULT_MIN_GRACE_S`. The table is prose FOR the
+negotiation — code reads the code.
+
+**9.2 Executor-declared bounds (the contract ask).** The executor of a claimed chore declares
+its OWN staleness bound in `~/.claude/janitor-control/claim-bounds.json` —
+`{"<chore>": <bound_s>, …}` — written/refreshed by whichever side currently executes. The
+watchdog consults it with **widen-only** semantics: a declared bound REPLACES the default only
+when larger (self-calibration must never introduce a false positive; same rule the watchdog
+already applies to its own observed-cadence widening). File absent or unparseable ⇒ the §9.1
+defaults stand, fail-open. This makes a server that legitimately runs `version-update` daily
+(not every 6 h) alarm-free WITHOUT the janitor guessing, and keeps janitor#221's 3.7-day wedge
+detected in ≤ the declared bound.
+
+**9.3 What stays true regardless (already ratified, restated so §9 cannot be read as
+reopening it).** Alarm-only: the janitor NEVER un-yields a stale claimed chore (rev 4 / owner
+directive 2026-07-17 — a claiming server that does not execute is a SERVER bug to fix there;
+two writers on a machine-global chore is worse than zero). Unknown chore ⇒ skipped, never
+guessed. `no-evidence` (claimed, no stamp ever) is itself a finding.
+
+**9.4 Known discrepancies this round must settle (cross-cited per the hub's 2026-08-18
+constraints — the server lanes are NOT assumed healthy; two hub cards exist precisely because
+they are not).**
+- **ai-maestro TRDD-FXPV7L4D** (marketplace refresh claims every marketplace from ONE exit
+  code while ten were months stale): §9.2's per-chore stamp+bound gives the wedge a detection
+  channel, but a stamp written on a false "success" is still a lie — the stamp MUST mean "the
+  chore's work product is actually current", which is that card's fix to land server-side.
+- **ai-maestro TRDD-PE54D95Q** (absorbed auto-update lane has no cadence control, retries
+  permanent failures hourly): once cadence control exists, its chosen cadence is exactly what
+  §9.2 asks the server to declare.
+- **`github-config-audit` (janitor#274):** on the janitor side this is class-4
+  janitor-internal (§2 item 4 — never yields, no server equivalent). If the server also runs a
+  github-config audit, that is a duplicate to reconcile: either it joins
+  `SERVER_ABSORBED_TASKS` (and this table) or the server retires its copy.
+
 ## Ratification log
 
 - rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1.
@@ -535,3 +594,9 @@ sides must keep identical.
   grid from a **server-side `@xterm/headless`** fed the same PTY (`term.buffer.active`, the alt
   buffer) — not the browser `Terminal`, which is closed for unattended agents, exactly when the wedge
   bites. To post to #100.
+- rev 8 — 2026-08-18, authored janitor-side under the USER's session delegation ("human review
+  is delegated to you… act and decide by yourself"; hub-side holds the mirror delegation this
+  session and raised the constraints folded into §9.4): added §9, the claimed-chore
+  chore⇄token⇄stamp⇄bound table + executor-declared bounds (`claim-bounds.json`, widen-only,
+  fail-open) — TRDD-6CRC9SQQ item 2, routed through ai-maestro#126 item 1 + #111. Posted to
+  ai-maestro#126 for the server-side match + mirror; alarm-only semantics (§9.3) unchanged.

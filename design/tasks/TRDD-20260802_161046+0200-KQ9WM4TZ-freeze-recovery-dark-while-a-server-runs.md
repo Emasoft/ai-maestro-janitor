@@ -1,10 +1,10 @@
 ---
 trdd-id: KQ9WM4TZ
 title: Standalone sessions have no freeze recovery while an ai-maestro server runs
-column: human_review
+column: complete
 pre-block-column: testing
 created: 2026-08-02T16:10:46+0200
-updated: 2026-08-06T08:40:00+0200
+updated: 2026-08-18T19:52:15+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -218,3 +218,17 @@ the soak was condition 1 of 3, and this was condition 2, eight lines below it. F
 card because it is a distinct atomic task with a different owner and a different trigger, and
 because leaving it as a bullet inside a card being closed is precisely how it would have gone
 dark permanently.
+
+## Approval log
+
+- 2026-08-18T19:52:15+0200 — APPROVED (`human_review → complete`) by janitor-main-session under
+  the USER's explicit delegation of human_review verdicts this session ("human review is
+  delegated to you… act and decide by yourself"). Breadcrumb design BLESSED: dedupe (1h) vs
+  beat pacing (600s) verified correct as designed; the dedupe threshold derives from the
+  detector's OWN beat cadence, so the fleet's "staleness bound derived from a NON-executor's
+  cadence ⇒ deterministic false wedged alerts" failure class does not apply here. Hub
+  (ai-maestro session, itself USER-delegated) raised two constraints and both were checked:
+  the server being DOWN at verdict time (hub-measured curl :23000 → 000) does not invalidate
+  the design — the detector is state-gated per beat (`no-server` quiet gate) and assumes no
+  standing server; and the false-wedged class check above. All code committed (`ac419694`),
+  in v3.3.16, ai_review passed 2026-08-06.

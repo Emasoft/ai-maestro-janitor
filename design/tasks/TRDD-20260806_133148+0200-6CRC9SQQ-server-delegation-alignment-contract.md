@@ -3,18 +3,37 @@ trdd-id: 6CRC9SQQ
 title: Janitor-server delegation has no alignment contract — a server-claimed chore can wedge for days and neither side notices
 column: human_review
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-07T12:45:00+0200
+updated: 2026-08-18T20:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
 severity: high
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [1e803e47]
 ---
 
 # Janitor-server chore-delegation alignment contract (owner failure report 2026-08-06, item 7)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-06
+## ⏵ STATE — 2026-08-18: ITEM 2 INITIATED — rev 8 table AUTHORED + POSTED; awaiting the server's match
+
+Under the USER's session delegation (and the hub session's mirror delegation) the last box is no
+longer "owner's call to initiate" — it was initiated today:
+- `design/ARCHITECTURE.md` **§9** now carries the chore⇄token⇄stamp⇄bound table (rev 8 in the
+  ratification log), plus the one contract ask: **executor-declared bounds** via
+  `~/.claude/janitor-control/claim-bounds.json`, widen-only, fail-open. §9.4 cross-cites the
+  hub's TRDD-FXPV7L4D + TRDD-PE54D95Q per its 2026-08-18 constraints (server lanes NOT assumed
+  healthy — those cards exist because they are not), and raises janitor#274's
+  `github-config-audit` classification for the server to settle.
+- Posted to ai-maestro#126 (routing per this card: #126 item 1 + #111):
+  https://github.com/Emasoft/ai-maestro/issues/126#issuecomment-5332083178 — janitor-side
+  **RATIFIED rev 8**; hub messaged directly for its match + repo mirror.
+- **NEXT ACTION:** on the hub's `RATIFIED rev 8` (watch the #126 thread / hub reply), tick the
+  last acceptance box and close this card `complete`. If the hub amends, fold the amendment
+  into §9 (widen-only + alarm-only are not negotiable — they restate rev 4) and re-post.
+- Column stays `human_review`: the card waits on the peer session's ratification, i.e. a
+  decision-maker outside this repo, which is what this column means here.
+
+## ⏵ STATE (superseded head) — READ THIS FIRST ON RESUME — 2026-08-06
 
 **Log provenance RESOLVED — and the "contradiction" I recorded here is DISPROVED. There is no
 contradiction: the daemon yields exactly as `claimed_chores()` says.** The whole thing was one

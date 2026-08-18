@@ -1,9 +1,9 @@
 ---
 trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
-column: human_review
+column: complete
 created: 2026-07-23T06:35:11+0200
-updated: 2026-08-16T02:19:48+0200
+updated: 2026-08-18T19:59:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -256,3 +256,15 @@ janitor reorganises + surfaces, the agent corrects content).
   asserts active work; nobody was working this (idle 10d). Its "blocker" is a stale in-session
   note ("HELD by the burn throttle… resume after the ~22:40 reset") from 2026-08-02 — that
   window closed 10 days ago. No scope or acceptance changed.
+- 2026-08-18T19:59:00+0200 — DECIDED + CLOSED (`human_review → complete`) by
+  janitor-main-session under the USER's explicit delegation of open decisions this session.
+  Of the card's candidate fixes: **option 1 chosen — refuse at write time** (filed as
+  TRDD-VOWAUVE5, `created-by:` this card): it stops the refill at the source and, per this
+  card's own analysis, generalises where per-class repair batches must re-run forever.
+  Option 2 rejected — it would quietly reverse janitor#200's ratified INFO-tier reasoning.
+  Option 3 rejected — accepting permanent debt loses to a one-time gate. Option 4
+  (`edit_project_scope: true`) deliberately NOT taken: it authorises automation to edit
+  pushed memory, which is exactly the consent that gate exists to obtain from the USER —
+  a delegate flipping it would launder that consent. This card is complete as delivered:
+  the repeated measurement, the non-convergence proof, and the recorded decision; the build
+  lives in TRDD-VOWAUVE5, the 3K8SVX2H frozen-class carve-out is inherited there.
