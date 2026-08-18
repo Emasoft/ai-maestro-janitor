@@ -56,6 +56,24 @@ cycle whose SUMMARY half worked, not one that only exercised the template fallba
 rollout on a 0%-summary host would ship the degraded experience as the product.** Card stays
 `testing`, box stays open, blocker is llm-ext's empty-summary-on-zero-exit.
 
+### ⏵ 2026-08-18 ~21:50 — peer diagnosis landed; blocker OWNED with an ETA; janitor half done
+
+The llm-externalizer session confirmed the CONTRACT GAP in their code (session-summary's
+--stdout path returns the assembled summary with no final gate — empty at exit 0), will make
+empty-final-summary a NON-ZERO exit with a classifiable one-line stderr message in
+**llm-ext ≥ 13.5.7** (their TRDD-P4ULUV1R), and could NOT reproduce the 17:23-17:56 window on
+the current build (same transcript → 5743-byte real summary; the window coincided with
+machine-wide free-pool contention). Two janitor-side facts settled in the same pass:
+- the 14× window ran the PRE-3.3.16 plugin — the per-attempt forensic evidence line
+  (`attempt N [outcome] detail | …stdout/stderr excerpts`) shipped in 3.3.16 (`617e3fcd`),
+  which is why the window's log had no evidence lines; the next failure will carry them;
+- their request (persist the CLI's stderr tail on failed/empty attempts) is DONE: the
+  evidence line's stderr excerpt tail widened 400 → 2000 chars (~20 lines) on the failure
+  paths — stdout is the summary alone by contract, so stderr is where every diagnostic lives.
+CLOSE CONDITION unchanged: an unattended cycle whose SUMMARY half succeeds, expected after
+llm-ext ≥ 13.5.7 + the next genuine idle window; their fixed rc!=0 maps into our existing
+bounded-UNKNOWN/transient classification with no janitor change needed.
+
 **Column `todo` since 2026-08-12.** Nobody is working this — 0/5 acceptance, and the NEXT ACTION
 (wire the watcher) is known and concrete, so it is pullable rather than in progress.
 *(2026-08-15 correction: the watcher/hook IS wired and shipped in v3.3.0 — the remaining work is

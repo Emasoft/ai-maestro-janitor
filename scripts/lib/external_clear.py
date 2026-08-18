@@ -864,10 +864,15 @@ def attempt_llm_ext_summary(
     # returned a refusal there was nothing on disk saying WHAT it returned, and the owner had to
     # reconstruct it from the poisoned handoff. Capturing both ends of both streams is what makes
     # "the compaction failed" answerable without a repro.
+    # stderr gets a WIDER tail (~20 lines) than the default excerpt: llm-ext's stdout is the
+    # summary alone by contract, so every diagnostic for a failed/empty attempt lives on stderr
+    # — and the llm-externalizer session's 2026-08-18 diagnosis of the 14x empty-at-zero window
+    # asked for exactly this (a 400-char tail clips a stack trace to its least useful half).
     evidence = (
         f"transcript={transcript} bytes={size} rc={rc} "
         f"elapsed={time.monotonic() - started:.1f}s "
-        f"stdout[{len(out_raw)}]={_excerpt(out_raw)!r} stderr[{len(err)}]={_excerpt(err)!r}"
+        f"stdout[{len(out_raw)}]={_excerpt(out_raw)!r} "
+        f"stderr[{len(err)}]={_excerpt(err, tail=2000)!r}"
     )
     if rc != 0:
         return SummaryAttempt(None, classify_llm_ext_failure(
