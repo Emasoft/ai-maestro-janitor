@@ -1,9 +1,9 @@
 ---
 trdd-id: CEWVQ8DG
 title: The cold-resume shrink refuses when agentlensPro cannot answer and degrades to a template because llm-ext is not on the hook PATH
-column: testing
+column: complete
 created: 2026-08-15T22:14:54+0200
-updated: 2026-08-16T16:36:40+0200
+updated: 2026-08-18T17:35:33+0200
 current-owner: janitor-main-session
 task-type: bugfix
 implementation-commits: [904ddef4]
@@ -127,6 +127,22 @@ The instrumentation ask above is therefore moot — the input that needed naming
 component that owns it. The remaining exit gate for this card is unchanged: one real cold resume
 whose `external-clear.log` shows `summary: ok`.
 
+### FIELD PROOF 2026-08-18 — gate met twice; card CLOSED (`column: complete`)
+
+The 2026-08-18 fleet restart produced two REAL cold resumes, both through the full chain:
+
+* EMASOFT-ORCHESTRATOR-AGENT `[s:ff0192bb]` — `16:19:52 fire=True trigger=resumed-cold
+  (context=165557)` → `16:25:49 summary: ok on attempt 1`.
+* EMASOFT-ASSISTANT-MANAGER `[s:8dc5e064]` — `13:01:44 fire=True trigger=resumed-cold
+  (context=168227)` → `13:05:17 summary: ok on attempt 1`.
+
+No `permanent — llm-ext is not on PATH` (D2) and no `data dir unresolvable` on either fire: both
+resolution defects this card owns are field-proven fixed. Honest scope note: the orchestrator's
+`summary: ok` was CONTENT-wise a model refusal accepted by the pre-guard 3.3.12 build — that is a
+different defect, found and fixed the same day as TRDD-IFZQ98BA (guard shipped in 3.3.13+). It
+does not reopen this card: this card's gate is that the chain REACHES a summary instead of
+refusing on resolution, and it did.
+
 ### QUEUED FOLLOW-UP — llm-ext's NEXT release moves the ground again (peer notice 2026-08-16)
 
 The llm-externalizer session's second reply supersedes its first: as of their commit `f338112`
@@ -241,8 +257,9 @@ binary path, so an absolute plugin-cache path keeps working unchanged.
       and returns "" when genuinely absent.
 * [x] The hook passes the age-derived verdict into the gate.
 * [x] ruff + mypy clean; full pytest suite green.
-* [ ] Field proof on the next real cold resume: `fire=True trigger=resumed-cold` AND
-      `summary: ok` (not `permanent`) in the logs.
+* [x] Field proof on the next real cold resume: `fire=True trigger=resumed-cold` AND
+      `summary: ok` (not `permanent`) in the logs — MET 2026-08-18, twice, on real fleet
+      restarts (see FIELD PROOF in STATE).
 
 ## Notes
 
