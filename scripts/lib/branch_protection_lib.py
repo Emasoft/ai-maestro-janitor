@@ -475,6 +475,133 @@ def baselines_present(slug: str) -> bool | None:
             and TAG_PROTECT_RULESET_NAME in names)
 
 
+def _bypass_actor_key(actor: dict) -> tuple:
+    return (actor.get("actor_id"), actor.get("actor_type"), actor.get("bypass_mode"))
+
+
+def _params_match(expected: dict, live: dict) -> bool:
+    """Every key the BASELINE pins must be equal in the live rule; server-added
+    extra keys in `live` are ignored (a GET echoes the payload plus decoration).
+    `required_status_checks` lists compare as context SETS — order is not pinned."""
+    for key, want in expected.items():
+        got = live.get(key)
+        if key == "required_status_checks" and isinstance(want, list):
+            want_ctx = {c.get("context") for c in want if isinstance(c, dict)}
+            got_ctx = {c.get("context") for c in (got or []) if isinstance(c, dict)}
+            if want_ctx != got_ctx:
+                return False
+            continue
+        if got != want:
+            return False
+    return True
+
+
+def ruleset_content_drift(expected: dict, live: dict) -> list[str]:
+    """Drift reasons for ONE live ruleset vs its ratified payload; [] = current.
+
+    TRDD-DD0M4QL7: `baselines_present` answers "do rulesets with the baseline
+    NAMES exist?" and nothing ever asked "do they still carry the baseline
+    CONTENT?", so a hand-loosened ruleset stayed "converged" forever — the
+    baseline could be created but never MAINTAINED. This is the content half.
+    The comparison runs against `baseline_ruleset_payloads` (the code SSOT,
+    never prose) and is SUBSET-shaped: only fields the baseline pins are
+    compared, so server-added response decoration can never false-positive.
+
+    One deliberate asymmetry: a live `required_status_checks` rule that the
+    expected payload OMITS is NOT drift. The payload omits that rule exactly
+    when CI contexts cannot be detected from the CURRENT checkout (the
+    documented cwd-dependence in `baseline_ruleset_payloads`), so the live
+    rule is evidence of an earlier apply from the repo's own checkout —
+    stricter than what we can currently express, never stale. Flagging it
+    would make a foreign-cwd repair PUT strip a working checks gate.
+    """
+    name = expected.get("name", "?")
+    drift: list[str] = []
+    for field in ("target", "enforcement"):
+        if live.get(field) != expected.get(field):
+            drift.append(f"{name}: {field} {live.get(field)!r} != {expected.get(field)!r}")
+    exp_ref = (expected.get("conditions") or {}).get("ref_name") or {}
+    live_ref = (live.get("conditions") or {}).get("ref_name") or {}
+    for part in ("include", "exclude"):
+        if set(live_ref.get(part) or []) != set(exp_ref.get(part) or []):
+            drift.append(f"{name}: conditions.ref_name.{part} differs")
+    exp_bypass = {_bypass_actor_key(a) for a in expected.get("bypass_actors") or []}
+    live_bypass = {_bypass_actor_key(a) for a in live.get("bypass_actors") or []}
+    if exp_bypass != live_bypass:
+        drift.append(f"{name}: bypass_actors differ")
+    exp_rules = {r["type"]: r.get("parameters", {}) for r in expected.get("rules") or []}
+    live_rules = {
+        r.get("type"): r.get("parameters", {})
+        for r in live.get("rules") or []
+        if isinstance(r, dict)
+    }
+    for rtype, params in exp_rules.items():
+        if rtype not in live_rules:
+            drift.append(f"{name}: missing rule {rtype}")
+        elif not _params_match(params, live_rules[rtype]):
+            drift.append(f"{name}: rule {rtype} parameters loosened/changed")
+    for rtype in live_rules:
+        if rtype not in exp_rules and rtype != "required_status_checks":
+            drift.append(f"{name}: extra rule {rtype} (a repair apply would remove it)")
+    return drift
+
+
+def fetch_ruleset_detail(slug: str, ruleset_id: int) -> dict | None:
+    """GET one ruleset's FULL body (the list endpoint returns summaries without
+    rules/conditions/bypass_actors, so content comparison needs the detail)."""
+    if not gh_available():
+        return None
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{slug}/rulesets/{ruleset_id}"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def baselines_content_current(
+    slug: str, default_branch: str, project_root: Path,
+) -> tuple[bool, list[str]] | None:
+    """(True, []) when all three baseline rulesets are content-current; (False,
+    reasons) on drift; None when any lookup failed (uncertain — don't act).
+
+    Expected payloads are built EXACTLY as the apply path builds them
+    (same checks detection, same per-slug PR toggle), so "current" means
+    "a repair PUT would be a byte-level no-op on the pinned fields".
+    """
+    rulesets = list_existing_rulesets(slug)
+    if rulesets is None:
+        return None
+    by_name: dict[str, int] = {}
+    for r in rulesets:
+        if isinstance(r, dict) and isinstance(r.get("id"), int) and isinstance(r.get("name"), str):
+            by_name[r["name"]] = r["id"]
+    checks = detect_required_status_checks(project_root)
+    payloads = baseline_ruleset_payloads(
+        default_branch, checks, require_pull_request=require_pull_request_for(slug)
+    )
+    drift: list[str] = []
+    for payload in payloads:
+        name = payload["name"]
+        rid = by_name.get(name)
+        if rid is None:
+            drift.append(f"{name}: missing entirely")
+            continue
+        live = fetch_ruleset_detail(slug, rid)
+        if live is None:
+            return None
+        drift.extend(ruleset_content_drift(payload, live))
+    return (not drift, drift)
+
+
 def _workflow_triggers(wf: dict) -> set[str]:
     """The set of event names in a workflow's ``on:`` trigger.
 

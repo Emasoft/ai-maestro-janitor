@@ -145,10 +145,13 @@ def main() -> int:
         )
         return 0
 
-    # Gate 6: convergence short-circuit. If BOTH ratified rulesets are
-    # already present, ledger once (so the human sees the baseline was
-    # confirmed-in-place) and exit silently. None means the list lookup
-    # failed → uncertain → don't act.
+    # Gate 6: convergence short-circuit — by NAME **and CONTENT** (TRDD-DD0M4QL7).
+    # Name-presence alone let a hand-loosened or older-parameter ruleset stay
+    # "converged" forever: the baseline could be created but never MAINTAINED
+    # (the fleet's 8-of-9 staleness). Content drift falls THROUGH to the apply —
+    # restoring drifted rules to the ratified baseline is the explicitly EXEMPT
+    # idempotent re-apply (manager-approval-defaults §F). None anywhere means a
+    # lookup failed → uncertain → don't act.
     present = bpl.baselines_present(slug)
     if present is None:
         state.log_line(
@@ -157,10 +160,32 @@ def main() -> int:
         )
         return 0
     if present:
-        ledger = state.state_dir() / _LEDGER_FILE
-        if not ledger.is_file():
-            _ledger_append(slug, default_branch, "already-present")
-        return 0
+        verdict = bpl.baselines_content_current(slug, default_branch, plugin_root)
+        if verdict is None:
+            state.log_line(
+                "branch-protection-apply",
+                f"skip: ruleset detail lookup failed for {slug} — content unverified",
+            )
+            return 0
+        current, reasons = verdict
+        if current:
+            # The converged no-op leaves ONE honest trace per pass, so silence
+            # stops being ambiguous between "checked and converged" and
+            # "never checked" (the card's silent-short-circuit finding).
+            state.log_line(
+                "branch-protection-apply",
+                f"converged: all 3 baseline rulesets present and content-current on {slug}",
+            )
+            ledger = state.state_dir() / _LEDGER_FILE
+            if not ledger.is_file():
+                _ledger_append(slug, default_branch, "already-present")
+            return 0
+        state.log_line(
+            "branch-protection-apply",
+            f"content drift on {slug}: " + "; ".join(reasons[:4])
+            + (f" (+{len(reasons) - 4} more)" if len(reasons) > 4 else ""),
+        )
+        # fall through: gate 7 + the ratified re-apply repair the drift
 
     # Gate 7: admin permission (can't configure what we can't administer).
     if not bpl.viewer_is_admin(slug):
