@@ -390,13 +390,17 @@ def _looks_like_refusal(text: str) -> bool:
     return False
 
 
-def _excerpt(text: str, *, head: int = 300, tail: int = 200) -> str:
+def _excerpt(text: str, *, head: int = 300, tail: int = 400) -> str:
     """A bounded, single-line window on a blob — BOTH ENDS, never just one.
 
     Programs print the DIAGNOSIS first and the raw underlying error last, so a head-only
     excerpt keeps exactly the wrong half of a stack trace and a tail-only one keeps the
     wrong half of a refusal. Newlines are escaped because this lands in a line-oriented log
     that is read with grep.
+
+    tail=400 is a CONTRACT with llm-externalizer's driver: its `(nonconforming)` stderr
+    message ends with a 400-char excerpt of the model's own words, so a shorter tail would
+    clip the one part of the message that answers "what did the model actually say".
     """
     blob = " ".join((text or "").split())
     if len(blob) <= head + tail:
