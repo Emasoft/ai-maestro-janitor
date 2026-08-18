@@ -66,6 +66,7 @@ def stale_threshold(
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
     observed_s: int = 0,
+    declared_s: int = 0,
 ) -> int:
     """Seconds a claimed chore's completion stamp may age before it counts as stale.
 
@@ -81,12 +82,16 @@ def stale_threshold(
     take the MAX of the two: a rhythm we have genuinely watched can only ever widen the
     bound, never narrow it, so self-calibration cannot introduce a false positive.
 
-    The real fix is the contract (TRDD-6CRC9SQQ item 2: the chore⇄token⇄stamp⇄BOUND table,
-    where the executor declares its own bound). This makes the detector correct in the
-    meantime without requiring that negotiation to land first.
+    `declared_s` — the executor's OWN bound from the ratified rev-8 contract
+    (ARCHITECTURE.md §9.2, `~/.claude/janitor-control/claim-bounds.json`). Same
+    widen-only rule as `observed_s`: it can only ever RAISE the bound. A declared
+    bound SMALLER than the roster default is deliberately ignored — honouring a
+    narrower bound would let one side's config change manufacture false positives,
+    the janitor#225 failure in the opposite direction.
     """
     roster = max(factor * cadence_s, cadence_s + min_grace_s)
-    return max(roster, factor * observed_s) if observed_s > 0 else roster
+    bound = max(roster, factor * observed_s) if observed_s > 0 else roster
+    return max(bound, declared_s) if declared_s > 0 else bound
 
 
 class Verdict(NamedTuple):
@@ -112,6 +117,7 @@ def classify(
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
     observed_s: int = 0,
+    declared_s: int = 0,
 ) -> Verdict:
     """Judge ONE claimed chore from its completion stamp. Total — never raises.
 
@@ -123,7 +129,11 @@ def classify(
     shipped twice. Being blind is itself the finding; see `VERDICT_NO_EVIDENCE`.
     """
     threshold = stale_threshold(
-        cadence_s, factor=factor, min_grace_s=min_grace_s, observed_s=observed_s
+        cadence_s,
+        factor=factor,
+        min_grace_s=min_grace_s,
+        observed_s=observed_s,
+        declared_s=declared_s,
     )
     if last_run <= 0:
         return Verdict(chore, VERDICT_NO_EVIDENCE, -1, cadence_s, threshold)
@@ -143,6 +153,7 @@ def evaluate(
     factor: int = DEFAULT_FACTOR,
     min_grace_s: int = DEFAULT_MIN_GRACE_S,
     observed_of: Callable[[str], int] | None = None,
+    declared_of: Callable[[str], int] | None = None,
 ) -> list[Verdict]:
     """Judge every claimed chore; return only the findings, worst-first.
 
@@ -166,6 +177,7 @@ def evaluate(
             factor=factor,
             min_grace_s=min_grace_s,
             observed_s=observed_of(chore) if observed_of else 0,
+            declared_s=declared_of(chore) if declared_of else 0,
         )
         if v.is_finding:
             out.append(v)

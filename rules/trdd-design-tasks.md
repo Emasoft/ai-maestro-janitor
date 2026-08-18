@@ -104,10 +104,14 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
 12. **Terminal columns are frozen — AFTER the transition that made them terminal.** No body
     edits on `complete`/`failed`/`superseded`/`published`/`live`; new work = new TRDD. Only
     `updated:` (and, when superseding, `superseded-by:`) may change. Narrow exceptions: the
-    closing edit itself; `## Approval log` (append-only, EXEMPT); `published`/`live` archive AS
-    THEMSELVES (archive-eligible = `completed|cancelled|superseded|published|live`; absent
-    `release-via:` defaults to `none`); and a body line FALSELY, MACHINE-VERIFIABLY contradicting
-    the terminal `column:` MAY be removed. Worked example + why so narrow: the reference.
+    closing edit itself; `## Approval log` (append-only, EXEMPT); EVERY terminal column
+    archives AS ITSELF — no rename on the way in (archive-eligible =
+    `complete|completed|cancelled|superseded|published|live`; absent `release-via:` defaults
+    to `none`; 3-pillars spec 2.0.0 amended 3P-ZON-05 on 2026-08-18 to admit `complete`
+    because the complete→completed rename was a dual-write measured drifting 232 times
+    fleet-wide — the rule moved, not the cards); and a body line FALSELY, MACHINE-VERIFIABLY
+    contradicting the terminal `column:` MAY be removed. Worked example + why so narrow: the
+    reference.
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions

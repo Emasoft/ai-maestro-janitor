@@ -201,3 +201,41 @@ def test_a_wedged_chore_cannot_inflate_its_own_bound() -> None:
     before = ccw.observed_period(comps)
     # hours pass with no new completion — the history is unchanged by definition
     assert ccw.observed_period(comps) == before
+
+
+def test_declared_bound_widens_the_roster_bound() -> None:
+    """An executor-declared bound LARGER than the roster default is adopted (rev-8
+    contract §9.2: the executor knows its own rhythm)."""
+    # cadence 3600 -> roster bound 10800; server declares 14400
+    assert ccw.stale_threshold(3600, declared_s=14_400) == 14_400
+
+
+def test_declared_bound_smaller_than_roster_is_ignored() -> None:
+    """Widen-only: a declared bound NARROWER than the roster default is ignored —
+    honouring it would let one side's config manufacture false positives (the
+    janitor#225 failure in the opposite direction)."""
+    # cadence 21600 -> roster bound 64800; a declared 14400 must NOT narrow it
+    assert ccw.stale_threshold(21_600, declared_s=14_400) == 64_800
+
+
+def test_declared_bound_composes_with_observed_widening() -> None:
+    """declared and observed widening compose: the final bound is the max of all
+    widen-only inputs, never less than the roster default."""
+    # roster 10800; observed 7200 -> 3x = 21600; declared 30000 wins
+    assert ccw.stale_threshold(3600, observed_s=7_200, declared_s=30_000) == 30_000
+    # ...and when the observed widening is the largest, IT wins
+    assert ccw.stale_threshold(3600, observed_s=10_000, declared_s=14_400) == 30_000
+
+
+def test_evaluate_passes_declared_of_through_to_the_threshold() -> None:
+    """The per-chore declared_of hook reaches classify: a stamp inside the declared
+    (widened) bound is OK even though it is past the roster bound."""
+    now = 1_000_000
+    verdicts = ccw.evaluate(
+        ["marketplace-refresh"],
+        last_run_of=lambda c: now - 12_000,   # past roster 10800, inside declared 14400
+        cadence_of=lambda c: 3600,
+        now=now,
+        declared_of=lambda c: 14_400,
+    )
+    assert verdicts == []  # no finding: the declared bound covered it

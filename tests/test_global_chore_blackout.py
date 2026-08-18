@@ -111,7 +111,9 @@ def test_unabsorbed_chores_names_the_eight_the_server_never_claimed() -> None:
     """
     assert set(hb.unabsorbed_chores()) == {
         "memory-guard", "cache-prune", "rules-cleanup",
-        "github-config-audit", "session-liveness", "fleet-stop",
+        # github-config-audit moved to SERVER_ABSORBED_TASKS 2026-08-18
+        # (janitor#274, ratified rev 8) — the server executes and stamps it.
+        "session-liveness", "fleet-stop",
         "fleet-plugins-update", "cold-cache-clear",
     }
 

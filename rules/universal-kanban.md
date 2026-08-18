@@ -44,7 +44,9 @@ The folder-lifecycle overlay values (`proposal`, `planned`, `refused`,
 `trdd-design-tasks.md`) BRACKET this pipeline; they are states of the
 same `column:` field, not additional work columns. `proposal`/`planned`
 cards sit in an intake antechamber ahead of `backburner`, and the
-terminal values leave the board — `completed`/`cancelled`/`superseded`
+terminal values leave the board, each archived AS ITSELF (no rename on
+the way in; 3-pillars spec 2.0.0, 3P-ZON-05) —
+`complete`/`completed`/`cancelled`/`superseded`/`published`/`live`
 into `design/archived/`, `refused` into `design/refused/`. A board view
 may render them as an intake lane and a done lane.
 

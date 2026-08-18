@@ -166,14 +166,17 @@ def test_an_EXPLICIT_operator_override_claims_the_legacy_absorbed_set(
 
 
 def test_absorbed_set_matches_the_contract() -> None:
-    """Pin the exact absorbed-chore set: the OAuth pair + the update trio — a drift
-    here silently changes which chores the handoff covers."""
+    """Pin the exact absorbed-chore set: the OAuth pair + the update trio + the
+    github-config audit (joined 2026-08-18, janitor#274 ratified on the rev-8/#126
+    thread — the server has stamped it since 2026-08-05) — a drift here silently
+    changes which chores the handoff covers."""
     assert hb.SERVER_ABSORBED_TASKS == frozenset({
         "marketplace-refresh",
         "user-plugins-update",
         "version-update",
         "oauth-rotator-supervisor",
         "oauth-rotator-tick",
+        "github-config-audit",
     })
 
 
@@ -194,7 +197,8 @@ def test_population_split_and_family_b_tasks_stay_janitor() -> None:
         "memory-guard",
         "cache-prune",
         "rules-cleanup",
-        "github-config-audit",
+        # github-config-audit left this set 2026-08-18: the server executes and
+        # stamps it (janitor#274, ratified rev 8), so it is absorbed, not Family-B.
     }
     overlap = keep & hb.SERVER_ABSORBED_TASKS
     assert not overlap, f"population-split/Family-B tasks must never yield: {sorted(overlap)}"

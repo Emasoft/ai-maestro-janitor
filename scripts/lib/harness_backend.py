@@ -62,6 +62,14 @@ SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
     "version-update",
     "oauth-rotator-supervisor",
     "oauth-rotator-tick",
+    # Joined 2026-08-18 (janitor#274, ratified with the server on the rev-8/#126
+    # thread): the server has executed its own github-config audit since 2026-08-05
+    # (ai-maestro lib/janitor-chore-stamp.ts) and writes this chore's stamp —
+    # verified on-host: ~/.claude/janitor-control/github-config-audit.last-run.ts
+    # fresh the day this line landed. Keeping it out of the set made both sides run
+    # it, and two writers on repo config is the exact class the absorption exists
+    # to prevent.
+    "github-config-audit",
 })
 
 # EVERY chore the machine-global daemon owns, with the env var + default cadence
@@ -70,8 +78,8 @@ SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
 # without the full set it partitions.
 #
 # WHY this exists (ai-maestro#111, 2026-08-05): a live server does not make the daemon
-# YIELD five chores — `global_state.ensure_daemon_running` refuses to spawn the daemon
-# AT ALL, and the daemon owns eleven. The six below SERVER_ABSORBED_TASKS therefore have
+# YIELD the absorbed chores — `global_state.ensure_daemon_running` refuses to spawn the
+# daemon AT ALL. Every roster chore NOT in SERVER_ABSORBED_TASKS therefore has
 # NO owner for as long as a server is up. Measured on the owner's host: all eleven stamps
 # 10-14 days stale, and not one alarm, because the only staleness watchdog suppressed
 # itself whenever a server was alive. Keeping the roster next to the boundary is what lets

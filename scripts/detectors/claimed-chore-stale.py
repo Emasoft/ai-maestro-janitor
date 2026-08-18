@@ -75,6 +75,30 @@ def _cadence_of(chore: str) -> int | None:
     return state.coerce_int(os.environ.get(env_var), default_s)
 
 
+def _declared_bounds() -> dict[str, int]:
+    """The executor-declared staleness bounds from the ratified rev-8 contract
+    (ARCHITECTURE.md §9.2): `~/.claude/janitor-control/claim-bounds.json`,
+    `{"<chore>": <bound_s>}`, written by whichever side currently executes.
+
+    Fail-open BY CONTRACT: file absent, unparseable, or an entry non-numeric/
+    non-positive ⇒ that chore falls back to the roster bound. Widen-only
+    enforcement lives in `stale_threshold`, not here — this reader must stay a
+    dumb transport so a malformed declaration can never narrow a bound.
+    """
+    path = gs.control_dir() / "claim-bounds.json"
+    try:
+        raw = json.loads(path.read_text())
+    except Exception:  # noqa: BLE001 -- fail-open to the roster bound
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in raw.items():
+        if isinstance(k, str) and isinstance(v, (int, float)) and v > 0:
+            out[k] = int(v)
+    return out
+
+
 def _completion_log(state_dir: Path) -> Path:
     return state_dir / "claimed-chore-completions.json"
 
@@ -126,12 +150,14 @@ def main() -> int:
 
         now = int(time.time())
         observed = _record_completions(state.state_dir(), claimed)
+        declared = _declared_bounds()
         findings = ccw.evaluate(
             claimed,
             last_run_of=gs.read_last_run,
             cadence_of=_cadence_of,
             now=now,
             observed_of=lambda c: observed.get(c, 0),
+            declared_of=lambda c: declared.get(c, 0),
         )
         if not findings:
             return 0

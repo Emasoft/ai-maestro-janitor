@@ -84,7 +84,8 @@ Three executors, one criterion each:
    and the janitor yields them; file absent/stale ⇒ the server is not running ⇒ the
    janitor runs them ALL. The absorbed set (`harness_backend.SERVER_ABSORBED_TASKS`):
    `oauth-rotator-tick`, `oauth-rotator-supervisor`, `marketplace-refresh`,
-   `user-plugins-update`, `version-update`.
+   `user-plugins-update`, `version-update`, and — since 2026-08-18 (janitor#274,
+   settled by measurement on the rev-8 round) — `github-config-audit`.
 
    **The contract this implies (the rev-4 ratification point):** writing a fresh
    `server-liveness.json` IS the claim on all absorbed chores — a server that runs
@@ -101,7 +102,9 @@ Three executors, one criterion each:
    reload-skills propagation, restart-claude. The split IS the per-instance
    `server_owned` diagnosis — no protocol needed beyond it.
 4. **Janitor-internal machine chores** never yield (no server equivalent):
-   `memory-guard`, `cache-prune`, `rules-cleanup`, `github-config-audit`.
+   `memory-guard`, `cache-prune`, `rules-cleanup`. (`github-config-audit` left this
+   class 2026-08-18 — the server has executed and stamped it since 2026-08-05, so it
+   is absorbed, class 2; janitor#274.)
 
 Execution rule added by TRDD-H7NVKSAX (binding on BOTH daemons): **bulk chores must never
 run on the thread that owns per-minute survival beats** — the janitor runs them in one
@@ -503,6 +506,7 @@ executor declaring its own bound — this table plus one small file.
 | `marketplace-refresh` | `marketplace-refresh` | `~/.claude/janitor-control/marketplace-refresh.last-run.ts` | 3 600 s | 10 800 s |
 | `user-plugins-update` | `user-plugins-update` | `~/.claude/janitor-control/user-plugins-update.last-run.ts` | 3 600 s | 10 800 s |
 | `version-update` | `version-update` | `~/.claude/janitor-control/version-update.last-run.ts` | 21 600 s | 64 800 s |
+| `github-config-audit` | `github-config-audit` | `~/.claude/janitor-control/github-config-audit.last-run.ts` | 21 600 s | 64 800 s |
 
 Sources of truth: chore names + cadences `harness_backend.GLOBAL_CHORES`; absorbed set
 `harness_backend.SERVER_ABSORBED_TASKS`; bound formula + floor
@@ -535,10 +539,13 @@ they are not).**
 - **ai-maestro TRDD-PE54D95Q** (absorbed auto-update lane has no cadence control, retries
   permanent failures hourly): once cadence control exists, its chosen cadence is exactly what
   §9.2 asks the server to declare.
-- **`github-config-audit` (janitor#274):** on the janitor side this is class-4
-  janitor-internal (§2 item 4 — never yields, no server equivalent). If the server also runs a
-  github-config audit, that is a duplicate to reconcile: either it joins
-  `SERVER_ABSORBED_TASKS` (and this table) or the server retires its copy.
+- **`github-config-audit` (janitor#274) — RESOLVED 2026-08-18, same round:** settled by the
+  hub's measurement (server executes it since 2026-08-05, `lib/janitor-chore-stamp.ts`;
+  stamp verified fresh on this host at epoch 1787060644) — it JOINS
+  `SERVER_ABSORBED_TASKS` and the §9.1 table. Note on its declared bound: the server
+  declares 14 400 s, BELOW the 64 800 s roster default — §9.2's widen-only rule ignores a
+  narrowing declaration by design, so detection stays at the roster bound; a server that
+  wants faster detection of its own wedge lowers the JANITOR default, not the declaration.
 
 ## Ratification log
 
@@ -600,3 +607,8 @@ they are not).**
   chore⇄token⇄stamp⇄bound table + executor-declared bounds (`claim-bounds.json`, widen-only,
   fail-open) — TRDD-6CRC9SQQ item 2, routed through ai-maestro#126 item 1 + #111. Posted to
   ai-maestro#126 for the server-side match + mirror; alarm-only semantics (§9.3) unchanged.
+  **Server matched same day ⇒ FINAL**: ai-maestro `docs/claimed-chores-contract.md` (commit
+  `eccbd02a`), thread comment 5332124288, §9.2 accepted as authored. Same round settled
+  janitor#274: `github-config-audit` joined the absorbed set + §9.1 (stamp verified on-host);
+  janitor-side reader shipped (`claimed-chore-stale.py::_declared_bounds`, widen-only in
+  `claimed_chore_watch.stale_threshold`).

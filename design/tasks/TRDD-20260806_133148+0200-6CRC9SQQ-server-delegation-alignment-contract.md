@@ -1,9 +1,9 @@
 ---
 trdd-id: 6CRC9SQQ
 title: Janitor-server delegation has no alignment contract — a server-claimed chore can wedge for days and neither side notices
-column: human_review
+column: complete
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-18T20:12:00+0200
+updated: 2026-08-18T20:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 scope: project
@@ -27,11 +27,13 @@ longer "owner's call to initiate" — it was initiated today:
 - Posted to ai-maestro#126 (routing per this card: #126 item 1 + #111):
   https://github.com/Emasoft/ai-maestro/issues/126#issuecomment-5332083178 — janitor-side
   **RATIFIED rev 8**; hub messaged directly for its match + repo mirror.
-- **NEXT ACTION:** on the hub's `RATIFIED rev 8` (watch the #126 thread / hub reply), tick the
-  last acceptance box and close this card `complete`. If the hub amends, fold the amendment
-  into §9 (widen-only + alarm-only are not negotiable — they restate rev 4) and re-post.
-- Column stays `human_review`: the card waits on the peer session's ratification, i.e. a
-  decision-maker outside this repo, which is what this column means here.
+- **DONE same evening — the hub RATIFIED rev 8** (server mirror
+  `docs/claimed-chores-contract.md`, ai-maestro commit `eccbd02a`; thread comment
+  5332124288; §9.2 accepted exactly as authored). Same round settled janitor#274:
+  `github-config-audit` joined `SERVER_ABSORBED_TASKS` + the §9.1 table (server stamp
+  verified on-host, epoch 1787060644), and the janitor-side reader shipped
+  (`claimed-chore-stale.py::_declared_bounds` + `stale_threshold(declared_s=…)`,
+  widen-only, fail-open, 4 new tests). Card closed `complete`.
 
 ## ⏵ STATE (superseded head) — READ THIS FIRST ON RESUME — 2026-08-06
 
@@ -230,8 +232,10 @@ claimed-but-wedged chore is strictly worse than an unclaimed one, because the fa
 
 ## Acceptance
 
-- [ ] the chore⇄token⇄stamp⇄bound table exists in ARCHITECTURE.md and is agreed on the
-      #126/#111 threads — OUTWARD-FACING, owner's call to initiate
+- [x] the chore⇄token⇄stamp⇄bound table exists in ARCHITECTURE.md (§9, rev 8) and is agreed
+      on the #126 thread — janitor RATIFIED (issuecomment-5332083178), server matched same day
+      (issuecomment-5332124288, mirror `docs/claimed-chores-contract.md` @ `eccbd02a`).
+      Initiated + closed 2026-08-18 under the USER's session delegation (both sides held it)
 - [x] watchdog fires on claimed-but-stale within 3x cadence (test: freeze a stamp) —
       `claimed-chore-stale` (`1e803e47`); verified silent on the healthy host and firing on a
       stamp frozen 4 days back. Bound is `max(3 x cadence, cadence + 600s)`; the floor is
@@ -255,3 +259,14 @@ claimed-but-wedged chore is strictly worse than an unclaimed one, because the fa
 - Existing one-sided watchdog: `lib/daemon_watchdog.py` (per-session shims for OUR tasks).
 - Incidents: janitor#221, ai-maestro#111, janitor#134; sync ask: ai-maestro#126 item 1.
 - Memory: [[janitor-daemon-handover-unowned-chores]], [[janitor-two-runtime-backends]].
+
+## Approval log
+
+- 2026-08-18T20:35:00+0200 — CLOSED (`human_review → complete`) by janitor-main-session under
+  the USER's explicit delegation of open decisions this session. All four acceptance boxes
+  ticked: item 1 shipped v2.5.0 (`1e803e47`); un-yield decision recorded (NO — alarm only);
+  replay check YES; and item 2's table AUTHORED (ARCHITECTURE.md §9, rev 8), POSTED
+  (ai-maestro#126 issuecomment-5332083178) and MATCHED by the server the same evening
+  (issuecomment-5332124288, mirror `docs/claimed-chores-contract.md` @ `eccbd02a`) — both
+  sessions holding the owner's delegation, per the coordination the USER directed. The
+  §9.2 executor-declared-bound reader shipped janitor-side in the same change-set.
