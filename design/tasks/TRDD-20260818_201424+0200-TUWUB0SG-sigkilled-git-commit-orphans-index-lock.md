@@ -35,6 +35,14 @@ holds it (snapshot `ps` to a file first — never a live pgrep), then remove it 
 Never blanket-delete a lock we cannot attribute. Tests: real git repo in tmp, a commit child
 killed mid-run, assert the repo is writable afterwards.
 
+## Live incident, same evening (2026-08-18 23:32)
+
+The class fired on this very repo three hours after this card was filed: a 0-byte
+`.git/index.lock` (mtime 23:32) blocked a commit at 23:35 with NO live git process in a
+ps snapshot — a stale orphan from a killed git. Recovered exactly per this card's (b)
+discipline: snapshot first, attribute (no holder, 0 bytes, minutes old), then remove and
+retry. Evidence that the recovery belongs in code, not in an agent's judgment each time.
+
 ## Acceptance
 
 - [ ] the chosen recovery is implemented at BOTH github_config_fix.py:98/:117 and
