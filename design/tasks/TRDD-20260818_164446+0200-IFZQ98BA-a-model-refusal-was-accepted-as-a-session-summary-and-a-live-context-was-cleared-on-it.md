@@ -121,6 +121,6 @@ because any model can refuse for any reason. Own it as its own card if refusals 
 
 ## Approval log
 
-- 2026-08-18T16:44:46+0200 — Tier 0 (bugfix inside this project's own scope, no baseline
+* 2026-08-18T16:44:46+0200 — Tier 0 (bugfix inside this project's own scope, no baseline
   deviation, no cross-project surface). Advisor consulted before the change per project rule;
   its correction to the matching window was verified first-hand and adopted.
