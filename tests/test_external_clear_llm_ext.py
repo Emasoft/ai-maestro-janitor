@@ -13,6 +13,13 @@ import sys
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
+# BOTH roots, not just lib/: the budget/contract tests import `clear_trigger`,
+# which lives in scripts/ — without this insert they pass only when another
+# collected test file (test_global_state.py's module-level insert, which runs
+# at pytest COLLECTION time) happens to have put scripts/ on sys.path first,
+# i.e. the file was order-dependent and failed when run solo (hub-verified
+# mechanism, 2026-08-18).
+sys.path.insert(0, str(_REPO / "scripts"))
 sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
