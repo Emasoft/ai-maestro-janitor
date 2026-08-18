@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "3.3.14",
+  "version": "3.3.15",
   "description": "Keeps your dev environment tidy and secure, in the background: drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit auto-resume, prompt-cache keep-alive, and a markdown memory system. Runs on a per-session CronCreate heartbeat (session-scoped, re-armed each session) plus one machine-wide background daemon that owns every global-scope update.",
   "author": {
     "name": "Emasoft",

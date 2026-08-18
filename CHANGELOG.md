@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.15] — 2026-08-18
+
+### Bug Fixes
+
+- **test:** The refusal-guard tests stubbed the runner but not the BINARY LOOKUP (TRDD-IFZQ98BA) (88db92d)
+
+### Features
+
+- **cold-resume:** INJECT the handoff at /clear instead of pointing at it (TRDD-IFZQ98BA) (9ad66ab)
 ## [3.3.14] — 2026-08-18
 
 ### Documentation
@@ -11,6 +20,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **external-clear:** Record WHAT the process said, not just our verdict (TRDD-IFZQ98BA) (617e3fc)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.14 (74f2e45)
 ## [3.3.13] — 2026-08-18
 
 ### Bug Fixes
