@@ -2718,6 +2718,7 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
         );
     }
     let body = read_body_from_stdin()?;
+    check_new_body_budget(&body, atom_max_chars(), "atom")?;
 
     let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
     if let Some(base) = a.base_sha256.as_deref() {
@@ -3102,6 +3103,8 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // The lesson text is one logical line (DO NOT … BECAUSE … DO … instead) — collapse any pasted
     // newlines so the `[^N]:` definition stays a single, parser-clean line.
     let mut lesson_text = lesson_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Budget-gate the COLLAPSED text (what actually lands on the page), not the raw paste.
+    check_new_body_budget(&lesson_text, atom_max_chars(), "lesson")?;
 
     let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
     if let Some(base) = a.base_sha256.as_deref() {
@@ -4134,6 +4137,27 @@ fn atom_max_chars() -> usize {
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
         .unwrap_or(1500)
+}
+
+/// The WRITE-TIME half of the atom budget (TRDD-VOWAUVE5). The `oversized-atom` lint is
+/// deliberately INFO-tier (janitor#200: decomposition is semantic, no chore may act on it), so
+/// detection alone never drains the backlog — measured four times over three weeks on
+/// TRDD-WN7M829Y, the count only ever refills. Refusing the body at the verbs is what stops the
+/// INFLOW; the same `atom_max_chars()` the lint reads is the ONE budget, so gate and lint cannot
+/// drift. Raw stdin chars here vs the lint's whitespace-joined `body_chars` differ only by blank
+/// lines, and raw >= joined — the gate is stricter-or-equal, so nothing it admits can lint
+/// oversized. Supersession carve-out is BY CONSTRUCTION: `--supersedes` moves the EXISTING body
+/// verbatim without re-reading it — only the NEW body ever reaches this check.
+fn check_new_body_budget(body: &str, max_chars: usize, what: &str) -> Result<()> {
+    let n = body.chars().count();
+    if max_chars > 0 && n > max_chars {
+        anyhow::bail!(
+            "refusing this {what}: body is {n} chars, over the {max_chars}-char atom budget \
+             (MEMGREP_ATOM_MAX_CHARS) — one atom holds ONE fact; split it into smaller atoms \
+             (the janitor-memory-split skill) instead of raising the knob. Nothing was written."
+        );
+    }
+    Ok(())
 }
 
 /// Scan ONE raw markdown line for footnote tokens, yielding `(label, is_def)` for each. A footnote
@@ -10775,5 +10799,67 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         );
         assert!(final_content.contains("v3"), "the last change must have actually landed: {final_content}");
         assert!(final_content.contains("publish-globally: false"), "got: {final_content}");
+    }
+
+    /// TRDD-VOWAUVE5: the write-time half of the atom budget. The lint's `oversized-atom` is
+    /// INFO by ratified decision (janitor#200), so nothing drains the backlog — the gate stops
+    /// the INFLOW at the verbs instead. These drive the pure check (`max_chars` passed
+    /// explicitly, not via the env — the crate's tests run in parallel and the env is
+    /// process-global); the shared-constant property needs no runtime assertion because both
+    /// the gate call sites and the lint literally call the same `atom_max_chars()`.
+    #[test]
+    fn budget_gate_refuses_an_over_budget_body() {
+        let big = "w".repeat(1501);
+        let err = check_new_body_budget(&big, 1500, "atom").unwrap_err().to_string();
+        assert!(err.contains("1501 chars"), "got: {err}");
+        assert!(err.contains("Nothing was written"), "got: {err}");
+        assert!(err.contains("split it"), "the refusal must name the fix: {err}");
+    }
+
+    #[test]
+    fn budget_gate_admits_a_body_exactly_at_budget() {
+        assert!(check_new_body_budget(&"w".repeat(1500), 1500, "atom").is_ok());
+    }
+
+    #[test]
+    fn budget_gate_zero_disables_like_the_lint() {
+        assert!(check_new_body_budget(&"w".repeat(50_000), 0, "atom").is_ok());
+    }
+
+    #[test]
+    fn budget_gate_counts_chars_not_bytes() {
+        // 800 two-byte chars = 1600 bytes but only 800 chars — must pass a 1500-CHAR budget,
+        // exactly as the lint's `body_chars` (a char count) would judge it.
+        assert!(check_new_body_budget(&"é".repeat(800), 1500, "atom").is_ok());
+    }
+
+    /// The supersession carve-out is BY CONSTRUCTION, and this pins the construction: the
+    /// `--supersedes` relocation moves the EXISTING (possibly oversized) body verbatim without
+    /// it ever passing through `check_new_body_budget` — only the NEW body is gated. So
+    /// decomposing an oversized atom the sanctioned way can never be blocked by the gate.
+    #[test]
+    fn supersession_moves_an_oversized_body_without_regating_it() {
+        let dir = lint_tmpdir("gate-supersede");
+        let page = dir.join("n.md");
+        let big_body = "word ".repeat(400); // over the default budget
+        std::fs::write(
+            &page,
+            format!(
+                "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                 ^BIGATOM1 [keywords: k]\n{big_body}\n\n## Notes and lessons learned\n"
+            ),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&page).unwrap();
+        // The relocation the CLI performs under --supersedes, on an oversized existing body:
+        let moved = supersede_atom_lesson_free(&page, &text, "BIGATOM1", "NEWID001").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(moved.contains("## Superseded"), "got: {moved}");
+        assert!(
+            moved.contains(&big_body.trim().to_string()[..50]),
+            "the oversized body must survive the move verbatim"
+        );
+        // ...while a small replacement body sails through the gate the CLI applies to it.
+        assert!(check_new_body_budget("the decomposed replacement fact", 1500, "atom").is_ok());
     }
 }

@@ -1,9 +1,9 @@
 ---
 trdd-id: VOWAUVE5
 title: memgrep write verbs refuse an over-budget atom at write time
-column: todo
+column: testing
 created: 2026-08-18T19:54:51+0200
-updated: 2026-08-18T19:54:51+0200
+updated: 2026-08-19T00:20:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -51,11 +51,24 @@ malformed page" — an over-budget atom is the same class of malformation, caugh
 
 ## Acceptance
 
-- [ ] `add-atom`/`add-lesson` refuse an over-budget body; no partial write; message names the
-      split skill
-- [ ] gate and `atom-oversized` linter share ONE budget constant
-- [ ] supersession carve-out proven by test (legacy oversized body carried forward verbatim)
+- [x] `add-atom`/`add-lesson` refuse an over-budget body; no partial write; message names the
+      split skill — `check_new_body_budget` called on the stdin body BEFORE the write gate and
+      any page read (refuse cheap and early); BEHAVIORALLY verified through the bare installed
+      `memgrep` (1600-char body → the refusal, exit non-zero, nothing written). The lesson verb
+      gates the COLLAPSED one-line text, i.e. what actually lands on the page.
+- [x] gate and `atom-oversized` linter share ONE budget constant — both call the same
+      `atom_max_chars()` (env `MEMGREP_ATOM_MAX_CHARS`, 0 disables both identically); the
+      gate's raw-chars measure is stricter-or-equal to the lint's whitespace-joined
+      `body_chars`, so nothing the gate admits can lint oversized.
+- [x] supersession carve-out proven by test — `supersession_moves_an_oversized_body_without_
+      regating_it` pins that `--supersedes` relocates the existing oversized body verbatim
+      without it ever passing the gate; only the NEW body is measured. 5 new crate tests,
+      145/145 green.
 - [ ] after one drain batch, `memgrep lint` atom-oversized (net of the 3K8SVX2H frozen class)
-      is 0 and stays 0 across a week of heartbeats
+      is 0 and stays 0 across a week of heartbeats — OPEN: needs one hand-dispatched drain
+      batch of the residual stock (last measured 15) plus the week-long observation. The gate
+      is live on THIS host now (`cargo install` done); other hosts get it via the release.
+
+## ⏵ STATE — 2026-08-19: gate SHIPPED and live locally; column `dev → testing` on the drain box
 
 ## Approval log
