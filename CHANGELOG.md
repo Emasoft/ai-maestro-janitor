@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.16] — 2026-08-18
+
+### Bug Fixes
+
+- **external-clear:** Widen _excerpt tail 200 → 400 per llm-ext's nonconforming contract (5e1d7fa)
+- **external-clear:** Rc!=0 + '(nonconforming)' maps to bounded-UNKNOWN, never TRANSIENT (f5c0543)
+- **tests:** Pin the order-dependent state-cache pair to one xdist worker (1cdc94d)
+- **tests:** Decouple the -G semantics tests from the production abstain timeout (69bee75)
+
+### Documentation
+
+- **TRDD-CEWVQ8DG:** Field gate met twice on the 2026-08-18 fleet restart — close testing → complete (45ce7d9)
 ## [3.3.15] — 2026-08-18
 
 ### Bug Fixes
@@ -11,6 +23,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **cold-resume:** INJECT the handoff at /clear instead of pointing at it (TRDD-IFZQ98BA) (9ad66ab)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.15 (b304253)
 ## [3.3.14] — 2026-08-18
 
 ### Documentation
