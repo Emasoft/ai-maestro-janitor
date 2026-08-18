@@ -75,7 +75,19 @@ import sandbox_guard
 
 # ─── S1a/S1b module state (filled by pytest_configure) ──────────────────────────────────
 
-_ISOLATION_ENVS = ("HOME", "JANITOR_GLOBAL_STATE_DIR", "JANITOR_DATA_DIR", "CLAUDE_PLUGIN_DATA")
+_ISOLATION_ENVS = (
+    "HOME",
+    "JANITOR_GLOBAL_STATE_DIR",
+    "JANITOR_DATA_DIR",
+    "CLAUDE_PLUGIN_DATA",
+    # CLAUDE_PROJECT_DIR was the LAST unredirected root (2026-08-18): `state.log_line` and
+    # `state.state_dir` resolve the project's `.janitor/` from it, so any test reaching them
+    # without a per-file redirect wrote fixture strings into the REAL repo's logs. That
+    # manufactured phantom production evidence TWICE — "inject cancelled: cache went warm"
+    # (CEWVQ8DG) and today's nine "fired: trigger=long-idle — 9000s (>= 60s)" lines, which
+    # cost a real investigation before tracing back to a fixture's monkeypatched constants.
+    "CLAUDE_PROJECT_DIR",
+)
 _REAL_ENV: dict[str, str | None] = {}
 _SESSION_TMP: Path | None = None
 # Session-default temp keychain (TRDD-K3WQ7XM9 P2): every test's `security` calls are scoped
@@ -732,6 +744,13 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["JANITOR_GLOBAL_STATE_DIR"] = str(gsd)
     os.environ["JANITOR_DATA_DIR"] = str(data)
     os.environ["CLAUDE_PLUGIN_DATA"] = str(data)
+    # The fake PROJECT root, same rationale as the fake HOME: `state.state_dir()`/`log_line`
+    # resolve the project `.janitor/` from this env (NOT from any --project-root argv), so
+    # without it every test that reaches them writes the REAL repo's logs — the phantom-
+    # evidence leak this session diagnosed twice. Per-test monkeypatch.setenv overrides win.
+    proj = _SESSION_TMP / "_project"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    os.environ["CLAUDE_PROJECT_DIR"] = str(proj)
     os.environ.pop("XDG_STATE_HOME", None)
     _setup_session_keychain()  # session-default temp keychain — no test touches the login keychain
     # S1e LAST: the env above is now fake, so anything still resolving a REAL protected path is

@@ -53,6 +53,10 @@ def _firing_project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     import memory_scopes  # noqa: PLC0415
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    # log_line resolves the log dir from THIS env, not from --project-root argv — without it
+    # this file's fixture "fired:" lines (idle=9000, min_idle=60) landed in the REAL repo's
+    # external-clear.log and read there as production long-idle misfires (2026-08-18).
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     monkeypatch.setenv(ec.ENABLED_ENV, "true")
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no third-party probe
     # The llm-ext summariser is OFF for the same reason the probe is, and the omission was a
