@@ -380,7 +380,15 @@ def main() -> int:
                 print("  git add .gitignore .trashcan/.gitkeep .trashcan/README.txt")
                 print('  git commit -m "track .trashcan markers"')
 
-    if failed > 0 and moved == 0:
+    # Per-target semantics, honest exit (TRDD hub P1 2026-08-18, ai-maestro-fd
+    # verification): ANY failed target makes the whole invocation exit non-zero,
+    # even when other targets moved. The old gate (`failed > 0 and moved == 0`)
+    # returned 0 on a 1-of-3 partial, so a caller could not tell a clean batch
+    # from a partial one without parsing stderr. Deliberately NOT all-or-nothing:
+    # a move into .trashcan/ is recoverable by construction, and aborting the
+    # batch on one already-deleted path would break idempotent re-runs — the
+    # rule text (rules/use-safe-delete.md) documents these per-target semantics.
+    if failed > 0:
         return 1
     return 0
 

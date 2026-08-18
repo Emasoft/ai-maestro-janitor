@@ -75,10 +75,16 @@ move with a manifest.
    uv run "$CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py" <path1> [<path2> ...]
    ```
 
-The script writes to stdout the relative paths it moved, each line
-prefixed with `safe-deleted:`. Failure modes (path outside the project
-root, target not found, etc.) exit non-zero with a one-line diagnostic;
-nothing is moved on partial failure.
+The script lists on stdout every path it moved (`<rel> ->
+.trashcan/<timestamp>/<rel>`) plus the manifest path and ready-to-paste
+restore commands. Semantics are **per-target, not all-or-nothing**: each
+target either moves into the trashcan or is reported on stderr with a
+one-line diagnostic (path outside the project root, target not found,
+etc.), and the exit code is non-zero when ANY target failed — even if
+others moved. This is deliberate: a move into `.trashcan/` is
+recoverable by construction, so aborting a whole batch over one bad
+path would protect nothing and would break idempotent re-runs; the
+manifest covers exactly what landed.
 
 ## When NOT to use it
 
