@@ -3,7 +3,7 @@ trdd-id: VOWAUVE5
 title: memgrep write verbs refuse an over-budget atom at write time
 column: testing
 created: 2026-08-18T19:54:51+0200
-updated: 2026-08-19T00:20:00+0200
+updated: 2026-08-19T00:07:30+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -65,10 +65,15 @@ malformed page" — an over-budget atom is the same class of malformation, caugh
       without it ever passing the gate; only the NEW body is measured. 5 new crate tests,
       145/145 green.
 - [ ] after one drain batch, `memgrep lint` atom-oversized (net of the 3K8SVX2H frozen class)
-      is 0 and stays 0 across a week of heartbeats — OPEN: needs one hand-dispatched drain
-      batch of the residual stock (last measured 15) plus the week-long observation. The gate
-      is live on THIS host now (`cargo install` done); other hosts get it via the release.
+      is 0 and stays 0 across a week of heartbeats — HALF DONE: the drain batch ran
+      2026-08-19 (janitor-memory-subconscious-agent, direct dispatch): 4 PROJECT atoms
+      decomposed into 12, LOCAL/USER already clean, re-lint across all 3 scope roots =
+      **0 atom-oversized anywhere** (commit `5c9684bd`; report
+      `reports/janitor-memory-subconscious-agent/20260819_000527+0200-vowauve5-drain-batch.md`).
+      Remaining: the week-long stays-at-zero observation — window 2026-08-19 → 2026-08-26.
+      The gate is live on THIS host now (`cargo install` done); other hosts get it via the
+      release.
 
-## ⏵ STATE — 2026-08-19: gate SHIPPED and live locally; column `dev → testing` on the drain box
+## ⏵ STATE — 2026-08-19: gate SHIPPED; drain batch DONE (backlog 0 everywhere); only the week-long stays-at-zero hold (→ 2026-08-26) keeps this in `testing`
 
 ## Approval log
