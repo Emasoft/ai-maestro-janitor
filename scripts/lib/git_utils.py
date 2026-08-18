@@ -725,71 +725,30 @@ def drop_gitignored(paths: list[Path], *, root: Path) -> list[Path]:
     return [p for p in paths if str(p) not in ignored]
 
 
-def _live_git_exists(ps_lines: Optional[list[str]] = None) -> bool:
-    """Is ANY git process alive right now? Snapshot `ps` output FIRST, then search
-    the snapshot — never a live `pgrep`/`ps | grep`, whose own argv matches the
-    pattern (the scanner is in the table it scans). `ps_lines` is injectable for
-    tests; production always takes a fresh snapshot. Fail CLOSED: if `ps` cannot
-    be read we report True, so an unreadable process table never authorises a
-    lock deletion."""
-    if ps_lines is None:
-        try:
-            proc = subprocess.run(
-                ["ps", "-eo", "comm"], capture_output=True, text=True,
-                timeout=10, check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return True
-        if proc.returncode != 0:
-            return True
-        ps_lines = proc.stdout.splitlines()
-    return any(line.strip().rsplit("/", 1)[-1] == "git" for line in ps_lines)
+def recover_own_index_lock(repo_root: Path, spawn_ts: float) -> bool:
+    """Remove `.git/index.lock` left behind by OUR OWN just-killed git child
+    (TRDD-TUWUB0SG) — the one attribution `clear_stale_index_lock` cannot make.
 
-
-def recover_stale_index_lock(
-    repo_root: Path,
-    *,
-    spawn_ts: Optional[float] = None,
-    min_age_s: float = 60.0,
-    ps_lines: Optional[list[str]] = None,
-) -> bool:
-    """Remove `.git/index.lock` ONLY when it is attributable, and report whether
-    a retry is now worth attempting (TRDD-TUWUB0SG).
-
-    A `git commit` killed by a subprocess timeout (SIGKILL — git gets no chance
-    to clean up) orphans the lock, and every later writer then fails with
-    "index.lock: File exists" until a human deletes it. The recovery must never
-    become a blanket delete, so removal requires ONE of two measured
-    attributions:
-
-    * **ours** — `spawn_ts` given and the lock's mtime is at (or after) the
-      moment we spawned the child that timed out: the lock is the corpse of OUR
-      OWN killed git. No age requirement; no other predicate can be as direct.
-    * **orphan** — no `spawn_ts` (or mtime predates it): the lock must be at
-      least `min_age_s` old, EMPTY (a real git writes the new index into the
-      lock file — bytes mean live work), and NO git process may exist in a
-      fresh process-table snapshot. All three together; any doubt leaves the
-      lock alone. (Measured live 2026-08-18 23:32 on this repo: a 0-byte,
-      3-minute-old lock with no holder blocked a commit — exactly this shape.)
-
-    Returns True iff the lock was removed (caller may retry ONCE). Never raises.
-    """
+    That function is the general orphan recovery (age + process guards, sole
+    production caller: the `stale-index-lock` heartbeat detector) and is
+    deliberately conservative: a fresh lock is `"too-young"` for up to
+    `min_age_s`, because an OBSERVER cannot tell a fresh orphan from a live
+    writer. A SPAWNER can: when `subprocess.run(timeout=…)` just SIGKILLed the
+    git it spawned, a lock whose mtime is at/after that spawn is the corpse of
+    that exact child, and waiting `min_age_s` before retrying would stall the
+    unattended path the timeout was protecting. Guarded by `_lock_is_held`
+    (the lsof probe — G0 of the general path): held or unprobeable ⇒ removed
+    NOTHING, fail closed. Returns True iff removed (caller may retry ONCE).
+    Never raises."""
     lock = repo_root / ".git" / "index.lock"
     try:
         st = lock.stat()
     except OSError:
-        return False  # no lock (or unreadable) — nothing to recover
-    now = time.time()
-    if spawn_ts is not None and st.st_mtime >= spawn_ts - 1.0:
-        pass  # ours: created by (or after) the child we just killed
-    elif (
-        now - st.st_mtime >= min_age_s
-        and st.st_size == 0
-        and not _live_git_exists(ps_lines)
-    ):
-        pass  # provably orphaned
-    else:
-        return False
+        return False  # no lock — a killed git that cleaned up (the common shape)
+    if st.st_mtime < spawn_ts - 1.0:
+        return False  # predates our child: not ours to touch
+    if _lock_is_held(lock) is not False:
+        return False  # held, or the probe is blind — fail closed
     try:
         lock.unlink()
         return True

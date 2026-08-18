@@ -2188,17 +2188,17 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
                    f"'{expected_subject}'. Refuse to guess what state this is.{NC}")
             sys.exit(1)
         # Pre-flight orphan-lock recovery (TRDD-TUWUB0SG): a git writer killed by an
-        # earlier timeout (ours or any other tool's) leaves a 0-byte .git/index.lock
-        # that would fail this add+commit with a message a human then has to decode.
-        # recover_stale_index_lock removes it ONLY on the measured triple attribution
-        # (aged + empty + no live git process in a fresh ps snapshot) — never a
-        # blanket delete; a live or ambiguous lock is left alone and the commit fails
-        # loudly as before. Measured live on this repo 2026-08-18 23:32.
+        # earlier timeout (ours or any other tool's) leaves a .git/index.lock that
+        # would fail this add+commit with a message a human then has to decode.
+        # clear_stale_index_lock is the janitor#245 general recovery with ALL its
+        # guards (lsof holder probe, age floor, process snapshot) — a live, fresh,
+        # or ambiguous lock is left alone and the commit fails loudly as before.
+        # Measured live on this repo 2026-08-18 23:32.
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
         import git_utils  # noqa: PLC0415 -- local import; publish.py has no lib deps at top
-        if git_utils.recover_stale_index_lock(root):
+        if git_utils.clear_stale_index_lock(root) == "removed":
             cprint(f"  {YELLOW}Recovered a stale orphaned .git/index.lock "
-                   f"(aged, empty, no live git process) before committing.{NC}")
+                   f"(janitor#245 guards all clear) before committing.{NC}")
         run(["git", "add", "--", *to_stage], cwd=root)
         run(["git", "commit", "-m", expected_subject], cwd=root)
 

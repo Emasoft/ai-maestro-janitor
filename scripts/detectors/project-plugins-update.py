@@ -293,19 +293,18 @@ def _commit_settings(project_root: Path, plugin_ids: list[str]) -> tuple[bool, s
             )
         except subprocess.TimeoutExpired:
             # our own killed child: recover its lock and retry once
-            if attempt == 0 and git_utils.recover_stale_index_lock(
-                project_root, spawn_ts=spawn_ts
-            ):
+            if attempt == 0 and git_utils.recover_own_index_lock(project_root, spawn_ts):
                 continue
             return False, "git commit timed out"
         except OSError as exc:
             return False, f"git commit failed to run: {exc}"
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}")
-            # a PRE-EXISTING orphan (someone else's killed git): recover only on
-            # the measured triple predicate (aged + empty + no live git), retry once
+            # a PRE-EXISTING orphan (someone else's killed git): defer to the
+            # general recovery with ALL its guards (lsof holder probe, age,
+            # process snapshot — janitor#245); only "removed" earns the retry
             if attempt == 0 and "index.lock" in detail and \
-                    git_utils.recover_stale_index_lock(project_root):
+                    git_utils.clear_stale_index_lock(project_root) == "removed":
                 continue
             return False, f"git commit exited {proc.returncode}: {detail}"
         return True, "committed"
