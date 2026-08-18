@@ -147,3 +147,32 @@ def test_excerpt_keeps_both_ends() -> None:
     assert "DIAGNOSIS-AT-THE-TOP" in got
     assert "RAW-ERROR-AT-THE-BOTTOM" in got
     assert "elided" in got
+
+
+# llm-ext >=13.5.4 stderr contract: non-zero exit + the literal `(nonconforming)` token means
+# every candidate model produced non-schema output (usually a refusal). Verbatim message shape
+# from the llm-externalizer session's contract notice, model ids interpolated.
+NONCONFORMING_STDERR = (
+    "session-summary: every candidate free model is unavailable — tried a/x, b/y. Last failure "
+    "on 'b/y' (nonconforming): model returned text containing none of the 9 mandated section "
+    "headings — it declined the task or ignored the schema (response: I cannot help with that)"
+)
+
+
+def test_nonconforming_outranks_the_transient_markers() -> None:
+    """The nonconforming message also says "unavailable" — a _TRANSIENT_MARKERS hit.
+
+    Classified TRANSIENT, a model that always refuses would be retried to the full deadline;
+    the `(nonconforming)` token must win and yield the bounded UNKNOWN instead.
+    """
+    got = ec.classify_llm_ext_failure(returncode=1, stderr=NONCONFORMING_STDERR, timed_out=False)
+    assert got == ec.OUTCOME_UNKNOWN
+
+
+def test_nonconforming_signature_is_constant_across_model_rotations() -> None:
+    """The driver interpolates the tried model ids; the signature must not vary with them,
+    or every attempt looks novel and the UNKNOWN give-up never fires."""
+    other = NONCONFORMING_STDERR.replace("a/x, b/y", "c/z").replace("'b/y'", "'c/z'")
+    assert ec.failure_signature(returncode=1, stderr=NONCONFORMING_STDERR) == ec.failure_signature(
+        returncode=1, stderr=other
+    )

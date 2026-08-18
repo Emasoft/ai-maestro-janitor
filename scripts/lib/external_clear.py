@@ -767,6 +767,13 @@ def classify_llm_ext_failure(*, returncode: int, stderr: str, timed_out: bool) -
     if timed_out:
         return OUTCOME_TRANSIENT
     blob = (stderr or "").lower()
+    if "(nonconforming)" in blob:
+        # llm-ext >=13.5.4 contract: non-zero exit + this literal token means every candidate
+        # model produced non-schema output (usually a refusal). The driver's message ALSO says
+        # "every candidate free model is unavailable", so the marker scan below would call it
+        # TRANSIENT and burn the whole retry deadline on generations that keep refusing —
+        # this check must come FIRST.
+        return OUTCOME_UNKNOWN
     if any(m in blob for m in _TRANSIENT_MARKERS):
         return OUTCOME_TRANSIENT
     return OUTCOME_UNKNOWN
@@ -778,6 +785,11 @@ def failure_signature(*, returncode: int, stderr: str) -> str:
     First LINE only, because a wrapper that stamps a timestamp or a request id into later lines
     would otherwise make every identical failure look novel and defeat the give-up entirely.
     """
+    if "(nonconforming)" in (stderr or ""):
+        # Constant on purpose: the driver interpolates the model ids it tried into this message,
+        # so a first-line signature would differ on every attempt and defeat the UNKNOWN
+        # give-up — the same bound-loss the stdout refusal's constant detail guards against.
+        return f"{returncode}|(nonconforming)"
     first = ""
     for line in (stderr or "").splitlines():
         if line.strip():
