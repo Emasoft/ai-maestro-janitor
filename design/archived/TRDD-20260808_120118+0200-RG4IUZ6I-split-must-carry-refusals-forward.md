@@ -1,9 +1,9 @@
 ---
 trdd-id: RG4IUZ6I
 title: A split must carry conflict refusals forward — page-name keys die with the page
-column: human_review
+column: cancelled
 created: 2026-08-08T12:01:18+0200
-updated: 2026-08-16T02:39:50+0200
+updated: 2026-08-18T19:58:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -146,3 +146,20 @@ re-voids today's refusals. One chore manufactures null work for another.
       candidate; a genuine contradiction still is
 - [ ] The 221k-token null-pass scenario replayed → no dispatch (refusals match)
 - [ ] #241 answered when it ships
+
+(Boxes deliberately left unticked: they describe the build the 2026-08-16 investigation
+refuted — nothing here ships, so nothing can tick them.)
+
+## Approval log
+
+- 2026-08-18T19:58:00+0200 — CANCELLED (`human_review → cancelled`, archived) by
+  janitor-main-session under the USER's explicit delegation of open decisions this session.
+  Grounds, from the card's own STATE: item 1 (refusal-ledger rewrite) forbidden; item 2
+  (sibling-pair suppression) shipped under TRDD-3QIQ2E6J; item 3 (headroom gate) judged not
+  worth its cost — and its cheapest correct form, skill-level guidance, ALREADY exists as
+  rule (e) in `skills/janitor-memory-split/SKILL.md` (~90% headroom + the janitor#241
+  measurement). Decisive fact: measured 2026-08-16, split siblings never reach the conflict
+  path (`_conflict_pairs` needs an opposing-claim signal siblings cannot produce), so no
+  refusal was ever re-voided — the premise does not occur. Cancel, not supersede: nothing
+  replaces this card. The STATE's advisor-consultation failure is recorded there; this verdict
+  is taken under the same explicit-note clause.

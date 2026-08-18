@@ -58,10 +58,12 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import git_utils  # noqa: E402
 import state  # noqa: E402
 
 PID_FILENAME = "project-plugins-update.pid"
@@ -273,21 +275,41 @@ def _commit_settings(project_root: Path, plugin_ids: list[str]) -> tuple[bool, s
     msg_body = "janitor chore: commit the updated plugins"
     if plugin_ids:
         msg_body += "\n\nplugins updated:\n" + "\n".join(f"  - {p}" for p in plugin_ids)
-    try:
-        git_env = dict(os.environ)
-        git_env["GIT_OPTIONAL_LOCKS"] = "0"
-        proc = subprocess.run(
-            ["git", "-C", str(project_root), "commit", "--only", "-m", msg_body,
-             "--", SETTINGS_REL_PATH],
-            capture_output=True, text=True, timeout=30, check=False,
-            env=git_env,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return False, f"git commit failed to run: {exc}"
-    if proc.returncode != 0:
-        detail = (proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}")
-        return False, f"git commit exited {proc.returncode}: {detail}"
-    return True, "committed"
+    argv = ["git", "-C", str(project_root), "commit", "--only", "-m", msg_body,
+            "--", SETTINGS_REL_PATH]
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+    # ONE retry, and only after an ATTRIBUTED lock recovery (TRDD-TUWUB0SG): a
+    # timeout here SIGKILLs git mid-write, orphaning .git/index.lock — before
+    # this recovery, every later writer failed until a human deleted the lock,
+    # and this except branch reported the timeout while silently leaving the
+    # repo wedged.
+    for attempt in (0, 1):
+        spawn_ts = time.time()
+        try:
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=30, check=False,
+                env=git_env,
+            )
+        except subprocess.TimeoutExpired:
+            # our own killed child: recover its lock and retry once
+            if attempt == 0 and git_utils.recover_stale_index_lock(
+                project_root, spawn_ts=spawn_ts
+            ):
+                continue
+            return False, "git commit timed out"
+        except OSError as exc:
+            return False, f"git commit failed to run: {exc}"
+        if proc.returncode != 0:
+            detail = (proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}")
+            # a PRE-EXISTING orphan (someone else's killed git): recover only on
+            # the measured triple predicate (aged + empty + no live git), retry once
+            if attempt == 0 and "index.lock" in detail and \
+                    git_utils.recover_stale_index_lock(project_root):
+                continue
+            return False, f"git commit exited {proc.returncode}: {detail}"
+        return True, "committed"
+    return False, "git commit failed after lock recovery"
 
 
 def main() -> int:
