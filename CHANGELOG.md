@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.13] — 2026-08-18
+
+### Bug Fixes
+
+- **external-clear:** A model REFUSAL was accepted as a summary and a context was cleared on it (TRDD-IFZQ98BA) (8310965)
+
+### Documentation
+
+- **TRDD-IFZQ98BA:** MD004 — standardize bullets to asterisk (publish gate) (3905067)
 ## [3.3.12] — 2026-08-18
 
 ### Bug Fixes
@@ -25,6 +34,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-JEEQCHFG:** RETRACT the "measures AGE" section — it describes time/etime, not %cpu (144d1a5)
 - **TRDD-JEEQCHFG:** The RAM "refutation" is retracted — memory was the root cause all along (d3d3ca1)
 - **TRDD-JEEQCHFG:** MD004 — standardize bullets to asterisk (publish gate) (13c1698)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.12 (c58812e)
 ## [3.3.11] — 2026-08-16
 
 ### Bug Fixes
