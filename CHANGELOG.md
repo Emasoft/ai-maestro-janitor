@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.14] — 2026-08-18
+
+### Documentation
+
+- **memory:** The handoff that authorised a destructive clear was never validated (TRDD-IFZQ98BA) (a2f4bc3)
+
+### Features
+
+- **external-clear:** Record WHAT the process said, not just our verdict (TRDD-IFZQ98BA) (617e3fc)
 ## [3.3.13] — 2026-08-18
 
 ### Bug Fixes
@@ -11,6 +20,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - **TRDD-IFZQ98BA:** MD004 — standardize bullets to asterisk (publish gate) (3905067)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.13 (7ead90f)
 ## [3.3.12] — 2026-08-18
 
 ### Bug Fixes
