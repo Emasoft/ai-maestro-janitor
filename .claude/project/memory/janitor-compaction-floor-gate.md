@@ -2,11 +2,12 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything"
 ocd: 2026-07-17
-lmd: 2026-07-17
+lmd: 2026-08-18
 metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 The janitor's PROACTIVE-idle auto-compact trigger (`cold_cache_compact` +
@@ -50,6 +51,36 @@ The two clocks read the SAME elapsed time with OPPOSITE asymmetries, which is wh
 **A CLI that ships inside another plugin is invisible to `shutil.which` in a hook child.** llm-ext lives at `~/.claude/plugins/cache/<marketplace>/llm-externalizer/<version>/bin/llm-ext` — a dir the user's interactive PROFILE puts on PATH, which a hook-spawned detached child never inherits. So `summary: permanent — llm-ext is not on PATH; not retrying` fired on every cold resume and each handoff silently degraded to the link-only template. Resolve by the install's OWN layout (the convention `llm_ext_data_dir` already reads in reverse), PATH first so an operator keeps control, and order versions by PARSED NUMERIC TUPLE — as strings `"9.0.0"` sorts above `"13.5.1"` and would pin the oldest install forever.
 
 **Verify a PATH-dependent fix under the environment that FAILED, not your shell**: `env -i HOME=$HOME PATH=/usr/bin:/bin <interpreter> -c '...'` reproduces the hook child. An interactive shell finds the binary and proves nothing.
+
+
+^ATOM-MK02-SA6C [desc: "the handoff that authorised a destructive clear was never validated — 'summary: ok' only ever meant the process printed something", keywords: handoff_was_a_refusal compaction_cleared_my_session_and_the_handoff_was_useless summary_ok_but_the_summary_was_garbage model_refused_the_compaction agent-handoff.md_contains_a_lecture externalized_compaction_lost_my_work exit_0_but_wrong_output llm-ext_returned_a_refusal, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+
+On 2026-08-18 the externalized compaction cleared a live session and left a REFUSAL in its
+handoff. Every mechanical step was correct — cold-cache gate opened, the hook BLOCKED on the
+watcher, the chain typed `/clear` — and the log said `summary: ok on attempt 1`. The model had
+not summarised: it declined the compaction as a prompt injection and lectured about this plugin,
+on exit 0 with non-empty stdout. The whole validation of the artifact that authorises destroying
+a context was `out or None`.
+
+**A zero exit says the CLI ran. It says nothing about whether the text is a summary.** The fix
+(3.3.13, `_looks_like_refusal`) classifies a refusal as UNKNOWN with a CONSTANT detail — the
+retry bound counts identical details, so prose in the detail would silently make it unbounded —
+and the pre-existing degrade-to-template path then writes an honest link-only handoff and still
+clears. The clear is never held hostage to summary quality; that was always the design.
+
+The match is ANCHORED to the first line, NOT "anywhere in the first N chars": a legitimate
+summary OF this incident opens by QUOTING the refusal. Blockquote `>` is deliberately not
+stripped — a leading `>` is evidence of quoting, the opposite of refusing.
+
+3.3.14 added the other half: until then stderr was read into a local and DROPPED on every
+zero-exit path, and stdout was dropped on every non-OK path, so "the compaction failed" could
+not be answered without a repro. Each attempt now carries `evidence` (transcript path + bytes,
+rc, elapsed, both-ends excerpts of both streams), logged the moment it fails.
+
+Blast radius measured across 19 project handoffs on this host: 1 poisoned. Full record:
+TRDD-IFZQ98BA. The upstream half is llm-externalizer's `driver.ts:996-997` prompt, whose
+"Your output REPLACES the transcript ... it is a handoff, not a report" reads as injection-shaped
+to a safety-tuned model; that reword is theirs, and they have it.
 
 ## Governed by
 
