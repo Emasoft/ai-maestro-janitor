@@ -100,3 +100,35 @@ def test_exported_sibling_is_guarded_too() -> None:
 
     transcript = Path(__file__).resolve()
     assert ec.run_llm_ext_summary(str(transcript), runner=lambda *a, **k: _Proc()) is None
+
+
+def test_a_refused_attempt_carries_forensic_evidence() -> None:
+    """A failed compaction must record WHAT the process said, not just our verdict.
+
+    Until 2026-08-18 stderr was read and dropped on every zero-exit path and stdout was dropped
+    on every non-OK path, so "the compaction failed" was unanswerable without a repro.
+    """
+
+    class _Proc:
+        returncode = 0
+        stdout = INCIDENT_REFUSAL
+        stderr = "[llm-externalizer] Auth: token resolved"
+
+    transcript = Path(__file__).resolve()
+    got = ec.attempt_llm_ext_summary(str(transcript), runner=lambda *a, **k: _Proc())
+
+    assert got.outcome == ec.OUTCOME_UNKNOWN
+    assert "rc=0" in got.evidence
+    assert "bytes=" in got.evidence and "elapsed=" in got.evidence
+    assert "not going to produce" in got.evidence, "the refusal's own words must be recorded"
+    assert "Auth: token resolved" in got.evidence, "stderr must no longer be discarded"
+    assert "\n" not in got.evidence, "evidence lands in a line-oriented log"
+
+
+def test_excerpt_keeps_both_ends() -> None:
+    """Head-only excerpting keeps the wrong half: programs print the raw error LAST."""
+    blob = "DIAGNOSIS-AT-THE-TOP " + ("x" * 5000) + " RAW-ERROR-AT-THE-BOTTOM"
+    got = ec._excerpt(blob)
+    assert "DIAGNOSIS-AT-THE-TOP" in got
+    assert "RAW-ERROR-AT-THE-BOTTOM" in got
+    assert "elided" in got

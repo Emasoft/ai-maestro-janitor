@@ -390,6 +390,20 @@ def _looks_like_refusal(text: str) -> bool:
     return False
 
 
+def _excerpt(text: str, *, head: int = 300, tail: int = 200) -> str:
+    """A bounded, single-line window on a blob — BOTH ENDS, never just one.
+
+    Programs print the DIAGNOSIS first and the raw underlying error last, so a head-only
+    excerpt keeps exactly the wrong half of a stack trace and a tail-only one keeps the
+    wrong half of a refusal. Newlines are escaped because this lands in a line-oriented log
+    that is read with grep.
+    """
+    blob = " ".join((text or "").split())
+    if len(blob) <= head + tail:
+        return blob
+    return f"{blob[:head]} …[{len(blob) - head - tail} chars elided]… {blob[-tail:]}"
+
+
 def run_llm_ext_summary(
     transcript: str,
     *,
@@ -734,6 +748,13 @@ class SummaryAttempt:
     text: str | None
     outcome: str
     detail: str = ""
+    # What the process ACTUALLY produced, for the post-mortem. Separate from `detail` on
+    # purpose: `detail` is the retry key and must stay CONSTANT across attempts (the UNKNOWN
+    # bound counts identical details), while evidence is free-form and differs every time.
+    # Defaulted so every existing construction — including the spies in the test suite — keeps
+    # working; a required field here would break them at a distance, which this file has
+    # already paid for once.
+    evidence: str = ""
 
 
 def classify_llm_ext_failure(*, returncode: int, stderr: str, timed_out: bool) -> str:
@@ -796,6 +817,11 @@ def attempt_llm_ext_summary(
     # template — the CEWVQ8DG field failure, 7 occurrences on 2026-08-16 alone.
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_DATA"}
     try:
+        size = Path(transcript).stat().st_size
+    except OSError:
+        size = -1
+    started = time.monotonic()
+    try:
         proc = runner(
             [binary, "session-summary", "--stdout", "--transcript", transcript],
             capture_output=True,
@@ -805,20 +831,39 @@ def attempt_llm_ext_summary(
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return SummaryAttempt(None, OUTCOME_TRANSIENT, f"timed out after {timeout_s}s")
+        return SummaryAttempt(
+            None, OUTCOME_TRANSIENT, f"timed out after {timeout_s}s",
+            evidence=f"transcript={transcript} bytes={size} elapsed={time.monotonic() - started:.1f}s",
+        )
     except Exception as exc:  # noqa: BLE001 - a handoff must survive ANY subprocess failure
-        return SummaryAttempt(None, OUTCOME_TRANSIENT, f"spawn failed: {exc!r}")
+        return SummaryAttempt(
+            None, OUTCOME_TRANSIENT, f"spawn failed: {exc!r}",
+            evidence=f"transcript={transcript} bytes={size}",
+        )
     rc = int(getattr(proc, "returncode", 1) or 0)
     err = getattr(proc, "stderr", "") or ""
+    out_raw = getattr(proc, "stdout", "") or ""
+    # The forensic record of THIS invocation. Until 2026-08-18 stderr was read and then dropped
+    # on every zero-exit path, and stdout was dropped on every non-OK path — so when the model
+    # returned a refusal there was nothing on disk saying WHAT it returned, and the owner had to
+    # reconstruct it from the poisoned handoff. Capturing both ends of both streams is what makes
+    # "the compaction failed" answerable without a repro.
+    evidence = (
+        f"transcript={transcript} bytes={size} rc={rc} "
+        f"elapsed={time.monotonic() - started:.1f}s "
+        f"stdout[{len(out_raw)}]={_excerpt(out_raw)!r} stderr[{len(err)}]={_excerpt(err)!r}"
+    )
     if rc != 0:
         return SummaryAttempt(None, classify_llm_ext_failure(
             returncode=rc, stderr=err, timed_out=False
-        ), failure_signature(returncode=rc, stderr=err))
-    out = (getattr(proc, "stdout", "") or "").strip()
+        ), failure_signature(returncode=rc, stderr=err), evidence=evidence)
+    out = out_raw.strip()
     if not out:
         # Exit 0 with nothing on stdout: the CLI answered without producing a summary. Retryable
         # — an empty generation is a normal free-tier outcome under load, not a broken install.
-        return SummaryAttempt(None, OUTCOME_TRANSIENT, "empty summary on a zero exit")
+        return SummaryAttempt(
+            None, OUTCOME_TRANSIENT, "empty summary on a zero exit", evidence=evidence
+        )
     if _looks_like_refusal(out):
         # UNKNOWN, and the detail is a CONSTANT on purpose. A refusal is probabilistic, so a
         # retry can legitimately succeed (PERMANENT would give up too early) — but its trigger
@@ -827,7 +872,9 @@ def attempt_llm_ext_summary(
         # bounded retry, and it is bounded by `seen[last.detail]` counting IDENTICAL details:
         # interpolating the refusal prose here would make every attempt look distinct, the
         # counter would never trip, and this would silently behave like TRANSIENT.
-        return SummaryAttempt(None, OUTCOME_UNKNOWN, "refusal-shaped output on a zero exit")
+        return SummaryAttempt(
+            None, OUTCOME_UNKNOWN, "refusal-shaped output on a zero exit", evidence=evidence
+        )
     return SummaryAttempt(out, OUTCOME_OK)
 
 
@@ -904,6 +951,12 @@ def summarize_with_retry(
             last = run_attempt(transcript)
         finally:
             release_fleet_lease(lease, lane_dir=lane_dir)
+        # Log the forensics of every attempt that did NOT succeed, at the moment it happens.
+        # An outcome word alone ("refusal-shaped output") says what we decided, never what the
+        # process said — and the process's own words are the only thing that tells the owner
+        # whether the model refused, the CLI broke, or the transcript was wrong.
+        if last.outcome != OUTCOME_OK and last.evidence:
+            say(f"attempt {i + 1} [{last.outcome}] {last.detail} | {last.evidence}")
         if last.outcome == OUTCOME_OK:
             say(f"summary: ok on attempt {i + 1}")
             return last
