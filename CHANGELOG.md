@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.12] — 2026-08-18
+
+### Bug Fixes
+
+- **tcc:** The osascript interpreter needs a stable IDENTITY, not just a stable path (48c524a)
+- **automation:** Sign the interpreter, stop deriving llm-ext's data dir (TRDD-CEWVQ8DG) (38d2a34)
+- **clear:** A cancel must falsify the TRIGGER's own premise (TRDD-CEWVQ8DG) (11f176a)
+- **test:** The ordering spy must mirror _fire's real signature (TRDD-CEWVQ8DG) (268322a)
+- **detectors:** The alarm shipped a FALSE claim about its own metric, pinned by a test (80ce577)
+- **detectors:** Three MORE sites carried the disproved %cpu mechanism (TRDD-JEEQCHFG) (1cf988e)
+- **cold-resume:** The one-shot must record FIRES, not ATTEMPTS (28b3e7a)
+- **tcc:** The chain child must run under the automation interpreter, not inherit blindly (9b4ee41)
+- **cold-resume:** The hook now actually BLOCKS, as its own comment always claimed (783af50)
+
+### Documentation
+
+- **baseline:** The module docstring asserted the pre-ruling payload (f8aa684)
+- Add TRDD-JEEQCHFG — supersede 8QSLYMGU, whose premise about %cpu was false (80ce577a) (92495e2)
+- **TRDD-JEEQCHFG:** The retracted metric fails in BOTH directions, and my own discriminator was wrong (22729dc)
+- **TRDD-JEEQCHFG:** The metric measures AGE, and the RAM half is refuted (6fed349)
+- **TRDD-JEEQCHFG:** RETRACT the "measures AGE" section — it describes time/etime, not %cpu (144d1a5)
+- **TRDD-JEEQCHFG:** The RAM "refutation" is retracted — memory was the root cause all along (d3d3ca1)
+- **TRDD-JEEQCHFG:** MD004 — standardize bullets to asterisk (publish gate) (13c1698)
 ## [3.3.11] — 2026-08-16
 
 ### Bug Fixes
@@ -25,6 +48,10 @@ All notable changes to this project will be documented in this file.
 - **design:** TUVQWLJF — log the advisor attempts on the card the advisor is blocking (eaf7c44)
 - **design:** TUVQWLJF dev -> testing — all 5 boxes ticked, fe8590c3 recorded (8d59e3c)
 - **design:** XM3FPJC0 — match the file's asterisk bullets (MD004, publish blocker) (1b5f3e7)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.11 (770b02d)
 ## [3.3.10] — 2026-08-16
 
 ### Bug Fixes
