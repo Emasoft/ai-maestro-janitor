@@ -229,14 +229,41 @@ def main() -> int:
             if managed
             else ["uv", "run", "--script", "--quiet", str(watcher)]
         )
-        subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
+        # ACTUALLY BLOCK. Until 2026-08-18 this Popen'd and returned 0 immediately while the
+        # 40-line comment above asserted "BLOCKING, NOT DETACHED" — the comment was
+        # aspirational, and the cost was measured on a sibling project that morning: fire at
+        # 11:11:17, /clear landed 11:19:59, an 8m39s window in which any turn (a user prompt,
+        # a 5-minute heartbeat fire) ran on the fat cold context and paid exactly the ~700k
+        # this feature exists to prevent. The owner directive the comment cites requires the
+        # wait; the 2800 s hooks.json timeout was ALWAYS sized for it.
+        #
+        # `start_new_session=True` stays, deliberately: the child must SURVIVE us being
+        # killed (Claude Code kills the hook at 2800 s; the watcher's own post-deadline
+        # fallback then still composes and clears). We WAIT on the child rather than run it
+        # attached, so both ceilings compose: our wait releases session start, never kills
+        # the work.
+        proc = subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
             [*argv, "--project-root", str(root), "--on-resume"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
             env=state.detached_uv_env(),
         )
-        state.log_line("cold-cache-clear", f"fired detached watcher for {root}")
+        state.log_line("cold-cache-clear", f"watcher started (blocking) for {root}")
+        try:
+            # Strictly ABOVE the watcher's own 2600 s deadline + ~200 s fallback headroom
+            # would exceed the hook's 2800 s budget, so: 2700 — past the deadline (the
+            # common case resolves far earlier), below hooks.json's 2800 so OUR release
+            # fires before Claude Code kills the hook, and the detached child finishes the
+            # fallback path on its own either way.
+            rc = proc.wait(timeout=2700)
+            state.log_line("cold-cache-clear", f"watcher exited rc={rc} — session start released")
+        except subprocess.TimeoutExpired:
+            state.log_line(
+                "cold-cache-clear",
+                "watcher still running at the 2700s wait ceiling — releasing session start; "
+                "the detached child continues its fallback on its own",
+            )
     except Exception as exc:  # noqa: BLE001 -- NEVER break session start
         try:
             import state  # noqa: PLC0415
