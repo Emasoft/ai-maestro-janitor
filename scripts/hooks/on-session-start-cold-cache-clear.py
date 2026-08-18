@@ -57,6 +57,19 @@ for _entry in (
 _FIRED_STAMP = "cold-cache-clear-fired.txt"
 
 
+def _fire_recorded(seen_file: Path, key: str) -> bool:
+    """Has a fire ALREADY been recorded for `key`? READ-ONLY — never records.
+
+    Deliberately not `dedupe.emit_once(...) is None`: that writes the key as a side effect of
+    asking, which is what made a single non-firing SessionStart permanently disable the lever
+    for a long-lived session. Fails OPEN (returns False) on any read error — a lost marker
+    costs at most one extra clear, while a spurious True costs the whole feature, silently."""
+    try:
+        return key in seen_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+
+
 def _payload() -> dict:
     """The hook's stdin JSON, or {} when there is none. Never raises."""
     try:
@@ -108,10 +121,22 @@ def main() -> int:
             )
             return 0
 
-        # Guard 2 — one fire per session id, whatever SessionStart does. `emit_once` returns
-        # None on a repeat, which is exactly "already fired for this session".
+        # Guard 2 — one fire per session id, whatever SessionStart does.
+        #
+        # READ-ONLY here; the key is RECORDED only after `verdict.fire` is true (below). It used
+        # to be written by an `emit_once` at THIS point, which consumed the session's single
+        # allowance on the FIRST SessionStart regardless of outcome. Measured 2026-08-18: this
+        # session recorded its key on a run whose verdict was `cache warm` — nothing was cleared
+        # — and because a RESUMED session keeps its id indefinitely, every later reload logged
+        # `already fired for this session` and the lever stayed dead for two days. The user
+        # restarted after a 24 h gap, when the cache was certainly cold, and still got nothing:
+        # this guard is checked BEFORE the cache check, so a stale key short-circuits a verdict
+        # that would otherwise have fired.
+        #
+        # The guard's real job is narrow — make a DOUBLE-DELIVERED SessionStart a no-op — and a
+        # marker named `…-fired` must therefore record FIRES, not ATTEMPTS.
         key = f"cold-cache-clear@{session_id or 'no-session-id'}"
-        already = dedupe.emit_once(sd / _FIRED_STAMP, key, "x") is None
+        already = _fire_recorded(sd / _FIRED_STAMP, key)
 
         newest = cold_cache_compact.newest_transcript(root)
         now = int(time.time())
@@ -147,6 +172,10 @@ def main() -> int:
         )
         if not verdict.fire:
             return 0
+
+        # RECORD THE ONE-SHOT HERE — past the fire decision, so a refused verdict leaves the
+        # allowance intact for the next SessionStart of this same (possibly long-lived) session.
+        dedupe.emit_once(sd / _FIRED_STAMP, key, "x")
 
         watcher = _PLUGIN_ROOT / "scripts" / "external_handoff_clear.py"
         if not watcher.is_file():
