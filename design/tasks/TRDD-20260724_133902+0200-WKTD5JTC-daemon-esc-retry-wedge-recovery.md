@@ -1,9 +1,9 @@
 ---
 trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
-column: testing
+column: complete
 created: 2026-07-24T13:39:02+0200
-updated: 2026-08-15T23:05:00+0200
+updated: 2026-08-18T20:55:00+0200
 implementation-commits: [3517836b]
 current-owner: main
 task-type: feature
@@ -368,3 +368,14 @@ the STATE block + Design above):
   requested by the owner). Advisor consult required before implementation (>3-file daemon change).
 - 2026-07-24T14:22:35+0200 — Advisor (Fable 5) reviewed: APPROVE-WITH-CHANGES. Four corrections folded into
   STATE + Design; NEXT ACTION revised to "verify 1a/1b empirically first". Still `todo`, unimplemented.
+- 2026-08-18T20:55:00+0200 — CLOSED (`testing → complete`) by janitor-main-session under the
+  USER's explicit delegation of open decisions this session, on LIVE testing evidence measured
+  first-hand today: (1) implementation verified in the tree — `fleet_recovery.injection_for`
+  returns `esc_nudge` UNCONDITIONALLY for `retry_wedged` (advisor #1), and `daemon.py:1622-1630`
+  writes `rate-limited.flag` BEFORE the ESC with the §1b measurement quoted in-code, exactly the
+  mandatory fallback this card derived (832/832 vs 1/53); (2) the daemon has broken SIX genuine
+  retry-watchdog wedges on this host — 2026-08-16 23:23 (attempt=2) and five today (18:54 ×2,
+  19:07, 19:36, 19:53), every one logged `FIRED`, none escalated to crash-loop, and the
+  recovered sessions are alive in the live agent roster. The "verify on a REAL wedge" gate is
+  satisfied by real wedges, repeatedly. Harness-side (§8 server port) remains ai-maestro's own
+  card per ARCHITECTURE §8.4 — not this card's scope.

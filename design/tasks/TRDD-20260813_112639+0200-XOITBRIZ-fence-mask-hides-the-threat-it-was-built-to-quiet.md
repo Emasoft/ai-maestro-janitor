@@ -1,9 +1,9 @@
 ---
 trdd-id: XOITBRIZ
 title: The code-fence mask hides dynamic-exec-in-body's primary threat — the fence is not the signal, the surrounding prose is
-column: testing
+column: complete
 created: 2026-08-13T11:26:39+0200
-updated: 2026-08-13T13:22:00+0200
+updated: 2026-08-18T21:12:00+0200
 current-owner: janitor-main-session
 task-type: security
 approval-tier: 0
@@ -139,5 +139,17 @@ recall 2/3 → 3/3 with no FP change.
       same class slipped back in through the vocabulary rather than the term list, which is
       evidence the discriminator needs a positional rule (headings are titles, not disclaimers),
       not more term-pruning.
+
+## Approval log
+
+- 2026-08-18T21:12:00+0200 — CLOSED (`testing → complete`) by janitor-main-session under the
+  USER's explicit delegation of open decisions this session. The card's DELIVERED claim stands
+  fully gated: fence mask replaced by the prose discriminator at 3/9 → 6/9 (7/9 after shape C)
+  recall with 0/72 benign FP, misses characterised into 5 shapes, shape C fixed with the
+  regression baseline raised. The three remaining open items are constraints and FOLLOW-ON
+  work, not defects in what shipped: shapes A/B/D/E + the required FRESH blind set are split
+  to TRDD-VAWIKRK2 (`created-by:` this card, per one-atomic-task-per-TRDD — the parent card's
+  own text says only C was safe to close on existing evidence). The burned-blind-set
+  constraint and the retired ≥3/3 box remain recorded here as the honest bounds of the claim.
 
 ## Notes and lessons learned

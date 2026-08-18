@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-16T00:55:00+0200
+updated: 2026-08-18T21:00:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -39,6 +39,22 @@ Done in response, 2026-08-15:
 NEXT: the first genuine cold restart on this machine is the "one observed end-to-end unattended
 cycle" acceptance box. When it is observed, flipping `DEFAULT_ENABLED` to `True` is that box's
 payoff (per the constant's own comment). Do NOT flip it before then.
+
+### ⏵ 2026-08-18 21:00 — a REAL unattended cycle fired, but it only proved the FAIL-SAFE half.
+### DEFAULT_ENABLED stays False; the summary half is 100% degraded on this host.
+
+Measured in `global-state/external-clear.log` (session 98b5f8c0): at 17:56:14 the trigger
+genuinely fired unattended (`trigger=long-idle`, 304954s ≥ 3600s) and a handoff WAS produced —
+but only after **14/14 summary attempts** returned `transient — empty summary on a zero exit`,
+so the handoff `degraded to template` and the cycle repeated the same shape at 18:01. The
+"never produces no handoff" safety property is now proven live; the llm-ext summary half has a
+**0% success rate** on this host. Note this is NOT the rc!=0 `(nonconforming)` class —
+`f5c0543f`/`5e1d7fab` are in the running v3.3.16 (verified by tag ancestry) — it is rc=0 with
+EMPTY output, i.e. llm-ext succeeding with no content. Reported to the llm-externalizer peer
+session this evening. **Decision under the USER's delegation: the flip's bar is an observed
+cycle whose SUMMARY half worked, not one that only exercised the template fallback — a default
+rollout on a 0%-summary host would ship the degraded experience as the product.** Card stays
+`testing`, box stays open, blocker is llm-ext's empty-summary-on-zero-exit.
 
 **Column `todo` since 2026-08-12.** Nobody is working this — 0/5 acceptance, and the NEXT ACTION
 (wire the watcher) is known and concrete, so it is pullable rather than in progress.

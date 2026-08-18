@@ -1,9 +1,9 @@
 ---
 trdd-id: XM3FPJC0
 title: Nothing notices a file that grows without bound — 231 MB of debug log accumulated for 11 days unseen
-column: testing
+column: complete
 created: 2026-08-15T23:10:53+0200
-updated: 2026-08-16T06:22:45+0200
+updated: 2026-08-18T21:05:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -136,3 +136,15 @@ Tonight's specific writer is `~/.claude/statusline.py:814,824` — the user's ow
 project tree, so this session did not edit it and only reported the three-line fix (gate the debug
 write behind an env var). That separation is the point of a report-only detector: the janitor can
 see the balloon everywhere, and only ever fixes what it owns.
+
+## Approval log
+
+- 2026-08-18T21:05:00+0200 — CLOSED (`testing → complete`) by janitor-main-session under the
+  USER's explicit delegation of open decisions this session. The NEXT ACTION's remaining half
+  is now observed first-hand: `last-run-runaway-file-growth.ts` in this project stamps an
+  AUTONOMOUS dispatcher-driven fire 6 minutes before this verdict (nobody invoked the detector
+  by hand this session), and `runaway-file-growth.json` exists and persists between runs —
+  empty, which is the CORRECT steady-state content at the default 100 MB threshold with no
+  balloon present. The re-alert policy itself was already proven live on real files on
+  2026-08-15 (re-reported only the grower past the 2× gate); the scheduling was the only
+  unproven half and is unproven no longer. Shipped in v3.3.6, in the released line.
