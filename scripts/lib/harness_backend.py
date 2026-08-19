@@ -58,7 +58,16 @@ BACKEND_STANDALONE = "standalone"
 # regardless (population-split ops + janitor-only Family-B chores).
 SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
     "marketplace-refresh",
-    "user-plugins-update",
+    # `user-plugins-update` LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC, the janitor
+    # counterpart to ai-maestro TRDD-PE54D95Q AC6, commit 5796ef6a): the Claude Code
+    # harness self-updates installed plugins from the autoUpdate:true refreshed catalogs
+    # (261/261 measured), so the server's absorbed loop duplicated ~80 `claude plugin
+    # update` spawns per fire and STOPPED claiming it. Daemon-owned again at 3600s. The
+    # removal is safe with no dark window: daemon.py's yield keys on the server's LIVE
+    # beat (`claimed_chores()`), not this static set, and its `_consume_plugin_update_
+    # requests()` gate is `"user-plugins-update" not in yielded` — designed to survive
+    # the absorbed set narrowing. `unabsorbed_chores()` derives from GLOBAL_CHORES minus
+    # this set, so dropping the name here is all that makes the daemon own it again.
     "version-update",
     "oauth-rotator-supervisor",
     "oauth-rotator-tick",

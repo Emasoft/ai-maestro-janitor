@@ -166,13 +166,15 @@ def test_an_EXPLICIT_operator_override_claims_the_legacy_absorbed_set(
 
 
 def test_absorbed_set_matches_the_contract() -> None:
-    """Pin the exact absorbed-chore set: the OAuth pair + the update trio + the
-    github-config audit (joined 2026-08-18, janitor#274 ratified on the rev-8/#126
-    thread — the server has stamped it since 2026-08-05) — a drift here silently
-    changes which chores the handoff covers."""
+    """Pin the exact absorbed-chore set: the OAuth pair + the update pair
+    (marketplace-refresh + version-update) + the github-config audit (joined
+    2026-08-18, janitor#274 ratified on the rev-8/#126 thread — the server has stamped
+    it since 2026-08-05) — a drift here silently changes which chores the handoff
+    covers. `user-plugins-update` LEFT the set 2026-08-19 (TRDD-TIZHEPNC / ai-maestro
+    PE54D95Q AC6): the harness self-updates plugins, so the absorbed loop duplicated
+    it; it is daemon-owned again."""
     assert hb.SERVER_ABSORBED_TASKS == frozenset({
         "marketplace-refresh",
-        "user-plugins-update",
         "version-update",
         "oauth-rotator-supervisor",
         "oauth-rotator-tick",
