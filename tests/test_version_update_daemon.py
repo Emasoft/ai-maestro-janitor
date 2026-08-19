@@ -157,14 +157,18 @@ def test_resolve_latest_published_reads_the_newest_cached_manifest_when_staged(
 
     seen: dict[str, list[str]] = {}
 
-    class _Proc:
+    # Named _GhProc, NOT _Proc: a module-level _Proc exists below (line ~261), and
+    # pyright resolves the nested `-> _Proc` annotation against that one, yielding
+    # the CI-only "_Proc is not assignable to _Proc" error (v3.3.17 bump-commit CI).
+    # mypy accepts the shadowed name, so only a distinct name keeps BOTH gates green.
+    class _GhProc:
         returncode = 0
         stdout = "v9.9.9\n"
         stderr = ""
 
-    def fake_run(argv: list[str], **_kw: object) -> _Proc:
+    def fake_run(argv: list[str], **_kw: object) -> _GhProc:
         seen["argv"] = argv
-        return _Proc()
+        return _GhProc()
 
     monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
     monkeypatch.setattr(vu.subprocess, "run", fake_run)
@@ -273,7 +277,11 @@ def test_auto_update_skips_when_no_scope_detected(
     vu = _vu()
     calls: list[list[str]] = []
     monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
-    monkeypatch.setattr(vu.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _Proc(0))[1])
+    def _record_run(cmd: list[str], **kw: object) -> _Proc:
+        calls.append(cmd)
+        return _Proc(0)
+
+    monkeypatch.setattr(vu.subprocess, "run", _record_run)
     monkeypatch.setattr(vu, "detect_install_scopes", lambda: [])
     logs: list[str] = []
 
@@ -292,10 +300,11 @@ def test_auto_update_passes_exact_scope_per_detected_scope(
     vu = _vu()
     calls: list[list[str]] = []
     monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
-    monkeypatch.setattr(
-        vu.subprocess, "run",
-        lambda cmd, **kw: (calls.append(cmd), _Proc(0, "updated from 0.1.0 to 0.2.0"))[1],
-    )
+    def _record_run(cmd: list[str], **kw: object) -> _Proc:
+        calls.append(cmd)
+        return _Proc(0, "updated from 0.1.0 to 0.2.0")
+
+    monkeypatch.setattr(vu.subprocess, "run", _record_run)
     monkeypatch.setattr(vu, "detect_install_scopes", lambda: ["user", "local"])
 
     result = vu.attempt_auto_update(lambda _m: None)
