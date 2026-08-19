@@ -14,7 +14,11 @@ cwd/permission_mode/stop_hook_active). We read ``agent_id`` best-effort — some
 builds do send it — and NO-OP when absent. That asymmetry is safe by design:
 the manifest's time sweep (pending_agents.MAX_AGE_S) is the guaranteed cleanup
 for entries whose Stop carried no id, and an over-listed agent in a resume
-directive is harmless (a ping to a finished agent just restates its result).
+directive is harmless ONLY when it finished normally (a ping just restates its
+result). It is NOT harmless for one a session deliberately ``TaskStop``-killed
+(TRDD-PGN5XSHA) — this hook is never invoked by a kill (there is no janitor
+TaskStop hook), so the resume directive is worded advisory rather than
+imperative to cover that gap; see ``pending_agents.mark_stopped``.
 
 A hook fault must NEVER block a subagent stop: everything is wrapped and the
 hook ALWAYS exits 0 with empty output (never a "block" decision).

@@ -79,10 +79,11 @@ def _import_session_start_hook():
 
 
 def test_add_then_pending_roundtrip(iso) -> None:
-    """add() records {agentId, description, ts, nudges, transcript, agentDir}; pending()
-    returns it live. `nudges` seeds at 0 — the per-entry resume budget introduced for #75.
-    `transcript` is the respawn-recovery handle (empty when the payload carried none);
-    `agentDir` is the lazy-resolution root for when `transcript` is unusable."""
+    """add() records {agentId, description, ts, nudges, transcript, agentDir, stopped};
+    pending() returns it live. `nudges` seeds at 0 — the per-entry resume budget
+    introduced for #75. `transcript` is the respawn-recovery handle (empty when the
+    payload carried none); `agentDir` is the lazy-resolution root for when `transcript`
+    is unusable; `stopped` seeds False (TRDD-PGN5XSHA — set only by `mark_stopped`)."""
     pa = iso["pa"]
     pa.add("agent-abc123", "fix runtime LOWs", now=1000)
     got = pa.pending(now=1000)
@@ -94,6 +95,7 @@ def test_add_then_pending_roundtrip(iso) -> None:
             "nudges": 0,
             "transcript": "",
             "agentDir": "",
+            "stopped": False,
         }
     ]
 
@@ -105,6 +107,28 @@ def test_remove_clears_entry(iso) -> None:
     pa.add("a2", now=1001)
     pa.remove("a1", now=1002)
     assert [e["agentId"] for e in pa.pending(now=1002)] == ["a2"]
+
+
+def test_mark_stopped_excludes_from_directive_and_count_but_stays_for_audit(iso) -> None:
+    """TRDD-PGN5XSHA: a deliberately `TaskStop`-killed agent must not be named in the
+    resume directive nor counted as pending, but stays visible via `pending()` for
+    audit — and a DIED (never marked) agent is still named/counted, so recovery for
+    a genuine crash is preserved."""
+    pa = iso["pa"]
+    pa.add("killed-1", "wedged advisor", now=1000)
+    pa.add("died-1", "crashed worker", now=1001)
+    pa.mark_stopped("killed-1", now=1002)
+
+    still_present = {e["agentId"]: e["stopped"] for e in pa.pending(now=1002)}
+    assert still_present == {"killed-1": True, "died-1": False}
+
+    lines = pa.directive_lines(now=1002)
+    agent_lines = [ln for ln in lines if ln.startswith("resume background agent via SendMessage:")]
+    assert not any("killed-1" in ln for ln in agent_lines)
+    assert any("died-1" in ln for ln in agent_lines)
+
+    non_stopped_count = len([e for e in pa.pending(now=1002) if not e.get("stopped")])
+    assert non_stopped_count == 1
 
 
 def test_duplicate_add_refreshes_not_duplicates(iso) -> None:

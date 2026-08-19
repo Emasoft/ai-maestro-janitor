@@ -198,6 +198,10 @@ def _normalize(entry: object, now: int) -> dict | None:
         # explicitly" reasoning: drop this and a respawn loses the only way to find the
         # agent's transcript once `transcript` itself was blanked or never resolvable.
         "agentDir": str(entry.get("agentDir", "") or ""),
+        # TRDD-PGN5XSHA: same "carried through explicitly" trap — drop this and a
+        # deliberately `TaskStop`-killed agent's entry reverts to looking like a plain
+        # in-flight one on the very next load, silently undoing `mark_stopped`.
+        "stopped": bool(entry.get("stopped", False)),
     }
 
 
@@ -278,6 +282,30 @@ def remove(agent_id: str, now: int | None = None) -> None:
         pass
 
 
+def mark_stopped(agent_id: str, now: int | None = None) -> None:
+    """Record that this agent was deliberately `TaskStop`-killed, not that it finished or
+    died (TRDD-PGN5XSHA). Mirrors `remove()` but KEEPS the entry (set `stopped: True`)
+    instead of dropping it, so it stays visible for audit while `directive_lines()` and
+    the pending count stop treating it as a resume candidate. No-op on empty/unknown id
+    (fail-open, same contract as `remove`)."""
+    try:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return
+        t = int(now if now is not None else time.time())
+        with _locked():
+            entries = _load_unlocked(t)
+            changed = False
+            for e in entries:
+                if e["agentId"] == agent_id and not e["stopped"]:
+                    e["stopped"] = True
+                    changed = True
+            if changed:
+                _save_unlocked(entries)
+    except Exception:  # noqa: BLE001 - a manifest bug must never crash a caller
+        pass
+
+
 def pending(now: int | None = None, *, state_dir: Path | None = None) -> list[dict]:
     """Live (unswept) entries, oldest-first. Fail-open [].
 
@@ -330,7 +358,10 @@ def directive_lines(now: int | None = None) -> list[str]:
         t = int(now if now is not None else time.time())
         with _locked():
             entries = _load_unlocked(t)
-            listed = entries[-MAX_DIRECTIVE_AGENTS:]
+            # TRDD-PGN5XSHA: a `stopped` entry was a deliberate decision, not something to
+            # nudge a resume of — excluded from BOTH the listing and the nudge spend below.
+            candidates = [e for e in entries if not e["stopped"]]
+            listed = candidates[-MAX_DIRECTIVE_AGENTS:]
             if not listed:
                 return []
             lines = [_directive_line(e) for e in listed]

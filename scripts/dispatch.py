@@ -965,14 +965,16 @@ def _pending_agent_directive_lines() -> list[str]:
 def _pending_agent_count() -> int:
     """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0.
 
-    Counts ALL agents — used by the resume nudge (an agent that died must still be
-    named for a SendMessage-resume, janitor-spawned or not — and a WEEK-old corpse is
-    still worth naming, which is exactly why this count must not drive the cadence).
+    Counts every non-`stopped` agent — used by the resume nudge (an agent that DIED must
+    still be named for a SendMessage-resume, janitor-spawned or not — and a WEEK-old
+    corpse is still worth naming, which is exactly why this count must not drive the
+    cadence). An entry a session deliberately `TaskStop`-killed is excluded (TRDD-PGN5XSHA
+    — a corpse is worth naming, a decision the session just made is not).
     The CADENCE probe uses `_fresh_external_agent_count` instead (TRDD-CI6ZTNB9)."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
-        return len(pending_agents.pending())
+        return len([e for e in pending_agents.pending() if not e.get("stopped")])
     except Exception:  # noqa: BLE001
         return 0
 
@@ -2433,8 +2435,13 @@ def _phase_keep_going_nudge() -> None:
         pass
     n = _pending_agent_count()
     if n:
+        # Advisory, not imperative (TRDD-PGN5XSHA): the janitor has no TaskStop hook, so a
+        # deliberately killed agent CANNOT be auto-detected here — one of these `n` may be an
+        # agent this session just stopped on purpose, and a SendMessage resumes it from its
+        # transcript, re-entering the exact wedge the kill escaped. Confirm, don't obey blind.
         bits.append(
-            f"{n} background agent(s) pending — resume each via SendMessage"
+            f"{n} background agent(s) pending — before resuming any via SendMessage, confirm"
+            " each is still wanted (one may be an agent you deliberately stopped)"
             " (ids in .janitor/state/pending-agents.json)"
         )
     if bits:
