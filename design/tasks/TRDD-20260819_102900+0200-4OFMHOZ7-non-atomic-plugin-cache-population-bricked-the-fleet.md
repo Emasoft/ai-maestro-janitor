@@ -3,7 +3,7 @@ trdd-id: 4OFMHOZ7
 title: Non-atomic plugin-cache population bricked every session's tools for 20 minutes — post-mortem + staging-dir guard
 column: dev
 created: 2026-08-19T10:29:00+0200
-updated: 2026-08-19T19:52:00+0200
+updated: 2026-08-19T20:52:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -34,6 +34,19 @@ Remaining writer in the 09:35–09:55 churn window: the ai-maestro HUB-side upda
 measured the partial dir AND additively completed it from the repo checkout) or a peer
 session's manual `claude plugin update` — both outside this repo's logs. Memory pressure was
 live throughout (memory-guard "pressure, no Tier-1 candidate" 09:03/09:19/09:54).
+
+**Box 1 addendum — hub cross-check received (peer, 2026-08-19 ~20:50).** The hub lane's
+`~/.aimaestro/auto-update-settings.json` lastRunSummary shows its
+`claude plugin update ai-maestro-janitor@ai-maestro-plugins` ran **09:50:18–09:50:34, exit 0**
+— inside the window, and the only CONFIRMED same-window writer. Timeline refinement: the
+partial state was observed from ~09:35, BEFORE that run, and the hub tick was inside its
+marketplace-refresh step from ~09:20:18 until killed at 09:50:18 — so the 09:50 extraction
+most plausibly wrote OVER an already-partial dir (part of the observed churn / repair), and
+the INITIAL truncation (09:15–09:35) remains unattributed: daemon exonerated, hub tick
+occupied elsewhere, and any earlier hub fire is overwritten in a last-run-only trail. Peer
+offered to add per-target start/end stamps + exit codes to the trail — ACCEPTED; that gives
+the next post-mortem both ends. Attribution is now closed as: one confirmed overlapping
+writer (hub, exit 0), initial truncator unattributable with existing trails.
 
 **Box 3 — detector coverage: DECIDED (measured refusal + one gap named).** From
 `scripts/detectors/janitor-self-integrity.py`: C2 manifest verification covers the .md
