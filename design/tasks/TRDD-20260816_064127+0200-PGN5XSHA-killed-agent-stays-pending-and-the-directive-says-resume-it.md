@@ -1,9 +1,10 @@
 ---
 trdd-id: PGN5XSHA
 title: A deliberately killed subagent stays in the pending manifest and the resume directive keeps telling the session to resume it
-column: dev
+column: testing
 created: 2026-08-16T06:41:27+0200
-updated: 2026-08-19T01:05:00+0200
+updated: 2026-08-19T01:10:00+0200
+implementation-commits: [0f6c772c]
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -111,13 +112,13 @@ reader is choosing rather than obeying.
 
 ## Acceptance criteria
 
-- [ ] A stopped-vs-died distinction exists in the manifest, with the kill site recording it
-- [ ] The resume directive and `_pending_agent_count` no longer name a deliberately stopped agent
+- [x] A stopped-vs-died distinction exists in the manifest, with the kill site recording it
+- [x] The resume directive and `_pending_agent_count` no longer name a deliberately stopped agent
       (or name it as stopped, if the advisor says resuming one is legitimate)
-- [ ] A test that kills an agent, then asserts the directive does not instruct a resume of it
-- [ ] The two docstrings above are corrected — they currently assert the harmlessness this card
+- [x] A test that kills an agent, then asserts the directive does not instruct a resume of it
+- [x] The two docstrings above are corrected — they currently assert the harmlessness this card
       disproves, and a wrong comment outlives a wrong line of code
-- [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports` clean
+- [x] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports` clean
 
 ## Explicitly NOT in scope
 
