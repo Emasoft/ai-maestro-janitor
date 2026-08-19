@@ -105,6 +105,73 @@ def test_resolve_latest_published_returns_none_when_no_repo_url(env: Path) -> No
     assert vu.resolve_latest_published(vdir) is None
 
 
+# ---------- resolve_cache_parent (TRDD-ZM5LZ24Y staged-closure runtime) ----
+
+def test_resolve_cache_parent_prefers_a_real_version_parent(env: Path) -> None:
+    """The normal shape: plugin_root is a cache version dir, its parent lists
+    versions — that parent wins, no fallback."""
+    vu = _vu()
+    cache_parent = env / "cache"
+    _make_cache(cache_parent, ["1.0.0", "1.1.0"])
+    assert vu.resolve_cache_parent(cache_parent / "1.1.0") == cache_parent
+
+
+def test_resolve_cache_parent_falls_back_for_the_staged_data_closure(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE TRDD-ZM5LZ24Y shape: the daemon runs from the staged DATA closure, so
+    plugin_root.parent (~/.claude/plugins/data) has zero semver children. Every
+    consumer then silently no-oped forever — auto-update early-returned and
+    certify hit its one silent return, freezing the C3 pin at 0.59.0 for a month
+    of on-cadence fires. The resolver must fall back to the canonical user-scope
+    cache path instead of trusting the shape assumption."""
+    vu = _vu()
+    monkeypatch.setenv("HOME", str(env / "home"))
+    canonical = (
+        env / "home" / ".claude" / "plugins" / "cache"
+        / "ai-maestro-plugins" / "ai-maestro-janitor"
+    )
+    _make_cache(canonical, ["3.3.16"])
+    data_root = env / "home" / ".claude" / "plugins" / "data" / "ai-maestro-janitor-x"
+    (data_root / "scripts").mkdir(parents=True)
+    assert vu.resolve_cache_parent(data_root) == canonical
+
+
+def test_resolve_latest_published_reads_the_newest_cached_manifest_when_staged(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """From the staged closure there is no .claude-plugin/plugin.json at
+    plugin_root, so the F1 provenance tag was unresolvable on every daemon fire
+    (failing certification closed). The fallback reads the newest CACHED
+    version's manifest — proven here by the resolver reaching the gh call with
+    the slug that ONLY that cached manifest carries."""
+    vu = _vu()
+    monkeypatch.setenv("HOME", str(env / "home"))
+    canonical = (
+        env / "home" / ".claude" / "plugins" / "cache"
+        / "ai-maestro-plugins" / "ai-maestro-janitor"
+    )
+    _make_plugin_root(canonical, "3.3.16", repo_url="https://github.com/Emasoft/ai-maestro-janitor")
+    data_root = env / "home" / ".claude" / "plugins" / "data" / "ai-maestro-janitor-x"
+    (data_root / "scripts").mkdir(parents=True)
+
+    seen: dict[str, list[str]] = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = "v9.9.9\n"
+        stderr = ""
+
+    def fake_run(argv: list[str], **_kw: object) -> _Proc:
+        seen["argv"] = argv
+        return _Proc()
+
+    monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(vu.subprocess, "run", fake_run)
+    assert vu.resolve_latest_published(data_root) == "9.9.9"
+    assert "repos/Emasoft/ai-maestro-janitor/releases/latest" in " ".join(seen["argv"])
+
+
 # ---------- do_auto_update_if_needed --------------------------------------
 
 def test_do_auto_update_silent_when_cache_matches_github(

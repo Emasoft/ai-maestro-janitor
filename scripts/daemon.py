@@ -606,7 +606,9 @@ def task_version_update() -> None:
         # is a no-op when the version shipped no manifest or no key resolves, and
         # any failure just leaves the stub on its C2-only gate — never blocking.
         try:
-            new_version_dir = plugin_root.parent / new_latest
+            # resolve_cache_parent, NOT plugin_root.parent: under the staged DATA
+            # closure the latter is ~/.claude/plugins/data (TRDD-ZM5LZ24Y).
+            new_version_dir = vu.resolve_cache_parent(plugin_root) / new_latest
             if vu.pin_good_version(new_version_dir, new_latest):
                 state.log_line(
                     "daemon",
@@ -639,7 +641,11 @@ def task_version_update() -> None:
         # refused to pin is byte-indistinguishable from a fire that never ran, which
         # is exactly why TRDD-ZM5LZ24Y's soak could not be closed from the outside.
         newly_pinned = vu.certify_newest_if_clean(
-            plugin_root.parent, latest_published or None,
+            # resolve_cache_parent, NOT plugin_root.parent: from the staged DATA
+            # closure the latter lists zero versions, and certify's empty-installed
+            # path is its ONE silent return — the pin froze at 0.59.0 for a month
+            # with fires on cadence and nothing logged (TRDD-ZM5LZ24Y, measured).
+            vu.resolve_cache_parent(plugin_root), latest_published or None,
             log=lambda msg: state.log_line("daemon", f"  version-update: {msg}"),
         )
     except Exception as exc:  # noqa: BLE001 — periodic re-pin must NEVER break the daemon

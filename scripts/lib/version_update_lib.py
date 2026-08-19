@@ -206,6 +206,38 @@ def list_installed_versions(parent: Path) -> list[str]:
     return sorted(versions, key=_semver_tuple)
 
 
+def resolve_cache_parent(plugin_root: Path) -> Path:
+    """The dir whose children are the cached `<version>` dirs.
+
+    `plugin_root` is NORMALLY a cache version dir
+    (`…/plugins/cache/<marketplace>/<plugin>/<version>`), whose parent IS the
+    version list — the shape every consumer here documents. But the daemon also
+    runs from the STAGED DATA closure (`…/plugins/data/<plugin-slug>/scripts/
+    daemon.py` → `plugin_root` = the DATA dir), where `plugin_root.parent` is
+    `~/.claude/plugins/data` — zero semver-shaped children — and every consumer
+    silently no-ops FOREVER: `do_auto_update_if_needed` early-returns on an empty
+    version list (so the daemon never self-updates) and `certify_newest_if_clean`
+    hits its one silent `return None` (so the C3 pin never advances). Measured
+    live (TRDD-ZM5LZ24Y): the pin sat at 0.59.0 for a month while the daemon's
+    version-update fired on cadence, logging nothing — the fail-open path has no
+    log line by contract, which is why this had to be found by re-running the
+    walk out-of-band rather than from any log.
+
+    Prefer `plugin_root.parent` only when it actually lists installed versions;
+    otherwise fall back to the canonical user-scope cache path — the same root
+    `dispatcher-stub.py` hardcodes as its version walk (kept in lockstep by the
+    test suite, not by an import: the stub is a standalone artifact in the DATA
+    dir and cannot share a constant).
+    """
+    parent = plugin_root.parent
+    if list_installed_versions(parent):
+        return parent
+    return (
+        Path.home() / ".claude" / "plugins" / "cache"
+        / "ai-maestro-plugins" / "ai-maestro-janitor"
+    )
+
+
 def resolve_latest_published(plugin_root: Path) -> str | None:
     """GitHub releases/latest tag for the repo declared in plugin.json.
 
@@ -215,6 +247,19 @@ def resolve_latest_published(plugin_root: Path) -> str | None:
     decides whether to log.
     """
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.is_file():
+        # Staged-closure runtime (TRDD-ZM5LZ24Y): the DATA dir stages scripts
+        # only — no `.claude-plugin/plugin.json` — so the F1 provenance tag was
+        # unresolvable on every daemon fire, failing certification closed even
+        # after the cache-parent fix below. Read it from the newest CACHED
+        # version instead: same plugin, same repository field, and the cache is
+        # the artifact this whole module reasons about anyway.
+        cache_parent = resolve_cache_parent(plugin_root)
+        installed = list_installed_versions(cache_parent)
+        if installed:
+            plugin_json = (
+                cache_parent / installed[-1] / ".claude-plugin" / "plugin.json"
+            )
     if not plugin_json.is_file():
         return None
     try:
@@ -355,7 +400,9 @@ def do_auto_update_if_needed(plugin_root: Path,
     Designed for the daemon: it's safe to call every cadence, silent
     when nothing's behind, conservative on every failure mode.
     """
-    cache_parent = plugin_root.parent
+    # NOT `plugin_root.parent`: under the staged DATA closure that parent holds
+    # no version dirs and this function early-returns forever (TRDD-ZM5LZ24Y).
+    cache_parent = resolve_cache_parent(plugin_root)
     installed = list_installed_versions(cache_parent)
     latest_installed = installed[-1] if installed else ""
 

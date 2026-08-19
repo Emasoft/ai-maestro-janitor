@@ -52,7 +52,11 @@ _PLUGIN_ROOT = _HERE.parent
 
 
 def main() -> int:
-    cache_parent = _PLUGIN_ROOT.parent
+    # resolve_cache_parent guards the staged-DATA-closure case (TRDD-ZM5LZ24Y):
+    # invoked from the cache it returns _PLUGIN_ROOT.parent unchanged; invoked
+    # from a staged copy it falls back to the canonical cache instead of
+    # silently walking an empty dir.
+    cache_parent = vu.resolve_cache_parent(_PLUGIN_ROOT)
 
     print(
         "MANUAL OVERRIDE: bypassing the F1 provenance gate (TRDD-ZM5LZ24Y). "
