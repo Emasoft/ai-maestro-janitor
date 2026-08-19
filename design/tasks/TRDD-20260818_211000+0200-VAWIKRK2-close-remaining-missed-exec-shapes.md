@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: todo
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-19T06:55:00+0200
+updated: 2026-08-20T00:00:56+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -17,7 +17,24 @@ eht: []
 
 # Remaining missed shapes from the fence-mask replacement (XOITBRIZ follow-on)
 
-## ⏵ STATE — 2026-08-19 ~06:55: generation STOPPED — pool degraded to timeouts; box-1 blind set is PARTIAL
+## ⏵ STATE — 2026-08-20 00:00: full resume-run COMPLETED — 21/32 captured; the blocker is the 900 s CEILING vs CLASS WEIGHT, not pool availability
+
+The 2026-08-19 ~20:23 resume-run (llm-ext restored to PATH — it vanished from the
+non-interactive PATH; the repo-bundled `~/Code/llm-externalizer/llm-externalizer-plugin/bin`
+prepend fixes it) drained all 32 jobs to a verdict. **Captured 21** (`c01-c12, c15, c16,
+c21, c23, c24, c26, c28, b3, b4` — benign now PARTIALLY present, 2/4). **TIMED OUT 11 at
+the 900 s per-call ceiling**: c13, c14, c17, c18, c19, **c20 two-step-code-injection**,
+c22, c25, c27, b1, b2. c13/c14/c19/c20 reproduced their morning timeouts exactly, on a
+quiet pool and a calm host — so the earlier "pool availability" theory is CORRECTED: these
+classes' generation prompts are too heavy for the free tier inside 900 s, ever. The
+measurement is STILL blocked by its own rule (c20 missing; benign only half present).
+
+**NEXT ACTION (pick one, next session):** (a) raise the per-call ceiling for the 11 heavy
+classes only; (b) run just those 11 through a paid or local profile (`--estimate` first per
+the llm-ext cost rule); (c) split the heavy prompts. Keep it BLIND either way. The 21
+captured .path files are preserved in `tests/agent_context_bench/out/` — resume skips them.
+
+## ⏵ STATE — 2026-08-19 ~06:55: generation STOPPED — pool degraded to timeouts; box-1 blind set is PARTIAL *(superseded by 2026-08-20 above — the "pool availability" diagnosis was wrong)*
 
 The background regen ran 12/32 classes then the free pool degraded to per-call TIMEOUTs (c13,
 c14 both hit the 900s ceiling with no completion in ~30 min). Stopped it (`TaskStop bne4zye4w`)
