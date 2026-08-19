@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "ai-maestro-janitor"
-version = "3.3.17"
+version = "3.3.18"
 source = { virtual = "." }
 
 [package.optional-dependencies]

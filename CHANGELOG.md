@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.18] — 2026-08-19
+
+### Bug Fixes
+
+- **tests:** Resolve the pyright _Proc scope collision that reddened v3.3.17 CI + two standing mypy func-returns-value nits (0638eb0)
+- **inject:** A blinded typing probe DEFERS, never licenses — typing_now un-launders HID blindness (TRDD-D2DD5GO8) (5515108)
+
+### Documentation
+
+- Add TRDD-E39YT9G6 + TRDD-9ZPU69UC — the two 3.3.18 commitments to the hub (retire the daemon plugin sweep; cold-cache-clear auto-rolling launcher) (6716809)
+- Close TRDD-TIZHEPNC (testing → complete) — shipped in v3.3.17; follow-on is TRDD-E39YT9G6 (6c60e6a)
+- **TRDD-E39YT9G6:** Correct the ownership premise (HARNESS self-updates, server deleted its loop too) + ground the sweep in the measured 15+-file consumer inventory (5c3351d)
+- **TRDD-4OFMHOZ7:** Hub cross-check — one confirmed overlapping writer (hub update 09:50:18-34, exit 0); initial truncator unattributable; per-target stamps offer accepted (4ce17e1)
+- **TRDD-VAWIKRK2:** Resume-run drained 32/32 to a verdict — 21 captured, 11 at the 900s ceiling; diagnosis corrected from pool-availability to ceiling-vs-class-weight (c13/c14/c19/c20 reproduced on a quiet pool) (48889c2)
+- **TRDD-4OFMHOZ7:** Dev → blocked — the one open half (upstream harness issue) awaits the USER's explicit word (repo not owned by this gh auth) (391b37b)
 ## [3.3.17] — 2026-08-19
 
 ### Bug Fixes
@@ -53,6 +68,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Gitignore agent_context_bench generation scratch (out*/, reports/) — blocked publish gate 1 (TRDD-VAWIKRK2 artifacts, preserved on disk) (8129a2b)
+- Bump version to 3.3.17 (ece16dd)
 
 ### Refactor
 
