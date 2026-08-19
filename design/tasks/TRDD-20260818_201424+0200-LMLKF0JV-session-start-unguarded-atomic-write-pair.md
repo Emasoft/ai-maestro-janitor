@@ -1,9 +1,10 @@
 ---
 trdd-id: LMLKF0JV
 title: on-session-start has an unguarded atomic_write pair inside its never-break-session-start invariant
-column: todo
+column: testing
 created: 2026-08-18T20:14:25+0200
-updated: 2026-08-18T20:14:25+0200
+updated: 2026-08-19T00:35:00+0200
+implementation-commits: [22b13d0d]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: medium
@@ -33,7 +34,17 @@ raises ⇒ the hook still exits 0 and the session-start payload is still emitted
 
 ## Acceptance
 
-- [ ] no write in on-session-start.py can raise out of the hook (sweep, not just the cited pair)
-- [ ] test: write-fault ⇒ exit 0 + payload still emitted + one diagnostic line
+- [x] no write in on-session-start.py can raise out of the hook (sweep, not just the cited pair)
+      — commit `22b13d0d`. The cited pair AND every other unguarded write are wrapped fail-open;
+      the real crash site the fault-injection found was `state.log_line()` ITSELF (it calls
+      `init_state()` + opens a log for append), so every call site now routes through the new
+      `_slog()` wrapper. Swept sites: init_state, reload-ack pair, keepalive.unlink,
+      install_rules/references, remove_orphaned_rules, both mirror syncs.
+- [x] test: write-fault ⇒ exit 0 + payload still emitted + one diagnostic line —
+      `tests/test_on_session_start_write_faults.py`, REAL fault injection (read-only
+      `CLAUDE_PROJECT_DIR` makes every mkdir/open/os.replace raise, incl. inside the logger).
+      10 passed; ruff + mypy clean.
+
+## STATE — 2026-08-19: implemented + verified, `todo → testing` (commit 22b13d0d). Rides the next publish like the sibling testing cards.
 
 ## Approval log
