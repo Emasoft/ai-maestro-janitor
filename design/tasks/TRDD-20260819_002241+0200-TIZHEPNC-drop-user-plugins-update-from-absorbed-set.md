@@ -1,9 +1,10 @@
 ---
 trdd-id: TIZHEPNC
 title: Remove user-plugins-update from SERVER_ABSORBED_TASKS — the harness self-updates plugins, the absorbed loop duplicated it
-column: todo
+column: testing
 created: 2026-08-19T00:22:41+0200
-updated: 2026-08-19T00:22:41+0200
+updated: 2026-08-19T00:50:00+0200
+implementation-commits: [fbed874a]
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -59,10 +60,26 @@ use on the fleet; awaiting.
 
 ## Acceptance
 
-- [ ] `user-plugins-update` removed from `SERVER_ABSORBED_TASKS`; `unabsorbed_chores()` includes it
-- [ ] blackout/watchdog accounting verified (no stale server-claim expectation for it) — grep-proven
-- [ ] §9 ARCHITECTURE.md row reclassified daemon-owned
-- [ ] tests updated + `uv run pytest` green, `uv run ruff check`, `uv run mypy scripts/` clean
-- [ ] lands before any USER-authorized server build+restart (covers the operator-override caveat)
+- [x] `user-plugins-update` removed from `SERVER_ABSORBED_TASKS`; `unabsorbed_chores()` includes it
+      — commit `fbed874a`. `unabsorbed_chores()` derives from `GLOBAL_CHORES − SERVER_ABSORBED_TASKS`,
+      so the one-line removal is all that makes the daemon own it.
+- [x] blackout/watchdog accounting verified (no stale server-claim expectation for it) — grep-proven.
+      Every consumer checked: `daemon.py:2731`'s `_consume_plugin_update_requests` gate is keyed on
+      the runtime `yielded` set (`"user-plugins-update" not in yielded`), NOT the static set — its
+      own comment anticipates the absorbed set narrowing, so it needs no change and correctly
+      resumes when the server stops claiming. `test_harness_exclusion` is the thin-mode roster
+      (unrelated). `claimed_chore_watch.py:76` is a historical comment. `GLOBAL_CHORES` keeps the
+      3600s registration (correct — daemon-owned).
+- [x] §9 ARCHITECTURE.md row reclassified daemon-owned — §9 prose list + §9.1 table row updated
+      (the row removed; the absorbed set is now 5, so the "five absorbed" refs are numerically
+      correct again; line 212's "update trio" is historical narrative, left).
+- [x] tests updated + green — `test_absorbed_set_matches_the_contract` (trio→pair). 77 passed
+      across chore-coordination + daemon-integration + harness-exclusion + user-plugins-update-stale
+      + claimed-chore-watch; ruff + mypy clean.
+- [x] lands before any USER-authorized server build+restart — server is DOWN; committed now. And
+      the operator-override caveat is MOOT on this host (no override anywhere: env/pm2/ecosystem +
+      daemon pid 64131 env all clean), so even the static path never governs here.
+
+## STATE — 2026-08-19: SHIPPED (fbed874a), `todo → testing`. Rides the next publish. Report the SHA to the ai-maestro-fd peer (done via SendMessage).
 
 ## Approval log
