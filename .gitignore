@@ -94,3 +94,10 @@ llm_externalizer_output/
 # Added by CPV standardize
 *_dev/
 .ruff_cache/
+
+# agent_context_bench generation scratch (TRDD-VAWIKRK2): out/ holds the blind
+# llm-ext .path captures between generate and assemble; reports/ is llm-ext CLI
+# report output from runs launched with the bench as cwd. Both regenerate from
+# generate_corpus.py; only the ASSEMBLED corpus JSONL files are tracked.
+tests/agent_context_bench/out*/
+tests/agent_context_bench/reports/
