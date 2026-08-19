@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-18T21:00:00+0200
+updated: 2026-08-19T00:30:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -39,6 +39,33 @@ Done in response, 2026-08-15:
 NEXT: the first genuine cold restart on this machine is the "one observed end-to-end unattended
 cycle" acceptance box. When it is observed, flipping `DEFAULT_ENABLED` to `True` is that box's
 payoff (per the constant's own comment). Do NOT flip it before then.
+
+### ⏵ 2026-08-19 00:30 — llm-ext 13.5.7 CONTRACT FIX confirmed live; the CODE blocker is CLEARED. Remaining = transient free-pool 429 only.
+
+Probed 13.5.7 directly this session (`llm-ext session-summary --stdout --transcript <13.4MB prior
+transcript>`, `CLAUDE_PLUGIN_DATA` unset per the janitor's own contract). Result: **rc=1**,
+empty stdout, and a CLASSIFIABLE stderr message — no longer the silent empty-on-zero:
+`FAILED: session-summary: chunk 6 hit a rate limit on 'google/gemma-4-31b-it:free' … Checkpoint
+saved … re-run to resume once the limit clears (free daily quotas reset at 00:00 UTC)`. So
+llm-ext's TRDD-P4ULUV1R fix (empty/failed summary → NON-ZERO exit with a one-line reason) is
+**live on this host**, and the janitor side is already correct: `run_llm_ext_summary` returns
+None on `returncode != 0` → degrades to template. The 14×-empty-on-ZERO loop that defined this
+blocker on 3.3.16 cannot recur under 13.5.7 — a failed attempt now exits non-zero and is
+classified, not retried-into-a-template silently.
+
+What actually failed in the probe is a genuine **free-pool 429** (OpenRouter free models
+rate-limited upstream right now) — TRANSIENT/environmental, NOT a code defect, and exactly the
+"machine-wide free-pool contention" the 21:50 note already suspected. This maps into the
+janitor's existing bounded-UNKNOWN/transient classification with no janitor change (per the
+21:50 close-condition note). A checkpoint was saved (`…/session-summary-checkpoints/
+b928b4e23333f543.json`); a resume after the 00:00-UTC quota reset would produce the real summary
+and directly evidence the summary half succeeding on this host with 13.5.7.
+
+**Status change: this card is no longer blocked on llm-ext CODE.** The CLOSE CONDITION (an
+unattended cycle whose SUMMARY half succeeds) is now gated ONLY on catching a genuine idle
+window while the free pool has quota — a timing/environmental matter, not a fix. DEFAULT_ENABLED
+still stays False until such a cycle is observed (the bar is unchanged); but the risk that the
+bar could never be met because of a CLI contract gap is retired.
 
 ### ⏵ 2026-08-18 21:00 — a REAL unattended cycle fired, but it only proved the FAIL-SAFE half.
 ### DEFAULT_ENABLED stays False; the summary half is 100% degraded on this host.

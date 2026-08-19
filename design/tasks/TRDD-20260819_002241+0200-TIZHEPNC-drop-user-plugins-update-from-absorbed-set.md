@@ -1,0 +1,68 @@
+---
+trdd-id: TIZHEPNC
+title: Remove user-plugins-update from SERVER_ABSORBED_TASKS — the harness self-updates plugins, the absorbed loop duplicated it
+column: todo
+created: 2026-08-19T00:22:41+0200
+updated: 2026-08-19T00:22:41+0200
+current-owner: janitor-main-session
+task-type: refactor
+priority: medium
+approval-tier: 0
+scope: project
+external-refs: [ai-maestro TRDD-PE54D95Q @ 5796ef6a, TRDD-6CRC9SQQ, TRDD-50V256RH]
+npt: []
+eht: []
+---
+
+# Drop `user-plugins-update` from the absorbed set (contract rev-8 §9 counterpart)
+
+## Why
+
+The ai-maestro server side (PE54D95Q AC6, commit 5796ef6a) DELETED the absorbed lane's
+per-plugin user-scope update loop and REMOVED `user-plugins-update` from its `ABSORBED_CHORES`.
+Rationale (server-side, measured): the Claude Code harness upgrades installed plugins itself
+from the `autoUpdate:true` refreshed catalogs (261/261 measured; this repo rolled 3.3.15→3.3.16
+with the server down), so the absorbed loop duplicated ~80 `claude plugin update` spawns per
+fire. Keeping a CLAIM without the WORK is the FXPV7L4D stamp-lie class, so the server stopped
+claiming it. The janitor half of the rev-8 contract (§9) must match: the chore returns to the
+daemon at its 3600s cadence.
+
+## Verified read (this session, first-hand) — no dark-window from ordering
+
+`daemon._task_yielded_to_server` (daemon.py:2220) = `server_runs_chores() and task_name in
+harness_backend.claimed_chores()`. `claimed_chores()` resolves from the server's LIVE
+liveness-beat caps (harness_backend.py:52-57), per-chore-exact. So when the server's rebuilt
+beat drops `user-plugins-update` from its `absorbed_chores`, the daemon resumes running the
+chore immediately, regardless of whether this static-roster edit has shipped. The static
+`SERVER_ABSORBED_TASKS` governs the yield ONLY on the explicit-operator-override path
+(`_explicit_chore_override() and server_runs_chores()`, harness_backend.py:48-49) — the legacy
+fallback. **So this edit is contract/accounting consistency, not a functional yield gate**,
+EXCEPT on a host that has force-set the chore knob up (there the static set governs — ship
+before any authorized server build+restart). Peer asked to confirm whether that override is in
+use on the fleet; awaiting.
+
+## What
+
+1. Remove `"user-plugins-update"` from `harness_backend.SERVER_ABSORBED_TASKS`
+   (scripts/lib/harness_backend.py:59).
+2. Verify the derived accounting now treats it as daemon-owned: `unabsorbed_chores()` includes
+   it, and `global-chore-blackout.py` / `orphaned_chores()` no longer expect a server claim for
+   it. Grep every `SERVER_ABSORBED_TASKS` / `user-plugins-update` consumer
+   (harness_backend, daemon, daemon_watchdog, global_state, global-chore-blackout detector) and
+   confirm none hard-codes the membership.
+3. Reclassify the §9 table row in `design/ARCHITECTURE.md` (chore⇄token⇄stamp⇄bound) — the
+   chore is daemon-owned again; the server no longer writes its stamp. Mirror doc row on the
+   server side is already updated (peer: docs/claimed-chores-contract.md).
+4. Tests: the harness_backend / blackout tests that assert the absorbed-set membership must be
+   updated so `user-plugins-update` is asserted daemon-owned (positive control), not
+   server-absorbed.
+
+## Acceptance
+
+- [ ] `user-plugins-update` removed from `SERVER_ABSORBED_TASKS`; `unabsorbed_chores()` includes it
+- [ ] blackout/watchdog accounting verified (no stale server-claim expectation for it) — grep-proven
+- [ ] §9 ARCHITECTURE.md row reclassified daemon-owned
+- [ ] tests updated + `uv run pytest` green, `uv run ruff check`, `uv run mypy scripts/` clean
+- [ ] lands before any USER-authorized server build+restart (covers the operator-override caveat)
+
+## Approval log
