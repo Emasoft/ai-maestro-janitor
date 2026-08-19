@@ -209,10 +209,29 @@ _TILDE_HOME = re.compile(r"(?<![\w/])~(?!/)[A-Za-z_][A-Za-z0-9_\-]*/")
 # predicate distinguishes a real ssh target from an email address.
 _SSH_USER_HOST = re.compile(r"(?<![\w.])[A-Za-z0-9_][A-Za-z0-9_.\-]*@[A-Za-z0-9][A-Za-z0-9.\-]+")
 
-# Machine hostname — `<label>.local` or `<label>.lan` (mDNS / LAN). The label
-# is a DNS label (letters/digits/hyphens). The allow predicate drops reserved
-# names. A leading boundary keeps it out of the middle of a longer token.
-_LOCAL_HOSTNAME = re.compile(r"(?<![\w.@])[A-Za-z0-9][A-Za-z0-9\-]*\.(?:local|lan)\b")
+# Machine hostname — `<label>` suffixed by a conventional internal/LAN TLD
+# (mDNS `.local`/`.lan`, or the internal-network conventions `.internal`,
+# `.intranet`, `.corp`, `.home`). The label is a DNS label (letters/digits/
+# hyphens). The allow predicate drops reserved names. A leading boundary
+# keeps it out of the middle of a longer token.
+#
+# IN scope (TRDD-UWBXNJ76 gap 1): suffix-anchored hostname —
+#   `.local .lan .internal .intranet .corp .home` — plus the `user@host`
+#   ssh position, already covered separately by `_SSH_USER_HOST`.
+# OUT of scope: a bare SUFFIXLESS hostname token (e.g. `emasofts-mac-mini`)
+#   — matching any hyphenated word is the FP minefield this rule exists to
+#   avoid; the only corroborating position that matters (`user@host`) is
+#   already convicted by `_SSH_USER_HOST`.
+# Sibling gap (short high-entropy ids, `_ENTROPY_MIN_LEN` in
+# `memory-scope-leak.py`) is a MEASURED REFUSAL — see TRDD-UWBXNJ76.
+#
+# The trailing `(?!\()` excludes API method-call syntax (`Path.home()`,
+# `Locale.local()`) — `home`/`local`/`corp` are common Python/JS method names,
+# and a call site is never a hostname (measured FP on this repo's own memory
+# corpus, TRDD-UWBXNJ76: `Path.home()` in prose matched before this guard).
+_LOCAL_HOSTNAME = re.compile(
+    r"(?<![\w.@])[A-Za-z0-9][A-Za-z0-9\-]*\.(?:local|lan|internal|intranet|corp|home)\b(?!\()"
+)
 
 
 # ---- The rule catalogue -------------------------------------------------

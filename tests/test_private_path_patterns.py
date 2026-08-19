@@ -222,6 +222,25 @@ def test_localhost_local_not_flagged() -> None:
     assert "private-path.local-hostname" not in _ids(findings)
 
 
+def test_corp_hostname_flagged() -> None:
+    """A `<host>.corp` internal-network hostname is flagged (TRDD-UWBXNJ76)."""
+    findings = ppp.scan_text("ssh into build.corp for the release box")
+    assert "private-path.local-hostname" in _ids(findings)
+
+
+def test_internal_hostname_flagged() -> None:
+    """A `<host>.internal` internal-network hostname is flagged (TRDD-UWBXNJ76)."""
+    findings = ppp.scan_text("the service runs at api.internal behind the vpn")
+    assert "private-path.local-hostname" in _ids(findings)
+
+
+def test_bare_hostname_still_flagged_via_ssh_user_host() -> None:
+    """A bare suffixless hostname (out of scope for `_LOCAL_HOSTNAME`) is
+    still convicted in the `user@host` position via `_SSH_USER_HOST`."""
+    findings = ppp.scan_text("rsync -a ./dist/ deploy@build-box:/srv/app")
+    assert "private-path.ssh-user-host" in _ids(findings)
+
+
 # ---------- composition / ordering ---------------------------------------
 
 
