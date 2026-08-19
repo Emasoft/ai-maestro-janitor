@@ -1,9 +1,9 @@
 ---
 trdd-id: PGN5XSHA
 title: A deliberately killed subagent stays in the pending manifest and the resume directive keeps telling the session to resume it
-column: todo
+column: dev
 created: 2026-08-16T06:41:27+0200
-updated: 2026-08-16T06:41:27+0200
+updated: 2026-08-19T01:05:00+0200
 current-owner: janitor-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -16,6 +16,41 @@ implementation-commits: []
 ---
 
 # A killed subagent stays `pending`, and the resume directive keeps saying "resume it"
+
+## ⏵ STATE — 2026-08-19: fix DECIDED (Fable), in `dev`, delegated to a lean-worker. Read before implementing.
+
+The fix was left "not decided" + carried an advisor open-question. Decided this session
+(investigated the mechanism first-hand):
+
+**Load-bearing finding — the janitor has NO TaskStop hook.** `on-subagent-stop.py` (SubagentStop)
+evicts on normal COMPLETION (it receives `agent_id` → `pending_agents.remove`), but a `TaskStop`
+KILL is not a janitor hook point at all — so the manifest CANNOT auto-detect a deliberate stop.
+Any fix keyed on "detect the kill" is impossible. Therefore the fix is TWO parts, and the
+**directive-honesty part is the one that actually prevents the measured harm** (the mark_stopped
+part only helps when a caller happens to know):
+
+1. **`pending_agents.mark_stopped(agent_id)`** — mirrors `remove()` but SETS `stopped: True` on the
+   entry instead of dropping it (kept for audit, box 1). **LANDMINE:** `_normalize()` REBUILDS each
+   entry from a FIXED key set and silently drops any field not named there — so `stopped` MUST be
+   added to the rebuilt dict (`"stopped": bool(entry.get("stopped", False))`) or it vanishes on the
+   first load. This is the same trap the `transcript`/`agentDir` comments already warn about.
+2. **count + directive SKIP stopped** — `_pending_agent_count` (dispatch.py) →
+   `len([e for e in pending() if not e.get("stopped")])`; `directive_lines()` skips `stopped` entries.
+3. **Directive made SAFE-BY-DEFAULT (the real fix)** — since a kill can't be auto-marked, the resume
+   directive must not blindly COMMAND a resume of any listed agent. Change its wording from the
+   imperative "resume each via SendMessage" to advisory: name the count, then "before
+   SendMessage-resuming any, confirm it is still wanted — one may be an agent you deliberately
+   stopped, and a resume re-enters it from its transcript." This makes blind-following safe whether
+   or not `mark_stopped` was called.
+4. **Correct the two docstrings** that assert the harmlessness this card disproves:
+   `on-subagent-stop.py` ("an over-listed agent … is harmless") and `_pending_agent_count`
+   ("a WEEK-old corpse is still worth naming") — both true only for a DIED agent, not a stopped one.
+5. **Test** — `mark_stopped` an agent, assert `directive_lines()` does not name it and the count
+   excludes it; and that a DIED (un-marked) agent is still named (recovery preserved).
+
+Answer to the advisor open-question (resuming a deliberately-stopped agent — ever wanted?): rarely,
+so do NOT hard-drop it — keep it in `pending()` for audit and let the human choose via the honest
+directive; never auto-resume it. Delegated to lean-worker with this exact spec 2026-08-19.
 
 ## Measured tonight, first-hand
 
