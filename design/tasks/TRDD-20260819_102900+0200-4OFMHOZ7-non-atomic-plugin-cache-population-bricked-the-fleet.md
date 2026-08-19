@@ -1,9 +1,9 @@
 ---
 trdd-id: 4OFMHOZ7
 title: Non-atomic plugin-cache population bricked every session's tools for 20 minutes — post-mortem + staging-dir guard
-column: todo
+column: dev
 created: 2026-08-19T10:29:00+0200
-updated: 2026-08-19T10:29:00+0200
+updated: 2026-08-19T19:52:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -15,6 +15,47 @@ eht: []
 ---
 
 # Non-atomic cache population — the 2026-08-19 09:35 fleet-bricking incident
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-19 19:52
+
+**Box 1 — attribution: RESOLVED as far as this host's logs allow (daemon EXONERATED).**
+`daemon.log` forensics, 2026-08-19 evening:
+- The daemon's `user-plugins-update` sweep (child pid 29651, started 09:15:09, 77 plugins,
+  alphabetical) processed the janitor slot ~09:15–09:19 SILENTLY — and silence means rc=0
+  no-change, because every timeout in that sweep IS logged (`(15/77) claude-code-setup TIMED
+  OUT` at 09:19:13, then 36,37,38,40,41,43,50,51). The workload-cap SIGKILL at 09:50:42
+  landed on iteration ~52 (playwright zone), not the janitor.
+- The daemon's requests-consumer path logged ZERO `plugin-update ai-maestro-janitor` lines
+  on 08-19.
+- `cold-cache-clear` verified from source (daemon.py:1907): it shrinks SESSION prompt-cache
+  contexts, never touches plugin cache dirs — ruled out.
+Remaining writer in the 09:35–09:55 churn window: the ai-maestro HUB-side updater (it owns
+`user-plugins-update` per the 10:09:43 chore-coordination yield, and by its own account both
+measured the partial dir AND additively completed it from the repo checkout) or a peer
+session's manual `claude plugin update` — both outside this repo's logs. Memory pressure was
+live throughout (memory-guard "pressure, no Tier-1 candidate" 09:03/09:19/09:54).
+
+**Box 3 — detector coverage: DECIDED (measured refusal + one gap named).** From
+`scripts/detectors/janitor-self-integrity.py`: C2 manifest verification covers the .md
+classes only (README/CLAUDE/skills/commands/rules) and is OPT-IN (default OFF); the stub's
+C2-exec gate verifies scripts the STUB launches, not the hook scripts the HARNESS launches
+(which is why the loss bricked tools with raw Errno-2 instead of a janitor finding). Mass
+file-loss — this incident's class, 1758→120 files — inevitably takes hundreds of skills/*.md
+with it, so the C2 manifest's missing-count WOULD flag it when armed. A dedicated
+scripts/-loss alarm is REFUSED: the .md proxy covers the interrupted-extraction class, and a
+targeted scripts-only tamper is C2-exec's domain at launch time. The real gap is the opt-in
+default — surfacing that flag to the user is the actionable residue, not a new detector.
+
+**Box 4 — memory page: DONE.** `plugin-cache-install-integrity` gained lesson
+ATOM-X3NR-20M8 (quarantine must live OUTSIDE every scanned tree) and its `description:` now
+carries the bricked-tools + quarantine-load-error symptoms.
+
+**Box 2 — HALF-BLOCKED.** The staging-dir+atomic-rename requirement goes to the hub's
+server-absorption design via peer message (sendable now). The UPSTREAM ask is harness-owned
+(`claude plugin update` populates the cache non-atomically) ⇒ filing it means posting on a
+repo NOT owned by this gh auth — forbidden without the USER's explicit word. NEXT ACTION:
+ask the USER whether to file the upstream harness issue; on yes, file with the evidence
+above (partial version dir observed live, 120/1758 files, loaded without complaint).
 
 ## What happened (measured, two observers)
 
@@ -55,10 +96,13 @@ population is non-atomic. No emergency republish required.
 
 ## Acceptance
 
-- [ ] interrupted actor identified (or explicitly unattributable with the evidence listed)
+- [x] interrupted actor identified (daemon exonerated with evidence; remaining candidates —
+      hub-side updater / peer session — named and outside this repo's logs; see STATE)
 - [ ] staging-dir+rename requirement recorded in the server-absorption design (hub §) + upstream
-      ask filed if the extraction is harness-owned
-- [ ] detector coverage decided: installed-root file-loss alarm exists or a measured refusal
-- [ ] plugin-cache-install-integrity memory page updated (quarantine location + this incident)
+      ask filed if the extraction is harness-owned — peer message sendable; upstream ask BLOCKED
+      on USER approval (repo not owned by this gh auth)
+- [x] detector coverage decided: measured refusal of a dedicated scripts/-loss alarm; the .md
+      manifest proxy covers the class WHEN the opt-in flag is armed (see STATE)
+- [x] plugin-cache-install-integrity memory page updated (lesson ATOM-X3NR-20M8 + description)
 
 ## Approval log

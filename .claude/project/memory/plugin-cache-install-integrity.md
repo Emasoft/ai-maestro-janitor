@@ -1,12 +1,13 @@
 ---
 name: plugin-cache-install-integrity
-description: "the installed plugin is missing agents commands or hooks / Agent type not found but skills load fine / plugin cache incomplete after an update / how to verify an install against its release tag / cache extraction interrupted killed partway / hand-patched cache"
+description: "the installed plugin is missing agents commands or hooks / Agent type not found but skills load fine / plugin cache incomplete after an update / how to verify an install against its release tag / cache extraction interrupted killed partway / hand-patched cache / every tool blocked machine-wide PreToolUse hook Errno 2 missing hook script / reload reports load errors after parking a quarantined broken copy inside a scanned cache tree"
 ocd: 2026-08-07
-lmd: 2026-08-07
+lmd: 2026-08-19
 metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 # plugin-cache-install-integrity
@@ -39,6 +40,8 @@ for a partial install was deleted BY the event it detects (the general design le
 the USER-scope page a-guard-disarmed-by-the-event-it-guards); since v2.7.2 an installed root
 with no manifest is a FINDING naming the interrupted-install cause. See
 [[claude-code-plugin-rollout-staleness]] for the sibling failure: a COMPLETE cache whose
-already-loaded skills stay stale until a new session.
+already-loaded skills stay stale until a new session. [^1]
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-X3NR-20M8, status: valid, desc: "2026-08-19 fleet-bricking recovery: first quarantine mv landed inside the marketplace cache dir", keywords: "reload_reports_load_errors_after_quarantine plugin_surface_missing_after_reload quarantine_location_inside_scanned_tree mv_aside_broken_cache_dir broken_plugin_copy_loaded_as_plugin", ocd: 2026-08-19, lmd: 2026-08-19] DO NOT park a quarantined broken plugin copy inside any tree the plugin scanner walks (the marketplace cache dir, any ~/.claude/plugins/cache/... subdir), BECAUSE the loader tries to load it as a plugin — measured 2026-08-19: the parked broken 3.3.16 produced 7 load errors and the janitor surface failed to register on the user's own /reload-plugins. DO move it OUTSIDE every scanned tree (e.g. ~/.claude/.broken-cache-quarantine/) before re-extracting.
