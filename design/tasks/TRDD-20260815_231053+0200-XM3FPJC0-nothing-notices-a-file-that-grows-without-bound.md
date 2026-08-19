@@ -139,7 +139,7 @@ see the balloon everywhere, and only ever fixes what it owns.
 
 ## Approval log
 
-- 2026-08-18T21:05:00+0200 — CLOSED (`testing → complete`) by janitor-main-session under the
+* 2026-08-18T21:05:00+0200 — CLOSED (`testing → complete`) by janitor-main-session under the
   USER's explicit delegation of open decisions this session. The NEXT ACTION's remaining half
   is now observed first-hand: `last-run-runaway-file-growth.ts` in this project stamps an
   AUTONOMOUS dispatcher-driven fire 6 minutes before this verdict (nobody invoked the detector
