@@ -3,19 +3,48 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-16T05:58:00+0200
+updated: 2026-08-19T09:20:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
 approval-tier: 0
 npt: []
 eht: []
-implementation-commits: [a8982a03, 11e925c0]
+implementation-commits: [a8982a03, 11e925c0, 83cfd3b6]
 ---
 
 # C3 last-good pin never advances after a manual `claude plugin update`
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-16
+## ⏵ STATE ADDENDUM — 2026-08-19: the soak could NEVER close — Option A ran against the WRONG ROOT. Real root cause found + fixed (`83cfd3b6`).
+
+The wait for "the daemon's version-update fire advancing the pin" was structurally doomed, and
+the reason is not in the 2026-08-16 block below. Measured this session, out-of-band:
+
+- The daemon's fires DID run (02:42, 08:42 — server down, chore un-yielded) and 3.3.16 IS
+  runnable, non-quarantined, **C2-clean** — the certify walk itself passes every predicate.
+- But the keepalive daemon runs the STAGED DATA closure, so `task_version_update`'s
+  `plugin_root = Path(__file__).parent.parent` is the DATA dir → `plugin_root.parent` is
+  `~/.claude/plugins/data` → zero semver children → `certify_newest_if_clean`'s ONE silent
+  path (`installed` empty, fail-open `return None` BEFORE any `_say`). That is why the soak's
+  own instrumentation (F-logging) never printed a decline: the decline it instruments was never
+  reached. Same wrong root also killed `do_auto_update_if_needed` (early return — the daemon
+  never self-updates) and `resolve_latest_published` (no plugin.json in the DATA dir → the F1
+  tag permanently unresolvable).
+- **Fix (`83cfd3b6`)**: `vu.resolve_cache_parent(plugin_root)` — prefers `plugin_root.parent`
+  only when it actually lists versions, else the canonical user-scope cache (the stub's own
+  walk root). Wired into do_auto_update, resolve_latest_published (newest-cached plugin.json
+  fallback), both daemon.py sites, and repin_integrity.py. 3 tests pin the staged shape.
+
+**NEW CLOSE CONDITION:** the fix reaches the LIVE daemon only when a release restages the
+closure (or the daemon restarts onto the fixed code); the first post-restage `version-update`
+fire should then log either `periodic re-pin certified last-good=<v>` or a `C3 re-pin
+declined — … F1 …` line, and the pin advances on a fire where the tag resolves. Interim: only
+the F2 manual `/janitor-repin-integrity` can advance the pin (human decision — not run
+unasked). The CLAUDE.md note "the fire never comes while the server owns the chore" is now only
+HALF the story: with the server down the fires come and still could not pin — this addendum is
+the other half.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (2026-08-16 — still accurate for F1/F2/detector design; superseded on WHY the soak stalled, see addendum above)
 
 - **Detector: SHIPPED.** `scripts/detectors/janitor-self-integrity.py` gained
   `_check_last_good_pin()` (finding class `last-good-pin`), wired into the check
