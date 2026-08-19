@@ -3,12 +3,12 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-16T23:02:16+0200
+updated: 2026-08-19T01:25:00+0200
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
 relevant-rules: []
-implementation-commits: [80ce577a]
+implementation-commits: [80ce577a, c1698d1b]
 ---
 
 # The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
@@ -85,7 +85,12 @@ retracted mechanism.
 ## Acceptance
 
 * [ ] The window question (3) is answered with a measurement, not an argument.
-* [ ] Pid-existence at report time is audited and fixed if absent.
+* [x] Pid-existence at report time is audited and fixed if absent — commit `c1698d1b`.
+      `dr.alive_findings(findings, pid_alive)` (pure) drops findings whose pid exited; the
+      detector calls it with an `os.kill(pid,0)` probe right before `format_drift_line`.
+      Unit-tested (`test_alive_findings_drops_a_pid_that_exited_before_emit`); e2e streak/emit
+      tests trust synthetic pids under the existing `JANITOR_PS_SNAPSHOT` seam. This was the
+      sub-task whose assigned worker had stalled without filing.
 * [ ] A fresh runaway tally is built; the old one is not consulted.
 * [ ] Any threshold change cites the window decision from (3).
 
