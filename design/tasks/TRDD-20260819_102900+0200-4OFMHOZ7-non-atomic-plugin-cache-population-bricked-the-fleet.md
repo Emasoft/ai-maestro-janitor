@@ -1,9 +1,11 @@
 ---
 trdd-id: 4OFMHOZ7
 title: Non-atomic plugin-cache population bricked every session's tools for 20 minutes — post-mortem + staging-dir guard
-column: dev
+column: blocked
+pre-block-column: dev
+blocked-by: [USER-decision-upstream-harness-issue]
 created: 2026-08-19T10:29:00+0200
-updated: 2026-08-19T20:52:00+0200
+updated: 2026-08-20T00:32:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
