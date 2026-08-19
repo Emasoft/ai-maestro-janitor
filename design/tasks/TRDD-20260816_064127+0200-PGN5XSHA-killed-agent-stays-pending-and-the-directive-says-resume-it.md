@@ -13,7 +13,6 @@ relevant-rules: []
 npt: []
 eht: []
 blocked-by: []
-implementation-commits: []
 ---
 
 # A killed subagent stays `pending`, and the resume directive keeps saying "resume it"
