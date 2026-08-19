@@ -26,6 +26,7 @@ tasks within the test's wait window without us having to mock time.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -159,14 +160,14 @@ def harness(tmp_path: Path):
     # probe of ~/.aimaestro/server-liveness.json. Unpinned, these tests read that REAL
     # machine-wide file: if an ai-maestro server happens to be running on the dev box
     # (or in CI), the daemon CORRECTLY yields every SERVER_ABSORBED_TASK — which
-    # includes both marketplace-refresh and user-plugins-update — and the assertions
+    # includes marketplace-refresh — and the assertions
     # below fail on a daemon that did exactly the right thing. Observed for real: the
     # suite passed, a server came up, and the same commit then failed the publish gate.
     # "0" = the server does NOT own the chores, so the daemon runs them deterministically.
     base_env["JANITOR_AIMAESTRO_SERVER_CHORES"] = "0"
     # Fire tasks every second during tests so the assertion window is short.
+    # (user-plugins-update's interval knob left with the retired sweep — TRDD-E39YT9G6.)
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"] = "1"
-    base_env["CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL"] = "1"
     # Forcing the cadences to 1 s is not enough on its own: the two bulk tasks
     # share ONE serial lane, so the second spawns only after the first child is
     # REAPED — and a reap happens on the _BULK_RECHECK_SEC beat. At the 5 s
@@ -345,32 +346,29 @@ def test_session_daemon_does_not_double_record_in_main(harness: dict) -> None:
     assert lines == [], f"main() must not record a spawn attempt off the keepalive path, got {lines}"
 
 
-def test_daemon_runs_marketplace_refresh_and_user_plugins_update(harness: dict) -> None:
-    """Within the first cadence window the daemon invokes both tasks' CLI calls."""
+def test_daemon_runs_marketplace_refresh_and_never_a_bulk_plugin_sweep(harness: dict) -> None:
+    """Within the first cadence window the daemon runs marketplace-refresh — and, the
+    TRDD-E39YT9G6 retirement pin, never spawns a bulk per-plugin `plugin update` sweep
+    (the harness self-updates plugins; the marketplace line is the positive control
+    proving the bulk lane was alive and had every chance to sweep)."""
     harness["spawn"]()
     stub_log = harness["stub_log"]
 
-    # Wait for the stub log to contain BOTH marketplace update and at least
-    # one user-scope plugin update (proves user-plugins-update enumerated
-    # and filtered the list, then dispatched the per-plugin update).
-    def saw_both() -> bool:
+    def saw_refresh() -> bool:
         if not stub_log.is_file():
             return False
-        lines = stub_log.read_text(encoding="utf-8").splitlines()
-        return any("plugin marketplace update" in ln for ln in lines) and \
-               any("plugin update test-plugin-a@mp --scope user" in ln for ln in lines)
+        return any("plugin marketplace update" in ln
+                   for ln in stub_log.read_text(encoding="utf-8").splitlines())
 
-    # 30 s: bulk tasks run via the background lane (one at a time) since the
-    # 2026-07-17 starvation fix, so user-plugins-update spawns only after the
-    # marketplace-refresh child is REAPED — up to two _BULK_RECHECK_SEC beats
-    # plus both child runtimes.
-    assert _wait_for(saw_both, timeout=30.0), "daemon must run both tasks"
+    assert _wait_for(saw_refresh, timeout=30.0), "daemon must run marketplace-refresh"
 
-    # Sanity: the local-scope plugin in the stub list must NOT have been
-    # updated by the daemon (user-scope is the daemon's job, not local-scope).
+    # The retirement pin: with the lane provably alive, NO `plugin update` sweep ran
+    # (no request was enqueued, so any update spawn here would be the retired sweep).
     lines = stub_log.read_text(encoding="utf-8").splitlines()
+    assert not any("plugin update test-plugin-a@mp" in ln for ln in lines), \
+        "the bulk user-scope sweep is retired — the daemon must not update unrequested plugins"
     assert not any("plugin update test-plugin-c@mp" in ln for ln in lines), \
-        "local-scope plugin must be filtered out by the daemon"
+        "local-scope plugins must never be touched"
 
 
 def test_daemon_singleton_second_spawn_exits(harness: dict) -> None:
@@ -459,20 +457,19 @@ def test_daemon_sigterm_records_graceful_exit(harness: dict) -> None:
 
 
 def test_daemon_marks_last_run_after_task(harness: dict) -> None:
-    """Each task records its last-run.ts on completion."""
+    """Each task records its last-run.ts on completion (marketplace-refresh as the
+    representative bulk-lane task; the user-plugins-update stamp left with the
+    retired sweep — TRDD-E39YT9G6)."""
     _ = harness["spawn"]()
     mr_path = harness["state_dir"] / "marketplace-refresh.last-run.ts"
-    up_path = harness["state_dir"] / "user-plugins-update.last-run.ts"
 
     # 30 s: since the background-lane fix a bulk task's stamp lands at child REAP
-    # time (serialized lane), not synchronously — see the saw_both timeout note.
-    assert _wait_for(lambda: mr_path.is_file() and up_path.is_file(), timeout=30.0), \
-        "both task last-run files must be written"
-    # Stamps must be sensible epoch seconds (within the last minute).
+    # time (serialized lane), not synchronously.
+    assert _wait_for(mr_path.is_file, timeout=30.0), "task last-run file must be written"
+    # Stamp must be sensible epoch seconds (within the last minute).
     now = int(time.time())
-    for p in (mr_path, up_path):
-        ts = int(p.read_text(encoding="utf-8").strip())
-        assert abs(now - ts) < 60, f"stamp {ts} unreasonably far from now {now}"
+    ts = int(mr_path.read_text(encoding="utf-8").strip())
+    assert abs(now - ts) < 60, f"stamp {ts} unreasonably far from now {now}"
 
 
 # ---------- reload-flag integration tests ----------------------------------
@@ -482,14 +479,30 @@ def test_daemon_marks_last_run_after_task(harness: dict) -> None:
 # regex and the global_state helpers (tests/test_daemon.py, tests/test_global_state.py).
 
 
+def _enqueue_update_request(harness: dict, plugin_id: str) -> Path:
+    """Write one per-plugin update request into the harness's isolated global-state dir,
+    in the exact `plugin-update-requests.json` shape `global_state.request_plugin_update`
+    produces. Written BEFORE the daemon spawns, so no atomicity dance is needed. Since
+    TRDD-E39YT9G6 the requests-consumer is the ONLY per-plugin update path (the bulk
+    sweep is retired), so the reload-flag wiring is exercised through it."""
+    path = harness["state_dir"] / "plugin-update-requests.json"
+    path.parent.mkdir(parents=True, exist_ok=True)  # pre-spawn: the daemon has not created it yet
+    key = f"{plugin_id}|user"
+    path.write_text(
+        json.dumps({key: {"plugin_id": plugin_id, "scope": "user", "reason": "test"}}),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_daemon_writes_reload_flag_when_plugin_updated(harness: dict) -> None:
-    """When `claude plugin update` stdout shows an "Updated from ... to ..." line,
-    the daemon must set reload-needed.flag for dispatch to surface."""
+    """When a requested `claude plugin update` stdout shows an "Updated from ... to ..."
+    line, the daemon must set reload-needed.flag for dispatch to surface."""
     harness["env"]["CLAUDE_STUB_FORCE_UPDATE"] = "1"
+    _enqueue_update_request(harness, "test-plugin-a@mp")
     harness["spawn"]()
     flag = harness["state_dir"] / "reload-needed.flag"
-    # 30 s: the flag is set by the user-plugins-update background child, which
-    # spawns only after marketplace-refresh clears the bulk lane.
+    # 30 s: the requests-consumer runs on the main loop tick after the startup branches.
     assert _wait_for(lambda: flag.is_file(), timeout=30.0), \
         "reload-needed.flag must be written after a real plugin update"
     body = flag.read_text(encoding="utf-8")
@@ -498,20 +511,32 @@ def test_daemon_writes_reload_flag_when_plugin_updated(harness: dict) -> None:
 
 
 def test_daemon_does_not_write_reload_flag_when_nothing_updated(harness: dict) -> None:
-    """A clean `plugin update` (no "Updated" marker in stdout) → no flag.
+    """A clean requested `plugin update` (no "Updated" marker in stdout) → no flag.
 
     The stub returns rc=0 with empty stdout by default, simulating "already
     up to date". The daemon must NOT set the reload flag in that case —
     spurious [janitor-reload] markers would force /reload-plugins on every
-    no-op cadence.
+    no-op consume.
     """
     # Note: CLAUDE_STUB_FORCE_UPDATE is NOT set here (default behavior).
+    req_path = _enqueue_update_request(harness, "test-plugin-a@mp")
     harness["spawn"]()
-    # Wait until at least one user-plugins-update completes so the daemon
-    # has had its chance to set the flag.
-    up_path = harness["state_dir"] / "user-plugins-update.last-run.ts"
-    # 30 s: stamp-at-reap through the serialized bulk lane (see saw_both note).
-    assert _wait_for(lambda: up_path.is_file(), timeout=30.0)
+    # Clear-before-run: the request file's entry is consumed (file emptied) before the
+    # update runs, so "requests file no longer lists the plugin" == "the daemon had its
+    # chance"; then give the update child a beat to finish and (wrongly) set the flag.
+    def consumed() -> bool:
+        try:
+            return "test-plugin-a@mp" not in req_path.read_text(encoding="utf-8")
+        except OSError:
+            return not req_path.is_file()
+
+    assert _wait_for(consumed, timeout=30.0), "the request must be consumed"
+    stub_log = harness["stub_log"]
+    assert _wait_for(
+        lambda: stub_log.is_file()
+        and "plugin update test-plugin-a@mp" in stub_log.read_text(encoding="utf-8"),
+        timeout=30.0,
+    ), "the requested update must actually run"
     # Now the flag must NOT exist.
     flag = harness["state_dir"] / "reload-needed.flag"
     assert not flag.is_file(), "reload flag must not be set when no plugin actually updated"

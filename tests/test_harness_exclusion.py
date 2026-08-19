@@ -282,7 +282,7 @@ def test_dispatch_detector_roster_is_filtered_in_harness() -> None:
     spec.loader.exec_module(dispatch)
 
     for name in (
-        "marketplace-refresh", "user-plugins-update", "local-plugins-update",
+        "marketplace-refresh", "local-plugins-update",
         "project-plugins-update", "version-update", "plugin-updates",
         "oauth-beacon-refresh", "oauth-cookie-reminder", "oauth-login-needed",
         "keychain-health", "window-burn-rate", "fleet-github-config",

@@ -13,9 +13,6 @@ Owns three classes of machine-global work that previously piled up across
 sessions (issue #7):
   * marketplace-refresh — `claude plugin marketplace update` (bulk; refreshes
     every configured marketplace globally under ~/.claude/plugins/marketplaces/).
-  * user-plugins-update — enumerate user-scope plugins via
-    `claude plugin list --json` and run `claude plugin update <id> --scope user`
-    on each sequentially.
   * version-update — janitor self-update. Compares the local cache's highest
     installed version against the latest GitHub release of the
     `ai-maestro-janitor` repo declared in plugin.json; when behind, runs
@@ -117,15 +114,12 @@ _INTERVAL_MARKETPLACE_REFRESH = _env_interval(
 )  # 1 h — daemon is the only writer of GLOBAL marketplace refresh
 #  (refreshes every configured marketplace in one CLI call). The per-session
 #  detector handles narrower local+project marketplaces at 5 min, and the
-#  consumer of this refresh (user-plugins-update) runs hourly anyway, so a
-#  faster beat buys nothing. WHY not the old 1200: the bulk refresh takes
+#  consumer of this refresh (the harness's autoUpdate pass) runs on its own
+#  cadence anyway, so a faster beat buys nothing. WHY not the old 1200: the bulk refresh takes
 #  ~1190 s at low priority, so a 1200 s cadence had the task running ~50% of
 #  wall-clock time — and (pre-background-lane) starving the 60 s survival
 #  beats for 20 min of every 40 (oauth-rotation starvation incident,
 #  2026-07-17: an account hit its 5 h wall inside such a blind window).
-_INTERVAL_USER_PLUGINS_UPDATE = _env_interval(
-    "CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", 3600
-)  # 1 h — full sweep takes ~7 min; hourly cadence keeps everything fresh.
 _INTERVAL_VERSION_UPDATE = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600
 )  # 6 h — janitor self-update cadence. GitHub releases land at human-day
@@ -450,72 +444,16 @@ def task_marketplace_refresh() -> None:
                 state.log_line("daemon", f"    stderr: {ln.strip()}")
 
 
-def task_user_plugins_update() -> None:
-    """Enumerate user-scope plugins and update each sequentially.
-
-    `claude plugin list --json` returns every plugin regardless of scope;
-    we filter to scope=="user" in Python (the CLI lacks a `--scope` filter
-    flag on `list`). Each entry's `id` is already in `<plugin>@<marketplace>`
-    form — exactly what `claude plugin update` accepts.
-
-    Cooperates with shutdown: between every plugin we check the kill-switch
-    and the SIGTERM-driven _running flag, so the daemon can drain a long
-    sweep in a bounded time when the user wants it to stop.
-    """
-    listing = _run_workload(["claude", "plugin", "list", "--json"], timeout=60)
-    if listing is None or listing.returncode != 0:
-        state.log_line("daemon", "  user-plugins-update: `claude plugin list --json` failed")
-        return
-    try:
-        plugins = json.loads(listing.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        state.log_line("daemon", f"  user-plugins-update: malformed JSON ({exc})")
-        return
-    if not isinstance(plugins, list):
-        return
-    all_user = [p for p in plugins
-                if isinstance(p, dict) and p.get("scope") == "user" and p.get("id")]
-    # R2 (TRDD-db169d9e): NEVER auto-update the ai-maestro fleet. Those plugins'
-    # versions are owned by each plugin's own release pipeline; bumping them here
-    # causes fleet version skew. The janitor's own id is excluded too — its
-    # self-update is the dedicated task_version_update, not this per-plugin sweep.
-    user_scope = [p for p in all_user if not state.is_ai_maestro_plugin_id(str(p["id"]))]
-    excluded = len(all_user) - len(user_scope)
-    total = len(user_scope)
-    msg = f"  user-plugins-update: {total} user-scope plugin(s)"
-    if excluded:
-        msg += f" ({excluded} ai-maestro-plugins member(s) excluded — fleet self-manages)"
-    state.log_line("daemon", msg)
-    updated_ids: list[str] = []
-    for i, p in enumerate(user_scope, start=1):
-        if not _running or gs.kill_switch_present():
-            state.log_line("daemon", f"  user-plugins-update: aborted at {i-1}/{total}")
-            break
-        pid = str(p["id"])
-        update = _run_workload(
-            ["claude", "plugin", "update", pid, "--scope", "user"],
-            timeout=120,
-        )
-        if update is None:
-            state.log_line("daemon", f"    ({i}/{total}) {pid} — TIMED OUT / spawn failed")
-            continue
-        if update.returncode != 0:
-            state.log_line("daemon", f"    ({i}/{total}) {pid} — rc={update.returncode}")
-            continue
-        # Only on rc==0 do we look at stdout for the "actually updated" markers.
-        if _stdout_proves_plugin_updated(update.stdout or ""):
-            updated_ids.append(pid)
-            state.log_line("daemon", f"    ({i}/{total}) {pid} — UPDATED")
-
-    # If any plugin actually changed on disk, request a one-shot
-    # `/reload-plugins` so Claude picks up the new hooks/skills without a
-    # session restart. The dispatch reload-phase reads + clears the flag.
-    if updated_ids:
-        gs.set_reload_flag(",".join(updated_ids[:10]))
-        state.log_line(
-            "daemon",
-            f"  user-plugins-update: reload-needed.flag SET ({len(updated_ids)} plugin(s) updated)",
-        )
+# `task_user_plugins_update` was RETIRED here 2026-08-20 (TRDD-E39YT9G6, after
+# TRDD-TIZHEPNC removed it from the absorbed set): the Claude Code harness
+# self-updates installed plugins from the autoUpdate:true refreshed catalogs
+# (261/261 measured), so the hourly 77-plugin `claude plugin update` sweep
+# duplicated harness work — and under load its serial spawns each timed out
+# until the workload cap SIGKILLed the child (2026-08-19, rc=-9 at 2184 s,
+# during live memory pressure). The server deleted its copy of the same loop
+# for the same reason (ai-maestro PE54D95Q AC6). The TARGETED per-plugin
+# request consumer (`_consume_plugin_update_requests`) is NOT this sweep and
+# stays daemon-owned.
 
 
 def task_fleet_plugins_update() -> None:
@@ -2182,8 +2120,6 @@ def _build_tasks() -> list[Task]:
     return [
         Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh,
              background=True),
-        Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update,
-             background=True),
         Task("fleet-plugins-update", _INTERVAL_FLEET_PLUGINS_UPDATE, task_fleet_plugins_update,
              background=True),
         Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update,
@@ -2734,10 +2670,13 @@ def main() -> int:
                 # branches above (each of which `break`s or `continue`s, so reaching here means
                 # the daemon is actively working) and BEFORE the due-loop.
                 _consume_version_update_request(tasks)
-            if "user-plugins-update" not in yielded:
-                # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
-                # the plugin-updates detector enqueued and run them as the single writer (#7).
-                _consume_plugin_update_requests()
+            # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
+            # the plugin-updates detector enqueued and run them as the single writer (#7).
+            # UNGATED since TRDD-E39YT9G6: the `user-plugins-update` sweep Task is retired,
+            # so its name can never appear in `yielded` (yielded ⊆ live task names) — the
+            # old `not in yielded` gate had become a dead always-true condition. The
+            # consumer itself is daemon-owned by design; the server never reads our queue.
+            _consume_plugin_update_requests()
 
             bulk_busy = _run_due_tasks(tasks, yielded)
 

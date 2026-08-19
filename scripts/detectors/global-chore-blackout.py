@@ -14,8 +14,9 @@ WHY A WHOLE DETECTOR. The pre-existing staleness watchdog (`daemon_watchdog`) wa
 by construction: it returned early whenever `server_runs_chores()` was true, for EVERY chore,
 so the one signal that could have reported the blackout was disabled by the very condition
 that caused it. That gate is now narrowed to absorbed chores only — but narrowing it is not
-enough, because the watchdog has exactly two callers (`marketplace-refresh`,
-`user-plugins-update`) and BOTH are absorbed chores. The six unowned ones had no caller at
+enough, because the watchdog had exactly two callers (`marketplace-refresh` and the
+since-retired `user-plugins-update` shim — TRDD-E39YT9G6) and both were absorbed chores.
+The six unowned ones had no caller at
 all. This detector is that caller. Measured cost of the gap on the owner's host, 2026-08-05:
 eleven chores dark for 10-14 days, zero warnings — including `session-liveness`, the 2-minute
 fleet guardian, without which a frozen session is never revived and every per-session

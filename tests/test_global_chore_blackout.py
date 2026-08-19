@@ -86,7 +86,7 @@ def test_absorbed_and_unabsorbed_partition_the_roster_without_overlap() -> None:
     assert absorbed <= set(hb.GLOBAL_CHORES), "an absorbed chore that is not a real chore"
 
 
-def test_unabsorbed_chores_names_the_eight_the_server_never_claimed() -> None:
+def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
     """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails.
 
     `fleet-plugins-update` joined the roster on 2026-08-11 (TRDD-G4BCRUP7 R3) and is the
@@ -115,11 +115,10 @@ def test_unabsorbed_chores_names_the_eight_the_server_never_claimed() -> None:
         # (janitor#274, ratified rev 8) — the server executes and stamps it.
         "session-liveness", "fleet-stop",
         "fleet-plugins-update", "cold-cache-clear",
-        # user-plugins-update LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC /
-        # ai-maestro PE54D95Q AC6: the harness self-updates installed plugins, so
-        # the server's absorbed loop duplicated it and stopped claiming it) —
-        # daemon-owned again, hence back in the unabsorbed pin.
-        "user-plugins-update",
+        # user-plugins-update briefly returned here 2026-08-19 (TRDD-TIZHEPNC) and was
+        # then RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the
+        # harness self-updates installed plugins, so no sweep exists to be absorbed OR
+        # unabsorbed — it left this pin by leaving the chore roster, not by a claim.
     }
 
 

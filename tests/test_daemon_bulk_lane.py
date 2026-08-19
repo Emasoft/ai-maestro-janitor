@@ -181,7 +181,8 @@ def test_build_tasks_background_split_pins_the_survival_beats_foreground() -> No
     rotation latency through spawn overhead + lane contention."""
     tasks = {t.name: t.background for t in daemon._build_tasks()}
     assert {n for n, bg in tasks.items() if bg} == {
-        "marketplace-refresh", "user-plugins-update", "fleet-plugins-update", "version-update",
+        # user-plugins-update retired from the roster 2026-08-20 (TRDD-E39YT9G6).
+        "marketplace-refresh", "fleet-plugins-update", "version-update",
         "github-config-audit",
     }
     assert tasks["oauth-rotator-tick"] is False

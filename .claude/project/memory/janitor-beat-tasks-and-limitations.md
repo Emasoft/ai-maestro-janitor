@@ -1,8 +1,8 @@
 ---
 name: janitor-beat-tasks-and-limitations
-description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / dynamic heartbeat tiers fast mid slow — the janitor's two-clock schedule and its known limitations"
+description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go — the janitor's two-clock schedule and its known limitations"
 ocd: 2026-07-12
-lmd: 2026-07-13
+lmd: 2026-08-19
 metadata:
   node_type: memory
   type: project
@@ -11,6 +11,7 @@ metadata:
     - "scripts/daemon.py"
     - "scripts/dispatch.py"
     - "scripts/lib/heartbeat_cadence.py"
+publish-globally: false
 ---
 
 # Janitor beat tasks + limitations
@@ -73,7 +74,7 @@ overridable via its `CLAUDE_PLUGIN_OPTION_DAEMON_*_INTERVAL` env var. [^1]
 | Task | Interval | Purpose / opt-in |
 |---|---|---|
 | `marketplace-refresh` | **1200 s (20 min)** | bulk `claude plugin marketplace update` (all marketplaces) — the daemon is the sole global-refresh writer. |
-| `user-plugins-update` | **3600 s (1 h)** | full `--scope user` plugin sweep (~7 min); EXCLUDES the ai-maestro fleet. |
+| ~~`user-plugins-update`~~ | — | **RETIRED 2026-08-20 (TRDD-E39YT9G6)** — the harness self-updates user-scope plugins (autoUpdate catalogs), so the hourly sweep duplicated it; the targeted `_consume_plugin_update_requests` consumer stays. |
 | `version-update` | **21600 s (6 h)** | janitor self-update when GitHub is ahead of the cache; sets the reload flag. |
 | `oauth-rotator-supervisor` | **600 s (10 min)** | OAuth-rotator governance/alerts. **No-op unless `/janitor-auto-manage-oauth-on`.** |
 | `oauth-rotator-tick` | **60 s** | refresh the LIVE OAuth credential. **No-op unless opted-in AND a real `claude` is running.** The one beat that still runs under MAINTENANCE (a lapsed token would break the fleet). |
@@ -153,7 +154,7 @@ user plugins EXCEPT the ai-maestro fleet").
   agentlensPro cross-check (informs the TTL-regime probe direction).
 
 
-^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^2]
+^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^2] [^4]
 
 ### Control flow
 
@@ -176,15 +177,15 @@ run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
 periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
 **unconditionally** in `finally` (so stale last-run = task not *running*, not
 failing-silently). **Background bulk lane (TRDD-H7NVKSAX, 2026-07-17 oauth-starvation
-incident):** the BULK tasks (`marketplace-refresh`, `user-plugins-update`,
-`version-update`, `github-config-audit`) carry `background=True` and run in ONE detached
+incident):** the BULK tasks (`marketplace-refresh`, `fleet-plugins-update`,
+`version-update`, `github-config-audit`; `user-plugins-update` was one until its
+2026-08-20 retirement — TRDD-E39YT9G6) carry `background=True` and run in ONE detached
 child at a time (`daemon.py --run-task <name>`, parent reaps + stamps from the child rc)
 so a ~20-min bulk run can NEVER block the loop's 60s survival beats (oauth-rotator-tick
 above all — two back-to-back 1190s marketplace refreshes once blinded rotation while an
 account hit its 5h wall). One lane preserves the old bulk-chore serialization; file locks
 remain the backstop. Tasks: `marketplace-refresh` (3600s — was 1200s, which ≈ its own
-runtime and gave a 50% duty cycle; bulk), `user-plugins-update`
-(3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag),
+runtime and gave a 50% duty cycle; bulk), `version-update` (21600s, self-update + sets reload-flag),
 `rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
 provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a
 full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
@@ -234,3 +235,4 @@ MEASURED, not estimated (`agentlenspro heartbeat-cost`, 2026-08-04): ONE heartbe
   platform ignores is not a broken promise, it is a promise never made.
 [^2]: [id:ATOM-0AOD-B2GJ, status:valid, desc:"The tier table's latency claim ignored cron jitter; the two jitter sources disagree", keywords:"recovery_latency_cron_jitter heartbeat_tier_worst_case_gap cron_fires_late_sources_disagree measure_fire_times_not_turn_end janitor_resume_slow_after_compact", ocd:2026-08-02, lmd:2026-08-02] DO NOT quote a heartbeat tier's recovery latency as exactly its cron period (this page pre-2026-08-02 read 'FAST */5 — recovery latency unchanged / ZERO regression'), BECAUSE a scheduled fire lands LATE by a documented jitter and the two sources for it DISAGREE (CronCreate tool: <=10% of the period, max 15 min; CC docs page: up to HALF the interval for sub-hourly tasks — both checked 2026-08-02), so */5 is really ~5 min + 0.5-2.5 min and */30 is ~30 min + 3-15 min. DO state period + jitter range with source and check date, and measure the real distribution ONLY from FIRE timestamps (.janitor/logs/heartbeat-fires.log, stamped by dispatch.main since TRDD-LI7ENU2A) — never token-meter turn-END times, whose ts-mod-300 is UNIFORM (they measure turn duration, not jitter).
 [^3]: [id:ATOM-3YQE-ACXU, status:valid, desc:"measure token and context numbers with agentlenspro, never state a remembered or felt figure", keywords:"I_estimated_the_context_percentage_instead_of_measuring_it how_full_is_my_context am_I_about_to_auto-compact do_not_guess_token_numbers", ocd:2026-08-04, lmd:2026-08-04] DO NOT state a context-percentage or token cost from memory, feel, or a hook warning read several turns ago, BECAUSE those numbers go stale the instant a compaction lands and a confidently wrong one gets acted on — on 2026-08-04 I claimed "~95% context" from a pre-compaction warning, when the measured figure was 406,239/700,000, and used the invented number to decline work the owner had asked for. DO run the agentlenspro CLI (owner directive 2026-08-04: always use it) — `heartbeat-cost` for a fire's real cost, `cache-expired` / `last-compact` for cache and compaction state — and quote what it prints.
+[^4]: [id: ATOM-GLM6-PIK9, status: valid, desc: "TRDD-E39YT9G6 retirement — this page's task table carried the sweep as live until 2026-08-20", keywords: "user-plugins-update_stamp_frozen where_did_the_plugin_sweep_go daemon_chore_missing_from_roster who_updates_user_scope_plugins_now sweep_retired_harness_autoupdate", ocd: 2026-08-19, lmd: 2026-08-19] DO NOT treat user-plugins-update as a live daemon chore or expect its last-run stamp to advance, BECAUSE it was RETIRED 2026-08-20 (TRDD-E39YT9G6): the harness self-updates user-scope plugins from autoUpdate catalogs, so the hourly sweep duplicated harness work and under load its serial spawns timed out until the workload cap SIGKILLed the child (2026-08-19, rc=-9 at 2184 s). DO use the targeted _consume_plugin_update_requests consumer for per-plugin updates — it is not a chore and stays daemon-owned.

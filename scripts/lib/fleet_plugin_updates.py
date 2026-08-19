@@ -30,8 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state  # noqa: E402
 
-# Scopes whose updates are cwd-relative. `user`/`managed` are machine-global and are the daemon's
-# existing `task_user_plugins_update` job — deliberately not touched here.
+# Scopes whose updates are cwd-relative. `user`/`managed` are machine-global and are the
+# HARNESS's own autoUpdate job (the daemon's bulk sweep of them was retired 2026-08-20,
+# TRDD-E39YT9G6) — deliberately not touched here.
 PROJECT_SCOPES = ("local", "project")
 
 # Which settings file carries a scope's `enabledPlugins` map.

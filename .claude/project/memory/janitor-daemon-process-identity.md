@@ -87,7 +87,7 @@ pressure drops sharply, but the breaker's exit-cause blindness is untouched. Do 
 (`state.py:166`) returns that override when set, so the daemon's log is
 `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log`.
 A project's `<repo>/.janitor/logs/daemon.log` is written by the **per-session detector shims**
-(`detectors/version-update.py`, `detectors/user-plugins-update.py`, …), never by the daemon.
+(`detectors/version-update.py`, `detectors/marketplace-refresh.py`, …), never by the daemon.
 
 So `grep -c chore-coordination <repo>/.janitor/logs/daemon.log` → 0 is **not** evidence the
 daemon never yielded. Measured 2026-08-06: that grep returned 0 while the real log held 9 such

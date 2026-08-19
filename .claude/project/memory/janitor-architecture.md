@@ -86,8 +86,7 @@ heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts` **unconditionally in
 `finally`** — so a stale last-run stamp means the task is not *running*, not
 that it is failing silently. Every `claude plugin marketplace update` is wrapped
 in a cross-process marketplace lock (skip-if-held). The daemon's task set
-includes: `marketplace-refresh` (bulk, ~1200s), `user-plugins-update`
-(`--scope user`, ~3600s), `version-update` (janitor self-update, ~21600s, sets
+includes: `marketplace-refresh` (bulk, ~1200s), `version-update` (janitor self-update, ~21600s, sets
 the reload flag), plus the opt-in OAuth-rotator beats and the Tier-1 memory
 guard (below). For the FULL beat schedule — every daemon `Task` with its exact
 cadence, the dynamic per-session heartbeat tiers, and the single-writer /
@@ -108,8 +107,9 @@ This is the load-bearing rule the whole two-tier split exists to enforce:
   may stay per-session **but MUST be atomic** (tmp file + `os.replace`) — the
   file analogue of the daemon's single-writer lock (PRRD S3.1).
 
-User-scope detectors that look like they mutate (e.g. `user-plugins-update`,
-`version-update`) are actually thin **shims** that delegate to the daemon and
+User-scope detectors that look like they mutate (e.g. `version-update`; formerly
+`user-plugins-update`, retired 2026-08-20 TRDD-E39YT9G6 — the harness self-updates
+user-scope plugins) are actually thin **shims** that delegate to the daemon and
 emit a staleness drift line if the daemon's stamp is old — they never perform
 the mutation themselves.
 
@@ -139,8 +139,8 @@ worker that skips if the prior worker is still alive. By function:
   window-burn-rate (early-rate-limit alarm); both ENRICH/CROSS-CHECK with the optional
   agentlensPro CLI — see [[agentlens-diagnostics-integration]].
 - **updates (daemon-delegating shims)** — marketplace-refresh, plugin-updates,
-  local-plugins-update, project-plugins-update, user-plugins-update (shim),
-  version-update (shim).
+  local-plugins-update, project-plugins-update,
+  version-update (shim). (user-plugins-update retired 2026-08-20, TRDD-E39YT9G6.)
 - **OAuth (opt-in)** — oauth-cookie-reminder, oauth-login-needed.
 
 **Fail-soft contract (PRRD S6.1):** every detector that raises, or whose
@@ -433,7 +433,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 ~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
 ~/.claude/janitor-global-state/                                       LEGACY daemon state (auto-migrated → DATA/global-state by the daemon; read-fallback only):
     daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
-    marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
+    marketplace-op.lock (NEW) · {marketplace-refresh,version-update}.last-run.ts
     kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
     version-update-requested.flag (release-triggered self-update request; daemon consumes clear-before-run — TRDD-Y9KM5RCJ)
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·

@@ -296,9 +296,9 @@ def test_a_corrupt_stamp_cannot_mask_a_good_one(dirs: tuple[Path, Path]) -> None
     gs = _gs()
     control.mkdir(parents=True, exist_ok=True)
     gsd.mkdir(parents=True, exist_ok=True)
-    (control / "user-plugins-update.last-run.ts").write_text("not-a-number\n", encoding="utf-8")
-    (gsd / "user-plugins-update.last-run.ts").write_text("1700000000\n", encoding="utf-8")
-    assert gs.read_last_run("user-plugins-update") == 1700000000
+    (control / "marketplace-refresh.last-run.ts").write_text("not-a-number\n", encoding="utf-8")
+    (gsd / "marketplace-refresh.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    assert gs.read_last_run("marketplace-refresh") == 1700000000
 
 
 def test_an_absent_stamp_reads_zero_everywhere(dirs: tuple[Path, Path]) -> None:

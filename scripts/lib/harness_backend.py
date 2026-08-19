@@ -58,16 +58,13 @@ BACKEND_STANDALONE = "standalone"
 # regardless (population-split ops + janitor-only Family-B chores).
 SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
     "marketplace-refresh",
-    # `user-plugins-update` LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC, the janitor
-    # counterpart to ai-maestro TRDD-PE54D95Q AC6, commit 5796ef6a): the Claude Code
+    # `user-plugins-update` LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC) and was then
+    # RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the Claude Code
     # harness self-updates installed plugins from the autoUpdate:true refreshed catalogs
-    # (261/261 measured), so the server's absorbed loop duplicated ~80 `claude plugin
-    # update` spawns per fire and STOPPED claiming it. Daemon-owned again at 3600s. The
-    # removal is safe with no dark window: daemon.py's yield keys on the server's LIVE
-    # beat (`claimed_chores()`), not this static set, and its `_consume_plugin_update_
-    # requests()` gate is `"user-plugins-update" not in yielded` — designed to survive
-    # the absorbed set narrowing. `unabsorbed_chores()` derives from GLOBAL_CHORES minus
-    # this set, so dropping the name here is all that makes the daemon own it again.
+    # (261/261 measured), so BOTH sweeps — the server's absorbed loop (~80 `claude plugin
+    # update` spawns per fire, deleted in ai-maestro PE54D95Q AC6) and the daemon's hourly
+    # copy — duplicated harness work. Nobody runs a bulk sweep now; the daemon keeps only
+    # the TARGETED `_consume_plugin_update_requests()` consumer, which is not a chore.
     "version-update",
     "oauth-rotator-supervisor",
     "oauth-rotator-tick",
@@ -99,7 +96,8 @@ SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
 # describes.
 GLOBAL_CHORES: dict[str, tuple[str, int]] = {
     "marketplace-refresh": ("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 3600),
-    "user-plugins-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", 3600),
+    # "user-plugins-update" retired 2026-08-20 (TRDD-E39YT9G6) — the harness self-updates
+    # plugins; neither daemon nor server runs a bulk sweep. See SERVER_ABSORBED_TASKS note.
     "fleet-plugins-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_PLUGINS_UPDATE_INTERVAL", 21600),
     "version-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600),
     "oauth-rotator-supervisor": ("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", 600),

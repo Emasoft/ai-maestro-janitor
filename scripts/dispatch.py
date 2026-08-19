@@ -152,9 +152,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # Global bulk refresh is the daemon's job (every 20 min). Runs BEFORE the
     # plugin-* detectors so the manifest is fresh by the time they consult it.
     ("marketplace-refresh", 300, "CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_INTERVAL"),
-    # user-plugins-update is Track 1 of the auto-update directive — cron-
-    # global, project-agnostic, no enabled filter (all user-scope plugins).
-    ("user-plugins-update", 300, "CLAUDE_PLUGIN_OPTION_USER_PLUGINS_UPDATE_INTERVAL"),
+    # Track 1 (user-plugins-update) RETIRED 2026-08-20 (TRDD-E39YT9G6): the harness
+    # self-updates user-scope plugins from autoUpdate:true catalogs; the daemon sweep,
+    # the server loop, AND the per-session watchdog shim that lived here are all gone.
     # local-plugins-update is Track 2a — per-project, reads
     # .claude/settings.local.json, filters to enabled, no git mutation
     # (settings.local.json is gitignored by convention).
@@ -491,7 +491,6 @@ _DETECTORS: list[tuple[str, int, str]] = [
 _NON_HARNESS_DETECTORS = frozenset({
     "peer-freeze-recovery",  # fleet-wide actuation — a harness agent's world is server-owned
     "marketplace-refresh",
-    "user-plugins-update",
     "local-plugins-update",
     "project-plugins-update",
     "version-update",
@@ -2878,9 +2877,9 @@ def main() -> int:
     # gate inside the applier passes. Cadence-throttled (default 6 h).
     _phase_guard_branch_protection()
 
-    # Phase 1.6: plugin-reload signal — emit [janitor-reload] once when the
-    # daemon's user-plugins-update task reports a real version change. The
-    # cron prompt's silent-execute clause runs /reload-plugins.
+    # Phase 1.6: plugin-reload signal — emit [janitor-reload] once when any updater
+    # (the daemon's targeted requests-consumer, version-update, fleet sweep) reports
+    # a real version change. The cron prompt's silent-execute clause runs /reload-plugins.
     _phase_plugin_reload()
 
     # Phase 1.62: standalone-skills reload signal — emit [janitor-reload-skills]

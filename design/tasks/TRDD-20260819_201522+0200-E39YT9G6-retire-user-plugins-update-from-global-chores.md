@@ -1,9 +1,9 @@
 ---
 trdd-id: E39YT9G6
 title: Retire user-plugins-update from GLOBAL_CHORES — the daemon-side fleet sweep is superseded by the server lane
-column: todo
+column: testing
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-19T20:30:25+0200
+updated: 2026-08-20T01:37:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: normal
@@ -61,9 +61,19 @@ between), not a single pass.
 
 ## Acceptance
 
-- [ ] no `user-plugins-update` Task in the daemon roster; requests-consumer intact + tested
-- [ ] full-repo grep shows only deliberately-historical mentions
-- [ ] pytest, ruff, mypy clean; chore-coordination + blackout pins updated
-- [ ] memory pages updated via memgrep verbs (supersede, not overwrite)
+- [x] no `user-plugins-update` Task in the daemon roster; requests-consumer intact (gate
+      ungated — dead condition removed) + tested (test_universal_plugin_autoupdate pins the
+      fleet/self guards; test_daemon_integration reload-flag pair repointed to the consumer;
+      NEW retirement pin: the daemon must never spawn an unrequested `plugin update`)
+- [x] full-repo grep shows only deliberately-historical mentions (scripts, tests, README,
+      ARCHITECTURE, 6 memory pages; detector + its test git-rm'd, recoverable from history)
+- [x] pytest (15597 green, full suite), ruff, mypy clean; chore-coordination + blackout +
+      bulk-lane + harness-exclusion pins updated (the unabsorbed pin is seven now)
+- [x] memory pages updated: lesson ATOM-GLM6-PIK9 (WHY, on the owning beat-tasks page) via
+      add-lesson; 5 pages' liveness claims corrected, all validate+lint clean, reindexed
+
+SHIPPED 2026-08-20 01:37 (`todo → testing`). Gate to `complete`: rides the next publish
+(3.3.19); then one daemon restart observed with the trimmed roster (12 GLOBAL_CHORES,
+no user-plugins-update stamp advancing, requests-consumer still draining).
 
 ## Approval log

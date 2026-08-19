@@ -10,7 +10,8 @@ metadata:
 ---
 
 **The daemon's due-loop is single-threaded; since v0.50.0 (TRDD-H7NVKSAX) the BULK tasks
-(`marketplace-refresh`, `user-plugins-update`, `version-update`, `github-config-audit`)
+(`marketplace-refresh`, `fleet-plugins-update`, `version-update`, `github-config-audit`;
+`user-plugins-update` was one until its 2026-08-20 retirement, TRDD-E39YT9G6)
 carry `background=True` and run in ONE detached, parent-reaped child at a time (the "bulk
 lane": `daemon.py --run-task <name>`, `Task.spawn_background`/`poll_background`).** The
 loop's 60 s survival beats (oauth-rotator-tick above all) therefore never block behind a

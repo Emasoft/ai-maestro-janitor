@@ -1,6 +1,7 @@
 # Shared daemon-task staleness watchdog for the per-session detector shims.
 #
-# Both marketplace-refresh and user-plugins-update are owned by the global
+# Daemon-owned bulk tasks (marketplace-refresh today; user-plugins-update too until
+# its 2026-08-20 retirement, TRDD-E39YT9G6) live in the global
 # daemon (issue #7). Their per-session shims must surface a drift line ONLY
 # when a daemon task is genuinely not progressing AND the daemon is not
 # responding — never when a heartbeat-fresh daemon is merely mid-run or briefly
@@ -11,9 +12,10 @@
 # the daemon was perfectly healthy, and the code then read a fresh heartbeat and
 # cried "daemon stuck — kill it".
 #
-# This is the ONE implementation both shims call, so they cannot drift apart —
-# they did exactly that (marketplace-refresh was fixed, user-plugins-update kept
-# crying "daemon may be stuck"), which is the structural bug this module closes.
+# This is the ONE implementation every such shim calls, so they cannot drift apart —
+# the two historical shims did exactly that (marketplace-refresh was fixed, the
+# since-retired user-plugins-update shim kept crying "daemon may be stuck"), which
+# is the structural bug this module closes.
 
 from __future__ import annotations
 

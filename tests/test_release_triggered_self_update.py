@@ -159,7 +159,7 @@ def test_consume_runs_only_version_update_not_other_tasks() -> None:
     tasks = [
         daemon.Task("marketplace-refresh", 1200, lambda: ran.append("marketplace-refresh")),
         daemon.Task("version-update", 21600, lambda: ran.append("version-update")),
-        daemon.Task("user-plugins-update", 3600, lambda: ran.append("user-plugins-update")),
+        daemon.Task("fleet-plugins-update", 21600, lambda: ran.append("fleet-plugins-update")),
     ]
     gs.request_version_update("0.39.0->0.41.0")
 

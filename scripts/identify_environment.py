@@ -408,7 +408,8 @@ def _gather_plugins(*, online: bool) -> dict:
         "installed_version": installed or None,
         "marketplace_refresh_ts": _ts("marketplace-refresh"),
         "version_update_ts": _ts("version-update"),
-        "user_plugins_update_ts": _ts("user-plugins-update"),
+        # user_plugins_update_ts removed 2026-08-20 (TRDD-E39YT9G6): the sweep is
+        # retired, so its stamp freezes forever and reporting it would read as drift.
     }
     if online:
         latest = _out(["gh", "api", "repos/Emasoft/ai-maestro-janitor/releases/latest",

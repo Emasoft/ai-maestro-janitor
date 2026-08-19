@@ -203,11 +203,12 @@ def _emit_daemon_stale_drift_if_needed() -> None:
     """Surface a once/hour drift line when the daemon's global marketplace
     refresh is stale AND the daemon is not responding.
 
-    Delegates to the shared `daemon_watchdog` so this shim and
-    user-plugins-update share ONE implementation and cannot drift apart (they
-    did: this one was fixed for issue #9 while the sibling kept crying "daemon
-    may be stuck"). See daemon_watchdog for the heartbeat-gate rationale that
-    eliminates the false positive a long-but-healthy refresh used to trigger.
+    Delegates to the shared `daemon_watchdog` so every such shim shares ONE
+    implementation and cannot drift apart (the two historical shims did: this one
+    was fixed for issue #9 while the since-retired user-plugins-update sibling —
+    TRDD-E39YT9G6 — kept crying "daemon may be stuck"). See daemon_watchdog for the
+    heartbeat-gate rationale that eliminates the false positive a long-but-healthy
+    refresh used to trigger.
     """
     daemon_watchdog.emit_if_daemon_stale(
         task_name=_NAME,

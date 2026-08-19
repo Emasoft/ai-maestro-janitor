@@ -86,9 +86,10 @@ Three executors, one criterion each:
    `oauth-rotator-tick`, `oauth-rotator-supervisor`, `marketplace-refresh`,
    `version-update`, and — since 2026-08-18 (janitor#274, settled by measurement on
    the rev-8 round) — `github-config-audit`. (`user-plugins-update` LEFT the set
-   2026-08-19 — TRDD-TIZHEPNC / ai-maestro TRDD-PE54D95Q AC6: the Claude Code harness
-   self-updates installed plugins, so the absorbed loop duplicated it; it is
-   daemon-owned again at its 3600s cadence.)
+   2026-08-19 — TRDD-TIZHEPNC / ai-maestro TRDD-PE54D95Q AC6 — and was then RETIRED
+   from the chore roster entirely 2026-08-20, TRDD-E39YT9G6: the Claude Code harness
+   self-updates installed plugins, so no bulk sweep exists anywhere; the daemon keeps
+   only the targeted per-plugin requests-consumer.)
 
    **The contract this implies (the rev-4 ratification point):** writing a fresh
    `server-liveness.json` IS the claim on all absorbed chores — a server that runs
