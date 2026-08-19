@@ -76,6 +76,23 @@ def _early_log(message: str) -> None:
         pass
 
 
+def _slog(state, name: str, message: str) -> None:  # noqa: ANN001 - local module type
+    """Fail-open wrapper around `state.log_line`.
+
+    `log_line` itself calls `init_state()` and then opens the log file for append — both
+    can raise (e.g. a read-only/unwritable project dir, disk full). Proven empirically: a
+    read-only `CLAUDE_PROJECT_DIR` crashed this hook at `state.log_line("source=...")` with
+    an UNHANDLED `PermissionError`, even though every OTHER write in the file was already
+    guarded — the diagnostic logger was itself the unguarded write. Every call site in this
+    hook goes through here so a logging fault can never become a NEW way session start
+    breaks (the file's own never-break-session-start invariant).
+    """
+    try:
+        state.log_line(name, message)
+    except Exception:  # noqa: BLE001 -- logging must never break session start
+        pass
+
+
 def _active_global_stop(gs) -> tuple[str, str, int] | None:
     """(kind, reason, since_epoch) for the active machine-wide stop, or None.
 
@@ -173,7 +190,7 @@ def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - loca
             "durable crons on restart. To opt this project out permanently: /janitor-disarm."
         )
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
-        state.log_line("session-start", f"cron-liveness nudge skipped: {exc}")
+        _slog(state, "session-start", f"cron-liveness nudge skipped: {exc}")
 
 
 def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: Path) -> None:  # noqa: ANN001 - local module type
@@ -228,9 +245,9 @@ def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: 
             "## Notes and lessons learned\n"
         )
         state.atomic_write(target, body)
-        state.log_line("session-start", f"seeded a stub {scope_name} overview page: {target}")
+        _slog(state, "session-start", f"seeded a stub {scope_name} overview page: {target}")
     except Exception as exc:  # noqa: BLE001 -- fail OPEN; a seeding fault never costs a session
-        state.log_line("session-start", f"{scope_name} overview seed skipped: {exc}")
+        _slog(state, "session-start", f"{scope_name} overview seed skipped: {exc}")
 
 
 def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module type
@@ -335,7 +352,10 @@ def main() -> int:
         raise
     _early_log("imports ok")
 
-    state.init_state()
+    try:
+        state.init_state()
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _early_log(f"init_state failed: {exc}")
 
     # #J THIN MODE (TRDD-PZLVT2RN): inside an ai-maestro harness agent this hook keeps
     # only its self-scoped work (state init, breadcrumb, TRDD surfacing, arm nudge) and
@@ -345,7 +365,7 @@ def main() -> int:
     # Family-A + token surfaces for harness agents; janitor#100).
     thin_harness = harness_backend.is_harness_session()
     if thin_harness:
-        state.log_line("session-start", "harness thin mode (#J): outside-world writers skipped")
+        _slog(state, "session-start", "harness thin mode (#J): outside-world writers skipped")
 
     # Seed this project's reload-ack to the CURRENT reload generation at a TRUE
     # session start: a fresh process has just loaded the current plugin versions,
@@ -375,7 +395,7 @@ def main() -> int:
     # ack seeding) are gated on `source`, and from outside a wrong `source` is
     # INDISTINGUISHABLE from the branch having run and failed — both leave no file. One log
     # line makes that difference readable after the fact.
-    state.log_line("session-start", f"source={source}")
+    _slog(state, "session-start", f"source={source}")
 
     # THE "a /clear actually happened" signal (TRDD-Z582IKIR follow-up). `/clear` has
     # no hook of its own, but it re-enters SessionStart with source=clear — this is the
@@ -395,12 +415,12 @@ def main() -> int:
             # fires and the fresh session sits idle — the exact silent-disable shape this
             # project treats as a defect. Logging keeps the failure diagnosable without
             # ever raising into session start.
-            state.log_line("session-start", f"clear-observed stamp failed: {exc!r}")
+            _slog(state, "session-start", f"clear-observed stamp failed: {exc!r}")
             print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
         try:
             _inject_post_clear_handoff(state)
         except Exception as exc:  # noqa: BLE001 -- never break session start
-            state.log_line("session-start", f"post-clear handoff injection failed: {exc!r}")
+            _slog(state, "session-start", f"post-clear handoff injection failed: {exc!r}")
 
     # "fork" added for CC 2.1.214 ("SessionStart hooks now report source 'fork' when a
     # session begins as a fork instead of 'resume'"). A fork is a NEW process that loaded
@@ -413,14 +433,17 @@ def main() -> int:
     # very conversation it was forked to preserve. A missing enum value became destructive
     # by composition with a feature added months later.
     if source in ("startup", "resume", "fork"):
-        state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
-        # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a
-        # fresh process already carries the current non-plugin skills, so it should
-        # act on `[janitor-reload-skills]` only for a /janitor-global-reload-skills
-        # issued AFTER now — not replay a past one.
-        state.atomic_write(
-            state.state_dir() / "skills-reload-acked.ts", str(gs.skills_reload_generation())
-        )
+        try:
+            state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
+            # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a
+            # fresh process already carries the current non-plugin skills, so it should
+            # act on `[janitor-reload-skills]` only for a /janitor-global-reload-skills
+            # issued AFTER now — not replay a past one.
+            state.atomic_write(
+                state.state_dir() / "skills-reload-acked.ts", str(gs.skills_reload_generation())
+            )
+        except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+            _slog(state, "session-start", f"reload-ack seeding failed: {exc}")
 
     # Clear any stale flag from a prior session crash. If the last session
     # ended mid-rate-limit, the flag is preserved and the heartbeat cron
@@ -431,6 +454,8 @@ def main() -> int:
         keepalive.unlink()
     except FileNotFoundError:
         pass
+    except OSError as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"keepalive flag cleanup failed: {exc}")
 
     # Record this session's terminal identity (TRDD-dccb0b8a NPT) so the GLOBAL
     # daemon's session-liveness watchdog knows WHICH pane to inject recovery into
@@ -465,7 +490,7 @@ def main() -> int:
                 json.dumps(ident, separators=(",", ":")),
             )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
-        state.log_line("session-start", f"terminal-identity capture skipped: {exc}")
+        _slog(state, "session-start", f"terminal-identity capture skipped: {exc}")
 
     # Live-identity BEACON (TRDD-7PYTX4E9 F2): this hook runs in the SESSION context,
     # which can read the primary live keychain item even when the headless daemon
@@ -495,7 +520,7 @@ def main() -> int:
                     start_new_session=True,
                 )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
-        state.log_line("session-start", f"live-identity beacon spawn skipped: {exc}")
+        _slog(state, "session-start", f"live-identity beacon spawn skipped: {exc}")
 
     _cron_liveness_nudge(state, session_id)
 
@@ -506,9 +531,13 @@ def main() -> int:
     # who edited the rule keeps their version. Adding new rule files to
     # the plugin and shipping a release is enough to roll them out — no
     # explicit migration step required.
-    copied = [] if thin_harness else rules_installer.install_rules(Path(plugin_root))
+    try:
+        copied = [] if thin_harness else rules_installer.install_rules(Path(plugin_root))
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"install_rules failed: {exc}")
+        copied = []
     if copied:
-        state.log_line(
+        _slog(state,
             "session-start",
             f"installed plugin rule(s): {', '.join(copied)}",
         )
@@ -534,7 +563,7 @@ def main() -> int:
                 file=sys.stderr,
             )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
-        state.log_line("session-start", f"settings-ensurer failed: {exc}")
+        _slog(state, "session-start", f"settings-ensurer failed: {exc}")
 
     # Ship the rules' FULL reference docs to <DATA>/rules-reference/ (TRDD-YRPUSIFY axis
     # B). They live OUTSIDE any .claude/rules/ dir on purpose: everything in a rules dir
@@ -542,9 +571,13 @@ def main() -> int:
     # machine-wide, so parking 87 KB of schemas/cheat-sheets/migration guides there made
     # every fan-out re-write them into cache. Here they cost ZERO tokens until an agent
     # actually reads one.
-    refs = [] if thin_harness else rules_installer.install_references(Path(plugin_root))
+    try:
+        refs = [] if thin_harness else rules_installer.install_references(Path(plugin_root))
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"install_references failed: {exc}")
+        refs = []
     if refs:
-        state.log_line(
+        _slog(state,
             "session-start",
             f"installed rule reference doc(s): {', '.join(refs)}",
         )
@@ -556,9 +589,13 @@ def main() -> int:
     # so a user's own rule and every MEMORY store are untouched. Full last-scope
     # uninstall can't self-heal from a hook (the plugin is gone) — the daemon's
     # cleanup_user_orphans_if_uninstalled + each rule's own inert-guard cover that.
-    removed = [] if thin_harness else rules_installer.remove_orphaned_rules()
+    try:
+        removed = [] if thin_harness else rules_installer.remove_orphaned_rules()
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"remove_orphaned_rules failed: {exc}")
+        removed = []
     if removed:
-        state.log_line(
+        _slog(state,
             "session-start",
             f"removed orphaned janitor rule(s) from non-install scope(s): {', '.join(removed)}",
         )
@@ -568,9 +605,13 @@ def main() -> int:
     # uninstall` (which deletes the data dir) never loses memory — and on a fresh install
     # with an empty primary, RESTORE it from the mirror. Additive, best-effort, NEVER
     # deletes a note; a mirror hiccup can't break session start.
-    synced = None if thin_harness else memory_scopes.sync_user_memory_mirror()
+    try:
+        synced = None if thin_harness else memory_scopes.sync_user_memory_mirror()
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"sync_user_memory_mirror failed: {exc}")
+        synced = None
     if synced == "restored":
-        state.log_line(
+        _slog(state,
             "session-start",
             "restored USER memory from the uninstall-safe mirror (primary was empty)",
         )
@@ -580,9 +621,13 @@ def main() -> int:
     # harness's own ``cleanupPeriodDays`` sweep can silently delete inside
     # ``~/.claude/projects/<slug>/design/`` (it holds session transcripts too), and that
     # dir has no backup of its own. Additive, best-effort, NEVER deletes a TRDD.
-    design_synced = None if thin_harness else memory_scopes.sync_local_design_mirror()
+    try:
+        design_synced = None if thin_harness else memory_scopes.sync_local_design_mirror()
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        _slog(state, "session-start", f"sync_local_design_mirror failed: {exc}")
+        design_synced = None
     if design_synced == "restored":
-        state.log_line(
+        _slog(state,
             "session-start",
             "restored LOCAL design/ TRDDs from the cleanup-safe mirror (primary was empty)",
         )
@@ -600,12 +645,12 @@ def main() -> int:
             _seed_overview_if_absent(state, memory_bridge, _scope_name, _scope_root)
             outcome = memory_bridge.ensure_bridge_line(_scope_root)
             if outcome == memory_bridge.OUTCOME_ADDED:
-                state.log_line(
+                _slog(state,
                     "session-start",
                     f"re-added the wikimem bridge line to {_scope_name} MEMORY.md",
                 )
     except Exception as exc:  # noqa: BLE001 -- fail OPEN; an index line never costs a session
-        state.log_line("session-start", f"memory bridge skipped: {exc}")
+        _slog(state, "session-start", f"memory bridge skipped: {exc}")
 
     # Self-heal the lean-ctx shell allowlist (TRDD-ZGLCGC6A). On a machine that
     # runs the lean-ctx Bash-allowlist wrapper, the heartbeat cron's bare
@@ -621,12 +666,12 @@ def main() -> int:
 
         allowed = [] if thin_harness else leanctx_allowlist.ensure_janitor_allowed()
         if allowed:
-            state.log_line(
+            _slog(state,
                 "session-start",
                 f"lean-ctx allowlist self-heal: ensured {', '.join(allowed)}",
             )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
-        state.log_line("session-start", f"lean-ctx allowlist self-heal skipped: {exc}")
+        _slog(state, "session-start", f"lean-ctx allowlist self-heal skipped: {exc}")
 
     # OAuth-rotator supervisor FAST-PATH (TRDD-32acd15f, P2). The daemon Task
     # runs the same alert-only governance on a 10-min cadence; firing it here too
@@ -647,19 +692,19 @@ def main() -> int:
             if _findings:
                 _res = oauth_supervisor.apply(
                     _findings,
-                    log=lambda m: state.log_line("session-start", m),
+                    log=lambda m: _slog(state, "session-start", m),
                 )
-                state.log_line(
+                _slog(state,
                     "session-start",
                     f"oauth-rotator-supervisor (fast-path): alerts={_res.alerts or '[]'}",
                 )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
-        state.log_line("session-start", f"oauth-supervisor fast-path skipped: {exc}")
+        _slog(state, "session-start", f"oauth-supervisor fast-path skipped: {exc}")
 
     # `last-activity.ts` was previously written here too, but no detector
     # ever read it — dropped to avoid carrying dead state. The
     # session-start nudge below is what callers actually rely on.
-    state.log_line("session-start", f"state initialized at {state.state_dir()}")
+    _slog(state, "session-start", f"state initialized at {state.state_dir()}")
 
     # Stdout from this hook becomes additional context for the first user turn. Normally we
     # remind Claude to arm the heartbeat cron — but when a MACHINE-WIDE stop flag is set
@@ -691,7 +736,7 @@ def main() -> int:
         if crumb:
             print(crumb)
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
-        state.log_line("session-start", f"memory breadcrumb skipped: {exc}")
+        _slog(state, "session-start", f"memory breadcrumb skipped: {exc}")
 
     # Findings inbox (TRDD-FENWWB4E, ARCHITECTURE.md §4 — ratified rev 3): surface the
     # UNREAD entries of THIS project's findings ledger — the per-project mailbox where
@@ -708,7 +753,7 @@ def main() -> int:
         if block:
             print(block)
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
-        state.log_line("session-start", f"findings inbox skipped: {exc}")
+        _slog(state, "session-start", f"findings inbox skipped: {exc}")
 
     # Harness self-test (TRDD-B0SABNP8): the janitor is coupled to Claude Code harness
     # internals, and several CC releases have BROKEN that coupling SILENTLY (2.1.207
@@ -755,7 +800,7 @@ def main() -> int:
                     except OSError:
                         pass
     except Exception as exc:  # noqa: BLE001 -- MUST NOT strand the survival emissions below
-        state.log_line("session-start", f"harness self-test skipped: {exc}")
+        _slog(state, "session-start", f"harness self-test skipped: {exc}")
 
     stop = _active_global_stop(gs)
     if stop is not None:
@@ -765,7 +810,7 @@ def main() -> int:
         # 2026-07-31) — a stop is now unambiguous, and an armed-but-inert session is exactly
         # the state that made a disabled fleet look healthy.
         kind, reason, since = stop
-        state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
+        _slog(state, "session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
         print(_format_stop_reminder(kind, reason, since, int(time.time())))
         return 0
 
@@ -780,7 +825,7 @@ def main() -> int:
     try:
         armed = gs.armed_state()
     except Exception as exc:  # noqa: BLE001 -- must never break session start
-        state.log_line("session-start", f"armed_state() failed, defaulting to absent: {exc}")
+        _slog(state, "session-start", f"armed_state() failed, defaulting to absent: {exc}")
         armed = "absent"
     if armed == "armed":
         # ONLY on a fresh PROCESS. `clear` and `compact` re-enter SessionStart inside the
@@ -795,7 +840,7 @@ def main() -> int:
         # job either — dispatch.py's `_phase_heartbeat_renew` emits `[janitor-renew]` for
         # that, so gating here leaves no coverage gap.
         if source not in ("startup", "resume"):
-            state.log_line("session-start", f"armed; source={source} keeps the live cron -> no re-arm")
+            _slog(state, "session-start", f"armed; source={source} keeps the live cron -> no re-arm")
             return 0
         print(
             "[janitor] armed (persistent) — re-plumbing the session heartbeat. "
