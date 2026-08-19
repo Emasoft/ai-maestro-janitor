@@ -338,6 +338,13 @@ def test_the_DEFAULT_presence_probe_is_callable(monkeypatch) -> None:
 
     The lesson generalises: a default that no test uses is untested code on the hot path."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/nonexistent-for-this-test")
+    # Pin the HID rung to "keyboard idle" so the DEFAULT probe path stays exercised while the
+    # verdict is deterministic. Since TRDD-D2DD5GO8 a BLINDED probe (hid None on darwin)
+    # correctly DEFERS to the loud give-up, so leaving the live ioreg answer in play made
+    # this test's outcome depend on the machine's real keyboard state.
+    import user_intent  # noqa: PLC0415
+
+    monkeypatch.setattr(user_intent, "hid_idle_seconds", lambda **_kw: 9999.0)
     sent: list[str] = []
     ok, why = tt.inject_until_sent(
         {"kind": "tmux", "pane": "%1"}, "/compact",

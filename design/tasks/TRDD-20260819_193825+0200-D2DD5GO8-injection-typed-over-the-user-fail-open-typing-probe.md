@@ -1,9 +1,9 @@
 ---
 trdd-id: D2DD5GO8
 title: Terminal injection typed over the USER mid-sentence — the typing probe fails OPEN exactly when osascript is blind
-column: todo
+column: testing
 created: 2026-08-19T19:38:25+0200
-updated: 2026-08-19T19:38:25+0200
+updated: 2026-08-20T00:17:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,6 +15,38 @@ eht: []
 ---
 
 # Injection typed over the user — fail-open typing probe under a blinded osascript
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-20 00:17
+
+**SHIPPED (`todo → testing`).** The audit sharpened the diagnosis beyond the card's sketch:
+the failure was never surfaced as "unknown" — under load `ioreg` times out, `hid_idle_seconds`
+returns None, and `user_presence` fell through to the SUBMIT-stamped breadcrumb (stale by
+construction while a user is mid-sentence), laundering blindness into a confident "not
+typing". The design direction below is SUPERSEDED in one respect: **"single unknown ⇒
+proceed" is wrong** — the dangerous moment is the FIRST blind read meeting an empty field,
+so a tolerate-one-blip rule re-opens the incident hole. Shipped semantics:
+
+- `user_intent.typing_now()` (new): hid readable ⇒ answers BOTH ways alone; hid blinded ON
+  darwin ⇒ None (unless a fresh breadcrumb proves True); off darwin ⇒ collapses to bool
+  (the 22-min Linux-CI hang class stays fixed — no headless box can block).
+- Both `terminal_trigger` default probes: **None ALWAYS defers** (bounded by giveup_s + the
+  iteration cap, exiting through the loud give-up, never a silent cancel); the
+  `_BLIND_PROBE_STREAK=3` threshold gates only the one diagnostic log line, which is itself
+  exception-guarded (a diagnostic must never break the gate).
+- `JANITOR_HID_IDLE_OVERRIDE_S` (new env seam): subprocess tests can pin rung 0; the real
+  probe reads the HOST keyboard, which made every real-subprocess test hostage to live human
+  presence (measured: hid=0.6 s mid-suite ⇒ truthful deferral ⇒ 30 s timeout flake in
+  test_clear_trigger).
+
+Tests: `tests/test_blind_probe_streak.py` (10 — typing_now semantics both platforms,
+sustained-blind never types + loud give-up, blip-then-recovered proceeds, streak log once,
+pane-free hold/free); legacy default-probe + clear-trigger tests made hermetic. Full suite
+15605 passed; ruff + mypy + pyright clean.
+
+**NEXT ACTION (the gate to `complete`):** observe one real loaded-host episode (loadavg
+spikes recur on this box) with the SHIPPED plugin: the terminal_trigger log shows the
+"typing probe blinded Nx" line and no injection lands while keys are pressed. Ships with
+the next publish; the running cache still has the old semantics until then.
 
 ## What happened (USER report, 2026-08-19 ~19:30, this host)
 

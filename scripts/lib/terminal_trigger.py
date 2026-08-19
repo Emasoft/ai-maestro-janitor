@@ -148,6 +148,13 @@ _PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its o
 # moment someone touched the keyboard — which is how a user who typed the command themselves got
 # `USER_PRESENT` and nothing else. Waiting costs a few seconds; discarding costs the request.
 _USER_QUIET_S = 8.0                # no keystroke for this long before we attempt
+# Consecutive BLINDED typing-probe reads (typing_now → None: the HID signal exists but could
+# not be read) at which the injection gates emit their ONE diagnostic line (TRDD-D2DD5GO8).
+# Every blinded read defers — None never licenses an injection, because the incident's hole
+# was the FIRST blind read meeting an empty field — so this threshold gates only the logging:
+# 3 at the 8 s deferral cadence ≈ 24 s of sustained blindness, past any transient ioreg blip
+# (the 2026-08-19 incident's blindness lasted hours), keeping a single hiccup out of the log.
+_BLIND_PROBE_STREAK = 3
 
 
 def _inject_giveup_s() -> float:
@@ -569,17 +576,35 @@ def wait_until_pane_free(
     typed would be silently dropped on any pane we cannot read. Deferring to the caller's own
     timeout is the lesser failure.
     """
+    # Same fail-direction contract as `inject_until_sent`'s probe (TRDD-D2DD5GO8): a blinded
+    # read (typing_now → None: darwin, HID unreadable) NEVER counts as "pane free" — it holds
+    # the busy verdict, bounded by this loop's own giveup + iteration cap. Off darwin
+    # `typing_now` collapses to a bool, so no headless box can block here (the spin-forever
+    # lesson stays fixed); the streak counter only gates the diagnostic line.
+    blind_streak = 0
+
     def _default_probe(_t: Mapping[str, str]) -> bool:
+        nonlocal blind_streak
         try:
             import user_intent  # noqa: PLC0415
 
-            # Tri-state, unknown → NOT typing: this probe only defers/loops — the empty-field
-            # check and rule 2 are the real injection guards — and mapping unknown → typing
-            # made the wait loop spin forever on any box with no breadcrumb (the exception
-            # arm below already picked this side).
-            return user_intent.user_presence(idle_s=int(quiet_s), env=os.environ) is True
-        except Exception:  # noqa: BLE001
-            return False
+            verdict = user_intent.typing_now(idle_s=int(quiet_s), env=os.environ)
+        except Exception:  # noqa: BLE001 - a broken probe is a blinded probe, not a licence
+            verdict = None
+        if verdict is None:
+            blind_streak += 1
+            if blind_streak == _BLIND_PROBE_STREAK:
+                try:
+                    state.log_line(
+                        "terminal_trigger",
+                        f"pane-free typing probe blinded {blind_streak}x in a row — "
+                        "holding the pane-busy verdict rather than declaring it free",
+                    )
+                except Exception:  # noqa: BLE001,S110 - a diagnostic must never break the gate
+                    pass
+            return True
+        blind_streak = 0
+        return verdict
 
     probe = _default_probe if is_typing is None else is_typing
     giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
@@ -660,18 +685,45 @@ def inject_until_sent(
     `type_fn` / `submit_fn` / `clear_fn` are injected so the decision logic is testable without
     a terminal, and so the caller keeps ownership of which channel actually types.
     """
+    # FAIL-DIRECTION AUDIT of this gate (TRDD-D2DD5GO8): the probe is `typing_now`, whose
+    # None means the machine-wide HID signal is BLINDED on a platform where it exists (ioreg
+    # hung under load — the 2026-08-19 type-over-the-user incident, where the old ladder
+    # laundered that blindness into a confident "not typing" and this function typed over the
+    # user's fingers). None NEVER licenses an injection: the dangerous moment is the FIRST
+    # iteration meeting an empty-looking field, so a tolerate-one-blip rule would re-open the
+    # exact incident hole. None DEFERS like a typing user — bounded by `giveup_s` + the
+    # iteration cap, exiting through the loud give-up, never a silent cancel — and the streak
+    # counter only gates the diagnostic line. This cannot block a no-signal box: `typing_now`
+    # collapses to a bool off darwin (the 22-minute Linux-CI spin lesson 31844013197 stays
+    # fixed), so a permanent defer-to-giveup needs a darwin host whose HID probe is broken —
+    # which is precisely a machine where no injection can prove it is not typing over a human.
+    # Rule 1 (empty field) is the other gate; its fail-direction is already safe: an
+    # unreadable pane returns None from the reader, which retries transiently and then gives
+    # up WITHOUT typing — never "".
+    blind_streak = 0
+
     def _default_is_typing(_t: Mapping[str, str]) -> bool:
+        nonlocal blind_streak
         try:
             import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
 
-            # Tri-state, unknown → NOT typing — the same side the exception arm below always
-            # took ("unknown presence must not block a requested command forever"). Rules 1-2
-            # (empty field, stop on any keystroke) remain the guards that protect a real user;
-            # unknown → typing here was the tight infinite loop that hung the first Linux CI
-            # run for 22 minutes (31844013197).
-            return user_intent.user_presence(idle_s=int(quiet_s), env=os.environ) is True
-        except Exception:  # noqa: BLE001
-            return False  # unknown presence must not block a requested command forever
+            verdict = user_intent.typing_now(idle_s=int(quiet_s), env=os.environ)
+        except Exception:  # noqa: BLE001 - a broken probe is a blinded probe, not a licence
+            verdict = None
+        if verdict is None:
+            blind_streak += 1
+            if blind_streak == _BLIND_PROBE_STREAK:  # log once per streak, not per loop
+                try:
+                    state.log_line(
+                        "terminal_trigger",
+                        f"typing probe blinded {blind_streak}x in a row (hid unreadable) — "
+                        "deferring injection rather than typing over a possibly-typing user",
+                    )
+                except Exception:  # noqa: BLE001,S110 - a diagnostic must never break the gate
+                    pass
+            return True  # blindness DEFERS (bounded by giveup_s), never licenses
+        blind_streak = 0
+        return verdict
 
     typing_probe = _default_is_typing if is_typing is None else is_typing
 

@@ -64,6 +64,11 @@ def _run(
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
     if env_extra:
         env.update(env_extra)
+    # Pin rung 0 (live HID) to "keyboard idle" unless a test overrides it: the real probe
+    # reads the HOST's keyboard, so every real-subprocess test here was hostage to whether
+    # a human touched the machine during its 30 s window (measured flake, 2026-08-20:
+    # hid=0.6 s while the suite ran ⇒ the injector truthfully deferred ⇒ timeout).
+    env.setdefault("JANITOR_HID_IDLE_OVERRIDE_S", "9999")
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
     # regardless of the host terminal (e.g. running the suite inside tmux).
     env["JANITOR_FORCE_TERMINAL_KIND"] = "iterm"
@@ -287,7 +292,12 @@ def test_a_deferred_clear_writes_NO_resume_state(tmp_path: Path) -> None:
         project=p,
         iterm=pane,
         home=_home(tmp_path, present=True, pane_id=pane),
-        env_extra={"JANITOR_INJECT_GIVEUP_S": "0"},  # force the deferral path deterministically
+        # The deferral under test happens in the chained CHILD (giveup 0 ⇒ it gives up
+        # before firing); the parent's own 120 s pane-free wait must NOT be the thing
+        # deferring, so the _run-level idle HID pin (9999) is exactly right here too —
+        # pinning rung 0 to "typing" instead parks the parent in its hard-coded 120 s
+        # wait and times the subprocess out (found while making this file hermetic).
+        env_extra={"JANITOR_INJECT_GIVEUP_S": "0"},
     )
     assert proc.returncode == 0
     assert "CLEAR_FIRED" not in proc.stdout, "a deferred clear must not fire"

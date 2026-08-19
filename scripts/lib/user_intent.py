@@ -68,6 +68,8 @@ INTENT_TTL_S = 600  # 10 minutes
 # Tunable via CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S; any value ≤0 coerces back to
 # the default so the gate can never be silently disabled to a 0-second window.
 USER_PRESENT_IDLE_S = 20  # 20 seconds (owner directive 2026-07-18)
+# Test/operator override for the rung-0 HID reading (see hid_idle_seconds).
+HID_IDLE_OVERRIDE_ENV = "JANITOR_HID_IDLE_OVERRIDE_S"
 
 # The verbs whose authority we track. Keyed by verb → the slash-commands that mean it.
 _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -222,6 +224,17 @@ def hid_idle_seconds(*, timeout_s: float = 3.0) -> float | None:
     last 20 seconds" needs. Multiple registry matches → take the MINIMUM (the most recent
     event across input devices). Fail-open: None lets the caller fall back to the
     breadcrumb rungs rather than blocking or licensing an injection on a broken probe."""
+    # Test/operator seam (TRDD-D2DD5GO8): a subprocess-driven test cannot monkeypatch this
+    # module, and the REAL rung-0 probe reads the live keyboard — which made every test that
+    # spawns the real injector hostage to whether a human happened to touch the machine
+    # during its window. Set to a float ("9999" = provably idle, "1" = provably typing);
+    # malformed values fall through to the real probe rather than inventing a reading.
+    override = os.environ.get(HID_IDLE_OVERRIDE_ENV, "").strip()
+    if override:
+        try:
+            return float(override)
+        except ValueError:
+            pass
     if sys.platform != "darwin":
         return None
     try:
@@ -292,6 +305,44 @@ def user_presence(
     if last <= 0:
         return False  # breadcrumb exists but no user input was EVER recorded → unattended
     return (current - last) <= idle_s
+
+
+def typing_now(
+    *,
+    idle_s: int = USER_PRESENT_IDLE_S,
+    home: Path | None = None,
+    now: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool | None:
+    """The INJECTION-GATE typing signal (TRDD-D2DD5GO8): True = typed within `idle_s`,
+    False = provably not typing, None = the typing signal is BLINDED — do not trust a
+    'not typing' answer built without it.
+
+    Why `user_presence` alone was not enough (the 2026-08-19 incident, measured): under
+    host load `ioreg` hangs past its 3 s timeout, so `hid_idle_seconds()` — the ONLY rung
+    that moves on every keystroke — returns None, and the ladder falls through to the
+    presence breadcrumb, which is stamped only at prompt SUBMIT. A user mid-sentence has a
+    STALE breadcrumb by construction, so the ladder returned a confident-looking False and
+    the injector typed over their fingers. The failure was never surfaced as 'unknown';
+    it was laundered into 'not typing'. This function un-launders it:
+
+      * hid readable  → hid alone answers BOTH ways (`hid <= idle_s`) — it is machine-wide
+        and moves on every keystroke, so it can prove 'not typing' where breadcrumbs cannot.
+      * hid blinded ON DARWIN (the signal exists but could not be read) → a fresh breadcrumb
+        may still prove True (a submit IS typing); anything else is None — the breadcrumb's
+        absence/staleness is NOT evidence of an idle keyboard.
+      * non-darwin (no HID signal exists at all) → the breadcrumb ladder collapsed to a
+        bool exactly as before — returning None here would make sustained-blind deferral
+        permanent on every headless Linux runner, resurrecting the 22-minute CI hang class
+        (31844013197) as a permanent give-up instead of a spin.
+    """
+    hid = hid_idle_seconds()
+    if hid is not None:
+        return hid <= idle_s
+    presence = user_presence(idle_s=idle_s, home=home, now=now, env=env)
+    if sys.platform == "darwin":
+        return True if presence is True else None
+    return presence is True
 
 
 def user_is_present(
