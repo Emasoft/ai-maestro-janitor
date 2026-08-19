@@ -1,9 +1,10 @@
 ---
 trdd-id: UWBXNJ76
 title: memory-scope-leak misses bare hostnames and sub-24-char high-entropy ids
-column: todo
+column: testing
 created: 2026-08-18T20:14:25+0200
-updated: 2026-08-19T00:12:00+0200
+updated: 2026-08-19T00:40:00+0200
+implementation-commits: [07bf1d16]
 current-owner: janitor-main-session
 task-type: security
 priority: low
@@ -82,8 +83,14 @@ hostname-position in a path/URL/ssh string) rather than matching every bare toke
 
 ## Acceptance
 
-- [ ] class enumeration recorded in the detector docstring (in-scope vs out-of-scope shapes)
-- [ ] one positive control test per class (fires today, pinned)
-- [ ] measured FP pass over the live 3-scope corpus before shipping (no new FP findings)
+- [x] class enumeration recorded in the detector docstring (in-scope vs out-of-scope shapes) —
+      `_LOCAL_HOSTNAME` docstring, commit `07bf1d16`.
+- [x] one positive control test per class (fires today, pinned) — `test_corp_hostname_flagged`,
+      `test_internal_hostname_flagged`, `test_bare_hostname_still_flagged_via_ssh_user_host`.
+- [x] measured FP pass over the live 3-scope corpus before shipping (no new FP findings) —
+      3-scope `_scan_page` diff pre/post = byte-identical (0 new firings), verified twice (worker
+      + main). A `Path.home()` FP that widening WOULD have introduced was caught in measurement
+      and fixed with the `(?!\()` lookahead before shipping. `_ENTROPY_MIN_LEN` unchanged
+      (measured refusal). 57 passed, ruff + mypy clean.
 
 ## Approval log
