@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.17] — 2026-08-19
+
+### Bug Fixes
+
+- **tests:** CLAUDE_PROJECT_DIR joins the session-default isolation — the last unredirected root (290f989)
+- **safe-delete:** Honest per-target exit code + rule text aligned to reality (271290e)
+- **tests:** Test_external_clear_llm_ext no longer depends on collection order (2198a2e)
+- **external-clear:** Widen the failure evidence's stderr tail to ~20 lines (TRDD-PXP08ZQC) (7bb8a3c)
+- **git:** Merge the lock recovery onto janitor#245's existing machinery (TRDD-TUWUB0SG closed) (8e4a541)
+- **session-start:** Guard every write against faults — a logging write was itself unguarded (TRDD-LMLKF0JV) (22b13d0)
+- **pending-agents:** Distinguish a deliberately-stopped agent from a died one (TRDD-PGN5XSHA) (0f6c772)
+- **runaway:** Re-validate pid existence at report time (TRDD-JEEQCHFG box 2) (c1698d1)
+- **version-update:** Resolve the cache parent robustly — the staged DATA closure froze the C3 pin (TRDD-ZM5LZ24Y) (83cfd3b)
+
+### Documentation
+
+- Drain the human_review queue under the USER's 2026-08-18 delegation (9 verdicts) (3452151)
+- Card the hub's 4 verified Phase-2 findings (TRDD-DD0M4QL7 P1 baseline freeze, TRDD-TUWUB0SG P2 index-lock, TRDD-LMLKF0JV P2 session-start writes, TRDD-UWBXNJ76 P3 scope-leak gaps) — citations spot-checked on-host, ledger: ai-maestro TRDD-BRRJK57P @ 9562b2a4 (ed86dc8)
+- **memory:** ATOM-KYRU-GT5O — rev-8 executor-declared bounds + github-config-audit absorption, on the handover page (companion to e630a35c) (3d1ba9b)
+- Drain the testing column on first-hand evidence (5 verdicts + 1 split) (f3ebc5f)
+- TRDD-TUWUB0SG — the index.lock class fired live on this repo tonight (0-byte orphan, no holder in ps snapshot); recovery recorded per the card's own discipline (c57c877)
+- **memory:** Drain oversized atoms batch (TRDD-VOWAUVE5) (5c9684b)
+- TRDD-VOWAUVE5 — drain batch done (backlog 0 in all 3 scopes), week-long stays-at-zero hold to 2026-08-26 (359aec5)
+- TRDD-UWBXNJ76 — measured grounding (entropy gap = measured refusal; hostname = suffix-widen) (ec1e6ec)
+- Queue TRDD-TIZHEPNC (drop user-plugins-update from absorbed set) + PXP08ZQC 13.5.7 probe finding (2b9bcc2)
+- TRDD-LMLKF0JV todo->testing — write-fault guards implemented + tested (22b13d0d) (0e749d9)
+- TRDD-UWBXNJ76 todo->testing — hostname widen + entropy refusal shipped (07bf1d16) (c791b71)
+- TRDD-TIZHEPNC todo->testing — absorbed-set removal shipped (fbed874a) (92ccaad)
+- TRDD-PGN5XSHA fix decided (Fable) + moved to dev — stopped-vs-died in pending manifest (7648f57)
+- TRDD-PGN5XSHA todo->testing — stopped-agent fix shipped (0f6c772c) (aeacc33)
+- TRDD-PGN5XSHA — de-dup implementation-commits frontmatter key (keep [0f6c772c]) (38e8302)
+- TRDD-JEEQCHFG box 2 done (c1698d1b) — pid re-validation; stays todo, 3 measurement boxes open (eaa9b98)
+- TRDD-VAWIKRK2 — free pool recovered; blind corpus regen running (background, box 1) (3262f9a)
+- TRDD-VAWIKRK2 — blind regen stopped (pool degraded to timeouts); box-1 set partial (7b36b2b)
+- TRDD-ZM5LZ24Y addendum — soak was structurally unclosable (staged-closure wrong root); fixed in 83cfd3b6, new close condition (5bb8724)
+- XM3FPJC0 — normalize one list marker dash->asterisk (MD004, mechanical) (9c9ff37)
+- Add TRDD-4OFMHOZ7 — non-atomic cache population bricked the fleet (post-mortem + staging-dir guard) (844683d)
+- Add TRDD-D2DD5GO8 — injection typed over the user; fail-open typing probe under blinded osascript (8c9a20d)
+- **TRDD-4OFMHOZ7:** Post-mortem — daemon exonerated by sweep-iteration timing; C2 coverage decided; quarantine lesson ATOM-X3NR-20M8 (a8c0467)
+
+### Features
+
+- **contract:** Rev 8 FINAL — claim-bounds reader + github-config-audit absorbed (TRDD-6CRC9SQQ) (e630a35)
+- **branch-protection:** Gate 6 verifies CONTENT, not just names (TRDD-DD0M4QL7) (4d0888f)
+- **git:** Attributed .git/index.lock recovery, wired at both writer sites (TRDD-TUWUB0SG) (47f1d8d)
+- **memgrep:** Refuse an over-budget atom/lesson body at WRITE time (TRDD-VOWAUVE5) (527a550)
+- **scope-leak:** Widen internal-TLD hostnames; entropy floor = measured refusal (TRDD-UWBXNJ76) (07bf1d1)
+
+### Miscellaneous Tasks
+
+- Gitignore agent_context_bench generation scratch (out*/, reports/) — blocked publish gate 1 (TRDD-VAWIKRK2 artifacts, preserved on disk) (8129a2b)
+
+### Refactor
+
+- **chores:** User-plugins-update leaves SERVER_ABSORBED_TASKS — daemon owns it again (TRDD-TIZHEPNC) (fbed874)
+
+### Testing
+
+- Unabsorbed-chores pin gains user-plugins-update (TRDD-TIZHEPNC follow-through) (25ed337)
 ## [3.3.16] — 2026-08-18
 
 ### Bug Fixes
@@ -14,6 +73,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - **TRDD-CEWVQ8DG:** Field gate met twice on the 2026-08-18 fleet restart — close testing → complete (45ce7d9)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.16 (7ca607b)
 ## [3.3.15] — 2026-08-18
 
 ### Bug Fixes
