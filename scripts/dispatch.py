@@ -2738,6 +2738,17 @@ def _stamp_resume(sd: Path, now: int) -> None:
 
 
 def main() -> int:
+    # SERVER-LANE ENTRY (TRDD-9ZPU69UC): `dispatcher-stub.py --run-cold-cache-clear`
+    # reaches here through the stub's auto-roll + C2/C3 verify walk (the stub execs the
+    # newest verified dispatch.py with argv passed through), so the ai-maestro server can
+    # fire the cold-cache-clear beat with ZERO janitor code imported server-side and no
+    # vendored copy to skew. Handled BEFORE anything heartbeat-shaped: this invocation is
+    # a chore, not a fire — no fire stamp, no phases, no markers on stdout.
+    if "--run-cold-cache-clear" in sys.argv[1:]:
+        import cold_cache_clear_task  # noqa: PLC0415 — only this entry path needs it
+
+        return cold_cache_clear_task.run_once()
+
     state.init_state()
 
     # Fire-time stamp (TRDD-LI7ENU2A prerequisite): record EVERY fire's wall-clock

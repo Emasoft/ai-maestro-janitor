@@ -60,6 +60,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
+import cold_cache_clear_task  # noqa: E402  # the ONE cold-cache-clear beat impl (TRDD-9ZPU69UC)
 import cross_project_issue as cpi  # noqa: E402  # file a finding on the repo it belongs to (Rule 4)
 import daemon_path  # noqa: E402  # restore a usable tool PATH under launchd (TRDD-VQ4LX7ND)
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
@@ -1845,74 +1846,13 @@ def task_fleet_stop() -> None:
 def task_cold_cache_clear() -> None:
     """Shrink every running session whose prompt cache has gone cold, before its next fire pays.
 
-    THE WINDOW, and why nothing in-session can cover it: a cron fire's input cost is billed when
-    the turn STARTS, and the dispatcher stub runs inside that turn. Any in-session check is
-    therefore reading a bill that has already been paid. The daemon runs outside every turn, so
-    it is the only place a cold-cache session can be shrunk BEFORE one begins.
-
-    It delegates rather than reimplements — one `external_handoff_clear.py --project-root <p>`
-    per candidate. That script owns the gate, the handoff composition (with its retry loop and
-    fleet lane) and the injection chain; duplicating any of that here would be a second
-    implementation of an unrecoverable `/clear`.
-
-    ONE CANDIDATE PER BEAT, deliberately. Even with the fleet lane spacing the llm-ext calls,
-    firing N clears from one beat means N concurrent children each holding a lane ticket, and the
-    last one's ticket is minutes out — so they would pile up faster than they drain. Draining one
-    per beat lets a 20-session fleet settle over ~20 beats with at most one child alive at a time.
-
-    SAFETY: default-OFF via the same opt-in as the hook (`external_clear.enabled()`), never a
-    session the daemon cannot identify a pane for, never one whose transcript is ADVANCING (that
-    is a human working — clearing under them is the one unrecoverable mistake here), and never
-    twice inside the cooldown (`cold_cache_compact.clear_in_cooldown`). Never raises.
+    Thin delegate since TRDD-9ZPU69UC: the whole beat (window rationale, one-candidate-per-beat,
+    the safety gates, the watcher spawn) MOVED verbatim to `lib/cold_cache_clear_task.run_once`
+    so the ai-maestro server's absorbed lane can run the SAME code via the auto-rolling
+    dispatcher stub (`dispatcher-stub.py --run-cold-cache-clear`) instead of porting it —
+    a port is exactly the vendored-copy version-skew the stub pattern exists to kill.
     """
-    try:
-        import cold_cache_compact  # noqa: PLC0415
-        import external_clear as ec  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001 - a missing sibling must not kill the beat
-        state.log_line("daemon", f"cold-cache-clear: libs unavailable: {exc}")
-        return
-    if not ec.enabled():
-        return  # ships inert, exactly like the SessionStart half — /clear is unrecoverable
-    now = int(time.time())
-    try:
-        fleet = fleet_scan.gather_fleet(now=now)
-    except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
-        state.log_line("daemon", f"cold-cache-clear: fleet scan failed: {exc}")
-        return
-
-    watcher = Path(__file__).resolve().parent / "external_handoff_clear.py"
-    if not watcher.is_file():
-        return
-    for inst in fleet:
-        # `inst.project_root`, NOT `getattr(inst, "root", "")`. The first draft used the getattr
-        # form with a default, and `Instance` has no `root` — so it would have read "" for every
-        # instance and this whole task would have shipped as a permanent no-op that logs nothing
-        # and looks exactly like "no session needed clearing". Attribute access on a known
-        # dataclass field is the version that FAILS LOUDLY when the field is renamed.
-        root = inst.project_root or ""
-        # `active` means the transcript is ADVANCING — a live turn, i.e. someone (or something)
-        # is working. Clearing that is unrecoverable, and unlike a keystroke it cannot be
-        # deferred-and-retried into safety, so it is a hard skip rather than a wait.
-        if not root or inst.active:
-            continue
-        if inst.pid in (os.getpid(), gs.daemon_pid()):
-            continue
-        sd = Path(root) / ".janitor" / "state"
-        if not sd.is_dir() or cold_cache_compact.clear_in_cooldown(sd, now=now):
-            continue
-        try:
-            subprocess.Popen(  # noqa: S603 - fixed argv, feature-detected script
-                [sys.executable, str(watcher), "--project-root", root],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                env={**os.environ, "CLAUDE_PROJECT_DIR": root},
-            )
-        except Exception as exc:  # noqa: BLE001 - one bad spawn must not stop the beat
-            state.log_line("daemon", f"cold-cache-clear: spawn failed for {root}: {exc}")
-            continue
-        state.log_line("daemon", f"cold-cache-clear: evaluating {root}")
-        return  # one per beat — see the docstring
+    cold_cache_clear_task.run_once()
 
 
 class Task:

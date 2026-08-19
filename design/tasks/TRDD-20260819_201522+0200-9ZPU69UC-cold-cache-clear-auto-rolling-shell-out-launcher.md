@@ -1,9 +1,9 @@
 ---
 trdd-id: 9ZPU69UC
 title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fire it without importing janitor code
-column: todo
+column: testing
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-19T20:15:22+0200
+updated: 2026-08-20T01:45:00+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -41,11 +41,32 @@ change. Logic stays in this repo; the launcher is a stable ABI.
    in one window.
 4. Tell the hub the launcher path + contract when it ships.
 
+## SHIPPED 2026-08-20 01:45 (`todo → testing`) — design SIMPLIFIED, no new launcher file
+
+The card's sketch (a second staged launcher) was superseded during implementation by a
+strictly smaller shape: the EXISTING dispatcher stub already execs the newest verified
+`dispatch.py` **with argv passed through** its whole C2/C3 auto-roll walk — so the server's
+launcher IS `<DATA>/dispatcher-stub.py --run-cold-cache-clear`, zero new staged files, zero
+duplicated verify logic. `dispatch.py` grew the flag branch (chore-only: no fire stamp, no
+phases, rc pass-through) delegating to the extracted
+`scripts/lib/cold_cache_clear_task.run_once()`, which `daemon.task_cold_cache_clear` now
+also thin-delegates to — ONE implementation, both lanes. The 7 existing daemon-beat tests
+run through the delegation unchanged (shared `sys.modules` instances make the fixture's
+patches reach the lib), proving parity.
+
 ## Acceptance
 
-- [ ] launcher exists in the staged closure, auto-rolls (proven by a test faking two cached versions)
-- [ ] no janitor import in the launcher beyond the resolver; server contract = argv only
-- [ ] double-ownership window covered by chore-coordination; test pinned
-- [ ] pytest, ruff, mypy clean; peer notified with path + contract
+- [x] launcher auto-rolls through the stub's own verified walk (argv-pass-through pinned
+      end-to-end against the REAL stub with a fake cached version); no new staged file — the
+      staged stub is the launcher
+- [x] no janitor import server-side; server contract = argv only
+      (`dispatcher-stub.py --run-cold-cache-clear`)
+- [x] double-ownership pinned: the daemon yields `cold-cache-clear` the tick the server's
+      beat claims it (named test); clear cooldown stays the backstop
+- [x] pytest (15600 green, full suite), ruff, mypy, pyright clean; peer notified with the
+      contract (SendMessage after commit)
+
+Gate to `complete`: the hub wires its lane to the contract and one armed beat is observed
+end-to-end (their side; they were waiting only on this).
 
 ## Approval log
