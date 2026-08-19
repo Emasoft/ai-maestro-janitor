@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: todo
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-19T05:52:00+0200
+updated: 2026-08-19T06:55:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -17,7 +17,24 @@ eht: []
 
 # Remaining missed shapes from the fence-mask replacement (XOITBRIZ follow-on)
 
-## ⏵ STATE — 2026-08-19: free pool RECOVERED; a fresh BLIND corpus generation is RUNNING (background)
+## ⏵ STATE — 2026-08-19 ~06:55: generation STOPPED — pool degraded to timeouts; box-1 blind set is PARTIAL
+
+The background regen ran 12/32 classes then the free pool degraded to per-call TIMEOUTs (c13,
+c14 both hit the 900s ceiling with no completion in ~30 min). Stopped it (`TaskStop bne4zye4w`)
+rather than hammer the fleet-contended pool for ~2 more hours to produce a set STILL missing the
+classes this card needs. Captured this run (12 `.path` files in `tests/agent_context_bench/out/`,
+blind, preserved — a future full run's `[ -d out ] && mv out out.pre-vawikrk2.<ts>` moves them
+aside, never clobbers): authority-override … through `mcp-annotation-lying` (c12), **including
+`dynamic-exec-in-body` (c09)** — one of the two target classes. **NOT captured:
+`two-step-code-injection` (c20) and `benign`** (both sit behind the c13 timeout wall), so the
+out-of-sample recall + 0-FP measurement CANNOT be run yet.
+
+**RE-RUN when the pool is quiet** (or targeted: the two attack classes + benign only — but keep
+it BLIND, intent-only from `classes.tsv`, no shape-enrichment). Do NOT measure on the partial set
+and quote a recall number — a set missing two-step + benign would understate coverage and has no
+FP baseline. The blocker is now pool AVAILABILITY at generation time, not the feature.
+
+## ⏵ STATE — 2026-08-19: free pool RECOVERED; a fresh BLIND corpus generation is RUNNING (background)  *(superseded above — pool degraded mid-run)*
 
 The only thing blocking this card was the fleet-contended free pool (same 429 that failed the
 PXP08ZQC probe). Re-probed 2026-08-19 ~05:51 → `llm-ext chat` rc=0, free model resolved. So the
