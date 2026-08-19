@@ -141,6 +141,31 @@ def _save_streaks(path: Path, streaks: dict[str, int]) -> None:
         pass
 
 
+def _pid_alive(pid: int) -> bool:
+    """True iff a process with `pid` currently exists (TRDD-JEEQCHFG box 2).
+
+    `os.kill(pid, 0)` sends NO signal — signal 0 only probes existence + permission:
+    success or `PermissionError` (the process exists but is not ours — still alive)
+    mean alive; `ProcessLookupError` means gone. A malformed/absurd pid can never name a
+    real runaway, so treat it as gone.
+
+    Test seam: an injected `JANITOR_PS_SNAPSHOT` carries SYNTHETIC pids that do not exist
+    on the host, so trust them (the same seam `_gather_ps_snapshot` reads) — otherwise
+    every streak/emit e2e test would need a real runaway process. The filter's own logic
+    is unit-tested against a captured snapshot via `dr.alive_findings`."""
+    if os.environ.get("JANITOR_PS_SNAPSHOT") is not None:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, ValueError, OSError):
+        return False
+    return True
+
+
 def main() -> int:
     state.init_state()
 
@@ -208,6 +233,19 @@ def main() -> int:
         # Nothing over the bar this beat — forget the dedupe key so a FUTURE runaway
         # (even by the same process/command) re-arms instead of staying deduped
         # against an episode that already cleared.
+        dedupe.emit_forget(seen, "runaway")
+        state.rotate_log_if_big(_LOG)
+        return 0
+
+    # Re-validate at REPORT time (TRDD-JEEQCHFG box 2): the `ps` snapshot above names a
+    # pid that can EXIT before we emit — a peer observed an alarm naming a dead pid,
+    # which is a defect under any metric. Drop findings whose process is already gone.
+    # The streak map is left as saved: a pid absent from the NEXT snapshot drops out
+    # normally, and a best-effort emit-time probe must not rewrite persisted state.
+    reportable = dr.alive_findings(reportable, _pid_alive)
+    if not reportable:
+        # Every over-the-bar process exited between snapshot and emit — same handling as
+        # nothing over the bar: forget the dedupe key so a genuine future runaway re-arms.
         dedupe.emit_forget(seen, "runaway")
         state.rotate_log_if_big(_LOG)
         return 0

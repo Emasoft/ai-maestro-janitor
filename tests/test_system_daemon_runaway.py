@@ -226,6 +226,23 @@ def test_streak_key_carries_the_command_so_a_recycled_pid_cannot_inherit_it() ->
     assert streaks == {"74805:node": 1}
 
 
+def test_alive_findings_drops_a_pid_that_exited_before_emit() -> None:
+    """TRDD-JEEQCHFG box 2: a `ps` snapshot names a pid that can exit before the alarm
+    is printed, and naming a dead pid is a defect under any metric. `alive_findings`
+    keeps only the still-live findings, using a caller-supplied liveness probe so the
+    syscall stays out of the pure layer and the filter is testable with a fake."""
+    text = (
+        f"111 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/still-alive\n"
+        f"222 1 {_RSS_MB_39GB * 1024} 1.0 /usr/sbin/already-gone\n"
+    )
+    findings, _ = dr.classify_runaway(_rows(text), disk_free_pct=50.0, rss_threshold_mb=4096.0)
+    assert {f.pid for f in findings} == {111, 222}
+    kept = dr.alive_findings(findings, pid_alive=lambda p: p == 111)
+    assert [f.pid for f in kept] == [111]
+    # An empty result when every offender exited is a valid, silent outcome.
+    assert dr.alive_findings(findings, pid_alive=lambda p: False) == []
+
+
 def test_cpu_drift_line_names_the_metrics_window() -> None:
     """A reader who cross-checks with `top` and sees 0.8% must be able to reconcile the
     two numbers from the line itself, instead of concluding the detector is lying."""

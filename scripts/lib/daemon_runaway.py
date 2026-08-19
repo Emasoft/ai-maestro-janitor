@@ -19,6 +19,7 @@ returns).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # The FS-event + Spotlight class the parent incident belongs to (TRDD-ZNN0UK5K was
@@ -194,6 +195,23 @@ def sustained_findings(
         if streak >= min_streak:
             reportable.append(finding)
     return reportable, streaks
+
+
+def alive_findings(
+    findings: list[Finding], pid_alive: Callable[[int], bool]
+) -> list[Finding]:
+    """Drop findings whose pid no longer exists at REPORT time (TRDD-JEEQCHFG box 2).
+
+    A `ps` snapshot names a pid that can EXIT before the alarm is emitted — a peer
+    observed an alarm naming a pid that no longer existed, which is a defect under any
+    metric. Re-check each finding's pid against a caller-supplied liveness probe (the
+    detector passes an `os.kill(pid, 0)` existence check; a test passes a fake) and keep
+    only the still-live ones. Best-effort by nature — the pid can still exit
+    microseconds later — but it removes the observed case where the process was ALREADY
+    gone when the line was printed. PURE: the syscall lives in the caller's `pid_alive`,
+    so this stays testable against a captured snapshot like the rest of the module.
+    """
+    return [f for f in findings if pid_alive(f.pid)]
 
 
 def format_drift_line(
