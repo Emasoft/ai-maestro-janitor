@@ -1,9 +1,9 @@
 ---
 trdd-id: TIZHEPNC
 title: Remove user-plugins-update from SERVER_ABSORBED_TASKS — the harness self-updates plugins, the absorbed loop duplicated it
-column: testing
+column: complete
 created: 2026-08-19T00:22:41+0200
-updated: 2026-08-19T00:50:00+0200
+updated: 2026-08-19T20:24:00+0200
 implementation-commits: [fbed874a]
 current-owner: janitor-main-session
 task-type: refactor
@@ -83,3 +83,5 @@ use on the fleet; awaiting.
 ## STATE — 2026-08-19: SHIPPED (fbed874a), `todo → testing`. Rides the next publish. Report the SHA to the ai-maestro-fd peer (done via SendMessage).
 
 ## Approval log
+
+- 2026-08-19T20:24:00+0200 — CLOSED (testing → complete) by janitor-main-session under the standing USER delegation. All 5 acceptance boxes ticked at authoring; the change SHIPPED in v3.3.17 (released, CI Release+Notify green, installed locally 3.3.17, cache tag-diff 0 missing). The follow-on retirement of the chore itself is TRDD-E39YT9G6 (3.3.18).
