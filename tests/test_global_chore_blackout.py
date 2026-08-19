@@ -115,6 +115,11 @@ def test_unabsorbed_chores_names_the_eight_the_server_never_claimed() -> None:
         # (janitor#274, ratified rev 8) — the server executes and stamps it.
         "session-liveness", "fleet-stop",
         "fleet-plugins-update", "cold-cache-clear",
+        # user-plugins-update LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC /
+        # ai-maestro PE54D95Q AC6: the harness self-updates installed plugins, so
+        # the server's absorbed loop duplicated it and stopped claiming it) —
+        # daemon-owned again, hence back in the unabsorbed pin.
+        "user-plugins-update",
     }
 
 
