@@ -3,7 +3,7 @@ trdd-id: E39YT9G6
 title: Retire user-plugins-update from GLOBAL_CHORES — the daemon-side fleet sweep is superseded by the server lane
 column: todo
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-19T20:15:22+0200
+updated: 2026-08-19T20:30:25+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: normal
@@ -19,12 +19,31 @@ eht: []
 ## Why
 
 Design answer given to the ai-maestro hub on 2026-08-19 (absorption thread, follows
-TRDD-TIZHEPNC which already removed it from SERVER_ABSORBED_TASKS): the 77-plugin
-`claude plugin update` sweep belongs to the server lane, not the janitor daemon. The
-2026-08-19 incident record (TRDD-4OFMHOZ7) shows why the daemon-side sweep is a liability
-under load: serial spawns each timing out, a 2184 s child killed by the workload cap
-(rc=-9), all on a host already at memory pressure — while the hub runs the same chore in
-its own lane. One owner, not two.
+TRDD-TIZHEPNC which already removed it from SERVER_ABSORBED_TASKS). PREMISE, stated
+precisely (the first draft of this card said "the server lane owns it" — WRONG: the server
+DELETED its own loop in PE54D95Q AC6): **the HARNESS owns plugin self-updates** —
+`autoUpdate:true` refreshed catalogs upgrade installed plugins with no janitor and no
+server involved (measured 261/261; this repo rolled 3.3.15→3.3.16 with the server down).
+So the sweep should exist NOWHERE — the server already dropped its copy; this card drops
+the daemon's. The 2026-08-19 incident record (TRDD-4OFMHOZ7) shows what the daemon-side
+sweep costs under load: serial spawns each timing out, a 2184 s child killed by the
+workload cap (rc=-9), on a host already at memory pressure — all duplicating work the
+harness does anyway.
+
+## Measured consumer inventory (recon 2026-08-19 20:29 — the sweep list below is grounded in this)
+
+Scripts naming the chore: `daemon.py` (Task row :2185, `task_user_plugins_update` ~:460-520,
+requests-consumer gate :2737 — KEEP the consumer), `lib/harness_backend.py` (GLOBAL_CHORES),
+`lib/claimed_chore_watch.py` (historical comment), `lib/daemon_watchdog.py`,
+`lib/fleet_plugin_updates.py`, `dispatch.py`, `identify_environment.py`,
+`detectors/user-plugins-update.py`, `detectors/local-plugins-update.py`,
+`detectors/global-chore-blackout.py`, `detectors/marketplace-refresh.py` (its comment says
+its only consumer is this chore — decide marketplace-refresh's fate explicitly, do not
+orphan it silently). Tests: test_control_dir_flags, test_claimed_chore_watch,
+test_chore_coordination, test_daemon_bulk_lane, test_daemon_integration,
+test_harness_exclusion, test_daemon_fleet_plugins_update, test_user_plugins_update_stale,
+test_global_chore_blackout. ~15+ files ⇒ run as PHASED work (≤5 files/phase, verify
+between), not a single pass.
 
 ## What (sweep — every consumer, per check-all-files-after-breaking-change)
 
@@ -37,7 +56,8 @@ its own lane. One owner, not two.
    surface; sweep ALL references: tests (test_chore_coordination, test_global_chore_blackout
    pins), docs, memory pages (janitor-beat-tasks-and-limitations, janitor-fleet-control-plane),
    rules-reference, skills.
-4. Bump-time note in CHANGELOG: the chore is retired, not absorbed — the server owns it.
+4. Bump-time note in CHANGELOG: the chore is retired, not absorbed — the HARNESS
+   self-updates plugins; neither daemon nor server runs a sweep.
 
 ## Acceptance
 
