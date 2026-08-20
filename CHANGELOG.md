@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.19] — 2026-08-20
+
+### Bug Fixes
+
+- **audit:** NO_PR_REVIEW honours the builder's conditional-PR ruling (janitor#283, TRDD-KDLJ04AM) (98a3876)
+
+### Documentation
+
+- Add TRDD-BEXY5KIP (server reload-signal consumer) + TRDD-BEIG83VR (publish stage-10 index.lock recovery gap, fired live tonight) (98e159a)
+- Add TRDD-KDLJ04AM (janitor#283 NO_PR_REVIEW false positive, verified) + TRDD-XWWRE9V0 (janitor#282 refined — guard lane fixed in 3.3.17, the FLEET audit lane is the content-blind residue) (5d50cc3)
+- TRDD-KDLJ04AM todo → testing — shipped (98a38760), janitor#283 closed (c4625a0)
+- TRDD-XWWRE9V0 todo → testing — shipped (068d1574) (85efbbe)
+- Refuse TRDD-CJ4ZFTSF — the KDLJ04AM false-positive class; approving would re-impose the ruling-removed PR rule (8f2ff63)
+
+### Features
+
+- **dispatch:** Server-lane cold-cache-clear via the existing stub — dispatch.py --run-cold-cache-clear (TRDD-9ZPU69UC) (1d5a3b1)
+- **reload:** Consume the server-published plugins-updated signal (TRDD-BEXY5KIP) (4e7c005)
+- **audit:** BASELINE_CONTENT_DRIFT — the fleet lane's content half (janitor#282, TRDD-XWWRE9V0) (068d157)
+
+### Refactor
+
+- **daemon:** Retire the user-plugins-update sweep — the harness self-updates plugins (TRDD-E39YT9G6) (e3b0ec8)
 ## [3.3.18] — 2026-08-19
 
 ### Bug Fixes
@@ -17,6 +40,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-4OFMHOZ7:** Hub cross-check — one confirmed overlapping writer (hub update 09:50:18-34, exit 0); initial truncator unattributable; per-target stamps offer accepted (4ce17e1)
 - **TRDD-VAWIKRK2:** Resume-run drained 32/32 to a verdict — 21 captured, 11 at the 900s ceiling; diagnosis corrected from pool-availability to ceiling-vs-class-weight (c13/c14/c19/c20 reproduced on a quiet pool) (48889c2)
 - **TRDD-4OFMHOZ7:** Dev → blocked — the one open half (upstream harness issue) awaits the USER's explicit word (repo not owned by this gh auth) (391b37b)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.18 (92d78c8)
 ## [3.3.17] — 2026-08-19
 
 ### Bug Fixes
