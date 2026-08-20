@@ -19,6 +19,7 @@ REAL `git` — no mocks, because the whole behaviour under test is what `git sta
 from __future__ import annotations
 
 import ast
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -362,3 +363,60 @@ def test_release_notes_are_hard_capped_at_120000_chars(tmp_path: Path) -> None:
     assert len(notes) <= publish._RELEASE_NOTES_MAX_CHARS
     assert "truncated" in notes
     assert "CHANGELOG.md" in notes
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-BEIG83VR — stage-10 index.lock recovery at the WRITER site
+#
+# The pre-flight `clear_stale_index_lock(root)` that already runs before the
+# add+commit keeps its 30-minute age floor, and correctly so: an observer cannot
+# tell a fresh orphan from a live writer. That is exactly why it did NOT save the
+# v3.3.18 release on 2026-08-20 00:32 — the blocking lock was seconds old, came
+# back "too-young", and git failed with exit 128. These tests pin the writer-site
+# retry that covers it: after git itself refuses, the lock is definitively
+# blocking, so the age heuristic (and only that one) is dropped.
+#
+# Real git, real lsof, real ps — the guard's whole value is environment shape.
+# --------------------------------------------------------------------------- #
+
+_REAL_BINARIES = all(shutil.which(b) for b in ("git", "lsof", "ps"))
+_needs_binaries = pytest.mark.skipif(
+    not _REAL_BINARIES, reason="git, lsof and ps must be on PATH — the guard probes them for real"
+)
+
+
+@_needs_binaries
+def test_orphaned_index_lock_is_removed_and_the_write_retried(repo: Path) -> None:
+    """A fresh 0-byte orphan lock (no holder, no live git) is removed once and the add succeeds."""
+    (repo / "notes.md").write_text("changed\n", encoding="utf-8")
+    lock = repo / ".git" / "index.lock"
+    lock.touch()
+    assert lock.stat().st_size == 0
+
+    publish._git_write_or_recover_lock(["git", "add", "--", "notes.md"], repo)
+
+    assert not lock.exists(), "the orphan lock must be gone after recovery"
+    assert "notes.md" in _git(repo, "diff", "--cached", "--name-only")
+
+
+@_needs_binaries
+def test_a_held_index_lock_is_never_removed_and_the_write_fails_loudly(repo: Path) -> None:
+    """A lock this process holds OPEN is a live writer's — refuse, exit non-zero, leave it."""
+    (repo / "notes.md").write_text("changed\n", encoding="utf-8")
+    lock = repo / ".git" / "index.lock"
+    with lock.open("w") as holder:  # a REAL open fd, which real lsof reports
+        holder.write("x")
+        holder.flush()
+        with pytest.raises(SystemExit) as exc:
+            publish._git_write_or_recover_lock(["git", "add", "--", "notes.md"], repo)
+        assert exc.value.code != 0
+        assert lock.exists(), "a held lock must survive — removing it would corrupt a live write"
+
+
+@_needs_binaries
+def test_a_failure_that_is_not_a_lock_collision_is_not_retried(repo: Path) -> None:
+    """A non-128 git failure exits with ITS code — the recovery must not swallow other errors."""
+    with pytest.raises(SystemExit) as exc:
+        publish._git_write_or_recover_lock(["git", "add", "--", "no-such-file.md"], repo)
+    assert exc.value.code != 0
+    assert not (repo / ".git" / "index.lock").exists()

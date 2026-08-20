@@ -289,6 +289,39 @@ def run(
     return result
 
 
+def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
+    """Run a git WRITE command; on an `index.lock` collision, recover ONCE and retry.
+
+    The pre-flight `clear_stale_index_lock(root)` at the call site cannot cover this
+    case, and that is by design: its 30-minute age floor exists because an OBSERVER
+    cannot tell a fresh orphan from a live writer mid-write. THIS caller can — git has
+    just refused with exit 128 and the lock is still on disk, which is positive
+    evidence that nothing is going to release it. So the retry drops the age heuristic
+    and ONLY the age heuristic: the lsof holder probe and the live-git process scan
+    still run inside `clear_stale_index_lock` and still fail closed, so a lock a real
+    git process holds is never removed.
+
+    Measured 2026-08-20 00:32 (TRDD-BEIG83VR): a 0-byte orphan with no holder was
+    "too-young" for the pre-flight, rc=128'd the v3.3.18 release at stage 10, and cost
+    a human `rm` plus restoring five half-written bump files before a full re-run.
+    """
+    result = run(cmd, cwd=root, check=False)
+    if result.returncode == 0:
+        return
+    lock = root / ".git" / "index.lock"
+    if result.returncode == 128 and lock.is_file():
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+        import git_utils  # noqa: PLC0415 -- local import; publish.py has no lib deps at top
+        # min_age_s=0.0 disables ONLY the age guard (see above); every other guard holds.
+        if git_utils.clear_stale_index_lock(root, min_age_s=0.0) == "removed":
+            cprint(f"  {YELLOW}Removed an orphaned .git/index.lock that blocked "
+                   f"{' '.join(cmd)} (no holder, no live git) — retrying once.{NC}")
+            run(cmd, cwd=root)
+            return
+    cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
+    sys.exit(result.returncode)
+
+
 def _readonly_git_env() -> dict[str, str]:
     """Env for a READ-ONLY git subprocess (status/diff/show/log/config --get/...).
 
@@ -2199,8 +2232,8 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         if git_utils.clear_stale_index_lock(root) == "removed":
             cprint(f"  {YELLOW}Recovered a stale orphaned .git/index.lock "
                    f"(janitor#245 guards all clear) before committing.{NC}")
-        run(["git", "add", "--", *to_stage], cwd=root)
-        run(["git", "commit", "-m", expected_subject], cwd=root)
+        _git_write_or_recover_lock(["git", "add", "--", *to_stage], root)
+        _git_write_or_recover_lock(["git", "commit", "-m", expected_subject], root)
 
     if tag_exists:
         cprint(f"  {YELLOW}Tag {tag} already exists locally — skipping tag step.{NC}")
