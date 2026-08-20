@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import gh_notify_inbox  # noqa: E402  # the fleet-wide inbox SSOT (TRDD-079778RM)
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
@@ -117,30 +118,44 @@ def main() -> int:
         # The poller could not even report its own state dir — treat as unavailable.
         return 0
 
-    # The machine-wide floor (janitor#215): both the baseline call below and the real
-    # poll a few lines down issue a `gh api notifications` request, so the gate sits
-    # BEFORE either — checking it only in front of the real poll would still let every
-    # project's first-fire baseline call through uncapped.
+    # THE INBOX LANE (TRDD-079778RM). When the daemon has recently published the
+    # account's notifications, read those instead of competing for the poll token: the
+    # list is ACCOUNT-scoped and so identical for every project, while the registry that
+    # filters it is per-project. No `gh` call means no floor to respect, so EVERY armed
+    # project gets served on EVERY fire — which is the actual fix. Under the old
+    # first-come token, 40 armed projects produced 3 non-deferred polls in the entire log.
+    #
+    # FAIL-OPEN: no inbox, a stale one (daemon down, chore absorbed by the ai-maestro
+    # server), or a corrupt one all fall through to the original gated path below, so this
+    # can never make the lane worse than it was.
     now = int(time.time())
-    if not _global_gate_allows(now):
-        state.log_line(
-            _DETECTOR,
-            "deferred — machine-wide poll floor not yet elapsed (janitor#215)",
-        )
-        return 0
-    _mark_global_poll(now)
+    inbox_extra: list[str] = []
+    if gh_notify_inbox.is_fresh(now):
+        inbox_extra = ["--from-inbox"]
+    else:
+        # The machine-wide floor (janitor#215): both the baseline call below and the real
+        # poll a few lines down issue a `gh api notifications` request, so the gate sits
+        # BEFORE either — checking it only in front of the real poll would still let every
+        # project's first-fire baseline call through uncapped.
+        if not _global_gate_allows(now):
+            state.log_line(
+                _DETECTOR,
+                "deferred — machine-wide poll floor not yet elapsed (janitor#215)",
+            )
+            return 0
+        _mark_global_poll(now)
 
     # FIRST FIRE: adopt the current notification state and say NOTHING. The retired
     # enable-skill ran `--baseline` as its step 1 for exactly this reason. Without it the
     # first poll on a project would replay every already-read thread that happens to be
     # in the registry as if it were a fresh reply.
     if not (sdir / "state.json").exists():
-        state.run_subprocess(_poll_argv("--baseline"), detector_name=_DETECTOR)
+        state.run_subprocess(_poll_argv("--baseline", *inbox_extra), detector_name=_DETECTOR)
         state.log_line(_DETECTOR, "first fire — baselined the notification cursor, reporting from the next fire")
         state.rotate_log_if_big(_DETECTOR)
         return 0
 
-    proc = state.run_subprocess(_poll_argv(), detector_name=_DETECTOR)
+    proc = state.run_subprocess(_poll_argv(*inbox_extra), detector_name=_DETECTOR)
     if proc is None or proc.returncode != 0:
         # gh missing / not authed / rate-limited / offline. Stay silent: this is a
         # notification feature, not a broken-tooling alarm on every fire. (The poller

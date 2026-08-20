@@ -39,6 +39,10 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import gh_notify_inbox  # noqa: E402  # the fleet-wide inbox SSOT (TRDD-079778RM)
+
 STATE_VERSION = 3
 SEEN_TTL_DAYS = 30
 # Overlap the `since` window so a thread updated in the same second as the last
@@ -297,19 +301,84 @@ def do_list() -> int:
     return 0
 
 
-def do_poll(args) -> int:
-    reg = load_registry()
-    st = load_state()
-    now = datetime.now(timezone.utc)
+def do_write_inbox(args) -> int:
+    """Fetch the account's notifications ONCE and publish them for every project to read.
 
+    The daemon's half of TRDD-079778RM. Project-independent by construction: it touches no
+    `registry.json` and no per-project cursor, so it can run from a daemon that has no
+    project of its own. Its own `since` cursor lives beside the inbox rather than in a
+    project's state dir, for the same reason.
+
+    Errors are SILENT here. This runs on a 60 s daemon cadence, so a broken token would
+    otherwise write a line every minute forever; readers already surface a degraded lane
+    on their own by falling back to a direct poll and reporting through the existing path.
+    """
+    inbox_state = _read_json_at(gh_notify_inbox.inbox_path().parent / "gh-notify-inbox.cursor", {})
+    now = datetime.now(timezone.utc)
     query = f"notifications?all=true&per_page={args.limit}"
-    if st["since"] and not args.baseline:
-        since = datetime.fromisoformat(st["since"].replace("Z", "+00:00")) - timedelta(
+    since_raw = (inbox_state or {}).get("since")
+    if since_raw:
+        since = datetime.fromisoformat(str(since_raw).replace("Z", "+00:00")) - timedelta(
             seconds=OVERLAP_SECONDS
         )
         query += f"&since={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
 
     threads, err = gh_api(query)
+    if err or not isinstance(threads, list):
+        return 0
+    if not gh_notify_inbox.write(threads):
+        return 0
+    # Advance the cursor ONLY after a successful publish, so a failed write is refetched
+    # next tick instead of being skipped forever.
+    _write_json_at(
+        gh_notify_inbox.inbox_path().parent / "gh-notify-inbox.cursor",
+        {"since": now.strftime("%Y-%m-%dT%H:%M:%SZ")},
+    )
+    return 0
+
+
+def _read_json_at(path, default):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def _write_json_at(path, payload) -> None:
+    try:
+        os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        os.replace(tmp, str(path))
+    except (OSError, ValueError):
+        pass  # best-effort cursor; a lost cursor costs one redundant full fetch
+
+
+def do_poll(args) -> int:
+    reg = load_registry()
+    st = load_state()
+    now = datetime.now(timezone.utc)
+
+    # INBOX MODE (TRDD-079778RM): take the account-scoped thread list from the fleet-wide
+    # inbox instead of calling `gh`. Everything below this point — the per-project registry
+    # filter, the `seen` dedupe, the emitted line — is untouched, which is the whole point:
+    # only the SOURCE of the list changes, so the surfacing logic that already works is not
+    # re-implemented. `since` is not applied here because the inbox is already a retention
+    # window and `seen` is what actually prevents re-emission.
+    if getattr(args, "from_inbox", False):
+        threads: object = gh_notify_inbox.read_threads()
+        err = None
+    else:
+        query = f"notifications?all=true&per_page={args.limit}"
+        if st["since"] and not args.baseline:
+            since = datetime.fromisoformat(st["since"].replace("Z", "+00:00")) - timedelta(
+                seconds=OVERLAP_SECONDS
+            )
+            query += f"&since={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+
+        threads, err = gh_api(query)
 
     if err:
         # Silence is not success: surface the failure ONCE, then stay quiet until
@@ -384,11 +453,17 @@ def main() -> int:
                     help="skip the extra call that fetches the replying comment")
     ap.add_argument("--limit", type=int, default=50, help="max threads per poll (default 50)")
     ap.add_argument("--state-dir", action="store_true", help="print the state dir and exit")
+    ap.add_argument("--write-inbox", action="store_true",
+                    help="daemon mode: fetch notifications once and publish the fleet-wide inbox")
+    ap.add_argument("--from-inbox", action="store_true",
+                    help="read threads from the fleet-wide inbox instead of calling gh")
     args = ap.parse_args()
 
     if args.state_dir:
         print(state_dir())
         return 0
+    if args.write_inbox:
+        return do_write_inbox(args)
     if args.list:
         return do_list()
     if args.register:

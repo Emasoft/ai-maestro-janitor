@@ -109,6 +109,12 @@ GLOBAL_CHORES: dict[str, tuple[str, int]] = {
     "session-liveness": ("CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL", 120),
     "fleet-stop": ("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_STOP_INTERVAL", 60),
     "cold-cache-clear": ("CLAUDE_PLUGIN_OPTION_DAEMON_COLD_CACHE_CLEAR_INTERVAL", 300),
+    # TRDD-079778RM. UNABSORBED deliberately: the server cannot execute a lane it has never
+    # heard of, and absorbing it would mean nothing writes the inbox on a server host while
+    # the roster claims someone does. Left unabsorbed, the daemon keeps fetching wherever it
+    # runs, and where it is suppressed the readers' own staleness check degrades them to the
+    # pre-existing gated poll — the same starvation as before, never a silence worse than it.
+    "gh-notify-inbox": ("CLAUDE_PLUGIN_OPTION_DAEMON_GH_NOTIFY_INBOX_INTERVAL", 60),
 }
 
 

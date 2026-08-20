@@ -115,6 +115,14 @@ def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
         # (janitor#274, ratified rev 8) — the server executes and stamps it.
         "session-liveness", "fleet-stop",
         "fleet-plugins-update", "cold-cache-clear",
+        # `gh-notify-inbox` joined 2026-08-20 as the NINTH (TRDD-079778RM), by the same
+        # discipline: the tripwire fired and the honest answer is that the server does not
+        # claim it — it is a brand-new lane the server has never heard of. Unlike the others
+        # this blackout is BENIGN: every reader checks the inbox's age and falls back to the
+        # pre-existing machine-wide gated poll when nobody is fetching, so a server host gets
+        # exactly the behaviour it had before this chore existed. The blackout costs the
+        # IMPROVEMENT, not the feature — which is why it is listed rather than absorbed.
+        "gh-notify-inbox",
         # user-plugins-update briefly returned here 2026-08-19 (TRDD-TIZHEPNC) and was
         # then RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the
         # harness self-updates installed plugins, so no sweep exists to be absorbed OR

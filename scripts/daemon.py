@@ -189,6 +189,14 @@ _INTERVAL_COLD_CACHE_CLEAR = _env_interval(
 #  A cadence just under the common `*/5` heartbeat, so a session that goes cold is normally
 #  reached within one beat of its own next fire. Steady state is cheap: a ps scan plus, per
 #  candidate, a local transcript-age read — the expensive probe only runs once those pass.
+# One fleet-wide notification fetch per GitHub poll window (TRDD-079778RM). 60 s is the
+# `X-Poll-Interval` GitHub returns for `GET /notifications`, and because this is now the
+# ONLY caller on the host, the account's poll rate equals this interval no matter how many
+# projects are armed — which is exactly what the old per-project race could not guarantee.
+_INTERVAL_GH_NOTIFY_INBOX = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_GH_NOTIFY_INBOX_INTERVAL", 60
+)
+
 _INTERVAL_RULES_CLEANUP = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
@@ -1855,6 +1863,45 @@ def task_cold_cache_clear() -> None:
     cold_cache_clear_task.run_once()
 
 
+def task_gh_notify_inbox() -> None:
+    """Fetch the account's GitHub notifications ONCE, fleet-wide, for every project to read.
+
+    TRDD-079778RM. `GET /notifications` carries `X-Poll-Interval: 60` scoped to the ACCOUNT,
+    and all N armed projects on this host share one owner identity — so the rate had to be
+    capped machine-wide, and it was, with a single first-come stamp (janitor#215). The cap
+    was right and the mechanism starved everyone: with 40 armed projects firing on
+    synchronised 5-minute cron boundaries, the same early project won the token nearly every
+    round and the whole `gh-reply-watch.log` held 3 non-deferred polls. The lane logged an
+    entry every heartbeat while doing nothing, so a reply could sit unseen for weeks.
+
+    The daemon is the right owner precisely because it is the host's singleton: one fetch
+    here satisfies every project at once, instead of N projects competing to make the SAME
+    account-scoped request. Projects keep their own `registry.json` filter, so sharing the
+    fetch shares no data between them — no project's registry gains an entry, so no project
+    can see another's threads.
+
+    Runs in the foreground: it is one bounded HTTP call with a hard timeout, so it does not
+    belong in the bulk lane where a 20-minute workload could delay it behind marketplace
+    refreshes. Fail-open and SILENT — readers detect a stale inbox themselves and fall back
+    to the old gated direct poll, so a broken token degrades the lane to its previous
+    behaviour rather than spamming a log line every 60 s.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_GH_REPLY_WATCH_ENABLED", True):
+        return
+    poller = _HERE / "gh_issues_monitor" / "gh_notify_poll.py"
+    if not poller.is_file():
+        return
+    try:
+        subprocess.run(  # noqa: S603 - explicit args, no shell
+            ["uv", "run", "--script", "--quiet", str(poller), "--write-inbox"],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass  # a failed fetch just leaves the inbox to age out into the fallback path
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -2075,6 +2122,7 @@ def _build_tasks() -> list[Task]:
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
         Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
         Task("cold-cache-clear", _INTERVAL_COLD_CACHE_CLEAR, task_cold_cache_clear),
+        Task("gh-notify-inbox", _INTERVAL_GH_NOTIFY_INBOX, task_gh_notify_inbox),
     ]
 
 
