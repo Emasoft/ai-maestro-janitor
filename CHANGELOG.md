@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.20] — 2026-08-20
+
+### Bug Fixes
+
+- **session-start:** Stop telling the USER to run /janitor-arm (TRDD-HC7CQT10) (4515ca1)
+
+### Documentation
+
+- Add TRDD-OZNG3N2D + TRDD-6CCQ6T7V — consumer cards for the hub's activity and update-trail verbs (d7c1517)
 ## [3.3.19] — 2026-08-20
 
 ### Bug Fixes
@@ -21,6 +30,10 @@ All notable changes to this project will be documented in this file.
 - **dispatch:** Server-lane cold-cache-clear via the existing stub — dispatch.py --run-cold-cache-clear (TRDD-9ZPU69UC) (1d5a3b1)
 - **reload:** Consume the server-published plugins-updated signal (TRDD-BEXY5KIP) (4e7c005)
 - **audit:** BASELINE_CONTENT_DRIFT — the fleet lane's content half (janitor#282, TRDD-XWWRE9V0) (068d157)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.19 (9ff0195)
 
 ### Refactor
 
