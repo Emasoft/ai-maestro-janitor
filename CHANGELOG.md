@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.24] — 2026-08-20
+
+### Bug Fixes
+
+- **memory:** Tier-shape must test a HEADING line, not a raw substring (janitor#284) (4a2ea0a)
 ## [3.3.23] — 2026-08-20
 
 ### Bug Fixes
@@ -10,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - **memory:** Claim only YOUR chore's dispatch (janitor#275, closes #280 + #273) (3f3fc77)
 - **hooks:** Invoke the wrapper DIRECTLY — no shell operators, 127 everywhere (09edda5)
 - **hooks:** Name bash explicitly — satisfies the validator AND keeps 127 (7452169)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.23 (5508d63)
 ## [3.3.22] — 2026-08-20
 
 ### Bug Fixes
