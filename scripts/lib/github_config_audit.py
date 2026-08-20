@@ -101,6 +101,14 @@ class RepoFacts:
     rulesets: list[dict] | None = None   # FULL per-ruleset detail dicts (with 'rules'); None = probe failed
     classic_protected: bool | None = None  # True=200, False=definitive 404, None=indeterminate
     has_workflows: bool | None = None    # whether .github/workflows has any workflow file
+    # Whether the ratified baseline would even EMIT a pull_request rule for this repo —
+    # `branch_protection_lib.require_pull_request_for(slug)`, resolved at GATHER time so the
+    # classifier stays pure (janitor#283 / TRDD-KDLJ04AM). Default True keeps hand-built
+    # facts (and any stale serialized ones) on the old, stricter behavior; the gatherer
+    # always sets it explicitly. False on a solo-owned standalone repo per the USER's
+    # 2026-08-13 ruling — flagging NO_PR_REVIEW there contradicts our own builder, and the
+    # fix path would re-impose the rule the ruling removed.
+    pr_review_expected: bool = True
 
 
 def _active_branch_rulesets(rulesets: list[dict]) -> list[dict]:
@@ -193,7 +201,17 @@ def classify_repo(facts: RepoFacts) -> list[Finding]:
     # still counts (that union already includes resolved rulesets' real rules).
     any_unresolved = any(_detail_unresolved(rs) for rs in branch_rs)
     if branch_rs and not any_unresolved:
-        if "pull_request" not in all_branch_rule_types:
+        # NO_PR_REVIEW only where the baseline BUILDER would emit the rule (janitor#283 /
+        # TRDD-KDLJ04AM): since 36f05aac `baseline_ruleset_payloads` includes `pull_request`
+        # CONDITIONALLY — False on a solo-owned standalone repo (USER Tier-3 ruling
+        # 2026-08-13: GitHub forbids self-approval, so the rule reviews nothing and jams
+        # every merge). This audit emitted the finding UNCONDITIONALLY, so a repo baselined
+        # correctly by our own builder was permanently flagged — and github_config_fix
+        # lists NO_PR_REVIEW as FIXABLE, so acting on the false finding would RE-IMPOSE the
+        # rule the ruling removed. The predicate is the builder's own
+        # `require_pull_request_for`, resolved into `facts.pr_review_expected` at GATHER
+        # time (this classifier is contractually pure — no gh, no I/O).
+        if "pull_request" not in all_branch_rule_types and facts.pr_review_expected:
             findings.append(Finding(facts.slug, "NO_PR_REVIEW", FINDING_BLURB["NO_PR_REVIEW"]))
         # NO_REQUIRED_CHECKS only when CI actually exists (has_workflows True); if there is
         # no CI at all that is the NO_CI finding below, not a missing gate.
@@ -431,6 +449,9 @@ def gather_repo_facts(slug: str) -> RepoFacts:
         rulesets=rulesets,
         classic_protected=classic,
         has_workflows=_has_workflows(slug),
+        # The builder's own conditional-PR ruling, resolved here (gather does gh already)
+        # so the classifier stays pure — janitor#283 / TRDD-KDLJ04AM.
+        pr_review_expected=bpl.require_pull_request_for(slug),
     )
 
 

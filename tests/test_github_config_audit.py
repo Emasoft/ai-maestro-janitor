@@ -414,3 +414,46 @@ def test_staleness_line_withholds_without_implying_clean() -> None:
     assert "Emasoft/ai-maestro-janitor" in line
     # It must carry the live-probe remedy, not leave the reader stuck with a dead payload.
     assert "/janitor-github-config-fix" in line
+
+
+# ---- NO_PR_REVIEW honours the builder's conditional-PR ruling (janitor#283) ----
+
+def test_no_pr_review_is_silent_where_the_builder_omits_the_rule() -> None:
+    """THE janitor#283 fixture: a solo-owned standalone repo (pr_review_expected=False,
+    the gatherer's resolution of require_pull_request_for) with no pull_request rule is
+    BASELINED CORRECTLY by our own builder — flagging it contradicts the SSOT, and the
+    fix path would re-impose the rule the USER's 2026-08-13 ruling removed. This test
+    FAILS on the pre-fix classifier (which emitted the finding unconditionally)."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+        pr_review_expected=False,
+    )
+    assert "NO_PR_REVIEW" not in _codes(facts)
+
+
+def test_no_pr_review_still_fires_where_the_builder_demands_the_rule() -> None:
+    """FALSIFY the fix's over-reach: identical facts with pr_review_expected=True (harness
+    repo / someone else's repo) must still flag the genuinely missing rule."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+        pr_review_expected=True,
+    )
+    assert "NO_PR_REVIEW" in _codes(facts)
+
+
+def test_gatherer_resolves_pr_review_expected_from_the_builder_predicate(monkeypatch) -> None:
+    """ONE predicate, the builder's own: gather_repo_facts must carry
+    require_pull_request_for(slug) into the facts — the classifier is pure and never
+    probes. Both answers are exercised so a hardcoded field cannot pass."""
+    monkeypatch.setattr(gca.bpl, "viewer_is_admin", lambda _s: True)
+    monkeypatch.setattr(gca.bpl, "detect_default_branch", lambda _s: "main")
+    monkeypatch.setattr(gca, "_full_rulesets", lambda _s: [])
+    monkeypatch.setattr(gca, "_classic_protected", lambda _s, _b: None)
+    monkeypatch.setattr(gca, "_has_workflows", lambda _s: False)
+    for answer in (False, True):
+        monkeypatch.setattr(gca.bpl, "require_pull_request_for", lambda _s, _a=answer: _a)
+        assert gca.gather_repo_facts("o/r").pr_review_expected is answer
