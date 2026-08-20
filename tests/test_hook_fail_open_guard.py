@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.real_subprocess("sh", "uv", "python3")
+pytestmark = pytest.mark.real_subprocess("sh", "uv", "python3", "git")
 
 _ROOT = Path(__file__).resolve().parents[1]
 _WRAPPER = _ROOT / "hooks" / "hook-run.sh"
@@ -78,30 +78,46 @@ def test_a_missing_WRAPPER_is_also_non_blocking(tmp_path: Path) -> None:
     design fell into its own trap on Linux: during the very window it exists to protect, a
     vanished wrapper would have denied every tool call.
 
-    The command shape is therefore `test -f <wrapper> && sh <wrapper> <script>`. POSIX fixes
-    `test` at exit 1 for false, on every shell and platform, and 1 is non-blocking — so this
-    no longer depends on how a particular shell reports an unopenable file.
+    The wrapper is therefore invoked DIRECTLY (`<wrapper> <script>`), not as an argument to
+    `sh`. A missing EXECUTABLE is "command not found", which POSIX fixes at 127 on every
+    shell — while `sh <missing FILE>` is the case shells disagree about. Same protection,
+    no platform dependency.
+
+    A `test -f … && sh …` guard also worked, and was rejected for a different reason: it puts
+    shell operators into all 29 hook commands, which the publish security gate reports as 29
+    CRITICAL command-injection findings (measured — it blocked the v3.3.23 release). A single
+    direct invocation has no operators.
     """
     missing = tmp_path / "gone.sh"
-    rc = subprocess.run(
-        ["sh", "-c", f'test -f "{missing}" && sh "{missing}" x'],
-        capture_output=True, text=True, timeout=60,
-    ).returncode
+    rc = subprocess.run(["sh", "-c", f'"{missing}" x'],
+                        capture_output=True, text=True, timeout=60).returncode
     assert rc != _BLOCKING, "a vanished wrapper must never produce the blocking code"
+    assert rc == 127, f"expected POSIX command-not-found, got {rc}"
 
 
-def test_the_shipped_command_shape_guards_the_wrapper_itself() -> None:
-    """hooks.json must use the `test -f … && sh …` form, not a bare `sh <wrapper>`.
+def test_the_shipped_commands_carry_no_shell_operators() -> None:
+    """No `&&`, `||` or `;` in a hook command.
 
-    Pinned in the CONFIG, because the platform difference above is invisible on the
-    maintainer's machine: a bare `sh` form passes every local test and only fails on Linux,
-    which is exactly how it shipped in v3.3.22 and reddened CI.
+    Two independent reasons, both measured: the publish security gate flags a shell compound
+    as CRITICAL command injection (29 findings, one per command, blocking the release), and a
+    compound is harder to reason about at exactly the moment — a half-present plugin dir —
+    when the exit code has to be exactly right.
     """
     cmds = [h["command"]
             for entries in json.loads(_HOOKS_JSON.read_text(encoding="utf-8"))["hooks"].values()
             for e in entries for h in e.get("hooks", [])]
-    bare = [c for c in cmds if not c.startswith("test -f ")]
-    assert not bare, f"these commands do not guard the wrapper's own existence: {bare}"
+    bad = [c for c in cmds if any(op in c for op in ("&&", "||", ";"))]
+    assert not bad, f"hook commands must be a single invocation, got operators in: {bad}"
+
+
+def test_the_wrapper_ships_executable() -> None:
+    """The direct-invocation form REQUIRES the exec bit — without it the shell reports
+    'permission denied' (126), and while 126 is still non-blocking, every hook would silently
+    stop running. Checked against git's recorded mode, not the working copy's, because that
+    is what a cloner and the published package actually receive."""
+    mode = subprocess.run(["git", "ls-files", "-s", "hooks/hook-run.sh"],
+                          cwd=str(_ROOT), capture_output=True, text=True, timeout=60).stdout
+    assert mode.startswith("100755"), f"hooks/hook-run.sh is not tracked as executable: {mode!r}"
 
 
 def test_every_hooks_json_command_goes_through_the_wrapper() -> None:

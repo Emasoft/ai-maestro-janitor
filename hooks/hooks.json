@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.py",
             "timeout": 5
           }
         ]
@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-trdd-state.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-trdd-state.py",
             "timeout": 5
           }
         ]
@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-watchpaths.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-watchpaths.py",
             "timeout": 5
           }
         ]
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-cold-cache-clear.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-cold-cache-clear.py",
             "timeout": 2800
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.py",
             "timeout": 2
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-user-mem.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-user-mem.py",
             "timeout": 30
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-autorecall.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-autorecall.py",
             "timeout": 10
           }
         ]
@@ -72,17 +72,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.py",
             "timeout": 2
           },
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-token-meter.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-token-meter.py",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-proactive-compact.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-proactive-compact.py",
             "timeout": 5
           }
         ]
@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.py",
             "timeout": 2
           }
         ]
@@ -104,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-start.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-start.py",
             "timeout": 3
           }
         ]
@@ -115,7 +115,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-stop.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-stop.py",
             "timeout": 3
           }
         ]
@@ -127,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-pkg-guard.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-pkg-guard.py",
             "timeout": 3
           }
         ]
@@ -137,12 +137,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-agent-generator-guard.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-agent-generator-guard.py",
             "timeout": 3
           }
         ]
@@ -152,7 +152,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-publish-lock.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-publish-lock.py",
             "timeout": 3
           }
         ]
@@ -161,7 +161,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-context-usage.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-context-usage.py",
             "timeout": 5
           }
         ]
@@ -170,7 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-token-budget.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-token-budget.py",
             "timeout": 5
           }
         ]
@@ -182,7 +182,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-safety.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-safety.py",
             "timeout": 3
           }
         ]
@@ -192,12 +192,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-memory-correction.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-memory-correction.py",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-wikimem-lint.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-wikimem-lint.py",
             "timeout": 12
           }
         ]
@@ -207,7 +207,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-mcp-response-sanitizer.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-mcp-response-sanitizer.py",
             "timeout": 3
           }
         ]
@@ -217,7 +217,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/gh_issues_monitor/gh_register_hook.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/gh_issues_monitor/gh_register_hook.py",
             "timeout": 30
           }
         ]
@@ -228,7 +228,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact-handoff.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-compact-handoff.py",
             "timeout": 15
           }
         ]
@@ -239,7 +239,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-resume.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-resume.py",
             "timeout": 10
           }
         ]
@@ -250,7 +250,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-end.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-end.py",
             "timeout": 10
           }
         ]
@@ -261,7 +261,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-config-change.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-config-change.py",
             "timeout": 5
           }
         ]
@@ -272,7 +272,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh && sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-file-changed.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-file-changed.py",
             "timeout": 5
           }
         ]
