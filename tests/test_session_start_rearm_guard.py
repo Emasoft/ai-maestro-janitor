@@ -152,3 +152,11 @@ def test_session_start_skips_replumb_on_clear_when_armed(tmp_path: Path, monkeyp
     """source="clear" + armed → NO re-plumb nudge (same process, live cron survives)."""
     out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="clear")
     assert "re-plumbing" not in out, f"must not re-plumb mid-session on clear, got {out!r}"
+
+
+def test_replumb_line_never_reads_as_a_user_chore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The re-plumb line is rendered to the USER, so it must say no action is required and must
+    NOT carry a slash-command imperative the user's eye reads as an instruction to type."""
+    out = _run_session_start(monkeypatch, tmp_path, flag="armed", source="startup")
+    assert "NO USER ACTION REQUIRED" in out, f"the user must be told nothing is asked of them, got {out!r}"
+    assert "/janitor-arm" not in out, f"a slash command in a user-visible line reads as a chore, got {out!r}"

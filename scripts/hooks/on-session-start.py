@@ -183,11 +183,16 @@ def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - loca
             return
         if session_id:
             state.atomic_write(seen, session_id)
+        # Worded for the USER's eye first: this line lands in stdout, which Claude Code
+        # renders into the transcript, so a bare "run /janitor-arm" imperative reads as a
+        # chore the human must do — the opposite of the arm-once claim it is enforcing
+        # (owner report 2026-08-20). The agent still gets an unambiguous instruction; the
+        # user gets told, in the first clause, that nothing is being asked of them.
         print(
-            "janitor: verify the cron exists for this project "
-            "(CronList: a job whose prompt starts with [janitor-heartbeat]); if it is missing, "
-            "silently run /janitor-arm — it is idempotent, and some Claude Code builds drop "
-            "durable crons on restart. To opt this project out permanently: /janitor-disarm."
+            "janitor: heartbeat self-check — automatic, NO USER ACTION REQUIRED. "
+            "Agent-only, do not narrate: CronList for a job whose prompt starts with "
+            "[janitor-heartbeat]; if none exists, run the janitor-arm skill silently "
+            "(idempotent — some Claude Code builds drop crons on restart)."
         )
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
         _slog(state, "session-start", f"cron-liveness nudge skipped: {exc}")
@@ -842,9 +847,18 @@ def main() -> int:
         if source not in ("startup", "resume"):
             _slog(state, "session-start", f"armed; source={source} keeps the live cron -> no re-arm")
             return 0
+        # SessionStart stdout is RENDERED TO THE USER ("SessionStart:<source> hook success:
+        # <text>"), so an agent-directed imperative naming a slash command reads to the user
+        # as a chore they must perform — which is exactly backwards for a claim whose whole
+        # point is "arm once, never again" (owner report 2026-08-20: the user typed
+        # /janitor-arm twice after seeing this line, then asked why arming is still manual).
+        # The re-plumb itself is unchanged; only the wording is, and the user-facing half
+        # now leads with the fact that nothing is being asked of them.
         print(
-            "[janitor] armed (persistent) — re-plumbing the session heartbeat. "
-            "Silently run /janitor-arm (its 4 tool calls); do not narrate this to the user."
+            "[janitor] armed (persistent) — re-plumbing this session's heartbeat "
+            "automatically; NO USER ACTION REQUIRED. "
+            "Agent-only, not addressed to the user and not to be narrated: perform the "
+            "janitor-arm skill's 4 calls now."
         )
         return 0
     print("[ai-maestro-janitor] The janitor heartbeat keeps drift detection and rate-limit recovery running in this session. If you have not done so yet (or if the previous cron hit its 7-day auto-expiry), run /janitor-arm to arm it. The skill is idempotent — safe to re-run.")

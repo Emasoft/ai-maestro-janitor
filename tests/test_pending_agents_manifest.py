@@ -563,12 +563,17 @@ def test_cron_liveness_nudge_emits_once_per_session(iso, capsys) -> None:
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "sess-1")
     first = capsys.readouterr().out
-    assert "verify the cron exists" in first
-    assert "/janitor-arm" in first
+    assert "heartbeat self-check" in first
+    assert "janitor-arm skill" in first
+    # The line is RENDERED TO THE USER, so it must lead with "nothing is asked of you" and
+    # must not carry a slash-command imperative the user reads as a chore (owner report
+    # 2026-08-20: seeing it twice is why the user believed arming was still manual).
+    assert "NO USER ACTION REQUIRED" in first
+    assert "/janitor-arm" not in first
     hook._cron_liveness_nudge(state, "sess-1")
     assert capsys.readouterr().out == ""  # deduped for the same session
     hook._cron_liveness_nudge(state, "sess-2")
-    assert "verify the cron exists" in capsys.readouterr().out
+    assert "heartbeat self-check" in capsys.readouterr().out
 
 
 def test_cron_liveness_nudge_fires_when_never_armed(iso, capsys) -> None:
@@ -586,7 +591,7 @@ def test_cron_liveness_nudge_fires_when_never_armed(iso, capsys) -> None:
     assert not (state.state_dir() / "heartbeat-armed-at.ts").exists()
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "sess-1")
-    assert "verify the cron exists" in capsys.readouterr().out
+    assert "heartbeat self-check" in capsys.readouterr().out
 
 
 def test_cron_liveness_nudge_silent_when_disarmed(iso, capsys) -> None:
@@ -607,7 +612,7 @@ def test_cron_liveness_nudge_missing_session_id_still_nudges(iso, capsys) -> Non
     state = iso["state"]
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "")
-    assert "verify the cron exists" in capsys.readouterr().out
+    assert "heartbeat self-check" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------- #
