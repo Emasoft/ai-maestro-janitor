@@ -1,9 +1,10 @@
 ---
 trdd-id: 079778RM
 title: gh-reply-watch is starved by the fleet-wide poll token — 3 real polls in 3 weeks
-column: todo
+column: testing
 created: 2026-08-20T19:44:32+0200
-updated: 2026-08-20T19:44:32+0200
+updated: 2026-08-20T23:20:05+0200
+implementation-commits: [b49541f4]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -60,10 +61,55 @@ callers (`dispatch.py`, `gh_register_hook.py`, `gh-reply-watch.py`), all session
 
 ## Acceptance
 
-- [ ] One poll per floor window fleet-wide, regardless of how many projects are armed
-- [ ] Every armed project sees every reply, with a bounded worst-case latency stated in the code
-- [ ] Daemon absent / chore absorbed ⇒ today's behaviour exactly (fail-open, proven by test)
-- [ ] A test that N projects sharing the host all receive a reply, which the current design fails
-- [ ] pytest, ruff, mypy, pyright clean
+- [x] One poll per floor window fleet-wide, regardless of how many projects are armed
+      — the daemon's `gh-notify-inbox` Task at 60 s is now the ONLY caller, so the
+      account's rate equals the interval no matter how many projects are armed
+      (`test_the_daemon_registers_the_inbox_fetch_as_a_foreground_task`,
+      `test_reading_the_inbox_makes_no_gh_notifications_call`)
+- [x] Every armed project sees every reply, with a bounded worst-case latency stated in the code
+      — `gh_notify_inbox.RETAIN_S` (24 h) IS the bound and says so at its definition
+      (`test_with_a_fresh_inbox_EVERY_project_on_the_host_sees_the_reply`)
+- [x] Daemon absent / chore absorbed ⇒ today's behaviour exactly (fail-open, proven by test)
+      — absent / stale / corrupt / wrong-shaped each fall back to the gated poll
+      (`test_a_stale_inbox_falls_back_to_todays_exact_behaviour`,
+      `test_a_corrupt_inbox_is_treated_as_absent_not_as_empty`)
+- [x] A test that N projects sharing the host all receive a reply, which the current design fails
+      — BOTH directions pinned: `test_without_the_inbox_only_ONE_project_on_a_host_sees_the_reply`
+      asserts the old behaviour (1 of 4), the fresh-inbox test asserts 4 of 4
+- [x] pytest, ruff, mypy, pyright clean — 15671 passed, 1 skipped; ruff/mypy/pyright 0 findings
+
+## Outcome (2026-08-20)
+
+Implemented in `b49541f4`. Two things worth carrying forward beyond the fix itself:
+
+- **Sharing the FETCH must not share the FILTER.** The notification list is account-scoped
+  and identical for every project; `registry.json` is per-project. That asymmetry is what
+  makes one shared call safe, and it is pinned by
+  `test_the_inbox_does_not_leak_another_projects_threads` rather than left to review.
+- **A stale inbox is not an empty one.** Empty means "nothing new" (stay quiet); stale means
+  "nobody is fetching" (spend a poll token). Collapsing them would make a dead daemon look
+  like a quiet inbox and silence the lane entirely — a worse failure than the starvation
+  this card fixes, because it would be undetectable.
+
+**Known residue, accepted:** the chore is UNABSORBED, so on a host running a live
+ai-maestro server (which suppresses the daemon) nothing writes the inbox and every reader
+degrades to the old gated poll. Absorbing it would be worse — the roster would claim an
+owner that cannot execute the lane. The blackout therefore costs the IMPROVEMENT, not the
+feature, and `global-chore-blackout` makes it visible. Closing it is a cross-repo ask on
+ai-maestro, the same shape as ai-maestro#111.
+
+## Live observation still owed (why this is `testing`, not `complete`)
+
+Every acceptance box is proven by automated tests, but the whole VALUE of this card is a
+fleet behaviour no unit test can observe: that the daemon on THIS host actually writes the
+inbox and the deferrals stop. After the next publish + daemon pickup, confirm:
+
+```bash
+ls -l ~/.claude/janitor-control/gh-notify-inbox.json          # exists, mtime within ~60s
+tail -20 .janitor/logs/gh-reply-watch.log                     # deferral lines should stop
+```
+
+Until that is seen, the honest column is `testing` — the code is done, the effect is not
+yet witnessed.
 
 ## Approval log
