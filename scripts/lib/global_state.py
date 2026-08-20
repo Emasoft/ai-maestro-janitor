@@ -1933,7 +1933,42 @@ def reload_generation() -> int:
     pre-control-dir global_state_dir() location, and the legacy dir
     (TRDD-QK7M2B0X + TRDD-2U8AH82F) — max() wins, so a stamp from any era or
     location still triggers exactly one reload."""
-    return _generation_from_flag("reload-needed.flag")
+    # Since TRDD-BEXY5KIP the SERVER-published plugins-updated signal is one more source
+    # in the same max: the ai-maestro hub's absorbed fleet-plugins-update lane honours
+    # the publish/consume boundary (it never writes our reload-needed.flag), so its
+    # atomic ~/.aimaestro/state/plugins-updated.json feeds this generation READ-ONLY.
+    # No new consumed-stamp exists or is needed — the per-project reload-acked.ts that
+    # _phase_plugin_reload already advances IS the consumption record.
+    return max(_generation_from_flag("reload-needed.flag"), _server_plugins_updated_epoch())
+
+
+# Test/operator override for the server-published plugins-updated signal path.
+SERVER_PLUGINS_UPDATED_ENV = "JANITOR_AIMAESTRO_PLUGINS_UPDATED_FILE"
+
+
+def _server_plugins_updated_epoch(*, now: int | None = None) -> int:
+    """`updated_at_epoch` from the hub's plugins-updated signal, or 0 when unusable.
+
+    FAIL-OPEN toward 0 on every defect (absent, unreadable, malformed JSON, wrong shape,
+    non-positive epoch): a broken signal must never invent a reload. One guard fails the
+    OTHER way: an epoch further than a day in the FUTURE is ignored, because the phase's
+    per-project ack advances TO the generation — a bogus huge epoch would ratchet every
+    project's ack past all future real generations and silently disable reload
+    signalling machine-wide forever. A day of tolerance absorbs clock skew; nothing
+    legitimate publishes from further ahead than that."""
+    raw = os.environ.get(SERVER_PLUGINS_UPDATED_ENV, "").strip()
+    path = Path(raw) if raw else Path.home() / ".aimaestro" / "state" / "plugins-updated.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        epoch = int(data["updated_at_epoch"])
+    except Exception:  # noqa: BLE001 - fail-open: no signal is a silent 0, never an error
+        return 0
+    if epoch <= 0:
+        return 0
+    current = int(time.time()) if now is None else int(now)
+    if epoch > current + 86400:
+        return 0
+    return epoch
 
 
 def reload_flag_present() -> bool:
