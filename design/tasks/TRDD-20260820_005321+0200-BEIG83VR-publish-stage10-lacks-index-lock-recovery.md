@@ -4,7 +4,7 @@ title: publish.py stage 10 has no index.lock recovery — the TUWUB0SG class rc-
 column: testing
 created: 2026-08-20T00:53:21+0200
 updated: 2026-08-20T18:05:00+0200
-implementation-commits: [pending]
+implementation-commits: [d917cce6]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
