@@ -192,3 +192,67 @@ def test_removal_still_clears_with_a_live_git_process_in_a_different_repo(tmp_pa
         except subprocess.TimeoutExpired:
             blocker.kill()
             blocker.wait(timeout=5)
+
+
+def test_a_zombie_git_process_does_not_block_removal(tmp_path: Path) -> None:
+    """A git process that has EXITED but not been reaped is a corpse — it holds no fds and
+    no cwd, so it must never block clearing an orphaned lock.
+
+    This is the defect that failed the v3.3.21 publish gate with `got 'live-git'` on a repo
+    no live git had ever entered. `os.kill(pid, 0)` answers True for a zombie (the kernel
+    keeps its exit status), and `lsof` cannot resolve a cwd for one — precisely the
+    (alive, cwd-unresolvable) combination `_live_git_holds` fails CLOSED on. On a busy host
+    short-lived git invocations are continuous, so their corpses are too, which made the
+    recovery refusable at random under load: the "guard that always refuses" family again,
+    one reaping-window later than the fix that came before it.
+
+    Real zombie, real ps, real lsof — the whole point is the environment shape.
+    """
+    worktree = _make_worktree_repo(tmp_path)
+    lock_path = _lock_path(worktree)
+    lock_path.write_text("", encoding="utf-8")
+    old = time.time() - 3600
+    os.utime(lock_path, (old, old))
+
+    # A real git child that exits immediately and is deliberately NOT reaped.
+    zombie = subprocess.Popen(["git", "--version"], cwd=str(worktree),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 5
+        state = ""
+        while time.time() < deadline:
+            state = subprocess.run(["ps", "-o", "state=", "-p", str(zombie.pid)],
+                                   capture_output=True, text=True).stdout.strip()
+            if state.upper().startswith("Z"):
+                break
+            time.sleep(0.05)
+        if not state.upper().startswith("Z"):
+            pytest.skip(f"could not observe a zombie (state={state!r}) — timing-dependent")
+
+        assert git_utils._pid_is_alive(zombie.pid) is True, (
+            "precondition: os.kill(pid,0) must still report a zombie as alive — that is the trap"
+        )
+        assert git_utils._pid_is_zombie(zombie.pid) is True, "the corpse must be identified as one"
+
+        outcome = git_utils.clear_stale_index_lock(worktree, min_age_s=2)
+        assert outcome == "removed", (
+            f"a zombie git holds nothing and must not block removal, got {outcome!r}"
+        )
+    finally:
+        zombie.wait(timeout=5)
+
+
+def test_a_reaped_pid_is_not_reported_as_a_zombie(tmp_path: Path) -> None:
+    """`_pid_is_zombie` fails CLOSED: once the pid is gone, `ps` cannot confirm a corpse, so
+    the answer is False ('not provably dead') and the caller's own liveness check governs.
+
+    Pinned because the fail-direction is the whole safety argument: an unreadable process
+    state must never be what authorises removing a lock.
+    """
+    # cwd=tmp_path, not the default: the suite's write sandbox refuses any `git` spawned
+    # with the real repo as its cwd, and it is right to — it cannot know the verb is inert.
+    probe = subprocess.Popen(["git", "--version"], cwd=str(tmp_path),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pid = probe.pid
+    probe.wait(timeout=5)  # reaped — the slot is released
+    assert git_utils._pid_is_zombie(pid) is False

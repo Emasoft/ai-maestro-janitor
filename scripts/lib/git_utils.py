@@ -487,6 +487,44 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
+def _pid_is_zombie(pid: int) -> bool:
+    """True iff `pid` is a ZOMBIE — already exited, merely awaiting reaping.
+
+    `_pid_is_alive` above cannot answer this: `os.kill(pid, 0)` succeeds for a
+    zombie, because the kernel still holds a process-table slot for its exit
+    status. MEASURED 2026-08-20 on this host — spawn a child, do not `wait()` it:
+    `ps -o state=` says `Z`, `_pid_is_alive` says True, `_pid_cwd` says None.
+
+    That combination is exactly the one `_live_git_holds` fails CLOSED on, so a
+    CORPSE blocks the removal of an orphaned lock. A zombie holds nothing: it has
+    released every file descriptor and its cwd, and it cannot execute. This is the
+    same "guard that always refuses is equivalent to no guard" family the unscoped
+    version of this guard was fixed for — on a busy host, short-lived `git`
+    invocations are continuous, so their corpses are too, and the earlier fix
+    (skip pids that have fully vanished) does not cover the window before the
+    parent reaps them. It bit a real publish: the v3.3.21 test gate failed with
+    `got 'live-git'` on a repo no live git had ever entered.
+
+    Fails CLOSED in the opposite direction from `_pid_is_alive`: any probe failure
+    (no `ps`, timeout, unreadable state) answers False — "not PROVABLY a corpse" —
+    so an unreadable state can never be what authorises a removal.
+    """
+    try:
+        proc = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    # macOS prints `Z`, Linux `Z` or `Z+`/`Zs`; anything else is a real state.
+    return proc.stdout.strip().upper().startswith("Z")
+
+
 def _live_git_holds(ps_snapshot: str, repo_root: Path) -> bool:
     """True iff SOME live `git` process in `ps_snapshot` could be holding
     `repo_root`'s `.git/index.lock` — i.e. its cwd is inside `repo_root`, or
@@ -528,6 +566,14 @@ def _live_git_holds(ps_snapshot: str, repo_root: Path) -> bool:
             #   * the pid is ALIVE and lsof was denied/timed out — genuinely unknown, so
             #     it blocks, exactly as before.
             if not _pid_is_alive(pid):
+                continue
+            #   * the pid is a ZOMBIE — `os.kill(pid, 0)` says "alive" for a corpse
+            #     awaiting reaping, but it holds no fds and no cwd, so it cannot be
+            #     holding anything. This is the same transient-git problem one window
+            #     earlier: the branch above only catches gits that have already been
+            #     REAPED. Measured 2026-08-20 (see `_pid_is_zombie`): it failed a real
+            #     publish gate with `got 'live-git'` on a repo no live git had entered.
+            if _pid_is_zombie(pid):
                 continue
             return True  # fail closed: alive, and could not confirm it is elsewhere
         try:
