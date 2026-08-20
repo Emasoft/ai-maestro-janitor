@@ -1,12 +1,13 @@
 ---
 name: janitor-daemon-process-identity
-description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters"
+description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters / which TREE the daemon runs from — a staged import closure, not the plugin cache / a daemon chore silently does nothing and logs done in 0s / tests pass but the feature is dead on the daemon / never subprocess an unstaged path, log deduped chore failures"
 ocd: 2026-08-06
-lmd: 2026-08-06
+lmd: 2026-08-20
 metadata:
   node_type: memory
   type: reference
   tier: component
+publish-globally: false
 ---
 
 # janitor-daemon-process-identity
@@ -67,6 +68,13 @@ still OPEN as janitor#216** — the eviction manufacturers were removed in `7533
 pressure drops sharply, but the breaker's exit-cause blindness is untouched. Do not read a
 `crash-loop` quarantine entry as evidence a version crashed; read the daemon log first. [^1]
 
+
+^ATOM-KCGJ-99K2 [desc: "the daemon runs from a STAGED import closure in the DATA dir, so a chore that reaches an unstaged repo path silently no-ops forever", keywords: daemon_runs_from_staged_copy_not_the_cache chore_logs_done_in_0s_and_writes_nothing daemon_subprocess_path_does_not_exist keepalive_stage_import_closure why_does_my_daemon_task_silently_no-op DATA_scripts_dir_missing_modules tests_pass_but_the_daemon_does_nothing, type: reference, ocd: 2026-08-20, lmd: 2026-08-20]
+
+The daemon does NOT run from the plugin cache — it runs from a STAGED copy in the plugin DATA dir (`<DATA>/scripts/`) containing `daemon.py` plus its TRANSITIVE IMPORT CLOSURE and nothing else. `keepalive_stage._SUBDIRS` is `("lib", "oauth_rotator")`, and the closure is computed by AST-walking the imports of `daemon_keepalive_entry.py` + `daemon.py`. Measured 2026-08-20: DATA/scripts held 45 lib modules where the repo has 321, and no `gh_issues_monitor/` at all.
+
+The practical consequence: a daemon chore that reaches a repo path by FILENAME — a subprocess, an `open()`, a `Path(...).is_file()` guard — is looking at a tree that does not exist where the daemon actually runs. It fails the guard and returns, so the chore logs a normal-looking `done in 0s` on its cadence forever while doing nothing. Tests never catch it because tests run from the repo, where the path DOES exist. Importing the module instead is what puts it in the closure and therefore on disk beside the daemon. [^4]
+
 ## Governed by
 
 - [[janitor-architecture]] — the hub this component hangs off: the daemon +
@@ -113,3 +121,4 @@ spawned by session `c9ae7481` and every one of its lines is tagged `[s:c9ae7481]
 [^1]: [id:ATOM-KK8S-MZ1D, status:valid, desc:"a breaker that counts attempts cannot testify to a cause", keywords:"quarantine_entry_says_crash-loop is_this_version_really_bad breaker_tripped_so_the_version_must_be_broken", ocd:2026-08-06, lmd:2026-08-06] DO NOT treat a `crash-loop` quarantine entry as evidence that a version crashed, BECAUSE the breaker counts spawn ATTEMPTS and never reads the exit cause, so orderly SIGTERM churn from an unrelated eviction loop manufactures the identical record. DO read the daemon log for an actual traceback or a non-zero exit BEFORE accepting the verdict or rolling back.
 [^2]: [id:ATOM-G885-IWX6, status:valid, desc:"the --system flag is what makes the resolution cwd-independent", keywords:"uv_python_find_returns_the_wrong_interpreter resolved_the_venv_python_instead_of_the_managed_one grant_still_not_sticking_after_the_fix", ocd:2026-08-06, lmd:2026-08-06] DO NOT resolve the daemon's interpreter with a bare `uv python find`, BECAUSE run from inside a project it answers that project's `.venv/bin/python3` — a cwd-DEPENDENT identity that no TCC grant can follow. DO pass `--system --managed-python <pin>` so the answer is the fixed managed-install path regardless of where the resolver happens to run.
 [^3]: [id:ATOM-YPP0-PALA, status:valid, desc:"a log's silence is only evidence once you have proved the writer writes THERE", keywords:"grep_returned_zero_so_the_code_never_ran absence_of_log_lines_as_evidence I_concluded_a_contradiction_from_an_empty_grep wrong_log_file log_path_overridden_by_env proving_where_a_process_logs", ocd:2026-08-06, lmd:2026-08-06] DO NOT conclude anything from a log's SILENCE until you have proved that writer writes to that file, BECAUSE a log path can be redirected by an env override (`JANITOR_LOG_DIR`) or a differing cwd, so grepping the conventional path yields a confident, wholly fictional zero — here it manufactured a "CONFIRMED CONTRADICTION" between `claimed_chores()` and the daemon, blocked TRDD-6CRC9SQQ's item 1 as unbuildable, and leaked a false "Verified (do not re-verify)" line into TRDD-50V256RH. DO read the path RESOLVER in the writer's own code (`log_dir()` and its override) before treating absence as data — it is cheaper than any runtime probe, and `lsof` cannot answer it at all because `log_line` opens/appends/closes per line.
+[^4]: [id: ATOM-SP6A-0A2T, status: valid, desc: "the fix rule: import it, do not shell out to it, and log the failure", keywords: "daemon_chore_silently_does_nothing done_in_0s_every_cadence tests_pass_but_feature_dead_on_the_daemon put_daemon_work_in_an_imported_module never_subprocess_an_unstaged_path log_deduped_chore_failures", ocd: 2026-08-20, lmd: 2026-08-20] DO NOT give a daemon chore a path into a tree the daemon does not carry — no subprocess to `scripts/<subdir>/x.py`, no `is_file()` guard over a repo-relative path — BECAUSE the daemon runs from a STAGED import closure (`lib/` + `oauth_rotator/` only), so that path is absent there: the guard trips, the chore logs `done in 0s` on its cadence forever, and every test still passes because tests run from the repo where the path exists (measured: the gh-notify-inbox lane shipped dead in 3.3.26). DO put the work in a module the daemon IMPORTS — the AST closure walker then stages it automatically — and LOG failures (deduped), because a chore that swallows its errors is indistinguishable from one with nothing to do.
