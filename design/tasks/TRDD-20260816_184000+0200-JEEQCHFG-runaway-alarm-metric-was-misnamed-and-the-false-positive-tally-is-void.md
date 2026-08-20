@@ -3,7 +3,8 @@ trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
 column: todo
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-19T01:25:00+0200
+updated: 2026-08-20T18:10:00+0200
+eht: [NLHVLGEP]
 current-owner: ai-maestro-janitor
 task-type: bugfix
 supersedes: 8QSLYMGU
@@ -84,7 +85,8 @@ retracted mechanism.
 
 ## Acceptance
 
-* [ ] The window question (3) is answered with a measurement, not an argument.
+* [x] The window question (3) is answered with a measurement, not an argument — see
+      **THE WINDOW QUESTION, ANSWERED** below (2026-08-20).
 * [x] Pid-existence at report time is audited and fixed if absent — commit `c1698d1b`.
       `dr.alive_findings(findings, pid_alive)` (pure) drops findings whose pid exited; the
       detector calls it with an `os.kill(pid,0)` probe right before `format_drift_line`.
@@ -92,7 +94,69 @@ retracted mechanism.
       tests trust synthetic pids under the existing `JANITOR_PS_SNAPSHOT` seam. This was the
       sub-task whose assigned worker had stalled without filing.
 * [ ] A fresh runaway tally is built; the old one is not consulted.
-* [ ] Any threshold change cites the window decision from (3).
+* [x] Any threshold change cites the window decision from (3) — vacuously satisfied and
+      deliberately so: the measurement says **change nothing**. See below.
+
+## THE WINDOW QUESTION, ANSWERED (measured 2026-08-20 18:1x–18:3x, this host)
+
+**Answer: ~1 minute IS the right window for a runaway alarm at a 600 s cadence, and the
+thresholds should not move. The card's stated fear — that a 1-minute average sampled every
+ten minutes "can miss a nine-minute burn entirely" — was not observed, and the mechanism
+says it largely cannot happen.**
+
+Method (and the trap it had to avoid): 40 samples of `ps -axo pid,%cpu,time,etime,comm` at
+20 s intervals over ~13 min, 483 pids, everything above 3% retained. Ground truth is
+INTERVAL DIFFERENCING of cumulative CPU `time`, per open-item 2 — the only method that is
+not itself a window average. The first pass differenced over 20 s and compared against a
+~60 s decaying average, which is *precisely the comparing-two-windows error this whole card
+exists to document*; it was discarded and re-run at matched windows. That first result is
+reported below only as the control.
+
+Error = (reported `%cpu` at the end of the window) − (true burn over that window), in
+percentage points of one core:
+
+| differencing window | n | median | stdev | p95 | max | \|err\|>50 |
+|---|---|---|---|---|---|---|
+| 20 s (control — window MISMATCH) | 255 | +2.2 | 17.9 | +46.6 | +79.8 | 11 over, 0 under |
+| 60 s (matches `%cpu`'s own window) | 197 | +1.5 | 19.9 | +57.5 | +82.2 | 11 over, 1 under |
+| **600 s (the detector's own cadence)** | **20** | **+1.9** | **5.1** | **+13.9** | **+13.9** | **0, 0** |
+
+Three things fall out, and they settle the design:
+
+1. **At the cadence that matters, `%cpu` is an excellent estimator of sustained burn** —
+   median error +1.9 points, stdev 5.1, worst case +13.9 across 20 windows. A process
+   genuinely burning for ten minutes is also burning in the last minute, so the short
+   window samples it correctly. The window is not the problem.
+2. **The error is ASYMMETRIC and the asymmetry is favourable**: 22 over-reports beyond 50
+   points across all windows, **one** under-report. The single-sample failure mode is a
+   FALSE ALARM, not silence. To "miss a nine-minute burn" the burn must have ended more
+   than ~1 min before the sample — i.e. it is over by the time we look, and a ≥10-minute
+   burn would already have been caught at the previous fire.
+3. **The real risk is single-sample noise on a bursty process** (p95 +57.5 at 60 s), and
+   the mitigation is already shipped: `sustained_findings(..., min_streak=2)` requires the
+   finding to hold across two consecutive fires, keyed on pid AND command. **Do not remove
+   the streak gate and do not raise `cpu_threshold_pct` to compensate for noise the streak
+   already absorbs** — raising it would silence slow burns to fix a problem the gate
+   already fixes.
+
+Honest limits of this measurement: n=20 at the 600 s window is small; those windows overlap
+and are therefore correlated; and surviving 30 consecutive samples selects for long-lived
+processes, so the 600 s row describes exactly the population the alarm targets and says
+nothing about short-lived ones. It is one host, one afternoon. It is, however, a
+measurement rather than an argument, which is what this card asked for.
+
+Incidental: the JumpConnect runaway that triggered two live alarms earlier in the session
+had dropped below the 3% floor before the sampler finished, so it does not appear in the
+data — the burn ended on its own, which is itself consistent with (2).
+
+### Derived improvement, filed separately
+
+The detector already fires twice and already persists a streak map, so it is one stored
+field away from reporting GROUND TRUTH instead of an estimator: keep the previous fire's
+cumulative CPU `time` per key and difference it across its own two consecutive snapshots.
+That yields "287% sustained over the last 612 s" — correct by construction over exactly the
+alarm's own window, and self-describing, which would have prevented this entire card. Filed
+as its own TRDD rather than widened into this one.
 
 ## THE LESSON OF THE NIGHT — the alarm named both dimensions and we debated one
 
