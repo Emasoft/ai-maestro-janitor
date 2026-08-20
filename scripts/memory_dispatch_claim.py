@@ -72,8 +72,22 @@ def candidates(state_dir: Path) -> list[Path]:
         return []
 
 
-def claim_one(state_dir: Path) -> dict | None:
+def claim_one(state_dir: Path, chore: str = "") -> dict | None:
     """Atomically claim the oldest unclaimed dispatch and return its payload, else None.
+
+    `chore` (janitor#275, and the root cause of #280 and #273) restricts the claim to
+    dispatches whose `intervention` matches. Without it the claim is FIFO-by-age and
+    chore-BLIND, while every caller is chore-SPECIFIC: the heartbeat emits one marker
+    (`[janitor-memory-atomize]`, say) and the agent it spawns loads that chore's skill.
+    If the queue head belongs to a different chore, that agent claimed and consumed an
+    assignment it cannot perform — the queue head is renamed out of the pool, so the
+    dispatch that CAN be performed is orphaned and the wrong agent does nothing useful.
+    Measured on this host as a permanently wedged atomize dispatch (janitor#273).
+
+    Empty `chore` keeps the historical chore-blind behaviour, deliberately: an older
+    installed skill that has not learned the flag must keep working rather than start
+    claiming nothing. A filtered claim is strictly narrower, so it can never consume a
+    dispatch the unfiltered one would have left alone.
 
     Reads BEFORE renaming: a rename we won is unrecoverable for anyone else, so if the read
     then failed the assignment would be lost with nothing left to point at it.
@@ -84,6 +98,10 @@ def claim_one(state_dir: Path) -> dict | None:
         except (OSError, ValueError):
             continue  # unreadable: leave it for the orphan detector to report, don't consume it
         if not isinstance(payload, dict):
+            continue
+        # Filter BEFORE the rename — a mismatched dispatch must be left in the pool for the
+        # agent that can actually run it, which is the whole point.
+        if chore and str(payload.get("intervention") or "") != chore:
             continue
         target = state_dir / f"{CLAIMED_PREFIX}{path.name[len(PENDING_PREFIX):]}"
         try:
@@ -139,6 +157,10 @@ def main() -> int:
     ap.add_argument("--state-dir", default="", help="override the project's .janitor/state")
     ap.add_argument("--peek", action="store_true",
                     help="report the next claimable dispatch WITHOUT claiming it")
+    ap.add_argument("--chore", default="",
+                    help="claim ONLY a dispatch whose intervention matches (janitor#275) — "
+                         "the marker-routed agent knows which chore it was launched for, so "
+                         "it must not consume another chore's assignment")
     args = ap.parse_args()
 
     state_dir = Path(args.state_dir) if args.state_dir else state.state_dir()
@@ -150,7 +172,7 @@ def main() -> int:
         print(nxt[0])
         return 0
 
-    payload = claim_one(state_dir)
+    payload = claim_one(state_dir, args.chore)
     if payload is None:
         # The legacy single slot is NOT a fallback. It is the very file whose clobbering
         # this exists to fix, so consuming it here would reintroduce the bug on exactly the

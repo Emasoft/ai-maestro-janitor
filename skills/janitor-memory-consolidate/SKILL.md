@@ -71,7 +71,7 @@ Process exactly **ONE scope this run**, and CLAIM it before touching anything â€
 never self-select:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore consolidate
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute

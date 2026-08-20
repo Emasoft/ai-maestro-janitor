@@ -174,3 +174,68 @@ def test_retiring_the_mirror_did_not_make_it_claimable(tmp_path):
 
     assert mdc.claim_one(tmp_path) is None
     assert (tmp_path / mdc.LEGACY_NAME).exists()
+
+
+# ---------------------------------------------------------------------------
+# janitor#275 — the chore FILTER (root cause of #280 and #273)
+#
+# The claim was FIFO-by-age and chore-BLIND while every caller is chore-SPECIFIC:
+# the heartbeat emits ONE marker and the agent it spawns loads that chore's skill.
+# With a different chore at the queue head, that agent renamed an assignment it
+# cannot perform out of the pool — orphaning the dispatch that WAS runnable and
+# doing nothing useful itself. Measured live as a permanently wedged atomize
+# dispatch (janitor#273).
+# ---------------------------------------------------------------------------
+
+
+def test_a_chore_filtered_claim_skips_another_chores_dispatch(tmp_path):
+    """THE BUG: the queue HEAD belongs to another chore. It must be left alone, and the
+    matching (younger) dispatch claimed instead — the opposite of FIFO."""
+    _dispatch(tmp_path, 100, "atomize")
+    _dispatch(tmp_path, 200, "consolidate")
+    got = mdc.claim_one(tmp_path, "consolidate")
+    assert got is not None, "a matching dispatch existed and must be claimed"
+    assert got["intervention"] == "consolidate"
+
+
+def test_the_skipped_dispatch_stays_claimable_by_ITS_own_chore(tmp_path):
+    """The orphaning half: after the mismatched agent ran, the older dispatch must still be
+    there for the agent that can actually perform it. Before the filter it had been renamed
+    out of the pool and was unreachable forever."""
+    _dispatch(tmp_path, 100, "atomize")
+    _dispatch(tmp_path, 200, "consolidate")
+    mdc.claim_one(tmp_path, "consolidate")
+    still = mdc.claim_one(tmp_path, "atomize")
+    assert still is not None, "the other chore's dispatch was consumed — this is janitor#273"
+    assert still["intervention"] == "atomize"
+
+
+def test_no_matching_chore_claims_NOTHING_rather_than_the_wrong_thing(tmp_path):
+    """An agent with no work must abstain. Returning someone else's dispatch is strictly
+    worse than returning None: the skill's exit-2 path reports honestly, while a wrong
+    payload sends it to edit a scope nobody asked it to touch."""
+    _dispatch(tmp_path, 100, "atomize")
+    assert mdc.claim_one(tmp_path, "consolidate") is None
+    assert mdc.claim_one(tmp_path, "atomize") is not None, "the atomize dispatch must survive"
+
+
+def test_an_empty_chore_keeps_the_historical_chore_blind_behaviour(tmp_path):
+    """Back-compat, deliberately: an installed skill that predates the flag must keep
+    working rather than silently start claiming nothing. A filtered claim is strictly
+    narrower, so it can never consume what the unfiltered one would have left."""
+    _dispatch(tmp_path, 100, "atomize")
+    got = mdc.claim_one(tmp_path, "")
+    assert got is not None and got["intervention"] == "atomize"
+
+
+def test_every_memory_skill_passes_its_own_chore(tmp_path):
+    """Pinned over the SHIPPED skills: the filter only helps if the callers use it, and a
+    skill that forgets the flag silently reverts to the chore-blind bug for its chore."""
+    root = Path(__file__).resolve().parents[1] / "skills"
+    missing = []
+    for chore in ("consolidate", "split", "repair", "atomize",
+                  "retro-lesson", "conflict", "harvest"):
+        text = (root / f"janitor-memory-{chore}" / "SKILL.md").read_text(encoding="utf-8")
+        if "memory_dispatch_claim.py" in text and f"--chore {chore}" not in text:
+            missing.append(chore)
+    assert not missing, f"these skills claim without naming their chore: {missing}"

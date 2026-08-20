@@ -55,7 +55,10 @@ already in lesson form; only body ATOM markers count.
 ## Procedure
 
 0. **Scope.** CLAIM your dispatch — never read a shared file for it:
-   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"`. It prints the
+   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore retro-lesson`.
+   `--chore` is not optional (janitor#275): without it the claim is FIFO-by-age and
+   chore-BLIND, so this agent would consume another chore's assignment — orphaning that
+   dispatch and leaving itself nothing it can perform. It prints the
    scheduler's pinned `(intervention, scope, root)` (absolute — your cwd is not the project
    root) and hands it to you alone, so a later dispatch cannot re-point work in flight
    (janitor#242). Exit 2 → STOP and report that; never fall back to the legacy

@@ -46,7 +46,7 @@ full additive-vs-editorial distinction.
 2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    ```bash
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore repair
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you

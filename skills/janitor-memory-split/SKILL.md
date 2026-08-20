@@ -76,7 +76,7 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py"
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore split
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
