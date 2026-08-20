@@ -59,6 +59,7 @@ FINDING_CODES = (
     "NO_REQUIRED_CHECKS",  # protected + CI exists, but no required_status_checks gate
     "NO_CI",               # no .github/workflows at all
     "NO_TAG_PROTECT",      # protected branch, but published release tags are mutable/deletable
+    "BASELINE_CONTENT_DRIFT",  # a baseline-NAMED ruleset no longer carries the ratified content
 )
 
 # Human-readable one-liners keyed by code — used by the fix skill and the surface detector
@@ -73,6 +74,9 @@ FINDING_BLURB = {
     "NO_CI": "no .github/workflows — the repo runs no CI at all",
     "NO_TAG_PROTECT": "release tags are unprotected — a leaked token could move/delete a "
     "published vX.Y.Z tag and re-point installers",
+    "BASELINE_CONTENT_DRIFT": "a baseline-named ruleset drifted from the ratified payload — "
+    "name-presence hid this from every finding class, so baseline changes never propagated "
+    "finding-driven (janitor#282)",
 }
 
 
@@ -230,7 +234,52 @@ def classify_repo(facts: RepoFacts) -> list[Finding]:
     if facts.has_workflows is False:
         findings.append(Finding(facts.slug, "NO_CI", FINDING_BLURB["NO_CI"]))
 
+    # 4) BASELINE_CONTENT_DRIFT (janitor#282 / TRDD-XWWRE9V0) — the fleet lane's content
+    #    half. Name-presence is what every class above keys on, so a baseline-NAMED ruleset
+    #    whose CONTENT was hand-loosened (or predates a ruling) produced no finding, the fix
+    #    path never fired, and a ratified change propagated 0/24 fleet-wide until applied by
+    #    hand. Reuses the guard lane's comparator (`ruleset_content_drift` — DD0M4QL7's, one
+    #    SSOT); only rulesets PRESENT by baseline name are compared (absence is the presence
+    #    classes' job), and janitor#244 summary shells are skipped per ruleset. Expected
+    #    payloads are built with checks=None — the documented cwd-dependence means the fleet
+    #    audit cannot know another repo's CI contexts, and the comparator's DD0M4QL7
+    #    asymmetry already treats a live checks rule the payload omits as NOT drift — and
+    #    with the repo's own `pr_review_expected`, so a solo repo is compared against the
+    #    ruling-correct shape (the #283 lesson).
+    drift_reasons = _baseline_content_drift(facts)
+    if drift_reasons:
+        shown = "; ".join(drift_reasons[:3])
+        more = len(drift_reasons) - 3
+        detail = f"{FINDING_BLURB['BASELINE_CONTENT_DRIFT']}: {shown}" + (
+            f" (+{more} more)" if more > 0 else ""
+        )
+        findings.append(Finding(facts.slug, "BASELINE_CONTENT_DRIFT", detail))
+
     return findings
+
+
+def _baseline_content_drift(facts: RepoFacts) -> list[str]:
+    """Drift reasons across the baseline-NAMED rulesets present on the repo; [] = none.
+
+    PURE: compares the detail dicts already gathered into `facts.rulesets` against
+    payloads built from facts alone — no gh, no I/O, per this classifier's contract."""
+    if not facts.default_branch or not facts.rulesets:
+        return []
+    by_name: dict[str, dict] = {
+        rs["name"]: rs
+        for rs in facts.rulesets
+        if isinstance(rs, dict) and isinstance(rs.get("name"), str)
+    }
+    payloads = bpl.baseline_ruleset_payloads(
+        facts.default_branch, None, require_pull_request=facts.pr_review_expected
+    )
+    reasons: list[str] = []
+    for payload in payloads:
+        live = by_name.get(payload["name"])
+        if live is None or _detail_unresolved(live):
+            continue  # absence = the presence classes' job; a summary shell proves nothing
+        reasons.extend(bpl.ruleset_content_drift(payload, live))
+    return reasons
 
 
 # ---- linear-history removal helpers (pure — the fix skill's core) --------
@@ -492,6 +541,7 @@ _SHORT = {
     "NO_REQUIRED_CHECKS": "no required status checks",
     "NO_CI": "no CI workflows",
     "NO_TAG_PROTECT": "unprotected release tags",
+    "BASELINE_CONTENT_DRIFT": "baseline ruleset content drifted from the ratified payload",
 }
 
 

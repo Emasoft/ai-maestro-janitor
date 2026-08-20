@@ -457,3 +457,81 @@ def test_gatherer_resolves_pr_review_expected_from_the_builder_predicate(monkeyp
     for answer in (False, True):
         monkeypatch.setattr(gca.bpl, "require_pull_request_for", lambda _s, _a=answer: _a)
         assert gca.gather_repo_facts("o/r").pr_review_expected is answer
+
+
+# ---- BASELINE_CONTENT_DRIFT — the fleet lane's content half (janitor#282) ----
+
+def _ratified_live(pr_review_expected: bool) -> list[dict]:
+    """Live detail dicts a faithful apply would leave behind, echoed back by GitHub."""
+    import branch_protection_lib as bpl
+    payloads = bpl.baseline_ruleset_payloads("main", None, require_pull_request=pr_review_expected)
+    return [dict(p) for p in payloads]
+
+
+def test_content_stale_baseline_named_ruleset_is_flagged() -> None:
+    """THE janitor#282 fleet-lane fixture: baseline NAMES present, one payload hand-loosened
+    (enforcement disabled) → BASELINE_CONTENT_DRIFT. FAILS on the pre-fix classifier, whose
+    every class keyed on name/rule-type presence only — the measured 0/24 propagation."""
+    live = _ratified_live(False)
+    live[0] = {**live[0], "enforcement": "disabled"}
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main", rulesets=live,
+        classic_protected=None, has_workflows=True, pr_review_expected=False,
+    )
+    codes = _codes(facts)
+    assert "BASELINE_CONTENT_DRIFT" in codes
+
+
+def test_converged_baseline_is_silent() -> None:
+    """FALSIFY: a byte-faithful echo of the ratified payloads → no drift finding."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main", rulesets=_ratified_live(False),
+        classic_protected=None, has_workflows=True, pr_review_expected=False,
+    )
+    assert "BASELINE_CONTENT_DRIFT" not in _codes(facts)
+
+
+def test_live_checks_rule_the_payload_omits_is_not_drift() -> None:
+    """The DD0M4QL7 asymmetry, inherited: the fleet audit builds expected with checks=None
+    (cwd-dependence — it cannot know another repo's CI contexts), so a live
+    required_status_checks rule from an earlier own-checkout apply is stricter, never stale."""
+    live = _ratified_live(True)
+    for rs in live:
+        if rs["name"] == "baseline-pr-and-checks":
+            rs["rules"] = [*rs["rules"], {
+                "type": "required_status_checks",
+                "parameters": {"strict_required_status_checks_policy": True,
+                               "required_status_checks": [{"context": "Tests"}]},
+            }]
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main", rulesets=live,
+        classic_protected=None, has_workflows=True, pr_review_expected=True,
+    )
+    assert "BASELINE_CONTENT_DRIFT" not in _codes(facts)
+
+
+def test_unresolved_shell_and_absent_ruleset_are_not_content_drift() -> None:
+    """Absence is the presence classes' job; a janitor#244 summary shell proves nothing —
+    neither may produce the content finding."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_unresolved_branch_rs()],  # shell only; every baseline name absent
+        classic_protected=None, has_workflows=True, pr_review_expected=False,
+    )
+    assert "BASELINE_CONTENT_DRIFT" not in _codes(facts)
+
+
+def test_solo_repo_is_compared_against_the_ruling_correct_shape() -> None:
+    """The #283 lesson carried into the content half: a solo repo (pr_review_expected=False)
+    whose live pr-and-checks ruleset faithfully echoes the NO-pull_request payload must be
+    converged — comparing it against the PR-demanding shape would re-flag the ruling."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main", rulesets=_ratified_live(False),
+        classic_protected=None, has_workflows=True, pr_review_expected=False,
+    )
+    codes = _codes(facts)
+    # NO_REQUIRED_CHECKS legitimately fires here (CI exists, the checks=None payload echo
+    # carries no checks rule) — that presence class is out of this test's scope. The claims
+    # under test: neither the ruling-removed PR rule nor its faithful absence is flagged.
+    assert "BASELINE_CONTENT_DRIFT" not in codes
+    assert "NO_PR_REVIEW" not in codes

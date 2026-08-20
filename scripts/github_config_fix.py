@@ -62,7 +62,11 @@ import github_config_audit as gca  # noqa: E402
 # finding is NO_CI still got the full 3-ruleset baseline PUT on --apply: a Tier-2 remote
 # mutation for a gap this script cannot fix (and a plan line that promised otherwise).
 _CONFIG_FIXABLE = frozenset(
-    {"UNPROTECTED", "LINEAR_HISTORY", "NO_PR_REVIEW", "NO_REQUIRED_CHECKS", "NO_TAG_PROTECT"}
+    {"UNPROTECTED", "LINEAR_HISTORY", "NO_PR_REVIEW", "NO_REQUIRED_CHECKS", "NO_TAG_PROTECT",
+     # BASELINE_CONTENT_DRIFT (janitor#282 / TRDD-XWWRE9V0): the fix is the same
+     # idempotent baseline re-apply — restoring drifted rules to the ratified payloads
+     # is the explicitly EXEMPT operation (manager-approval-defaults §F).
+     "BASELINE_CONTENT_DRIFT"}
 )
 
 
