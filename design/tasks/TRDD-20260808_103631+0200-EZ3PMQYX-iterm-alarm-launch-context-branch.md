@@ -1,9 +1,9 @@
 ---
 trdd-id: EZ3PMQYX
 title: iTerm alarm must branch on the daemon's launch context — launchd-spawned means the grant remedy cannot succeed
-column: todo
+column: complete
 created: 2026-08-08T10:36:31+0200
-updated: 2026-08-16T10:58:00+0200
+updated: 2026-08-20T18:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -212,15 +212,13 @@ published as a stronger conclusion than they supported.
 
 ## Acceptance
 
-- [ ] Payload round-trip + branch tests (launchd text has NO System Settings trip; session
-      text unchanged) — **THE CARD'S CORE THESIS, AND STILL THE ONLY THING UNBUILT.** Checked
-      2026-08-16: the alarm mentions launchd in prose (`dispatch.py:1674`, `:1713`) but never
-      BRANCHES on it, and no `launch_context` field exists on the flag. So a launchd-spawned
-      daemon is still told to go grant Automation to a binary the grant cannot help — the exact
-      thing the title says must stop. Needs the daemon's own launch context recorded on the
-      flag, then a branch that DROPS the System Settings remedy rather than caveating it.
-      NEXT ACTION for whoever picks this up; the exposure plumbing shipped above is the
-      template (pure predicate → late compare-and-write patch → fail-open reader → clause).
+- [x] **REFUSED BY MEASUREMENT, 2026-08-20 — the launchd branch must NOT be built.** See
+      **THE LAUNCHD BRANCH IS REFUSED** below. The box as written (*"launchd text has NO
+      System Settings trip"*) asks for a branch that would ship FALSE advice on this host:
+      the launchd-spawned daemon reaches iTerm successfully, today. Keeping it open as
+      "the only thing unbuilt" invited exactly that. Everything the card actually needed —
+      `probe_outcome` at the call site, evidence-weighted alarm text, evidence age,
+      host-type exposure — is shipped.
 - [x] Flag includes rearm-evidence age; absent evidence → field absent, not 0 — shipped
       (`fleet_scan.py:232` the parameter, `:263-264` the guarded write). The absent-not-zero half
       holds BY CONSTRUCTION: the key is only assigned inside `if rearm_evidence_age_s is not
@@ -269,3 +267,59 @@ published as a stronger conclusion than they supported.
       2026-08-16 (`#issuecomment-5304813279`) under TRDD-9PDH8G0W. Posting fresh comments on
       five closed threads would be noise, not an answer — the debt this box tracked was
       settled by whoever closed them.
+
+## THE LAUNCHD BRANCH IS REFUSED — measured 2026-08-20 18:0x, and this is the second refutation
+
+The last open acceptance box asked for a branch that, when the daemon is launchd-spawned,
+DROPS the System Settings remedy because "the grant cannot help". Measured on this host,
+right now, that premise is false:
+
+| probe | result |
+|---|---|
+| daemon pid | 70850, **PPID = 1**, up 1h22m — launchd-spawned (`com.ai-maestro-janitor.daemon.plist` present) |
+| interpreter | `/Library/Frameworks/Python.framework/…/Python` — the signed framework build (TRDD-DB1P25S4's fix, holding) |
+| `FIRED rearm → iterm` in the live daemon log | **96** (plus 74 in the rotated log) |
+| most recent success | **2026-08-20 16:54:29 and 16:54:31** — ~75 minutes before this measurement |
+| `INPUT FIELD BUSY on iterm` (a read that required the Apple Event to answer) | 26 |
+| `iterm-automation-blocked.flag` on disk | absent |
+
+A launchd-spawned daemon that fired an iTerm rearm 75 minutes ago is holding a working
+Automation grant. A branch keyed on parentage would therefore tell a human "the grant
+cannot help you" while the grant is demonstrably working — worse than the two-cause hedge
+it replaces, because it is confidently wrong instead of honestly uncertain.
+
+This is the SECOND time the same claim has been refuted by the same kind of evidence. The
+2026-08-08 revision above already retracted it ("Refuted the same day by the daemon's own
+log … 99 all-time") and its own What-item 2 concluded: *"Parentage may be RECORDED as
+context but must not gate any branch (it discriminates nothing on this host)."* The
+2026-08-16 acceptance note nonetheless re-stated the retracted thesis as "THE CARD'S CORE
+THESIS, AND STILL THE ONLY THING UNBUILT", and the 2026-08-16 findings block opened by
+calling the remedy "the futile advice this card is about".
+
+**So the card re-acquired its own retracted premise — from its title, which still asserts
+it.** That is the mirror image of the failure recorded in fact 4 above (a written
+ratification out-arguing a fresh measurement); here a written thesis out-argued its own
+retraction, because the retraction lived in the middle of a long card while the claim lived
+in the title and in the one unticked box. A stale unticked box is not a neutral placeholder:
+it is a standing instruction to build the thing, and it outranked the prose that forbade it.
+
+Method note, since it nearly went wrong again: the first pass grepped
+`~/.claude/janitor-control/daemon.log` and got **0 successes**, which would have CONFIRMED
+the branch. That file does not exist — the daemon logs to the plugin DATA dir. A zero from
+a path that does not exist reads identically to a zero from a healthy grep, and it pointed
+the wrong way. `ls` the file before believing a count of zero.
+
+### What would justify reopening this
+
+Not parentage. Evidence: a host where the iTerm channel produces NO success line
+(`FIRED rearm → iterm` or `INPUT FIELD BUSY on iterm`) across a meaningful window AND
+osascript returns a TCC-shaped error (`probe_outcome: error`, not `timeout`, not `empty`).
+That is already the shipped discriminator, and it is the right one — it keys on the thing
+that actually varies.
+
+## Approval log
+
+- 2026-08-20T18:20:00+0200 — COMPLETE by janitor-main-session. Four of five acceptance items
+  shipped in earlier commits; the fifth is refused on measurement rather than silently ticked
+  or left to rot as a standing instruction to build false advice. Title kept as the historical
+  record of the claim; this section is the correction.
