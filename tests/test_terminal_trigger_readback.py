@@ -1005,3 +1005,49 @@ def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch
     assert ok is True and "no ask-user menu" in why
     assert sum(1 for c in calls if "Enter" in c) == 1, f"only the submit Enter is allowed: {calls!r}"
     assert any("Escape" in c for c in calls), f"the ESC after the submit is mandatory: {calls!r}"
+
+
+def test_an_EMPTY_readback_is_polled_not_treated_as_malformed() -> None:
+    """Typing is asynchronous — the keystrokes cross an Apple Event / tmux boundary and the
+    pane must RENDER before a capture can show them. A read taken too early sees an EMPTY
+    field, and treating that as malformed clears and retypes text that was merely in flight.
+
+    MEASURED, from this project's own log: 2026-08-19T14:00:47 "inject gave up after 30s:
+    field did not settle to '/janitor-handoff-and-clear' (saw '')" — on a host at loadavg
+    ~180-195. The externalized-compaction lane fired correctly and then failed to DELIVER,
+    which is what an owner experiences as a stalled project.
+
+    So an empty read-back is re-read rather than judged: it is the one state that cannot be a
+    verdict, because we know our own keystrokes were already sent.
+    """
+    cleared: list[str] = []
+    sent: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: cleared.append("C-u"),
+        # empty (field free) -> type -> STILL EMPTY (not rendered yet) -> settles to the command
+        reader=_seq(_pane(""), _pane(""), _pane("/compact")),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok, why
+    assert sent == ["Enter"], "the command must be submitted once the field settles"
+    assert cleared == [], "nothing was malformed — a late render must not trigger a clear+retype"
+
+
+def test_a_field_that_stays_EMPTY_still_gives_up_rather_than_submitting() -> None:
+    """The fail-safe half of the poll: bounded, and it never invents a submit. If the field
+    never shows the command, Enter is not pressed — refusing to submit is the safe direction,
+    exactly as before the poll existed."""
+    sent: list[str] = []
+    clock = iter([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])
+    ok, _why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
+        reader=lambda _t=None: _pane(""),   # renders nothing, ever
+        is_typing=lambda _t: False, sleeper=lambda _s: None,
+        clock=lambda: next(clock), giveup_s=1.0,
+    )
+    assert not ok, "a field that never shows the command must not report success"
+    assert sent == [], "Enter must never be pressed on an unverified field"

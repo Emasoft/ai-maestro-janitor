@@ -140,6 +140,14 @@ def _is_choice_row(line: str) -> bool:
     return bool(_CHOICE_ROW_RE.match(line)) and _NBSP not in line
 _PROMPT_POLL_INTERVAL_S = 5.0      # the owner's "try again after 5 seconds" (a FAILED attempt)
 _PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its own outage
+# RENDER-SETTLE window, used ONLY between typing and the read-back that verifies it
+# (`inject_until_sent`). Small and deliberately not the 5 s failed-attempt interval: this is
+# not a retry, it is waiting for keystrokes already sent to appear in a pane capture. Two
+# extra reads at 0.4 s bound the added latency at ~0.8 s on the success path (usually zero —
+# the first read normally already shows the text), against a failure that otherwise costs a
+# full 8 s quiet window per attempt and, at 30 s, the whole injection.
+_SETTLE_READ_ATTEMPTS = 2
+_SETTLE_READ_INTERVAL_S = 0.4
 # Owner directive, refined 2026-08-02: *"even if the user is reported as present, it should not
 # stop the command! it should simply retry every 8 seconds! it must check if in the last 8
 # seconds nothing was typed by the user."*
@@ -779,7 +787,45 @@ def inject_until_sent(
             continue
 
         type_fn()
+        # POLL for the field to settle — do NOT judge on ONE immediate read. Typing is
+        # asynchronous: the keystrokes cross an Apple Event / tmux send-keys boundary and the
+        # pane must then RENDER before a capture can show them. On a loaded host that is not
+        # instant, and a read taken too early sees an EMPTY field — which this loop classifies
+        # as MALFORMED, clearing and retyping text that was merely in flight, burning a quiet
+        # window per attempt until it gives up.
+        #
+        # That is the observed shape, from this project's own log: 2026-08-19T14:00:47
+        # "inject gave up after 30s: field did not settle to '/janitor-handoff-and-clear'
+        # (saw '')" — an EMPTY read-back, on a day this host ran loadavg ~180-195. The
+        # externalized-compaction lane fires correctly and then fails to DELIVER, which is
+        # what an owner experiences as "the project stalled".
+        #
+        # The cause is deliberately NOT claimed as proven: confirming it would mean performing
+        # an injection, which this session must not do. Polling is the right change either
+        # way, because it is asymmetric — it can only turn a PREMATURE empty read into a
+        # correct one; it can never turn a genuinely malformed field into a submit, since the
+        # exact-match check below is unchanged and still gates Enter.
+        #
+        # `verify_then_submit` (the sibling helper other call sites use) has always polled.
+        # This loop was the odd one out, reading exactly once.
         after = reader(terminal)
+        for _ in range(_SETTLE_READ_ATTEMPTS):
+            # Poll ONLY while the field reads back EMPTY. Empty is the one state that cannot
+            # be a verdict: our keystrokes were sent, so an empty pane means they have not
+            # rendered YET. Anything non-empty IS a verdict — the command (submit), our own
+            # garbage (clear), or the user's text (back off) — and is judged immediately by
+            # the unchanged checks below, so no existing behaviour moves.
+            #
+            # Narrower than it first appears, deliberately. Polling until the field MATCHES
+            # would also swallow a partial prefix like "/comp" on its way to "/compact", which
+            # is plausibly render latency too — but the measured failure was `saw ''`, and
+            # widening past the evidence would silently reclassify the malformed-text recovery
+            # this loop exists for (`tests/test_terminal_trigger_readback.py` pins that a
+            # non-empty malformed field is still CLEARED, and it should stay pinned).
+            if after is not None and not prompt_field_is_empty(after):
+                break
+            sleeper(_SETTLE_READ_INTERVAL_S)
+            after = reader(terminal)
         if after is not None and prompt_field_shows_only(after, command):
             # `pre_submit` runs HERE and nowhere else: the field is verified and Enter is the
             # very next act, so any state it records cannot outlive a command that never ran.
