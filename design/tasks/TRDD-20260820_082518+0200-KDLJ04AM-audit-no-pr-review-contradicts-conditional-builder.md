@@ -1,9 +1,10 @@
 ---
 trdd-id: KDLJ04AM
 title: github-config audit emits NO_PR_REVIEW unconditionally while the payload builder emits pull_request conditionally
-column: todo
+column: testing
 created: 2026-08-20T08:25:18+0200
-updated: 2026-08-20T08:25:18+0200
+updated: 2026-08-20T09:05:00+0200
+implementation-commits: [98a38760]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -52,3 +53,5 @@ eht: []
 - [ ] pytest, ruff, mypy clean; janitor#283 closed with the commit
 
 ## Approval log
+
+- 2026-08-20T09:05:00+0200 — SHIPPED (todo → testing) by janitor-main-session. All four acceptance boxes met (fixture fails-pre-fix proven via single-path stash; falsification pair; gatherer carries both predicate answers; suite green with one isolated-pass load flake). janitor#283 commented + closed (98a38760). Gate to complete: rides 3.3.19; the three held fleet GHCFG tickets self-clear on the installed line.
