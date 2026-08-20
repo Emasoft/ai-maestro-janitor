@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.23] — 2026-08-20
+
+### Bug Fixes
+
+- **hooks:** Guard the wrapper's OWN existence — 'sh <missing>' is 2 on Linux (6839f16)
+- **memory:** Claim only YOUR chore's dispatch (janitor#275, closes #280 + #273) (3f3fc77)
+- **hooks:** Invoke the wrapper DIRECTLY — no shell operators, 127 everywhere (09edda5)
+- **hooks:** Name bash explicitly — satisfies the validator AND keeps 127 (7452169)
 ## [3.3.22] — 2026-08-20
 
 ### Bug Fixes
@@ -14,6 +22,10 @@ All notable changes to this project will be documented in this file.
 
 - Add TRDD-079778RM — gh-reply-watch starved by the fleet-wide poll token (f5cd573)
 - **memory:** Record the hook exit-2 lockout lesson (janitor#281) (3dae31d)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.22 (fb33a6d)
 ## [3.3.21] — 2026-08-20
 
 ### Bug Fixes
