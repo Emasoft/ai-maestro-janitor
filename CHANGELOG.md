@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.22] — 2026-08-20
+
+### Bug Fixes
+
+- **hooks:** Fail OPEN when the plugin tree is mid-refetch (janitor#281) (8eb56bd)
+- **terminal_trigger:** Re-read an EMPTY field instead of calling it malformed (9011c4b)
+- **rotator:** Surface the 'rotation is impossible' dead end to a human (62da581)
+
+### Documentation
+
+- Add TRDD-079778RM — gh-reply-watch starved by the fleet-wide poll token (f5cd573)
+- **memory:** Record the hook exit-2 lockout lesson (janitor#281) (3dae31d)
 ## [3.3.21] — 2026-08-20
 
 ### Bug Fixes
@@ -16,6 +28,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-EZ3PMQYX:** Refuse the launchd branch on measurement; close the card complete (5efcfee)
 - **TRDD-IJ94O8YD:** Make the deferred scope call — state the rule, build no guard; close complete (1eb89e7)
 - **TRDD-AM8JD9SG:** F3 and F4 have a vehicle — TRDD-OZNG3N2D; cross-link both (90b4b9f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.21 (4364ebb)
 ## [3.3.20] — 2026-08-20
 
 ### Bug Fixes
