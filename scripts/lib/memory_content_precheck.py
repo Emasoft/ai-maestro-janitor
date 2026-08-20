@@ -659,8 +659,23 @@ def repair_defect(text: str) -> str:
         if not pat.search(fm_block):
             return "nested-only-dates"  # ocd/lmd present only NESTED → placement-normalization work
     tier = str(meta.get("tier", "")).strip()
-    has_applies = "## Applies to" in text
-    has_governed = "## Governed by" in text
+    # Anchored to a HEADING LINE, never a raw substring (janitor#284). As `in text` these
+    # asked "is this string anywhere on the page", so prose that merely QUOTED a heading
+    # moved the verdict — and moved it both ways. The noisy way: a `component` page whose
+    # lesson says "has `## Governed by` and no `## Applies to` — it is a component" was
+    # flagged for correctly documenting that it is NOT mis-tiered, and was unfixable, since
+    # the only way to clear the match is to reword a lesson the never-delete rule protects.
+    # The dangerous way is the reason this is anchored rather than special-cased: the branch
+    # below reads `not has_applies`, so ONE prose mention silently SUPPRESSES a genuinely
+    # inverted aspect/hub — "the scope is clean" becomes indistinguishable from "the
+    # detector was blinded". 20 pages across the six memory roots carry one of these strings
+    # in prose only. Same class as janitor#255 (TRDD-DEAD-SYMBOL firing on words that were
+    # never symbols): a predicate matching prose instead of structure.
+    # NOT fence-aware, deliberately: measured 0 pages with either heading at column 0 inside
+    # a fence, and the fence-aware walk in `_footer_heading_line` mirrors a Rust twin, so
+    # reusing it here would couple this rule to that mirror for no measured gain.
+    has_applies = re.search(r"^## Applies to", text, re.M) is not None
+    has_governed = re.search(r"^## Governed by", text, re.M) is not None
     if tier in ("aspect", "hub") and has_governed and not has_applies:
         return "inverted-tier-shape"  # a radiator built as a receiver
     if tier == "component" and has_applies:

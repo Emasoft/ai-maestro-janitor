@@ -1909,3 +1909,63 @@ def test_page_needs_repair_matches_repair_defect_exactly(tmp_path):
         text = p.read_text(encoding="utf-8")
         assert mcp._page_needs_repair(text) is expect_flagged
         assert mcp._page_needs_repair(text) == bool(mcp.repair_defect(text))
+
+
+# --------------------------------------------------------------------------- #
+# tier-shape is a HEADING test, not a substring test (janitor#284)
+# --------------------------------------------------------------------------- #
+
+def test_prose_quoting_a_footer_heading_does_not_flag_a_component(tmp_path):
+    """The self-announcing half of janitor#284.
+
+    `has_applies` was `"## Applies to" in text`, so a component page whose lesson
+    EXPLAINS the tier shape was flagged for it. The sentence below is the real one
+    that tripped it, from a page on this host — the page was reported as mis-tiered
+    because it correctly documented that it is not. It was also permanently
+    unfixable: the only way to clear a substring match is to reword the lesson, and
+    the never-delete-knowledge rule forbids that, so the repair chore could only
+    ever refuse it.
+    """
+    p = _shaped(
+        tmp_path, "a.md",
+        body="This page has `## Governed by` and no `## Applies to` — it is a component.",
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
+
+
+def test_prose_mention_cannot_SUPPRESS_a_real_inversion(tmp_path):
+    """The dangerous half of janitor#284, and the reason this is a fix rather than a
+    tweak: the aspect/hub branch reads `and not has_applies`, so a single prose
+    mention flipped a genuinely inverted page to CLEAN.
+
+    A false positive argues with you; this one just makes a real defect disappear,
+    leaving "the scope is clean" indistinguishable from "the detector was blinded".
+    The page below IS inverted — an aspect that only receives — and says the words in
+    prose. It must still be caught.
+    """
+    p = _shaped(
+        tmp_path, "a.md", tier="aspect",
+        body=("A rule that radiates.\n\nUnlike a page with `## Applies to`, this one\n"
+              "only receives.\n\n## Governed by\n- [[x]]"),
+    )
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == "inverted-tier-shape"
+
+
+def test_a_real_heading_is_still_detected_in_both_directions(tmp_path):
+    """The anchor must not over-correct: an ACTUAL `^## Applies to` heading still
+    decides the verdict, which is the behaviour the two pre-existing cases pin."""
+    receiver = _shaped(tmp_path / "r", "a.md", tier="aspect",
+                       body="A rule.\n\n## Governed by\n- [[x]]")
+    radiator = _shaped(tmp_path / "d", "a.md",
+                       body="A fact.\n\n## Applies to\n- [[x]]")
+    assert mcp.repair_defect(receiver.read_text(encoding="utf-8")) == "inverted-tier-shape"
+    assert mcp.repair_defect(radiator.read_text(encoding="utf-8")) == "inverted-tier-shape"
+
+
+def test_an_indented_heading_is_not_a_heading(tmp_path):
+    """`^## Applies to` is column-anchored on purpose. An indented line is markdown
+    content (a list continuation or a code block), not a section this page radiates
+    from — treating it as one is the same prose-vs-structure confusion, one level in.
+    """
+    p = _shaped(tmp_path, "a.md", body="A fact.\n\n    ## Applies to\n    - [[x]]")
+    assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
