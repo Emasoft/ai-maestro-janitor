@@ -32,6 +32,7 @@ due, even though the per-session heartbeat fires it in every project.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 import time
@@ -241,6 +242,52 @@ def main() -> int:
         line2 = dedupe.emit_once(seen2, f"stalled-{day}-{sig2}", msg2)
         if line2 is not None:
             print(line2)
+
+    # TERTIARY nudge — rotation is IMPOSSIBLE right now, and no human knows.
+    #
+    # The two nudges above cover per-account credential death. They do NOT cover the other
+    # dead end: every account is alive but USAGE-EXHAUSTED, or there is no alternate to
+    # rotate to at all. `rotator._decide()` records those to stdout and `rotator.log`, and
+    # MEASURED 2026-08-20: nothing in `scripts/` reads that log for them. So the one moment
+    # a human is the only way forward was the one moment the janitor said nothing, and the
+    # session simply stalled — the shape the owner reports as "projects stall after a while".
+    #
+    # Reads the MARKER (`rotation-stuck.json`), never greps the log: the rotator knows it is
+    # stuck and says so structurally, and a log grep would re-derive that by pattern-matching
+    # prose that is free to be reworded.
+    try:
+        stuck = json.loads((home / "rotation-stuck.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- absent (the healthy case) or corrupt: stay silent
+        stuck = None
+    if isinstance(stuck, dict) and stuck.get("kind"):
+        first = int(stuck.get("first_seen_epoch") or now)
+        last = int(stuck.get("last_seen_epoch") or first)
+        # STALENESS GATE. The marker is cleared on a successful rotation, but a host whose
+        # rotator stopped running entirely would leave one behind forever. Only report while
+        # the condition is still being OBSERVED, so this can never nag about a dead end that
+        # ended when the rotator did.
+        if now - last <= 3600:
+            kind = str(stuck.get("kind"))
+            hours = max(0.0, (now - first) / 3600.0)
+            remedy = {
+                "all-accounts-maxed":
+                    "every paid account is over its usage window — nothing to do but wait for "
+                    "a window to reset, or add another paid account",
+                "no-alternates-configured":
+                    f"there is no second account to rotate to — add one with `{login_sh} <email>`",
+                "expired-and-offline":
+                    "the live credential is expired and the API is unreachable — check the "
+                    "network, then re-auth manually",
+            }.get(kind, "see the rotator log for the decision")
+            msg3 = (
+                f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
+                f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
+                f"rescued by rotating — it will stall. Detail: {stuck.get('detail') or 'n/a'}"
+            )
+            seen3 = home / ".oauth-rotation-stuck-seen.txt"
+            line3 = dedupe.emit_once(seen3, f"stuck-{day}-{kind}", msg3)
+            if line3 is not None:
+                print(line3)
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

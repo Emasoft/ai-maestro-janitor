@@ -145,6 +145,7 @@ def _run(
     profiles: dict[str, float | None],
     *,
     env_extra: dict[str, str] | None = None,
+    before=None,
 ) -> tuple[str, int]:
     """slots value: True = refresh-capable; False = no-refresh setup-token (365d).
 
@@ -169,6 +170,12 @@ def _run(
             # standing between it and a login nudge is whether a session exists.
             oauth["expiresAt"] = int((time.time() - 86400) * 1000)
         (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
+
+    # `before(home)` — last-moment hook for a test that needs an extra file in the rotator
+    # home (e.g. the rotation-stuck marker). Runs after the standard fixture so a test can
+    # add to it without restating any of it.
+    if before is not None:
+        before(home)
 
     prof_root = tmp_path / "profiles"
     for email, cookie_days in profiles.items():
@@ -390,3 +397,80 @@ def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:
     )
     assert r.returncode == 0
     assert r.stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# TERTIARY nudge — rotation is IMPOSSIBLE and no human knows (2026-08-20)
+#
+# The two nudges above cover per-account credential DEATH. They do not cover the
+# other dead end: every account alive but USAGE-EXHAUSTED, or no alternate to
+# rotate to at all. `rotator._decide()` writes those to stdout and rotator.log,
+# and nothing in scripts/ reads that log for them — so the one moment a human is
+# the only way forward was the one moment the janitor said nothing, and the
+# session just stalled.
+# ---------------------------------------------------------------------------
+
+
+def _write_stuck(home: Path, kind: str, *, age_h: float = 2.0, last_seen_ago_s: int = 30) -> None:
+    now = int(time.time())
+    (home / "rotation-stuck.json").write_text(json.dumps({
+        "kind": kind,
+        "detail": "a@x 5h=99%; b@x 7d=100%",
+        "first_seen_epoch": now - int(age_h * 3600),
+        "last_seen_epoch": now - last_seen_ago_s,
+    }), encoding="utf-8")
+
+
+def test_a_live_stuck_marker_is_reported_to_the_human(tmp_path: Path) -> None:
+    """The whole point: an all-accounts-maxed dead end must reach the human, not just a log."""
+    out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0},
+                   before=lambda home: _write_stuck(home, "all-accounts-maxed"))
+    assert rc == 0
+    assert "[oauth-rotation-stuck]" in out, out
+    assert "all-accounts-maxed" in out
+    assert "stall" in out, "the consequence must be stated — that is why the human should care"
+
+
+def test_a_stale_marker_is_NOT_reported(tmp_path: Path) -> None:
+    """The marker clears on a successful rotation, but a host whose rotator STOPPED would
+    leave one behind forever. Only report while the condition is still being observed —
+    otherwise this nags about a dead end that ended when the rotator did."""
+    out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0},
+                   before=lambda home: _write_stuck(home, "all-accounts-maxed",
+                                                    last_seen_ago_s=7200))
+    assert rc == 0
+    assert "[oauth-rotation-stuck]" not in out, out
+
+
+def test_no_marker_means_silence(tmp_path: Path) -> None:
+    """The healthy case: absent marker -> not a word. A detector that speaks when nothing is
+    wrong trains the reader to ignore it, which is how the 91 unread alerts happened."""
+    out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0})
+    assert rc == 0
+    assert "[oauth-rotation-stuck]" not in out
+
+
+def test_a_corrupt_marker_is_survived_silently(tmp_path: Path) -> None:
+    """Fail-open: an unreadable marker must never break the heartbeat or invent an alarm."""
+    def _corrupt(home: Path) -> None:
+        (home / "rotation-stuck.json").write_text("{not json", encoding="utf-8")
+    out, rc = _run(tmp_path, {"a@x": True}, {"a@x": 30.0}, before=_corrupt)
+    assert rc == 0
+    assert "[oauth-rotation-stuck]" not in out
+
+
+def test_each_stuck_kind_names_its_own_remedy(tmp_path: Path) -> None:
+    """The three dead ends need DIFFERENT human actions — waiting, adding an account, and
+    fixing the network. One generic 'rotation failed' would send the reader down the wrong path."""
+    seen = {}
+    for kind, expect in (
+        ("all-accounts-maxed", "wait"),
+        ("no-alternates-configured", "no second account"),
+        ("expired-and-offline", "network"),
+    ):
+        out, rc = _run(tmp_path / kind, {"a@x": True}, {"a@x": 30.0},
+                       before=lambda home, k=kind: _write_stuck(home, k))
+        assert rc == 0
+        assert expect in out.lower(), f"{kind}: expected {expect!r} in {out!r}"
+        seen[kind] = out
+    assert len({v.split("Detail:")[0] for v in seen.values()}) == 3, "remedies must differ"

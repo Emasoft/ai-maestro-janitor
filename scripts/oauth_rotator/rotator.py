@@ -252,6 +252,60 @@ LOG_FILE = ROOT / "rotator.log"
 _LOG_MAX_BYTES = 256 * 1024  # rotate at this size — bounds the unattended 60s-cadence log
 
 
+#: The "rotation is IMPOSSIBLE right now" marker — a machine-readable sibling of the three
+#: genuinely-stuck decisions below, written so a heartbeat detector can surface them.
+#: `_decide()` alone reaches stdout and `rotator.log`, and MEASURED 2026-08-20: nothing in
+#: `scripts/` reads that log for these lines. So an unattended run that exhausts every
+#: account leaves a durable, correct, and completely unread record while the session stalls —
+#: the failure the owner reports as "projects stall after a while".
+STUCK_FILE = ROOT / "rotation-stuck.json"
+
+
+def _mark_stuck(kind: str, detail: str) -> None:
+    """Record that rotation cannot proceed. Best-effort; never raises.
+
+    Written on EVERY stuck tick rather than only on the transition, so `first_seen_epoch`
+    (preserved across ticks) tells a reader how long the dead end has lasted while
+    `last_seen_epoch` proves the condition is still live and not a stale file nobody
+    cleared. A detector that cannot tell those apart either nags about a resolved problem
+    or trusts a marker from last week.
+    """
+    now = int(time.time())
+    first = now
+    try:
+        prior = json.loads(STUCK_FILE.read_text(encoding="utf-8"))
+        if isinstance(prior, dict) and prior.get("kind") == kind:
+            first = int(prior.get("first_seen_epoch") or now)
+    except Exception:  # noqa: BLE001 -- absent/corrupt marker: start a fresh window
+        first = now
+    payload = {
+        "kind": kind,
+        "detail": detail,
+        "first_seen_epoch": first,
+        "last_seen_epoch": now,
+    }
+    try:
+        STUCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STUCK_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, STUCK_FILE)
+    except OSError:
+        pass  # a marker write must never break a rotation tick
+
+
+def _clear_stuck() -> None:
+    """Drop the marker — rotation is possible again. Best-effort; never raises.
+
+    Called on every outcome that proves the dead end is over. Clearing on SUCCESS rather
+    than by expiry is what keeps the signal honest: a marker that ages out on its own would
+    go quiet while the host is still stuck.
+    """
+    try:
+        STUCK_FILE.unlink()
+    except OSError:
+        pass
+
+
 def _log(msg: str) -> None:
     """Append a timestamped line to the persistent rotator log.
 
@@ -1569,6 +1623,11 @@ def _switch_blob(email: str, blob: dict, reason: str) -> None:
     # presses the key a successful rotation was supposed to make unnecessary. Stamp only —
     # the daemon's liveness beat owns the decision of whom to wake and how.
     gs.record_rotation_success(int(time.time()))
+    # A rotation just SUCCEEDED, so any "cannot rotate" marker is now false. Cleared here —
+    # the single chokepoint every successful switch passes through — rather than at each of
+    # the three call sites, so a future rotation path cannot forget to clear it and leave the
+    # host nagging about a dead end it has already escaped.
+    _clear_stuck()
     save_state(state)
     # F2 (TRDD-7PYTX4E9): the rotator AUTHORED this live write, so it knows the identity
     # with certainty even in a context that cannot read the primary back — stamp the
@@ -2183,14 +2242,20 @@ def cmd_auto() -> int:
     # alternate was actually MEASURED and rejected, while empty means there was nothing to
     # measure at all (no slots configured). Collapsing them made "maxed" a lie in the empty
     # case and hid that no alternate was ever probed, so split them into distinct outcomes.
+    # Each branch ALSO writes the machine-readable marker (see `_mark_stuck`): `_decide`
+    # reaches stdout and rotator.log, and nothing reads those for these lines, so without
+    # this the host goes quiet at exactly the moment a human is the only way out.
     if network_up:
         if verdicts:
             detail = "; ".join(verdicts)
             _decide("auto: live %s exhausted (%s) but every alternate was measured and none is usable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, detail))
+            _mark_stuck("all-accounts-maxed", detail)
         else:
             _decide("auto: live %s exhausted (%s) but there are no alternate accounts to measure — cannot rotate; add another paid account" % (live_email or "(live)", live_desc))
+            _mark_stuck("no-alternates-configured", live_desc)
     else:
         _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate with a known future expiry exists — cannot rotate; manual re-auth needed" % (live_email or "(live)"))
+        _mark_stuck("expired-and-offline", live_email or "(live)")
     return 0
 
 
