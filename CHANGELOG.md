@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.21] — 2026-08-20
+
+### Bug Fixes
+
+- **publish:** Recover an index.lock that blocks stage 10's own add/commit (TRDD-BEIG83VR) (d917cce)
+- **git_utils:** A ZOMBIE git must not block orphaned-lock removal (1a4ea9e)
+
+### Documentation
+
+- **TRDD-BEIG83VR:** Record the implementing commit d917cce6 (37485fe)
+- **TRDD-JEEQCHFG:** Answer the window question by measurement; file TRDD-NLHVLGEP (9da4435)
+- **TRDD-EZ3PMQYX:** Refuse the launchd branch on measurement; close the card complete (5efcfee)
+- **TRDD-IJ94O8YD:** Make the deferred scope call — state the rule, build no guard; close complete (1eb89e7)
+- **TRDD-AM8JD9SG:** F3 and F4 have a vehicle — TRDD-OZNG3N2D; cross-link both (90b4b9f)
 ## [3.3.20] — 2026-08-20
 
 ### Bug Fixes
@@ -11,6 +25,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Add TRDD-OZNG3N2D + TRDD-6CCQ6T7V — consumer cards for the hub's activity and update-trail verbs (d7c1517)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.20 (26277f3)
 ## [3.3.19] — 2026-08-20
 
 ### Bug Fixes
