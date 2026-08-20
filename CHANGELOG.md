@@ -2,11 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.25] — 2026-08-20
+
+### Bug Fixes
+
+- **gh-reply-watch:** One fleet-wide notification fetch, not N projects racing for one token (TRDD-079778RM) (b49541f)
+
+### Documentation
+
+- **TRDD-079778RM:** Todo -> testing — fleet inbox landed in b49541f4, live observation owed (5ef5d4f)
 ## [3.3.24] — 2026-08-20
 
 ### Bug Fixes
 
 - **memory:** Tier-shape must test a HEADING line, not a raw substring (janitor#284) (4a2ea0a)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.24 (d2b5381)
 ## [3.3.23] — 2026-08-20
 
 ### Bug Fixes
