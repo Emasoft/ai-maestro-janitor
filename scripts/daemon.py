@@ -73,6 +73,12 @@ import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import fleet_stop  # noqa: E402  # daemon-driven disarm/pause policy (TRDD-ME8V2YJF)
+
+# STATIC import on purpose: `keepalive_stage` computes the daemon's transitive import
+# closure by AST and stages exactly that into the DATA dir the daemon actually runs from.
+# Importing the fetch here is what gets it staged; a subprocess to a path outside the
+# closure silently no-ops there (measured in 3.3.25 — see fetch_and_publish's docstring).
+import gh_notify_inbox  # noqa: E402  # the fleet-wide GH notification inbox (TRDD-079778RM)
 import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TRDD-157OH2D7)
 import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
@@ -1888,18 +1894,26 @@ def task_gh_notify_inbox() -> None:
     """
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_GH_REPLY_WATCH_ENABLED", True):
         return
-    poller = _HERE / "gh_issues_monitor" / "gh_notify_poll.py"
-    if not poller.is_file():
-        return
     try:
-        subprocess.run(  # noqa: S603 - explicit args, no shell
-            ["uv", "run", "--script", "--quiet", str(poller), "--write-inbox"],
-            capture_output=True,
-            timeout=60,
-            check=False,
+        count, err = gh_notify_inbox.fetch_and_publish()
+    except Exception as exc:  # noqa: BLE001 — a notification lane must never kill the daemon
+        state.log_line("daemon", f"gh-notify-inbox: unexpected failure: {exc}")
+        return
+    if err:
+        # LOG IT, deduped. The first version of this chore swallowed every failure and
+        # logged `done in 0s` on a 60 s cadence while writing nothing — a lane that looks
+        # alive and does nothing is the exact defect TRDD-079778RM exists to fix, so
+        # reproducing it one layer down would be the worst possible outcome. Deduped
+        # because a broken token would otherwise write a line every minute forever.
+        msg = dedupe.emit_once(
+            gs.control_dir() / "gh-notify-inbox.err.seen",
+            f"fetch-{err[:60]}",
+            f"gh-notify-inbox: fetch failed — {err}",
         )
-    except (OSError, subprocess.SubprocessError):
-        pass  # a failed fetch just leaves the inbox to age out into the fallback path
+        if msg:
+            state.log_line("daemon", msg)
+        return
+    state.log_line("daemon", f"gh-notify-inbox: published {count} notification thread(s)")
 
 
 class Task:

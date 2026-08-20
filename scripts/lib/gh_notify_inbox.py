@@ -27,7 +27,9 @@ detector reader cannot drift about any of the three.
 from __future__ import annotations
 
 import json
+import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,12 @@ import global_state as gs
 import state
 
 _INBOX_NAME = "gh-notify-inbox.json"
+_CURSOR_NAME = "gh-notify-inbox.cursor"
+
+# Overlap the `since` window so a thread updated in the same second as the last fetch is
+# not lost between ticks. Merging by (id, updated_at) downstream makes the overlap free.
+_OVERLAP_S = 90
+_PAGE_LIMIT = 50
 
 # How long a thread stays in the inbox after its `updated_at`.
 #
@@ -139,6 +147,81 @@ def is_fresh(now: int | None = None) -> bool:
     """True iff a fetch landed recently enough to be served instead of a direct poll."""
     age = age_s(now)
     return age is not None and age <= MAX_AGE_S
+
+
+def _cursor_path() -> Path:
+    return gs.control_dir() / _CURSOR_NAME
+
+
+def _gh_api(path: str) -> tuple[object | None, str | None]:
+    """`(parsed_json, error)`. Never raises — mirrors `gh_notify_poll.gh_api`."""
+    try:
+        proc = subprocess.run(  # noqa: S603 - explicit args, no shell
+            ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+            capture_output=True, text=True, timeout=60,
+        )
+    except FileNotFoundError:
+        return None, "gh CLI not found on PATH"
+    except (OSError, subprocess.SubprocessError):
+        return None, "gh api did not run"
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()
+        return None, (tail[-1][:200] if tail else "gh api failed")
+    try:
+        return json.loads(proc.stdout), None
+    except ValueError:
+        return None, "gh api returned non-JSON"
+
+
+def fetch_and_publish() -> tuple[int, str]:
+    """Fetch the account's notifications ONCE and publish them. `(count, error)`.
+
+    THIS LIVES IN lib/ FOR A LOAD-BEARING REASON, measured 2026-08-20. The daemon does not
+    run from the plugin cache — it runs from a STAGED copy in the plugin DATA dir holding
+    only `daemon.py` plus its transitive import closure (`keepalive_stage._SUBDIRS` is
+    `("lib", "oauth_rotator")`). `scripts/gh_issues_monitor/` is NOT staged, so the first
+    version of this chore — which shelled out to `gh_notify_poll.py --write-inbox` — hit a
+    path that does not exist on the daemon's own tree, took its `is_file()` guard, and
+    logged `task 'gh-notify-inbox' done in 0s` every 60 s forever while writing nothing.
+    Every test passed, because tests invoke the REPO path where that file does exist.
+
+    So the fetch belongs in a module the daemon IMPORTS: the closure walker then stages it
+    automatically, and a future rename cannot silently un-stage it the way a hardcoded
+    subprocess path could. `gh_notify_poll.py --write-inbox` delegates here rather than
+    reimplementing, so there is exactly one writer.
+
+    Errors are RETURNED, not logged, so the daemon can log once with context instead of
+    this module guessing who is listening.
+    """
+    now = datetime.now(timezone.utc)
+    query = f"notifications?all=true&per_page={_PAGE_LIMIT}"
+    try:
+        raw = json.loads(_cursor_path().read_text(encoding="utf-8")).get("since")
+    except (OSError, ValueError, AttributeError):
+        raw = None
+    if raw:
+        try:
+            since = datetime.fromisoformat(str(raw).replace("Z", "+00:00")) - timedelta(
+                seconds=_OVERLAP_S
+            )
+            query += f"&since={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+        except ValueError:
+            pass  # unparseable cursor -> full fetch, which is correct-but-slower
+
+    threads, err = _gh_api(query)
+    if err:
+        return 0, err
+    if not isinstance(threads, list):
+        return 0, "notifications response was not a list"
+    if not write(threads):
+        return 0, "inbox write failed"
+    # Advance the cursor ONLY after a successful publish, so a failed write is refetched
+    # next tick instead of being skipped forever.
+    try:
+        state.atomic_write(_cursor_path(), json.dumps({"since": now.strftime("%Y-%m-%dT%H:%M:%SZ")}))
+    except (OSError, TypeError, ValueError):
+        pass  # a lost cursor costs one redundant full fetch, never a missed reply
+    return len(threads), ""
 
 
 def read_threads(*, ignore_age: bool = False, now: int | None = None) -> list[dict[str, Any]]:

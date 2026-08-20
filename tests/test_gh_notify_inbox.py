@@ -197,3 +197,47 @@ def test_the_POLLER_actually_writes_the_inbox_end_to_end(tmp_path: Path,
     written = json.loads((control / "gh-notify-inbox.json").read_text(encoding="utf-8"))
     assert [t["id"] for t in written["threads"]] == ["77"]
     assert written["fetched_at"] > 0
+
+
+def test_the_inbox_module_is_IN_the_daemons_staged_closure() -> None:
+    """THE BUG 3.3.25 SHIPPED, pinned so it cannot return.
+
+    The daemon does not run from the plugin cache — it runs from a STAGED copy in the
+    plugin DATA dir holding only `daemon.py` plus its transitive import closure
+    (`keepalive_stage._SUBDIRS` is `("lib", "oauth_rotator")`). The first version of this
+    chore shelled out to `scripts/gh_issues_monitor/gh_notify_poll.py --write-inbox`, a
+    path that does NOT exist on that staged tree — so the guard tripped, the chore logged
+    `done in 0s` every 60 s, and the inbox was never written. Measured on the live daemon
+    after the 3.3.25 rollout; every test passed throughout, because tests run from the REPO
+    where that file does exist.
+
+    Being in the closure is therefore the load-bearing property, not an implementation
+    detail: it is what makes the module present where the daemon actually runs.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
+    import keepalive_stage  # noqa: PLC0415
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    staged = {p.name for p in keepalive_stage.daemon_closure(scripts)}
+    assert "gh_notify_inbox.py" in staged, (
+        "the inbox module is not in the daemon's staged import closure — the chore will "
+        f"silently no-op on the daemon's own tree. Staged: {sorted(staged)}"
+    )
+
+
+def test_the_daemon_does_not_shell_out_to_the_unstaged_monitor_tree() -> None:
+    """The same bug stated as a rule, because the closure test alone would still pass if
+    someone re-added a subprocess call beside the import.
+
+    `scripts/gh_issues_monitor/` is NOT staged, so any daemon path that reaches into it by
+    filename is dead code on the daemon's own tree — and dead SILENTLY, which is why this
+    is asserted rather than reviewed.
+    """
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "daemon.py").read_text(
+        encoding="utf-8"
+    )
+    offenders = [ln.strip() for ln in src.splitlines()
+                 if "gh_issues_monitor" in ln and not ln.strip().startswith("#")]
+    assert not offenders, (
+        f"daemon.py reaches into the unstaged gh_issues_monitor tree: {offenders}"
+    )

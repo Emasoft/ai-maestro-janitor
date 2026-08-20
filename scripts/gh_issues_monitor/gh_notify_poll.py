@@ -302,58 +302,20 @@ def do_list() -> int:
 
 
 def do_write_inbox(args) -> int:
-    """Fetch the account's notifications ONCE and publish them for every project to read.
+    """Publish the fleet-wide inbox. A thin DELEGATE — the implementation is in
+    `lib/gh_notify_inbox.fetch_and_publish`.
 
-    The daemon's half of TRDD-079778RM. Project-independent by construction: it touches no
-    `registry.json` and no per-project cursor, so it can run from a daemon that has no
-    project of its own. Its own `since` cursor lives beside the inbox rather than in a
-    project's state dir, for the same reason.
+    It lives there, not here, because the daemon (the chore's real caller) runs from a
+    staged tree containing only `daemon.py`'s import closure — `lib/` and
+    `oauth_rotator/`, never `gh_issues_monitor/`. Keeping the writer here and shelling out
+    to it is exactly the bug that shipped in 3.3.25: the path did not exist on the daemon's
+    tree, so the chore no-opped silently every 60 s.
 
-    Errors are SILENT here. This runs on a 60 s daemon cadence, so a broken token would
-    otherwise write a line every minute forever; readers already surface a degraded lane
-    on their own by falling back to a direct poll and reporting through the existing path.
+    Errors stay SILENT on this path: it is the manual/debug entry point, and a broken token
+    should not have this print on a cadence.
     """
-    inbox_state = _read_json_at(gh_notify_inbox.inbox_path().parent / "gh-notify-inbox.cursor", {})
-    now = datetime.now(timezone.utc)
-    query = f"notifications?all=true&per_page={args.limit}"
-    since_raw = (inbox_state or {}).get("since")
-    if since_raw:
-        since = datetime.fromisoformat(str(since_raw).replace("Z", "+00:00")) - timedelta(
-            seconds=OVERLAP_SECONDS
-        )
-        query += f"&since={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-
-    threads, err = gh_api(query)
-    if err or not isinstance(threads, list):
-        return 0
-    if not gh_notify_inbox.write(threads):
-        return 0
-    # Advance the cursor ONLY after a successful publish, so a failed write is refetched
-    # next tick instead of being skipped forever.
-    _write_json_at(
-        gh_notify_inbox.inbox_path().parent / "gh-notify-inbox.cursor",
-        {"since": now.strftime("%Y-%m-%dT%H:%M:%SZ")},
-    )
+    gh_notify_inbox.fetch_and_publish()
     return 0
-
-
-def _read_json_at(path, default):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return default
-
-
-def _write_json_at(path, payload) -> None:
-    try:
-        os.makedirs(os.path.dirname(str(path)), exist_ok=True)
-        tmp = f"{path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
-        os.replace(tmp, str(path))
-    except (OSError, ValueError):
-        pass  # best-effort cursor; a lost cursor costs one redundant full fetch
 
 
 def do_poll(args) -> int:

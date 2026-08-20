@@ -60,9 +60,19 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
     daemon files fleet findings on the repos that own them, and the module MUST be staged —
     a lazy import would keep this number small by making the feature fail under launchd,
     where the daemon runs from the staged copy and nothing else is importable.
+
+    50 -> 55 when `gh_notify_inbox.py` joined (TRDD-079778RM, 2026-08-20) — and that module
+    is the WORKED EXAMPLE of the sentence above, not another routine bump. Its first version
+    kept the closure at 50 by having the daemon shell out to
+    `scripts/gh_issues_monitor/gh_notify_poll.py` instead of importing anything. That tree is
+    not staged, so on the daemon's own copy the path did not exist: the chore logged
+    `done in 0s` every 60 s and never wrote a byte, while every test here stayed green
+    because tests run from the repo. Shipped in 3.3.25, caught only by watching the live
+    daemon. Keeping this number down by NOT importing is how the feature breaks, so the
+    bound is raised rather than defended.
     """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 50, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= 55, f"closure unexpectedly large: {len(closure)}"
     leaked = [p.name for p in closure if p.name.endswith("_patterns.py")]
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 
@@ -75,7 +85,7 @@ def test_closure_excludes_detectors_and_reuses_wake_modules() -> None:
     FAILS the build instead of letting the daemon crash-loop on a bloated stage exactly in the
     all-sessions-down scenario the keepalive exists for."""
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 50, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= 55, f"closure unexpectedly large: {len(closure)}"
     detectors = [str(p) for p in closure if "detectors" in p.parts]
     assert not detectors, f"detector modules leaked into the L0 daemon closure: {detectors}"
     assert not [p.name for p in closure if p.name.endswith("_patterns.py")]
