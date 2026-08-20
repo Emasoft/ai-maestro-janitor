@@ -3,13 +3,13 @@ trdd-id: OZNG3N2D
 title: Injection gate corroborator — consume the hub's aimaestro-session activity verb as a second presence signal
 column: backburner
 created: 2026-08-20T16:09:19+0200
-updated: 2026-08-20T16:09:19+0200
+updated: 2026-08-20T19:00:00+0200
 current-owner: janitor-main-session
 task-type: feature
-priority: normal
+priority: high
 approval-tier: 0
 scope: project
-external-refs: [TRDD-D2DD5GO8]
+external-refs: [TRDD-D2DD5GO8, TRDD-AM8JD9SG]
 npt: []
 eht: []
 ---
@@ -24,6 +24,22 @@ forever. The hub now ships `aimaestro-session.sh activity <tmux-session>`, which
 `in_turn`, `last_user_input_epoch` (server-side presence), and a transcript epoch. When
 the hub backend is present, that is an independent second signal the gate can consult
 BEFORE giving up.
+
+## This also closes two orphaned audit findings (added 2026-08-20, verified)
+
+TRDD-AM8JD9SG has carried F3 and F4 as design-needed since 2026-07-16 with nobody knowing what
+would resolve them. This card is the answer to both, which raises its priority above
+"nice-to-have corroborator":
+
+- **F4 — "the self-compact presence gate is HOST-wide, not per-pane."** Confirmed at HEAD:
+  `user_intent.hid_idle_seconds()` documents itself as *"machine-wide"* and reads macOS
+  IOHIDSystem, i.e. the machine's input devices. No call-site care can make that per-pane, so F4
+  is unfixable in place and needs a different SOURCE. The hub verb is per-session — the exact
+  granularity F4 asks for.
+- **F3 — "transcript freshness is conflated with human presence."** The verb reports
+  `last_user_input_epoch` (server-observed human input) as a field distinct from the transcript
+  epoch, and documents that the transcript epoch is one sample. The conflation is resolved at the
+  source instead of being inferred downstream.
 
 ## Contract facts (from the hub's landing message, 2026-08-20 ~09:15)
 

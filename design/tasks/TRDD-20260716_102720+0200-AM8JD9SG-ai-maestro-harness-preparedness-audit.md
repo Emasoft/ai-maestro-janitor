@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-16T02:43:00+0200
+updated: 2026-08-20T19:00:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -296,8 +296,20 @@ finding is fully resolved, and it cannot see a fix that landed without citing th
       message or CLI injection is indistinguishable from a human typing, so it forges user-presence
       and user-intent. Needs a prompt-provenance root of trust; the card records this as USER/server
       scope, not janitor-side.
-- [ ] **F3** transcript freshness is conflated with human presence.
-- [ ] **F4** the self-compact presence gate is HOST-wide, not per-pane.
+- [ ] **F3** transcript freshness is conflated with human presence. — **VEHICLE IDENTIFIED
+      2026-08-20: TRDD-OZNG3N2D.** The hub shipped `aimaestro-session.sh activity <tmux-session>`,
+      which reports `last_user_input_epoch` (server-OBSERVED human input) SEPARATELY from a
+      transcript epoch, and states the transcript epoch is one sample needing two spaced reads to
+      mean "advancing". That is exactly the conflation F3 names, resolved at the source rather
+      than inferred. Blocked on OZNG3N2D, not on design.
+- [ ] **F4** the self-compact presence gate is HOST-wide, not per-pane. — **CONFIRMED STILL TRUE
+      AT HEAD 2026-08-20, and structurally so.** `user_intent.hid_idle_seconds()` says it in its
+      own docstring: *"Seconds since the user's last REAL input event (keyboard or mouse),
+      **machine-wide**"*. It reads macOS IOHIDSystem, which measures the machine's input devices;
+      no amount of care at the call site can make it per-pane, so this is not a bug to fix in
+      place. **Same vehicle: TRDD-OZNG3N2D** — the hub verb is per-SESSION, which is the
+      granularity F4 asks for. Note the fail-direction contract from TRDD-D2DD5GO8 must survive:
+      `in_turn` NULL is UNKNOWN and never licenses an injection.
 - [ ] **F7** hard-restart rungs bypass the ai-maestro server lifecycle — must use
       `hibernate`→`wake` (LIFECYCLE), never `restart` (DRIVE, revoked by R42).
 - [ ] **F11** R42.5 compliance — the guardian must not cross-inject.
