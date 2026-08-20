@@ -1,10 +1,10 @@
 ---
 trdd-id: IJ94O8YD
 title: Editing an injected instruction file mid-session costs a full cache re-write — 150k tokens, measured
-column: todo
+column: complete
 created: 2026-08-13T00:41:54+0200
-updated: 2026-08-16T02:15:20+0200
-current-owner: unassigned
+updated: 2026-08-20T18:40:00+0200
+current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
 scope: project
@@ -207,6 +207,53 @@ only has to be sampled before it ages out, the way the first window's rules edit
       janitor cannot influence. Enforcement machinery for the smaller, self-limiting cost is not
       obviously worth its own maintenance burden — that is a scope judgement, and building it
       first and asking later is how a card outgrows its evidence.
-- [ ] Whatever the rule is, it is enforced by something that runs — not only written down
-      (this corpus's own lesson: a fix reaches the sites it is wired into, not the sites it
-      claims). Gated on the box above being decided, not on effort.
+- [x] **DECIDED 2026-08-20 — the rule is stated, and it is deliberately NOT enforced by
+      machinery.** See **THE SCOPE CALL** below. The box was gated on a decision, not on
+      effort; leaving it open indefinitely was itself the failure mode.
+- [x] Whatever the rule is, it is enforced by something that runs — **ANSWERED: nothing new
+      needs to run, because the free path already runs.** See below.
+
+## THE SCOPE CALL — 2026-08-20
+
+**The rule.** Edits to injected instruction files (`~/.claude/rules/*.md`, `CLAUDE.md`) belong
+in the **script path** — `rules_installer`, which the janitor already uses and which runs
+outside any model prefix, so the edit costs zero cache. A **hand edit mid-session is
+explicitly allowed for an urgent fix**; it costs approximately one prefix rewrite (~150k
+tokens on the days it happens), and that is an acceptable price for a rule that would
+otherwise not ship. What is NOT acceptable is a batch of cosmetic rules edits made
+mid-session for tidiness — that is the 2026-08-12 shape (`29121d8b`, `83a68674`) which paid a
+full cache write to buy context headroom.
+
+**No enforcement machinery, and the reason is the evidence, not laziness.** A hook that
+blocked or warned on Edit against `~/.claude/rules/` would:
+
+- fire on exactly the case the rule permits (the urgent fix), so it would be trained away;
+- carry permanent maintenance and per-tool-call cost;
+- to defend a cost that two measurements show is EPISODIC — ~150k on rules-edit days,
+  entirely absent otherwise — and self-limiting, since the edit that causes it is also the
+  edit that ends it.
+
+Weighed against the janitor's own token-economy law (the 46k repo-map was deleted from
+CLAUDE.md for costing far less than this per day), building a standing guard against an
+occasional 150k is not worth its own footprint. The rule is written where it is read on
+demand rather than injected into every turn — for the same reason.
+
+### The third window could not be taken, AGAIN — stop trying
+
+The 2026-08-13 12:45 note promised the third measurement was "free next time the server is
+up". Retried 2026-08-20: the server answers `200` on `http://localhost:4316/mcp` and
+`agentlenspro get_cache_break_causes --out …` then **hung past a 20-minute timeout and wrote
+no file**. That is the second failed attempt by a different failure mode (first: `ECONNRESET`).
+
+Recorded so the next session does not spend another 20 minutes on it: **the reachability of
+the server does not predict that this tool call completes**, and if it is attempted again it
+must be backgrounded, never run inline. More importantly, the decision above does not depend
+on it — a third window could only sharpen an EPISODIC claim that two windows already agree
+on, and no plausible result flips a "don't build machinery" call.
+
+## Approval log
+
+- 2026-08-20T18:40:00+0200 — COMPLETE by janitor-main-session. Both surviving boxes were
+  gated on a scope judgement the card had deferred twice; the judgement is now made and
+  recorded with its reasoning, rather than leaving the card open as a standing invitation to
+  build a guard the evidence does not support.
