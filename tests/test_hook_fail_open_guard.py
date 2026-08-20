@@ -70,12 +70,38 @@ def test_a_present_hook_that_allows_returns_zero(tmp_path: Path) -> None:
 
 
 def test_a_missing_WRAPPER_is_also_non_blocking(tmp_path: Path) -> None:
-    """The wrapper lives inside the same directory that gets emptied, so it can vanish too.
-    The shell then cannot open it and exits 127 — non-zero, but NOT 2, so still non-blocking.
-    Pinned because the whole design claims fail-open at EVERY layer."""
-    rc = subprocess.run(["sh", str(tmp_path / "gone.sh"), "x"], capture_output=True,
-                        text=True, timeout=60).returncode
-    assert rc != 0 and rc != _BLOCKING
+    """The wrapper lives inside the directory that gets emptied, so it can vanish too — and
+    the SHELL's answer for that is not portable.
+
+    MEASURED 2026-08-20, and this test is why the hole was found: `sh <missing>` exits 127 on
+    macOS but **2** on the Linux CI runner — the BLOCKING code. So the first version of this
+    design fell into its own trap on Linux: during the very window it exists to protect, a
+    vanished wrapper would have denied every tool call.
+
+    The command shape is therefore `test -f <wrapper> && sh <wrapper> <script>`. POSIX fixes
+    `test` at exit 1 for false, on every shell and platform, and 1 is non-blocking — so this
+    no longer depends on how a particular shell reports an unopenable file.
+    """
+    missing = tmp_path / "gone.sh"
+    rc = subprocess.run(
+        ["sh", "-c", f'test -f "{missing}" && sh "{missing}" x'],
+        capture_output=True, text=True, timeout=60,
+    ).returncode
+    assert rc != _BLOCKING, "a vanished wrapper must never produce the blocking code"
+
+
+def test_the_shipped_command_shape_guards_the_wrapper_itself() -> None:
+    """hooks.json must use the `test -f … && sh …` form, not a bare `sh <wrapper>`.
+
+    Pinned in the CONFIG, because the platform difference above is invisible on the
+    maintainer's machine: a bare `sh` form passes every local test and only fails on Linux,
+    which is exactly how it shipped in v3.3.22 and reddened CI.
+    """
+    cmds = [h["command"]
+            for entries in json.loads(_HOOKS_JSON.read_text(encoding="utf-8"))["hooks"].values()
+            for e in entries for h in e.get("hooks", [])]
+    bare = [c for c in cmds if not c.startswith("test -f ")]
+    assert not bare, f"these commands do not guard the wrapper's own existence: {bare}"
 
 
 def test_every_hooks_json_command_goes_through_the_wrapper() -> None:
@@ -85,7 +111,7 @@ def test_every_hooks_json_command_goes_through_the_wrapper() -> None:
             for entries in json.loads(_HOOKS_JSON.read_text(encoding="utf-8"))["hooks"].values()
             for e in entries for h in e.get("hooks", [])]
     assert cmds, "hooks.json declares no commands — the config is not being read correctly"
-    unguarded = [c for c in cmds if not c.startswith("sh ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ")]
+    unguarded = [c for c in cmds if "hooks/hook-run.sh " not in c]
     assert not unguarded, f"these hook commands bypass the fail-open wrapper: {unguarded}"
 
 
