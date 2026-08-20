@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.real_subprocess("sh", "uv", "python3", "git")
+pytestmark = pytest.mark.real_subprocess("sh", "bash", "uv", "python3", "git")
 
 _ROOT = Path(__file__).resolve().parents[1]
 _WRAPPER = _ROOT / "hooks" / "hook-run.sh"
@@ -34,7 +34,7 @@ _BLOCKING = 2
 
 
 def _run(*args: str) -> int:
-    return subprocess.run(["sh", str(_WRAPPER), *args], capture_output=True,
+    return subprocess.run(["bash", str(_WRAPPER), *args], capture_output=True,
                           text=True, timeout=60).returncode
 
 
@@ -78,10 +78,11 @@ def test_a_missing_WRAPPER_is_also_non_blocking(tmp_path: Path) -> None:
     design fell into its own trap on Linux: during the very window it exists to protect, a
     vanished wrapper would have denied every tool call.
 
-    The wrapper is therefore invoked DIRECTLY (`<wrapper> <script>`), not as an argument to
-    `sh`. A missing EXECUTABLE is "command not found", which POSIX fixes at 127 on every
-    shell — while `sh <missing FILE>` is the case shells disagree about. Same protection,
-    no platform dependency.
+    The wrapper is therefore invoked as `bash <wrapper> <script>`. BASH is the same program
+    on every platform, and answers 127 for a missing script file; `sh` is NOT one program —
+    it is dash on Debian/Ubuntu and bash elsewhere, which is the whole reason the answers
+    diverged. Naming the interpreter explicitly is also what the publish validator requires
+    (29 MINOR findings blocked take 3 without it), so the two constraints agree here.
 
     A `test -f … && sh …` guard also worked, and was rejected for a different reason: it puts
     shell operators into all 29 hook commands, which the publish security gate reports as 29
@@ -89,7 +90,7 @@ def test_a_missing_WRAPPER_is_also_non_blocking(tmp_path: Path) -> None:
     direct invocation has no operators.
     """
     missing = tmp_path / "gone.sh"
-    rc = subprocess.run(["sh", "-c", f'"{missing}" x'],
+    rc = subprocess.run(["bash", str(missing), "x"],
                         capture_output=True, text=True, timeout=60).returncode
     assert rc != _BLOCKING, "a vanished wrapper must never produce the blocking code"
     assert rc == 127, f"expected POSIX command-not-found, got {rc}"
@@ -127,7 +128,7 @@ def test_every_hooks_json_command_goes_through_the_wrapper() -> None:
             for entries in json.loads(_HOOKS_JSON.read_text(encoding="utf-8"))["hooks"].values()
             for e in entries for h in e.get("hooks", [])]
     assert cmds, "hooks.json declares no commands — the config is not being read correctly"
-    unguarded = [c for c in cmds if "hooks/hook-run.sh " not in c]
+    unguarded = [c for c in cmds if not c.startswith("bash ") or "hooks/hook-run.sh " not in c]
     assert not unguarded, f"these hook commands bypass the fail-open wrapper: {unguarded}"
 
 
