@@ -108,6 +108,37 @@ anything wrong.
 2036 and 1572 chars, in ordinary use, through the installed binary. And the offending atom is
 not mine — the gate-vs-lint invariant in box 2 held for every write I made.)*
 
+### Day 3 (2026-08-21 17:3x) — unchanged, and I exercised the ungated path myself
+
+Re-measured all three roots: PROJECT **0**, LOCAL **0**, USER **1** — the same
+`repair-reflags-correct-page-tier-shape.md:15`, `^ATOM-J8YH-IK0E`, still 1733 chars. So the
+regression is STATIC: one atom, not a growing leak. That matters for the re-scope below — a
+standing count of 1 is a backlog item, whereas a climbing count would be an active breach.
+
+**New datum: the ungated path is not hypothetical, it is the ordinary workflow.** Today I
+edited a USER page directly with the Edit tool — `memgrep add-lesson` itself INSTRUCTED me to,
+warning that the lesson would be unfindable unless I extended the page `description:`, which no
+verb does. That write was clean (a description is not an atom body), but it proves the hole is
+traversed in normal, protocol-following use — by a tool the protocol names, on the advice of
+the crate's own output.
+
+**So box 4 cannot be met as written, and not because anything is broken.** It asks for an
+OUTCOME (`stays 0`) that a write-time gate inside the crate can influence but never enforce,
+against writers the protocol deliberately permits outside it.
+
+**Re-scope proposed, NOT unilaterally applied** — rewriting an acceptance box to make it
+passable is how a card lies about being done, so this needs an explicit call:
+
+- **(a)** Replace the outcome with what the mechanism can guarantee: *"every write through
+  `add-atom`/`add-lesson` is gated (proven), and any atom-oversized arriving by an ungated path
+  is DETECTED by lint and drained by the memory-maintenance chore within one cycle."* Testable,
+  and it matches how this one was actually found.
+- **(b)** Keep `stays 0` and close the hole first — gate `edit`/`migrate` too, and accept that
+  a direct Edit-tool write can never be gated from inside the crate.
+
+(a) is the honest description of the system that exists; (b) is a larger piece of work and
+still leaves the Edit-tool path open, so it buys less than it looks.
+
 **NEXT ACTION — a decision, not a patch.** Three options, and the cheap one is wrong:
 1. *Gate `migrate`/`edit` too* — closes two holes, leaves the Edit-tool hole open, and risks
    refusing a legitimate migration of large legacy content (the reason box 3's supersession
