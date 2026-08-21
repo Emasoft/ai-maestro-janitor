@@ -3,7 +3,7 @@ trdd-id: 9ZPU69UC
 title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fire it without importing janitor code
 column: testing
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-20T01:45:00+0200
+updated: 2026-08-21T02:42:00+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -68,5 +68,30 @@ patches reach the lib), proving parity.
 
 Gate to `complete`: the hub wires its lane to the contract and one armed beat is observed
 end-to-end (their side; they were waiting only on this).
+
+## Our side verified on the installed runtime — 2026-08-21 (STAYS `testing`)
+
+I briefly moved this to `complete` and reverted it: the gate above is **"the hub wires its
+lane … (their side)"**, and nothing here is evidence about the hub. What follows verifies the
+JANITOR half only. The card stays in `testing` until the peer confirms, because a card whose
+stated gate belongs to another repo cannot be closed from this one.
+
+Both janitor-side halves observed live on 3.3.26:
+
+- **The launcher ships**: `--run-cold-cache-clear` present in the installed `dispatch.py`
+  (2 occurrences — the argv branch and its dispatch).
+- **The beat actually runs**: the daemon executed it on its own cadence, doing real work
+  rather than no-opping —
+
+  ```
+  [2026-08-21T02:35:22+0200] task 'cold-cache-clear' starting
+  [2026-08-21T02:35:30+0200] task 'cold-cache-clear' done in 8s
+  ```
+
+The 8 s matters more than the log line: a chore that shells out to a path its runtime does not
+carry returns in 0 s and looks identical to a healthy quiet beat. That failure was measured on
+this host the same night for a different chore (TRDD-079778RM, the `gh-notify-inbox` lane
+shipped dead in 3.3.25 and logged `done in 0s` every minute), so "it appears in the log" is NOT
+sufficient evidence for a shell-out chore — a non-trivial duration is.
 
 ## Approval log

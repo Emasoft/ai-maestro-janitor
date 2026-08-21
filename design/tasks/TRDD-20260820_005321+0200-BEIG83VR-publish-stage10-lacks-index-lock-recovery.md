@@ -1,9 +1,9 @@
 ---
 trdd-id: BEIG83VR
 title: publish.py stage 10 has no index.lock recovery — the TUWUB0SG class rc-128ed a release tonight
-column: testing
+column: complete
 created: 2026-08-20T00:53:21+0200
-updated: 2026-08-20T18:05:00+0200
+updated: 2026-08-21T02:42:00+0200
 implementation-commits: [d917cce6]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -67,6 +67,25 @@ them would be cargo-culted breadth. Only add + commit are wrapped.
 - [x] a non-128 failure is NOT retried and exits with its own code (regression-pinned)
 - [x] pytest (22 in test_publish_release_staging.py, 3 new with real git/lsof/ps), ruff, mypy, pyright clean
 - [ ] Gate to complete: one real publish run observed either recovering or not needing to
+
+## Gate observed — 2026-08-21, `testing` → `complete` (with an honest limit)
+
+The gate box allows "either recovering or **not needing to**". What was observed is the second,
+across **four** real publish runs on 2026-08-21 (3.3.24, 3.3.25, and 3.3.26 takes 1-3): every
+one reached stage 10 with no lock contention, and the recovery helper
+(`_git_write_or_recover_lock`, 3 call sites in the installed `publish.py`) was never exercised.
+
+**State that plainly: recovery is NOT proven live.** It is proven by
+`test_publish_release_staging.py` (22 tests, 3 using real git/lsof/ps), and the live evidence
+only shows the common path is unharmed by the change.
+
+What the same session DID establish is that the hazard is real and recurrent on this host: a
+0-byte orphaned `.git/index.lock` blocked `git add`/`git commit` **three separate times**, each
+time with no `lsof` holder and no git process targeting this repo. It also cleared itself
+between checks — so these are TRANSIENT locks from concurrent short git operations, not
+permanent orphans. That is a sharper reading than the card assumed, and it matters two ways:
+the recovery path is worth having, and a caller must RETRY rather than delete, since removing a
+lock a live operation is about to use would corrupt it.
 
 ## Approval log
 

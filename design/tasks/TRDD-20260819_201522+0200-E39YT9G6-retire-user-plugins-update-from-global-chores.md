@@ -1,9 +1,9 @@
 ---
 trdd-id: E39YT9G6
 title: Retire user-plugins-update from GLOBAL_CHORES — the daemon-side fleet sweep is superseded by the server lane
-column: testing
+column: complete
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-20T01:37:00+0200
+updated: 2026-08-21T02:40:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: normal
@@ -75,5 +75,22 @@ between), not a single pass.
 SHIPPED 2026-08-20 01:37 (`todo → testing`). Gate to `complete`: rides the next publish
 (3.3.19); then one daemon restart observed with the trimmed roster (12 GLOBAL_CHORES,
 no user-plugins-update stamp advancing, requests-consumer still draining).
+
+## Verified on the installed runtime — 2026-08-21, `testing` → `complete`
+
+Resolved by IMPORT, not by grep, because a grep could not tell the retirement comment from a
+live entry — `"user-plugins-update"` still appears once in the installed
+`harness_backend.py` (line 99, the comment recording this very card).
+
+Importing the installed 3.3.26 module:
+
+```
+user-plugins-update in GLOBAL_CHORES:      False
+user-plugins-update in SERVER_ABSORBED_TASKS: False
+roster size:                               13
+```
+
+13 matches the task count the running daemon logs at startup, so the roster the code exposes
+and the roster the daemon actually runs agree.
 
 ## Approval log
