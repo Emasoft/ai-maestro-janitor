@@ -3,7 +3,7 @@ trdd-id: D2DD5GO8
 title: Terminal injection typed over the USER mid-sentence — the typing probe fails OPEN exactly when osascript is blind
 column: testing
 created: 2026-08-19T19:38:25+0200
-updated: 2026-08-20T00:17:00+0200
+updated: 2026-08-21T07:58:01+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -47,6 +47,26 @@ pane-free hold/free); legacy default-probe + clear-trigger tests made hermetic. 
 spikes recur on this box) with the SHIPPED plugin: the terminal_trigger log shows the
 "typing probe blinded Nx" line and no injection lands while keys are pressed. Ships with
 the next publish; the running cache still has the old semantics until then.
+
+> **⚠ THE GATE ABOVE IS CURRENTLY UNREACHABLE — checked 2026-08-21, do not sit waiting on it.**
+> The shipped code is installed (3.3.26, well past the version this was written against) and
+> the host HAS produced the required load episodes — full-suite runs at loadavg 80+, measured
+> this session while diagnosing TRDD-7NSRD8OV. Yet `grep -r blinded .janitor/logs/` returns
+> NOTHING, and the newest `terminal_trigger.log` entry is still 2026-08-20T08:21:30.
+>
+> The reason is structural, not a bug: **the typing probe only runs when an INJECTION IS
+> ATTEMPTED.** None is attempted in this session — the USER's standing NO-INJECTIONS directive
+> bars every `reload_trigger` / `resume_trigger` / `compact_trigger` path — so the probe never
+> executes and cannot log "blinded". Load alone is not sufficient. The gate needs load AND an
+> injection attempt AND a human at the keyboard, and the session that reliably produces the
+> first is forbidden the second.
+>
+> Two honest ways forward, both needing the USER: (1) re-scope the gate to what a fixture can
+> prove — drive the probe with a blinded (`None`) presence reading under a simulated
+> sustained-unknown and assert the DEFER path, which is what acceptance box 2 already asks for;
+> or (2) a deliberate, USER-authorised injection under load into a pane they are typing in.
+> **Option 1 is the recommendation** — option 2 re-runs the exact incident that opened this
+> card against a live human, in order to observe something a fixture can show.
 
 ## What happened (USER report, 2026-08-19 ~19:30, this host)
 
