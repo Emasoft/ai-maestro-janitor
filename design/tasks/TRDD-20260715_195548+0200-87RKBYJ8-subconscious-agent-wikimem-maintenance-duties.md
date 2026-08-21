@@ -1,11 +1,10 @@
 ---
 trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
-column: blocked
-pre-block-column: todo
-blocked-by: [AZ6QRK0D]
+column: todo
+blocked-by: []
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-13T11:52:00+0200
+updated: 2026-08-22T00:50:41+0200
 current-owner: janitor-session
 task-type: feature
 scope: project

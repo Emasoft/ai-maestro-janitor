@@ -1,11 +1,10 @@
 ---
 trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
-column: blocked
-pre-block-column: todo
-blocked-by: [AZ6QRK0D]
+column: todo
+blocked-by: []
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-16T02:10:31+0200
+updated: 2026-08-22T00:50:41+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
