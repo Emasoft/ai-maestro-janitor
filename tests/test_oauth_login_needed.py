@@ -189,6 +189,11 @@ def _run(
             "CLAUDE_ROTATOR_PROFILES": str(prof_root),
             "CLAUDE_PROJECT_DIR": str(tmp_path / "proj"),
             "HOME": str(tmp_path / "home"),
+            # These are subprocess tests — never let notify.push's Tier-1 desktop
+            # notification actually fire (osascript/notify-send). The notify-routing
+            # behaviour itself is exercised in-process below, where notify.push is
+            # monkeypatched.
+            "CLAUDE_PLUGIN_OPTION_NOTIFY_ENABLED": "false",
         }
     )
     if env_extra:
@@ -474,3 +479,131 @@ def test_each_stuck_kind_names_its_own_remedy(tmp_path: Path) -> None:
         assert expect in out.lower(), f"{kind}: expected {expect!r} in {out!r}"
         seen[kind] = out
     assert len({v.split("Detail:")[0] for v in seen.values()}) == 3, "remedies must differ"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (TRDD-GZXTSJSR) — wider proactive grace window + urgency escalation +
+# the real notify.py human channel. In-process (not subprocess) so notify.push
+# can be monkeypatched and never fires a real desktop notification.
+# ---------------------------------------------------------------------------
+
+
+def test_grace_days_default_widened_to_48h(monkeypatch) -> None:
+    """Root cause 1: the old 1.0-day default only fired once a token was already
+    near-dead. Default must now be 2.0 (48h) so the nudge is proactive."""
+    monkeypatch.delenv("CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS", raising=False)
+    assert det._grace_days() == 2.0
+
+
+def test_grace_days_bad_env_falls_back_to_the_new_default(monkeypatch) -> None:
+    """A non-numeric / non-positive override must fail open onto the (new) default,
+    never crash and never silently disable the nudge."""
+    monkeypatch.setenv("CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS", "not-a-number")
+    assert det._grace_days() == 2.0
+    monkeypatch.setenv("CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS", "-5")
+    assert det._grace_days() == 2.0
+    monkeypatch.setenv("CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS", "7")
+    assert det._grace_days() == 7.0
+
+
+def test_urgency_buckets_escalate_with_worsening_state() -> None:
+    """The urgency bucket (drives both notify severity and the escalation dedupe
+    key) must climb monotonically as a token approaches / passes expiry, and a
+    dead refresh counter is treated as maximal urgency regardless of token_days."""
+    assert det._urgency(1.9, 0) == "48h"
+    assert det._urgency(1.0, 0) == "24h"
+    assert det._urgency(0.5, 0) == "24h"
+    assert det._urgency(0.0, 0) == "expired"
+    assert det._urgency(-3.0, 0) == "expired"
+    assert det._urgency(None, 0) == "expired"
+    assert det._urgency(10.0, det.cascade.DEFAULT_MAX_REFRESH_FAILURES) == "dead-refresh"
+
+
+def _write_login_slot(
+    home: Path, email: str, *, expires_in_days: float, refresh_failures: int = 0
+) -> None:
+    """A single no-refresh, no-session slot at a chosen expiry — the minimal fixture
+    for exercising the notify-severity / escalation path directly (bypasses `_run`'s
+    hardcoded already-expired slot, so the 48h/24h buckets are reachable)."""
+    (home / "slots").mkdir(parents=True, exist_ok=True)
+    (home / "state.json").write_text(
+        json.dumps({"slots": {email: {"refresh_failures": refresh_failures}}})
+    )
+    (home / "opt-in.flag").touch()
+    oauth = {"accessToken": "x", "expiresAt": int((time.time() + expires_in_days * 86400) * 1000)}
+    (home / "slots" / f"{email}.json").write_text(json.dumps({"claudeAiOauth": oauth}))
+
+
+def _run_inprocess(tmp_path: Path, home_name: str, monkeypatch, capsys, *, before) -> tuple[str, int]:
+    """Same env shape as `_run`, but calls `det.main()` in-process so `det.notify.push`
+    can be monkeypatched by the caller before invoking this."""
+    home = tmp_path / home_name
+    before(home)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    (tmp_path / "proj").mkdir(exist_ok=True)
+    (tmp_path / "userhome").mkdir(exist_ok=True)
+    rc = det.main()
+    return capsys.readouterr().out, rc
+
+
+def test_notify_pushed_high_for_a_48h_bucket_account(tmp_path, monkeypatch, capsys) -> None:
+    """Acceptance #1: an account within the (now 48h) proactive window fires a HIGH
+    notify.push — the decisive fix for root cause 4 (an unattended session never
+    reads the passive heartbeat line)."""
+    calls = []
+    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    out, rc = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_login_slot(home, "soon@x.com", expires_in_days=1.5),
+    )
+    assert rc == 0
+    assert "[oauth-login-needed]" in out
+    assert len(calls) == 1
+    assert calls[0]["sev"] == "HIGH"
+    assert calls[0]["code"] == "OAUTH-LOGIN-NEEDED"
+    assert "soon@x.com" in calls[0]["summary"]
+
+
+def test_notify_escalates_to_critical_when_expired(tmp_path, monkeypatch, capsys) -> None:
+    """An expired token must escalate the notify severity to CRITICAL, not stay at
+    the plain HIGH a still-proactive 48h-out account gets."""
+    calls = []
+    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    out, rc = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_login_slot(home, "dead@x.com", expires_in_days=-1.0),
+    )
+    assert rc == 0
+    assert len(calls) == 1
+    assert calls[0]["sev"] == "CRITICAL"
+
+
+def test_escalation_sig_re_notifies_same_day_when_bucket_worsens(tmp_path, monkeypatch, capsys) -> None:
+    """Root cause 3: the old daily-only dedupe key went silent after one nudge even
+    while the login stayed overdue. The bucket-aware signature must re-emit the
+    SAME DAY when the account's urgency worsens (48h -> expired)."""
+    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
+    first, rc1 = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=1.9),
+    )
+    assert rc1 == 0
+    assert "[oauth-login-needed]" in first
+
+    second, rc2 = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=1.9),
+    )
+    assert rc2 == 0
+    assert "[oauth-login-needed]" not in second  # unchanged bucket -> same-day dedupe holds
+
+    third, rc3 = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_login_slot(home, "worsen@x.com", expires_in_days=-1.0),
+    )
+    assert rc3 == 0
+    assert "[oauth-login-needed]" in third  # worsened to "expired" -> re-notifies same day

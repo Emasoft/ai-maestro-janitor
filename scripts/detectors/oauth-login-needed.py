@@ -44,9 +44,14 @@ sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import dedupe  # noqa: E402
+import notify  # noqa: E402  # scripts/lib/notify.py (human-notification channel, TRDD-4649ZLE0)
 import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (canonical session-key probe + profiles root)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
+
+# Escalation dedupe key rank (TRDD-GZXTSJSR root cause 3) — "dead-refresh" and "expired"
+# are equally maximal urgency (both mean only a human re-login fixes it right now).
+_URGENCY_RANK = {"expired": 0, "dead-refresh": 0, "24h": 1, "48h": 2}
 
 
 def _rotator_home() -> Path | None:
@@ -130,18 +135,41 @@ def _has_live_session(email: str, now: float) -> bool:
 
 
 def _grace_days() -> float:
-    """Login-nudge grace window (days). Env-overridable; default 1.0.
+    """Login-nudge grace window (days). Env-overridable; default 2.0 (48h).
 
-    A bad value (non-numeric / non-positive) falls back to the default so a typo
-    in the env never crashes the heartbeat or disables the nudge silently."""
+    Widened from the original 1.0-day default (TRDD-GZXTSJSR root cause 1): a 1-day
+    window only fires once a token is already near-dead — reactive, not proactive.
+    2.0 days gives the human a full extra workday of runway before any account
+    actually becomes unusable, matching the "prompt EARLY" requirement this TRDD
+    exists for. A bad value (non-numeric / non-positive) falls back to the default
+    so a typo in the env never crashes the heartbeat or disables the nudge silently."""
     raw = os.environ.get("CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS", "").strip()
     if not raw:
-        return 1.0
+        return 2.0
     try:
         val = float(raw)
     except ValueError:
-        return 1.0
-    return val if val > 0 else 1.0
+        return 2.0
+    return val if val > 0 else 2.0
+
+
+def _urgency(token_days: float | None, refresh_failures: int) -> str:
+    """One-word urgency bucket for an account that needs a human login.
+
+    Drives BOTH the notify severity (root cause 4 — the nudge must reach a REAL
+    human channel, not just a heartbeat line nobody unattended reads) AND the
+    escalation dedupe key (root cause 3 — a worsening account must produce a NEW
+    signature so it re-notifies instead of going silent behind yesterday's daily
+    key). Buckets are coarse and boundary-triggered by construction — they only
+    change when the account's real state crosses a threshold, so this can never
+    become a per-tick spam source."""
+    if refresh_failures >= cascade.DEFAULT_MAX_REFRESH_FAILURES:
+        return "dead-refresh"
+    if token_days is None or token_days <= 0:
+        return "expired"
+    if token_days <= 1.0:
+        return "24h"
+    return "48h"
 
 
 def _disp(path: Path) -> str:
@@ -178,12 +206,12 @@ def main() -> int:
         state.rotate_log_if_big("oauth-login-needed")
         return 0
 
-    needing: list[str] = []   # need a one-time human LOGIN (no refresh, no session, expired)
+    needing: list[tuple[str, str]] = []  # (email, urgency bucket) — needs a one-time human LOGIN
     stalled: list[str] = []   # B3: logged in (has session) but OAuth capture not yet completed
     for f in facts:
         has_session = _has_live_session(f.email, now)
         if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace, f.refresh_failures):
-            needing.append(f.email)
+            needing.append((f.email, _urgency(f.expires_days, f.refresh_failures)))
         elif slot_capture_stalled(f.has_refresh, has_session, f.refresh_failures):
             stalled.append(f.email)
 
@@ -194,9 +222,14 @@ def main() -> int:
     # of how many sessions fire heartbeats.
     if needing:
         needing = sorted(needing)
+        emails = ", ".join(e for e, _ in needing)
         seen = home / ".oauth-login-needed-seen.txt"
-        sig = hashlib.sha1(",".join(needing).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-        emails = ", ".join(needing)
+        # Escalation signature: bucket-aware, not just the email set (root cause 3). A
+        # worsening account (48h -> 24h -> expired) changes the sig even within the
+        # same day, so it re-notifies instead of staying silent behind yesterday's key.
+        sig = hashlib.sha1(
+            ",".join(f"{e}:{b}" for e, b in needing).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:8]
         msg = (
             f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
             f"{emails} — run `{login_sh} <email>` for each "
@@ -206,6 +239,24 @@ def main() -> int:
         line = dedupe.emit_once(seen, f"due-{day}-{sig}", msg)
         if line is not None:
             print(line)
+
+        # Root cause 4 (the decisive gap) — a heartbeat print is invisible to an
+        # UNATTENDED session. Route through the real human channel too. notify.push
+        # owns its own gates (severity floor, content-hash dedupe, 24h cap, digest),
+        # so calling it every tick is safe; the worst-case account decides severity so
+        # an expired/dead-refresh account escalates past a plain 48h-out HIGH.
+        worst = min((b for _, b in needing), key=lambda b: _URGENCY_RANK[b])
+        sev = "CRITICAL" if worst in ("expired", "dead-refresh") else "HIGH"
+        try:
+            notify.push(
+                sev=sev,
+                code="OAUTH-LOGIN-NEEDED",
+                project="oauth-rotator",
+                summary=f"{len(needing)} account(s) need a one-time login ({worst}): {emails}",
+                hint=login_sh,
+            )
+        except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
+            pass
 
     # SECONDARY nudge (B3) — accounts that ARE logged in but whose automatic OAuth capture
     # hasn't completed (the detached bootstrap keeps launching but never succeeds: CF
