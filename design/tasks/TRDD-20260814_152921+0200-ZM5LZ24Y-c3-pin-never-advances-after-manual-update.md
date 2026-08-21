@@ -3,14 +3,14 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-21T15:05:00+0200
+updated: 2026-08-21T15:20:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
 approval-tier: 0
 npt: []
 eht: []
-implementation-commits: [a8982a03, 11e925c0, 83cfd3b6]
+implementation-commits: [a8982a03, 11e925c0, 83cfd3b6, e7c1ec47]
 ---
 
 # C3 last-good pin never advances after a manual `claude plugin update`
@@ -52,10 +52,26 @@ not refusing now. Two candidates, neither chosen:
    for this shell; a launchd/detached daemon need not inherit that PATH. Same shape as
    **TRDD-AM8JD9SG F6**.
 
-**The actionable next step is a DIAGNOSTIC, not a fix:** make the decline message name WHICH of
-the three it was. Every hour spent on this card since it opened has been spent distinguishing
-causes a one-line message could have separated — the identical lesson today's
-`run_subprocess` fail-open logging closed elsewhere.
+**The actionable next step was a DIAGNOSTIC, not a fix — and it is now SHIPPED (`e7c1ec47`).**
+`resolve_latest_published` takes an `on_failure` sink (the `cause.append` idiom
+`refresh_oauth_token` already uses) and reports which branch refused: *no plugin.json* /
+*unreadable* / *no GitHub repository url* / *gh is not on PATH for this process* / *gh api timed
+out after 5s* / *gh api exited N* / *no published releases yet*. `do_auto_update_if_needed`
+wires it to its existing `log_writer`, so `daemon.log` records the cause on the fire that
+produced it. `TimeoutExpired` is caught apart from `OSError` deliberately — candidate 1 and
+candidate 2 above need opposite responses. Mutation-proven; the default stays silent, so no
+existing caller changed.
+
+**REVISED CLOSE PATH — read the cause, do not re-derive it.** On the next janitor-owned
+`version-update` fire, `daemon.log` will carry either `periodic re-pin certified last-good=<v>`
+(box closes) or `F1 provenance unresolved: <named cause>` immediately before the decline. That
+line decides between the two candidates without another week of theorising:
+- `gh is not on PATH for this process` ⇒ a daemon PATH fix (the TRDD-AM8JD9SG F6 shape).
+- `gh api timed out after 5s` ⇒ raise the ceiling or retry. **Do NOT reach for
+  `timeout_scale()`** — it is 1.0 in production and the daemon IS production.
+
+**Still forbidden to satisfy the box:** running `/janitor-repin-integrity` (F2). It advances the
+pin by human authority, which is exactly the provenance the observation is supposed to prove.
 
 ## ⏵ STATE ADDENDUM — 2026-08-21: the soak STILL cannot close, for a SECOND and different reason — the chore is ABSORBED
 
