@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T05:05:00+0200
+updated: 2026-08-21T05:40:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -17,7 +17,44 @@ eht: []
 
 # Remaining missed shapes from the fence-mask replacement (XOITBRIZ follow-on)
 
-## ⏵ STATE — 2026-08-21 05:05: **c20 CAPTURED — the measurement's blocker is GONE.** 25/32
+## ⏵ STATE — 2026-08-21 05:40: **RUN COMPLETE 30/32 — MEASUREMENT RUN. Out-of-sample recall 39%, FP 0%.**
+
+Generation finished: `ALLDONE 30/32`. Only **c14 whole-env-exfil** and **c17
+procmem-credential-extraction** never produced output, at 1800 s, concurrency 1. Nine of the
+eleven heavy classes were recovered by the ceiling raise — so options (b) paid/local and (c)
+split-prompts now apply to TWO classes, not eleven.
+
+**A parser bug nearly wasted the whole run — read this before trusting any corpus count.**
+`assemble_corpus.objects_in()` walks a whole report tracking string/escape state, so ONE
+malformed sample desynchronises it and silently swallows every LATER sample in that file. On the
+c20 report it returned exactly ONE object — the 44-char output TEMPLATE echoed inside the prompt
+— while 7 of 9 real samples (286-863 chars) were valid JSON on their own lines. The first bench
+run therefore listed `two-step-code-injection` under **"rules with no corpus coverage"**, hours
+after a run whose entire purpose was to capture it. Invisible in aggregate: corpus-wide the
+walker finds MORE records than per-line parsing (301 vs 278), so totals looked healthy while one
+class was missing outright. Fixed in `34577427` (per-line first, walker as fallback, seen-set
+dedupes; strict superset 271 -> 278 samples, 27 -> 28 labels).
+
+**THE MEASUREMENT** (`corpus-vawikrk2-20260821.jsonl`, blind, committed baseline `corpus.jsonl`
+NOT overwritten):
+
+```
+samples 278 · attack(claimed) 168 · benign 46
+recall (intended rule) 39%  ·  recall (any rule) 42%  ·  false positives 0%
+```
+
+**0% FP on 46 benign samples** — the 0-FP property survives out-of-sample, which is the half
+this detector could most easily have lost.
+
+**Recall 39% is the honest headline, and it is over 26 of 28 attack classes** (c14/c17 absent —
+do not quote it as "the corpus"). The class this card exists for scores **0 of 7 intended** on
+`two-step-code-injection`. Eight classes are declared blind spots and score 0-2 "any rule".
+
+**NEXT ACTION:** per-shape decisions (A base64-floor / B alias-sink / D positional-suppression /
+E split-literal) against THESE numbers, then update the baseline gate so a regression fails. The
+card's own rule still binds: do NOT quote a recall number that includes c14/c17 as if measured.
+
+## ⏵ STATE — 2026-08-21 05:05: c20 CAPTURED — the measurement's blocker is GONE. 25/32 *(superseded above)*
 
 `c20 two-step-code-injection` landed at 1800 s / concurrency 1, having timed out at 900 s twice
 before. That is the class whose absence made the out-of-sample recall + 0-FP measurement
