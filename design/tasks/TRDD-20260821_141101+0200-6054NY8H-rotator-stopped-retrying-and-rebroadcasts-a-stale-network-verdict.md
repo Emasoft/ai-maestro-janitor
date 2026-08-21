@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-21T14:25:00+0200
+updated: 2026-08-21T14:35:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -11,7 +11,7 @@ scope: project
 severity: major
 priority: high
 approval-tier: 0
-labels: [oauth-rotator, alerts, self-heal]
+labels: [oauth-rotator, alerts, self-heal, upstream-ai-maestro]
 npt: []
 eht: []
 implementation-commits: []
@@ -124,14 +124,41 @@ source to explain behaviour the janitor is not performing.** The source findings
 TRUE of `rotator.py` — cause-blind counter, max 3, all slots far past it — but whether they are
 the operative code path depends on an unanswered question.
 
-**THE UNANSWERED QUESTION, and it decides where any fix belongs:** does the ai-maestro server
-INVOKE the janitor's `oauth_rotator/rotator.py` (in which case the source diagnosis holds and
-only the scheduler is the server's), or does it run its own implementation that merely writes
-into the janitor's `rotator.log`? Resolve that BEFORE touching anything.
+**THE UNANSWERED QUESTION — now ANSWERED, 14:35.** It was: does the server INVOKE the janitor's
+`oauth_rotator/rotator.py`, or run its own implementation that merely writes into the janitor's
+`rotator.log`?
 
-**Per `~/.claude/rules/how-to-fix-issues-of-other-projects.md`, if the defect is the server's it
-is NOT mine to edit** — it gets an issue on the ai-maestro repo, or a fork-and-PR, and only on
-the USER's explicit say-so. Nothing here justifies editing another project's tree.
+**The server has its OWN implementation.** `grep -rn "aim-server" scripts/ --include=*.py`
+returns **nothing** — the string does not exist anywhere in the janitor's source. Every
+`aim-server/alert: ONSET …` / `CLEARED …` line is written by code this repo does not contain.
+(The five `CLEARED` hits a naive grep finds are unrelated prose inside comments in
+`dispatch.py`, `ticket_proposal.py` and `global_state.py` — checked, not assumed.)
+
+It writes into the janitor's OWN data dir
+(`plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/rotator.log`), which is why
+the log looked like the janitor's all day and why three separate diagnoses went to the wrong
+component.
+
+**So the whole retry/alert behaviour on this card belongs to ai-maestro, not here.** The
+`rotator.py` findings above describe code that is NOT the one running.
+
+**Per `~/.claude/rules/how-to-fix-issues-of-other-projects.md` this is NOT mine to edit**, and
+that rule requires stating the situation and WAITING for explicit direction rather than picking
+a route. The two permitted routes, for the USER to choose:
+
+1. **File an issue on `Emasoft/ai-maestro`** — recommended. The report is already written
+   (frozen count, the 8 ms/47 ms transport measurement, the three slots' `refresh_failures` +
+   `last_refresh_failure` + expiry), and the fix is a design call about whether a
+   cause-blind failure counter should latch on transport errors.
+2. **Fork → clone to `/tmp` → fix → PR.** Only if the USER asks for the patch itself.
+
+**Neither has been done.** No issue filed, no comment posted — a shared `gh` identity means a
+stray comment is indistinguishable from the owner speaking, so it waits for a word.
+
+**What stays on THIS card even though the fix is upstream:** the misleading output lands in the
+JANITOR's data dir and is read by janitor users as the janitor's own, and the janitor's
+`session-start.log` amplifies it with contradictory advice. Whether the janitor should surface
+a foreign component's alerts unlabelled is a question this repo owns.
 
 **What survives all three corrections, and is the only part that needs a human TODAY:** three
 account tokens expired 6.7–10 days ago, two with `credential-dead`. That is true regardless of
