@@ -1,9 +1,9 @@
 ---
 trdd-id: DD0M4QL7
 title: The branch-protection baseline cannot be MAINTAINED after first creation — present-by-name masks stale-by-content
-column: testing
+column: complete
 created: 2026-08-18T20:14:25+0200
-updated: 2026-08-21T03:30:00+0200
+updated: 2026-08-21T03:55:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -55,8 +55,41 @@ how-to-fix-issues-of-other-projects if still unfixed when this card enters dev).
       subset-shaped so server-added response fields can never false-positive; the documented
       `required_status_checks` cwd-dependence is carved out (a live checks rule the foreign-cwd
       payload omits is stricter, never stale)
-- [ ] non-admin still refused deletion/non_fast_forward after a repair apply (live check) —
-      **its stated blocker EXPIRED 2026-08-21; the box is now open on a NARROWER thing.**
+- [x] non-admin still refused deletion/non_fast_forward after a repair apply (live check) —
+      **CLOSED 2026-08-21. Both halves proven; my own "still unobserved" caveat below was
+      WRONG, and the correction came from the ai-maestro hub reading MY log.**
+
+      THE REPAIR APPLY HAPPENED, unattended, in `.janitor/logs/branch-protection-apply.log`:
+
+      ```text
+      [2026-08-20T08:21:53+0200] [s:d30bf250] content drift on Emasoft/ai-maestro-janitor:
+         baseline-pr-and-checks: rule required_status_checks parameters loosened/changed; …
+      2026-08-20T08:21:58+0200  OK  Emasoft/ai-maestro-janitor  main
+         baseline-history-protect=updated id=17286452; baseline-pr-and-checks=updated …
+      ```
+
+      Five seconds apart, same session. Those two lines are emitted by NOTHING ELSE:
+      `branch_protection_apply.py:185` (the gate-6 content-drift fallthrough) and
+      `_audit_append` at `:233` (only reached after a successful apply). A manual `gh api`
+      session cannot produce that pair. The applied payload in the log already carries
+      `bypass_actors: [{actor_id: 5, RepositoryRole, always}]`, i.e. the post-2026-08-13
+      ratified shape. Same pattern independently in ai-maestro-plugin (08:38:18 → 08:38:29)
+      and ai-maestro-maintainer-agent (2026-08-19 20:28:29 → 20:28:34).
+
+      NON-ADMIN STILL REFUSED, read live from the API afterwards: `baseline-history-protect`
+      `enforcement: active`, rules `["deletion", "non_fast_forward"]`, sole bypass actor
+      RepositoryRole 5. And the `converged: …` lines at 16:11:24 and 02:40:47 are the fix's
+      own new trace doing its job — the silent no-op this card is about is gone.
+
+      **MY ERROR, recorded because it is the more useful half.** I asserted unattended repair
+      was unobserved, reasoning from the hub's report that THEY applied payloads on 08-20 —
+      and never opened my own applier's log to check whether it had also run. It had, hours
+      earlier. Being conservative about a claim is not the same as verifying it: I refused to
+      tick a box on someone else's evidence, then failed to look for my own. `#282`'s
+      "the ruling reached 0/9 repos" was true of the other 8 and NOT of this repo, which
+      self-healed at 08:21.
+
+      SUPERSEDED — do NOT carry forward: the paragraph below, which claims this is open.
       The old text said "the RUNNING plugin is cached v3.3.16 whose gate 6 still
       short-circuits on names". That is no longer true: 3.3.26 is installed and carries
       `baselines_content_current` in both the guard and the lib, and it was run LIVE against

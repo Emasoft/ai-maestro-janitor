@@ -3,7 +3,7 @@ trdd-id: UWBXNJ76
 title: memory-scope-leak misses bare hostnames and sub-24-char high-entropy ids
 column: testing
 created: 2026-08-18T20:14:25+0200
-updated: 2026-08-19T00:40:00+0200
+updated: 2026-08-21T03:55:00+0200
 implementation-commits: [07bf1d16]
 current-owner: janitor-main-session
 task-type: security
@@ -66,9 +66,16 @@ the baseline above → assert no NEW firing on PROJECT + the benign LOCAL/USER p
 Two enumerable coverage gaps in the PROJECT-scope privacy gate (which, since AZ6QRK0D's
 verdict, is the SOLE enforcement point for publish-globally pages — raising its stakes):
 
-1. `private_path_patterns.py:215` anchors the hostname pattern to `.local|.lan` — a bare
-   hostname (`emasofts-mac-mini`, an mDNS name without suffix, an internal DNS name on another
-   TLD) passes.
+1. `private_path_patterns.py:232-233` (`_LOCAL_HOSTNAME`) requires a dotted suffix —
+   `(?:local|lan|internal|intranet|corp|home)` — so a bare hostname (`emasofts-mac-mini`, an
+   mDNS name without suffix, an internal DNS name on another TLD) passes.
+
+   *Citation repaired 2026-08-21.* It read `:215` until the ai-maestro hub tried to re-derive
+   it and found that line had ROTTED onto a comment; the regex had moved to `:232-233`. A
+   line-number citation decays silently every time the file above it changes, and the cost is
+   paid by whoever next tries to verify the claim — the hub lost a session to a rotted
+   citation this week. When a citation must survive, anchor it to the SYMBOL (`_LOCAL_HOSTNAME`)
+   and treat the line number as a hint, which is what this bullet now does.
 2. `memory-scope-leak.py:96` sets `_ENTROPY_MIN_LEN = 24` — shorter high-entropy identifiers
    (16-23 char API key fragments, short ULIDs/tokens) are never even tokenized.
 
