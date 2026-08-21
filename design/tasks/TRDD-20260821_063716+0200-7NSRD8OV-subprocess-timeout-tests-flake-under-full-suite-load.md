@@ -118,7 +118,19 @@ completed in 81 s and 99 s against the pre-fix 162 s and 176 s. Same worker coun
 genuinely quieter, so this is **not a perfectly controlled comparison**. The evidence is
 before/after at matched settings PLUS a named, proven mechanism per site — not a green run alone.
 
-### ⏵ CAVEAT RETIRED — 2026-08-21 12:26. A LOADED post-fix run, slower than both failing ones
+### ⛔ THE "CAVEAT RETIRED" CLAIM BELOW IS FALSE — REFUTED 2026-08-21 12:50
+
+A soak run at `-n 28` right after it: **39 failed / 15,691 passed in 383.53 s** — the SLOWEST
+run of the day and the WORST count, worse than the pre-fix 24 and 12. So 189 s was not a
+ceiling, just another quiet-ish sample, and retiring the caveat on ONE loaded green was the
+same error a fifth time. Failures spread far wider than the 13 fixed sites (9
+`test_branch_protection`, 7 `test_package_manager_policy`, 5 `test_doctor_classify_sarif`, 5
+`test_branch_protection_guard`, 3 `test_memory_librarian`, 3 `test_launchd_keepalive`, 2
+`test_gh_issues_monitor`, 2 `test_agentlens_probe`) — several already "fixed", several never
+seen before. **The four categories are real but NOT exhaustive at this load.** Card stays in
+`testing`; evidence below is kept because the measurements are true, only the CONCLUSION was.
+
+### ⏵ (REFUTED) CAVEAT RETIRED — 2026-08-21 12:26. A LOADED post-fix run
 
 `-n 28`, after the UTC fix and `branch_protection_guard`'s category-D ceiling:
 **15,730 passed, 1 skipped, 0 failed, EXIT 0, in 189.20 s.**
