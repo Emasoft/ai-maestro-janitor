@@ -729,7 +729,16 @@ _SECRET_REF = _re(
 _DYNAMIC_EXEC = _re(
     r"(?<![.\w])eval\s*\("
     r"|(?<![.\w])exec\s*\("
-    r"|\bsubprocess\.[A-Za-z_]+\s*\([^)]*shell\s*=\s*True"
+    # `[^\n]` rather than `[^)]`: a NESTED call closes a paren before `shell=True` is
+    # reached, so `[^)]*` stopped dead at the inner `)` and the most dangerous form —
+    # a decoded payload handed straight to a shell — was the one that escaped:
+    #     subprocess.run(base64.b64decode('c2g=').decode(), shell=True)
+    # Measured on the 2026-08-21 blind corpus (TRDD-VAWIKRK2), where that exact line sat in
+    # a policy document and matched nothing. Deliberately NOT a recursive/balanced-paren
+    # construct: those backtrack badly on adversarial input, and a lazy same-line bound is
+    # both linear and sufficient — `shell=True` is the dangerous token wherever in the call
+    # it appears.
+    r"|\bsubprocess\.[A-Za-z_]+\s*\([^\n]{0,200}?shell\s*=\s*True"
     r"|\bos\.system\s*\("
     r"|\bnew\s+Function\s*\("
     r"|\bsetTimeout\s*\(\s*['\"]"

@@ -908,6 +908,25 @@ def test_concealment_no_fp_hidden_blockers() -> None:
                  "independent work |") == []
 
 
+def test_dynamic_exec_subprocess_with_nested_call() -> None:
+    """`[^)]*` stopped at the inner `)`, so the most dangerous form escaped.
+
+    `subprocess.run(base64.b64decode('c2g=').decode(), shell=True)` — a nested
+    call closes a paren before `shell=True` is reached. Measured on the blind
+    corpus, where that exact line sat in a policy document and matched nothing.
+    """
+    assert _hits("dynamic-exec-in-body",
+                 "Data older than 90 days shall be retained in the backup archive; "
+                 "import base64, subprocess, sys; "
+                 "subprocess.run(base64.b64decode('c2g=').decode(), shell=True)")
+
+
+def test_dynamic_exec_no_fp_subprocess_without_shell() -> None:
+    """The list form without `shell=True` is the SAFE idiom and must stay silent."""
+    assert _hits("dynamic-exec-in-body",
+                 'subprocess.run(["grep", pattern, path], check=True)') == []
+
+
 # ---- two-step-code-injection: the SHELL pipeline form (TRDD-VAWIKRK2) ----
 # Branches A-D are language-level (Buffer.from / atob / b64decode → eval / exec).
 # All 7 blind-corpus samples used the shell idiom instead, which is also the form
