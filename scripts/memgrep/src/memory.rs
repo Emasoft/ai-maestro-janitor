@@ -3152,8 +3152,8 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     let atom_query_matches = |id: &str| atom_id_matches(id, query);
     let (marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
         .ok_or_else(|| anyhow::anyhow!(
-            "no BODY atom answering to `{}` on {} — add-lesson anchors a lesson from an existing atom's body",
-            a.atom, a.page.display()
+            "no BODY atom answering to `{}` on {} — add-lesson anchors a lesson from an existing atom's body{}",
+            a.atom, a.page.display(), unclosed_fence_hint(&text)
         ))?;
 
     // SUPERSESSION (TRDD-DOJ2LE1G): embed the atom's CURRENT verbatim body as `SUPERSEDED BODY: …`
@@ -3293,6 +3293,36 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
 /// citation that looks correct in the source. Cost of over-skipping: nothing observable.
 fn is_indented_code(line: &str) -> bool {
     line.starts_with("    ") || line.starts_with('\t')
+}
+
+/// A trailing clause naming an UNCLOSED CODE FENCE when the page has one, else empty (janitor#279).
+///
+/// Appended to the "atom not found" refusals because that message, alone, sends the reader looking
+/// for a problem with the ATOM — and the peer who filed #279 spent an investigation doing exactly
+/// that: they induced and falsified the footer-placement mechanism and then the marker-grammar
+/// mechanism, both from source, before handing over the reproduction. Neither was wrong-headed;
+/// the atom really was well-formed and really was placed correctly. What no message told them is
+/// that a fence opened earlier on the page had never closed, so every walker was still inside it
+/// and the atom did not exist as far as the scan was concerned.
+///
+/// Same counting rule as the walkers themselves (odd number of fence-marker lines ⇒ unbalanced), so
+/// the hint appears exactly when a walker is confused and never when it is not.
+fn unclosed_fence_hint(text: &str) -> String {
+    let mut open: Option<usize> = None;
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            open = if open.is_some() { None } else { Some(i) };
+        }
+    }
+    match open {
+        Some(i) => format!(
+            ". NOTE: this page has an UNCLOSED code fence at line {} — every atom below it is \
+             invisible to the scan, which is the likely cause here; close the fence and retry",
+            i + 1
+        ),
+        None => String::new(),
+    }
 }
 
 /// `locate_atom_body` generalised to any id-matcher (so `add-lesson` can accept the canonical-8 /
@@ -4783,6 +4813,46 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
 
         let lines: Vec<&str> = text.lines().collect();
         let ctx = md::build_context(&text, lines.len());
+
+        // Check 0 — AN UNCLOSED CODE FENCE, reported FIRST because it invalidates every other
+        // structural conclusion on the page (janitor#279).
+        //
+        // Every structural walker here toggles `in_fence` on any line starting with ``` or ~~~ and
+        // suppresses parsing while it is true. An ODD number of such lines therefore leaves the
+        // walker inside a fence for the whole REST of the page: atoms after it stop existing,
+        // headings after it stop existing, and each consumer then reports its own confident wrong
+        // answer. Measured on the reproduction: `add-lesson` said "no BODY atom answering to <id>"
+        // for an atom plainly present, and this very lint said "missing `## Notes and lessons
+        // learned` section" for a heading plainly present — two different lies from one cause.
+        //
+        // That is what makes it worth its own check. The peer who filed #279 induced and FALSIFIED
+        // two source-derived mechanisms (footer placement, marker grammar) before handing over the
+        // reproduction — the wasted effort was not carelessness, it was that no error message ever
+        // named the actual fault. This one does.
+        //
+        // The rule DELIBERATELY mirrors the walkers' own (count lines whose trimmed start is a
+        // fence marker; odd ⇒ unbalanced) rather than something more correct. A cleverer counter
+        // that disagreed with the consumers would flag pages they parse fine and stay silent on
+        // pages they mangle; this fires exactly when they are confused, which is the useful signal.
+        let mut fence_open: Option<usize> = None;
+        for (i, line) in lines.iter().enumerate() {
+            let t = line.trim_start();
+            if t.starts_with("```") || t.starts_with("~~~") {
+                fence_open = if fence_open.is_some() { None } else { Some(i) };
+            }
+        }
+        if let Some(open_at) = fence_open.as_ref() {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                open_at + 1,
+                "unclosed code fence opened here — every atom and heading BELOW it is \
+                 invisible to the structural walkers, so other findings on this page \
+                 (and `add-atom` / `add-lesson` refusals) are unreliable until it is closed"
+                    .to_string(),
+                "page-unclosed-fence",
+            ));
+        }
 
         // Check 3 (cont.) — the `## Notes and lessons learned` section must be present. The section
         // is MANDATORY on every page (it is the standing landing zone for a `[^N]` correction
@@ -8935,6 +9005,59 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             Some(Severity::Error),
             "got: {v:?}"
         );
+    }
+
+    #[test]
+    fn lint_unclosed_code_fence_is_an_error_naming_the_opening_line() {
+        // janitor#279. An odd number of fence-marker lines leaves every structural walker inside
+        // a fence for the rest of the page, so atoms and headings below it stop existing. The
+        // page below has BOTH an atom and the mandatory Notes heading after the open fence — and
+        // before this check the only findings were about those two being "missing", which is how
+        // the reporter lost an investigation to it.
+        let dir = lint_tmpdir("unclosed_fence");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             prose\n\n```text\nopened and never closed\n\n\
+             ^ATOM-AAAA-BBBB [keywords: k, ocd: 2026-01-01, lmd: 2026-01-01]\nbody.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            severity_of(&v, "unclosed code fence"),
+            Some(Severity::Error),
+            "got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_balanced_fences_do_not_trip_the_unclosed_check() {
+        // The mirror half: a page that legitimately SHOWS a fenced block must stay clean, or the
+        // check would fire on most documentation pages in this corpus and be routed around.
+        let dir = lint_tmpdir("balanced_fence");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-AAAA-BBBB [keywords: k, ocd: 2026-01-01, lmd: 2026-01-01]\nbody.\n\n\
+             ```text\nshown and closed\n```\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(severity_of(&v, "unclosed code fence"), None, "got: {v:?}");
+    }
+
+    #[test]
+    fn unclosed_fence_hint_names_the_line_and_is_empty_when_balanced() {
+        // The hint is appended to the "atom not found" refusal. It must be SILENT on a healthy
+        // page: a note about fences on every unrelated typo'd id would train the reader to skip it,
+        // and then it would not be read on the one page where it matters.
+        let bad = "---\nname: n\n---\n\nprose\n\n```text\nopen\n\n^ATOM-AAAA-BBBB [k]\nbody\n";
+        let good = "---\nname: n\n---\n\n```text\nopen\n```\n\n^ATOM-AAAA-BBBB [k]\nbody\n";
+        assert!(unclosed_fence_hint(bad).contains("line 7"), "got: {}", unclosed_fence_hint(bad));
+        assert_eq!(unclosed_fence_hint(good), "");
     }
 
     #[test]
