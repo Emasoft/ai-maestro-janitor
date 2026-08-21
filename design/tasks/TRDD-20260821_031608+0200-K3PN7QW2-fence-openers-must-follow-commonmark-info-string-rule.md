@@ -1,9 +1,9 @@
 ---
 trdd-id: K3PN7QW2
 title: Fence-opener detection is naive — an inline triple-backtick span at line start is read as a fence
-column: testing
+column: ai_review
 created: 2026-08-21T03:16:08+0200
-updated: 2026-08-21T10:26:30+0200
+updated: 2026-08-21T15:40:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -163,7 +163,13 @@ will disagree, which is the drift the mirroring was chosen to avoid.
       `lint_balanced_fences_do_not_trip_the_unclosed_check` both still pass — the mirror half.
       Plus the new `a_tilde_line_does_not_close_a_backtick_fence`, which is now REPORTED as
       unclosed where the old bool silently accepted `~~~` as a closer.
-- [~] cargo test + clippy clean; `uv run pytest -q`, ruff, mypy, pyright clean
+- [x] cargo test + clippy clean; `uv run pytest -q`, ruff, mypy, pyright clean
+
+      **CLOSED 2026-08-21 15:40 — the one thing holding this at `[~]` is gone.** A full-suite
+      run on this tree: **15,739 passed, 1 skipped, 0 failed in 177.33 s** (`-n 14`). The
+      blocker below was never this change; it was TRDD-7NSRD8OV's load flake, whose
+      category-D half has since been fixed at a shared seam. pyright still not run and still
+      not the gate — CLAUDE.md says ruff + mypy, both clean.
 
       Green: **cargo test 218 + 145** (216 before — the 2 new tests were RED on the old code),
       **clippy** clean for both changed files (4 remaining hits are pre-existing and outside the
