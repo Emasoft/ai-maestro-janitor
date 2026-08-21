@@ -3,12 +3,13 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-21T14:35:00+0200
+updated: 2026-08-21T16:10:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 scope: project
 severity: major
+deadline: 2026-08-30
 priority: high
 approval-tier: 0
 labels: [oauth-rotator, alerts, self-heal, upstream-ai-maestro]
@@ -160,9 +161,39 @@ JANITOR's data dir and is read by janitor users as the janitor's own, and the ja
 `session-start.log` amplifies it with contradictory advice. Whether the janitor should surface
 a foreign component's alerts unlabelled is a question this repo owns.
 
-**What survives all three corrections, and is the only part that needs a human TODAY:** three
-account tokens expired 6.7–10 days ago, two with `credential-dead`. That is true regardless of
-which component schedules the refresh.
+## ⛔ CORRECTION 3 — 2026-08-21 16:10: **the cookie layer is ALIVE. Two slots need NO human.**
+
+I reported "two accounts need a human re-login" from `last_refresh_failure: credential-dead`.
+That field describes the **OAuth refresh token**, and I generalised it to the account. The
+alert's own words were the ones to follow: *"a live claude.ai cookie can still mint these with
+NO human; check the cookie layer before re-logging in."* **I never checked the cookie layer.**
+
+Measured now (`safe_storage.retrieve(cv.COOKIE_KEYCHAIN_SERVICE, <email>)`, values redacted):
+
+| slot | cookie jar | auth cookie | expires | verdict |
+|---|---|---|---|---|
+| #0 `fmu***` | **PRESENT** 15,242 B, 23 cookies | `sessionKeyLC` | **2026-08-30** | **VALID, +9.2 d** |
+| #1 `ema***` | PRESENT 13,686 B, 21 cookies | `sessionKey` | 2026-08-20 | EXPIRED −0.9 d |
+| #2 `ipa***` | **PRESENT** 15,242 B, 23 cookies | `sessionKey` | **2026-08-30** | **VALID, +9.2 d** |
+
+The keychain is reachable (`detect_backend() == macos`, `keychain_denied_latched() == False`),
+so nothing is blocking a read.
+
+**So the fleet is NOT down to zero recoverable accounts.** Two slots hold live browser sessions
+the cascade's `RENEW_COOKIE` leg is designed to mint fresh tokens from, with no human at all.
+Only `ema***` genuinely needs a re-login, and only because its cookie lapsed **yesterday**.
+
+**What that makes urgent:** the two live cookies expire **2026-08-30**. If whatever stopped the
+cookie leg from running is not fixed before then, the no-human recovery path closes and all
+three accounts become human-only. That is a 9-day clock, and it is the real deadline on this
+card — not the refresh tokens, which are already dead.
+
+**Why the leg is not running is UNKNOWN and belongs to ai-maestro** (correction 2): the server
+owns `oauth-rotator-tick`, and the janitor's own copy of the cascade is not the code executing.
+
+**Method note, because this is the third correction here:** each one came from reading a FIELD
+and inferring the SYSTEM. `credential-dead` was true of the refresh token and false of the
+account. The alert text named the thing to check and I did not check it.
 
 ## Acceptance
 
