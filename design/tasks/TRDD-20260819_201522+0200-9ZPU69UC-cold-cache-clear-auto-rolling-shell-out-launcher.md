@@ -3,7 +3,7 @@ trdd-id: 9ZPU69UC
 title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fire it without importing janitor code
 column: testing
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-21T02:42:00+0200
+updated: 2026-08-21T11:38:20+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -63,6 +63,17 @@ patches reach the lib), proving parity.
       (`dispatcher-stub.py --run-cold-cache-clear`)
 - [x] double-ownership pinned: the daemon yields `cold-cache-clear` the tick the server's
       beat claims it (named test); clear cooldown stays the backstop
+- [ ] **THE ACTUAL GATE — EXTERNAL, and it is why this card is not closeable here.** The hub
+      wires its lane end-to-end and that lane is observed firing. This is the PEER's side and
+      **cannot be observed from this repo**, so no amount of local verification advances it.
+
+      **Written as a box on 2026-08-21 because its absence has now nearly closed this card
+      TWICE.** Every other box is `[x]`, so the card reads as finished to anyone scanning the
+      board, and the only record of the real gate was one line inside commit `f6e05776` — "I
+      moved it to complete and reverted". A gate that lives in a commit message is a gate nobody
+      sees: the first session discovered it by making the move, and this session re-derived it by
+      reading `git log` after a box count said done-unclosed. The janitor half IS verified and
+      recorded as such; that was never in question.
 - [x] pytest (15600 green, full suite), ruff, mypy, pyright clean; peer notified with the
       contract (SendMessage after commit)
 
