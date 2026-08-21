@@ -83,8 +83,16 @@ def prune(threads: list[dict[str, Any]], now: int) -> list[dict[str, Any]]:
             continue
         try:
             # `2026-08-20T19:44:32Z` — normalise the military Z the API emits.
+            #
+            # `datetime.timestamp()` on an AWARE datetime, never `time.mktime(time.strptime(…))`.
+            # `strptime` does parse the `%z` offset, but `mktime` IGNORES it and re-reads the
+            # struct as LOCAL time — so every UTC stamp came out wrong by exactly this host's
+            # UTC offset. Measured on a +0200 host: `2026-08-20T12:00:00Z` parsed 7200 s early,
+            # which silently shortened RETAIN_S from 24 h to 22 h and dropped live notification
+            # threads two hours before the documented window. It fails the other way west of
+            # Greenwich (over-retaining), so it is invisible in UTC/CI and only bites operators.
             stamp = int(
-                time.mktime(time.strptime(raw.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S%z"))
+                datetime.strptime(raw.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S%z").timestamp()
             )
         except (ValueError, OverflowError):
             kept.append(t)

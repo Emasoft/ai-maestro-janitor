@@ -8,6 +8,7 @@ replies silently rather than loudly.
 
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 import time
@@ -241,3 +242,39 @@ def test_the_daemon_does_not_shell_out_to_the_unstaged_monitor_tree() -> None:
     assert not offenders, (
         f"daemon.py reaches into the unstaged gh_issues_monitor tree: {offenders}"
     )
+
+
+def test_utc_stamps_are_parsed_as_UTC_not_as_local_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `Z` stamp must resolve to the same instant regardless of the HOST's timezone.
+
+    The original implementation was `time.mktime(time.strptime(raw, "…%z"))`. `strptime` does
+    parse the offset, but `mktime` IGNORES it and re-reads the struct as LOCAL time, so every
+    UTC stamp came out wrong by exactly the host's UTC offset. Measured on a +0200 host:
+    `2026-08-20T12:00:00Z` parsed 7200 s early, which silently shortened RETAIN_S from 24 h to
+    22 h and dropped live notification threads two hours before the documented window — while
+    `write()` still returned True, so the loss was invisible.
+
+    THE TIMEZONE IS FORCED rather than inherited, because the bug is INVISIBLE under UTC:
+    `mktime` and the correct reading agree at offset 0, so this test would pass on a UTC CI box
+    against the broken code and prove nothing. It also fails the OTHER way west of Greenwich
+    (over-retaining), which is why the defect survived — it can only be seen from a host that
+    is not on UTC.
+    """
+    monkeypatch.setenv("TZ", "Europe/Rome")  # +0100/+0200, never 0
+    time.tzset()
+    try:
+        now = int(
+            datetime.datetime(2026, 8, 21, 10, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        )
+        # 23 h before `now` in UTC terms — comfortably INSIDE the 24 h retention window.
+        kept = inbox.prune([_thread("1", updated="2026-08-20T11:00:00Z")], now=now)
+        assert [t["id"] for t in kept] == ["1"], (
+            "a 23h-old thread was dropped from a 24h window — the UTC stamp is being read as "
+            "local time"
+        )
+        # And the boundary still works: 25 h out really is dropped.
+        gone = inbox.prune([_thread("2", updated="2026-08-20T09:00:00Z")], now=now)
+        assert gone == [], "retention stopped dropping genuinely expired threads"
+    finally:
+        monkeypatch.undo()
+        time.tzset()
