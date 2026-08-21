@@ -1425,6 +1425,41 @@ def _phase_proactive_idle_compact() -> bool:
         return False
 
 
+_CACHE_REFETCH_WINDOW_S = 60.0
+
+
+def _plugin_cache_is_settled(now: float | None = None) -> bool:
+    """Is the plugin cache free of an IN-FLIGHT purge/refetch? (janitor#271)
+
+    The harness stages a refetch in `~/.claude/plugins/cache/temp_git*_<ms>_<rand>/`, so a
+    FRESH one of those means a reload asked for right now would evaluate a half-populated
+    cache.
+
+    AGE-GATED, and that is the whole design. Measured on this host while writing it: **17**
+    such directories were present, the YOUNGEST 34.6 hours old and the oldest 6.3 days — the
+    harness abandons them and nothing sweeps them. A presence-only check ("any temp dir ⇒ not
+    settled") would therefore have blocked every reload on this machine forever, which is a
+    worse failure than the race it set out to fix and would have looked like the plugin simply
+    never reloading.
+
+    FAILS OPEN: an unreadable or absent cache dir returns True (emit the marker). A guard that
+    cannot see must not silently stop reloads — the same reason the reload deferral above was
+    removed as an availability bug.
+    """
+    now = time.time() if now is None else now
+    try:
+        cache = Path.home() / ".claude" / "plugins" / "cache"
+        for entry in cache.glob("temp_git*"):
+            try:
+                if entry.is_dir() and (now - entry.stat().st_mtime) < _CACHE_REFETCH_WINDOW_S:
+                    return False
+            except OSError:
+                continue  # a dir vanishing mid-scan IS the refetch finishing; keep looking
+    except Exception:  # noqa: BLE001 - never let a cache probe stop a reload
+        return True
+    return True
+
+
 def _phase_plugin_reload() -> None:
     """Emit a bare `[janitor-reload]` marker once-per-session when the daemon's
     reload GENERATION advances past what THIS project's heartbeat has acked.
@@ -1513,6 +1548,19 @@ def _phase_plugin_reload() -> None:
             "anyway — reload_trigger --shrink will /clear first so the cache break lands on a "
             "near-floor context (was: deferred forever, which left sessions on stale code)",
         )
+
+    if not _plugin_cache_is_settled():
+        # janitor#271: `/reload-plugins --force` evaluates the load while the purge/refetch it
+        # triggered is still running, so the session comes back with FEWER plugins and MORE load
+        # errors than before (measured there: 36 -> 33 plugins, 1 -> 10 errors, whole namespaces
+        # gone). The harness owns that race; all we own is when we ASK for a reload, so do not
+        # ask mid-refetch. The ack is deliberately left unadvanced, so the next fire re-emits.
+        state.log_line(
+            "dispatch",
+            "[reload-guard] plugin cache is mid-refetch — deferring [janitor-reload] one fire "
+            "(janitor#271: reloading now returns fewer plugins than before)",
+        )
+        return
 
     state.atomic_write(acked_path, str(gen))
     _emit_decision("[janitor-reload]")  # D5: bare token, marks the fire non-quiet
