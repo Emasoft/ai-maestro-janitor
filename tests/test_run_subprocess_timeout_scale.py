@@ -12,11 +12,18 @@ parks the 5-minute heartbeat. Under full-suite load that expiry fires, the calle
 asserting on `''` with nothing naming a timeout. 52 call sites share the seam, so which test
 fails is decided by scheduling — that is why the fix is here and not in any one test.
 
-This seam is NOT the whole class, and saying so here matters more than it looks: a reader who
-finds these tests green could otherwise conclude the flake is solved. 73 files call
-`subprocess.run` DIRECTLY with their own timeouts, entirely outside `run_subprocess`, and the
-flake was still reproducible after this shipped. What these tests pin is that the seam's scale
-works and stays production-inert — not that the suite no longer flakes.
+A reader who finds these tests green could still conclude the flake is solved. It is not —
+but NOT for the reason this docstring gave until 2026-08-21. It claimed the 73 files calling
+`subprocess.run` DIRECTLY were a second, uncovered family. They are not uncovered:
+`run` forwards its timeout to `Popen.communicate`, which is the layer conftest patches, so
+those ceilings scale too. `test_a_DIRECT_subprocess_run_gets_the_scaled_ceiling_too` and its
+seam-off twin measure exactly that.
+
+That correction REMOVES an explanation rather than adding one. The residual empty-stdout
+failures observed after this shipped are therefore not attributable to a direct-`run` family
+being missed, and their mechanism is undetermined — do not edit 73 call sites on the strength
+of the old claim. What these tests pin is that the seam's scale reaches both call shapes and
+stays production-inert.
 """
 from __future__ import annotations
 
@@ -139,6 +146,44 @@ def test_seam_is_installed_on_the_popen_layer() -> None:
     assert getattr(subprocess.Popen.communicate, "__wrapped__", None) is not None
     assert getattr(subprocess.Popen.wait, "__wrapped__", None) is not None
     assert getattr(subprocess.run, "__wrapped__", None) is None
+
+
+def test_a_DIRECT_subprocess_run_gets_the_scaled_ceiling_too() -> None:
+    """The second family IS covered: a bare `subprocess.run(timeout=)` inherits the scale.
+
+    This is the box the card got wrong. `run_subprocess` is one seam; 73 files call
+    `subprocess.run` directly with their own ceilings and were written off as "scaling the
+    seam does nothing for those". They funnel through `Popen.communicate`, which IS the
+    patched layer — so they are covered, and no 73-file edit is owed.
+
+    Measured, not reasoned: a 1.5 s child under a 0.5 s ceiling. Unscaled that is a
+    `TimeoutExpired`; at 10x the ceiling is 5 s and the child completes. Its twin below runs
+    the identical call with the seam off and asserts the raise, so a passing result here
+    cannot be a sleep that merely finished early.
+    """
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", "import time; time.sleep(1.5)"],
+        timeout=0.5,
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 0
+
+
+@pytest.mark.no_timeout_scale
+def test_a_DIRECT_subprocess_run_expires_when_the_seam_is_off() -> None:
+    """The control for the test above — same call, seam removed, must raise.
+
+    Without this, that test would pass just as happily if the child had exited instantly,
+    proving nothing about the ceiling.
+    """
+    with pytest.raises(subprocess.TimeoutExpired):
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-c", "import time; time.sleep(1.5)"],
+            timeout=0.5,
+            capture_output=True,
+            check=False,
+        )
 
 
 @pytest.mark.no_timeout_scale

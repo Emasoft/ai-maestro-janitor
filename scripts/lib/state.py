@@ -1009,9 +1009,11 @@ def run_subprocess(
     Returning None lets each call site decide whether to log + skip the
     branch or log + abort the detector.
 
-    `detector_name` (optional): if provided, a one-line failure log goes
-    to `<detector_name>.log` via `log_line`. Pass the detector's own name
-    so post-mortem debugging can correlate the timeout to the right detector.
+    `detector_name` (optional): routes the one-line failure log to
+    `<detector_name>.log` via `log_line`. Pass the detector's own name so
+    post-mortem debugging can correlate the timeout to the right detector.
+    The log itself is UNCONDITIONAL — a nameless caller lands in the shared
+    `subprocess.log` rather than nowhere (see `_log_fail_open`).
 
     Always passes `check=False` and `text=True`; never sets `shell=True`.
     Capture defaults on (`capture_output=True`); pass `capture=False` for

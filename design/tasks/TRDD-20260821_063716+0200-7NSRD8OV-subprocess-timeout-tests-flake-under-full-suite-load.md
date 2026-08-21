@@ -711,8 +711,15 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
 
 ## Acceptance
 
-- [ ] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
+- [x] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
       the two that happened to fail — **and the enumeration settles the design question.**
+
+      **CHECKED 2026-08-21 16:56, on the third pass.** Both families are now enumerated AND
+      both are proven to land on one seam: 52 sites via `state.run_subprocess`, 73 calling
+      `subprocess.run` directly, all funnelling through `Popen.communicate`. That is what the
+      box asked for — the design question ("per-test or shared seam?") is answered by the
+      enumeration itself. The residual empty-stdout flake is a DIFFERENT open question and is
+      deliberately not folded into this box; conflating them is what kept it unchecked.
 
       **UNCHECKED again 2026-08-21 09:42.** It carried `[x]` from 08:10 until the second family
       below was found. Two claims live in this box and only one survived: the enumeration does
@@ -741,8 +748,25 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
       DIRECTLY**, several with their own timeouts, entirely outside that seam
       (`branch_protection_lib._post_or_patch_ruleset` at `timeout=15`,
       `github_config_audit._gh_json` at 15.0, `fleet_scan._run_probe_outcome` at 10,
-      `agentlens_probe.probe_json` at 5.0, `fleet_restart` at 5, …). Scaling the seam does
-      nothing for those.
+      `agentlens_probe.probe_json` at 5.0, `fleet_restart` at 5, …). ~~Scaling the seam does
+      nothing for those.~~
+
+      **⛔ THAT LAST SENTENCE IS FALSE — measured and struck 2026-08-21 17:5x.** It confused
+      two different seams. Scaling `state.run_subprocess`'s own ceiling would indeed do
+      nothing for a direct caller — but that is not what shipped. What shipped patches
+      `Popen.communicate`/`Popen.wait`, and `subprocess.run` FORWARDS its `timeout=` down to
+      `communicate`. So the direct family inherits the scale as well.
+
+      Proof is a matched pair, not an argument —
+      `test_a_DIRECT_subprocess_run_gets_the_scaled_ceiling_too` runs a 1.5 s child under a
+      0.5 s ceiling and completes; its `no_timeout_scale` twin runs the identical call with
+      the seam removed and raises `TimeoutExpired`. Only the seam differs. 16 passed.
+
+      **Why this correction MATTERS more than it reads:** it deletes a lead. The residual
+      empty-stdout failures were being attributed to this "uncovered family", which pointed
+      the next session at editing 73 call sites. That work is not owed, and it would not have
+      fixed anything. The residual mechanism is now explicitly UNKNOWN — one fewer wrong
+      answer, not one more right one.
 
       Measured after shipping the seam scale (`99d2f7dd`): the five previously-flaky suites run
       TOGETHER still produced **5 failures in 241s**, same empty-stdout signature, while the
@@ -757,13 +781,15 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
       on call sites whose victim is chosen by scheduling. What shipped instead is one
       environment-scaled multiplier at that seam, which covers all 52 of its call sites at once.
 
-      **The second family is knowingly NOT covered, and that is a decision, not an oversight.**
-      73 files call `subprocess.run` directly, outside the seam. I did not pre-emptively edit
-      them because I never instrumented WHICH call expires — editing 73 sites on suspicion is
-      guesswork, and the evidence below says the seam alone is currently sufficient. If the
-      flake returns, that family is the first place to look, and
-      `branch_protection_lib` (6 sites at `timeout=10`/`15`) is the nearest suspect since it
-      sits on the path of two of the five original failures.
+      ~~**The second family is knowingly NOT covered**~~ — **struck 2026-08-21 17:5x: it IS
+      covered.** See the correction in box 1. `subprocess.run` forwards its `timeout=` to
+      `Popen.communicate`, the patched layer, so all 73 direct callers scale with the rest.
+      The decision recorded here ("do not edit 73 sites on suspicion") was the right call for
+      the wrong reason: not because the evidence said the seam was *sufficient*, but because
+      those sites were never outside it.
+
+      **So `branch_protection_lib` is no longer "the nearest suspect".** That pointer is
+      withdrawn — it rested entirely on the family being unscaled.
 - [x] production defaults (`_TIMEOUT_S = 5.0`) are UNCHANGED — this is a test-harness defect,
       and loosening a production timeout to make a test pass would trade a real guarantee for a
       green tick
