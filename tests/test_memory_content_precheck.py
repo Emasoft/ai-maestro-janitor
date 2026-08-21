@@ -925,6 +925,35 @@ def test_a_page_not_ending_in_a_footer_has_no_footer_region(tmp_path):
     assert mcp._footer_heading_line(p.read_text(encoding="utf-8")) is None
 
 
+def test_inline_code_span_at_line_start_does_not_open_a_phantom_fence(tmp_path):
+    """An inline ```span``` at line start must not swallow every heading below it.
+
+    TRDD-K3PN7QW2 / janitor#277 + #279. CommonMark: a BACKTICK fence's info string may not
+    contain a backtick, so ```` ```fence``` ```` at line start opens NOTHING — it is an inline
+    code span. This walker's `stripped.startswith("```")` reads it as an opener, flips
+    `in_fence`, and never sees a closer, so every heading after it is skipped and the page
+    appears to have no footer at all.
+
+    This is the SAME rule the Rust crate's walkers use, and that is exactly why it matters
+    here: janitor#227 and #260 were both this precheck and `memgrep lint` disagreeing about
+    page structure, which left the repair chore re-dispatching forever at ~250-300k tokens per
+    no-op run. The two implementations must move together or the next disagreement is the same
+    bug with a new number.
+    """
+    p = _shaped(
+        tmp_path,
+        "a.md",
+        body=(
+            "```fence``` or `inline code` is inert by CommonMark.\n\n"
+            "^real-atom [desc: legit, keywords: legit atom]\nAtom body."
+        ),
+    )
+    assert mcp._footer_heading_line(p.read_text(encoding="utf-8")) is not None, (
+        "the trailing Notes footer became invisible because an inline code span at line "
+        "start was mistaken for a fence opener"
+    )
+
+
 def test_repair_defect_clean_when_atom_precedes_see_also(tmp_path):
     """The correctly-shaped page — atom(s) ABOVE `## See also` — is not flagged
     `atom-after-footer`."""

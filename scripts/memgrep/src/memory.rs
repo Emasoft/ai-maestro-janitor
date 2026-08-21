@@ -1690,7 +1690,7 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
     // `None` = no atom open → non-marker lines are ignored (pre-first-marker / post-heading content).
     let mut open: Option<(String, BTreeMap<String, Vec<String>>)> = None;
     let mut acc: Vec<String> = Vec::new();
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     let mut lines = text.lines();
     // Skip a leading YAML frontmatter block (`--- … ---`) — it is PAGE metadata, never atom content.
     if matches!(text.lines().next(), Some(l) if l.trim_end() == "---") {
@@ -1703,15 +1703,14 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
     }
     for line in lines {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
-            // A fence-toggle line is body content of the open atom; ignored when none is open.
+        if fence_step(line, &mut fence) {
+            // A fence-delimiter line is body content of the open atom; ignored when none is open.
             if open.is_some() {
                 acc.push(line.to_string());
             }
             continue;
         }
-        if !in_fence && t.starts_with('#') {
+        if fence.is_none() && t.starts_with('#') {
             // ANY heading (#/##/###…) = structural boundary: CLOSE the open atom (flush it) and clear
             // the accumulator. Content after a heading with no new marker belongs to no atom.
             if let Some((id, p)) = open.take() {
@@ -1720,7 +1719,7 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
             acc.clear();
             continue;
         }
-        let marker = if in_fence {
+        let marker = if fence.is_some() {
             None
         } else {
             first_block_property_marker(line)
@@ -2233,14 +2232,13 @@ fn build_atom_marker(
 /// ends at the next heading — never bleeds into the lessons section), and `add-lesson` appends its
 /// footnote def AFTER it (inside the section).
 fn notes_section_line(text: &str) -> Option<usize> {
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             continue;
         }
-        if in_fence {
+        if fence.is_some() {
             continue;
         }
         if t.starts_with('#') {
@@ -2270,14 +2268,13 @@ fn notes_section_line(text: &str) -> Option<usize> {
 /// the fourth was named in a comment. The rule is not "the link law's two sections" but "ANY
 /// trailing footer that precedes Notes", and `See also` is the lateral-link member of that set.
 fn footer_section_line(text: &str) -> Option<usize> {
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             continue;
         }
-        if in_fence {
+        if fence.is_some() {
             continue;
         }
         if t.starts_with('#') {
@@ -2323,16 +2320,15 @@ fn footer_section_line(text: &str) -> Option<usize> {
 /// recorded rather than left implicit, because an unstated known difference is precisely what turns
 /// a "these two can never disagree" comment into a false one.
 fn footer_section_trailing_line(text: &str) -> Option<usize> {
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     // (0-based line index, is_footer) for every heading OUTSIDE a fence, in page order.
     let mut headings: Vec<(usize, bool)> = Vec::new();
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             continue;
         }
-        if in_fence {
+        if fence.is_some() {
             continue;
         }
         if t.starts_with('#') {
@@ -2367,14 +2363,13 @@ fn footer_section_trailing_line(text: &str) -> Option<usize> {
 /// 1-based (unlike `notes_section_line`'s 0-based `enumerate`) so it lines up directly with
 /// `AtomLintFacts.line`, which the lint check compares it against.
 fn superseded_heading_line(text: &str) -> Option<usize> {
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             continue;
         }
-        if in_fence {
+        if fence.is_some() {
             continue;
         }
         if t.trim_end().eq_ignore_ascii_case("## Superseded") {
@@ -3234,14 +3229,13 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
         Some(hidx) => {
             // The section runs from its heading to the next heading (fence-aware) or EOF.
             let mut end = lines.len();
-            let mut in_fence = false;
+            let mut fence: Option<Fence> = None;
             for (i, line) in lines.iter().enumerate().skip(hidx + 1) {
                 let t = line.trim_start();
-                if t.starts_with("```") || t.starts_with("~~~") {
-                    in_fence = !in_fence;
+                if fence_step(line, &mut fence) {
                     continue;
                 }
-                if !in_fence && t.starts_with('#') {
+                if fence.is_none() && t.starts_with('#') {
                     end = i;
                     break;
                 }
@@ -3297,6 +3291,112 @@ fn is_indented_code(line: &str) -> bool {
 
 /// A trailing clause naming an UNCLOSED CODE FENCE when the page has one, else empty (janitor#279).
 ///
+/// An OPEN fenced-code-block delimiter: which character opened it and how long the run was.
+///
+/// Carrying the character is what makes a `~~~` line unable to close a ```` ``` ```` fence, and
+/// carrying the length is what makes a short run unable to close a longer opener — neither of
+/// which a plain `bool` could express. Both are CommonMark §4.5 requirements.
+///
+/// `pub(crate)` because `md.rs`'s stack-overflow guard needs the identical rule — a second copy
+/// there would be the same drift this change exists to remove, one module over.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Fence {
+    ch: char,
+    len: usize,
+}
+
+/// Split a line into its leading fence-delimiter run: `(char, run length, rest of line)`.
+///
+/// `None` unless the line begins — after indentation — with at least three ```` ` ```` or `~`.
+/// Byte-slicing by `len` is safe precisely because the run is counted over ASCII ```` ` ````/`~`
+/// only, so the char count and the byte count cannot diverge.
+fn fence_run(line: &str) -> Option<(char, usize, &str)> {
+    let t = line.trim_start();
+    let ch = t.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let len = t.chars().take_while(|&c| c == ch).count();
+    if len < 3 {
+        return None;
+    }
+    Some((ch, len, &t[len..]))
+}
+
+/// Is this line a fence OPENER, and if so, which fence does it open?
+///
+/// **This is the rule this whole change exists for.** CommonMark §4.5: a BACKTICK opener's info
+/// string may not contain a backtick. So a line whose first non-space characters are
+/// ```` ```fence``` ```` opens NOTHING — it is an inline code span. Every walker here previously
+/// answered "yes" to it, then never found a closer, and silently swallowed every atom and heading
+/// below it (janitor#277, #279 — one lost investigation each).
+///
+/// A TILDE opener carries no such restriction; `~~~foo~~~` is a legitimate opener.
+fn is_fence_open(line: &str) -> Option<Fence> {
+    let (ch, len, info) = fence_run(line)?;
+    if ch == '`' && info.contains('`') {
+        return None;
+    }
+    Some(Fence { ch, len })
+}
+
+/// Does this line CLOSE `open`? Same character, run at least as long, and nothing but whitespace
+/// after it — a closer takes no info string (CommonMark §4.5).
+fn fence_closes(line: &str, open: Fence) -> bool {
+    match fence_run(line) {
+        Some((ch, len, rest)) => ch == open.ch && len >= open.len && rest.trim().is_empty(),
+        None => false,
+    }
+}
+
+/// Advance one line of fence state. Returns `true` when the line IS a delimiter, so the caller
+/// can treat it as non-structural content.
+///
+/// Every structural walker in this file drives its fence state through THIS function. That is
+/// deliberate and load-bearing: when the walkers each carried their own copy of the rule, fixing
+/// one of them meant the others disagreed, and a walker that disagrees does not report an error —
+/// it silently reports that your atom does not exist.
+pub(crate) fn fence_step(line: &str, state: &mut Option<Fence>) -> bool {
+    match *state {
+        Some(open) => {
+            if fence_closes(line, open) {
+                *state = None;
+                return true;
+            }
+            false
+        }
+        None => {
+            if let Some(f) = is_fence_open(line) {
+                *state = Some(f);
+                return true;
+            }
+            false
+        }
+    }
+}
+
+/// 0-based line index of a fence still OPEN at end of text, or `None` when the page is balanced.
+///
+/// Shared by the `page-unclosed-fence` lint and the refusal hint so the two cannot drift apart.
+fn unclosed_fence_line(text: &str) -> Option<usize> {
+    let mut open: Option<(usize, Fence)> = None;
+    for (i, line) in text.lines().enumerate() {
+        match open {
+            Some((_, f)) => {
+                if fence_closes(line, f) {
+                    open = None;
+                }
+            }
+            None => {
+                if let Some(f) = is_fence_open(line) {
+                    open = Some((i, f));
+                }
+            }
+        }
+    }
+    open.map(|(i, _)| i)
+}
+
 /// Appended to the "atom not found" refusals because that message, alone, sends the reader looking
 /// for a problem with the ATOM — and the peer who filed #279 spent an investigation doing exactly
 /// that: they induced and falsified the footer-placement mechanism and then the marker-grammar
@@ -3305,17 +3405,12 @@ fn is_indented_code(line: &str) -> bool {
 /// that a fence opened earlier on the page had never closed, so every walker was still inside it
 /// and the atom did not exist as far as the scan was concerned.
 ///
-/// Same counting rule as the walkers themselves (odd number of fence-marker lines ⇒ unbalanced), so
-/// the hint appears exactly when a walker is confused and never when it is not.
+/// Same rule as the walkers themselves — it calls the very same predicates (`unclosed_fence_line`),
+/// rather than re-implementing them — so the hint appears exactly when a walker is confused and
+/// never when it is not. That sharing is the point: this hint and the walkers previously carried
+/// two copies of an odd/even count, and two copies of a rule are two rules the moment one is fixed.
 fn unclosed_fence_hint(text: &str) -> String {
-    let mut open: Option<usize> = None;
-    for (i, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            open = if open.is_some() { None } else { Some(i) };
-        }
-    }
-    match open {
+    match unclosed_fence_line(text) {
         Some(i) => format!(
             ". NOTE: this page has an UNCLOSED code fence at line {} — every atom below it is \
              invisible to the scan, which is the likely cause here; close the fence and retry",
@@ -3341,7 +3436,7 @@ fn locate_atom_body_matching(
         }
         start = (start + 1).min(lines.len());
     }
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     let mut open: Option<(usize, usize, String)> = None;
     let finish = |open: &Option<(usize, usize, String)>| -> Option<(usize, usize)> {
         open.as_ref()
@@ -3349,21 +3444,20 @@ fn locate_atom_body_matching(
     };
     for (i, line) in lines.iter().enumerate().skip(start) {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             if let Some((_, last, _)) = open.as_mut() {
                 *last = i;
             }
             continue;
         }
-        if !in_fence && t.starts_with('#') {
+        if fence.is_none() && t.starts_with('#') {
             if let Some(hit) = finish(&open) {
                 return Some(hit);
             }
             open = None;
             continue;
         }
-        let marker = if in_fence { None } else { first_block_property_marker(line) };
+        let marker = if fence.is_some() { None } else { first_block_property_marker(line) };
         if let Some((_s, _end, id, _props)) = marker {
             if let Some(hit) = finish(&open) {
                 return Some(hit);
@@ -3413,15 +3507,14 @@ fn atom_verbatim_body(text: &str, marker_idx: usize, body_last_idx: usize) -> St
 /// its marker line plus every body line up to (not including) the next marker / heading / EOF, with
 /// trailing blank lines trimmed. Fence-aware. `migrate` lifts exactly this segment.
 fn atom_segment_end(lines: &[&str], marker_idx: usize) -> usize {
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     let mut end = lines.len();
     for (i, line) in lines.iter().enumerate().skip(marker_idx + 1) {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             continue;
         }
-        if !in_fence && (t.starts_with('#') || first_block_property_marker(line).is_some()) {
+        if fence.is_none() && (t.starts_with('#') || first_block_property_marker(line).is_some()) {
             end = i;
             break;
         }
@@ -3494,14 +3587,13 @@ fn append_footnote_defs(text: &str, defs: &[String]) -> String {
     match notes_section_line(text) {
         Some(hidx) => {
             let mut end = lines.len();
-            let mut in_fence = false;
+            let mut fence: Option<Fence> = None;
             for (i, line) in lines.iter().enumerate().skip(hidx + 1) {
                 let t = line.trim_start();
-                if t.starts_with("```") || t.starts_with("~~~") {
-                    in_fence = !in_fence;
+                if fence_step(line, &mut fence) {
                     continue;
                 }
-                if !in_fence && t.starts_with('#') {
+                if fence.is_none() && t.starts_with('#') {
                     end = i;
                     break;
                 }
@@ -4111,7 +4203,7 @@ fn atoms_for_lint(text: &str) -> Vec<AtomLintFacts> {
         }
         start = (start + 1).min(lines.len());
     }
-    let mut in_fence = false;
+    let mut fence: Option<Fence> = None;
     // (1-based marker line, atom id, raw props, accumulated body text)
     let mut open: Option<(usize, String, String, String)> = None;
     let flush = |out: &mut Vec<AtomLintFacts>, o: Option<(usize, String, String, String)>| {
@@ -4126,19 +4218,18 @@ fn atoms_for_lint(text: &str) -> Vec<AtomLintFacts> {
     };
     for (i, line) in lines.iter().enumerate().skip(start) {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
+        if fence_step(line, &mut fence) {
             if let Some((_, _, _, body)) = open.as_mut() {
                 body.push(' ');
                 body.push_str(line);
             }
             continue;
         }
-        if !in_fence && t.starts_with('#') {
+        if fence.is_none() && t.starts_with('#') {
             flush(&mut out, open.take());
             continue;
         }
-        let marker = if in_fence {
+        let marker = if fence.is_some() {
             None
         } else {
             first_block_property_marker(line)
@@ -4834,13 +4925,10 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // fence marker; odd ⇒ unbalanced) rather than something more correct. A cleverer counter
         // that disagreed with the consumers would flag pages they parse fine and stay silent on
         // pages they mangle; this fires exactly when they are confused, which is the useful signal.
-        let mut fence_open: Option<usize> = None;
-        for (i, line) in lines.iter().enumerate() {
-            let t = line.trim_start();
-            if t.starts_with("```") || t.starts_with("~~~") {
-                fence_open = if fence_open.is_some() { None } else { Some(i) };
-            }
-        }
+        // Same predicate the walkers use (`unclosed_fence_line`), not a second copy of the rule:
+        // this lint exists to fire exactly when a walker is confused, so it must be confused by
+        // exactly the same things.
+        let fence_open: Option<usize> = unclosed_fence_line(&lines.join("\n"));
         if let Some(open_at) = fence_open.as_ref() {
             violations.push((
                 Severity::Error,
@@ -9058,6 +9146,42 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let good = "---\nname: n\n---\n\n```text\nopen\n```\n\n^ATOM-AAAA-BBBB [k]\nbody\n";
         assert!(unclosed_fence_hint(bad).contains("line 7"), "got: {}", unclosed_fence_hint(bad));
         assert_eq!(unclosed_fence_hint(good), "");
+    }
+
+    #[test]
+    fn an_inline_code_span_at_line_start_is_not_a_fence_opener() {
+        // TRDD-K3PN7QW2 / janitor#277 + #279. CommonMark: a BACKTICK fence's info string may
+        // not contain a backtick, so a line whose first non-space characters are ```fence```
+        // opens NOTHING — it is an inline code span. The naive `starts_with("```")` toggle read
+        // it as an opener, never found a closer, and every atom and heading below it stopped
+        // existing, which cost two peer agents an investigation each.
+        //
+        // Precision matters and cost one repro attempt: the same span NOT at line start
+        // ("An inline span: ```fence``` …") always parsed fine. The run of backticks must be
+        // the first non-space characters, which is why the bug is rare and survived this long.
+        let page = "---\nname: n\n---\n\n\
+                    ```fence``` or `inline code` is inert by CommonMark.\n\n\
+                    ^ATOM-AAAA-BBBB [k]\nbody\n";
+        assert_eq!(
+            unclosed_fence_hint(page),
+            "",
+            "an inline code span at line start must not open a fence"
+        );
+    }
+
+    #[test]
+    fn a_tilde_line_does_not_close_a_backtick_fence() {
+        // The second, latent defect in the same toggle: a bare `bool` cannot tell ``` from ~~~,
+        // so today a ~~~ line "closes" a ``` fence. Per CommonMark a closer must use the SAME
+        // character and be at least as long as the opener. Pinned here because the state-machine
+        // fix gets this right for free, and a later "simplification" back to a bool would
+        // silently reintroduce it with nothing failing.
+        let page = "---\nname: n\n---\n\n```text\nopen\n~~~\n\n^ATOM-AAAA-BBBB [k]\nbody\n";
+        assert!(
+            unclosed_fence_hint(page).contains("line 5"),
+            "a ~~~ line must not close a ``` fence; got: {}",
+            unclosed_fence_hint(page)
+        );
     }
 
     #[test]

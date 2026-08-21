@@ -235,17 +235,20 @@ const MAX_MD_NESTING: usize = 1000;
 /// hostile file is rejected without scanning all of it).
 fn max_block_nesting(text: &str, threshold: usize) -> usize {
     let mut worst = 0usize;
-    let mut in_fence = false; // inside a ``` / ~~~ fenced code block: its content isn't block structure
+    // Inside a fenced code block, leading `>`/brackets are literal text rather than nesting, so we
+    // stop counting until it closes. Uses the SHARED CommonMark predicate rather than a local
+    // `starts_with` toggle: the naive rule treats an inline ```span``` at line start as an opener
+    // and then skips the whole rest of the file as "fence content" — which UNDER-reports nesting,
+    // and this guard's entire job is to catch adversarially deep documents before comrak's
+    // recursive descent overflows the stack. Under-reporting here is not the safe direction it
+    // looks like: it is exactly how a hostile file would slip past the guard.
+    let mut fence: Option<crate::memory::Fence> = None;
     for raw in text.lines() {
         let line = raw.trim_end();
-        let trimmed = line.trim_start();
-        // A fence toggle (``` or ~~~). Inside a fence, leading `>`/brackets are literal text, not
-        // nesting — so we stop counting until the fence closes.
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_fence = !in_fence;
+        if crate::memory::fence_step(line, &mut fence) {
             continue;
         }
-        if in_fence {
+        if fence.is_some() {
             continue;
         }
         // Blockquote nesting: count the run of leading `>` markers (`> > >` ⟹ depth 3). comrak

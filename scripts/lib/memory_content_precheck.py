@@ -582,15 +582,20 @@ def _footer_heading_line(text: str) -> int | None:
     right and the code was wrong, which is why the bug survived a reading.
     """
     lines = text.splitlines()
-    in_fence = False
+    # Fence state via the SHARED predicate in memory_edit_verify (this module's established SSOT
+    # import), NOT a local startswith toggle. The naive rule read an inline ```span``` at line
+    # start as an opener and swallowed every heading below it — and because the crate carried its
+    # own copy of the same naive rule, the two agreed only by accident. janitor#227 and #260 were
+    # both this precheck and `memgrep lint` disagreeing about page structure.
+    fence: tuple[str, int] | None = None
     # (line index, is_footer) for every heading OUTSIDE a fence, in page order.
     headings: list[tuple[int, bool]] = []
     for i, line in enumerate(lines):
         stripped = line.lstrip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
+        fence, is_delim = memory_edit_verify.fence_step(line, fence)
+        if is_delim:
             continue
-        if in_fence:
+        if fence is not None:
             continue
         if stripped.startswith("#"):
             headings.append((i, _is_footer_heading(stripped)))

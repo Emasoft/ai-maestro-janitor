@@ -617,21 +617,86 @@ def mirror_preservation_ok(buffer_notes, wiki_corpus: str, min_len: int = 24) ->
 # --------------------------------------------------------------------------- #
 
 
+def fence_run(line: str) -> tuple[str, int, str] | None:
+    """Leading fence-delimiter run of `line` as `(char, run length, info string)`, else None.
+
+    Requires at least three backticks or tildes as the first non-space characters.
+    """
+    t = line.lstrip()
+    if not t or t[0] not in "`~":
+        return None
+    ch = t[0]
+    n = len(t) - len(t.lstrip(ch))
+    if n < 3:
+        return None
+    return ch, n, t[n:]
+
+
+def is_fence_open(line: str) -> tuple[str, int] | None:
+    """The fence this line OPENS, else None.
+
+    CommonMark 4.5: a BACKTICK opener's info string may not contain a backtick, so a line whose
+    first non-space characters are ```` ```fence``` ```` opens nothing — it is an inline code span.
+    A naive `startswith("```")` reads it as an opener, never finds a closer, and silently masks
+    everything below it (janitor#178, #277, #279 — this exact defect, found three separate times
+    in three separate places because each one carried its own copy of the rule).
+
+    A TILDE opener carries no such restriction.
+    """
+    run = fence_run(line)
+    if run is None:
+        return None
+    ch, n, info = run
+    if ch == "`" and "`" in info:
+        return None
+    return ch, n
+
+
+def fence_closes(line: str, open_fence: tuple[str, int]) -> bool:
+    """Does `line` close `open_fence`? Same character, run at least as long, nothing after it."""
+    run = fence_run(line)
+    if run is None:
+        return False
+    ch, n, rest = run
+    return ch == open_fence[0] and n >= open_fence[1] and not rest.strip()
+
+
+def fence_step(
+    line: str, state: tuple[str, int] | None
+) -> tuple[tuple[str, int] | None, bool]:
+    """Advance fence state one line: returns `(new state, line-is-a-delimiter)`.
+
+    Returns the new state rather than mutating, because Python has no `&mut`; every caller must
+    rebind. This is the SINGLE Python definition of the rule, and it deliberately mirrors the
+    memgrep crate's `fence_step` in `src/memory.rs` — janitor#227 and #260 were both this
+    precheck and the crate disagreeing about page structure, which left the repair chore
+    re-dispatching forever at ~250-300k tokens per no-op run.
+    """
+    if state is not None:
+        if fence_closes(line, state):
+            return None, True
+        return state, False
+    opened = is_fence_open(line)
+    if opened is not None:
+        return opened, True
+    return None, False
+
+
 def no_new_duplicate_lines(result: str, min_len: int = 24) -> tuple[bool, list[str]]:
     """No substantive content line (length ≥ `min_len`, not a heading/list marker)
     appears more than once in `result`. Catches a naive union that re-introduced
     the very duplication the merge was meant to remove."""
     seen: dict[str, int] = {}
-    in_fence = False
+    fence: tuple[str, int] | None = None
     for raw in result.splitlines():
         s = raw.strip()
         # L-6 (wikimem audit 2026-07-07): track fence STATE, don't just skip the
         # ``` line itself — the same ≥min_len command legitimately appears in two
         # code examples, and counting fence contents false-failed those merges.
-        if s.startswith("```"):
-            in_fence = not in_fence
+        fence, is_delim = fence_step(raw, fence)
+        if is_delim:
             continue
-        if in_fence or len(s) < min_len or s.startswith("#"):
+        if fence is not None or len(s) < min_len or s.startswith("#"):
             continue
         norm = re.sub(r"\s+", " ", s)
         seen[norm] = seen.get(norm, 0) + 1
@@ -808,20 +873,27 @@ def _mask_code_fences(text: str) -> str:
     including any code it quotes. Blanking to same-length spaces makes span(masked) ==
     span(original)."""
     out: list[str] = []
-    in_fence = False
+    fence: tuple[str, int] | None = None
     for line in text.splitlines(keepends=True):
         stripped = line.rstrip("\n")
         nl = line[len(stripped) :]
         core = stripped.lstrip()
-        # A fence DELIMITER line never carries a SECOND ``` later on the same line
-        # (issue #178's defect class): a prose line beginning with an inline span
-        # ('```x``` or …') has its closer inline and must NOT flip the toggle, or
-        # everything to the next real fence is silently masked.
-        if core.startswith("```") and "```" not in core[3:]:
-            in_fence = not in_fence
+        # Issue #178 found this defect class HERE FIRST and fixed it locally, with the
+        # approximation "a delimiter never carries a SECOND ``` later on the same line". That
+        # was close but not CommonMark: the real rule is that ANY backtick in a backtick
+        # opener's info string disqualifies it, so ```` ```py `x` ```` was still mis-read. More
+        # importantly the local fix never propagated — the crate and the precheck each kept
+        # their own naive copy and re-lost the same investigation as #277 and #279. Now shared.
+        opened = is_fence_open(core)
+        if fence is None and opened is not None:
+            fence = opened
             out.append(" " * len(stripped) + nl)
             continue
-        out.append((" " * len(stripped) + nl) if in_fence else line)
+        if fence is not None and fence_closes(core, fence):
+            fence = None
+            out.append(" " * len(stripped) + nl)
+            continue
+        out.append((" " * len(stripped) + nl) if fence is not None else line)
     return "".join(out)
 
 
