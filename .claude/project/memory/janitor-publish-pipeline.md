@@ -1,8 +1,8 @@
 ---
 name: janitor-publish-pipeline
-description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing / the gate timed out but the test passes on its own / TimeoutExpired on an xdist worker / is this flaky or a real regression — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy"
+description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing / the gate timed out but the test passes on its own / TimeoutExpired on an xdist worker / is this flaky or a real regression — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy / the test gate blocks a publish at random / tests fail only in the full suite and pass alone / a detector exits 0 with empty stdout / assert something in an empty string / which load-flake category is this"
 ocd: 2026-06-13
-lmd: 2026-08-16
+lmd: 2026-08-21
 metadata:
   node_type: memory
   type: project
@@ -117,6 +117,18 @@ absolute repo-root path, the owner GitHub identity / `gh` auth, account emails,
 and any OAuth tokens. This page is git-tracked and host-global, so it carries
 only generic procedure (use `<repo-root>`, `$HOME`, `<email>`, the CPV repo by
 name, never literal paths or secrets).
+
+
+^ATOM-SQZO-66VW [keywords: the_test_gate_blocks_a_publish_at_random tests_fail_only_in_the_full_suite_and_pass_alone detector_exits_0_with_empty_stdout which_of_the_four_load-flake_categories_is_this assert_something_in_empty_string raw_TimeoutExpired_in_a_test the_suite_flakes_under_xdist publish_gate_red_but_tests_pass_isolated, ocd: 2026-08-21, lmd: 2026-08-21]
+
+The pytest gate flakes under load in FOUR distinct ways, and each needs a DIFFERENT fix — collapsing them is why TRDD-7NSRD8OV was misdiagnosed three times before it converged.
+
+(A) A test hand-builds a MINIMAL child env, so conftest's timeout-scale knob never reaches the spawned detector; it runs at scale 1.0, `state.run_subprocess` fails OPEN on its 10 s default, and the detector exits 0 with EMPTY stdout.
+(B) A PRODUCTION helper does its own `subprocess.run` with its own ceiling, OUTSIDE `state.run_subprocess`, so scaling that seam never reaches it — `agentlens_probe.probe_json` 5 s, `cli_agent_roster.fetch_agents` 15 s, `terminal_trigger._run_aimaestro_cli` 5 s, `branch_protection_lib`'s six `gh` calls.
+(C) A test asserts a WALL-CLOCK bound (`elapsed < N`). No knob fixes this, and widening the bound destroys the guard — redesign onto a causal/state assertion instead.
+(D) The TEST'S OWN `subprocess.run` timeout. Nothing inside `scripts/lib` can reach a number written in a test file.
+
+TELL THEM APART BY THE FAILURE TEXT, not by which file failed: empty stdout ⇒ A or B; a raw `TimeoutExpired` ⇒ D; an `elapsed < N` assertion ⇒ C; a literal `'timeout'` where a different classification was expected ⇒ B.
 
 ## See also
 
