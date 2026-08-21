@@ -1,10 +1,10 @@
 ---
 trdd-id: 079778RM
 title: gh-reply-watch is starved by the fleet-wide poll token — 3 real polls in 3 weeks
-column: testing
+column: complete
 created: 2026-08-20T19:44:32+0200
-updated: 2026-08-20T23:20:05+0200
-implementation-commits: [b49541f4]
+updated: 2026-08-21T02:33:00+0200
+implementation-commits: [b49541f4, dcdd081f]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -98,18 +98,32 @@ owner that cannot execute the lane. The blackout therefore costs the IMPROVEMENT
 feature, and `global-chore-blackout` makes it visible. Closing it is a cross-repo ask on
 ai-maestro, the same shape as ai-maestro#111.
 
-## Live observation still owed (why this is `testing`, not `complete`)
+## Live observation — DONE, and it caught a second bug (2026-08-21)
 
-Every acceptance box is proven by automated tests, but the whole VALUE of this card is a
-fleet behaviour no unit test can observe: that the daemon on THIS host actually writes the
-inbox and the deferrals stop. After the next publish + daemon pickup, confirm:
+Holding this at `testing` for a live check was the single most valuable decision on the
+card. **3.3.25 shipped the lane completely dead and every test passed.**
 
-```bash
-ls -l ~/.claude/janitor-control/gh-notify-inbox.json          # exists, mtime within ~60s
-tail -20 .janitor/logs/gh-reply-watch.log                     # deferral lines should stop
+The daemon does not run from the plugin cache — it runs from a STAGED copy in the plugin
+DATA dir carrying `daemon.py` plus its AST-computed import closure (`keepalive_stage.
+_SUBDIRS` = `("lib", "oauth_rotator")`). The chore shelled out to
+`scripts/gh_issues_monitor/gh_notify_poll.py --write-inbox`, which does not exist on that
+tree, so its `is_file()` guard tripped and it logged `task 'gh-notify-inbox' done in 0s`
+every 60 s while writing nothing. Tests run from the REPO, where that path exists, so no
+test could have caught it. Fixed in `dcdd081f` by moving the fetch into
+`lib/gh_notify_inbox.fetch_and_publish()` and having `daemon.py` IMPORT it — importing is
+what puts a module in the staged closure — plus a deduped failure log, because the previous
+version swallowed every error.
+
+Verified on the live host at 3.3.26:
+
+```
+staged module        <DATA>/scripts/lib/gh_notify_inbox.py     present
+daemon log           gh-notify-inbox: published N thread(s)    every ~60s
+inbox                99 KB, age 9 s, 20 threads in retention   fresh
+detector run         NO "deferred" line; state.json rewritten  took the inbox lane
 ```
 
-Until that is seen, the honest column is `testing` — the code is done, the effect is not
-yet witnessed.
+The `published N` line is itself part of the fix: before it, a dead lane and a quiet lane
+were indistinguishable in the log — which is the very failure mode this card is about.
 
 ## Approval log
