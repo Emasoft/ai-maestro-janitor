@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T05:40:00+0200
+updated: 2026-08-21T05:42:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -49,6 +49,20 @@ this detector could most easily have lost.
 **Recall 39% is the honest headline, and it is over 26 of 28 attack classes** (c14/c17 absent —
 do not quote it as "the corpus"). The class this card exists for scores **0 of 7 intended** on
 `two-step-code-injection`. Eight classes are declared blind spots and score 0-2 "any rule".
+
+**TRIAGE DONE 2026-08-21 05:40** — `reports/agent-context-bench/20260821_054037+0200-vawikrk2-out-of-sample-triage.md`
+(gitignored). Its finding reorders the next pass: **5 classes have a rule that catches ZERO
+out-of-sample** — `concealment-directive` 0/9, `prompt-injection-multilingual` 0/9 (both 0 on
+ANY rule), `exfil-webhook-sink` 0/9, `mcp-annotation-lying` 0/9, `two-step-code-injection` 0/7.
+Those are worse than the 8 declared blind spots: a blind spot is honest and the coverage table
+says so, while a claimed rule scoring 0/9 reads as coverage on every report. That is the
+silent-FN asymmetry the bench exists to expose.
+
+Also corrective: **`dynamic-exec-in-body` scores 3/9 — mid-pack, not worst.** This card's shape
+analysis covers only that rule, so the per-shape pass is no longer obviously the highest-value
+next move; rank by silent risk and the 0/9 bucket goes first. And the **FP budget is intact
+(0/46 benign)**, so there IS headroom to widen a rule — the condition shape A's base64-floor
+trap warns is usually absent.
 
 **NEXT ACTION:** per-shape decisions (A base64-floor / B alias-sink / D positional-suppression /
 E split-literal) against THESE numbers, then update the baseline gate so a regression fails. The
