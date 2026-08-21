@@ -27,12 +27,31 @@ def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
 
 
-def _thread(tid: str, updated: str = "2026-08-20T12:00:00Z") -> dict:
-    return {"id": tid, "updated_at": updated, "subject": {"title": f"t{tid}"}}
+def _ago(seconds: int = 3600) -> str:
+    """A `Z` stamp `seconds` in the past, RELATIVE to the real clock — never a calendar literal.
+
+    Retention is 24 h wide and measured against `time.time()`, so every test that writes with
+    the default `now` and asserts the thread comes back is asserting "this stamp is younger
+    than a day". A hardcoded date satisfies that only until it is a day old, and then the
+    suite starts failing on whatever unrelated commit happens to run after the deadline —
+    which is exactly what happened to four tests here 26 h after the literal was written.
+    """
+    when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seconds)
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _thread(tid: str, updated: str | None = None) -> dict:
+    return {"id": tid, "updated_at": updated or _ago(), "subject": {"title": f"t{tid}"}}
 
 
 def _now() -> int:
-    return int(time.mktime(time.strptime("2026-08-20T13:00:00+0000", "%Y-%m-%dT%H:%M:%S%z")))
+    # `datetime.timestamp()` on an AWARE datetime, never `time.mktime(time.strptime(…))` —
+    # the same defect `prune` carried (mktime re-reads a parsed `%z` struct as LOCAL time),
+    # and a test helper that reproduces it would shift every fixed-now assertion here by the
+    # host's UTC offset.
+    return int(
+        datetime.datetime(2026, 8, 20, 13, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+    )
 
 
 def test_absent_inbox_reads_as_empty_and_not_fresh() -> None:
@@ -64,11 +83,12 @@ def test_a_later_fetch_MERGES_rather_than_replaces() -> None:
 def test_a_rewritten_thread_keeps_ONE_entry_with_the_newer_body() -> None:
     """Merging is keyed on the thread id, so a thread updated twice must not accumulate a
     duplicate — the reader's own dedupe is by (id, updated_at) and would re-emit."""
-    inbox.write([_thread("1", "2026-08-20T12:00:00Z")])
-    inbox.write([_thread("1", "2026-08-20T12:30:00Z")])
+    older, newer = _ago(3600), _ago(1800)
+    inbox.write([_thread("1", older)])
+    inbox.write([_thread("1", newer)])
     threads = inbox.read_threads()
     assert len(threads) == 1
-    assert threads[0]["updated_at"] == "2026-08-20T12:30:00Z"
+    assert threads[0]["updated_at"] == newer
 
 
 def test_threads_older_than_the_retention_window_are_pruned() -> None:
