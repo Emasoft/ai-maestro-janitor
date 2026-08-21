@@ -88,6 +88,32 @@ def _autoallow_enabled() -> bool:
         return True
 
 
+def _allow_timeout() -> float:
+    """`_ALLOW_TIMEOUT_S` scaled by the shared subprocess-timeout knob (1.0 in production).
+
+    TRDD-7NSRD8OV. This is a direct `subprocess.run` with its own ceiling, so scaling
+    `state.run_subprocess` never reached it. The failure mode is quiet and easy to misread: on
+    expiry the loop `continue`s, so the token is still in `attempted` — the returned list stays
+    COMPLETE — while the `lean-ctx` process was killed before it did its work. Under suite load
+    that made `test_leanctx_allowlist` fail comparing the recorded CALLS against
+    `required_tokens()`, with the calls list simply SHORT. It reads as a content/ordering bug and
+    it is neither; it is this timeout.
+
+    Same lazy dual-form import as `_autoallow_enabled` (both sys.path contexts), and the same
+    fail-safe: any failure to read the scale returns 1.0, the production value, so a broken
+    config can only leave the timeout at its normal length — never shorten it.
+    """
+    try:
+        try:
+            from lib import state  # hook context: scripts/ on sys.path
+        except ImportError:
+            import state  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
+
+        return _ALLOW_TIMEOUT_S * float(state.timeout_scale())
+    except Exception:  # noqa: BLE001 -- a config-read failure must not shorten a real timeout
+        return _ALLOW_TIMEOUT_S
+
+
 def ensure_janitor_allowed() -> list[str]:
     """Additively allow every janitor-required token on the lean-ctx allowlist.
 
@@ -124,7 +150,7 @@ def ensure_janitor_allowed() -> list[str]:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=_ALLOW_TIMEOUT_S,
+                timeout=_allow_timeout(),
             )
         except (subprocess.SubprocessError, OSError):
             # Best-effort: one token's failure must abort neither the remaining

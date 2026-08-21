@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
+import state  # noqa: E402  # for the shared subprocess-timeout scale
 
 
 class _Clock:
@@ -475,7 +476,18 @@ def test_a_real_failing_binary_is_classified_not_swallowed(tmp_path: Path) -> No
     fake = _script(tmp_path, "fake-llm-ext.sh", "echo 'HTTP 429 rate limit' >&2; exit 1")
 
     proc = subprocess.run(  # noqa: S603 - a script this test just wrote
-        [str(fake)], capture_output=True, text=True, timeout=10, check=False
+        [str(fake)],
+        capture_output=True,
+        text=True,
+        # Scaled by the shared knob (TRDD-7NSRD8OV). This is the TEST'S OWN timeout, not
+        # production's, so no amount of scaling inside scripts/lib reaches it — a category the
+        # card missed twice. Measured: spawning this trivial `echo; exit 1` script exceeded 10 s
+        # under suite load and raised TimeoutExpired straight through the test, which then reads
+        # as a classification bug in `classify_llm_ext_failure` rather than as a busy box.
+        # The timeout is incidental here — the subject is the CLASSIFICATION of a non-zero exit —
+        # so stretching it cannot weaken what this test proves.
+        timeout=10 * state.timeout_scale(),
+        check=False,
     )
 
     assert proc.returncode == 1

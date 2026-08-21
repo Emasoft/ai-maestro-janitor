@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T10:45:03+0200
+updated: 2026-08-21T10:57:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -149,11 +149,35 @@ tests asserting WALL-CLOCK BOUNDS are load-sensitive by construction, and are fi
 family A's env passthrough nor by family B's scaling. They need per-test redesign onto a state
 assertion.
 
-**Still unexplained — do NOT assume it is a timeout:**
-- `test_leanctx_allowlist` (2 fails): `['allow uv', 'allow pytho…'] == ['allow dispa…', …]` — a
-  CONTENT/ordering mismatch in the call log, not a timeout shape at all. Most likely a separate
-  defect that merely surfaces under the same load; it should probably become its own TRDD once
-  characterized, rather than be absorbed into this card.
+**`test_leanctx_allowlist` — RESOLVED 10:52. Family B, site #4, and my earlier read was WRONG.**
+I called it "a CONTENT/ordering mismatch, not a timeout shape at all, probably a separate defect".
+It is a timeout, and the reason it does not look like one is worth keeping:
+`ensure_janitor_allowed` appends the token to `attempted` BEFORE running `lean-ctx allow`, and on
+expiry it `continue`s. So the RETURNED list stays complete and correct while the `lean-ctx`
+process was killed before doing its work — the recorded CALL LOG comes back SHORT. Comparing
+calls against `required_tokens()` then fails on list CONTENT, which reads as an ordering bug in
+code that is fine. Fixed by scaling `_ALLOW_TIMEOUT_S`, via the module's existing lazy dual-form
+`state` import and failing SAFE to the unscaled production value.
+
+**`test_external_clear_retry` — RESOLVED 10:56, and it is a FOURTH category: the TEST'S OWN
+timeout.** The failure is a raw `subprocess.TimeoutExpired: … timed out after 10 seconds`
+propagating straight through the test. The 10 s ceiling belongs to the TEST's own
+`subprocess.run`, spawning a trivial `echo …; exit 1` script — so **no amount of scaling inside
+`scripts/lib` can ever reach it.** Scaling it is safe here because the timeout is incidental: the
+test's subject is the CLASSIFICATION of a non-zero exit, not the timeout.
+
+Verified by the wall-clock it now survives: the file used to FAIL at 13.3 s and now passes three
+for three, including a run of **68.0 s**.
+
+**CATEGORY D — a test's own `subprocess.run` timeout.** Same shape exists in
+`test_terminal_trigger` (lines ~255/260/277, `timeout=10` driving `tmux`). NOT fixed: those have
+never been observed failing, and fixing unobserved sites speculatively is what produced this
+card's first two wrong diagnoses. Named here so the next occurrence is recognized in one step.
+
+**NOTHING is now unexplained.** All 9 originally-failing files are accounted for: 4 families, 8
+sites fixed, 1 test (category C) needing redesign and deliberately left. The superseded guess
+about `test_leanctx_allowlist` being "a separate defect, probably its own TRDD" is resolved
+above — it was family B all along.
 
 **Verification status, stated honestly:** the full suite is green — 15,727 passed, 1 skipped, 0
 failed, EXIT 0, 140.5 s. **This does not close the card.** Every run today that mattered was on a
