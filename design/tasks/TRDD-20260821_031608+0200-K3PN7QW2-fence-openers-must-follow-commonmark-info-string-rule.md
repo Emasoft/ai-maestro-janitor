@@ -3,7 +3,7 @@ trdd-id: K3PN7QW2
 title: Fence-opener detection is naive — an inline triple-backtick span at line start is read as a fence
 column: ai_review
 created: 2026-08-21T03:16:08+0200
-updated: 2026-08-21T15:40:00+0200
+updated: 2026-08-21T13:41:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -165,7 +165,7 @@ will disagree, which is the drift the mirroring was chosen to avoid.
       unclosed where the old bool silently accepted `~~~` as a closer.
 - [x] cargo test + clippy clean; `uv run pytest -q`, ruff, mypy, pyright clean
 
-      **CLOSED 2026-08-21 15:40 — the one thing holding this at `[~]` is gone.** A full-suite
+      **CLOSED 2026-08-21 13:41 — the one thing holding this at `[~]` is gone.** A full-suite
       run on this tree: **15,739 passed, 1 skipped, 0 failed in 177.33 s** (`-n 14`). The
       blocker below was never this change; it was TRDD-7NSRD8OV's load flake, whose
       category-D half has since been fixed at a shared seam. pyright still not run and still

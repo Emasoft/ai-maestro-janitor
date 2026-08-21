@@ -3,7 +3,7 @@ trdd-id: KNTZ79HE
 title: memory-librarian conflict candidates are 3-for-3 false positives because the topic key admits low-information tokens
 column: ai_review
 created: 2026-08-21T11:50:51+0200
-updated: 2026-08-21T15:40:00+0200
+updated: 2026-08-21T13:41:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal

@@ -98,7 +98,7 @@ Two consequences for anyone reading the numbers above:
    else's screen-share session. Do not read a fast green run as evidence, and do not read a
    slow one as a regression in the tests.
 
-### ⏵ SOAK-5 — 2026-08-21 15:05. **595 s, 26 failures, and ZERO of them are category D**
+### ⏵ SOAK-5 — 2026-08-21 13:22. **595 s, 26 failures, and ZERO of them are category D**
 
 The slowest run ever measured (595.81 s, vs the 383 s that gave 39). It returned 26 failures —
 and the SIGNATURE is what matters, not the count:
@@ -124,7 +124,7 @@ so every caller that omitted one returned None in complete silence — which is 
 failures produced zero diagnosable artifacts. The gate is gone; unattributed failures land in a
 shared `subprocess.log` with timestamp, reason and argv.
 
-**A FOURTH CANDIDATE, found 15:20 and stronger than it looks: THE DISK IS 99 % FULL.**
+**A FOURTH CANDIDATE, found 13:30 and stronger than it looks: THE DISK IS 99 % FULL.**
 `df -h` reports 24 GB free of 1.9 TB on `/System/Volumes/Data`, and the janitor's own
 `system-daemon-runaway` detector fired on it in the same heartbeat. On APFS at that fill level
 writes slow down and allocation can stall — which produces exactly the empty-stdout signature,
