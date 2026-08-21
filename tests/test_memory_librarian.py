@@ -197,6 +197,74 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
                 conflict_section = proposal.split("## Conflict")[-1] if "## Conflict" in proposal else ""
                 self.assertNotIn("topic-a.md", conflict_section)
 
+    def test_do_support_auxiliaries_do_not_carry_a_topic(self):
+        """`did`/`does`/`own` must not be the shared token that pairs two notes (TRDD-KNTZ79HE).
+
+        Measured 2026-08-21: `memory-librarian` had reported "3 conflict" every heartbeat for
+        weeks and ALL THREE were false positives, paired on keys like `claude+did+janitor+plugin`
+        and `did+disappear+disarm+pause`. The cause is specific rather than general: `_STOPWORDS`
+        already carried the interrogatives (how/why/what/when) and `has`/`had`/`have`, but not
+        `do`/`did`/`does` — and `did` is the one that bites, because this corpus writes
+        `description:` fields as SYMPTOM QUESTIONS by convention ("did we decide…", "why did …
+        disappear"). The recall style the memory system deliberately adopted was seeding topic
+        keys with a token that names no subject.
+
+        The two notes below are about genuinely UNRELATED subjects and share only that
+        scaffolding, exactly like the real pair (where USER memory is STORED vs whether the
+        janitor tracks the CC changelog).
+
+        The fixture must actually FIRE before the fix, or it proves nothing — a first attempt
+        at this test paired two unrelated notes with no opposing-claim signal and passed against
+        BOTH the fixed and unfixed detector, i.e. it was vacuous. The conflict contract needs a
+        contradiction signal (an antonym split or a differing number) ON TOP of a shared subject
+        token, so the pair below carries the `enable`/`disable` antonym while sharing `did` and
+        `own` as their ONLY other common tokens. Pre-fix that scaffolding is the "subject"; post-
+        fix there is none, so the pair vanishes.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "storage-choice.md").write_text(
+                _note("storage-choice", "did we own and enable the folder", ["alpha"],
+                      body="We did own it and did enable that folder."))
+            (memdir / "changelog-currency.md").write_text(
+                _note("changelog-currency", "did we own and disable the parser", ["beta"],
+                      body="We did own it and did disable that parser."))
+            _run(home, project)
+            if (memdir / PROPOSAL_NAME).exists():
+                proposal = (memdir / PROPOSAL_NAME).read_text()
+                conflict_section = (
+                    proposal.split("Conflict candidates")[-1].split("###")[0]
+                    if "Conflict candidates" in proposal else ""
+                )
+                self.assertNotIn("storage-choice.md", conflict_section)
+                self.assertNotIn("changelog-currency.md", conflict_section)
+
+    def test_a_real_contradiction_still_fires_after_the_stopword_widening(self):
+        """The other half, and the one that matters: widening `_STOPWORDS` must NARROW noise,
+        never disable the check (TRDD-KNTZ79HE).
+
+        A fix that silences a detector and a fix that corrects it produce the same "0 findings",
+        so this pins the difference. These two notes contradict on the SAME subject with a
+        differing number — the canonical clash the conflict contract exists for — and they are
+        phrased with `did`/`does` throughout, so they would go silent if the widening were doing
+        anything coarser than dropping subject-free scaffolding.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "widget-cap-a.md").write_text(
+                _note("widget-cap-a", "did the widget retry cap change", ["retry"],
+                      body="The widget does retry 3 times before it fails."))
+            (memdir / "widget-cap-b.md").write_text(
+                _note("widget-cap-b", "did the widget retry cap change", ["retry"],
+                      body="The widget does retry 5 times before it fails."))
+            out = _run(home, project)
+            self.assertIn("conflict", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            self.assertIn("widget-cap-a.md", proposal)
+            self.assertIn("widget-cap-b.md", proposal)
+
     def test_no_candidates_when_every_note_distinct_topic(self):
         """A corpus where no two notes share a topic emits nothing and writes no proposal."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:

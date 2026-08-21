@@ -240,6 +240,14 @@ _STOPWORDS = frozenset({
     "never", "only", "back", "now", "way", "ways", "like", "just", "also",
     "more", "most", "some", "such", "each", "every", "per", "via", "vs",
     "first", "last", "next", "old", "good", "bad", "still", "even", "both",
+    # DO-support and possession auxiliaries (TRDD-KNTZ79HE). The list already carried the
+    # interrogatives (how/why/what/when) and `has`/`had`/`have`, but not `do`/`did`/`does` —
+    # and `did` is the one that bites, because this corpus writes `description:` fields as
+    # SYMPTOM QUESTIONS by convention ("did we decide…", "why did … disappear"). So the recall
+    # style the memory system deliberately adopted was seeding the topic keys with a token that
+    # carries no subject at all: `did` appeared in TWO of the three conflict-candidate keys
+    # measured 2026-08-21, and `own` in the third. All three pairs were verified false.
+    "did", "does", "own", "owns", "owned",
 })
 
 # ── Contradiction detection (issues #35/#38/#43) ──────────────────────────────

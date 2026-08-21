@@ -1,9 +1,9 @@
 ---
 trdd-id: KNTZ79HE
 title: memory-librarian conflict candidates are 3-for-3 false positives because the topic key admits low-information tokens
-column: todo
+column: testing
 created: 2026-08-21T11:50:51+0200
-updated: 2026-08-21T11:50:51+0200
+updated: 2026-08-21T11:59:35+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -55,10 +55,32 @@ because the day a REAL contradiction appears it will look identical.
 
 ## Acceptance
 
-- [ ] the three pairs above no longer appear as conflict candidates
-- [ ] a fixture pair that genuinely CONTRADICTS (same subject, opposite claims) still fires —
+- [x] the three pairs above no longer appear as conflict candidates
+
+      Measured before/after by re-running the detector: **conflicts 3 → 0**, with aggregation
+      candidates unchanged at 2 (so legitimate clusters were not collateral).
+- [x] a fixture pair that genuinely CONTRADICTS (same subject, opposite claims) still fires —
       proving the fix narrowed noise rather than disabling the check
-- [ ] the filter list is data, not scattered literals, so the next contaminant is one edit
-- [ ] pytest, ruff, mypy clean
+
+      `test_a_real_contradiction_still_fires_after_the_stopword_widening` — same subject,
+      differing number, phrased throughout with `did`/`does` so it would go silent if the
+      widening were doing anything coarser than dropping subject-free scaffolding. Passes.
+- [x] the filter list is data, not scattered literals, so the next contaminant is one edit
+
+      Already true and the reason this fix is 5 tokens rather than a new mechanism: `_STOPWORDS`
+      is a single `frozenset`. **The card's original premise was wrong and is corrected here** —
+      it proposed adding a filter, implying none existed. One did, complete with the
+      interrogatives and `has`/`had`/`have`; it simply had a hole for `do`/`did`/`does` and
+      `own`. Reading the code before building shrank this from a mechanism to a list entry.
+- [x] pytest, ruff, mypy clean
+
+      86 librarian tests (84 + 2 new), ruff clean, mypy clean across 486 files.
+- [x] **MUTATION-PROVEN, and the first attempt was VACUOUS.** The no-conflict test must RED on
+      the unfixed detector or it proves nothing. My first fixture paired two unrelated notes with
+      no opposing-claim signal and passed against BOTH detectors — it could never have fired,
+      because the contract needs an antonym or number clash ON TOP of a shared token. Rebuilt
+      with an `enable`/`disable` split: now **fails without the fix, passes with it**, while the
+      real-contradiction test passes both ways. That pair is the actual proof — one test reddens
+      on the bug, one stays green to show the check still works.
 
 ## Approval log
