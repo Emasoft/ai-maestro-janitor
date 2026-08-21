@@ -1,0 +1,63 @@
+---
+trdd-id: Q8ZT5NW3
+title: The apply audit line reports updated for a ruleset a no-op PUT did not change
+column: todo
+created: 2026-08-21T03:57:42+0200
+updated: 2026-08-21T03:57:42+0200
+current-owner: janitor-main-session
+task-type: bugfix
+priority: normal
+approval-tier: 0
+scope: project
+external-refs: [TRDD-DD0M4QL7]
+npt: []
+eht: []
+---
+
+# `updated` means "a PUT was issued", not "the ruleset changed"
+
+## Measured 2026-08-21
+
+`branch_protection_lib.py:719` sets `verb = "updated"` whenever the applier PUTs an EXISTING
+ruleset — regardless of whether the payload differed from what was already there. An identical
+PUT is a server-side no-op: GitHub does not move `updated_at`.
+
+The audit line for this repo's 2026-08-20 apply reads:
+
+    2026-08-20T08:21:58+0200  OK  Emasoft/ai-maestro-janitor  main
+      baseline-history-protect=updated id=17286452; baseline-pr-and-checks=updated …;
+      baseline-tag-protect=updated …
+
+Three "updated". The live API says exactly ONE changed:
+
+| ruleset | `updated_at` | who |
+|---|---|---|
+| baseline-history-protect | 2026-08-20T01:50:54 | the ai-maestro hub's fleet apply |
+| baseline-pr-and-checks | 2026-08-20T08:21:55 | **this applier** |
+| baseline-tag-protect | 2026-06-11T11:06:07 | neither — untouched since June |
+
+**Why it matters enough to file.** This log was cited as EVIDENCE — by me, to close
+TRDD-DD0M4QL7's unattended-repair box, and by the hub when auditing the fleet. The closure
+survives (the drift line named `baseline-pr-and-checks` specifically and the API confirms that
+one changed at 08:21:55), but an audit line that cannot distinguish "I changed this" from "I
+sent a PUT that changed nothing" is weak evidence for exactly the question an audit log exists
+to answer. It also inflates any future "N rulesets repaired" count by the number of no-ops.
+
+## What
+
+Report the EFFECT, not the action. Cheapest honest form: compare the response's `updated_at`
+(or the pre/post payload) and emit `updated` / `unchanged` accordingly — the applier already
+holds the existing ruleset for the id lookup, so the before-state is in hand.
+
+Do NOT drop the line to silence on a no-op: "checked and already correct" is the trace
+TRDD-DD0M4QL7 added on purpose, and losing it re-creates the silent-no-op ambiguity that card
+exists to end.
+
+## Acceptance
+
+- [ ] the audit line distinguishes `updated` from `unchanged` per ruleset
+- [ ] a no-op apply still logs one honest line (no regression of DD0M4QL7's anti-silence trace)
+- [ ] a test pins both: a changed ruleset reports `updated`, an identical PUT reports `unchanged`
+- [ ] pytest, ruff, mypy, pyright clean
+
+## Approval log
