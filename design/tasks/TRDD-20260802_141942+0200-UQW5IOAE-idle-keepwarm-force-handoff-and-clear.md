@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: testing
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-22T01:30:10+0200
+updated: 2026-08-22T01:49:42+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -86,6 +86,22 @@ The old NEXT ACTION ("observe it fire once") was **unfalsifiable as written**: i
 event without ever asking whether the event can occur. This session's recurring defect class is
 *a filter that reads as correct and matches nothing*, so the gate was measured directly instead.
 
+> **SUPERSEDED 2026-08-22 — the claim below ("never fired anywhere") is FALSE as of now, and
+> the 350 k reasoning under it was already void** (the size term was dropped by owner directive
+> 2026-08-04; see the advisor section). Re-measured today: **22 `idle-clear-fired.ts` stamps
+> exist under `$HOME`**, spanning 2026-08-15 21:47 → 2026-08-22 00:56 — including a burst of 11
+> projects inside 178 s on 2026-08-20 08:00. The nudge is live and reaching real sessions.
+>
+> **But NONE of those 22 counts toward the remaining acceptance box.** Every one predates
+> `e607e95a` (2026-08-22 01:27:49), which is where `_phase_idle_clear_nudge` first VETOES on
+> `awaiting_user` — before it, the flag was computed and thrown away, so the firing code was
+> structurally incapable of distinguishing *abandoned* from *waiting on the human*. That is
+> precisely the false-positive class the box exists to rule out, so the pre-fix record is
+> evidence of REACH, not of SAFETY. **The soak clock starts at `e607e95a`, not at the first
+> stamp.** Whether any of the 22 actually hit an awaiting-user session is not recoverable
+> retrospectively — those transcripts have moved on — so do not try to audit them; count
+> forward instead.
+
 **It has never fired anywhere** — no `idle-clear-fired.ts` exists under `$HOME`. That alone says
 nothing; the inputs decide. Measured across 45 project transcripts:
 
@@ -108,9 +124,12 @@ nudge exists precisely because `/compact` cannot go below its ~308 k floor), but
 nudge is **structurally unreachable for post-compact sessions** — worth knowing before anyone
 "fixes" a future report of it never firing.
 
-**NEXT ACTION:** none blocking. Leave the defaults. Move to `complete` once one live firing is
-observed opportunistically — do NOT hold the card open waiting for it, and do NOT lower the
-thresholds to manufacture a firing.
+**NEXT ACTION (rewritten 2026-08-22):** none blocking, and nothing to build. The remaining box
+is now a pure counting exercise with a defined start: re-run the stamp census
+(`find "$HOME" -maxdepth 7 -name idle-clear-fired.ts`) and count only stamps **newer than
+`e607e95a`'s commit time (2026-08-22 01:27:49 +0200)**. Zero false positives across those, plus
+the staged end-to-end drill, ticks the box. Do NOT lower the thresholds to manufacture a firing,
+and do NOT re-open the pre-fix 22 — they are dead evidence for this purpose.
 
 ### Verdict: NOT as external injection — a SELF-NUDGE, and probably not yet
 
