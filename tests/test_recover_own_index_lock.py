@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
 import git_utils  # noqa: E402
@@ -84,6 +86,11 @@ def test_no_lock_reports_false(tmp_path: Path) -> None:
     assert not git_utils.recover_own_index_lock(repo, time.time())
 
 
+# The `timeout=1` below is the test's INSTRUMENT — it is how the commit gets killed mid-hook.
+# The suite-wide scaling seam would stretch it to 10 s (TRDD-7NSRD8OV); the `sleep 30` hook
+# means it would still fire, but 9 s later for nothing. A test that drives timeout behaviour
+# owns its own scale.
+@pytest.mark.no_timeout_scale
 def test_real_producer_a_commit_killed_in_its_hook_leaves_NO_lock(tmp_path: Path) -> None:
     """MEASURED against the real producer (fleet ai_review warning 2026-08-18: verify
     input shapes against the producer, not a card's prose — and the measurement

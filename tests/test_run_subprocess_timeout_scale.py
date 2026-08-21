@@ -20,9 +20,11 @@ works and stays production-inert — not that the suite no longer flakes.
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
+import conftest
 import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -88,3 +90,63 @@ def test_the_scale_actually_reaches_subprocess_run(monkeypatch: pytest.MonkeyPat
     with pytest.raises(KeyboardInterrupt):
         state.run_subprocess(["true"], timeout=5)
     assert seen["timeout"] == 20.0
+
+
+# ---------------------------------------------------------------------------
+# The OTHER half: the ceilings the TESTS own, scaled by conftest's seam.
+# ---------------------------------------------------------------------------
+
+
+def test_seam_multiplies_an_explicit_timeout_kwarg() -> None:
+    """`scale_timeout_kwarg` multiplies an explicit numeric `timeout=` by the suite scale."""
+    seen: dict[str, object] = {}
+
+    def _spy(**kwargs: object) -> str:
+        seen.update(kwargs)
+        return "ran"
+
+    assert conftest.scale_timeout_kwarg(_spy)(timeout=3) == "ran"
+    assert seen["timeout"] == 3 * conftest.SUBPROCESS_TIMEOUT_SCALE
+
+
+def test_seam_leaves_absent_and_none_timeouts_alone() -> None:
+    """No timeout, or `timeout=None`, passes through untouched — `None * 10` would TypeError.
+
+    Both shapes are routine: `Popen.wait()` inside `communicate`'s own cleanup passes neither,
+    and `subprocess.run` forwards `timeout=None` verbatim when the caller gave none. A seam
+    that multiplied blindly would turn every un-timed call in the suite into a crash.
+    """
+    seen: dict[str, object] = {}
+
+    def _spy(**kwargs: object) -> None:
+        seen.clear()
+        seen.update(kwargs)
+
+    scaled = conftest.scale_timeout_kwarg(_spy)
+    scaled()
+    assert "timeout" not in seen
+    scaled(timeout=None)
+    assert seen["timeout"] is None
+
+
+def test_seam_is_installed_on_the_popen_layer() -> None:
+    """The wiring: the autouse fixture patched `Popen.communicate`/`wait`, not `run`.
+
+    Patching `subprocess.run` as well would DOUBLE-scale, because `run` forwards its own
+    timeout down to `communicate`. Asserting the factory works (above) would pass even if the
+    fixture never installed it anywhere, so this pins where it landed.
+    """
+    assert getattr(subprocess.Popen.communicate, "__wrapped__", None) is not None
+    assert getattr(subprocess.Popen.wait, "__wrapped__", None) is not None
+    assert getattr(subprocess.run, "__wrapped__", None) is None
+
+
+@pytest.mark.no_timeout_scale
+def test_the_no_timeout_scale_marker_removes_the_seam() -> None:
+    """The opt-out a timeout-subject test relies on actually opts out.
+
+    `test_fetch_agents_timeout_is_reported` and `test_real_producer_...` DRIVE a timeout to
+    completion; if the marker silently did nothing, their ceilings would stretch 10x and they
+    would prove nothing while still passing.
+    """
+    assert getattr(subprocess.Popen.communicate, "__wrapped__", None) is None

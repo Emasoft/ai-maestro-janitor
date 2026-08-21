@@ -55,17 +55,20 @@ even created for them.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import pwd
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -661,6 +664,12 @@ def _clear_keychain_latch_between_tests() -> "Iterator[None]":
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
+        "no_timeout_scale: opt this test out of the suite-wide subprocess-timeout scaling "
+        "(TRDD-7NSRD8OV). Use ONLY when the timeout IS the subject — a test that asserts a "
+        "TimeoutExpired fires, or that measures how long a call is allowed to take.",
+    )
+    config.addinivalue_line(
+        "markers",
         "real_state: opt out of the session-default janitor state isolation for this test (restores the REAL HOME / JANITOR_GLOBAL_STATE_DIR / JANITOR_DATA_DIR / CLAUDE_PLUGIN_DATA env). Use ONLY for tests that must observe real machine state.",
     )
     config.addinivalue_line(
@@ -797,9 +806,33 @@ def _isolate_control_dir(request: pytest.FixtureRequest, tmp_path_factory: pytes
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path_factory.mktemp("janitor-control")))
 
 
+SUBPROCESS_TIMEOUT_SCALE = 10.0
+
+
+def scale_timeout_kwarg(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap `fn` so an explicit numeric ``timeout=`` kwarg is multiplied by the suite scale.
+
+    Module-level (rather than a closure inside the fixture) so it is directly unit-testable —
+    `test_run_subprocess_timeout_scale` pins that it multiplies, and that it leaves a call with
+    no timeout, or `timeout=None`, completely alone. `bool` is excluded because it is an `int`
+    subclass and `timeout=True` is a caller bug, not a 10-second ceiling.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        timeout = kwargs.get("timeout")
+        if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+            kwargs["timeout"] = timeout * SUBPROCESS_TIMEOUT_SCALE
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 @pytest.fixture(autouse=True)
-def _relax_subprocess_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scale every `state.run_subprocess` timeout up for the suite (TRDD-7NSRD8OV).
+def _relax_subprocess_timeouts(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scale every subprocess timeout up for the suite — BOTH halves (TRDD-7NSRD8OV).
 
     Detectors pass short timeouts (`git rev-parse --git-dir`, `timeout=5`) and the helper
     fails OPEN on expiry, returning None so a hung child can never park the heartbeat. Under
@@ -814,8 +847,41 @@ def _relax_subprocess_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Production is unaffected: the knob defaults to 1.0 and `test_run_subprocess_timeout_scale`
     pins that default, so this cannot become a way to quietly loosen a real guarantee.
+
+    THE SECOND HALF — the ceilings the TESTS own. The env knob only reaches code that reads
+    it, so it covers the production seam and nothing else. But a test that spawns a detector
+    passes its OWN `subprocess.run(..., timeout=60)`, and under load THAT is what expires:
+    a soak at `-n 28` / 383 s produced 39 failures, 30 of them a raw `TimeoutExpired` naming
+    the test's own ceiling. There are ~258 such literals in `tests/`, and hand-scaling them
+    was tried and failed three times — each enumeration came back too narrow, and one of the
+    "fixed" sites (`_T30 = 30 * state.timeout_scale()` at module level) was VACUOUS because
+    module import runs before this fixture sets the env, freezing the scale at 1.0.
+
+    So scale at the ONE layer every shape funnels through instead of at the call sites.
+    `run`, `check_output`, `call` and `check_call` all reach the OS through
+    `Popen.communicate` / `Popen.wait`, so patching exactly those two scales every present
+    and future site once — and only once. Patching `run` as well would double-scale, since
+    `run` passes its own timeout down to `communicate`.
+
+    In-process only: it cannot reach a detector running as a child (that child gets the env
+    knob above), and it is a no-op for any call that passes no explicit timeout.
+
+    Opt out with `@pytest.mark.no_timeout_scale` when the timeout IS the subject.
     """
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE", "10")
+    # The marker opts out of BOTH halves. A test whose subject is the timeout needs the
+    # production seam left alone too — `probe_json(timeout=0.5)` multiplies by the env knob
+    # internally, so skipping only the Popen patch would still stretch its ceiling to 5 s and
+    # the hang-script it drives would finish inside it, proving nothing.
+    if request.node.get_closest_marker("no_timeout_scale") is not None:
+        return
+    monkeypatch.setenv(
+        "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE", str(int(SUBPROCESS_TIMEOUT_SCALE))
+    )
+
+    monkeypatch.setattr(
+        subprocess.Popen, "communicate", scale_timeout_kwarg(subprocess.Popen.communicate)
+    )
+    monkeypatch.setattr(subprocess.Popen, "wait", scale_timeout_kwarg(subprocess.Popen.wait))
 
 
 @pytest.fixture(autouse=True)

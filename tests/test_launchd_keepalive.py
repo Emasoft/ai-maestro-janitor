@@ -36,13 +36,13 @@ INSTALLER = SCRIPTS / "keepalive_install.sh"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import launchd_keepalive  # type: ignore[import-not-found]  # noqa: E402
-import state  # noqa: E402  # for the shared subprocess-timeout scale (TRDD-7NSRD8OV)
 
-# The TEST'S OWN ceilings for spawning `keepalive_install.sh`, scaled by the shared knob
-# (category D — nothing inside scripts/lib can reach a number written here). Measured at 2x
-# oversubscription: `TimeoutExpired … after 30 seconds` on `keepalive_install.sh status`.
-# Stretching is safe because these tests' subject is the installer's EFFECT, never its speed.
-_T30 = 30 * state.timeout_scale()
+# The TEST'S OWN ceiling for spawning `keepalive_install.sh`. Scaled for the suite by
+# conftest's `_relax_subprocess_timeouts` seam (TRDD-7NSRD8OV) — NOT here. It used to read
+# `30 * state.timeout_scale()`, which was VACUOUS: module import happens before the autouse
+# fixture sets the env, so the scale was frozen at 1.0 and this stayed 30 s. That is exactly
+# why the scaling moved to a runtime seam instead of a constant.
+_T30 = 30
 
 
 @pytest.fixture(autouse=True)

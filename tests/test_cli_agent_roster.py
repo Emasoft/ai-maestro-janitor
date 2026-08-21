@@ -7,6 +7,8 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
 import cli_agent_roster as car  # noqa: E402
@@ -228,6 +230,7 @@ def test_fetch_agents_unparseable_stdout_is_reported(tmp_path: Path, monkeypatch
     assert why == "unparseable"
 
 
+@pytest.mark.no_timeout_scale
 def test_fetch_agents_timeout_is_reported(tmp_path: Path, monkeypatch) -> None:
     """A process that outlives the timeout is reported as timeout, not left to hang."""
     # OPT OUT of the harness's subprocess-timeout scale (TRDD-7NSRD8OV). Every other test wants

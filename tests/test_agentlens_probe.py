@@ -10,6 +10,8 @@ script, a missing binary, a hanging script), never a mock.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import agentlens_probe as ap  # noqa: E402
@@ -298,6 +300,10 @@ def test_probe_json_none_on_missing_binary() -> None:
     assert ap.probe_json("/definitely/not/a/real/binary/xyzzy get_burn_status") is None
 
 
+# This test DRIVES a timeout — it is the subject, not an incidental ceiling — so it opts out
+# of the suite-wide scaling (TRDD-7NSRD8OV). Scaled, its 0.5 s becomes 5 s, the hang script
+# finishes inside that, and the assertion would pass having proven nothing.
+@pytest.mark.no_timeout_scale
 def test_probe_json_none_on_timeout(tmp_path: Path) -> None:
     """A command that hangs past the timeout → None (the daemon must never wedge)."""
     cmd = _write_script(tmp_path, "hang.sh", "sleep 5; echo '{}'")
@@ -368,6 +374,7 @@ def test_cache_expired_none_on_missing_binary() -> None:
     assert ap.probe_cache_expired("/definitely/not/a/real/binary/xyzzy cache-expired") is None
 
 
+@pytest.mark.no_timeout_scale  # drives a timeout — see the twin above (TRDD-7NSRD8OV)
 def test_cache_expired_none_on_timeout(tmp_path: Path) -> None:
     """A hanging probe → None. It runs in a SessionStart hook, which must never wedge."""
     cmd = _write_script(tmp_path, "hang-cache.sh", "sleep 5; echo false")

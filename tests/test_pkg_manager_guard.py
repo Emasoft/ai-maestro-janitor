@@ -26,7 +26,6 @@ _HOOK = _PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-pkg-guard.py"
 
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
-import state  # noqa: E402  # for the shared subprocess-timeout scale (TRDD-7NSRD8OV)
 
 assert _HOOK.is_file(), f"hook not found at {_HOOK}"
 
@@ -49,13 +48,10 @@ def _run(payload: dict[str, Any], env_overrides: Optional[dict[str, str]] = None
         capture_output=True,
         text=True,
         env=env,
-        # The TEST'S OWN ceiling, scaled by the shared knob (TRDD-7NSRD8OV, category D). This
-        # file is the card's FOUNDING example — it timed out during a publish at load avg 83 and
-        # passed 27/27 isolated straight after. Measured again at 2x oversubscription:
-        # `TimeoutExpired … after 30 seconds` spawning the hook. Nothing inside scripts/lib can
-        # reach this number, and stretching it cannot weaken the tests, whose subject is the
-        # guard's DECISION, never how fast it is reached.
-        timeout=30 * state.timeout_scale(),
+        # Scaled for the suite by conftest's `_relax_subprocess_timeouts` seam, not here
+        # (TRDD-7NSRD8OV). This file is the card's FOUNDING example — it timed out during a
+        # publish at load avg 83 and passed 27/27 isolated straight after.
+        timeout=30,
     )
     if not proc.stdout.strip():
         return proc.returncode, {}
@@ -407,7 +403,7 @@ def test_malformed_input_silent_allow(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         env={**os.environ, "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "g")},
-        timeout=10 * state.timeout_scale(),
+        timeout=10,  # scaled suite-wide by conftest's seam (TRDD-7NSRD8OV)
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
