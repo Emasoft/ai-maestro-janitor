@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T12:26:40+0200
+updated: 2026-08-21T13:40:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,7 +15,51 @@ eht: []
 
 # Subprocess-timeout tests flake under full-suite load
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 10:22
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 13:40
+
+**THERE IS NO FIFTH CATEGORY. Category D was simply MUCH larger than every enumeration of it,
+and the fix moved from the call sites to a seam.** The 39-failure soak, triaged by failure
+text: **30 of 39** are a raw `TimeoutExpired` naming the TEST'S OWN ceiling (60 s
+`branch-protection.py` ×9, 60 s `package-manager-policy.py` ×7, 120 s `doctor_classify.py` ×5,
+60 s `memory-librarian.py` ×3, 30 s `keepalive_install.sh` ×3, 30 s `dispatcher-stub` ×1); the
+other 9 are category B in four named production helpers. Nothing new in kind.
+
+**Why hand-scaling kept failing, stated plainly because it cost most of a day:** there are
+**~258** literal `timeout=` values in `tests/` and **156** in `scripts/`. Three separate
+enumerations each came back too narrow, and one "fixed" site was **VACUOUS** —
+`_T30 = 30 * state.timeout_scale()` at MODULE level runs before the autouse fixture sets the
+env, so the scale froze at 1.0 and the constant stayed 30. It looked scaled and was not. An
+enumeration of hundreds of sites is not a fix; it is a fresh chance to miss some.
+
+**THE FIX (commits `bf245a99`, `912f55a5`):**
+1. **Test half — ONE seam.** `conftest.scale_timeout_kwarg` wraps `Popen.communicate` and
+   `Popen.wait`, the single layer `run`/`check_output`/`call`/`check_call` all funnel through.
+   Every present and future test-owned ceiling is stretched exactly once. **Do NOT also patch
+   `subprocess.run`** — it forwards its own timeout down to `communicate`, so that
+   double-scales. The 6 hand-scaled sites reverted to plain literals for the same reason.
+2. **Production half — 4 NAMED sites**, each implicated by a measured failure, not a sweep:
+   `gh_notify_poll.gh_api`, `gh_notify_inbox._gh_api`, `agentlens_probe.probe_cache_expired`,
+   and `plugin-updates` (both its `claude plugin list` and its marketplace refresh). All
+   multiply by `state.timeout_scale()`, 1.0 in production. **The other 152 literals in
+   `scripts/` are deliberately untouched** — no measurement says they flake.
+3. **`@pytest.mark.no_timeout_scale`** opts out the 4 tests whose SUBJECT is the timeout. It
+   skips BOTH halves: `probe_json(timeout=0.5)` multiplies by the env knob internally, so
+   skipping only the Popen patch would still stretch it to 5 s against its hang script.
+
+**NEXT ACTION:** read `scratchpad/soak-{3,4,5}.txt` (three `-n 28` runs, in flight at 13:40).
+**Judge them as a DISTRIBUTION, not a verdict.** The pre-fix range is 24 and 12 failures at
+162/176 s and 39 at 383 s; the post-fix samples so far are 0 at 189 s and 1 at 238 s. Wall-clock
+is the load proxy — **a green run FASTER than 300 s proves nothing**, because 189 s and 238 s
+were already nearly green before this fix. What would move the card is a run at ~380 s or
+slower coming back clean.
+
+**DO NOT MOVE THIS CARD ON ONE GREEN RUN.** That error has now been made five times on this
+card (premature `testing` 09:53 · "THE root cause" · "family B retired" · "leanctx is separate"
+· "caveat retired"). Each time the next measurement refuted it within the hour.
+
+---
+
+### (SUPERSEDED 13:40) STATE — 2026-08-21 10:22
 
 **ROOT CAUSE FOUND, and it is NOT what this card has said all along. Column moved back
 `testing` → `dev`; the 09:53 block below is SUPERSEDED and kept only for its measurements.**
