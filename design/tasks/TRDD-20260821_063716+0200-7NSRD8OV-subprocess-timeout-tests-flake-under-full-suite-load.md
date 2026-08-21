@@ -98,6 +98,34 @@ Two consequences for anyone reading the numbers above:
    else's screen-share session. Do not read a fast green run as evidence, and do not read a
    slow one as a regression in the tests.
 
+### ⏵ SOAK-6 — 2026-08-21 14:05. The first LIKE-FOR-LIKE comparison at matched wall-clock
+
+`-n 28`: **15,739 passed, 1 skipped, 0 failed in 181.32 s.** Zero fail-open breadcrumbs
+harvested from the run's tmp dirs (the harvest step ran and found nothing, so nothing timed
+out — not a broken harvest; it was proven working at 13:51 below).
+
+**This is the matched pair the card never had.** Every earlier post-fix green was at a
+wall-clock the pre-fix tree was never sampled at, which is exactly why they proved nothing:
+
+| wall-clock | pre-fix | post-fix |
+|---|---|---|
+| 162 s | **24 failed** | — |
+| 176 s | **12 failed** | — |
+| **181 s** | — | **0 failed** |
+
+162 s / 176 s / 181 s is the same load band, and the flake originally reproduced there
+reliably. It no longer does.
+
+**What this does NOT say, and the card has been burned five times on exactly this:**
+- It says nothing about ≥473 s. The residual lives there (1 @473 s, 26 @595 s), and the
+  pre-fix tree was NEVER sampled above 383 s — so "26 is better than pre-fix would have been"
+  is unknown, not implied. Only the SIGNATURE change at high load is measured (30 raw
+  `TimeoutExpired` @383 s pre-fix → 0 @595 s post-fix).
+- A single 181 s green is one sample. It is meaningful only because a matched pre-fix sample
+  exists to compare it against — not on its own.
+
+**Column stays `testing`.**
+
 ### ⏵ SOAK-5 — 2026-08-21 13:22. **595 s, 26 failures, and ZERO of them are category D**
 
 The slowest run ever measured (595.81 s, vs the 383 s that gave 39). It returned 26 failures —
