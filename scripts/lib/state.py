@@ -951,8 +951,13 @@ def detached_uv_env() -> dict[str, str]:
     return env
 
 
-def _timeout_scale() -> float:
+def timeout_scale() -> float:
     """Multiplier applied to every `run_subprocess` timeout. **1.0 in production.**
+
+    PUBLIC (was `_timeout_scale`) because `run_subprocess` is not the only place that needs it:
+    helpers with their OWN short timeouts outside this seam — `agentlens_probe.probe_json` at
+    5.0 s is a measured one — must scale by the SAME number. A second private copy of this env
+    read in each of them is exactly the drift that gave TRDD-K3PN7QW2 five spellings of one rule.
 
     TRDD-7NSRD8OV. Detectors pass deliberately short timeouts (`git rev-parse --git-dir`,
     `timeout=5`) and `run_subprocess` fails OPEN on expiry — returning None so a hung child
@@ -1031,7 +1036,7 @@ def run_subprocess(
             capture_output=capture,
             text=True,
             check=False,
-            timeout=timeout * _timeout_scale(),
+            timeout=timeout * timeout_scale(),
             env=env,
         )
     except subprocess.TimeoutExpired:

@@ -109,7 +109,7 @@ def _harness_env() -> dict[str, str]:
     timeout — which reads as a logic bug in a detector that is fine.
 
     Measured directly rather than inferred: a child spawned with a minimal env reports
-    `_timeout_scale() == 1.0`, one that inherits reports `10.0`.
+    `state.timeout_scale() == 1.0`, one that inherits reports `10.0`.
     """
     return {k: v for k, v in os.environ.items() if k == _SCALE_KNOB}
 

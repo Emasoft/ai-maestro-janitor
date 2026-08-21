@@ -40,7 +40,7 @@ def test_production_default_is_exactly_one(monkeypatch: pytest.MonkeyPatch) -> N
     TRDD-7NSRD8OV forbids ("do not loosen a real guarantee to make a test pass").
     """
     monkeypatch.delenv(_KNOB, raising=False)
-    assert state._timeout_scale() == 1.0
+    assert state.timeout_scale() == 1.0
 
 
 @pytest.mark.parametrize("raw", ["", "abc", "0", "-3", "nan-ish", "1e", "None"])
@@ -56,7 +56,7 @@ def test_malformed_or_non_positive_falls_back_to_one(
     detector that shells out.
     """
     monkeypatch.setenv(_KNOB, raw)
-    assert state._timeout_scale() == 1.0
+    assert state.timeout_scale() == 1.0
 
 
 def test_a_valid_scale_is_honoured_and_read_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,15 +66,15 @@ def test_a_valid_scale_is_honoured_and_read_per_call(monkeypatch: pytest.MonkeyP
     `state` is imported, so an import-time constant would make the whole fix a no-op.
     """
     monkeypatch.setenv(_KNOB, "10")
-    assert state._timeout_scale() == 10.0
+    assert state.timeout_scale() == 10.0
     monkeypatch.setenv(_KNOB, "2.5")
-    assert state._timeout_scale() == 2.5
+    assert state.timeout_scale() == 2.5
 
 
 def test_the_scale_actually_reaches_subprocess_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Behavioural: the multiplied value is what `subprocess.run` receives.
 
-    Asserting on `_timeout_scale()` alone would pass even if nobody multiplied by it — the
+    Asserting on `timeout_scale()` alone would pass even if nobody multiplied by it — the
     helper could be dead code. This pins the wiring.
     """
     seen: dict[str, float] = {}

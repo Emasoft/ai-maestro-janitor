@@ -43,6 +43,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+import state as _state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
+
 # Default commands. Each is overridable via its CLAUDE_PLUGIN_OPTION_* env var; an
 # empty value disables that probe (pure fail-open to the native estimate). The bare
 # `agentlenspro` binary is resolved from PATH by the OS — the janitor never assumes
@@ -200,7 +202,14 @@ def probe_json(command: str, *, timeout: float = _TIMEOUT_S) -> dict | None:
             shlex.split(command),
             capture_output=True,
             text=True,
-            timeout=timeout,
+            # Scaled by the SHARED knob (1.0 in production, so this is byte-identical there).
+            # This helper has its own 5.0 s ceiling and does NOT go through
+            # `state.run_subprocess`, so scaling that seam alone left it exposed: under suite
+            # load the probe expired, fail-open returned None, and `test_agentlens_probe` failed
+            # on `assert isinstance(None, dict)` with nothing naming a timeout (TRDD-7NSRD8OV,
+            # measured). Importing the shared function rather than re-reading the env here — a
+            # per-helper copy of one rule is what TRDD-K3PN7QW2 spent a day undoing.
+            timeout=timeout * _state.timeout_scale(),
         )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
