@@ -258,10 +258,19 @@ def test_format_cause_clause_multi_workspace_says_so_instead_of_naming_one() -> 
 
 
 def _write_script(tmp_path: Path, name: str, body: str) -> str:
+    """Return a COMMAND that runs `body` — as DATA passed to /bin/sh, never a new executable.
+
+    Not `chmod +x` + a bare path: the first exec of a newly-created executable pays a one-time
+    macOS scan, measured at 0.22-0.25 s (40/40) with a tail reaching ~15 s under load. That
+    races the very timeouts these tests exercise, and when it wins the probe fails open to None
+    and the test asserts on empty output with nothing naming a timeout (TRDD-WMQQYLSZ).
+    Passing the file to an already-trusted interpreter measured 0.00 s (12/12) and is
+    load-immune, because no new executable is ever created. Callers are unchanged — the return
+    value was always a command string, and `shlex.split` handles the extra token.
+    """
     script = tmp_path / name
     script.write_text("#!/bin/sh\n" + body + "\n")
-    script.chmod(0o755)
-    return str(script)
+    return f"/bin/sh {script}"
 
 
 def test_probe_json_parses_object(tmp_path: Path) -> None:
