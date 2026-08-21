@@ -604,6 +604,19 @@ _URGENT_LINE_RE = re.compile(
     r"\b(CRITICAL|HIGH|ERROR|FAIL(?:ED|URE)?|INSECURE|LEAK)\b", re.IGNORECASE
 )
 
+# ...but a severity word the sentence NEGATES is not an alarm (janitor#276). `memgrep lint`
+# prints a summary unconditionally and on purpose — a linter silent on success cannot be told
+# apart from one that never ran (janitor#191) — so its clean-corpus line is
+# `memgrep lint: N finding(s), none at or above ERROR (…)`. The urgency override matched ERROR
+# inside the clause that negates it, promoting the single most routine line in the system past
+# quiet mode on EVERY fire. That is the whole of janitor#276, which was filed as a
+# chore-ownership gap: a completed pass could not move the number, so the same line repeated
+# forever. The number was never the problem; a regex reading a word against its own sentence was.
+#
+# Matched, not lookbehind: Python's `re` has no variable-width lookbehind, and the phrase is a
+# fixed emission from one known producer rather than free prose.
+_NEGATED_SEVERITY_RE = re.compile(r"\bnone at or above\b", re.IGNORECASE)
+
 # Advisory detectors whose lines EMBED text authored by a third party — GitHub issue
 # titles, PR titles, comment bodies. The urgency override MUST NOT apply to these: the
 # words it searches for are chosen by whoever wrote the issue, so titling one
@@ -648,7 +661,9 @@ def _quiet_filter(detector: str, text: str) -> str:
         if not stripped:
             continue
         if _RESERVED_MARKER_RE.fullmatch(stripped) or (
-            may_claim_urgent and _URGENT_LINE_RE.search(stripped)
+            may_claim_urgent
+            and _URGENT_LINE_RE.search(stripped)
+            and not _NEGATED_SEVERITY_RE.search(stripped)
         ):
             kept.append(line)
         else:

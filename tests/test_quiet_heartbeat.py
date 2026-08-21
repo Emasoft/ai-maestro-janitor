@@ -68,6 +68,35 @@ def test_an_urgent_line_survives_even_from_an_advisory_detector(monkeypatch):
         assert dispatch._quiet_filter("memory-librarian", line + "\n").strip() == line
 
 
+def test_a_NEGATED_severity_word_does_not_claim_urgency(monkeypatch):
+    """`none at or above ERROR` says nothing is wrong — it must not ride the urgency override.
+
+    janitor#276. `memgrep lint` ALWAYS prints a summary, deliberately: a linter silent on
+    success is indistinguishable from one that never ran (janitor#191). Its clean-corpus line
+    is `memgrep lint: N finding(s), none at or above ERROR (...)`. `_URGENT_LINE_RE` matched
+    the word ERROR inside a clause that NEGATES it, so the single most routine line in the
+    system was promoted past quiet mode on every fire — reported as an advisory that "re-emits
+    the identical line on every fire and can never be driven down".
+
+    The reported cause was a chore-ownership gap. It is not: it is a regex matching a word
+    while the sentence around it says the opposite.
+    """
+    _quiet(monkeypatch, [])
+    clean = "memgrep lint: 71 finding(s), none at or above ERROR (3 scope(s): LOCAL/PROJECT/USER)"
+    assert dispatch._quiet_filter("wikimem-syntax", clean + "\n") == ""
+
+
+def test_a_REAL_severity_count_still_claims_urgency(monkeypatch):
+    """The twin of the above — the fix must not muzzle the line that reports actual errors.
+
+    Without this, suppressing the negated form could be 'fixed' by suppressing the whole
+    advisory, which is the blindness the quiet filter exists to avoid.
+    """
+    _quiet(monkeypatch, [])
+    loud = "memgrep lint: 557 finding(s), 3 at or above ERROR (3 scope(s): LOCAL/PROJECT/USER)"
+    assert dispatch._quiet_filter("wikimem-syntax", loud + "\n").strip() == loud
+
+
 def test_non_advisory_detectors_are_untouched(monkeypatch):
     """DEFAULT LOUD. A detector is silenced only by being listed — so a security detector
     added later is noisy by omission, never silent by omission."""
