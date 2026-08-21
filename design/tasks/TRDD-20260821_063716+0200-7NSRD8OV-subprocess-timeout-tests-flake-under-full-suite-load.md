@@ -46,6 +46,47 @@ enumeration of hundreds of sites is not a fix; it is a fresh chance to miss some
    skips BOTH halves: `probe_json(timeout=0.5)` multiplies by the env knob internally, so
    skipping only the Popen patch would still stretch it to 5 s against its hang script.
 
+### ⏵ SOAK RESULT — 2026-08-21 14:30. The bar was cleared, and the card still does NOT close
+
+| run | wall-clock | failures | note |
+|---|---|---|---|
+| pre-fix | 162 s | **24** | |
+| pre-fix | 176 s | **12** | |
+| pre-fix | **383 s** | **39** | the worst pre-fix sample |
+| post-fix | 145 s | 3 → **0** real | 2 were regressions my own seam caused (below) |
+| **post-fix** | **473 s** | 3 → **1** real | **23 % SLOWER than the 383 s run that gave 39** |
+
+**473 s is the slowest run ever measured here** — well past the ~380 s bar this card set for
+"a run that would actually prove something" — and it returned ONE residual failure. 39 → 1 at
+higher load.
+
+**Two of those 3 failures were REGRESSIONS I introduced with the seam** (fixed, `8bdc8baa`):
+`test_daemon::test_run_workload_kills_hung_child_and_returns_none` and
+`test_dispatch_phases::test_run_detector_kills_hung_detector_within_timeout` both DRIVE a
+timeout (a child sleeps 30 s against a 1 s ceiling) and assert the kill via `elapsed < 10.0`.
+The seam stretched the ceiling and the assertion said "timeout did not fire" — correctly.
+I had screened for exactly this and the screen was too narrow for the FOURTH time today: I
+grepped `assertRaises`/`pytest.raises(TimeoutExpired)`, got zero, and concluded no test
+asserts a timeout fires. These assert it through an ELAPSED BOUND, which that grep cannot see.
+**A shape-based grep proves the absence of the shape it greps for and nothing else.**
+
+**THE ONE RESIDUAL, mechanism UNRESOLVED — do not guess it closed:**
+`test_token_usage_anomaly_detector::test_alarm_enriched_with_agentlens`. The alarm line
+carried `agentlensPro: $10.45/h` (first probe OK) but not `FORK_STORM` (second probe returned
+None). Both go through `probe_json`, the child gets the knob (`os.environ.copy()`), so its
+ceiling was 50 s. Two candidate mechanisms, NEITHER confirmed:
+- 50 s genuinely exceeded spawning `/bin/sh` at 28 workers on 14 cores, or
+- a transient fork/spawn failure (EAGAIN) — `probe_json` catches `OSError` and fails open to
+  None, which is indistinguishable from "agentlensPro is not installed".
+
+The second would not be fixable by any timeout, so **do not scale anything in response to this
+until it is reproduced and identified.** It is the same opacity the card has fought all day:
+None means "no signal" and no signal means nothing was logged.
+
+**Column stays `testing`.** 39 → 1 is a real, measured result at higher load; 1 is not 0.
+
+---
+
 **NEXT ACTION:** read `scratchpad/soak-{3,4,5}.txt` (three `-n 28` runs, in flight at 13:40).
 **Judge them as a DISTRIBUTION, not a verdict.** The pre-fix range is 24 and 12 failures at
 162/176 s and 39 at 383 s; the post-fix samples so far are 0 at 189 s and 1 at 238 s. Wall-clock
