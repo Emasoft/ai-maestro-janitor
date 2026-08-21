@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T17:35:00+0200
+updated: 2026-08-21T18:07:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -855,5 +855,58 @@ the cost to a named scanner, so "macOS scans a new executable on first exec" is 
 explanation, not a proven one. Alternatives I did not rule out are dyld/codesign caching
 effects. The 14.99 s figure is ONE sample and did not reproduce in 40 — treat it as evidence
 that the tail is heavy, not as the typical cost.
+
+## ⏵ THE 100x DOUBLE-SCALE IS STRUCTURAL — decided 2026-08-21 18:1x, ACCEPT + DOCUMENT
+
+Investigated a fix, designed one, and the codebase refuted it. Recording the refutation because
+the design looks obviously right and the next reader will propose it again.
+
+**The rejected design (looked clean):** stop the fixture setting the knob in the PARENT's
+`os.environ`; instead patch `Popen.__init__` to inject it into each CHILD's env. Then the parent
+reads an unset knob (`timeout_scale() == 1.0`, so the 13 in-process sites stop multiplying) and
+the `Popen` patch alone supplies 10x, while children still get their 10x from the injected env.
+Exactly 10x in both cases.
+
+**Why it is wrong — two independent refutations, both from the tests themselves:**
+
+1. `tests/test_gh_reply_watch.py::_harness_env` and `tests/test_github_issues_watch.py` build a
+   hand-crafted MINIMAL env for a spawned detector and harvest the knob **out of
+   `os.environ`**. Its docstring states the contract outright: *"conftest exports the
+   subprocess-timeout scale into `os.environ`, which reaches a child only if the child INHERITS
+   the environment."* Emptying the parent's env returns `{}` there and re-opens the family-A
+   failure a previous commit fixed.
+2. Making `Popen.__init__` inject unconditionally instead would break a DELIBERATE negative
+   case measured in that same docstring: *"a child spawned with a minimal env reports
+   `state.timeout_scale() == 1.0`, one that inherits reports `10.0`."* Both behaviours are
+   relied upon; an always-injecting patch can no longer produce an unscaled child.
+
+**And the narrower variant fails too.** Dropping `* timeout_scale()` from the 13 sites fixes
+in-process but strands children — `state.run_subprocess` is itself the seam a detector uses
+INSIDE a child, where no `Popen` patch exists, so it must keep multiplying. Keeping it there and
+dropping the other 12 still leaves `run_subprocess` compounding in-process. The only remaining
+lever would be teaching `run_subprocess` whether it is running in the parent test process, i.e.
+test-awareness inside production code — explicitly out of bounds.
+
+**So the two mechanisms cover overlapping-but-different sets, and the overlap compounds by
+construction.** That is a property of the design, not an oversight in it.
+
+**DECISION: option (c) — accept and document.** Justified by exposure, not by convenience:
+- It is LATENT. 15,750 tests pass; nothing currently drives a knob-reading site to a genuine
+  hang without the opt-out.
+- It is BOUNDED. `@pytest.mark.no_timeout_scale` disables both halves, and every test whose
+  subject IS a timeout already carries it.
+- It is PINNED. `test_an_ALREADY_scaling_site_is_scaled_TWICE_in_process` asserts the current
+  behaviour deterministically, so a future change to either half is a visible test change rather
+  than a silent shift from 100x to something else.
+
+**The residual risk, stated plainly:** an UNINTENTIONAL timeout at one of the 13 sites wedges
+the suite for 100x its production ceiling instead of failing — worst case
+`probe_cache_expired`'s 90 s becoming 9000 s. If that ever happens, the symptom is a suite that
+hangs rather than one that fails, and this section is the explanation.
+
+**Advisory note (rule compliance):** `fable-advisor:advisor` was consulted on exactly this
+question and did NOT return — stopped after 47 minutes with no verdict on a read-only question
+over three files. The decision above therefore rests on first-hand source reading, not on an
+advisor verdict, and is recorded that way deliberately.
 
 ## Approval log
