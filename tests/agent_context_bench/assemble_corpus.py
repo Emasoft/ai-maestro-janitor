@@ -173,7 +173,11 @@ def main() -> int:
                 "id": f"{label}-{sum(1 for o in out if o['label'] == label) + 1:02d}",
                 "label": label,
                 "kind": "source" if label in SOURCE else "prose",
-                "note": (rec.get("note") or "")[:90],
+                # Masked like `content`: `test_secret_fixture_hygiene` scans the tracked
+                # corpus as RAW TEXT, not per field, so a credential-shaped string a free-pool
+                # model happened to echo in its NOTE would fail the gate exactly as one in the
+                # body would — and the masking would look done.
+                "note": mask_secret_literals((rec.get("note") or "")[:90]),
                 "content": mask_secret_literals(content),
             })
     dest = Path(sys.argv[-1])
