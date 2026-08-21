@@ -98,6 +98,36 @@ Two consequences for anyone reading the numbers above:
    else's screen-share session. Do not read a fast green run as evidence, and do not read a
    slow one as a regression in the tests.
 
+### ⏵ SOAK-5 — 2026-08-21 15:05. **595 s, 26 failures, and ZERO of them are category D**
+
+The slowest run ever measured (595.81 s, vs the 383 s that gave 39). It returned 26 failures —
+and the SIGNATURE is what matters, not the count:
+
+| | pre-fix @383 s | post-fix @595 s |
+|---|---|---|
+| raw `TimeoutExpired` (category D) | **30 of 39** | **0 of 26** |
+| empty stdout (`assert 'X' in ''`, categories A/B) | the rest | **essentially all 26** |
+
+**Category D is CLOSED.** Not one raw `TimeoutExpired` survived, at 55 % more wall-clock than
+the run that produced thirty of them. The seam did its job.
+
+**What remains is the empty-stdout family**, and it scales with load: 1 at 473 s, ~26 at 595 s.
+Three candidate mechanisms, NONE confirmed — (a) a 100 s scaled ceiling genuinely exceeded at
+this contention, (b) a child that never receives the knob (category A, in a file not yet
+checked), (c) one of the **152 production `subprocess.run` literals deliberately left unscaled**
+(category B).
+
+**I did not guess between them, and neither should the next session.** Guessing is what
+misdiagnosed this card four times. Instead the fail-open path was made to NAME ITSELF
+(`2b88f67d`): `state.run_subprocess`'s failure log was gated on an OPTIONAL `detector_name`,
+so every caller that omitted one returned None in complete silence — which is precisely why 26
+failures produced zero diagnosable artifacts. The gate is gone; unattributed failures land in a
+shared `subprocess.log` with timestamp, reason and argv.
+
+**NEXT ACTION on the residual:** get one more slow (>500 s) run, then read the per-test
+`.janitor/logs/*.log` and `subprocess.log` of a failing case. It will now say which of (a)/(b)/
+(c) it was. Do NOT scale anything before that log exists.
+
 ---
 
 **NEXT ACTION:** read `scratchpad/soak-{3,4,5}.txt` (three `-n 28` runs, in flight at 13:40).
