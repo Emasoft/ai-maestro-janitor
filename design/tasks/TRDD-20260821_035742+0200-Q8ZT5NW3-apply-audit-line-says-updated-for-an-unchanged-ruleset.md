@@ -1,9 +1,9 @@
 ---
 trdd-id: Q8ZT5NW3
 title: The apply audit line reports updated for a ruleset a no-op PUT did not change
-column: ai_review
+column: human_review
 created: 2026-08-21T03:57:42+0200
-updated: 2026-08-21T08:34:07+0200
+updated: 2026-08-21T17:25:07+0200
 implementation-commits: [342f3f6f]
 current-owner: janitor-main-session
 task-type: bugfix

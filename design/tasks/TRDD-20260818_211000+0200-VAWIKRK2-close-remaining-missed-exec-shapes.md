@@ -1,9 +1,9 @@
 ---
 trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
-column: ai_review
+column: human_review
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T07:49:42+0200
+updated: 2026-08-21T17:25:07+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium

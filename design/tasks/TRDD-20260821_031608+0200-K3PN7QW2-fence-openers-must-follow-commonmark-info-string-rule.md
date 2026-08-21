@@ -1,9 +1,9 @@
 ---
 trdd-id: K3PN7QW2
 title: Fence-opener detection is naive — an inline triple-backtick span at line start is read as a fence
-column: ai_review
+column: human_review
 created: 2026-08-21T03:16:08+0200
-updated: 2026-08-21T13:41:00+0200
+updated: 2026-08-21T17:25:07+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
