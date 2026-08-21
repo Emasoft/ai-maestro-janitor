@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.26] — 2026-08-21
+
+### Bug Fixes
+
+- **gh-notify-inbox:** Move the fetch into the daemon's import closure — 3.3.25 no-opped silently (TRDD-079778RM) (dcdd081)
+
+### Documentation
+
+- **memory:** Record that the daemon runs from a STAGED import closure, not the plugin cache (7d27ef4)
 ## [3.3.25] — 2026-08-20
 
 ### Bug Fixes
@@ -11,6 +20,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - **TRDD-079778RM:** Todo -> testing — fleet inbox landed in b49541f4, live observation owed (5ef5d4f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.25 (ade7a42)
 ## [3.3.24] — 2026-08-20
 
 ### Bug Fixes
