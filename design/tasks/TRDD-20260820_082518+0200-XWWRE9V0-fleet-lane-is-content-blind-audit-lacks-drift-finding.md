@@ -1,9 +1,9 @@
 ---
 trdd-id: XWWRE9V0
 title: The fleet lane is content-blind — the audit has no ruleset-content-drift finding, so baseline changes never propagate finding-driven
-column: testing
+column: human_review
 created: 2026-08-20T08:25:18+0200
-updated: 2026-08-20T09:35:00+0200
+updated: 2026-08-21T17:45:00+0200
 implementation-commits: [068d1574]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -52,10 +52,32 @@ propagation of the 2026-08-13 ruling. Verification against HEAD refines that:
 
 ## Acceptance
 
-- [ ] name-present/content-stale ⇒ BASELINE_CONTENT_DRIFT (test fails pre-fix); converged ⇒ silent
-- [ ] fix path re-applies via the ratified SSOT payloads; solo-owner conditionality respected
-- [ ] grep-proven: ONE comparator (`ruleset_content_drift`) across guard + audit lanes
-- [ ] pytest, ruff, mypy clean; janitor#282 answered with the lane split
+All four VERIFIED first-hand 2026-08-21 17:4x against the shipped code, not against `068d1574`'s
+commit message. The work had shipped on 2026-08-20 and the boxes were simply never ticked, which
+left a high-priority card sitting in a WORK column asserting activity that had already finished.
+
+- [x] name-present/content-stale ⇒ BASELINE_CONTENT_DRIFT (test fails pre-fix); converged ⇒ silent
+      — `tests/test_github_config_audit.py:462-536`: one positive asserting the code IS emitted
+      (documented as failing on the pre-fix classifier) plus FOUR falsifications asserting
+      silence — converged echo, the checks asymmetry, shell/absent, and the solo shape.
+- [x] fix path re-applies via the ratified SSOT payloads; solo-owner conditionality respected
+      — `scripts/github_config_fix.py:64-70` adds `BASELINE_CONTENT_DRIFT` to `_CONFIG_FIXABLE`,
+      citing the idempotent baseline re-apply that `manager-approval-defaults` §F marks EXEMPT.
+      No new authority is taken: restoring drifted rules to the ratified payloads is not a
+      deviation, which is the only reason this is Tier 0.
+- [x] grep-proven: ONE comparator (`ruleset_content_drift`) across guard + audit lanes
+      — defined ONCE at `branch_protection_lib.py:514`; called from the guard lane at `:616` and
+      the audit lane at `github_config_audit.py:281`. Two callers, one definition.
+- [x] pytest, ruff, mypy clean; janitor#282 answered with the lane split
+      — 48 passed across `test_github_config_audit.py` + `test_branch_protection_content.py`;
+      full suite 15747 passed / 0 failed, ruff + mypy clean earlier today. janitor#282 is
+      CLOSED with the lane-split reply posted (2026-08-20 and 2026-08-21), both carrying the
+      PRRD G1.1 self-identification line.
+
+**STILL UNMET — the completion gate, which is NOT one of these boxes.** The Approval log below
+requires the change to ride 3.3.19 AND one fleet-audit fire observed emitting/omitting the
+finding correctly. That needs a publish plus a fire; it cannot be produced by inspection, so it
+is named here rather than quietly folded into a ticked box.
 
 ## Approval log
 
