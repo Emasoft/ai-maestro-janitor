@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-21T15:20:00+0200
+updated: 2026-08-21T15:35:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -47,10 +47,30 @@ not refusing now. Two candidates, neither chosen:
    has been heavily contended all day. **Scaling it would NOT help**: `timeout_scale()` is 1.0
    in production and the daemon IS production, so the knob is inert here — the fix would be a
    larger ceiling or a retry, which is a design call.
-2. **`gh` absent from the DAEMON's PATH.** `shutil.which("gh")` returning None is
-   indistinguishable in that message. `gh` lives at `/opt/homebrew/bin/gh` and is authenticated
-   for this shell; a launchd/detached daemon need not inherit that PATH. Same shape as
-   **TRDD-AM8JD9SG F6**.
+2. ~~**`gh` absent from the DAEMON's PATH.**~~ **RULED OUT 2026-08-21 15:35 — by the daemon's
+   own log, after the USER challenged the claim.** The janitor repairs its own PATH at startup
+   (`daemon.py:2451` → `daemon_path.ensure_tool_path()`), and it logged doing so **before** the
+   decline:
+
+   ```
+   2026-08-20T23:38:49  PATH augmented with: /opt/homebrew/bin:/opt/homebrew/sbin:
+                        /usr/local/bin:~/.local/bin:~/.cargo/bin
+   2026-08-21T00:37:31  version-update: C3 re-pin declined — … F1 provenance …
+   ```
+
+   The daemon running at 00:37 started at 23:38 with `/opt/homebrew/bin` — where `gh` lives —
+   on its PATH, and the companion `injection tools MISSING from this daemon's PATH` line has
+   **never** appeared (0 occurrences). `gh auth status` is healthy for the owner
+   (`Emasoft`, keyring, scopes incl. `repo`/`workflow`). So `shutil.which("gh")` did not return
+   None, and the AM8JD9SG F6 shape does not apply here.
+
+**⇒ CANDIDATE 1 IS NOW THE LEADING EXPLANATION**, by elimination rather than preference: the
+hardcoded **5 s** ceiling on `gh api repos/<slug>/releases/latest`, on a box measured under
+heavy contention all that night. The new `on_failure` diagnostic (below) will confirm or refute
+it by name on the next fire — `gh api timed out after 5s` versus anything else.
+
+**Lesson worth keeping:** I offered this candidate without checking the daemon's own PATH log,
+which was one grep away and settles it. The USER had to push back before it got checked.
 
 **The actionable next step was a DIAGNOSTIC, not a fix — and it is now SHIPPED (`e7c1ec47`).**
 `resolve_latest_published` takes an `on_failure` sink (the `cause.append` idiom
@@ -66,9 +86,13 @@ existing caller changed.
 `version-update` fire, `daemon.log` will carry either `periodic re-pin certified last-good=<v>`
 (box closes) or `F1 provenance unresolved: <named cause>` immediately before the decline. That
 line decides between the two candidates without another week of theorising:
-- `gh is not on PATH for this process` ⇒ a daemon PATH fix (the TRDD-AM8JD9SG F6 shape).
-- `gh api timed out after 5s` ⇒ raise the ceiling or retry. **Do NOT reach for
-  `timeout_scale()`** — it is 1.0 in production and the daemon IS production.
+- `gh api timed out after 5s` ⇒ **the expected answer** (see the elimination above): raise the
+  ceiling or retry. **Do NOT reach for `timeout_scale()`** — it is 1.0 in production and the
+  daemon IS production.
+- `gh is not on PATH for this process` ⇒ would CONTRADICT the ruled-out candidate 2; treat it
+  as new evidence, not as confirmation, and re-check `PATH augmented with` around that fire.
+- `gh api exited N: …` ⇒ an auth/rate-limit/API answer, none of which anyone has evidence for
+  yet — the owner's `gh auth status` is healthy.
 
 **Still forbidden to satisfy the box:** running `/janitor-repin-integrity` (F2). It advances the
 pin by human authority, which is exactly the provenance the observation is supposed to prove.
