@@ -76,6 +76,34 @@ shape; isolated run times for `test_window_burn_rate.py` were measured swinging 
 13.3s** against that 5.0s ceiling. It is a second instance of the same class, not the class
 itself.
 
+## ⏵ WHERE THE LOAD COMES FROM — measured 2026-08-21 09:44, and it names the only valid repro
+
+The card says "the load the full suite itself creates" without saying HOW, and that gap let me
+spend a measurement on a repro that cannot work. Both halves now measured:
+
+- **xdist is the load.** `pytest-xdist` is a declared dev dependency and the publish gate runs
+  `_PYTEST_CMD = [… "-n", "auto", "--dist", "loadgroup"]` (`publish.py:187`). pyproject's own
+  comment says why it was added: the suite is ~15k tests and ran **serially at ~16 min on a
+  14-core machine**. So the gate shards across 14 workers — and a large share of these tests
+  spawn a DETECTOR SUBPROCESS, i.e. a fresh Python interpreter plus its imports. 14 concurrent
+  workers each spawning interpreters is what produces the loadavg 80+ the card records, and at
+  that load a `timeout=5` on `git rev-parse` expires.
+- **Therefore the 5-file subset is NOT a repro.** Run alone just now: **163 passed in 26.67s**
+  at loadavg 12 — green. The earlier run of the SAME five files took **241s and failed 5**. Same
+  files, same code, ~9× wall-clock: the difference is entirely what else was on the box. A
+  subset run neither confirms nor refutes this bug, in either direction.
+
+**Consequence for anyone continuing this card: the ONLY measurement that counts is the FULL
+suite under `-n auto`.** A green subset proves nothing (it did not exercise the load), and a red
+subset proves nothing either (the box may have been busy with something unrelated). This is also
+the honest reading of the earlier "5 failures in 241s" — it is evidence the flake is real, not
+evidence about which call site caused it.
+
+Note this does NOT make xdist the defect. Sharding is deliberate and load-bearing (a 16-minute
+serial gate is one people route around, which pyproject calls out). The defect is that
+production timeouts tuned for the heartbeat are also the timeouts a saturated test box must
+meet.
+
 ## What
 
 **Superseded framing warning:** the options below were written against the first diagnosis (one
