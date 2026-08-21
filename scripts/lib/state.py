@@ -951,6 +951,35 @@ def detached_uv_env() -> dict[str, str]:
     return env
 
 
+def _timeout_scale() -> float:
+    """Multiplier applied to every `run_subprocess` timeout. **1.0 in production.**
+
+    TRDD-7NSRD8OV. Detectors pass deliberately short timeouts (`git rev-parse --git-dir`,
+    `timeout=5`) and `run_subprocess` fails OPEN on expiry — returning None so a hung child
+    can never park the 5-minute heartbeat. That is correct in production and pathological
+    under the TEST SUITE's own load: at loadavg 80+ a `git rev-parse` exceeds 5s, the caller's
+    `if x is None: return 0` fires, and the detector exits 0 with EMPTY stdout. The test then
+    fails asserting on `''`, with nothing anywhere naming a timeout — so it reads as a logic
+    bug in code that is fine. Measured across 5 tests in 4 files; which one fails is decided
+    by scheduling, because 52 call sites share this seam.
+
+    Scaling HERE rather than per test because no per-test fix can converge on 52 call sites,
+    and raising the production timeouts is forbidden — a real guarantee must not be traded for
+    a green suite. Read per-call, not at import, so a test can set it after this module loads.
+
+    Anything unparseable or non-positive falls back to 1.0: a malformed knob must never
+    silently shorten a production timeout.
+    """
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE")
+    if not raw:
+        return 1.0
+    try:
+        scale = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    return scale if scale > 0 else 1.0
+
+
 def run_subprocess(
     cmd: list[str],
     *,
@@ -1002,7 +1031,7 @@ def run_subprocess(
             capture_output=capture,
             text=True,
             check=False,
-            timeout=timeout,
+            timeout=timeout * _timeout_scale(),
             env=env,
         )
     except subprocess.TimeoutExpired:

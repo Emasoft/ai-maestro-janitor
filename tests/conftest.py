@@ -798,6 +798,27 @@ def _isolate_control_dir(request: pytest.FixtureRequest, tmp_path_factory: pytes
 
 
 @pytest.fixture(autouse=True)
+def _relax_subprocess_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scale every `state.run_subprocess` timeout up for the suite (TRDD-7NSRD8OV).
+
+    Detectors pass short timeouts (`git rev-parse --git-dir`, `timeout=5`) and the helper
+    fails OPEN on expiry, returning None so a hung child can never park the heartbeat. Under
+    THIS SUITE's own load (measured at loadavg 80+) those calls expire, the detector exits 0
+    with EMPTY stdout, and the test fails asserting on `''` — with nothing naming a timeout,
+    so it reads as a logic bug in code that is correct. 52 call sites share the seam, so
+    which test fails is decided by scheduling.
+
+    Set via the ENVIRONMENT rather than by patching the function, because the tests spawn the
+    detectors as SUBPROCESSES and build the child env with `os.environ.copy()` — an in-process
+    monkeypatch of the callable would never reach the child that actually runs the timeout.
+
+    Production is unaffected: the knob defaults to 1.0 and `test_run_subprocess_timeout_scale`
+    pins that default, so this cannot become a way to quietly loosen a real guarantee.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE", "10")
+
+
+@pytest.fixture(autouse=True)
 def _real_state_optout(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Restore the saved REAL env for tests explicitly marked ``real_state``."""
     if request.node.get_closest_marker("real_state") is None:
