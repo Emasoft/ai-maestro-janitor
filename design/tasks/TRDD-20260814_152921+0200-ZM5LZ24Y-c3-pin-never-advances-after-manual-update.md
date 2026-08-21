@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-19T09:20:00+0200
+updated: 2026-08-21T08:39:56+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -15,7 +15,47 @@ implementation-commits: [a8982a03, 11e925c0, 83cfd3b6]
 
 # C3 last-good pin never advances after a manual `claude plugin update`
 
-## ⏵ STATE ADDENDUM — 2026-08-19: the soak could NEVER close — Option A ran against the WRONG ROOT. Real root cause found + fixed (`83cfd3b6`).
+## ⏵ STATE ADDENDUM — 2026-08-21: the soak STILL cannot close, for a SECOND and different reason — the chore is ABSORBED
+
+The 2026-08-19 addendum below fixed the wrong-root defect. That fix is not the last blocker.
+Measured today, out-of-band, all read-only:
+
+- **The anchor has not moved.** `integrity/last-good.json` still reads
+  `{"version": "0.59.0"}`, **mtime 2026-07-21 20:44:56** — a month stale — while the newest
+  cached and running plugin is **3.3.26**. So the box's positive observation has NOT occurred,
+  five days after `83cfd3b6`.
+- **`version-update` has not fired since 2026-06-24.** `version-update.last-run.ts` =
+  `1785013281`, and the newest line in `version-update.log` is
+  `[2026-06-24T23:14:03+0200] … running=0.19.1`. Nearly two months.
+- **Because the ai-maestro server owns the chore.** The machine-global daemon log says so
+  outright, as recently as today:
+
+  ```text
+  [2026-08-21T04:45:33+0200] [s:cf997868] chore-coordination: yielding to active
+     ai-maestro server: ['github-config-audit', 'marketplace-refresh',
+     'oauth-rotator-supervisor', 'oauth-rotator-tick', 'version-update']
+  ```
+
+- **And `certify_newest_if_clean` has exactly TWO callers** (grep-verified):
+  `daemon.py:596`, inside the absorbed `task_version_update`; and `repin_integrity.py:71`, the
+  manual command **this card explicitly forbids an agent from running to satisfy the box**.
+
+**So the automatic path is gated behind a chore the server has taken over, and the only other
+path is the one the box rules out. The box is structurally unreachable on this host while the
+server is up** — the same shape as TRDD-D2DD5GO8's gate, found the same morning. Note what the
+frozen stamp does NOT mean: per CLAUDE.md, for an ABSORBED chore a frozen janitor stamp is
+exactly what healthy server-side execution looks like. The defect is not a dead daemon; it is
+that the server's execution of `version-update` demonstrably does not advance THIS anchor — a
+month of evidence.
+
+**NEXT ACTION (needs the USER — do not pick one autonomously):** either (a) give the C3
+self-heal a caller that is NOT the absorbed chore (its own small periodic task, so anchor
+certification stops depending on who owns `version-update`), or (b) have the ai-maestro server
+advance the anchor as part of the chore it absorbed — a cross-project request, not a local fix,
+or (c) re-scope the box to something reachable, as recommended for D2DD5GO8. **(a) is the
+recommendation**: it removes the coupling rather than negotiating it, and the coupling is the
+actual defect. CLAUDE.md already documents this symptom; the CARD did not, which is why the
+soak looked like it was merely waiting.
 
 The wait for "the daemon's version-update fire advancing the pin" was structurally doomed, and
 the reason is not in the 2026-08-16 block below. Measured this session, out-of-band:
