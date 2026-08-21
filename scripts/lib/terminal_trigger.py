@@ -1367,13 +1367,23 @@ def _resolve_aimaestro_cli(env: Mapping[str, str]) -> str | None:
 def _run_aimaestro_cli(
     cli: str, args: list[str], *, env: Mapping[str, str], timeout: float
 ) -> subprocess.CompletedProcess[str] | None:
-    """Run `<cli> <args…>` with the inherited env; None on ANY failure (best-effort)."""
+    """Run `<cli> <args…>` with the inherited env; None on ANY failure (best-effort).
+
+    Scaled HERE rather than at each call site so every caller is covered by one edit
+    (TRDD-7NSRD8OV). This is a direct `subprocess.run` with its own ceiling — the `list --json`
+    call passes 5.0 s — so scaling `state.run_subprocess` never reached it. Best-effort makes
+    the expiry INVISIBLE: a timeout returns None exactly like a missing CLI or a down server,
+    and the caller then falls back to the local keystroke path. Measured under suite load, that
+    is why `test_terminal_trigger` failed as `assert 'USE_ITERM_PATH' == 'FIRED:aimaestro'` —
+    the ai-maestro path was never broken, it just never got an answer in time.
+    """
     try:
         return subprocess.run(
             [cli, *args],
             capture_output=True,
             text=True,
-            timeout=timeout,
+            # 1.0 in production, so byte-identical there.
+            timeout=timeout * state.timeout_scale(),
             env=dict(env),
             check=False,
         )

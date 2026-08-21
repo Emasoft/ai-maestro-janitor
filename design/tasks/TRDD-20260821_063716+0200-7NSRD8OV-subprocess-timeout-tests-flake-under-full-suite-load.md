@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T10:36:26+0200
+updated: 2026-08-21T10:45:03+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -123,10 +123,33 @@ because `run_subprocess`'s own tests monkeypatch `subprocess.run` rather than re
 Swept for the same shape: only `test_fleet_scan` also asserts on a `"timeout"` string, and it is
 unaffected (69/69). **Any future site scaled this way needs the same sweep.**
 
-**Still unexplained — do NOT assume they are timeouts:**
-- `test_terminal_trigger` (5 fails): `assert 'USE_ITERM_PATH' == 'FIRED:aimaestro'`. An
-  environment-dependent BRANCH took the iTerm fallback instead of the ai-maestro path. May be
-  timeout-induced upstream; unproven either way.
+**`test_terminal_trigger` — RESOLVED 10:44, and it split into TWO different causes:**
+
+- **4 of 5 were family B, site #3.** `terminal_trigger._run_aimaestro_cli` is a direct
+  `subprocess.run`; the `list --json` call passes `timeout=5.0`. It is best-effort, so an expiry
+  is INVISIBLE — a timeout returns `None` exactly like a missing CLI or a down server, and the
+  caller falls back to the local keystroke path. That is precisely
+  `assert 'USE_ITERM_PATH' == 'FIRED:aimaestro'`: the ai-maestro path was never broken, it just
+  never got an answer in time. Fixed inside `_run_aimaestro_cli`, so every caller is covered by
+  one edit.
+- **1 is a THIRD category the knob CANNOT fix.**
+  `test_ai_maestro_cli_send_is_detached_not_inline` asserts `elapsed < 3.0` — a **wall-clock
+  bound**, not a timeout. On a saturated box a genuinely detached send still takes longer than
+  3 s to return, so it flakes however timeouts are scaled. It passes alone in 2.49 s.
+
+  **And scaling the bound would DESTROY the test, which is why this needs redesign, not a knob.**
+  Its purpose is to catch a regression where the per-command POSTs run inline (11-17 s); the spy
+  sleeps 4 s per command, so an inline regression costs ~8 s. At the suite's scale of 10 the
+  bound becomes 30 s — far above 8 s — so the exact regression it guards would sail through. A
+  load-robust version must assert on STATE (the spy's `session command` has not completed) rather
+  than on elapsed time.
+
+**CATEGORY C, recorded because two categories have already been mistaken for one on this card:**
+tests asserting WALL-CLOCK BOUNDS are load-sensitive by construction, and are fixed neither by
+family A's env passthrough nor by family B's scaling. They need per-test redesign onto a state
+assertion.
+
+**Still unexplained — do NOT assume it is a timeout:**
 - `test_leanctx_allowlist` (2 fails): `['allow uv', 'allow pytho…'] == ['allow dispa…', …]` — a
   CONTENT/ordering mismatch in the call log, not a timeout shape at all. Most likely a separate
   defect that merely surfaces under the same load; it should probably become its own TRDD once
