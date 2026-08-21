@@ -23,6 +23,10 @@ from tempfile import TemporaryDirectory
 
 DETECTOR = Path(__file__).resolve().parent.parent / "scripts" / "detectors" / "plugin-updates.py"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+
+import state  # noqa: E402  # for the shared subprocess-timeout scale (TRDD-7NSRD8OV)
+
 _CLAUDE_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 a = sys.argv[1:]
@@ -62,7 +66,14 @@ def _run(project: Path, plugin_list: list) -> tuple[str, list[str]]:
     env["JANITOR_GLOBAL_STATE_DIR"] = str(project / "gstate")
     res = subprocess.run(
         [sys.executable, str(DETECTOR)],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True, text=True, env=env,
+        # The TEST'S OWN ceiling, scaled by the shared knob (TRDD-7NSRD8OV, category D). The
+        # child DOES inherit the knob (`dict(os.environ)` above), so the detector's own
+        # `run_subprocess` calls were already covered — this 60 s was the last uncovered
+        # category-D site on the card. Safe to stretch: this test's subject is whether an
+        # enabled plugin becomes a CANDIDATE (asserted against the stub's call log), never how
+        # fast the detector reaches that verdict.
+        timeout=60 * state.timeout_scale(),
     )
     calls = stub_log.read_text(encoding="utf-8").splitlines() if stub_log.is_file() else []
     return res.stdout, calls
