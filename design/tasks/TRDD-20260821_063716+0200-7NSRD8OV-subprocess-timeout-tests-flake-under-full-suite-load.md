@@ -1,9 +1,9 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: dev
+column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T09:42:24+0200
+updated: 2026-08-21T09:53:59+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -14,6 +14,36 @@ eht: []
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 09:53
+
+**Where it stands:** the seam fix is SHIPPED (`99d2f7dd`) and now has real evidence behind it —
+**4 consecutive full-suite runs, 15,726 passed, 0 failures**, at start-loads 13 → 27 → 39 → 44.
+Wall-clock moved 83s → 89s → 162s → 121s, so load was genuinely biting (2× spread) and nothing
+failed. Previously-flaky members all passed every run.
+
+**NEXT ACTION:** decide whether that evidence closes the card, or whether it needs a run at the
+**historical loadavg 80+** — which we did NOT reach (see the caveat below). It is a USER call,
+because forcing 80+ means deliberately saturating a **shared 36-user box** that also runs the
+janitor daemon, the ai-maestro server and other Claude sessions. I did not do that unilaterally.
+
+**Load-bearing facts, so they are not re-derived:**
+- The knob is `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE`, default **1.0** (production
+  byte-identical), set to `"10"` for the suite by `conftest._relax_subprocess_timeouts`.
+- It must be set via the **environment**, not by patching the callable: the tests spawn
+  detectors as SUBPROCESSES and build the child env with `os.environ.copy()`, so an in-process
+  monkeypatch of the function would never reach the child that actually runs the timeout.
+  Verified this session — that is what makes the green runs meaningful rather than lucky.
+- **The only valid measurement is the FULL suite under `-n auto`.** A 5-file subset is not a
+  repro in either direction: the same 5 files went 5-failures/241s and then 163-passed/26.67s.
+
+**SUPERSEDED — do NOT carry forward:**
+- *"52 call sites"* as a complete enumeration — there is a second family (73 files calling
+  `subprocess.run` directly). Kept as a known-uncovered risk, deliberately NOT pre-emptively
+  edited; see acceptance box 2 for why.
+- *The original per-test option list (1/2/3 under "What")* — written before the shared-seam root
+  cause was found.
+- *`agentlens_probe` as THE root cause* — it is one instance, not the class.
 
 ## Why
 
@@ -177,11 +207,45 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
       TOGETHER still produced **5 failures in 241s**, same empty-stdout signature, while the
       same test passes ALONE in 11.9s. I did not instrument which call expired, so the specific
       site is unproven — but the second family demonstrably exists and the flake survives.
-- [ ] each one either stops shelling out, or takes an explicit test-side timeout, or asserts the
+- [~] each one either stops shelling out, or takes an explicit test-side timeout, or asserts the
       probe succeeded before asserting on its output
-- [ ] production defaults (`_TIMEOUT_S = 5.0`) are UNCHANGED — this is a test-harness defect,
+
+      **ANSWERED DIFFERENTLY — this box was written under the superseded per-test framing** and
+      is left `[~]` rather than `[x]` or `[ ]` because neither is honest. All three of its
+      options are per-test, and the root cause is a SHARED seam: no per-test rewrite converges
+      on call sites whose victim is chosen by scheduling. What shipped instead is one
+      environment-scaled multiplier at that seam, which covers all 52 of its call sites at once.
+
+      **The second family is knowingly NOT covered, and that is a decision, not an oversight.**
+      73 files call `subprocess.run` directly, outside the seam. I did not pre-emptively edit
+      them because I never instrumented WHICH call expires — editing 73 sites on suspicion is
+      guesswork, and the evidence below says the seam alone is currently sufficient. If the
+      flake returns, that family is the first place to look, and
+      `branch_protection_lib` (6 sites at `timeout=10`/`15`) is the nearest suspect since it
+      sits on the path of two of the five original failures.
+- [x] production defaults (`_TIMEOUT_S = 5.0`) are UNCHANGED — this is a test-harness defect,
       and loosening a production timeout to make a test pass would trade a real guarantee for a
       green tick
-- [ ] evidence: the full suite run back-to-back under load with no flake in this family
+
+      **MET.** `_timeout_scale()` returns exactly 1.0 when the knob is unset, and anything
+      unparseable or non-positive falls back to 1.0 (a malformed knob must never silently
+      SHORTEN a production timeout, and `0` would make every subprocess expire instantly).
+      `tests/test_run_subprocess_timeout_scale.py` pins all of that in 10 tests, including a
+      behavioural one proving the multiplied value is what `subprocess.run` actually receives —
+      without it the helper could be dead code and the suite would not notice.
+- [~] evidence: the full suite run back-to-back under load with no flake in this family
+
+      **STRONG BUT NOT CONCLUSIVE — 2026-08-21 09:44-09:53.** Four consecutive full-suite runs
+      (`-n auto --dist loadgroup`, matching the publish gate): **15,726 passed, 1 skipped, 8
+      subtests, 0 failures** every time. Start loadavg 13 → 27 → 39 → 44; wall-clock 83s → 89s
+      → 162s → 121s. The 2× wall-clock spread is the point — load was genuinely biting and the
+      suite still held, including every one of the five originally-flaky tests.
+
+      **The caveat that keeps this at `[~]`:** the original failures were recorded at **loadavg
+      80+**, and these runs peaked around 44. So this is "held at half the load that broke it",
+      not "held at the load that broke it". Reaching 80+ means deliberately saturating a shared
+      36-user box that also runs the janitor daemon, the ai-maestro server and other Claude
+      sessions — an outward-facing side effect I will not take unilaterally for marginal
+      evidence. **USER call:** accept the 4-run evidence, or authorize a synthetic-load run.
 
 ## Approval log
