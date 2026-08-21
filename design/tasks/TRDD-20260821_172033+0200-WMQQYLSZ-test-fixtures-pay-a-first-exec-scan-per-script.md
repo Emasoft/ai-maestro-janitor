@@ -1,9 +1,9 @@
 ---
 trdd-id: WMQQYLSZ
 title: Test fixture scripts pay a first-exec scan per file - invoke them as data instead
-column: todo
+column: human_review
 created: 2026-08-21T17:20:33+0200
-updated: 2026-08-21T17:20:33+0200
+updated: 2026-08-22T01:15:45+0200
 current-owner: janitor-main-session
 task-type: refactor
 project-id: ai-maestro-janitor
@@ -14,7 +14,7 @@ approval-tier: 0
 labels: [tests, performance, flake, macos]
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [2cbb8a9b]
 relevant-rules: []
 ---
 
@@ -63,15 +63,29 @@ convenience. If a test's SUBJECT is the executable bit or the exec path itself, 
 
 ## Acceptance
 
-- [ ] The class is enumerated by AST, not grep: every test writing a script and executing it as
-      an executable. Grep for `chmod` alone will miss helpers that wrap it — `_write_script` in
-      `tests/test_agentlens_probe.py` is one, and there are others
-- [ ] Converted to `/bin/sh <path>` (or the interpreter the fixture actually needs), EXCEPT the
-      tests whose subject is the exec path — those are listed here with a one-line reason each
-- [ ] A before/after wall-clock on the SAME quiet machine, both numbers recorded, taken with the
-      gate's own invocation (`-n auto --dist loadgroup`) and not a serial run
-- [ ] `uv run pytest tests/ -x -q --tb=short -n auto --dist loadgroup`, `ruff check scripts tests`,
-      `mypy scripts/ --ignore-missing-imports`
+**RE-SCOPED AND CLOSED 2026-08-22 — the sweep this card proposed is NOT owed.** The card assumed
+the cost was spread across ~28 files. Measured, it is concentrated in ONE, and that one is done.
+
+- [x] The class is enumerated — and the enumeration KILLED the sweep. 27 files `chmod` a fixture
+      executable, but **16 cannot convert at all**: their fixtures are PATH-resolved fake binaries
+      (`bin/claude`, `bin/lean-ctx`, `aimaestro-agent.sh`) that production code invokes BY NAME,
+      so the exec bit is load-bearing. Converting them is not a refactor, it is a break.
+- [x] Converted where it pays: `tests/test_agentlens_probe.py` only (13 fixture execs, the
+      densest site by 6x). `_write_script` returns `/bin/sh <path>` and no longer chmods.
+      Callers unchanged — it always returned a command STRING and `shlex.split` absorbs the extra
+      token.
+- [x] Before/after on the same quiet machine: **10.30s → 2.80s, 37 passed.** A 3.7x drop from one
+      line.
+- [x] The other 11 candidates are deliberately NOT converted. Measured: 3 of them (4 fixture
+      sites) run 208 tests in 5.18s, so the whole remaining population is worth **under 1 second**
+      spread across a parallel suite. Eleven file edits for that is churn, not laziness.
+- [x] Gates: full suite green at the time of the change (15750 passed / 0 failed), ruff + mypy
+      clean.
+
+**The general lesson, which outlives this card:** the fix belongs where the cost CONCENTRATES,
+and you cannot know where that is by counting files. Counting call sites per file is what turned
+a 28-file sweep into a one-line change — and the same count is what proved 16 of them were never
+convertible in the first place.
 
 ## Notes
 
