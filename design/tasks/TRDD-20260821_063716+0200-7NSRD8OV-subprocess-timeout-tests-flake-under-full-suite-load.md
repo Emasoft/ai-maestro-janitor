@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T08:10:11+0200
+updated: 2026-08-21T09:42:24+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -112,8 +112,14 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
 
 ## Acceptance
 
-- [x] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
+- [ ] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
       the two that happened to fail — **and the enumeration settles the design question.**
+
+      **UNCHECKED again 2026-08-21 09:42.** It carried `[x]` from 08:10 until the second family
+      below was found. Two claims live in this box and only one survived: the enumeration does
+      settle the DESIGN question (a shared seam, not per-test — that holds and is durable), but
+      the class itself is NOT fully enumerated, so the box as written is not met. Leaving it
+      checked would have made a partial fix read as a finished one on the board.
 
       Counting PRODUCTION call sites (the seam, not the tests, because the tests are just
       whoever was unlucky): **52 `state.run_subprocess` call sites fail OPEN within 15s** —
@@ -124,11 +130,25 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
       as an eighth, reached by a different helper with the identical fail-open-to-`None` shape.
 
       Those three 5s detectors alone are driven by 14 test files. So the class is not "two odd
-      tests" and not even "five" — it is *any* test that drives *any* of 52 call sites while the
-      box is loaded, and which one fails is decided by scheduling. **A per-test or
-      per-call-site fix cannot converge on that**, which is why the fix belongs at the shared
+      tests" and not even "five" — it is *any* test that drives *any* of those call sites while
+      the box is loaded, and which one fails is decided by scheduling. **A per-test or
+      per-call-site fix cannot converge on that**, which is why the fix belongs at a shared
       seam. This is the measurement that turned the card's original option list (all per-test)
       into the wrong shape.
+
+      **⚠ THIS ENUMERATION IS INCOMPLETE — corrected 2026-08-21 09:20, and the correction is
+      why the fix is only PARTIAL.** I counted one family: call sites going through
+      `state.run_subprocess`. There is a SECOND family — **73 files call `subprocess.run`
+      DIRECTLY**, several with their own timeouts, entirely outside that seam
+      (`branch_protection_lib._post_or_patch_ruleset` at `timeout=15`,
+      `github_config_audit._gh_json` at 15.0, `fleet_scan._run_probe_outcome` at 10,
+      `agentlens_probe.probe_json` at 5.0, `fleet_restart` at 5, …). Scaling the seam does
+      nothing for those.
+
+      Measured after shipping the seam scale (`99d2f7dd`): the five previously-flaky suites run
+      TOGETHER still produced **5 failures in 241s**, same empty-stdout signature, while the
+      same test passes ALONE in 11.9s. I did not instrument which call expired, so the specific
+      site is unproven — but the second family demonstrably exists and the flake survives.
 - [ ] each one either stops shelling out, or takes an explicit test-side timeout, or asserts the
       probe succeeded before asserting on its output
 - [ ] production defaults (`_TIMEOUT_S = 5.0`) are UNCHANGED — this is a test-harness defect,

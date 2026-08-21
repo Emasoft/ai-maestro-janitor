@@ -11,6 +11,12 @@ parks the 5-minute heartbeat. Under full-suite load that expiry fires, the calle
 `if x is None: return 0` runs, and the detector exits 0 with EMPTY stdout; the test then fails
 asserting on `''` with nothing naming a timeout. 52 call sites share the seam, so which test
 fails is decided by scheduling — that is why the fix is here and not in any one test.
+
+This seam is NOT the whole class, and saying so here matters more than it looks: a reader who
+finds these tests green could otherwise conclude the flake is solved. 73 files call
+`subprocess.run` DIRECTLY with their own timeouts, entirely outside `run_subprocess`, and the
+flake was still reproducible after this shipped. What these tests pin is that the seam's scale
+works and stays production-inert — not that the suite no longer flakes.
 """
 from __future__ import annotations
 
