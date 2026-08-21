@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-21T11:26:39+0200
+updated: 2026-08-21T11:32:10+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -57,6 +57,38 @@ check** — which is exactly the profile of work that should be a chore and not 
 **NOT caused by this session's memory writes**, and the distinction matters for anyone
 re-measuring: the two lessons added today went to **USER** scope, while this index covers
 **PROJECT** scope (`.claude/project/memory`). The drift predates the session.
+
+## ⏵ 2026-08-21 11:32 — WHY "just auto-refresh the index" IS NOT THE CHEAP WIN IT LOOKS LIKE
+
+Having measured the five-day staleness above, the obvious next move is to make the refresh
+automatic — a tool-owned block, a 2-line diff, no agent, no memory edit. **Do not do that**, and
+the reason is written into the detector this card already ships. `project-map-drift`'s own nudge
+ends:
+
+> "… Refresh the index with `uv run scripts/claudemd_slim.py index` … at a **cache-cheap
+> moment**; **the janitor never rewrites CLAUDE.md itself**."
+
+That is a deliberate INVARIANT, not a gap waiting to be filled. `CLAUDE.md` sits in the cached
+prompt prefix of every session on the machine — this repo's own `CLAUDE.md` records a former
+project map costing "~46,000 tokens on every turn of every session … re-read at the cache rate on
+each turn and re-written at 1.25x on each cache write". So the SIZE of the diff is irrelevant:
+**any** write to `CLAUDE.md` invalidates that prefix and re-bills it at 1.25x, for every session,
+not just the one that made the edit. A 2-line index refresh and a 200-line migration cost the
+same.
+
+**Consequence for this card's design: `PRRD G8.1`'s "automatic" and the cache invariant are in
+real tension, and §2 does not currently resolve it.** The chore cannot simply run on a schedule;
+it must fire at a moment that is already paying a cache write (session start before the prefix is
+warm, or immediately after a compaction), or batch its writes so the corpus drifts for a while
+and is repaired ONCE. Whichever is chosen belongs in §2 as an explicit trigger condition — right
+now §2 specifies WHAT to do and is silent on WHEN, and the silent answer ("whenever the scheduler
+says") is the expensive one.
+
+**Disclosure — I paid that cost today.** I ran `claudemd_slim.py index` manually at 11:26 to
+clear the staleness and described the result as a clean, minimal, tool-generated 2-line diff. The
+byte count was minimal; the cache cost was not, and I did not check for it before writing. That
+is the same failure this card is about: the write looked free because the visible artifact was
+small.
 
 ## ⏵ 2026-08-16 — THE "ZERO WORK TODAY" PREMISE HAS EXPIRED, and the way it expired is the card's own argument
 
