@@ -1,9 +1,10 @@
 ---
 trdd-id: JEEQCHFG
 title: The runaway alarm's metric was misnamed and the fleet's false-positive tally is void
-column: todo
+column: backburner
+review-after: 2026-09-21
 created: 2026-08-16T18:40:00+0200
-updated: 2026-08-20T18:10:00+0200
+updated: 2026-08-21T02:50:00+0200
 eht: [NLHVLGEP]
 current-owner: ai-maestro-janitor
 task-type: bugfix
@@ -93,7 +94,11 @@ retracted mechanism.
       Unit-tested (`test_alive_findings_drops_a_pid_that_exited_before_emit`); e2e streak/emit
       tests trust synthetic pids under the existing `JANITOR_PS_SNAPSHOT` seam. This was the
       sub-task whose assigned worker had stalled without filing.
-* [ ] A fresh runaway tally is built; the old one is not consulted.
+* [~] A fresh runaway tally is built; the old one is not consulted. **STARTED 2026-08-21 —
+      see "The fresh tally, opened" below.** Deliberately not ticked: a tally is a record that
+      ACCUMULATES as alarms fire, so it closes only once enough real firings have been
+      classified to speak to a false-positive rate. Everything that could be done in one pass
+      is done — method fixed, location created, baseline measured. The old tally was not read.
 * [x] Any threshold change cites the window decision from (3) — vacuously satisfied and
       deliberately so: the measurement says **change nothing**. See below.
 
@@ -157,6 +162,33 @@ cumulative CPU `time` per key and difference it across its own two consecutive s
 That yields "287% sustained over the last 612 s" — correct by construction over exactly the
 alarm's own window, and self-describing, which would have prevented this entire card. Filed
 as its own TRDD rather than widened into this one.
+
+## The fresh tally, opened — 2026-08-21 02:49 +0200
+
+Baseline entry written to `reports/runaway-tally/20260821_024859+0200-fresh-tally-entry-001.md`
+(gitignored, as reports must be). The void tally was not opened.
+
+Measured by INTERVAL DIFFERENCING, the only ground truth this card accepts — two
+`ps -axo pid,time,comm` snapshots, gap verified by two `date +%s` reads rather than assumed
+from `sleep`:
+
+| field | value |
+|---|---|
+| gap | 60 s (measured) |
+| pids present in BOTH snapshots | 944 |
+| **pids > 90% of one core** | **0** |
+| highest | 54.1% — `./target/debug/alcore` |
+
+Next five: WindowServer 39.1, mediaanalysisd 27.0, node 12.4, sysmond 12.2, `claude` 12.0.
+
+**Verdict: no runaway present**, so the tally opens empty — zero confirmed, zero false
+positives. That is a starting state, NOT evidence the alarm is accurate; only accumulated
+firings can establish that, which is why the acceptance box stays open.
+
+The detector was deliberately NOT switched to interval differencing. The window measurement
+already found `%cpu` matches consumption computed from cpu_time deltas, so the metric is
+sound — what was wrong was the CLASSIFICATION method that compared it against a `top -l 2`
+delta. Changing the detector now would be re-fixing something the measurement exonerated.
 
 ## THE LESSON OF THE NIGHT — the alarm named both dimensions and we debated one
 
