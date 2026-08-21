@@ -158,8 +158,18 @@ shared `subprocess.log` with timestamp, reason and argv.
 writes slow down and allocation can stall — which produces exactly the empty-stdout signature,
 via a mechanism no timeout scaling can touch.
 
-**UPDATE 14:58 — it is not merely full, it is FILLING: 24 GB → 20.7 GB in ~55 minutes**
-(~4 GB/h; ~5 h to zero at that rate). Traced far enough to be actionable and no further:
+**⛔ THE "~4 GB/h, ~5 h TO ZERO" PROJECTION BELOW IS WRONG — RETRACTED 14:48.** Measured again
+14 minutes later, in exact bytes: **20,696,969,216 → 20,741,152,768**. Free space went **UP by
+44 MB**. It is flat, not falling.
+
+**The 24 GB → 20.7 GB drop was a ONE-OFF event — the update staging below — not a leak.** I had
+two samples an hour apart and extrapolated a rate from them, which is the same
+two-points-are-a-trend error this card has punished all day. A rate needs a third point before
+it is a rate. **The disk being at 99 % / 20 GB free is still true and still worth acting on; the
+countdown was not.**
+
+**UPDATE 14:34 — the drop, and what caused it: 24 GB → 20.7 GB.** Traced far enough to be
+actionable and no further:
 
 - **A macOS update is staging RIGHT NOW.** `/System/Volumes/Update/` mtime **14:28 today**,
   `SFR` subtree **2.5 GB**, and three `com.apple.os.update-*` APFS snapshots exist — one named
