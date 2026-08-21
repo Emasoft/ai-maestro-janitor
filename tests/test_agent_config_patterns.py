@@ -921,6 +921,24 @@ def test_dynamic_exec_subprocess_with_nested_call() -> None:
                  "subprocess.run(base64.b64decode('c2g=').decode(), shell=True)")
 
 
+def test_dynamic_exec_sink_reached_by_alias() -> None:
+    """SHAPE B — the dangerous name is a STRING and the call happens later.
+
+    Every other branch matches a literal call site, so `getattr(os, "system")`
+    walks straight past. The lookup is the one place the intent is still
+    visible together.
+    """
+    assert _hits("dynamic-exec-in-body", 'runner = getattr(os, "system")')
+    assert _hits("dynamic-exec-in-body", "setTimeout(eval, 0, body)")
+
+
+def test_dynamic_exec_no_fp_ordinary_getattr() -> None:
+    """`getattr` in general is ordinary Python — only shell/eval sinks count."""
+    assert _hits("dynamic-exec-in-body",
+                 'handler = getattr(self, "on_" + event, None)') == []
+    assert _hits("dynamic-exec-in-body", 'value = getattr(os, "sep")') == []
+
+
 def test_dynamic_exec_no_fp_subprocess_without_shell() -> None:
     """The list form without `shell=True` is the SAFE idiom and must stay silent."""
     assert _hits("dynamic-exec-in-body",

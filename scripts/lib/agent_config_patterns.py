@@ -739,6 +739,20 @@ _DYNAMIC_EXEC = _re(
     # both linear and sufficient — `shell=True` is the dangerous token wherever in the call
     # it appears.
     r"|\bsubprocess\.[A-Za-z_]+\s*\([^\n]{0,200}?shell\s*=\s*True"
+    # SHAPE B (TRDD-VAWIKRK2) — the sink reached by ALIAS rather than by name. Every branch
+    # around this one matches a literal call site, so `runner = getattr(os, "system")` walks
+    # straight past: the dangerous name is a STRING, and the call happens later through a
+    # variable this rule never sees. Matching the lookup itself is the only point where the
+    # intent is still visible in one place.
+    # Narrow on purpose — the module must be one that owns a shell/eval sink, and the
+    # attribute must be one of those sinks. `getattr(obj, name)` in general is ordinary
+    # Python and is NOT matched.
+    r"|\bgetattr\s*\(\s*(?:os|subprocess|builtins|__builtins__|sys\.modules\[[^\]]*\])\s*,\s*"
+    r"['\"](?:system|popen\w*|exec\w*|eval|run|call|check_output|check_call|spawn\w*)['\"]"
+    # The JavaScript twin: the deferred-execution sinks accept a FUNCTION reference, so
+    # `setTimeout(eval, 0, body)` executes `body` without ever quoting a string — which is
+    # exactly what the `setTimeout\s*\(\s*['\"]` branch below requires.
+    r"|\b(?:setTimeout|setInterval|setImmediate)\s*\(\s*(?:eval|Function)\s*,"
     r"|\bos\.system\s*\("
     r"|\bnew\s+Function\s*\("
     r"|\bsetTimeout\s*\(\s*['\"]"
