@@ -10,6 +10,7 @@ write it.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -86,6 +87,41 @@ def records_in(text: str):
     yield from objects_in(text)
 
 
+# Contiguous credential SHAPES the free-pool models like to invent when asked for a
+# realistic attack sample. They are fake, but `test_secret_fixture_hygiene` (rightly)
+# cannot tell a fake `sk_live_…` from a real one — it forbids the SHAPE in tracked
+# source, and this corpus is tracked. Masking happens HERE, at assembly, rather than by
+# hand-editing the generated file: the assembler owns the corpus, so every future
+# regeneration inherits the hygiene instead of re-introducing the violation and failing
+# the suite again. `****` matches the convention already used in `corpus.jsonl`.
+#
+# Safe for the measurement because the masked span is FILLER, never the technique: no
+# rule in the catalog keys on a credential's random tail. Verified per-sample on the
+# 2026-08-21 corpus — the two affected samples fired the same set (nothing) before and
+# after. If a future rule ever DOES key on one of these shapes, that rule's sample must
+# stop relying on a contiguous literal, not the other way round.
+_SECRET_MASKS = (
+    (re.compile(r"\b(sk_live_)[A-Za-z0-9]{6,}"), r"\1****REDACTED"),
+    (re.compile(r"(-----BEGIN\s+)(RSA|EC|OPENSSH|DSA)?(\s*PRIVATE KEY-----)"),
+     r"\1\2****\3"),
+    # A conn-string password that is not an obvious placeholder. The replacement is
+    # `redacted` rather than `****` because the hygiene gate recognises a conn-string as
+    # safe by matching its password against `_PLACEHOLDER_PW` — a mask it does not know
+    # still reads as a live credential, which is how the first attempt at this failed.
+    (re.compile(r"\b(postgres(?:ql)?|mysql|mongodb(?:\+srv)?)://([^:@/\s\"]+):"
+                r"(?!(?:pass|password|passwd|pwd|changeme|secret|example|test|redacted"
+                r"|placeholder|xxx|xxxx|none|empty)[@:])"
+                r"[^@/\s\"]+@"), r"\1://\2:redacted@"),
+)
+
+
+def mask_secret_literals(content: str) -> str:
+    """Break contiguous credential SHAPES so tracked fixtures pass secret hygiene."""
+    for rx, repl in _SECRET_MASKS:
+        content = rx.sub(repl, content)
+    return content
+
+
 def main() -> int:
     # Resolve the report list HERE rather than relying on the shell to word-split a
     # variable: this session's shell is zsh, which does not split unquoted expansions, so
@@ -138,7 +174,7 @@ def main() -> int:
                 "label": label,
                 "kind": "source" if label in SOURCE else "prose",
                 "note": (rec.get("note") or "")[:90],
-                "content": content,
+                "content": mask_secret_literals(content),
             })
     dest = Path(sys.argv[-1])
     dest.parent.mkdir(parents=True, exist_ok=True)
