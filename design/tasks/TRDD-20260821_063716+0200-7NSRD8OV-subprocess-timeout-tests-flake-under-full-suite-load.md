@@ -124,9 +124,25 @@ so every caller that omitted one returned None in complete silence — which is 
 failures produced zero diagnosable artifacts. The gate is gone; unattributed failures land in a
 shared `subprocess.log` with timestamp, reason and argv.
 
-**NEXT ACTION on the residual:** get one more slow (>500 s) run, then read the per-test
-`.janitor/logs/*.log` and `subprocess.log` of a failing case. It will now say which of (a)/(b)/
-(c) it was. Do NOT scale anything before that log exists.
+**A FOURTH CANDIDATE, found 15:20 and stronger than it looks: THE DISK IS 99 % FULL.**
+`df -h` reports 24 GB free of 1.9 TB on `/System/Volumes/Data`, and the janitor's own
+`system-daemon-runaway` detector fired on it in the same heartbeat. On APFS at that fill level
+writes slow down and allocation can stall — which produces exactly the empty-stdout signature,
+via a mechanism no timeout scaling can touch.
+
+**This is NOT self-inflicted:** the pytest temp root holds 311 MB across 6 run dirs, so the
+soaks are not what filled it. But it means every measurement on this card was taken on a host
+under disk pressure, and it must be ruled out before (a)/(b)/(c) are investigated further —
+otherwise the next session will chase a subprocess bug that is really a full filesystem.
+**Freeing space is the USER's call, not an agent's** (nothing here is safe for an agent to
+delete unasked), so this is reported, not acted on.
+
+**NEXT ACTION on the residual, in this order:**
+1. Ask the USER about the 99 % disk; re-measure once it is resolved. A slow run on a
+   disk-pressured host proves nothing about subprocess timeouts.
+2. Only then: get a >500 s run and read the failing case's `.janitor/logs/*.log` plus the new
+   `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
+3. Do NOT scale anything before that log exists.
 
 ---
 
