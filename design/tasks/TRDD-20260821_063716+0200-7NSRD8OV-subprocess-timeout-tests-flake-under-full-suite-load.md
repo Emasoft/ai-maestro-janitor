@@ -158,8 +158,30 @@ shared `subprocess.log` with timestamp, reason and argv.
 writes slow down and allocation can stall — which produces exactly the empty-stdout signature,
 via a mechanism no timeout scaling can touch.
 
+**UPDATE 14:58 — it is not merely full, it is FILLING: 24 GB → 20.7 GB in ~55 minutes**
+(~4 GB/h; ~5 h to zero at that rate). Traced far enough to be actionable and no further:
+
+- **A macOS update is staging RIGHT NOW.** `/System/Volumes/Update/` mtime **14:28 today**,
+  `SFR` subtree **2.5 GB**, and three `com.apple.os.update-*` APFS snapshots exist — one named
+  `MSUPrepareUpdate`. Last *installed* update was Tahoe 26.6.1 on 2026-08-17.
+- **Not Time Machine:** `tmutil listlocalsnapshots /` reports **0** TM local snapshots, so the
+  usual "invisible snapshot" culprit is ruled out.
+- **Not the janitor:** its whole data dir is **44 MB**. `~/.claude/projects` holds 19 GB of
+  transcripts (accumulated, not the hourly delta); this session's own transcript is 29 MB.
+- No file over 200 MB was modified in the last hour anywhere under `$HOME` to depth 4.
+
+**Nothing here is an agent's to delete** — OS-update snapshots least of all. Installing or
+cancelling the staged update is the USER's lever, and it is the likely reclaim.
+
 **This is NOT self-inflicted:** the pytest temp root holds 311 MB across 6 run dirs, so the
-soaks are not what filled it. But it means every measurement on this card was taken on a host
+soaks are not what filled it.
+
+**A THIRD symptom now points at the same pressure:** `.git/index.lock` has gone stale **three
+times** this session (0 bytes, 80–225 s old, no holder in the process table, no `lsof` handle),
+each time blocking a commit until `git_utils.clear_stale_index_lock` removed it. A 0-byte lock
+with no owner is what a git index write that DIED leaves behind, and ENOSPC pressure is a
+credible cause. Not proven — recorded as correlation, with the mechanism named so the next
+occurrence can be checked against it rather than re-derived. But it means every measurement on this card was taken on a host
 under disk pressure, and it must be ruled out before (a)/(b)/(c) are investigated further —
 otherwise the next session will chase a subprocess bug that is really a full filesystem.
 **Freeing space is the USER's call, not an agent's** (nothing here is safe for an agent to
