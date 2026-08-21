@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T07:21:05+0200
+updated: 2026-08-21T07:24:46+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -90,13 +90,32 @@ worth reading.
 
 **ALL 5 CLOSED 2026-08-21.** Commits `5f347cbd`, `8a9830ec`, `84198838`, `17d0fedf`, `d010495b`.
 
-| rule | before | after | FP delta on 23.8k real files |
-|---|---|---|---|
-| `concealment-directive` | 0/9 | **8/9** | 0 |
-| `prompt-injection-multilingual` | 0/9 | **9/9** | 0 |
-| `exfil-structural-probe` (the real target — see below) | 1/9 | **2/9** | 0 |
-| `mcp-annotation-lying` | 0/9 | **4/9** | 0 |
-| `two-step-code-injection` | 0/7 | **7/7** | 0 |
+| rule | before | after | dev / holdout at fix time | FP delta on 23.8k real files |
+|---|---|---|---|---|
+| `concealment-directive` | 0/9 | **8/9** | 4/4 · 4/5 | 0 |
+| `prompt-injection-multilingual` | 0/9 | **9/9** | 7/7 · 2/2 | 0 |
+| `exfil-structural-probe` (the real target — see below) | 1/9 | **2/9** | 2/5 · **0/4** | 0 |
+| `mcp-annotation-lying` | 0/9 | **4/9** | 1/5 · 3/4 | 0 |
+| `two-step-code-injection` | 0/7 | **7/7** | 1/1 · **6/6** | 0 |
+
+**⚠ THE "after" COLUMN IS FIT, NOT OUT-OF-SAMPLE RECALL — do not quote it as recall.**
+`agent_context_bench.split_of` exists to prevent exactly what I did: *"tune on `dev`, quote
+the number from `holdout`"*. I fixed all five while looking at EVERY sample in each class, so
+**this corpus is now spent as a generalisation measure for these five rules.** The honest
+statement is "the gap that was found is closed" — worth pinning, and a different claim from
+"the rule generalises". I found this discipline in the module's own docstring only after the
+fixes were committed; recording it rather than quietly keeping the flattering number.
+
+The split still says something under contamination, which is why it is in the table: where a
+fix is one general SHAPE it covers holdout samples it was never individually shaped against
+(`two-step` — four branches, **6/6 holdout**), and where it is not, that shows too
+(`exfil-structural-probe` — **0/4 holdout**: the boundary fix is correct and its
+generalisation is unproven on this class). A future blind corpus is the only way to convert
+any of these into real recall numbers.
+
+**The FP column is NOT contaminated and is the stronger half of this work.** Those ~23,800
+real agent-context files were never used to CHOOSE a pattern, only to REJECT one — four
+attempts were reverted on their evidence.
 
 **ONE ROOT CAUSE, five times: each rule enumerated the CANONICAL phrasing of its attack and
 the corpus used a variant.** Not one of the five was missing a language, a host, or a
@@ -282,6 +301,14 @@ after seeing which sample exposed it), so no further recall claim may quote it.
 - [ ] new blind set exists, provenance recorded (author had read neither card)
 - [ ] per-shape fix or an explicit measured refusal (FP cost > benefit) for A, B, D, E
 - [ ] like-for-like table on the NEW set, benign FP unchanged at 0
-- [ ] baseline gate updated so regressions fail
+- [x] baseline gate updated so regressions fail — `tests/test_blind_corpus_floors.py`: a
+      per-class floor for each of the five (parametrized, so a regression fails BY NAME rather
+      than as one aggregate — the whole failure this card measured was a single rule reading as
+      covered inside a healthy total), plus a whole-catalog benign check. Verified the gate can
+      actually fail: the pre-fix `concealment-directive` pattern scores 0 against a floor of 8.
+      The benign half goes through `scan_text`, not raw patterns — a raw match is not a finding
+      (`file_kind` decides which rules run; `provenance_verified` downgrades a corroborated
+      described-attack), and asserting on raw matches reddened on four samples the detector
+      never reports. A gate that fails on correct behaviour gets deleted.
 
 ## Approval log
