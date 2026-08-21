@@ -199,6 +199,10 @@ def _isolate_project_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, daem
         fn.cache_clear()
 
 
+# The timeout IS the subject here — this test drives it to completion and asserts the kill
+# happened. The suite-wide scaling seam (TRDD-7NSRD8OV) would stretch `timeout=1` to 10 s and
+# the `elapsed < 10.0` bound would fail, so it opts out of BOTH halves.
+@pytest.mark.no_timeout_scale
 def test_run_workload_kills_hung_child_and_returns_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

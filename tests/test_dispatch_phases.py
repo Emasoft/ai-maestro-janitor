@@ -937,6 +937,9 @@ def _install_fake_detector(detectors_dir: Path, name: str, body: str) -> None:
     script.chmod(0o755)
 
 
+# The timeout IS the subject — see the twin in test_daemon.py. Opts out of the suite-wide
+# scaling seam (TRDD-7NSRD8OV), which would stretch the 1 s detector timeout past the bound.
+@pytest.mark.no_timeout_scale
 def test_run_detector_kills_hung_detector_within_timeout(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """A detector that sleeps far past the timeout is killed; the call returns fast.
 
