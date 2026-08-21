@@ -658,8 +658,17 @@ _DONE_MARKER_RE = re.compile(
     r"(✅|\bDONE\b|\bSHIPPED\b|\bCOMPLETE\b|\bCOMPLETED\b|\bPUBLISHED\b)",
     re.IGNORECASE,
 )
-# An unchecked GitHub-style task box `- [ ]` = remaining in-scope work.
-_UNCHECKED_BOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[ \][ \t]", re.MULTILINE)
+# An unchecked `- [ ]` OR PARTIAL `- [~]` task box = remaining in-scope work.
+#
+# `[~]` is this board's marker for a box whose author judged that NEITHER `[x]` nor `[ ]`
+# was honest — work is under way but the criterion is not met (a tally still accumulating,
+# a superseded framing). Matching only `[ ]` read such a card as having nothing left, so a
+# card carrying one `[~]` and no unchecked box was labelled a CLOSEABLE CANDIDATE. Measured
+# on the real board 2026-08-21: TRDD-JEEQCHFG returned False here while its `[~]` prose read
+# "Deliberately not ticked … closes only once enough real firings have been classified".
+# That is the failure direction this module already treats as the expensive one — a card the
+# board calls closeable is a card nobody re-reads.
+_UNCHECKED_BOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[[ ~]\][ \t]", re.MULTILINE)
 # A NEXT-ACTION / NEXT STEP line in the STATE block — its presence means the
 # author recorded a concrete remaining step. It only counts as "remaining" when
 # it is NOT annotated as done.
@@ -755,7 +764,7 @@ def check2_has_remaining_work(record: TrddRecord) -> bool:
 
     True iff the TRDD still encodes unfinished in-scope work — ANY of:
       * `column: blocked`;
-      * an unchecked `- [ ]` task box in the body;
+      * an unchecked `- [ ]` or PARTIAL `- [~]` task box in the body;
       * a NEXT-ACTION line whose OWN text carries no DONE/SHIPPED/✅ marker
         (scoped to the line, so a ✅ on a finished SUB-part can't mask a still-
         pending next action).

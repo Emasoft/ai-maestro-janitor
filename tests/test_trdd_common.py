@@ -315,6 +315,33 @@ def test_check2_unchecked_box_is_remaining():
     assert tc.check2_has_remaining_work(rec) is True
 
 
+def test_check2_PARTIAL_box_is_remaining():
+    """A `[~]` box is remaining work — it means started-and-honestly-not-tickable.
+
+    This repo uses `[~]` for a box whose author judged that neither `[x]` nor `[ ]` was
+    true: work is under way but the criterion is not met (a tally still accumulating, a
+    superseded framing). Counting only `[ ]` read those cards as having NOTHING left, so
+    a card with one `[~]` and no unchecked box was labelled a CLOSEABLE CANDIDATE.
+
+    Measured on the real board 2026-08-21: TRDD-JEEQCHFG returned
+    `check2_has_remaining_work() == False` while carrying a `[~]` whose own prose reads
+    "Deliberately not ticked … closes only once enough real firings have been classified".
+    That is the failure direction this function's docstring already calls the expensive
+    one — nobody re-reads a card the board has called closeable.
+    """
+    rec = _record(body="\n## plan\n- [~] started, criterion not met yet\n- [x] done\n")
+    assert tc.check2_has_remaining_work(rec) is True
+
+
+def test_check2_partial_box_counts_with_an_asterisk_bullet_too():
+    """`* [~]` as well as `- [~]` — the board uses both bullet characters.
+
+    JEEQCHFG, the card that exposed this, writes its acceptance list with `*`.
+    """
+    rec = _record(body="\n## plan\n* [~] started, not tickable\n")
+    assert tc.check2_has_remaining_work(rec) is True
+
+
 def test_check2_next_action_without_done_marker_is_remaining():
     rec = _record(body="\n## STATE\n- NEXT ACTION: wire the thing\nstuff\n")
     assert tc.check2_has_remaining_work(rec) is True
