@@ -172,6 +172,25 @@ delete unasked), so this is reported, not acted on.
    `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
 3. Do NOT scale anything before that log exists.
 
+**THE HARVEST COMMAND — run it in the SAME shell invocation as the soak, not afterwards.**
+pytest keeps only the last 3 run dirs, so a later session's runs evict the evidence. Paste this
+whole block; the `find`/`grep` half costs nothing when the run is green:
+
+```bash
+S=<scratchdir>; T=$(python3 -c "import tempfile;print(tempfile.gettempdir())")
+uv run pytest tests/ -q --tb=line -n 28 --dist loadgroup > "$S/soak.txt" 2>&1
+tail -1 "$S/soak.txt"; grep "^FAILED" "$S/soak.txt"
+for d in $(find "$T/pytest-of-$USER" -maxdepth 1 -type d -name 'pytest-*' -newermt '-30 minutes'); do
+  find "$d" -path '*/.janitor/logs/*.log' -newermt '-30 minutes' | while read lg; do
+    grep -qE "timed out|not in PATH|OSError" "$lg" && { echo "--- ${lg#$T/}"; \
+      grep -hE "timed out|not in PATH|OSError" "$lg" | tail -3; }
+  done
+done
+```
+
+An EMPTY harvest on a green run is the expected result and means nothing failed open — it was
+proven working at 13:51 (below), so do not read silence as a broken harvest.
+
 **THE INSTRUMENTATION IS VERIFIED END-TO-END, and it reproduced the exact signature.**
 Not asserted — measured, 2026-08-21 13:51. `branch-protection.py` run against a throwaway
 project with `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE=0.0001` to force expiry:
