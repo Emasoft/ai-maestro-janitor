@@ -1,9 +1,9 @@
 ---
 trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
-column: todo
+column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-20T00:00:56+0200
+updated: 2026-08-21T03:15:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -17,7 +17,29 @@ eht: []
 
 # Remaining missed shapes from the fence-mask replacement (XOITBRIZ follow-on)
 
-## ⏵ STATE — 2026-08-20 00:00: full resume-run COMPLETED — 21/32 captured; the blocker is the 900 s CEILING vs CLASS WEIGHT, not pool availability
+## ⏵ STATE — 2026-08-21 03:15: OPTION (a) IS WORKING — c13 captured at 1800 s / concurrency 1
+
+Took the previous block's option **(a) raise the ceiling**, with one addition its own data
+already implied: **ceiling and concurrency are ONE lever.** This file had measured that a
+SINGLE call completes in ~270 s while 4 concurrent pushed nearly every call past its timeout —
+throughput is bounded by the pool, so every extra worker takes time away from each call in
+flight. Two heavy calls sharing the pool is how both reach the ceiling. So the resume runs at
+**concurrency 1**, not 2, giving one call the whole pool.
+
+`generate_corpus.py` gained two env knobs (`BENCH_CALL_TIMEOUT_S`, `BENCH_WORKERS`), defaults
+UNCHANGED at 900/2 so an ordinary full run behaves identically (commit `e0071963`). The
+PROMPTS were not touched — they must stay byte-identical or the corpus stops being blind.
+
+**First result: `c13 mcp-schema-in-annotations` CAPTURED.** It had hit the 900 s ceiling twice
+before, on a quiet pool and a calm host. 22/32. Running: `BENCH_CALL_TIMEOUT_S=1800
+BENCH_WORKERS=1`, free tier, $0, background task `b9ss3pdx5`. Remaining: c14, c17, c18, c19,
+**c20 two-step-code-injection** (the class that blocks the measurement), c22, c25, c27, b1, b2.
+
+If the rest also land, the measurement is unblocked with no paid profile and no prompt surgery.
+If some still time out at 1800 s, THAT is the evidence for options (b)/(c) — and it is now a
+statement about those specific classes rather than about the pool.
+
+## ⏵ STATE — 2026-08-20 00:00: full resume-run COMPLETED — 21/32 captured; the blocker is the 900 s CEILING vs CLASS WEIGHT, not pool availability *(superseded by 2026-08-21 above — the ceiling was the blocker, and raising it works)*
 
 The 2026-08-19 ~20:23 resume-run (llm-ext restored to PATH — it vanished from the
 non-interactive PATH; the repo-bundled `~/Code/llm-externalizer/llm-externalizer-plugin/bin`
