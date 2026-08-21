@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T07:53:27+0200
+updated: 2026-08-21T08:10:11+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -112,8 +112,23 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
 
 ## Acceptance
 
-- [ ] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
-      the two that happened to fail
+- [x] the class is enumerated (which tests shell out through a fixed-timeout helper), not just
+      the two that happened to fail — **and the enumeration settles the design question.**
+
+      Counting PRODUCTION call sites (the seam, not the tests, because the tests are just
+      whoever was unlucky): **52 `state.run_subprocess` call sites fail OPEN within 15s** —
+      37 at 10s, 8 at 15s, and **7 at 5s**, which are the most exposed. The 5s tier:
+      `branch-protection.py:93` (`git`), `fleet-github-config.py:52` (`git`),
+      `tracked-ignored.py:65` and `:75` (`git`), `identify_environment.py:99` and `:144`
+      (`ps`), `state.py:834` (`ps`). Add `agentlens_probe.probe_json`'s own `_TIMEOUT_S = 5.0`
+      as an eighth, reached by a different helper with the identical fail-open-to-`None` shape.
+
+      Those three 5s detectors alone are driven by 14 test files. So the class is not "two odd
+      tests" and not even "five" — it is *any* test that drives *any* of 52 call sites while the
+      box is loaded, and which one fails is decided by scheduling. **A per-test or
+      per-call-site fix cannot converge on that**, which is why the fix belongs at the shared
+      seam. This is the measurement that turned the card's original option list (all per-test)
+      into the wrong shape.
 - [ ] each one either stops shelling out, or takes an explicit test-side timeout, or asserts the
       probe succeeded before asserting on its output
 - [ ] production defaults (`_TIMEOUT_S = 5.0`) are UNCHANGED — this is a test-harness defect,
