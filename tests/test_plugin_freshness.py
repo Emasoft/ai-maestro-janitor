@@ -54,7 +54,7 @@ def _write_pin(home: Path, name: str, marketplace: str, version: str) -> None:
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch: pytest.MonkeyPatch):
     """Default every test to OFFLINE; tests that want a 'published' answer re-patch."""
-    monkeypatch.setattr(pf.version_update_lib, "resolve_latest_published", lambda _root: None)
+    monkeypatch.setattr(pf.version_update_lib, "resolve_latest_published", lambda _root, **_kw: None)
 
 
 def test_stale_when_cache_diverges_from_pin(tmp_path, monkeypatch):
@@ -132,7 +132,7 @@ def test_stale_when_newer_release_published(tmp_path, monkeypatch):
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
     root = _cache_tree(tmp_path, "mkt", "demo-plugin", "1.2.0")
     _write_pin(tmp_path, "demo-plugin", "mkt", "1.2.0")
-    monkeypatch.setattr(pf.version_update_lib, "resolve_latest_published", lambda _root: "1.3.0")
+    monkeypatch.setattr(pf.version_update_lib, "resolve_latest_published", lambda _root, **_kw: "1.3.0")
     f = pf.freshness(root, now=_NOW)
     assert f["latest_published"] == "1.3.0"
     assert f["is_stale"] is True

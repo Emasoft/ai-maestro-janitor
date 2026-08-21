@@ -105,6 +105,60 @@ def test_resolve_latest_published_returns_none_when_no_repo_url(env: Path) -> No
     assert vu.resolve_latest_published(vdir) is None
 
 
+def test_resolve_latest_published_names_WHICH_cause_refused(env: Path, monkeypatch) -> None:
+    """TRDD-ZM5LZ24Y: `on_failure` must distinguish the causes, not restate "unresolved".
+
+    The C3 decline that stalled that card for a week read
+    `F1 provenance could not be resolved this fire (offline / no gh / no releases)` —
+    three causes with three different fixes, collapsed into one string. A week later
+    nobody could say which had fired. Each branch below must name ITSELF.
+    """
+    vu = _vu()
+
+    # (a) a manifest with no GitHub repository url
+    said: list[str] = []
+    vdir = _make_plugin_root(env / "cache", "0.5.0")  # no repository field
+    assert vu.resolve_latest_published(vdir, on_failure=said.append) is None
+    assert "repository url" in said[-1], said
+
+    # (b) `gh` absent from PATH — needs a PATH fix, never a longer timeout
+    said.clear()
+    vdir2 = _make_plugin_root(env / "cache2", "0.5.0", repo_url="https://github.com/o/r")
+    monkeypatch.setenv("PATH", str(env / "definitely-empty-bin"))
+    assert vu.resolve_latest_published(vdir2, on_failure=said.append) is None
+    assert "not on PATH" in said[-1], said
+
+
+def test_resolve_latest_published_reports_a_TIMEOUT_apart_from_other_failures(
+    env: Path, monkeypatch
+) -> None:
+    """A 5 s ceiling on a contended box and a missing binary need OPPOSITE responses.
+
+    Collapsing them is what made the stale C3 anchor undiagnosable, so the timeout gets
+    its own branch and its own words — asserted here, because a shared message would
+    still pass every other test in this file.
+    """
+    vu = _vu()
+    vdir = _make_plugin_root(env / "cache", "0.5.0", repo_url="https://github.com/o/r")
+    monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+
+    def _timeout(*_a, **_k):
+        raise vu.subprocess.TimeoutExpired(cmd=["gh"], timeout=5)
+
+    monkeypatch.setattr(vu.subprocess, "run", _timeout)
+    said: list[str] = []
+    assert vu.resolve_latest_published(vdir, on_failure=said.append) is None
+    assert "timed out" in said[-1], said
+    assert "PATH" not in said[-1], "a timeout must not read as a missing binary"
+
+
+def test_resolve_latest_published_stays_SILENT_without_on_failure(env: Path) -> None:
+    """The default is unchanged: no sink, no output. Every existing caller passes none."""
+    vu = _vu()
+    vdir = _make_plugin_root(env / "cache", "0.5.0")  # no repository field
+    assert vu.resolve_latest_published(vdir) is None  # no exception, nothing emitted
+
+
 # ---------- resolve_cache_parent (TRDD-ZM5LZ24Y staged-closure runtime) ----
 
 def test_resolve_cache_parent_prefers_a_real_version_parent(env: Path) -> None:
@@ -185,7 +239,7 @@ def test_do_auto_update_silent_when_cache_matches_github(
     vdir = _make_plugin_root(
         env / "cache", "0.5.0", "https://github.com/Emasoft/ai-maestro-janitor",
     )
-    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.0")
+    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root, **_kw: "0.5.0")
     logs: list[str] = []
     updated, latest, published = vu.do_auto_update_if_needed(vdir, logs.append)
     assert updated is False
@@ -205,7 +259,7 @@ def test_do_auto_update_silent_when_cache_ahead_of_github(
     )
     # Make the cache parent show only valid semver dirs:
     (env / "cache" / "0.6.0").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.0")
+    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root, **_kw: "0.5.0")
     logs: list[str] = []
     updated, _, _ = vu.do_auto_update_if_needed(vdir, logs.append)
     assert updated is False
@@ -219,7 +273,7 @@ def test_do_auto_update_runs_when_cache_behind_github(
     vu = _vu()
     cache_parent = env / "cache"
     vdir = _make_plugin_root(cache_parent, "0.5.0", "https://github.com/Emasoft/ai-maestro-janitor")
-    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.1")
+    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root, **_kw: "0.5.1")
 
     # Simulate the auto-update creating the new version dir.
     def _fake_attempt(_log: object, _path: object = None) -> bool:
@@ -240,7 +294,7 @@ def test_do_auto_update_treats_no_cache_advance_as_failure(
     vu = _vu()
     cache_parent = env / "cache"
     vdir = _make_plugin_root(cache_parent, "0.5.0", "https://github.com/Emasoft/ai-maestro-janitor")
-    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.1")
+    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root, **_kw: "0.5.1")
     monkeypatch.setattr(vu, "attempt_auto_update", lambda _log, _path=None: True)  # but no new dir
     logs: list[str] = []
     updated, _, _ = vu.do_auto_update_if_needed(vdir, logs.append)
@@ -254,7 +308,7 @@ def test_do_auto_update_silent_when_attempt_returns_false(
     vu = _vu()
     cache_parent = env / "cache"
     vdir = _make_plugin_root(cache_parent, "0.5.0", "https://github.com/Emasoft/ai-maestro-janitor")
-    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root: "0.5.1")
+    monkeypatch.setattr(vu, "resolve_latest_published", lambda _root, **_kw: "0.5.1")
     monkeypatch.setattr(vu, "attempt_auto_update", lambda _log, _path=None: False)
     updated, latest, published = vu.do_auto_update_if_needed(vdir, lambda _m: None)
     assert updated is False

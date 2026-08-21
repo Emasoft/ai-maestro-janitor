@@ -238,14 +238,30 @@ def resolve_cache_parent(plugin_root: Path) -> Path:
     )
 
 
-def resolve_latest_published(plugin_root: Path) -> str | None:
+def resolve_latest_published(
+    plugin_root: Path, *, on_failure: Callable[[str], None] | None = None
+) -> str | None:
     """GitHub releases/latest tag for the repo declared in plugin.json.
 
     Returns the tag stripped of any leading `v`, or None on any failure
     (no manifest, missing repository URL, `gh` unavailable, network
-    error, no published releases yet). Silent by design — the caller
-    decides whether to log.
+    error, no published releases yet).
+
+    `on_failure(reason)` (TRDD-ZM5LZ24Y) receives ONE line naming WHICH of those it
+    was. Added because the C3 decline that stalled that card for a week read
+    `F1 provenance could not be resolved this fire (offline / no gh / no releases)`
+    — three different causes collapsed into one string, with three different fixes.
+    Measured 2026-08-21: the daemon declined at 00:37 while the same call from a
+    shell returned `3.3.26` happily, and nothing recorded which branch refused. The
+    TIMEOUT is reported separately from a general OSError precisely because a 5 s
+    ceiling on a contended box and a missing binary need opposite responses.
+
+    Still silent by DEFAULT — the caller decides whether to log.
     """
+    def _fail(reason: str) -> None:
+        if on_failure is not None:
+            on_failure(reason)
+
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
     if not plugin_json.is_file():
         # Staged-closure runtime (TRDD-ZM5LZ24Y): the DATA dir stages scripts
@@ -261,31 +277,50 @@ def resolve_latest_published(plugin_root: Path) -> str | None:
                 cache_parent / installed[-1] / ".claude-plugin" / "plugin.json"
             )
     if not plugin_json.is_file():
+        _fail("no .claude-plugin/plugin.json in the plugin root or the newest cached version")
         return None
     try:
         with plugin_json.open("r", encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        _fail(f"plugin.json unreadable ({exc})")
         return None
     repo_url = str(data.get("repository", "") or "")
     m = _GH_REPO_RE.match(repo_url)
     if not m:
+        _fail(f"plugin.json names no GitHub repository url (got {repo_url!r})")
         return None
     slug = m.group(1)
 
     if shutil.which("gh") is None:
+        # A DETACHED daemon does not necessarily inherit the PATH a login shell has
+        # (`gh` is typically /opt/homebrew/bin/gh), so this branch is a live suspect
+        # whenever the pin is stale — and it needs a PATH fix, not a longer timeout.
+        _fail("gh is not on PATH for this process")
         return None
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}/releases/latest", "--jq", ".tag_name"],
             capture_output=True, text=True, timeout=5, check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except subprocess.TimeoutExpired:
+        # Reported apart from the OSError below ON PURPOSE: this ceiling is hardcoded
+        # here, outside `state.run_subprocess`, so the suite's timeout knob cannot
+        # reach it AND `timeout_scale()` is 1.0 in production anyway — the daemon IS
+        # production. If this is what refuses, the answer is a bigger ceiling or a
+        # retry, never a scale (TRDD-ZM5LZ24Y, category B of TRDD-7NSRD8OV).
+        _fail("gh api timed out after 5s")
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        _fail(f"gh api did not run ({exc})")
         return None
     if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        _fail(f"gh api exited {proc.returncode}" + (f": {tail[-1][:120]}" if tail else ""))
         return None
     tag = (proc.stdout or "").strip()
     if not tag:
+        _fail(f"{slug} has no published releases yet")
         return None
     return tag[1:] if tag.startswith("v") else tag
 
@@ -406,7 +441,13 @@ def do_auto_update_if_needed(plugin_root: Path,
     installed = list_installed_versions(cache_parent)
     latest_installed = installed[-1] if installed else ""
 
-    latest_published = resolve_latest_published(plugin_root) or ""
+    # The reason goes to the CALLER's log sink (daemon → daemon.log), so a stale C3
+    # anchor now names its own cause on the fire that produced it instead of being
+    # reconstructed a week later from three candidate theories (TRDD-ZM5LZ24Y).
+    latest_published = resolve_latest_published(
+        plugin_root,
+        on_failure=lambda why: log_writer(f"F1 provenance unresolved: {why}"),
+    ) or ""
     if not latest_published or not latest_installed:
         return (False, latest_installed, latest_published)
     if latest_published == latest_installed:
