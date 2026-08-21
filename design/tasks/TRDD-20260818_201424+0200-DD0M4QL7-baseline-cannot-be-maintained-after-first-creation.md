@@ -3,7 +3,7 @@ trdd-id: DD0M4QL7
 title: The branch-protection baseline cannot be MAINTAINED after first creation — present-by-name masks stale-by-content
 column: testing
 created: 2026-08-18T20:14:25+0200
-updated: 2026-08-18T21:30:00+0200
+updated: 2026-08-21T03:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -56,9 +56,24 @@ how-to-fix-issues-of-other-projects if still unfixed when this card enters dev).
       `required_status_checks` cwd-dependence is carved out (a live checks rule the foreign-cwd
       payload omits is stricter, never stale)
 - [ ] non-admin still refused deletion/non_fast_forward after a repair apply (live check) —
-      OPEN, rides the release: the RUNNING plugin is cached v3.3.16 whose gate 6 still
-      short-circuits on names; the repair fires autonomously after the next publish
-      (guard mode verified ON, applier roster-wired at dispatch.py:2012)
+      **its stated blocker EXPIRED 2026-08-21; the box is now open on a NARROWER thing.**
+      The old text said "the RUNNING plugin is cached v3.3.16 whose gate 6 still
+      short-circuits on names". That is no longer true: 3.3.26 is installed and carries
+      `baselines_content_current` in both the guard and the lib, and it was run LIVE against
+      the API — `names-present: True`, `content-current: True`. The gate fix is verified.
+
+      The SAFETY half is also verified live (read-only, `gh api …/rulesets/<id>`):
+      `baseline-history-protect` is `enforcement: active`, rules `["deletion",
+      "non_fast_forward"]`, and its ONLY bypass actor is `{actor_id: 5, RepositoryRole,
+      always}` — admin per the 2026-08-13 Tier-3 ruling, `required_linear_history` correctly
+      absent per 2026-08-08. **A non-admin IS still refused deletion and force-push.**
+
+      What remains unproven is PROVENANCE, and it is deliberately not ticked on the evidence
+      above: this repo is content-current because the **hub applied the payloads directly on
+      2026-08-20**, not because the janitor's own repair detected drift and fixed it. So the
+      end-to-end claim — "the janitor repairs a drifted repo unattended" — has still never
+      been observed. Ticking this box now would record the hub's manual apply as the
+      janitor's autonomous one, which is the specific thing this card exists to distrust.
 - [x] converged short-circuit leaves one honest trace — one `state.log_line` per converged
       pass; drift logs its named reasons before falling through to the exempt re-apply
 
