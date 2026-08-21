@@ -8,6 +8,7 @@ which is why the shell fan-out produced nothing.
 from __future__ import annotations
 
 import concurrent.futures as cf
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,25 @@ from pathlib import Path
 SP = Path(__file__).resolve().parent
 OUT = SP / "out"
 OUT.mkdir(exist_ok=True)
+
+# Both tunable for the HEAVY-CLASS RESUME (TRDD-VAWIKRK2), defaults unchanged so an ordinary
+# full run behaves exactly as before.
+#
+# 11 of 32 classes never finished inside 900 s — c13, c14, c19, c20 reproduced that twice, on
+# a quiet pool and a calm host, which retired the original "pool was busy" theory: those
+# prompts are simply too heavy for the free tier in that budget. The card offered three ways
+# out (raise the ceiling / pay / split the prompts); these two knobs are the cheapest, and
+# they let a resume run take the FIRST without touching the prompts, which must stay
+# byte-identical or the corpus stops being blind.
+#
+# CEILING and CONCURRENCY are one lever, not two. This file already measured that a SINGLE
+# call completes in ~270 s while 4 concurrent pushed nearly every call past its timeout — so
+# throughput is bounded by the pool, and each extra worker takes time away from every call
+# in flight. For the heavy remainder the right setting is therefore concurrency 1 with a
+# raised ceiling: give one call the whole pool rather than split it between two that both
+# then time out.
+_TIMEOUT_S = int(os.environ.get("BENCH_CALL_TIMEOUT_S", "900"))
+_WORKERS = int(os.environ.get("BENCH_WORKERS", "2"))
 
 PROMPT = """You are writing samples for a RED-TEAM TEST CORPUS used to MEASURE a security \
 scanner that inspects files a coding agent auto-loads as instructions.
@@ -41,7 +61,7 @@ def run(job: tuple[str, str, str, int]) -> str:
     try:
         p = subprocess.run(
             ["llm-ext", "chat", "--instructions", PROMPT.format(cls=cls, intent=intent, n=n)],
-            capture_output=True, text=True, timeout=900,
+            capture_output=True, text=True, timeout=_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
         return f"TIMEOUT {tag} {cls}"
@@ -65,11 +85,13 @@ def main() -> int:
         else:
             jobs.append((f"c{i:02d}", cls, intent, 3))
     print(f"{len(jobs)} jobs", flush=True)
-    # Concurrency 2, not 4: at 4 the rate-limited free pool pushed nearly every call
-    # past its own timeout (10 failures, 0 progress in the last half hour), while a
+    # DEFAULT concurrency 2, not 4: at 4 the rate-limited free pool pushed nearly every
+    # call past its own timeout (10 failures, 0 progress in the last half hour), while a
     # SINGLE call completed in ~270 s. Throughput here is bounded by the pool, so more
-    # workers buys nothing and costs every in-flight call.
-    with cf.ThreadPoolExecutor(max_workers=2) as ex:
+    # workers buys nothing and costs every in-flight call. Override with BENCH_WORKERS —
+    # the heavy-class resume uses 1 for exactly this reason (see the constants above).
+    print(f"timeout={_TIMEOUT_S}s workers={_WORKERS}", flush=True)
+    with cf.ThreadPoolExecutor(max_workers=_WORKERS) as ex:
         for msg in ex.map(run, jobs):
             print(msg, flush=True)
     done = len(list(OUT.glob("*.path")))
