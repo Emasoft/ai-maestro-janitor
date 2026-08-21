@@ -1,9 +1,9 @@
 ---
 trdd-id: KDLJ04AM
 title: github-config audit emits NO_PR_REVIEW unconditionally while the payload builder emits pull_request conditionally
-column: testing
+column: complete
 created: 2026-08-20T08:25:18+0200
-updated: 2026-08-20T09:05:00+0200
+updated: 2026-08-21T08:59:53+0200
 implementation-commits: [98a38760]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -47,10 +47,42 @@ eht: []
 
 ## Acceptance
 
-- [ ] solo-owner repo, no pull_request rule ⇒ zero findings (test fails pre-fix)
-- [ ] repo where require_pull_request_for is True and rule absent ⇒ finding still fires
-- [ ] grep-proven single predicate (audit imports the builder's, no copy)
-- [ ] pytest, ruff, mypy clean; janitor#283 closed with the commit
+- [x] solo-owner repo, no pull_request rule ⇒ zero findings (test fails pre-fix) —
+      `test_github_config_audit.py:422`, "THE janitor#283 fixture".
+- [x] repo where require_pull_request_for is True and rule absent ⇒ finding still fires —
+      `:437`, the falsification pair (identical facts, `pr_review_expected=True`).
+- [x] grep-proven single predicate (audit imports the builder's, no copy) — exactly ONE
+      definition (`branch_protection_lib.py:120`); the audit calls it at
+      `github_config_audit.py:503`; `:448` pins that the GATHERER resolves it from the builder.
+- [x] pytest, ruff, mypy clean; janitor#283 closed with the commit — issue **CLOSED**
+      2026-08-20T06:56:51Z; full suite 15,716 passed / 0 failed today; ruff + mypy clean.
+
+*(These four were recorded as met in the Approval log on 2026-08-20 but never ticked — which is
+why the board showed the card at 0/4. Verified independently before ticking, not taken from the
+log entry.)*
+
+## ⏵ STATE — 2026-08-21: gate MET on a positive live observation; `testing → complete`
+
+The gate was "rides 3.3.19; the three held fleet GHCFG tickets self-clear on the installed line".
+Both halves verified:
+
+- **Rides it:** `git tag --contains 98a38760` → `ai-maestro-janitor--v3.3.19` and every tag after.
+- **The tickets cleared, and this is a POSITIVE observation, not silence.** Running the shipped
+  classifier against LIVE `gather_repo_facts` for six fleet repos gives `NO_PR_REVIEW=False` on
+  every one, with `pr_review_expected=False` resolved from the builder's own predicate:
+  `ai-maestro-janitor`, `ai-maestro`, `ai-maestro-plugins`, `claude-plugins-validation`,
+  `agent-identity`, `ai-maestro-maintainer-agent`.
+
+Silence would NOT have been enough here and was explicitly not relied on: the ledger's last
+GHCFG-001 is from 2026-08-20 ~09:25 and nothing has appeared in ~23h, but the detector carries a
+seen-file dedupe, so an unchanged condition and a suppressed repeat look identical from the
+outside. (The detector IS live — `last-run-fleet-github-config.ts` stamped 2026-08-21 08:37:52 —
+so the run happened; it is the SILENCE that could not be read, not the schedule.) Running the
+classifier directly settles what the log cannot.
+
+**Incidental corroboration for TRDD-R4XC8MV1:** four of the six repos report
+`BASELINE_CONTENT_DRIFT` in the same sweep — independent confirmation of the applier
+oscillation measured on that card an hour earlier, from a different code path.
 
 ## Approval log
 
