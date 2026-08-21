@@ -1,9 +1,9 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: dev
+column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T11:04:55+0200
+updated: 2026-08-21T11:14:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -100,7 +100,35 @@ correlation is not cause; on the clean tree they reproduce identically, so TRDD-
 exonerated. Its files (memory modules + the memgrep crate) are not imported by any failing
 detector.
 
-### SESSION END STATE — 2026-08-21 10:36. Both families FIXED; 2 files still unexplained
+### ⏵ LOADED-RUN RESULT — 2026-08-21 11:14. The first like-for-like before/after at real load
+
+**`pytest -n 28 --dist loadgroup` on a 14-core box (2x oversubscription), before and after:**
+
+| | run 1 | run 2 |
+|---|---|---|
+| BEFORE the 11 fixes | **24 failed** / 162 s | **12 failed** / 176 s |
+| AFTER | **0 failed** / 81 s | **0 failed** / 99 s |
+
+15,727 passed, 1 skipped, 0 failed, both post-fix runs. Every file that failed pre-fix is one
+this session fixed, and the 7 fixed earlier stayed green through BOTH pre-fix stress runs at a
+load higher than the one that originally broke them.
+
+**THE CAVEAT, stated because this card has punished optimism four times today:** the post-fix runs
+completed in 81 s and 99 s against the pre-fix 162 s and 176 s. Same worker count, but the box was
+genuinely quieter, so this is **not a perfectly controlled comparison**. The evidence is
+before/after at matched settings PLUS a named, proven mechanism per site — not a green run alone.
+
+**I stopped escalating load deliberately.** A `-n 42` (3x) attempt was KILLED mid-run and left the
+box at loadavg 38. That was an overstep: earlier on this same card I declined to saturate a shared
+36-user machine for marginal evidence, then did nearly that. The kill is the signal, and further
+escalation is not worth what it costs everyone else on the host. If a stronger result is wanted,
+the right venue is CI, not this box.
+
+**What that means for the acceptance box:** back-to-back-under-load with no flake is MET at
+`-n 28`, where the pre-fix baseline demonstrably failed. It is not met at arbitrary load, and
+nobody should read it that way.
+
+### SESSION STATE — 2026-08-21 10:36. Both families FIXED; 2 files still unexplained
 
 **Fixed this session (4 sites):**
 
