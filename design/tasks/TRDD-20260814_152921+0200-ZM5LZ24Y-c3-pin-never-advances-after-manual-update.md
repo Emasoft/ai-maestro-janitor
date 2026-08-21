@@ -3,7 +3,7 @@ trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
 column: testing
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-21T08:39:56+0200
+updated: 2026-08-21T15:05:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
@@ -14,6 +14,48 @@ implementation-commits: [a8982a03, 11e925c0, 83cfd3b6]
 ---
 
 # C3 last-good pin never advances after a manual `claude plugin update`
+
+## ⏵ STATE ADDENDUM 2 — 2026-08-21 15:05: **the fire DID come, and the log names the refusal**
+
+**This partly REFUTES the addendum below.** "The chore is absorbed so the fire never comes" is
+not what happened on 2026-08-21. `global-state/daemon.log`:
+
+```
+00:35:34  task 'version-update' starting
+00:37:31    version-update: C3 re-pin declined — 3.3.25 is the version the stub would exec
+            and it is C2-clean, but F1 provenance could not be resolved this fire
+            (offline / no gh / no …)
+00:37:32  task 'version-update' done in 116s
+```
+
+A **janitor-owned** fire ran, for 116 s, and the candidate passed every predicate except **F1
+provenance**. Absorption is real (the chore IS in `SERVER_ABSORBED_TASKS`) but it is not the
+operative blocker: the daemon resumes singleton chores whenever the server is not confirmed
+active, and it did.
+
+**Measured now:** the pin still reads **`0.59.0`**, `last-good.json` mtime **2026-07-21** — a
+month stale — while **3.3.26** is installed. So the box does NOT close.
+
+**Why F1 failed is NOT determined, and the log cannot tell you** — its message conflates three
+different causes as one string, `(offline / no gh / no releases)`. Reproduced from a shell just
+now, `resolve_latest_published()` returns **`3.3.26`** happily, so whatever refused at 00:37 is
+not refusing now. Two candidates, neither chosen:
+
+1. **A 5 s timeout under load.** `version_update_lib.resolve_latest_published` calls
+   `subprocess.run(["gh","api",…], timeout=5)` — a RAW call with a hardcoded ceiling, outside
+   `state.run_subprocess`. That is precisely **category B of [[TRDD-7NSRD8OV]]**, on a box that
+   has been heavily contended all day. **Scaling it would NOT help**: `timeout_scale()` is 1.0
+   in production and the daemon IS production, so the knob is inert here — the fix would be a
+   larger ceiling or a retry, which is a design call.
+2. **`gh` absent from the DAEMON's PATH.** `shutil.which("gh")` returning None is
+   indistinguishable in that message. `gh` lives at `/opt/homebrew/bin/gh` and is authenticated
+   for this shell; a launchd/detached daemon need not inherit that PATH. Same shape as
+   **TRDD-AM8JD9SG F6**.
+
+**The actionable next step is a DIAGNOSTIC, not a fix:** make the decline message name WHICH of
+the three it was. Every hour spent on this card since it opened has been spent distinguishing
+causes a one-line message could have separated — the identical lesson today's
+`run_subprocess` fail-open logging closed elsewhere.
 
 ## ⏵ STATE ADDENDUM — 2026-08-21: the soak STILL cannot close, for a SECOND and different reason — the chore is ABSORBED
 
