@@ -31,6 +31,14 @@ kept: `hard_restart_enabled` (kills claude processes), `fleet_stop_enabled` (typ
 other panes), `issues-watch` (a notification firehose). Those ARM capability; they do not
 disable existing work. See [[janitor-fleet-control-plane]].
 
+## See also
+
+- [[janitor-skills-and-agents-roster]] — the same PAUSE retirement from the SKILLS side: which
+  commands exist today, and why `/janitor-pause` and maintenance mode were removed in v0.67.0.
+  This page answers "can I quiet the janitor" (no — `disarm` is the switch); that page answers
+  "where did `janitor-pause` go". The two were flagged as a CONFLICT candidate by
+  `memory-librarian` and are not one — they agree on every fact and were merely unlinked.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-NOSW-1TCH, status:valid, keywords:"sticky_sentinel silent_disable keep-going-off janitor_did_nothing_for_days quiet_heartbeat_looked_healthy", ocd:2026-07-31, lmd:2026-07-31]

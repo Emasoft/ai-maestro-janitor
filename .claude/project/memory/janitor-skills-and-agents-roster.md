@@ -122,4 +122,12 @@ included — they used to always ESC).
 - [[janitor-architecture]] — the architecture hub; this page is the detailed roster
   behind its abbreviated Skills summary.
 
+## See also
+
+- [[janitor-has-no-off-switch-but-disarm]] — the same PAUSE retirement from the OPERATOR side:
+  what to do when the heartbeat feels too noisy or too expensive. That page answers "can I quiet
+  the janitor" (no — `disarm` is the switch); this one answers "where did `janitor-pause` go".
+  `memory-librarian` flags the pair as a CONFLICT candidate; they agree on every fact and were
+  simply unlinked.
+
 ## Notes and lessons learned
