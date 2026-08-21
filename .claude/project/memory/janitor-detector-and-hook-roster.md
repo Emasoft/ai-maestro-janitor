@@ -2,7 +2,7 @@
 name: janitor-detector-and-hook-roster
 description: "full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16) / how many detectors are there / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py / why does the token-spike advisory never fire / TURN_OUTPUT knob has no effect / every tool call is denied after a plugin update or reload / bash and edit fail for ~15 minutes in a live session / a hook that exits 2 blocks the tool call / uv run on a missing script exit code / the plugin cache dir is emptied mid-refetch"
 ocd: 2026-08-02
-lmd: 2026-08-20
+lmd: 2026-08-21
 metadata:
   node_type: memory
   type: reference
@@ -172,6 +172,65 @@ addressed to the agent; a document-level frame is a cheaper signal than per-line
 Do NOT tune against those three samples alone — that fixes the samples, not the class; use the
 bench's dev/holdout split.
 
+
+^ATOM-9E4P-KYW5 [desc: "5 claimed rules scored 0 out-of-sample for ONE reason — each enumerated its attack's CANONICAL PHRASING and the corpus used a variant", keywords: detector_rule_scores_zero_on_its_own_class claimed_rule_reads_as_coverage closed_canonical_phrasing_enumeration eleven_languages_of_one_sentence rule_searched_the_wrong_field, ocd: 2026-08-21, lmd: 2026-08-21]
+
+Measured 2026-08-21 (TRDD-VAWIKRK2) on a second blind corpus: five rules the coverage report
+showed as claimed matched ZERO of their own class. Same root cause each time — the rule
+enumerated the CANONICAL PHRASING of its attack, and real attacks vary the OBJECT, the FIELD, or
+the SYNTAX. Not one was missing a language, a host, or a technique.
+
+`concealment-directive` matched concealment from "the user"; every attack concealed from the
+RECORD (audit trail, logs, changelog, commit message). `prompt-injection-multilingual` covered
+"ignore previous instructions" in ELEVEN languages; every attack kept the verb and swapped the
+object for a security control — eleven languages of ONE sentence is far narrower than it reads
+on a report. `mcp-annotation-lying` searched `name` for the destructive verb the attacker had
+deliberately put in `handler`, i.e. it searched the innocuous half by construction.
+`two-step-code-injection` knew `atob`/`Buffer.from` → `eval` while every sample used the shell
+pipeline `| base64 -d | bash`, which is also the commoner form in the wild.
+
+This is the silent-FN asymmetry a bench exists to expose: a declared blind spot is honest, while
+a claimed rule scoring 0 reads as coverage on every report. Check what a rule's OBJECT and FIELD
+are, not just whether its technique is listed.
+
+
+^ATOM-PJ03-3B29 [desc: "Across ~10 detector changes every false positive came from adding VOCABULARY; not one came from fixing a BOUNDARY, FIELD or POSITION", keywords: widening_a_security_regex_without_false_positives vocabulary_costs_FP_structure_does_not measured_refusal_pin_it_as_a_test secret_interpolation_in_docs_is_not_exfiltration, ocd: 2026-08-21, lmd: 2026-08-21]
+
+The reusable design rule from TRDD-VAWIKRK2's widening pass. Across ~10 changes to
+`agent_config_patterns`, EVERY false positive came from adding VOCABULARY; not one came from
+fixing a BOUNDARY, a FIELD, or a POSITION. Four vocabulary widenings were implemented, measured
+against ~12.6k real agent-context files, and reverted: `env_vars` (+5 FP on ordinary
+CHANGELOGs), a `${…TOKEN}` interpolation (+18 FP on OFFICIAL plugin docs — a secret
+interpolation is what correct documentation SHOWS you), a prose read-only claim fed to an
+existing 800-char window (+33), and an unbounded self-contradiction span (+33 — two words in one
+long paragraph are not a contradiction). Every structural fix measured 0 new firings.
+
+So: reach for boundary/field/position first, and treat a proposed new WORD as the expensive
+option that must be measured before it ships. PIN every refusal as a negative test — a refusal
+nobody pinned gets re-proposed by the next reader who has the same idea. See [[ATOM-9E4P-KYW5]]
+for why the rules were narrow in the first place.
+
+
+^ATOM-5DFW-DLSZ [desc: "Two detector misses were MATCHING MECHANICS, not vocabulary — a word boundary cannot see inside snake_case, and a negated-paren class stops at a NESTED paren", keywords: snake_case_defeats_word_boundary nested_paren_defeats_negated_character_class regex_misses_the_shape_it_was_written_for mis-filed_as_a_threshold_problem, ocd: 2026-08-21, lmd: 2026-08-21]
+
+Two `agent_config_patterns` misses (TRDD-VAWIKRK2) were matching mechanics rather than
+vocabulary, and both are worth recognising by shape because each was mis-filed as something
+else and the mis-filing pointed at a more dangerous fix.
+
+`\b` CANNOT see inside a snake_case compound: `_` is a word character, so `\bcredentials\b`
+never matches `user_credentials` and `\bsession_token\b` never matches `session_tokens`. A rule
+that reads agent CONFIG has to be able to read config SPELLING — snake_case is the convention an
+attacker writing a config file will use, so requiring the bare word requires the one spelling
+they will not write. Fix with `(?<![A-Za-z])` / `(?![A-Za-z])`, which lets `_` and `-` separate
+while still refusing a letter-glued substring.
+
+`[^)]*` stops at the FIRST `)`. In `subprocess.run(base64.b64decode('c2g=').decode(),
+shell=True)` that is the NESTED one, so `shell=True` was never reached and the most dangerous
+form in the class was precisely the one that escaped. It had been filed as "base64 literal under
+the 40-char floor", which would have sent the next reader at an unmeasured threshold knob that
+was never the cause. Fix with a lazy same-line bound, NOT a balanced-paren construct — those
+backtrack badly on adversarial input. [^5]
+
 ## Governed by
 
 - [[janitor-architecture]] — the architecture hub; this page is the detailed roster
@@ -249,3 +308,4 @@ See [[janitor-findings-pipeline]] for where these findings land.
 [^2]: [id:ATOM-JYY7-VMAM, status:valid, supersedes:ATOM-UWO2-0TIH, desc:"the roster's detector COUNT went stale as detectors were added — measured 72 registered, not 39", keywords:"how_many_janitor_detectors_are_there the_roster_count_is_wrong 39_detectors_is_stale detector_list_does_not_match_dispatch my_inventory_undercounts_the_fleet a_documented_roster_nobody_updates", ocd:2026-08-14, lmd:2026-08-14] DO NOT trust this page's detector COUNT (or any hand-maintained inventory) without re-measuring it against the code that registers them, BECAUSE a roster is written once and the fleet keeps growing: measured 2026-08-14, `dispatch.py` registers **72** detectors while this page said **39** — stale by 33, so nearly half the fleet was undocumented, and nothing failed or reddened to say so. An inventory has no test; it rots silently and still reads authoritative. DO re-derive the count from the registration site (the `("name", cadence, "CLAUDE_PLUGIN_OPTION_…")` entries in `scripts/dispatch.py`) before citing it, and treat the GROUPED list below as partial until a curator pass reconciles it — the groups are still correct about the detectors they name, they simply do not name them all. SUPERSEDED BODY: (empty)
 [^3]: [id:ATOM-WJN5-NM3H, status:valid, desc:"the roster claimed 39 detectors while dispatch.py registered 73 — an inventory with no test cannot fail, so it drifts while still reading as authoritative", keywords:"the_roster_is_out_of_date a_documented_list_drifted_from_the_code how_many_detectors_are_there_really my_docs_went_stale_and_the_suite_stayed_green an_inventory_has_no_test doc_guard_passes_while_the_doc_is_wrong count_in_the_docs_does_not_match_the_code", ocd:2026-08-15, lmd:2026-08-15] DO NOT document an INVENTORY — a roster, a capability list, a count of things the code registers — without a check that fails the moment the code gains a member, BECAUSE prose cannot fail: this page asserted "39 detectors" while `dispatch.py` registered 73, and went on reading as authoritative through ~34 additions, one un-updated commit at a time. Every other claim in this repo is defended by something that reddens (mypy, pytest, ruff); an un-tested list is the absence of a failure signal being mistaken for the absence of a defect. DO defend it with `tests/test_detector_roster_completeness.py`, which parses the REGISTRATION tuples in `dispatch.py` (registration is the authority — an unregistered file never runs) and fails naming each detector missing from a group bullet. DO NOT assert membership with a whole-page grep, and DO NOT read that guard's green as "the roster is correct", BECAUSE a name-presence check is greenest exactly when the claim around the name has been reversed, and it counted `agent-context-integrity` as documented on the strength of a passing mention while it belonged to no group at all — a SUPERSEDED body, a lesson footnote or an atom would have satisfied it just as well. DO scope the check to the `- *group:*` bullets, carry a control test that fails if the registration parser ever stops finding the fleet (a blind parser declares a perfect roster), and state in the guard itself that it proves PRESENCE, never that any description beside a name is true.
 [^4]: [id: ATOM-8S3B-B5OW, status: valid, desc: "a vanished hook script exits 2, which DENIES the tool call — fail-open wrapper required", keywords: "every_tool_call_denied_after_a_plugin_update bash_and_edit_fail_for_15_minutes hook_exits_2_blocks_the_tool session_stalls_during_reload-plugins uv_run_missing_script_exit_code plugin_cache_emptied_during_refetch PreToolUse_hook_denies_everything", ocd: 2026-08-20, lmd: 2026-08-20] DO NOT invoke a plugin hook as a bare `uv run --script <abs path>`, BECAUSE `uv run` on a MISSING file exits 2 — the one code Claude Code treats as a BLOCKING deny on PreToolUse (every other non-zero is merely logged) — so while a plugin update empties the active version dir in place, all six PreToolUse hooks exit 2 together and every Bash/Edit call in every live session is denied for the whole refetch (~15 min; janitor#281, measured 2026-08-20). DO route every hook through a wrapper that answers 0 ONLY when the script is absent and `exec`s otherwise (hooks/hook-run.sh), so 'absent' and 'denied' stay distinct exit codes — a blanket `|| exit 0` would cure the lockout by silently disarming pre-bash-safety and the publish lock.
+[^5]: [id: ATOM-QLN0-QZPS, status: valid, keywords: "memgrep_lint_footnote-dangling-ref regex_fragment_in_a_memory_description caret_bracket_reads_as_a_footnote", ocd: 2026-08-21, lmd: 2026-08-21] DO NOT put a bare regex fragment containing `[^...]` in an atom's `desc:` or in any prose outside a code span, BECAUSE markdown reads `[^)]` as a FOOTNOTE REFERENCE and `memgrep lint` correctly reports `footnote-dangling-ref` at ERROR — which blocks the page on a rule that is doing its job. The body is safe only because the fragments there are inside backticks; the `desc:` field is not a place where backticks help. DO describe the construct in words in the desc ("a negated-paren class stops at a nested paren") and keep the literal regex in the backticked body instead.
