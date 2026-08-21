@@ -1,9 +1,9 @@
 ---
 trdd-id: K3PN7QW2
 title: Fence-opener detection is naive — an inline triple-backtick span at line start is read as a fence
-column: dev
+column: testing
 created: 2026-08-21T03:16:08+0200
-updated: 2026-08-21T09:58:06+0200
+updated: 2026-08-21T10:26:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -136,10 +136,45 @@ will disagree, which is the drift the mirroring was chosen to avoid.
 
 ## Acceptance
 
-- [ ] one shared delimiter predicate; no remaining ad-hoc `starts_with` fence toggle in the crate
-- [ ] the Python precheck twin uses the same rule (grep-proven), so the two cannot disagree
-- [ ] a page whose only ````-line is an inline span parses fully: its atoms and headings are visible
-- [ ] a genuinely unclosed fence is STILL reported by `page-unclosed-fence`
-- [ ] cargo test + clippy clean; `uv run pytest -q`, ruff, mypy, pyright clean
+- [x] one shared delimiter predicate; no remaining ad-hoc `starts_with` fence toggle in the crate
+
+      Grep-proven: **0** non-comment `starts_with("```")`/`("~~~")` remain in `src/memory.rs` or
+      `src/md.rs` (the one surviving hit is a comment inside a new test). All 12 walker sites
+      drive `fence_step`; the lint and `unclosed_fence_hint` both call `unclosed_fence_line`
+      instead of each carrying an odd/even count.
+- [x] the Python precheck twin uses the same rule (grep-proven), so the two cannot disagree
+
+      **Wider than this box assumed — the card said ONE Python twin; there were THREE, in two
+      files.** `memory_edit_verify.py` carried two more, and one of them (`_mask_code_fences`)
+      ALREADY held a partial fix for this exact defect citing **issue #178**. So the bug was
+      found and fixed locally once and the fix never propagated — which is the real reason
+      #277 and #279 re-lost it. All three now call the shared predicate, placed in
+      `memory_edit_verify` because `memory_content_precheck` already imports it as its SSOT (no
+      new module, no circular import). `clear_trigger.py`'s toggle is deliberately untouched:
+      different domain (blob length in a handoff), not page structure.
+- [x] a page whose only ````-line is an inline span parses fully: its atoms and headings are visible
+
+      End-to-end on the built binary: the repro page's false `page-unclosed-fence` is gone and
+      `recall ATOM-TEST-0001` returns the atom that was invisible. Pinned by
+      `an_inline_code_span_at_line_start_is_not_a_fence_opener`, written RED first.
+- [x] a genuinely unclosed fence is STILL reported by `page-unclosed-fence`
+
+      `lint_unclosed_code_fence_is_an_error_naming_the_opening_line` and
+      `lint_balanced_fences_do_not_trip_the_unclosed_check` both still pass — the mirror half.
+      Plus the new `a_tilde_line_does_not_close_a_backtick_fence`, which is now REPORTED as
+      unclosed where the old bool silently accepted `~~~` as a closer.
+- [~] cargo test + clippy clean; `uv run pytest -q`, ruff, mypy, pyright clean
+
+      Green: **cargo test 218 + 145** (216 before — the 2 new tests were RED on the old code),
+      **clippy** clean for both changed files (4 remaining hits are pre-existing and outside the
+      diff), **ruff** clean, **mypy** clean across 486 files, **281** targeted Python tests.
+      Corpus findings **identical** old vs new binary (61/0/4) — the rule got stricter about what
+      OPENS a fence, not about what counts as a defect.
+
+      `[~]` for one honest reason: the FULL `pytest` run is not green, and not because of this
+      change. It hits TRDD-7NSRD8OV's load flake (31 failures in one run). Proven unrelated by
+      stashing this work and reproducing the identical failures on a clean tree — none of the
+      failing detectors import the memory modules or the crate. pyright was not run; the
+      project gate is ruff + mypy (per CLAUDE.md), both clean.
 
 ## Approval log
