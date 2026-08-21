@@ -1,9 +1,9 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: testing
+column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T09:53:59+0200
+updated: 2026-08-21T10:22:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,7 +15,76 @@ eht: []
 
 # Subprocess-timeout tests flake under full-suite load
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 09:53
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 10:22
+
+**ROOT CAUSE FOUND, and it is NOT what this card has said all along. Column moved back
+`testing` → `dev`; the 09:53 block below is SUPERSEDED and kept only for its measurements.**
+
+**The knob never reaches the child in these tests.** `conftest._relax_subprocess_timeouts`
+exports `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE=10` into `os.environ`, which works only
+for a child that INHERITS the environment. But **28 test files build a MINIMAL env dict** and
+pass it as `env=`, e.g. `test_gh_reply_watch._run_on_host`:
+
+```python
+env = {"PATH": …, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project), **extra_env}
+```
+
+No `os.environ.copy()`. **Zero of those 28 files pass the knob** (grep-verified: the only files
+mentioning it are `conftest.py` and its own test). So in every one of them the detector runs at
+scale **1.0** — `run_subprocess`'s default 10 s — fails open on expiry, and exits 0 with EMPTY
+stdout. That is the card's signature exactly, and it explains what the "second family" theory
+never could.
+
+**This also corrects a verification I performed and reported as sound.** At 09:47 I checked that
+`monkeypatch.setenv` writes real `os.environ` and concluded the mechanism reached the children —
+quoting conftest's own docstring, which asserts the tests "build the child env with
+`os.environ.copy()`". That claim is true of SOME tests and false of these. I verified the half
+that was true and took the docstring's word for the half that decides the outcome.
+
+**And it retires the 73-direct-`subprocess.run` theory as the main story.** That family is real
+but was never shown to fire; this one is measured, and `run_subprocess` — the seam I already
+fixed — is what times out, because the child never learned it should wait longer.
+
+### The measurement that forced it (all on a CLEAN tree, my fence work stashed out)
+
+`tests/test_gh_reply_watch.py` alone, five consecutive runs:
+
+| run | result | wall-clock |
+|---|---|---|
+| 1 | 6 failed | 94.6 s |
+| 2 | 4 failed | 71.0 s |
+| 3 | 3 failed | 43.6 s |
+| 4 | **14 passed** | 7.6 s |
+| 5 | **14 passed** | 8.2 s |
+
+**Failure count scales monotonically with wall-clock.** That is the timeout signature and
+nothing else looks like it. Note runs 4-5 are the same green a subset run gives on a quiet box —
+which is exactly how the 09:53 "4 clean full-suite runs" happened, and why they proved less than
+they appeared to.
+
+I stashed the fence work specifically because the failures appeared right after it landed and
+correlation is not cause; on the clean tree they reproduce identically, so TRDD-K3PN7QW2 is
+exonerated. Its files (memory modules + the memgrep crate) are not imported by any failing
+detector.
+
+### NEXT ACTION — a decision, and the cheap fix is the one that already failed once
+
+1. **Add the knob to each of the 28 minimal-env builders.** Explicit and greppable, but it is
+   28 edits and test #29 forgets it — this is precisely the per-site pattern that produced five
+   divergent fence rules in TRDD-K3PN7QW2.
+2. **One shared `child_env(**extra)` helper in conftest** that every builder calls. Still 28
+   edits, but the rule then lives in one place.
+3. **Patch `subprocess.run` inside the pytest process (conftest, autouse)** so any explicit
+   `env=` dict is seeded with the knob. ONE edit, covers all 28 and every future test, and
+   cannot be forgotten. Test-only; production untouched. The cost is magic — a test that
+   asserts on the exact env it passed would need care.
+**Recommend 2 for the rule + 3 for the enforcement**, but this changes test-harness behaviour
+broadly, so it wants a human's eye; I did not pick unilaterally after three advisor wedges.
+
+**Do NOT read the 09:53 evidence block as still standing.** Its four green runs were real and
+its conclusion was wrong.
+
+## ⏵ SUPERSEDED STATE — 2026-08-21 09:53 (kept for its measurements only)
 
 **Where it stands:** the seam fix is SHIPPED (`99d2f7dd`) and now has real evidence behind it —
 **4 consecutive full-suite runs, 15,726 passed, 0 failures**, at start-loads 13 → 27 → 39 → 44.
