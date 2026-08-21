@@ -36,6 +36,7 @@ assert _LIB.is_file(), f"lib not found at {_LIB}"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import state  # noqa: E402  # for the shared subprocess-timeout scale (TRDD-7NSRD8OV)
 
 # Fake gh: dispatches on argv, prints a canned body, exits a canned code.
 # Mirrors the contract `branch_protection_lib` makes against `gh`:
@@ -164,7 +165,15 @@ def _run_apply(
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
-        [str(_APPLY_SCRIPT)], env=env, capture_output=True, text=True, timeout=30,
+        [str(_APPLY_SCRIPT)], env=env, capture_output=True, text=True,
+        # The TEST'S OWN ceiling, scaled by the shared knob (TRDD-7NSRD8OV, category D).
+        # Scaling branch_protection_lib's six `gh` timeouts earlier fixed the PRODUCTION half
+        # and left this one, because at the load reachable then it never expired — it took a
+        # 283 s full-suite run to surface `TimeoutExpired … after 30 seconds` on
+        # branch_protection_apply.py itself. Nothing inside scripts/lib can reach a number
+        # written here. Safe to stretch: these tests' subject is which RULESETS the apply
+        # writes, never how fast it writes them.
+        timeout=30 * state.timeout_scale(),
     )
 
 
