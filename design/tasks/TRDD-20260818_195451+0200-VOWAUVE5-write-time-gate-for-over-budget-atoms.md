@@ -3,7 +3,7 @@ trdd-id: VOWAUVE5
 title: memgrep write verbs refuse an over-budget atom at write time
 column: testing
 created: 2026-08-18T19:54:51+0200
-updated: 2026-08-19T00:07:30+0200
+updated: 2026-08-21T08:30:42+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -74,6 +74,51 @@ malformed page" — an over-budget atom is the same class of malformation, caugh
       The gate is live on THIS host now (`cargo install` done); other hosts get it via the
       release.
 
-## ⏵ STATE — 2026-08-19: gate SHIPPED; drain batch DONE (backlog 0 everywhere); only the week-long stays-at-zero hold (→ 2026-08-26) keeps this in `testing`
+## ⏵ STATE — 2026-08-21: **THE STAYS-AT-ZERO HOLD HAS ALREADY REGRESSED, and the gate cannot prevent it**
+
+Re-measured mid-window (day 2 of 7). `atom-oversized` across the three scope roots:
+PROJECT **0**, LOCAL **0**, USER **1**.
+
+The one:
+
+```text
+INFO …/memory/repair-reflags-correct-page-tier-shape.md:15 [atom-oversized]
+     — atom body is 1733 chars (> 1500)
+```
+
+`^ATOM-J8YH-IK0E`, `ocd: 2026-08-20` — **created the day AFTER the gate shipped and after the
+drain batch**, on the host where `cargo install` had already been done. So this is not drain
+residue and not the `3K8SVX2H` frozen class; it is a fresh over-budget atom written past a live
+gate.
+
+**Root cause, and it is a coverage hole rather than a bug in the gate:**
+`check_new_body_budget` has exactly TWO call sites in the whole crate —
+`memory.rs:2721` (`add-atom`) and `memory.rs:3107` (`add-lesson`). Every other way a page
+legitimately gets written is ungated: the `migrate` and `edit` verbs, and — the one that matters
+most — **an agent editing the markdown directly with the Edit tool, which the memory protocol
+explicitly permits** ("edit pages ONLY via memgrep verbs *or the Edit tool*").
+
+So acceptance box 4 is not defended by the thing that was built to defend it. A write-time gate
+inside the crate cannot bind a writer that does not go through the crate, and the protocol hands
+every agent exactly such a path. The box asks for an outcome (`stays 0`) that the mechanism can
+only influence, not enforce — which is why it regressed within two days without anyone doing
+anything wrong.
+
+*(Confirmed the gate itself is healthy and NOT the leak: it refused two of my own atoms today at
+2036 and 1572 chars, in ordinary use, through the installed binary. And the offending atom is
+not mine — the gate-vs-lint invariant in box 2 held for every write I made.)*
+
+**NEXT ACTION — a decision, not a patch.** Three options, and the cheap one is wrong:
+1. *Gate `migrate`/`edit` too* — closes two holes, leaves the Edit-tool hole open, and risks
+   refusing a legitimate migration of large legacy content (the reason box 3's supersession
+   carve-out exists).
+2. *Re-scope box 4 to what a gate can actually promise*: "no VERB-written atom is over budget"
+   (enforceable, provable) plus "the linter reports the rest", instead of a fleet-wide
+   stays-at-zero that no single writer controls.
+3. *Make the linter's finding actionable on a schedule* — the drain chore re-runs and decomposes
+   what any path introduced, accepting that the steady state is "small and repaired", not zero.
+**Option 2 + 3 together is the recommendation**; option 1 alone would let the box keep claiming
+an enforcement it still would not have. Needs the USER, because it changes what this card
+promises.
 
 ## Approval log
