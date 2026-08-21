@@ -1,9 +1,9 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: todo
+column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T07:21:05+0200
+updated: 2026-08-21T07:53:27+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -37,22 +37,62 @@ session, on two unrelated tests:
    rather than the instances: whichever subprocess lands in a slow window is the one that fails,
    so chasing individual tests will never converge.
 
-The moving failure is the tell. Both tests call `agentlens_probe.probe_json`, which runs a
-`tmp_path` shell script through `subprocess.run(..., timeout=_TIMEOUT_S)` with
-`_TIMEOUT_S = 5.0` (`scripts/lib/agentlens_probe.py:54`). `probe_json` is fail-OPEN by design:
-a timeout returns `None`, the clause becomes `""`, and the assertion fails with an empty string
-rather than an error naming a timeout. Isolated run times for that one file were measured
-swinging **3.7s → 13.3s** — against a 5.0s per-probe ceiling. Whichever probe happens to land
-in a slow window is the test that fails, which is why it is never the same one.
+## ⏵ ROOT CAUSE — measured 2026-08-21, and it CORRECTS this card's first diagnosis
 
-**The failure LOOKS like a logic bug and is a scheduling one.** That is the expensive part: an
-empty-string assertion failure gives no hint that a timeout occurred, so the natural response is
-to go read the clause-building code, which is correct.
+**The original text below blamed `agentlens_probe.probe_json`'s 5.0s ceiling. That is true only
+of the `test_window_burn_rate` instance.** Reading the three later failures IN FULL (rather than
+pattern-matching them onto the first) gives a different and more general answer, and the
+correction matters because the first diagnosis pointed at one helper in one module while the
+real seam is shared by every detector in the repo.
+
+**The signature is identical in all three: the spawned detector exits `returncode 0` with
+COMPLETELY EMPTY stdout AND stderr** — the test then fails asserting `"BRPROT-001" in ''`, and
+in the `gh-reply-watch` case no state file is written at all. The script ran and deliberately
+did nothing. The outer harness timeouts are NOT involved and are generous (60s / 30s / 180s).
+
+The real chain is one layer down:
+
+1. Detectors call the SHARED helper `state.run_subprocess` (`scripts/lib/state.py:954`) with
+   short per-call timeouts — `branch-protection.py:93` runs `git rev-parse --git-dir` with
+   **`timeout=5`**, `gh auth status` with `timeout=10`.
+2. `run_subprocess` returns **`None`** on `subprocess.TimeoutExpired`. This is CORRECT and
+   deliberate production behaviour — its docstring says why: a hung subprocess must never park
+   the 5-minute heartbeat.
+3. The detector's next line is `if git_dir is None or git_dir.returncode != 0: return 0` — a
+   silent, successful exit.
+
+So under full-suite load (measured load avg 80+; the first instance at 83) a `git rev-parse`
+exceeds 5s, the detector correctly fails OPEN, and the test sees nothing. **Fail-open is right
+for production and is exactly what makes the test failure uninformative**: an empty-string
+assertion gives no hint a timeout occurred, so the natural response is to go read detector logic
+that is not wrong. The failure LOOKS like a logic bug and is a scheduling one.
+
+This also explains the moving target better than the first diagnosis did: the seam is shared, so
+whichever detector's short call lands in a slow window is the test that fails.
+
+**Original (partially superseded) note follows.** `agentlens_probe.probe_json` has its own
+`_TIMEOUT_S = 5.0` (`scripts/lib/agentlens_probe.py:54`) and the same fail-open-to-`None`
+shape; isolated run times for `test_window_burn_rate.py` were measured swinging **3.7s →
+13.3s** against that 5.0s ceiling. It is a second instance of the same class, not the class
+itself.
 
 ## What
 
+**Superseded framing warning:** the options below were written against the first diagnosis (one
+helper, `probe_json`, and a per-test rewrite). With the root cause corrected above, the fix
+belongs at the SHARED seam — `state.run_subprocess` — because per-test rewrites cannot converge
+on a class whose members are "whichever detector's short call lands in a slow window". Options 1
+and 2 are per-test and therefore mostly the wrong shape now; option 3 (make it LOUD) still
+stands on its own merits and is the part that turns an uninformative failure into a diagnosis.
+
+The candidate at the seam: a timeout SCALE read from the environment, defaulting to 1.0 so
+production behaviour is byte-identical, set once in `tests/conftest.py` for the suite. It works
+because tests build the child env with `env = os.environ.copy()`, so the variable reaches the
+spawned detector. **Approach under advisor review before implementation** (project rule: consult
+before a significant change; this touches a helper every detector uses).
+
 Not "raise the timeout until it stops" — that just moves the threshold and re-hides the problem
-on a slower machine or a busier day. Options to decide between, cheapest first:
+on a slower machine or a busier day. Original options, cheapest first:
 
 1. **Do not shell out at all in these tests.** The probe's CONTRACT (parse JSON stdout, fail
    open) is what is under test; the fact that the JSON arrives via `/bin/sh` is incidental.
