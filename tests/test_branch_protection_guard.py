@@ -789,10 +789,15 @@ def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
     r = _run_apply(
         project_env, gh_bin=gh,
         extra_env={
+            # `updated_at` on BOTH sides, and different, because that is what the
+            # live API returns and what makes "updated" a claim about the EFFECT
+            # rather than about having sent a PUT (TRDD-Q8ZT5NW3).
             "GH_RULESETS_BODY": json.dumps([
-                {"id": 42, "name": "baseline-history-protect", "target": "branch"},
+                {"id": 42, "name": "baseline-history-protect", "target": "branch",
+                 "updated_at": "2026-08-01T00:00:00Z"},
             ]),
-            "GH_PUT_BODY": json.dumps({"id": 42, "name": "baseline-history-protect"}),
+            "GH_PUT_BODY": json.dumps({"id": 42, "name": "baseline-history-protect",
+                                       "updated_at": "2026-08-21T09:00:00Z"}),
             "GH_POST_BODY": json.dumps({"id": 99, "name": "baseline-pr-and-checks"}),
         },
     )
@@ -801,6 +806,61 @@ def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
     # PUT (update) path reports "updated", POST path reports "created".
     assert "updated id=42" in r.stdout
     assert "created id=99" in r.stdout
+
+
+def test_apply_reports_unchanged_when_the_put_moved_nothing(project_env: Path) -> None:
+    """An identical PUT is a server-side no-op — GitHub does not move `updated_at`.
+
+    The audit line must say so. It has been cited as evidence that a repair
+    happened (TRDD-DD0M4QL7's box, and the ai-maestro hub's fleet audit), and on
+    the apply that prompted this, three rulesets reported `updated` while the live
+    API showed exactly ONE had changed.
+    """
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    stamp = "2026-08-01T00:00:00Z"
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            "GH_RULESETS_BODY": json.dumps([
+                {"id": 42, "name": "baseline-history-protect", "target": "branch",
+                 "updated_at": stamp},
+            ]),
+            # same timestamp back = nothing changed
+            "GH_PUT_BODY": json.dumps({"id": 42, "name": "baseline-history-protect",
+                                       "updated_at": stamp}),
+            "GH_POST_BODY": json.dumps({"id": 99, "name": "baseline-pr-and-checks"}),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "unchanged id=42" in r.stdout
+    assert "updated id=42" not in r.stdout
+    # DD0M4QL7's anti-silence trace must survive: a no-op still announces itself.
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+
+
+def test_apply_reports_put_unverified_when_the_timestamp_is_absent(project_env: Path) -> None:
+    """No `updated_at` to compare ⇒ say we cannot tell, never guess "updated".
+
+    Folding an unknown into the confident answer is the exact defect this card
+    fixes — someone grepping the audit log for repairs must not count a guess.
+    """
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            "GH_RULESETS_BODY": json.dumps([
+                {"id": 42, "name": "baseline-history-protect", "target": "branch"},
+            ]),
+            "GH_PUT_BODY": json.dumps({"id": 42, "name": "baseline-history-protect"}),
+            "GH_POST_BODY": json.dumps({"id": 99, "name": "baseline-pr-and-checks"}),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "put-unverified id=42" in r.stdout
+    assert "updated id=42" not in r.stdout
+    assert "unchanged id=42" not in r.stdout
 
 
 def test_apply_skips_when_ruleset_probe_fails(project_env: Path) -> None:

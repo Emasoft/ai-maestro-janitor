@@ -1,9 +1,9 @@
 ---
 trdd-id: Q8ZT5NW3
 title: The apply audit line reports updated for a ruleset a no-op PUT did not change
-column: todo
+column: testing
 created: 2026-08-21T03:57:42+0200
-updated: 2026-08-21T03:57:42+0200
+updated: 2026-08-21T08:22:43+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -55,9 +55,23 @@ exists to end.
 
 ## Acceptance
 
-- [ ] the audit line distinguishes `updated` from `unchanged` per ruleset
-- [ ] a no-op apply still logs one honest line (no regression of DD0M4QL7's anti-silence trace)
-- [ ] a test pins both: a changed ruleset reports `updated`, an identical PUT reports `unchanged`
-- [ ] pytest, ruff, mypy, pyright clean
+- [x] the audit line distinguishes `updated` from `unchanged` per ruleset — `by_name` now
+      carries `(id, updated_at)`, and `_post_or_patch_ruleset` compares the PUT response's
+      `updated_at` against the one the list returned. **Verified against the live API that the
+      list endpoint actually carries the field** (`updated_at: 2026-08-20T01:50:54.680+02:00`
+      on this repo's `baseline-history-protect`) — the comparison is real, not theoretical.
+- [x] a no-op apply still logs one honest line (no regression of DD0M4QL7's anti-silence trace)
+      — pinned by `test_apply_reports_unchanged_when_the_put_moved_nothing`, which asserts the
+      `[guard] applied …` announcement is STILL present alongside `unchanged id=42`.
+- [x] a test pins both: a changed ruleset reports `updated`, an identical PUT reports
+      `unchanged` — plus a THIRD state the card did not ask for and the code needs:
+      **`put-unverified`**, when either side lacks `updated_at`. Folding "cannot tell" into
+      "updated" would be the same defect in a new place: someone grepping the audit log for
+      repairs must not count a guess. Three tests, one per state.
+- [x] pytest, ruff, mypy, pyright clean — 116 passed across the four branch-protection /
+      github-config suites; ruff clean; mypy clean over 486 files; pyright 0 errors.
+
+No consumer parses the verb (swept `scripts/` — `_audit_append` writes the summary verbatim),
+so widening the vocabulary breaks nothing downstream.
 
 ## Approval log

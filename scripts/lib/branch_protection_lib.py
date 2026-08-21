@@ -690,10 +690,19 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
 
 
 def _post_or_patch_ruleset(
-    slug: str, payload: dict, existing_id: int | None,
+    slug: str, payload: dict, existing: tuple[int, str | None] | None,
 ) -> tuple[bool, str]:
-    """POST a new ruleset, or PUT (update) an existing one when `existing_id`
+    """POST a new ruleset, or PUT (update) an existing one when `existing`
     is set (idempotent-by-name). Returns (success, message).
+
+    `existing` is `(id, updated_at)` — the id selects the PUT endpoint, and the
+    timestamp is what lets the message report the EFFECT instead of the action
+    (TRDD-Q8ZT5NW3). An identical PUT is a server-side no-op: GitHub does not
+    move `updated_at`. Saying "updated" for one is not a cosmetic inaccuracy —
+    this audit line has already been cited as evidence that a repair happened,
+    once by me closing TRDD-DD0M4QL7 and once by the ai-maestro hub auditing the
+    fleet, and on the apply it describes, three rulesets reported `updated`
+    while the live API showed exactly ONE had changed.
 
     NOTE: GitHub's "Update a repository ruleset" endpoint is **PUT**
     `/repos/{owner}/{repo}/rulesets/{id}` — NOT PATCH. A PATCH returns 404 on
@@ -703,7 +712,8 @@ def _post_or_patch_ruleset(
     present), which is why the bug stayed latent."""
     if not gh_available():
         return (False, "gh CLI not in PATH")
-    if existing_id is None:
+    was_updated_at: str | None = None
+    if existing is None:
         argv = [
             "gh", "api", "--method", "POST",
             f"repos/{slug}/rulesets",
@@ -711,6 +721,7 @@ def _post_or_patch_ruleset(
         ]
         verb = "created"
     else:
+        existing_id, was_updated_at = existing
         argv = [
             "gh", "api", "--method", "PUT",
             f"repos/{slug}/rulesets/{existing_id}",
@@ -732,6 +743,18 @@ def _post_or_patch_ruleset(
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
         return (True, verb)
+    if existing is not None:
+        # Report the EFFECT. Three states, because there are genuinely three:
+        # the timestamp moved (a real repair), it did not (an identical PUT —
+        # the server no-op this card is about), or we cannot tell. The third is
+        # named rather than folded into "updated", since collapsing an unknown
+        # into the confident answer is the exact defect being fixed — a reader
+        # grepping the audit log for repairs must not count a guess.
+        now_updated_at = data.get("updated_at")
+        if isinstance(now_updated_at, str) and isinstance(was_updated_at, str):
+            verb = "updated" if now_updated_at != was_updated_at else "unchanged"
+        else:
+            verb = "put-unverified"
     new_id = data.get("id")
     return (True, f"{verb} id={new_id}" if new_id is not None else verb)
 
@@ -793,13 +816,18 @@ def apply_baseline_rulesets(
     rulesets = list_existing_rulesets(slug)
     if rulesets is None:
         return (False, [("list", False, "ruleset list lookup failed")], [])
-    by_name: dict[str, int] = {}
+    # name -> (id, updated_at). The timestamp rides along so the apply can report whether a
+    # PUT actually CHANGED anything (TRDD-Q8ZT5NW3); it is Optional because the list response
+    # is not guaranteed to carry it, and an absent one must read as "cannot tell", never as
+    # "unchanged".
+    by_name: dict[str, tuple[int, str | None]] = {}
     for r in rulesets:
         if isinstance(r, dict):
             rid = r.get("id")
             nm = r.get("name")
             if isinstance(rid, int) and isinstance(nm, str):
-                by_name[nm] = rid
+                seen_at = r.get("updated_at")
+                by_name[nm] = (rid, seen_at if isinstance(seen_at, str) else None)
 
     checks = detect_required_status_checks(project_root)
     # Slug-aware: this caller KNOWS the repo, so it can tell "my own standalone project"
