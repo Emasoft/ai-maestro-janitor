@@ -200,6 +200,41 @@ def test_tick_stall_suppressed_when_daemon_down() -> None:
                 if x.code == "tick-stalled"]
 
 
+def test_tick_stalled_is_suppressed_when_the_server_owns_the_chore() -> None:
+    """TRDD-9T0U3M00: an ABSORBED chore's stale stamp is health, not a stall.
+
+    `daemon.py` yields `oauth-rotator-tick` to an active ai-maestro server, so on such a host
+    the janitor's own stamp goes stale WHENEVER THE SYSTEM IS HEALTHY — the tick runs, just
+    not here. Measured 2026-08-21: this alert claimed 'rotation is effectively OFF' against a
+    server that had owned the chore all day, and it cost three consecutive misdiagnoses.
+
+    The pair below IS the mutation test: delete the `not facts.server_owns_chores` guard and
+    the second assertion goes red, while the first still passes — so a fix that silently
+    over-suppresses is caught too.
+    """
+    stale = dict(daemon_alive=True, tick_completed_age_s=sup.TICK_STALL_ALERT_S + 1)
+    assert [x for x in sup.diagnose(_facts(**stale, server_owns_chores=False))
+            if x.code == "tick-stalled"], "a standalone host must still get the alert"
+    assert not [x for x in sup.diagnose(_facts(**stale, server_owns_chores=True))
+                if x.code == "tick-stalled"], "an absorbed chore's stale stamp is not a stall"
+
+
+def test_server_owns_chores_fails_CLOSED_so_a_real_stall_stays_loud(monkeypatch) -> None:
+    """A probe that cannot answer must return False, keeping the alert ON.
+
+    Failing OPEN here would be the dangerous direction: a supervisor that cannot tell whether
+    the chore is absorbed would silently swallow a genuine stall, and rotation being off is
+    exactly what nobody notices until a rate limit lands.
+    """
+    import harness_backend
+
+    def _boom() -> bool:
+        raise RuntimeError("probe unavailable")
+
+    monkeypatch.setattr(harness_backend, "server_runs_chores", _boom)
+    assert sup._server_owns_chores() is False
+
+
 def test_tick_completed_age_reads_real_stamp(tmp_path: Path) -> None:
     """_tick_completed_age_s reads tick-completed.ts as an epoch and returns the age;
     an absent OR garbage stamp yields None (which diagnose treats as stalled)."""

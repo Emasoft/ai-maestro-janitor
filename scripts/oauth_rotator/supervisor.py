@@ -124,6 +124,11 @@ class Facts:
     # daemon's own problem, not a tick stall.
     tick_completed_age_s: float | None = None
     daemon_alive: bool = False
+    # TRDD-9T0U3M00: when an ACTIVE ai-maestro server owns the absorbed chores, the janitor
+    # daemon YIELDS `oauth-rotator-tick` to it — so the janitor's own stamp goes stale BY
+    # DESIGN and a stale stamp is what healthy server-side execution looks like. Defaults
+    # False so a standalone host (no server) keeps the F4 alert unchanged.
+    server_owns_chores: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,7 +177,15 @@ def diagnose(facts: Facts) -> list[Finding]:
     # the user relies on it. None (never stamped) counts as stalled too: once this
     # version ships, every completed tick stamps, so a persistent None is a real
     # signal, not noise.
-    if facts.daemon_alive and (
+    #
+    # …UNLESS the chore is ABSORBED. TRDD-9T0U3M00: `daemon.py` yields `oauth-rotator-tick`
+    # to an active ai-maestro server, so on such a host the janitor's stamp is stale WHENEVER
+    # THE SYSTEM IS HEALTHY — the tick is running, just not here. Measured 2026-08-21: this
+    # alert claimed "rotation is effectively OFF" against a server that had owned the chore
+    # all day, and it cost three consecutive misdiagnoses before `daemon.log` was read. The
+    # janitor's `version-update` stamp has the identical property and CLAUDE.md already warns
+    # not to read it as a dead daemon; this predicate never got the same guard.
+    if facts.daemon_alive and not facts.server_owns_chores and (
         facts.tick_completed_age_s is None or facts.tick_completed_age_s > TICK_STALL_ALERT_S
     ):
         age = ("%.0fs" % facts.tick_completed_age_s) if facts.tick_completed_age_s is not None else "never"
@@ -398,7 +411,38 @@ def gather_facts(root: Path | None = None, *, now: float | None = None) -> Facts
         slots=_slot_facts(root, now) if opt_in else (),
         tick_completed_age_s=_tick_completed_age_s(root, now) if opt_in else None,
         daemon_alive=_daemon_alive() if opt_in else False,
+        server_owns_chores=_server_owns_chores() if opt_in else False,
     )
+
+
+def _server_owns_chores() -> bool:
+    """Is `oauth-rotator-tick` currently YIELDED to an active ai-maestro server?
+
+    THE binary chore switch (`harness_backend.server_runs_chores`, TRDD-LU0C5KAR) — the same
+    call `daemon.py` uses to decide what to yield, so the supervisor and the daemon cannot
+    disagree about who owns the tick. Reading a second source here would reintroduce exactly
+    the split-brain this is fixing.
+
+    Fails to **False** on any import or probe error, which keeps the F4 alert LOUD by default:
+    a supervisor that cannot tell whether the chore is absorbed must not silently suppress a
+    genuine stall. `scripts/lib` is on sys.path in the daemon context but not necessarily in a
+    test harness — same reason `_track_cannot_self_renew` carries its own fallback.
+    """
+    try:
+        import harness_backend
+    except ImportError:
+        import sys
+        lib = str(Path(__file__).resolve().parent.parent / "lib")
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        try:
+            import harness_backend
+        except ImportError:
+            return False
+    try:
+        return bool(harness_backend.server_runs_chores())
+    except Exception:  # noqa: BLE001 - a probe fault must not break fact gathering
+        return False
 
 
 @dataclass
