@@ -144,13 +144,28 @@ delete unasked), so this is reported, not acted on.
    `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
 3. Do NOT scale anything before that log exists.
 
-**WHERE THAT LOG ACTUALLY LANDS — read this before concluding the instrumentation failed.**
-A detector spawned by a test writes to `$CLAUDE_PROJECT_DIR/.janitor/logs/`, and
-`CLAUDE_PROJECT_DIR` is the test's own `tmp_path`. So the breadcrumb is NOT in this repo's
-`.janitor/logs/` — it is under `/var/folders/.../pytest-of-<user>/pytest-<N>/<test-name><n>/`.
-pytest keeps the last 3 run dirs, so it survives long enough to read, and the failure message
-usually prints the path. An empty repo-local `subprocess.log` after a failing run means the
-child logged elsewhere, NOT that the logging is broken.
+**THE INSTRUMENTATION IS VERIFIED END-TO-END, and it reproduced the exact signature.**
+Not asserted — measured, 2026-08-21 13:51. `branch-protection.py` run against a throwaway
+project with `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE=0.0001` to force expiry:
+
+```
+rc=0   stdout=0 bytes   stderr=0 bytes
+.janitor/logs/branch-protection.log:
+  [2026-08-21T13:51:27+0200] subprocess timed out after 5s: git rev-parse --git-dir
+```
+
+**`rc=0` with EMPTY stdout is exactly what soak-5's `assert 'BRPROT-001' in ''` sees** — so the
+signature mapping is confirmed, and the breadcrumb that was missing all day is now written and
+readable. This does NOT prove a timeout is what happened at 595 s (this one was forced); it
+proves the next occurrence will say so itself.
+
+**WHERE THE LOG LANDS — look in the right file before concluding the instrumentation failed.**
+A caller that passes `detector_name` routes to `<detector-name>.log` (as above); only an
+UNATTRIBUTED caller lands in the shared `subprocess.log`. And a detector spawned by a test
+writes under `$CLAUDE_PROJECT_DIR`, which is the test's own `tmp_path` — so neither file is in
+this repo's `.janitor/logs/`; both are under
+`/var/folders/.../pytest-of-<user>/pytest-<N>/<test-name><n>/.janitor/logs/`. pytest keeps the
+last 3 run dirs, so they survive long enough to read.
 
 ### Category A re-checked by AST, not by grep — 2026-08-21 13:50
 
