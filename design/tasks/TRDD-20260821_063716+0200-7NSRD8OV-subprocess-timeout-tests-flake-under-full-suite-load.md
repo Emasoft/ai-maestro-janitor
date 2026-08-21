@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T11:14:40+0200
+updated: 2026-08-21T12:26:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -117,6 +117,30 @@ load higher than the one that originally broke them.
 completed in 81 s and 99 s against the pre-fix 162 s and 176 s. Same worker count, but the box was
 genuinely quieter, so this is **not a perfectly controlled comparison**. The evidence is
 before/after at matched settings PLUS a named, proven mechanism per site — not a green run alone.
+
+### ⏵ CAVEAT RETIRED — 2026-08-21 12:26. A LOADED post-fix run, slower than both failing ones
+
+`-n 28`, after the UTC fix and `branch_protection_guard`'s category-D ceiling:
+**15,730 passed, 1 skipped, 0 failed, EXIT 0, in 189.20 s.**
+
+| run | wall-clock | failures |
+|---|---|---|
+| pre-fix | 162 s | **24** |
+| pre-fix | 176 s | **12** |
+| post-fix (quiet — the weak evidence above) | 81 s / 99 s | 0 |
+| **post-fix (this one)** | **189 s** | **0** |
+
+**189 s is SLOWER than both runs that failed**, so the "held at half the load that broke it"
+objection no longer applies to this datum: the box was more contended than when 24 and 12 tests
+fell over, and nothing failed. Combined with a named, proven mechanism at each of the 12 sites,
+this is the back-to-back-under-load evidence the acceptance box asks for.
+
+Test count 15,727 → 15,730 is the three regression tests added since (two librarian, one
+timezone).
+
+**Still not closed here**, and the reason is no longer evidential: `test_plugin_updates`' own
+`timeout=60` failed once in the 283 s run and is deliberately unfixed (its detail was elided by
+`--tb=line`, and it passes isolated), so one category-D site remains unaudited by choice.
 
 **I stopped escalating load deliberately.** A `-n 42` (3x) attempt was KILLED mid-run and left the
 box at loadavg 38. That was an overstep: earlier on this same card I declined to saturate a shared
