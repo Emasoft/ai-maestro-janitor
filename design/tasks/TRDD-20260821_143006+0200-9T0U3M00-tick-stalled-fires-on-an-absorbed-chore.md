@@ -85,6 +85,23 @@ by the same test.
 - [x] It still fires on a standalone host (no server) — asserted in the same test
 - [x] The probe fails CLOSED, so an unanswerable probe keeps the alert on — asserted
 - [x] The supervisor and the daemon read ONE source for chore ownership
+
+      **This box was checked on a FALSE reading, and a code review caught it 2026-08-21 16:5x.**
+      One *module* is not one *predicate*. My guard asked `server_runs_chores()` alone;
+      `daemon.py::_task_yielded_to_server` (verified at `scripts/daemon.py:2164`) asks
+      `server_runs_chores() AND task_name in claimed_chores()` — the handover is INCREMENTAL
+      (owner ruling 2026-08-05, janitor#134: "it means BOTH").
+
+      **The failure that would have caused is worse than the bug I was fixing.** A live server
+      that has NOT claimed `oauth-rotator-tick` leaves the tick running here; if it then
+      genuinely stalled, my guard would have suppressed the F4 alert for a chore nobody had
+      taken — a silenced alarm, which is the ai-maestro#111 blackout shape, introduced by the
+      card whose whole purpose is preventing a false reading of that chore.
+
+      Now fixed to evaluate both terms. **Autopsy:** I asserted parity from the same *source*
+      rather than the same *expression*, and wrote the box from my intent instead of from a
+      diff of the two predicates. The check that would have caught it costs one grep — read
+      the predicate you claim parity with, not the module it lives in.
 - [x] Mutation-proven: the guard's removal turns the test red
 - [x] `uv run pytest tests/test_oauth_supervisor.py` 21 passed · `ruff` clean · `mypy` clean
       across 486 files

@@ -415,13 +415,19 @@ def gather_facts(root: Path | None = None, *, now: float | None = None) -> Facts
     )
 
 
+_TICK_CHORE = "oauth-rotator-tick"
+
+
 def _server_owns_chores() -> bool:
     """Is `oauth-rotator-tick` currently YIELDED to an active ai-maestro server?
 
-    THE binary chore switch (`harness_backend.server_runs_chores`, TRDD-LU0C5KAR) — the same
-    call `daemon.py` uses to decide what to yield, so the supervisor and the daemon cannot
-    disagree about who owns the tick. Reading a second source here would reintroduce exactly
-    the split-brain this is fixing.
+    THE SAME PREDICATE `daemon.py::_task_yielded_to_server` uses — `server_runs_chores()` AND
+    the chore appearing in `claimed_chores()`. Both halves, because the handover is INCREMENTAL
+    (owner ruling 2026-08-05, janitor#134: "it means BOTH"): a live server that has not claimed
+    `oauth-rotator-tick` leaves the tick running HERE, so asking only "is a server alive?" would
+    suppress the F4 alert for a chore nobody had taken — the silenced-alert form of the
+    ai-maestro#111 blackout. The supervisor and the daemon must not disagree about who owns the
+    tick, and they only cannot when they evaluate the same two terms.
 
     Fails to **False** on any import or probe error, which keeps the F4 alert LOUD by default:
     a supervisor that cannot tell whether the chore is absorbed must not silently suppress a
@@ -440,7 +446,10 @@ def _server_owns_chores() -> bool:
         except ImportError:
             return False
     try:
-        return bool(harness_backend.server_runs_chores())
+        return bool(
+            harness_backend.server_runs_chores()
+            and _TICK_CHORE in harness_backend.claimed_chores()
+        )
     except Exception:  # noqa: BLE001 - a probe fault must not break fact gathering
         return False
 
