@@ -1,9 +1,10 @@
 ---
 trdd-id: Q8ZT5NW3
 title: The apply audit line reports updated for a ruleset a no-op PUT did not change
-column: testing
+column: ai_review
 created: 2026-08-21T03:57:42+0200
-updated: 2026-08-21T08:22:43+0200
+updated: 2026-08-21T08:34:07+0200
+implementation-commits: [342f3f6f]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -74,4 +75,25 @@ exists to end.
 No consumer parses the verb (swept `scripts/` — `_audit_append` writes the summary verbatim),
 so widening the vocabulary breaks nothing downstream.
 
-## Approval log
+## Self-review (testing → ai_review, 2026-08-21T08:34+0200)
+
+**Test gate PASSED:** full suite 15,716 passed / 0 failed (9m53s) — +2 over the pre-change
+count, which are this card's own new tests. ruff, mypy (486 files) and pyright clean.
+
+**What a reviewer should push on:**
+
+1. **`put-unverified` is a vocabulary I added, not one the card asked for.** The card asked for
+   two states. I added a third because the code genuinely has three, and folding "cannot tell"
+   into "updated" is this card's own defect one level down. If you'd rather the log kept a
+   two-word vocabulary, the alternative is to treat a missing timestamp as a hard error rather
+   than a third word — but silently guessing is not on the table.
+2. **The comparison trusts GitHub's `updated_at` semantics** — specifically that an identical
+   PUT does not move it. That is the card's premise and it matches the observed data (three
+   PUTs, one moved timestamp), but it is an API behaviour, not a contract I can pin in a test.
+   The live-API check confirms the FIELD is present; it does not prove GitHub will never touch
+   it on a no-op.
+3. **No live re-verification of a real apply.** The three states are proven against the gh stub.
+   A real apply against a real repo would be the stronger evidence, and it is not worth causing
+   a ruleset write just to watch the log line.
+
+**Not moved to `complete`:** `ai_review → human_review → complete` is the USER's gate.
