@@ -23,6 +23,7 @@ node_modules/
 .env.*.local
 *.pem
 *.key
+id_rsa*
 
 # Claude Code cache directory — ignore the whole tree DEEPLY (`**`, not a bare
 # `.claude/`). The bare form prunes the directory so git never descends to honor

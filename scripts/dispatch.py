@@ -148,6 +148,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("gh-reply-watch", 900, "CLAUDE_PLUGIN_OPTION_GH_REPLY_WATCH_INTERVAL"),
     ("nested-git-safety", 3600, "CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL"),
     ("tracked-ignored", 3600, "CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL"),
+    # Runs alongside tracked-ignored and asks the question that one PRESUPPOSES: is the class
+    # covered at all? (TRDD-6WM4BFKF). Hourly, because the answer only changes when .gitignore
+    # or the index does, and the finding is preventive rather than urgent.
+    ("gitignore-coverage", 3600, "CLAUDE_PLUGIN_OPTION_GITIGNORE_COVERAGE_INTERVAL"),
     # marketplace-refresh: per-session, scoped to local+project marketplaces.
     # Global bulk refresh is the daemon's job (every 20 min). Runs BEFORE the
     # plugin-* detectors so the manifest is fresh by the time they consult it.
@@ -587,6 +591,10 @@ _ADVISORY_DETECTORS = frozenset({
     "why-in-commits", "subagent-report", "stale-task", "stale-stash", "dirty-tree",
     "stale-index-lock",
     "worktree-janitor", "trashcan-purge", "reports-purge", "screenshot-purge",
+    # Preventive, not urgent: a missing ignore pattern is a risk until a file appears in that
+    # class, not an incident. Advisory so it lands in the ledger instead of repeating on every
+    # fire — which is the janitor#276 failure this same file was just fixed for.
+    "gitignore-coverage",
     "runaway-file-growth",
     "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
     "oauth-cookie-reminder", "oauth-beacon-refresh",
@@ -2254,7 +2262,15 @@ def _phase_idle_clear_nudge() -> bool:
         if present or active:
             return False
         root = state.project_root()
-        idle_s, _, _ = fleet_scan.transcript_activity(str(root), now)
+        idle_s, _, awaiting_user = fleet_scan.transcript_activity(str(root), now)
+        if awaiting_user:
+            # The tail ends on an UNANSWERED tool_use: the session is not idle, it is waiting on
+            # the human. `user_is_present` cannot see this — presence is keyed on recent input,
+            # and someone reading a permission prompt is producing none. Without this the nudge
+            # reads "quiet" as "abandoned" and proposes clearing a conversation mid-interaction,
+            # destroying the context the pending answer belongs to. Same class as TRDD-OO301H7D,
+            # one path over: the flag was already computed here and thrown away by `_`.
+            return False
         ctx = cold_cache_compact.context_tokens_for(
             cold_cache_compact.newest_transcript(root)
         )
