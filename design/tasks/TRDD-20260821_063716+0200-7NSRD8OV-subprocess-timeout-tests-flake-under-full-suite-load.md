@@ -144,6 +144,37 @@ delete unasked), so this is reported, not acted on.
    `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
 3. Do NOT scale anything before that log exists.
 
+**WHERE THAT LOG ACTUALLY LANDS — read this before concluding the instrumentation failed.**
+A detector spawned by a test writes to `$CLAUDE_PROJECT_DIR/.janitor/logs/`, and
+`CLAUDE_PROJECT_DIR` is the test's own `tmp_path`. So the breadcrumb is NOT in this repo's
+`.janitor/logs/` — it is under `/var/folders/.../pytest-of-<user>/pytest-<N>/<test-name><n>/`.
+pytest keeps the last 3 run dirs, so it survives long enough to read, and the failure message
+usually prints the path. An empty repo-local `subprocess.log` after a failing run means the
+child logged elsewhere, NOT that the logging is broken.
+
+### Category A re-checked by AST, not by grep — 2026-08-21 13:50
+
+The two previous enumerations of hand-built child envs were done with `grep 'env = {'`
+anchored at line-end and were wrong twice (an inline `env={` is invisible to it). Redone by
+walking every `ast.Call` in `tests/` and testing each `env=` kwarg for a literal dict that does
+not derive from `os.environ`: **23 sites, 20 of them in files that never mention the knob.**
+
+Of those, exactly ONE is both a real category-A exposure and in a file with measured failures:
+`test_gh_reply_watch.py:287` (`test_a_broken_gh_is_silent_not_an_alarm`) — the FOURTH
+minimal-env builder in a file whose other three the earlier sweep fixed. Now passes
+`**_harness_env()`.
+
+**The rest are NOT worth touching, and saying why matters:** `test_gh_reply_watch.py:134` exits
+at the enable-gate before spawning anything; `test_github_issues_watch.py:275` already passes
+the knob (the AST scan flags the literal dict, not the absence); the remaining 20 are in files
+that have never appeared in a soak failure list. Fixing them would be the same
+enumerate-everything reflex that has failed three times on this card.
+
+**This does NOT explain soak-5's four `test_gh_reply_watch` failures** — those go through
+`_run_on_host`, which was fixed hours earlier and demonstrably carries the knob. So category A
+is now a WEAKER candidate for the residual, not a stronger one. Recorded because a negative
+result narrows the search too.
+
 ---
 
 **NEXT ACTION:** read `scratchpad/soak-{3,4,5}.txt` (three `-n 28` runs, in flight at 13:40).

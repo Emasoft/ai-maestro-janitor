@@ -291,6 +291,11 @@ def test_a_broken_gh_is_silent_not_an_alarm(tmp_path: Path) -> None:
             "PATH": f"{project / 'bin'}:/usr/bin:/bin",
             "HOME": str(project),
             "CLAUDE_PROJECT_DIR": str(project),
+            # The 4th minimal-env builder in this file — the earlier sweep fixed three and an
+            # AST scan of every `env={...}` in tests/ found this one still bare
+            # (TRDD-7NSRD8OV, category A). A grep for `env = {` anchored at line-end could not
+            # see it; that shape of miss has happened twice on this card.
+            **_harness_env(),
         },
     )
     assert proc.returncode == 0
