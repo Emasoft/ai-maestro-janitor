@@ -1,9 +1,9 @@
 ---
 trdd-id: BEXY5KIP
 title: Dispatcher consumes the server-published plugins-updated signal so server-lane sweeps still surface a reload
-column: testing
+column: complete
 created: 2026-08-20T00:53:21+0200
-updated: 2026-08-20T08:05:00+0200
+updated: 2026-08-21T07:55:37+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -59,7 +59,27 @@ and silently disable reload signalling machine-wide, forever.
 - [x] pytest (15611 green, full suite), ruff, mypy, pyright clean; 11 tests incl. the
       newer-source-wins-either-way pair and the far-future ratchet guard
 
-Gate to `complete`: one live observation — a hub sweep publishes, a janitor session with no
-local flag emits `[janitor-reload]` once and stays silent after. Needs 3.3.19 cached.
+- [x] **GATE MET — the live observation happened 2026-08-21 03:25:47 → 03:26:04.** Closed on
+      machine-recorded evidence, not on reasoning:
+
+      The hub's sweep published the signal (`~/.aimaestro/state/plugins-updated.json`,
+      `"by": "fleet-plugins-update"`, `"count": 7`, `updated_at_epoch: 1787275547`) at 03:25:47.
+      Seventeen seconds later this project's dispatcher consumed it:
+
+      ```text
+      [2026-08-21T03:26:04+0200] [s:d30bf250] reload generation 1787275547 > project ack
+         → [janitor-reload] emitted (per-project ack advanced; global generation left intact)
+      ```
+
+      That is the card's whole thesis demonstrated end to end: the generation is the SERVER's
+      epoch, byte-identical to the producer's `updated_at_epoch`, with no janitor-side flag
+      write involved. **And it stayed silent after** — 23 heartbeat fires between 04:00 and
+      07:50 produced ZERO further emissions, which is the per-project ack doing its job.
+
+      *Care taken, because the obvious evidence was not sufficient:* `reload-acked.ts` holding
+      exactly `1787275547` looks like proof and is not — SessionStart SEEDS that stamp to the
+      at-start generation, so `acked == gen` is equally consistent with a fresh session that
+      never emitted anything. Only the dispatch log distinguishes "emitted" from "seeded". A
+      stamp records a VALUE; it does not record which code path wrote it.
 
 ## Approval log
