@@ -36,6 +36,8 @@ import shutil
 import subprocess
 from typing import Any
 
+import state as _state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
+
 
 def parse_agents_json(stdout: str) -> list[dict[str, Any]]:
     """Parse `claude agents --json` stdout into a list of row dicts.
@@ -161,7 +163,14 @@ def fetch_agents(*, timeout_s: int = 15) -> tuple[list[dict[str, Any]], str]:
             [binary, "agents", "--json"],
             capture_output=True,
             text=True,
-            timeout=timeout_s,
+            # Scaled by the SHARED knob (1.0 in production — byte-identical there). This is a
+            # direct subprocess.run with its OWN ceiling, so scaling `state.run_subprocess`
+            # never reached it. Measured under suite load: this expired and returned "timeout",
+            # and the tests asserting the OTHER classifications failed as
+            # `assert 'timeout' == 'exit-7'` / `== 'unparseable'` — the outcome under test was
+            # replaced by a load artefact, which reads as a classification bug in code that is
+            # correct (TRDD-7NSRD8OV).
+            timeout=timeout_s * _state.timeout_scale(),
             check=False,
         )
     except subprocess.TimeoutExpired:

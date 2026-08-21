@@ -230,6 +230,12 @@ def test_fetch_agents_unparseable_stdout_is_reported(tmp_path: Path, monkeypatch
 
 def test_fetch_agents_timeout_is_reported(tmp_path: Path, monkeypatch) -> None:
     """A process that outlives the timeout is reported as timeout, not left to hang."""
+    # OPT OUT of the harness's subprocess-timeout scale (TRDD-7NSRD8OV). Every other test wants
+    # timeouts stretched so suite load cannot fake one; THIS test is the one that deliberately
+    # CAUSES a timeout, so the stretch would defeat it — at the suite's scale of 10 a 1 s ceiling
+    # becomes 10 s, the `sleep 5` shim finishes comfortably inside it, and the assertion fails
+    # having proven nothing. A test that pins timeout behaviour has to own the scale.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE", "1")
     shim_dir = _write_shim(tmp_path, "#!/bin/sh\nsleep 5\n")
     _prepend_to_path(monkeypatch, shim_dir)
     rows, why = car.fetch_agents(timeout_s=1)
