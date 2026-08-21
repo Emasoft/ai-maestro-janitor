@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T03:15:00+0200
+updated: 2026-08-21T05:05:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -17,7 +17,34 @@ eht: []
 
 # Remaining missed shapes from the fence-mask replacement (XOITBRIZ follow-on)
 
-## ⏵ STATE — 2026-08-21 03:15: OPTION (a) IS WORKING — c13 captured at 1800 s / concurrency 1
+## ⏵ STATE — 2026-08-21 05:05: **c20 CAPTURED — the measurement's blocker is GONE.** 25/32
+
+`c20 two-step-code-injection` landed at 1800 s / concurrency 1, having timed out at 900 s twice
+before. That is the class whose absence made the out-of-sample recall + 0-FP measurement
+unrunnable, so the card's central blocker is cleared.
+
+Per-class verdict so far (this is the useful output — the previous runs produced one blanket
+answer, this produces a routing decision per class):
+
+| class | 900 s | 1800 s / conc 1 |
+|---|---|---|
+| c13 mcp-schema-in-annotations | TIMEOUT x2 | **ok** |
+| c14 whole-env-exfil | TIMEOUT x2 | TIMEOUT |
+| c17 procmem-credential-extraction | TIMEOUT | TIMEOUT |
+| c18 git-protocol-only-dependency | TIMEOUT | **ok** |
+| c19 dns-exfil-long-subdomain | TIMEOUT x2 | **ok** |
+| **c20 two-step-code-injection** | TIMEOUT x2 | **ok** |
+
+4 of 6 recovered by the ceiling raise alone. Only c14 and c17 are genuinely too heavy for the
+free tier at 1800 s — those two, and only those two, are the candidates for option (b) paid/local
+or (c) split prompts. The 08-20 conclusion that "these classes' generation prompts are too heavy
+for the free tier inside 900 s, ever" was right about the ceiling being binding and wrong to
+generalise it to all eleven.
+
+Still running: c22, c25, c27, **b1, b2**. The benign set is the other half of the measurement's
+own rule (b3/b4 already captured); with b1+b2 it is complete and the measurement is runnable.
+
+## ⏵ STATE — 2026-08-21 03:15: OPTION (a) IS WORKING — c13 captured at 1800 s / concurrency 1 *(superseded by the block above)*
 
 Took the previous block's option **(a) raise the ceiling**, with one addition its own data
 already implied: **ceiling and concurrency are ONE lever.** This file had measured that a
