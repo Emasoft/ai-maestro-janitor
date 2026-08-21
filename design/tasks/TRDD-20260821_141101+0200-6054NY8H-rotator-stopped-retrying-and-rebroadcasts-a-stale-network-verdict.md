@@ -1,9 +1,9 @@
 ---
 trdd-id: 6054NY8H
-title: The OAuth rotator stopped retrying 6h ago and re-broadcasts a stale network verdict it will never re-test
+title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-21T14:20:00+0200
+updated: 2026-08-21T14:25:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -93,6 +93,49 @@ a human re-login. The stale-verdict defect is real but is now the SECOND finding
 Distinct from [[TRDD-A8DPTDOU]], which is about two alert KEYS describing one condition. This
 card is about a state machine that latched and a verdict that is never re-tested. Fixing the
 key hygiene would not fix this, and vice versa.
+
+## ⛔ CORRECTION 2 — 2026-08-21 14:25. **THE JANITOR IS NOT RUNNING THIS CHORE.**
+
+`global-state/daemon.log`, today:
+
+```
+04:45:33  chore-coordination: yielding to active ai-maestro server:
+          ['github-config-audit', 'marketplace-refresh', 'oauth-rotator-supervisor',
+           'oauth-rotator-ti…]
+11:40:14  chore-coordination: server no longer confirmed active — resuming singleton chores
+11:40:18  task 'oauth-rotator-tick' starting
+11:40:18  task 'oauth-rotator-tick' done in 0s
+11:40:23  chore-coordination: yielding to active ai-maestro server: [… same list …]
+```
+
+The janitor **yields `oauth-rotator-tick` AND `oauth-rotator-supervisor` to the ai-maestro
+server**. It ran the tick exactly twice today — 04:45 and 11:40 — each in the brief window
+before the server was re-confirmed active, each finishing in 0 s. Every alert line in
+`rotator.log` is tagged **`aim-server/alert:`**, not the janitor's own.
+
+**So the "stopped retrying" behaviour belongs to the SERVER's schedule, not the janitor's**, and
+the month-old `oauth-rotator-tick.last-run.ts` stamp is not a dead daemon — it is exactly what a
+healthy ABSORBED chore looks like (CLAUDE.md documents the identical pattern for
+`version-update`: "for an absorbed chore a frozen janitor stamp is exactly what healthy
+server-side execution looks like").
+
+**This is the THIRD correction on this card, and the most consequential: I was reading janitor
+source to explain behaviour the janitor is not performing.** The source findings above are still
+TRUE of `rotator.py` — cause-blind counter, max 3, all slots far past it — but whether they are
+the operative code path depends on an unanswered question.
+
+**THE UNANSWERED QUESTION, and it decides where any fix belongs:** does the ai-maestro server
+INVOKE the janitor's `oauth_rotator/rotator.py` (in which case the source diagnosis holds and
+only the scheduler is the server's), or does it run its own implementation that merely writes
+into the janitor's `rotator.log`? Resolve that BEFORE touching anything.
+
+**Per `~/.claude/rules/how-to-fix-issues-of-other-projects.md`, if the defect is the server's it
+is NOT mine to edit** — it gets an issue on the ai-maestro repo, or a fork-and-PR, and only on
+the USER's explicit say-so. Nothing here justifies editing another project's tree.
+
+**What survives all three corrections, and is the only part that needs a human TODAY:** three
+account tokens expired 6.7–10 days ago, two with `credential-dead`. That is true regardless of
+which component schedules the refresh.
 
 ## Acceptance
 
