@@ -1,9 +1,9 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: todo
+column: testing
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-16T06:17:58+0200
+updated: 2026-08-22T01:30:10+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -196,17 +196,31 @@ into a pane it does not own)?
       writing. **Done 2026-08-14 — see `## Advisor verdict` below.** Verdict was DO NOT SHIP
       AS DESIGNED; every objection is answered there, and the boxes below were rewritten
       because of it rather than merely ticked.
-- [ ] **(REWRITTEN per advisor.)** Two layers, because one is provably insufficient:
+- [x] **(REWRITTEN per advisor.)** Two layers, because one is provably insufficient:
       (a) PURE layer — mutation/neuter: disabling a veto must let a protected case through
       in a test; (b) GATHER layer — input-liveness: a fixture transcript ending on an
       unanswered `tool_use` must refuse END TO END. (b) is not optional. No mutation of a
       pure function can detect an input that never arrives, and TRDD-OO301H7D was exactly
       that bug — measured 2026-08-14, neutering the fix failed 1 of 54 tests, and the 53
       that still passed were the pure-layer ones.
-- [ ] A test proving a session blocked on `ExitPlanMode` is NEVER cleared.
-      **BLOCKED until TRDD-OO301H7D lands** — it cannot be honestly ticked while the
-      external path discards `awaiting_user`. (OO301H7D shipped `fde1bf40`; re-verify this
-      box against the in-model nudge path specifically, which is a different path.)
+- [x] A test proving a session blocked on `ExitPlanMode` is NEVER cleared.
+      ~~**BLOCKED until TRDD-OO301H7D lands**~~ — **UNBLOCKED AND MET 2026-08-22.**
+
+      This box told the next session exactly where to look, and it was right: *"re-verify
+      against the in-model nudge path specifically, which is a different path."* It was, and
+      it carried the same defect. `scripts/dispatch.py:2257` read
+      `idle_s, _, _ = fleet_scan.transcript_activity(...)`, discarding `awaiting_user` — and
+      `grep awaiting_user scripts/dispatch.py` returned NOTHING, so the flag was computed and
+      never consulted anywhere in that file. A tail ending on an unanswered `tool_use` (which
+      is what an open `ExitPlanMode` prompt IS) therefore read as "idle", and the nudge could
+      propose clearing a conversation mid-interaction.
+
+      `user_is_present` cannot cover this: presence is keyed on recent input, and a human
+      reading a prompt produces none. That is why the flag exists and why discarding it was
+      silent.
+
+      Fixed in the same pass; the GATHER-layer test above went RED → GREEN on that one change,
+      which is the proof both boxes were asserting.
 - [x] A test proving `/clear` is not typed unless a verified handoff exists on disk.
       **Done 2026-08-16 — `tests/test_external_clear_never_clears_without_handoff.py`.** Two
       end-to-end assertions on the real `main()`, per this card's own advisor verdict that a pure
