@@ -9,6 +9,7 @@ it must stay silent both when disabled and when it cannot resolve a repo.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -165,6 +166,13 @@ def _run_detector(project: Path, **extra_env: str) -> subprocess.CompletedProces
         "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
         "HOME": str(project),
         "CLAUDE_PROJECT_DIR": str(project),
+        # TRDD-7NSRD8OV: the timeout scale must survive this MINIMAL env or the detector runs at
+        # 1.0, times out under suite load, fails open, and exits 0 with empty stdout.
+        **{
+            k: v
+            for k, v in os.environ.items()
+            if k == "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE"
+        },
         **extra_env,
     }
     return subprocess.run(

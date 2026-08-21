@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T10:22:49+0200
+updated: 2026-08-21T10:35:12+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -41,9 +41,42 @@ quoting conftest's own docstring, which asserts the tests "build the child env w
 `os.environ.copy()`". That claim is true of SOME tests and false of these. I verified the half
 that was true and took the docstring's word for the half that decides the outcome.
 
-**And it retires the 73-direct-`subprocess.run` theory as the main story.** That family is real
-but was never shown to fire; this one is measured, and `run_subprocess` — the seam I already
-fixed — is what times out, because the child never learned it should wait longer.
+### CORRECTION 10:35 — I over-claimed this as THE root cause. There are TWO families, both real
+
+Written 13 minutes after the block above, on data that contradicts part of it. Of the **9 files
+with measured failures**, only **2** build a minimal env (`test_gh_reply_watch`,
+`test_github_issues_watch`). Checked per file:
+
+| failing file | env pattern | gets the knob? |
+|---|---|---|
+| `test_gh_reply_watch` (10 fails) | minimal dict ×3 | **no** |
+| `test_github_issues_watch` (2) | minimal dict ×1 | **no** |
+| `test_branch_protection_guard` (7) | `os.environ.copy()` | **yes** |
+| `test_token_usage_anomaly_detector` (1) | `os.environ.copy()` | **yes** |
+| `test_terminal_trigger` (5), `test_leanctx_allowlist` (2), `test_cli_agent_roster` (2), `test_external_clear_retry` (1), `test_agentlens_probe` (1) | neither | n/a |
+
+**`test_branch_protection_guard` is the one that breaks the single-cause story.** It uses
+`os.environ.copy()`, so its child DID receive scale 10 — a 100 s effective timeout — and it
+still produced empty stdout. A 100 s `run_subprocess` expiry is not credible, so its failure is
+NOT this family.
+
+**So the 73-direct-`subprocess.run` family is NOT retired — it is confirmed firing.**
+`test_agentlens_probe` failed on `assert isinstance(None, dict)`: `agentlens_probe.probe_json`
+returned `None` from its OWN `_TIMEOUT_S = 5.0`, reached by a direct call outside the seam. That
+is precisely the family I claimed above "was never shown to fire". It has now been shown.
+
+**Family A (proven, FIXED this session):** minimal-env children never receive the knob → scale
+1.0 → `run_subprocess` 10 s → fail-open → empty stdout. Proven load-independently: a child
+spawned with a minimal env reports `_timeout_scale() == 1.0`; one that inherits reports `10.0`.
+Fixed by passing the knob through all 4 minimal-env builders in the 2 files.
+
+**Family B (proven firing, NOT fixed):** direct `subprocess.run` with its own short timeout,
+outside the seam — `agentlens_probe.probe_json` (5.0 s), `branch_protection_lib`
+`_post_or_patch_ruleset` (15 s) and `github_config_audit._gh_json` (15 s) are the candidates on
+the failing paths.
+
+**Unexplained: the remaining 5 files** use neither env pattern. Mechanism unidentified — do not
+assume it is either family until measured.
 
 ### The measurement that forced it (all on a CLEAN tree, my fence work stashed out)
 

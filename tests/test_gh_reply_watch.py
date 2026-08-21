@@ -94,11 +94,32 @@ def _project(tmp_path: Path, *, registered: bool, baselined: bool) -> Path:
     return project
 
 
+_SCALE_KNOB = "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE"
+
+
+def _harness_env() -> dict[str, str]:
+    """Harness knobs a spawned detector must inherit even through a hand-built minimal env.
+
+    TRDD-7NSRD8OV. `conftest._relax_subprocess_timeouts` exports the subprocess-timeout scale
+    into `os.environ`, which reaches a child only if the child INHERITS the environment. The
+    helpers below build a MINIMAL dict instead, so without this passthrough the detector runs at
+    scale 1.0, hits `run_subprocess`'s 10 s default under suite load, fails OPEN (returns None so
+    a hung child can never park the heartbeat), and the caller's `if x is None: return 0` exits 0
+    with EMPTY stdout. The test then asserts against `''` with nothing anywhere naming a
+    timeout — which reads as a logic bug in a detector that is fine.
+
+    Measured directly rather than inferred: a child spawned with a minimal env reports
+    `_timeout_scale() == 1.0`, one that inherits reports `10.0`.
+    """
+    return {k: v for k, v in os.environ.items() if k == _SCALE_KNOB}
+
+
 def _run(project: Path, **extra_env: str) -> subprocess.CompletedProcess[str]:
     env = {
         "PATH": f"{project / 'bin'}:{os.environ.get('PATH', '/usr/bin:/bin')}",
         "HOME": str(project),
         "CLAUDE_PROJECT_DIR": str(project),
+        **_harness_env(),
         **extra_env,
     }
     return subprocess.run(
@@ -197,6 +218,7 @@ def _run_with_home(project: Path, home: Path) -> subprocess.CompletedProcess[str
         "PATH": f"{project / 'bin'}:{os.environ.get('PATH', '/usr/bin:/bin')}",
         "HOME": str(home),
         "CLAUDE_PROJECT_DIR": str(project),
+        **_harness_env(),
     }
     return subprocess.run(
         [sys.executable, str(_DETECTOR)],
@@ -321,6 +343,7 @@ def _run_on_host(project: Path, home: Path, **extra_env: str) -> subprocess.Comp
         "PATH": f"{home / 'bin'}:{os.environ.get('PATH', '/usr/bin:/bin')}",
         "HOME": str(home),
         "CLAUDE_PROJECT_DIR": str(project),
+        **_harness_env(),
         **extra_env,
     }
     return subprocess.run(
