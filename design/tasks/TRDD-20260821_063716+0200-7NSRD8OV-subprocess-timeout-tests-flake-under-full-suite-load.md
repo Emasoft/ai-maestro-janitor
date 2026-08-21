@@ -85,6 +85,19 @@ None means "no signal" and no signal means nothing was logged.
 
 **Column stays `testing`.** 39 → 1 is a real, measured result at higher load; 1 is not 0.
 
+**WHY THE WALL-CLOCK SWINGS 3× BETWEEN IDENTICAL RUNS — it is NOT the tests.** A `ps` snapshot
+taken during soak-5 (same suite, same code, same `-n 28`) shows the contention is almost
+entirely OTHER software on this box: `Jump Desktop Connect` at **126 % CPU**, `AI Session
+Meter` at 69 %, an AgentlensPro node server at 59 %, `WindowServer` at 37 %, and a `du -smx`
+scan of `$HOME` that had been running 9 minutes at 35 %. Only 17 processes were pytest.
+
+Two consequences for anyone reading the numbers above:
+1. **Wall-clock IS a valid load proxy** — it measures real contention, which is exactly the
+   condition the flake needs. That is why 145 s and 473 s are the same suite.
+2. **It is NOT a controllable variable.** Re-running to "get a slow run" is waiting on someone
+   else's screen-share session. Do not read a fast green run as evidence, and do not read a
+   slow one as a regression in the tests.
+
 ---
 
 **NEXT ACTION:** read `scratchpad/soak-{3,4,5}.txt` (three `-n 28` runs, in flight at 13:40).
