@@ -1,9 +1,9 @@
 ---
 trdd-id: PGN5XSHA
 title: A deliberately killed subagent stays in the pending manifest and the resume directive keeps telling the session to resume it
-column: testing
+column: complete
 created: 2026-08-16T06:41:27+0200
-updated: 2026-08-19T01:10:00+0200
+updated: 2026-08-21T02:36:55+0200
 implementation-commits: [0f6c772c]
 current-owner: janitor-session
 task-type: bugfix
@@ -118,6 +118,32 @@ reader is choosing rather than obeying.
 - [x] The two docstrings above are corrected — they currently assert the harmlessness this card
       disproves, and a wrong comment outlives a wrong line of code
 - [x] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports` clean
+
+## Verified on the INSTALLED runtime — 2026-08-21, `testing` → `complete`
+
+Checked the shipped copy, not just the repo (the lesson from TRDD-079778RM the same night: a
+fix that is only correct in the working tree is not shipped). All four parts present in
+`…/cache/ai-maestro-plugins/ai-maestro-janitor/3.3.26/`:
+
+| part | where | state |
+|---|---|---|
+| `mark_stopped()` | `lib/pending_agents.py:285` | present |
+| `_normalize` keeps `stopped` (the landmine) | `lib/pending_agents.py:204` | present |
+| `directive_lines` filters stopped | `lib/pending_agents.py:363` | present |
+| count + advisory wording | `dispatch.py:976`, `:2439-2443` | present |
+
+`tests/test_pending_agents_manifest.py` 65 pass, including
+`test_mark_stopped_excludes_from_directive_and_count_but_stays_for_audit`, which asserts BOTH
+directions — the stopped agent is not named, the DIED one still is, so crash recovery survives.
+The live manifest is empty (0 entries, empty directive), so there was no stopped agent to
+observe naturally; the guarantee rests on the shipped code plus that test rather than on a
+staged reproduction.
+
+**A live reminder of why the safe-by-default wording matters, from the same night:** a
+`[janitor-resume]` fire arrived carrying a directive to "publish v3.3.23" — work finished hours
+earlier. That is the same family of harm one level up (a stale directive commanding a redo), and
+it is why part 3 changed the resume wording from an imperative to an advisory. A resume cue is a
+suggestion to be checked against current state, never an instruction to be followed blindly.
 
 ## Explicitly NOT in scope
 
