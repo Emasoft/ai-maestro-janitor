@@ -167,12 +167,8 @@ def _run_detector(project: Path, **extra_env: str) -> subprocess.CompletedProces
         "HOME": str(project),
         "CLAUDE_PROJECT_DIR": str(project),
         # TRDD-7NSRD8OV: the timeout scale must survive this MINIMAL env or the detector runs at
-        # 1.0, times out under suite load, fails open, and exits 0 with empty stdout.
-        **{
-            k: v
-            for k, v in os.environ.items()
-            if k == "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE"
-        },
+        # 1.0, times out under suite load, fails open, and exits 0 having done nothing.
+        **_harness_env(),
         **extra_env,
     }
     return subprocess.run(
@@ -259,6 +255,22 @@ def _github_project(tmp_path: Path, issues: list[dict]) -> Path:
     return project
 
 
+def _harness_env() -> dict[str, str]:
+    """Harness knobs a spawned detector must inherit through a hand-built minimal env.
+
+    TRDD-7NSRD8OV. `conftest` exports the subprocess-timeout scale into `os.environ`, which
+    reaches a child only if the child INHERITS the environment. The helpers here build a MINIMAL
+    dict instead, so without this the detector runs at scale 1.0, `run_subprocess` fails OPEN on
+    its 10 s default under load, and the detector exits 0 having written no state — which surfaces
+    as "the baseline must be written", i.e. a logic bug in a detector that is fine.
+    """
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if k == "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE"
+    }
+
+
 def _run_with_gh(project: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(_PROJECT_ROOT / "scripts" / "detectors" / "github-issues-watch.py")],
@@ -267,6 +279,7 @@ def _run_with_gh(project: Path) -> subprocess.CompletedProcess[str]:
             "PATH": f"{project / 'bin'}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
             "HOME": str(project),
             "CLAUDE_PROJECT_DIR": str(project),
+            **_harness_env(),
         },
     )
 

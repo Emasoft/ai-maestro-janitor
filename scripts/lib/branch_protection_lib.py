@@ -54,6 +54,21 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import state as _state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
+
+
+def _t(seconds: float) -> float:
+    """`seconds` scaled by the shared subprocess-timeout knob — 1.0 in production.
+
+    TRDD-7NSRD8OV. Every `gh` call below is a DIRECT `subprocess.run` with its own ceiling, so
+    scaling `state.run_subprocess` never reached them. Each one fails soft (a None/empty result
+    the caller treats as "could not determine"), so under suite load the apply script ran to
+    completion and printed NOTHING — surfacing as `assert '[guard] applied …' in ''`, which reads
+    as a guard that did not fire rather than as a `gh` call that never answered. Measured: 18
+    such failures across two 2x-oversubscribed runs.
+    """
+    return seconds * _state.timeout_scale()
+
 # NOTE (TRDD-157OH2D7): `yaml` is imported LAZILY inside detect_required_status_checks (the ONLY
 # function that parses workflow YAML), NOT at module top. This lets lightweight importers of this
 # module — the `uv run --script` detectors branch-protection.py and fleet-github-config.py, which
@@ -387,7 +402,7 @@ def detect_default_branch(slug: str) -> str | None:
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}", "--jq", ".default_branch"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=_t(10), check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -407,7 +422,7 @@ def viewer_is_admin(slug: str) -> bool:
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}", "--jq", ".permissions.admin"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=_t(10), check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -423,7 +438,7 @@ def list_existing_rulesets(slug: str) -> list[dict] | None:
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}/rulesets"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=_t(10), check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -554,7 +569,7 @@ def fetch_ruleset_detail(slug: str, ruleset_id: int) -> dict | None:
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}/rulesets/{ruleset_id}"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=_t(10), check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -732,7 +747,7 @@ def _post_or_patch_ruleset(
         proc = subprocess.run(
             argv,
             input=json.dumps(payload),
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, timeout=_t(15), check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return (False, f"gh subprocess failed: {exc}")
@@ -777,7 +792,7 @@ def delete_ruleset_by_name(slug: str, name: str) -> tuple[bool, str]:
                 "gh", "api", "--method", "DELETE",
                 f"repos/{slug}/rulesets/{rid}",
             ],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, timeout=_t(15), check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return (False, f"gh subprocess failed: {exc}")
