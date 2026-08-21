@@ -378,11 +378,48 @@ _EXFIL_WEBHOOK = _re(
 # before the token; a config block states the URL before the payload fields). Six branches,
 # one per permutation of (verb, token, url) — same "cover every attacker-chosen order" reasoning
 # as `_CRYPTO_CLIPPER`'s two orderings and `_TWO_STEP_INJECT`'s four, just with a third element.
+# Same snake_case boundary fix as the TOKEN below, for the same measured reason: the config
+# sample `POST_RESULTS_TO=https://…` states the verb as an identifier prefix, and `\bPOST\b`
+# cannot match it because `_` is a word character. A config file is exactly where this rule is
+# supposed to look, so the spelling config files use has to be matchable.
 _EXFIL_STRUCTURAL_VERB = (
-    r"(?:\bPOST(?:s|ed|ing)?\b|\btransmit(?:s|ted|ting)?\b|requests\.post|fetch\s*\()"
+    r"(?:(?<![A-Za-z])POST(?:s|ed|ing)?(?![A-Za-z])"
+    r"|\btransmit(?:s|ted|ting)?\b|requests\.post|fetch\s*\()"
 )
+# `\b` CANNOT see inside a snake_case compound: `_` is a word character, so there is no
+# boundary in `user_credentials`, and `\bsession_token\b` cannot match `session_tokens`.
+# The vocabulary was right and the boundaries were wrong — measured on the 2026-08-21 blind
+# corpus (TRDD-VAWIKRK2), where the single most blatant sample in the class
+#   payload:
+#     - user_credentials
+#     - session_tokens
+# posted to a literal `data-collect[.]xyz` sink and matched NOTHING. Config keys and JSON
+# fields are snake_case by convention, so requiring the bare word is requiring the one
+# spelling an attacker writing a config file will not use.
+#
+# `(?<![A-Za-z])` / `(?![A-Za-z])` replace `\b`: they let `_` and `-` act as separators while
+# still refusing a letter-glued substring (so `credentials` does not match inside
+# `nocredentialsneeded`). This is a boundary fix, NOT a vocabulary widening — the terms are
+# unchanged, which keeps the rule anchored to TRDD-HYV0SOC6's committed measurement as its
+# comment above requires.
+#
+# TWO MEASURED REFUSALS, recorded because both are the obvious next idea and both are wrong.
+# Each was implemented, measured against 23,768 real agent-context files, and reverted:
+#   * `env[_-]vars?`  — +1 sample (recall 2→3), +5 false positives. "env-var hazard rules" in
+#     an ordinary CHANGELOG sits within 400 chars of some URL and some POST. Everyday
+#     vocabulary cannot carry a rule whose other two elements are this common.
+#   * `\$\{…TOKEN|SECRET|KEY\}` — +2 samples (recall 2→4), +18 false positives, on OFFICIAL
+#     plugin documentation ("POST for tool calls" beside `${API_TOKEN}`; a `fetch(url, …)`
+#     example). A secret INTERPOLATION is what correct docs show you; it is not evidence of
+#     exfiltration.
+# The kept terms are specific to secrets AT REST in a payload; the rejected ones describe how
+# every legitimate API is documented. Recall stays 2/9 on this class deliberately — see the
+# `description` for the honest limit, and TRDD-VAWIKRK2 for why the remaining 7 samples are
+# prose policies with no URL, which this shape cannot reach without unacceptable cost.
 _EXFIL_STRUCTURAL_TOKEN = (
-    r"(?:\bsession_token\b|\bcredentials?\b|context\s+snapshot|\.env\b)"
+    r"(?:(?<![A-Za-z])session[_-]?tokens?(?![A-Za-z])"
+    r"|(?<![A-Za-z])credentials?(?![A-Za-z])"
+    r"|context\s+snapshot|\.env\b)"
 )
 _EXFIL_STRUCTURAL_URL = r"https?://\S+"
 _EXFIL_STRUCTURAL_GAP = r"[\s\S]{0,400}?"

