@@ -1040,19 +1040,39 @@ def run_subprocess(
             env=env,
         )
     except subprocess.TimeoutExpired:
-        if detector_name:
-            cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
-            log_line(detector_name, f"subprocess timed out after {timeout}s: {cmd_short}")
+        _log_fail_open(detector_name, f"subprocess timed out after {timeout}s", cmd)
         return None
     except FileNotFoundError:
-        if detector_name:
-            log_line(detector_name, f"binary not in PATH: {cmd[0]}")
+        _log_fail_open(detector_name, "binary not in PATH", cmd)
         return None
     except OSError as exc:
-        if detector_name:
-            cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
-            log_line(detector_name, f"subprocess OSError ({exc}): {cmd_short}")
+        _log_fail_open(detector_name, f"subprocess OSError ({exc})", cmd)
         return None
+
+
+def _log_fail_open(detector_name: Optional[str], reason: str, cmd: list[str]) -> None:
+    """Record WHY `run_subprocess` returned None. UNCONDITIONAL, and never raises.
+
+    The log used to be gated on the optional `detector_name`, so every caller that omitted it
+    failed open in total silence. That silence is the single most expensive property this
+    module has had: a caller's `if x is None: return 0` then exits 0 with EMPTY stdout, and the
+    test asserting on that output fails with nothing anywhere naming a timeout — so it reads as
+    a logic bug in code that is correct. TRDD-7NSRD8OV was misdiagnosed four times against
+    exactly that shape, each time by GUESSING at a mechanism no artifact recorded.
+
+    Callers without a name land in a shared `subprocess.log` rather than nowhere. That is worth
+    a new file: an unattributed breadcrumb still carries the timestamp, the reason and the argv,
+    which is everything the diagnosis needs.
+
+    The `except OSError` is deliberate and narrow, against this repo's fail-fast default:
+    `run_subprocess`'s documented contract is that it NEVER propagates, and a read-only
+    diagnostic must not be the thing that breaks it on a host whose log dir is unwritable.
+    """
+    cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
+    try:
+        log_line(detector_name or "subprocess", f"{reason}: {cmd_short}")
+    except OSError:
+        return
 
 
 _EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
