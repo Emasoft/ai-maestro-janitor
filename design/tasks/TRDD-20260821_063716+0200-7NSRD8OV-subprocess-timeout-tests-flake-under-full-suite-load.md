@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T10:57:40+0200
+updated: 2026-08-21T11:04:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -148,6 +148,23 @@ unaffected (69/69). **Any future site scaled this way needs the same sweep.**
 tests asserting WALL-CLOCK BOUNDS are load-sensitive by construction, and are fixed neither by
 family A's env passthrough nor by family B's scaling. They need per-test redesign onto a state
 assertion.
+
+**CATEGORY C — REDESIGNED AND MUTATION-PROVEN, 2026-08-21 11:04.** The spy now touches a
+`send-started` and a `send-done` marker around its 4 s sleep, and the test asserts **`done` does
+NOT exist** when `send_self_command` returns. That decides the same question by CAUSALITY rather
+than by clock: an inline delivery could only return AFTER the sleep, so `done` would necessarily
+be on disk. True at any load. A second, generously-bounded poll then waits for `done` to appear,
+so a no-op that reported `FIRED` cannot pass either.
+
+Passes 3/3 including a **20.4 s** run — which the old `elapsed < 3.0` bound would have failed.
+
+**And it was MUTATION-TESTED, because a redesigned guard that no longer guards is worse than the
+flake it replaced.** Monkeypatching `_fire_detached_steps` to run the steps inline gives
+`done_exists=True`, i.e. the assertion FAILS — the regression is still caught. Note the first
+mutation run reported the opposite and was WRONG: the harness set the wrong env var
+(`CLAUDE_PLUGIN_OPTION_TERMINAL_KIND` instead of `JANITOR_FORCE_TERMINAL_KIND`), so it returned
+`USE_ITERM_PATH` and never exercised the ai-maestro path at all. Verify the harness before
+believing its verdict.
 
 **`test_leanctx_allowlist` — RESOLVED 10:52. Family B, site #4, and my earlier read was WRONG.**
 I called it "a CONTENT/ordering mismatch, not a timeout shape at all, probably a separate defect".

@@ -428,18 +428,39 @@ def test_ai_maestro_cli_midlist_failure_never_falls_back_to_retype(monkeypatch, 
 
 def test_ai_maestro_cli_send_is_detached_not_inline(monkeypatch, tmp_path):
     """AM8JD9SG F9: the per-command CLI POSTs must NOT run inline — a multi-command send
-    used to cost 11-17 s synchronously, blowing the 5 s hooks.json budget of the calling
-    hook. With a spy whose `session command` SLEEPS 4 s, send_self_command must return
-    well before one send could complete (only the bounded `list` runs inline)."""
+    used to cost 11-17 s synchronously, blowing the 5 s hooks.json budget of the calling hook.
+    With a spy whose `session command` SLEEPS 4 s, `send_self_command` must return before that
+    send could possibly have finished (only the bounded `list` runs inline).
+
+    ASSERTS ON STATE, NOT ON ELAPSED TIME (TRDD-7NSRD8OV, category C). This test used to assert
+    `elapsed < 3.0`, which flaked under suite load for a reason no timeout knob can fix: on a
+    saturated box a genuinely DETACHED send still takes over 3 s to return, so the bound failed
+    while the behaviour under test was perfectly correct.
+
+    Simply widening the bound was NOT an option, and that is the whole reason for the redesign:
+    an INLINE regression costs ~8 s here (two commands x the 4 s sleep), so any bound loose
+    enough to survive load is also loose enough to let the exact regression this guards sail
+    through — a green test defending nothing. The marker files decide the same question by
+    causality instead of by clock: if delivery were inline, `send_self_command` could only return
+    AFTER the sleep, so `done` would necessarily exist by then. Its absence is what proves
+    detachment, and that stays true at any load.
+    """
     wd = str(tmp_path)
     agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-slow"}}]
     agents_file = tmp_path / "agents.json"
     agents_file.write_text(json.dumps(agents))
+    started = tmp_path / "send-started"
+    done = tmp_path / "send-done"
     cli = tmp_path / "aimaestro-agent.sh"
     cli.write_text(
         "#!/usr/bin/env bash\n"
         f'if [ "$1" = "list" ]; then cat "{agents_file}"; exit 0; fi\n'
-        'if [ "$1" = "session" ] && [ "$2" = "command" ]; then sleep 4; exit 0; fi\n'
+        'if [ "$1" = "session" ] && [ "$2" = "command" ]; then\n'
+        f'  : > "{started}"\n'
+        "  sleep 4\n"
+        f'  : > "{done}"\n'
+        "  exit 0\n"
+        "fi\n"
         "exit 0\n"
     )
     cli.chmod(0o755)
@@ -449,11 +470,20 @@ def test_ai_maestro_cli_send_is_detached_not_inline(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
     import time as _time
 
-    t0 = _time.monotonic()
     out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False, delay_s=0.0)
-    elapsed = _time.monotonic() - t0
+
     assert out == "FIRED:aimaestro"
-    assert elapsed < 3.0, f"send blocked {elapsed:.1f}s — the delivery is not detached"
+    # THE detachment assertion: an inline send would have waited out the 4 s sleep, so `done`
+    # would already be on disk the moment we got control back.
+    assert not done.exists(), "the send COMPLETED before send_self_command returned — not detached"
+
+    # And prove the send was really dispatched rather than silently skipped — otherwise the
+    # assertion above would also pass for a no-op. Generously bounded and poll-based, so it
+    # measures completion, never scheduling latency.
+    deadline = _time.monotonic() + 60.0
+    while _time.monotonic() < deadline and not done.exists():
+        _time.sleep(0.1)
+    assert done.exists(), "the detached send never ran at all — FIRED was reported for a no-op"
 
 
 def test_ai_maestro_cli_dry_run_does_not_send(monkeypatch, tmp_path):
