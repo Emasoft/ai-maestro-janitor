@@ -528,6 +528,24 @@ def has_ioc_context_near(text: str, start: int, end: int, *, window: int = 100) 
 _DYNAMIC_EXEC_NEGATIVE_CONTEXT = re.compile(
     r"(?is)\b(?:report(?:s|ed|ing)?|flag(?:s|ged|ging)?|detect(?:s|ed|ion)?|scan(?:s|ned|ning)?"
     r"|reject(?:s|ed|ing)?|ban(?:s|ned|ning)?|forbid(?:s|den)?|prohibit(?:s|ed)?|disallow(?:s|ed)?"
+    # Bare `never` and `security risk` added with Shape D (TRDD-VAWIKRK2). Stripping headings
+    # from the window exposed ONE real false positive: a cross-platform migration table whose
+    # row reads "always pass `args` as list, never `shell=True`" — it names the code as bad in
+    # its own prose, but said it with words this list lacked, so its only cue had been a
+    # heading. Measured cost of admitting them: ZERO attack samples newly suppressed across
+    # BOTH corpora. (`migrat\w+` was tested in the same pass and REJECTED — it suppressed a
+    # genuine attack sample. A negative term must describe the CODE, and "migrate" describes
+    # the document's topic.)
+    r"|never\b|security\s+risk"
+    # `compromis\w+` / `exfiltrat\w+` are the SAME Shape D correction, applied to the case
+    # that broke first: janitor#254's post-mortem fixture suppressed only via its TITLE
+    # ("# Post-mortem: … dependency compromise"), so ignoring headings brought that false
+    # positive straight back. The fix is not to trust the title again — it is to recognise
+    # the incident language the BODY already uses ("a dependency was COMPROMISED", "no
+    # secrets were EXFILTRATED"), which describes the code as bad rather than describing
+    # what kind of document this is. Measured cost across both corpora: ZERO attack samples.
+    # (`malicious` was tested alongside and REJECTED — it suppressed a genuine attack.)
+    r"|compromis\w+|exfiltrat\w+"
     r"|never\s+use|do\s+not\s+use|avoid|anti-?pattern|vulnerab\w+|insecure|unsafe|dangerous"
     r"|remove(?:d|s)?|deprecat\w+|violation|severity|post-?mortem|root\s+cause"
     r"|lint(?:er|ing)?|rule:|autofix)\b"
@@ -551,7 +569,28 @@ def dynamic_exec_negative_context_near(text: str, start: int, end: int) -> bool:
     matches the rule's own pattern."""
     lo = max(0, start - _DYNAMIC_EXEC_NEGATIVE_WINDOW)
     hi = min(len(text), end + _DYNAMIC_EXEC_NEGATIVE_WINDOW)
-    return _DYNAMIC_EXEC_NEGATIVE_CONTEXT.search(text[lo:hi]) is not None
+    return _DYNAMIC_EXEC_NEGATIVE_CONTEXT.search(_without_headings(text[lo:hi])) is not None
+
+
+# TRDD-VAWIKRK2 Shape D. A markdown HEADING is a TITLE — it says what the DOCUMENT is, never
+# that this particular span of code is bad. That distinction is already the `checklist` lesson
+# recorded above ("a negative term must mean 'this code is being named as bad', never 'this
+# document is of a certain kind' — the latter is a title an attacker can simply choose"), but
+# it was enforced only by pruning the WORD LIST, which cannot work: the offending word is
+# usually a legitimate one that happens to sit in a title.
+#
+# Measured: the curated corpus's `dynamic-exec-in-body-blind-01` — a genuine attack sample —
+# produces NO finding at all, because it is titled "# Report Formatter Skill" and "Report" is
+# a negative cue. An attacker gets a full suppression by choosing a reassuring title, which is
+# the whole discriminator disarmed by one word of attacker-controlled text.
+#
+# So the fix is POSITIONAL, not lexical: the same words still suppress, but only where a human
+# would read them as a judgement on the code — in prose, not in the heading above it.
+def _without_headings(window: str) -> str:
+    """`window` with markdown heading lines blanked (kept as empty lines so offsets stay sane)."""
+    return "\n".join(
+        "" if line.lstrip().startswith("#") else line for line in window.splitlines()
+    )
 
 
 # ---- Content-genre marker — mention vs use (TRDD-XCRTJ1C9, janitor#254) ---
