@@ -3,7 +3,7 @@ trdd-id: K3PN7QW2
 title: Fence-opener detection is naive — an inline triple-backtick span at line start is read as a fence
 column: dev
 created: 2026-08-21T03:16:08+0200
-updated: 2026-08-21T08:15:56+0200
+updated: 2026-08-21T09:58:06+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -61,6 +61,45 @@ tell the two characters apart.
 this needs an advisor verdict before implementation. **NEXT ACTION:** consult the advisor (one
 is already mid-flight on TRDD-7NSRD8OV — do not spawn a second concurrently), then implement all
 sites together with a fixture per branch.
+
+## ⏵ ADDENDUM 2026-08-21 09:58 — the bug has ZERO live victims, and both defects are now RED at unit level
+
+Two measurements taken before implementing, both of which change how this card should be worked.
+
+**1. The live corpus is CLEAN.** `memgrep lint` across all three scope roots reports
+**0 `page-unclosed-fence` findings** (PROJECT `.claude/project/memory`, LOCAL, and the USER
+plugin-DATA memory dir). So this is a **latent correctness bug with no current casualties** —
+prophylactic, not an outage. That is the honest priority signal: the fix is still right (it
+prevents the recurrence that cost janitor#277 and #279 an investigation each, and the `~~~`
+defect below is live-but-silent), but nothing is broken *right now*, so there is no case for
+rushing it past an advisor verdict.
+
+**Consequence: acceptance item 4 as written is VACUOUS.** It says "pages currently flagged
+`page-unclosed-fence` that contain only an inline span should come back CLEAN without being
+reflowed" — there are no such pages. The real regression guard is the fixture pair below, not a
+corpus sweep. Re-running the corpus scan afterwards is still worth doing, but as a
+**no-new-findings** check (it must stay at 0), not as a before/after improvement.
+
+**2. Both defects are now pinned by FAILING unit tests** (written before the fix, in
+`memory.rs`'s test module, deliberately NOT committed while red — a red tree would block the
+publish gate):
+
+| test | expects | actual on current code |
+|---|---|---|
+| `an_inline_code_span_at_line_start_is_not_a_fence_opener` | no fence | `"UNCLOSED code fence at line 5"` — false positive |
+| `a_tilde_line_does_not_close_a_backtick_fence` | still unclosed | `""` — the `~~~` wrongly closed a ` ``` ` fence |
+
+The second confirms the latent defect the design predicted, at unit level rather than by
+inspection. Both probe `unclosed_fence_hint`, which is the cheapest true probe available: it
+carries the *same* counting rule as the walkers by design, so a test that moves it proves the
+shared rule moved.
+
+**Site count re-verified by grep, and it matches the card exactly:** 12 toggle lines in
+`memory.rs`, 1 in `md.rs`, 1 in `memory_content_precheck.py`. Note `locate_atom_body_matching`
+already carries a richer `Option<(usize, usize, String)>` alongside its bool — worth reading
+before converting, since it is the one site that is already half-way to the target shape.
+
+Baseline before any change: `cargo test` green (216 + 145).
 
 ## Why (measured 2026-08-21, janitor#277 + #279)
 
