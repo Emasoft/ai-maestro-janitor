@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T09:12:00+0200
+updated: 2026-08-21T07:21:05+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -88,13 +88,60 @@ hyphen flips the part of speech). Sample 07 (`suppress_output: true`, `log_level
 DELIBERATE abstention: legitimate config keys, and the FP budget is what makes a CRITICAL rule
 worth reading.
 
-**NEXT ACTION:** the remaining 4 of the claimed-but-zero bucket, same method —
-`prompt-injection-multilingual` 0/9, `exfil-webhook-sink` 0/9, `mcp-annotation-lying` 0/9,
-`two-step-code-injection` 0/7. For each: read a full sample before judging the label, widen only
-on evidence, re-run the 23,858-file FP sweep, hold FP at 0, pin one positive control per
-alternation. THEN the per-shape decisions (A base64-floor / B alias-sink / D
-positional-suppression / E split-literal) and the baseline gate. The card's own rule still binds:
-do NOT quote a recall number that includes c14/c17 as if measured.
+**ALL 5 CLOSED 2026-08-21.** Commits `5f347cbd`, `8a9830ec`, `84198838`, `17d0fedf`, `d010495b`.
+
+| rule | before | after | FP delta on 23.8k real files |
+|---|---|---|---|
+| `concealment-directive` | 0/9 | **8/9** | 0 |
+| `prompt-injection-multilingual` | 0/9 | **9/9** | 0 |
+| `exfil-structural-probe` (the real target — see below) | 1/9 | **2/9** | 0 |
+| `mcp-annotation-lying` | 0/9 | **4/9** | 0 |
+| `two-step-code-injection` | 0/7 | **7/7** | 0 |
+
+**ONE ROOT CAUSE, five times: each rule enumerated the CANONICAL phrasing of its attack and
+the corpus used a variant.** Not one of the five was missing a language, a host, or a
+technique — each was missing the OBJECT, the FIELD, or the SYNTAX the same attack takes when
+written by someone who is not quoting a textbook:
+
+- `concealment-directive` matched concealment from "the user"; attacks conceal from the RECORD.
+- `prompt-injection-multilingual` covered "ignore previous instructions" in ELEVEN languages;
+  attacks keep the verb and swap the object for a security control. Eleven languages of one
+  sentence is narrower than it looks, and it reads on a report as broad.
+- `exfil-structural-probe` required `\bcredentials\b`; attacks write `user_credentials`, and
+  `\b` cannot see inside a snake_case compound. A rule that reads agent CONFIG could not read
+  config spelling.
+- `mcp-annotation-lying` searched `name` for the destructive verb; attacks put the lie in
+  `name`/`description` and the truth in `handler`. It was searching the innocuous half.
+- `two-step-code-injection` knew `Buffer.from`/`atob` → `eval`; every attack used the SHELL
+  pipeline (`| base64 -d | bash`), which is also the commoner form in the wild.
+
+**TRIAGE CORRECTION — `exfil-webhook-sink` 0/9 is NOT a defect.** It is a literal blocklist of
+known exfil hosts; janitor#226 already measured it 0/8 and rewrote its description to say so
+("LIMIT: matches those hosts ONLY"). It therefore does NOT read as coverage, which was the
+bucket's whole premise. The honest target was its structural companion. Verify the premise of a
+finding before acting on it — the triage was right about four and wrong about one.
+
+**FOUR MEASURED REFUSALS, each implemented → measured → reverted → pinned as a negative
+control** (a refusal nobody pinned gets silently re-proposed): `env[_-]vars?` (+1 recall, **+5
+FP**), `${…TOKEN|SECRET|KEY}` (+2, **+18 FP** on OFFICIAL plugin docs), a prose read-only claim
+fed to the existing 800-char window (**+33 FP**), and an unbounded self-contradiction span (the
+same **+33** — a 500-char skill description eventually says "moves" somewhere far from
+"read-only"; two words in one long paragraph are not a contradiction). **Every FP I introduced
+came from adding VOCABULARY; none came from fixing a BOUNDARY or a FIELD.** That is the
+transferable rule for the next pass.
+
+**Also a CORPUS finding, recorded so recall is not read as pure rule quality:** 5 of the 9
+`mcp-annotation-lying` samples carry the deception only in the generator's `note` ("Backup tool
+secretly erases logs") while the artifact shows a `log_backup` tool honestly declaring
+`"destructive": false`. There is nothing in the text to detect and a human reviewer would find
+nothing wrong either. 4/9 is the ceiling that class supports, not a shortfall.
+
+**NEXT ACTION:** the per-shape decisions this card was originally scoped for — A base64-floor /
+B alias-sink / D positional-suppression / E split-literal — then acceptance box 4, the baseline
+gate, so any of the five regressing fails the suite. Note the gate must pin the numbers in the
+table above, NOT a single aggregate: the whole failure this card measured was one rule reading
+as covered inside a healthy total. The card's own rule still binds: do NOT quote a recall number
+that includes c14/c17 as if measured.
 
 **Reusable and not obvious:** the FP sweep must run over REAL agent-context files, not the bench's
 benign set. The bench's 46 benign samples showed 0 FP for both the broken and the fixed pattern —

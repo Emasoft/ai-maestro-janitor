@@ -3,10 +3,10 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: todo
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T06:37:16+0200
+updated: 2026-08-21T07:21:05+0200
 current-owner: janitor-main-session
 task-type: bugfix
-priority: medium
+priority: high
 approval-tier: 0
 scope: project
 npt: []
@@ -28,6 +28,14 @@ session, on two unrelated tests:
    full-suite run; on the next full run the failure MOVED to
    `test_agentlens_cause_kept_when_material` in the same family; then 6 consecutive isolated
    runs of that file passed 54/54.
+
+3. Same session, a later full run: `test_branch_protection.py::test_fires_when_unprotected`,
+   `test_branch_protection_guard.py::test_apply_acts_when_only_one_baseline_present`, and
+   `test_gh_reply_watch.py::test_first_fire_is_silent_and_baselines_the_cursor` failed together
+   inside a 12m33s full run — **all three passed isolated in 8.37s**. That takes the class from
+   "two odd tests" to **5 tests across 4 files**, which is the argument for fixing the CLASS
+   rather than the instances: whichever subprocess lands in a slow window is the one that fails,
+   so chasing individual tests will never converge.
 
 The moving failure is the tell. Both tests call `agentlens_probe.probe_json`, which runs a
 `tmp_path` shell script through `subprocess.run(..., timeout=_TIMEOUT_S)` with
