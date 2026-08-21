@@ -4921,14 +4921,11 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         // reproduction — the wasted effort was not carelessness, it was that no error message ever
         // named the actual fault. This one does.
         //
-        // The rule DELIBERATELY mirrors the walkers' own (count lines whose trimmed start is a
-        // fence marker; odd ⇒ unbalanced) rather than something more correct. A cleverer counter
-        // that disagreed with the consumers would flag pages they parse fine and stay silent on
-        // pages they mangle; this fires exactly when they are confused, which is the useful signal.
-        // Same predicate the walkers use (`unclosed_fence_line`), not a second copy of the rule:
-        // this lint exists to fire exactly when a walker is confused, so it must be confused by
-        // exactly the same things.
-        let fence_open: Option<usize> = unclosed_fence_line(&lines.join("\n"));
+        // Same predicate the walkers use (`unclosed_fence_line` → `fence_step`), not a second
+        // copy of the rule: this lint exists to fire exactly when a walker is confused, so it
+        // must be confused by exactly the same things. A cleverer detector that disagreed with
+        // the consumers would flag pages they parse fine and stay silent on pages they mangle.
+        let fence_open: Option<usize> = unclosed_fence_line(&text);
         if let Some(open_at) = fence_open.as_ref() {
             violations.push((
                 Severity::Error,
