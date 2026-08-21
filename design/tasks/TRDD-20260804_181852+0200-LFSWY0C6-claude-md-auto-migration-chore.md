@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-16T02:46:00+0200
+updated: 2026-08-21T11:26:39+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,31 @@ eht: []
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+
+## ⏵ 2026-08-21 11:26 — THIRD INDEPENDENT RECURRENCE, and it stayed stale for FIVE DAYS
+
+Still NOT STARTED (re-verified: `grep claudemd scripts/detectors/memory-maintenance.py` → nothing).
+Measured today on arrival:
+
+```text
+claudemd-slim: wikimem index is STALE vs the corpus (run scripts/claudemd_slim.py index)
+```
+
+**The dates are the finding.** The block below recorded this same staleness on **2026-08-16**.
+The header of the stale index read `generated=2026-08-16T05:05:28+0200` — so it had been stale
+for **five days**, across many sessions, with the advisory nudge presumably firing the whole
+time and nobody acting on it. That is the strongest evidence this card has: not that the index
+drifts (already known), but that **the advisory mechanism G8.1 rules out demonstrably does not
+get acted on**, measured over five days rather than argued.
+
+Refreshed manually (`scripts/claudemd_slim.py index`, tool-owned block) → `conforming and fresh`.
+The whole drift was 2 lines: the digest/timestamp header, and one page description that had
+moved from "73 detectors" to "72". **Trivial to repair and invisible until someone runs the
+check** — which is exactly the profile of work that should be a chore and not a nudge.
+
+**NOT caused by this session's memory writes**, and the distinction matters for anyone
+re-measuring: the two lessons added today went to **USER** scope, while this index covers
+**PROJECT** scope (`.claude/project/memory`). The drift predates the session.
 
 ## ⏵ 2026-08-16 — THE "ZERO WORK TODAY" PREMISE HAS EXPIRED, and the way it expired is the card's own argument
 

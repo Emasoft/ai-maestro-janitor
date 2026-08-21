@@ -117,7 +117,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=1a74460aff97 generated=2026-08-16T05:05:28+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=0f03bf6a311c generated=2026-08-21T11:26:39+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -145,7 +145,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-two-runtime-backends](.claude/project/memory/janitor-two-runtime-backends.md) — does the janitor run a daemon inside an ai-maestro agent
   - [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
   - [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
-  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (73 registered as of 2026-08-16)
+  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
   - [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
   - [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
 
