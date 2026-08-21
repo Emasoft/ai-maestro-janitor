@@ -3,7 +3,7 @@ trdd-id: 9T0U3M00
 title: The tick-stalled alert fires on an absorbed chore and reports healthy server-side execution as rotation being OFF
 column: testing
 created: 2026-08-21T14:30:06+0200
-updated: 2026-08-21T14:45:00+0200
+updated: 2026-08-21T14:55:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -90,6 +90,37 @@ by the same test.
       across 486 files
 - [ ] Observed on a fresh heartbeat: `session-start.log` no longer carries the false
       `tick-stalled` line
+
+## DERIVED CHECK — is this the only one? **Yes.** Swept 2026-08-21 14:55
+
+A fix like this implies a sibling hunt: any OTHER staleness alert over an absorbed chore with
+the same blind spot. Bounded properly — only a chore in `harness_backend.SERVER_ABSORBED_TASKS`
+can have it — that set is `marketplace-refresh`, `version-update`, `oauth-rotator-supervisor`,
+`oauth-rotator-tick`, `github-config-audit`.
+
+| watchdog | absorption guard | verdict |
+|---|---|---|
+| `detectors/marketplace-refresh.py` | via `daemon_watchdog.emit_if_daemon_stale` | **covered** |
+| `lib/claimed_chore_watch.py` | via the same shared helper | **covered** |
+| `detectors/global-chore-blackout.py` | its own (11 signals) | **covered** |
+| `detectors/claimed-chore-stale.py` | its own (9 signals) | **covered** |
+| `detectors/version-update.py` | n/a | **no stamp-age alert** — compares installed vs running version |
+| `hooks/on-session-start.py` | n/a | **no own predicate** — prints the supervisor's findings, so this fix covers it |
+| `oauth_rotator/supervisor.py` | **none, until this card** | **THE OUTLIER** |
+
+`detectors/memory-maintenance.py` looked like a candidate on a keyword grep and is NOT: its
+chore is not in the absorbed set, so it cannot have this bug.
+
+**The root cause is sharper than "someone forgot a guard".** The shared helper
+`daemon_watchdog.emit_if_daemon_stale` has carried the absorption guard since Phase B2
+(TRDD-PZLVT2RN), and every watchdog that routes through it inherited it for free.
+`supervisor.py` hand-rolled its OWN staleness predicate instead — and a second implementation
+of a shared rule is exactly where a later amendment to that rule fails to land.
+
+**Left undecided on purpose:** whether `supervisor.py` should now route through
+`daemon_watchdog` rather than keep a parallel predicate. That is a design call about the module
+boundary (the supervisor's `diagnose` is deliberately PURE over `Facts`, and the helper does its
+own I/O and printing), so it is not something to change while closing a bug.
 
 ## Notes
 
