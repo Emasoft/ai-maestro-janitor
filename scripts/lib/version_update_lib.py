@@ -70,6 +70,24 @@ _MANIFEST_REL = Path(".integrity") / "manifest-sha256.json"
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _GH_REPO_RE = re.compile(r"^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$")
 
+# Ceiling for the F1 provenance call (`gh api …/releases/latest`). TRDD-ZM5LZ24Y.
+#
+# WAS 5 s, and that was too tight by a factor nobody had measured. Measured on THIS host,
+# idle, five consecutive calls: 0.45 / 0.53 / 0.56 / 0.37 / 0.39 s — median ~0.45 s. So 5 s
+# expires only when the box is ~11x slower than idle, which is not exotic here: the same
+# machine ran its own test suite in 145 s and 595 s on the same day.
+#
+# The asymmetry decides the number, and it is stark. Too GENEROUS costs a few seconds on a
+# periodic daemon fire that already takes ~116 s and has nobody waiting on it. Too TIGHT
+# fails the provenance gate closed, which leaves the C3 trust anchor pinned to a version from
+# 2026-07-21 — a month of a security anchor naming the wrong release, which is exactly what
+# TRDD-ZM5LZ24Y measured. 30 s is ~66x the median: it absorbs the contention regime that
+# actually occurs here, and is still small beside the fire it runs inside.
+#
+# NOT `state.timeout_scale()` — that knob is 1.0 in production and the daemon IS production,
+# so scaling would change nothing where the failure happens (TRDD-7NSRD8OV, category B).
+GH_PROVENANCE_TIMEOUT_S = float(os.environ.get("JANITOR_GH_PROVENANCE_TIMEOUT_S", "30"))
+
 
 def _semver_tuple(s: str) -> tuple[int, ...]:
     """Convert '0.4.0' to (0, 4, 0) for ordering. Returns (-1,) on bad input."""
@@ -301,7 +319,7 @@ def resolve_latest_published(
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{slug}/releases/latest", "--jq", ".tag_name"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, timeout=GH_PROVENANCE_TIMEOUT_S, check=False,
         )
     except subprocess.TimeoutExpired:
         # Reported apart from the OSError below ON PURPOSE: this ceiling is hardcoded
@@ -309,7 +327,7 @@ def resolve_latest_published(
         # reach it AND `timeout_scale()` is 1.0 in production anyway — the daemon IS
         # production. If this is what refuses, the answer is a bigger ceiling or a
         # retry, never a scale (TRDD-ZM5LZ24Y, category B of TRDD-7NSRD8OV).
-        _fail("gh api timed out after 5s")
+        _fail(f"gh api timed out after {GH_PROVENANCE_TIMEOUT_S:g}s")
         return None
     except (OSError, subprocess.SubprocessError) as exc:
         _fail(f"gh api did not run ({exc})")

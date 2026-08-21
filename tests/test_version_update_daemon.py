@@ -150,6 +150,30 @@ def test_resolve_latest_published_reports_a_TIMEOUT_apart_from_other_failures(
     assert vu.resolve_latest_published(vdir, on_failure=said.append) is None
     assert "timed out" in said[-1], said
     assert "PATH" not in said[-1], "a timeout must not read as a missing binary"
+    assert f"{vu.GH_PROVENANCE_TIMEOUT_S:g}s" in said[-1], (
+        "the message must name the CEILING that was hit — a reader who sees '5s' after it was "
+        "raised to 30s chases a version of the code that no longer exists"
+    )
+
+
+def test_gh_provenance_ceiling_is_generous_because_the_asymmetry_is_stark(monkeypatch) -> None:
+    """TRDD-ZM5LZ24Y: the F1 ceiling must stay well clear of the measured call latency.
+
+    Measured on the dev host, idle: 0.37-0.56 s per `gh api …/releases/latest`. The old 5 s
+    expired only when the box was ~11x slower than idle — which happened, and froze the C3
+    trust anchor at a 2026-07-21 version for a month. Too generous costs seconds on a periodic
+    fire nobody waits on; too tight silently mis-pins a security anchor. This pins the
+    DIRECTION of that trade so a future "tidy-up" cannot quietly restore a tight ceiling.
+    """
+    vu = _vu()
+    assert vu.GH_PROVENANCE_TIMEOUT_S >= 20, (
+        f"ceiling {vu.GH_PROVENANCE_TIMEOUT_S}s is back in the range that measurably failed"
+    )
+    monkeypatch.setenv("JANITOR_GH_PROVENANCE_TIMEOUT_S", "7")
+    import importlib
+    assert importlib.reload(vu).GH_PROVENANCE_TIMEOUT_S == 7.0, "the env knob must be honoured"
+    monkeypatch.delenv("JANITOR_GH_PROVENANCE_TIMEOUT_S")
+    importlib.reload(vu)  # restore the module default for the rest of the session
 
 
 def test_resolve_latest_published_stays_SILENT_without_on_failure(env: Path) -> None:
