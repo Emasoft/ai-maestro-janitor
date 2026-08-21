@@ -50,6 +50,42 @@ def objects_in(text: str):
             depth = max(depth, 0)
 
 
+def records_in(text: str):
+    """Every usable record in a report — PER-LINE first, then the brace walker.
+
+    WHY BOTH, measured 2026-08-21 on the `two-step-code-injection` report. The walker
+    (`objects_in`) scans the whole file tracking string/escape state, so ONE malformed
+    sample desynchronises it and silently swallows every LATER sample in that file. On
+    c20 the walker returned exactly ONE object — the 44-char output TEMPLATE echoed back
+    inside the prompt — while 7 of the 9 real samples (286-863 chars) were perfectly valid
+    JSON on their own lines. Two bad samples cost all seven good ones.
+
+    That failure is invisible in aggregate: corpus-wide the walker finds MORE records than
+    per-line parsing (301 vs 278, because it also catches objects that span lines), so
+    totals look healthy while one CLASS is missing entirely. And the class it happened to
+    lose was the one blocking the measurement — the bench reported
+    `two-step-code-injection` under "rules with no corpus coverage" after a run whose whole
+    purpose was to capture it.
+
+    Per-line is tried first because the generator's prompt SPECIFIES JSONL — one object per
+    line — so it is the format the samples are actually in, and it isolates a malformed
+    sample to itself. The walker still runs afterwards to pick up genuinely multi-line
+    objects; `main`'s existing `seen` set dedupes the overlap, so this is a strict superset
+    of the old behaviour and can only add samples, never drop one.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue  # a malformed sample is dropped ALONE, not with its file's remainder
+        if isinstance(rec, dict):
+            yield rec
+    yield from objects_in(text)
+
+
 def main() -> int:
     # Resolve the report list HERE rather than relying on the shell to word-split a
     # variable: this session's shell is zsh, which does not split unquoted expansions, so
@@ -68,7 +104,7 @@ def main() -> int:
         if not path.exists():
             continue
         raw = Path(path).read_text(encoding="utf-8", errors="replace")
-        for rec in objects_in(raw):
+        for rec in records_in(raw):
             label, content = rec.get("label"), rec.get("content")
             if not isinstance(label, str) or not isinstance(content, str) or len(content) < 40:
                 dropped += 1
