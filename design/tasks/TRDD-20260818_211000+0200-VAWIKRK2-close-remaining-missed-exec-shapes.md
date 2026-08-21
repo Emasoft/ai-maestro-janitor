@@ -1,9 +1,9 @@
 ---
 trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
-column: testing
+column: ai_review
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T07:41:13+0200
+updated: 2026-08-21T07:49:42+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -346,5 +346,32 @@ after seeing which sample exposed it), so no further recall claim may quote it.
       (`file_kind` decides which rules run; `provenance_verified` downgrades a corroborated
       described-attack), and asserting on raw matches reddened on four samples the detector
       never reports. A gate that fails on correct behaviour gets deleted.
+
+## Self-review (testing → ai_review, 2026-08-21T07:49+0200)
+
+**Test gate: PASSED.** `uv run pytest` — 15,714 passed, 1 skipped, 0 failed (8m18s).
+`uv run ruff check scripts tests` clean; `uv run mypy scripts/ --ignore-missing-imports` clean
+across 486 files. Nine commits: `5f347cbd` `8a9830ec` `84198838` `17d0fedf` `d010495b`
+`76ad2f87` `7c1d17ee` `559fa7fc` `7cc45cf6`.
+
+**What a reviewer should be suspicious of, stated by me rather than found by them:**
+
+1. **The recall numbers are FIT.** I tuned against every sample. See the ⚠ in the STATE block.
+   The FP numbers are the trustworthy half.
+2. **Two of my own measurements were wrong before they were right** — an FP figure inflated
+   ~2.5x by sweeping paths the detector never reads, and "5 false positives" counted per-MATCH
+   on a file already being reported. Both are corrected in the commits that carry them; the
+   pattern to watch for is me measuring on a surface or unit I chose rather than the one the
+   consumer uses.
+3. **`never\b` is now a suppression cue** (Shape D). It is attacker-controllable — a payload
+   that says "never skip this step" near an eval self-suppresses. Measured at zero cost on both
+   corpora, but it is the weakest term in that list and the first thing to re-measure if a
+   future corpus shows an evasion.
+4. **Shape E is deferred, not done.** No corpus evidence; box ticked as a measured deferral.
+
+**Why this is not moved to `complete` by me:** `ai_review → human_review` is an escalation gate
+and `human_review → complete` is a USER decision (manager-approval-defaults §Z). The work is
+Tier-0 and self-approvable in a mono-agent repo, but the conservative reading is the one the
+rules ask for when unsure, and the honest caveats above are exactly what a human should weigh.
 
 ## Approval log
