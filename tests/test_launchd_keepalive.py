@@ -36,6 +36,13 @@ INSTALLER = SCRIPTS / "keepalive_install.sh"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import launchd_keepalive  # type: ignore[import-not-found]  # noqa: E402
+import state  # noqa: E402  # for the shared subprocess-timeout scale (TRDD-7NSRD8OV)
+
+# The TEST'S OWN ceilings for spawning `keepalive_install.sh`, scaled by the shared knob
+# (category D — nothing inside scripts/lib can reach a number written here). Measured at 2x
+# oversubscription: `TimeoutExpired … after 30 seconds` on `keepalive_install.sh status`.
+# Stretching is safe because these tests' subject is the installer's EFFECT, never its speed.
+_T30 = 30 * state.timeout_scale()
 
 
 @pytest.fixture(autouse=True)
@@ -316,7 +323,7 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
     env.pop("XDG_CONFIG_HOME", None)  # so linux resolves the unit under fake_home/.config
     proc = subprocess.run(
         ["bash", str(INSTALLER), "install"],
-        env=env, capture_output=True, text=True, timeout=30,
+        env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert proc.returncode == 0, proc.stderr
     expected_entry = str(
@@ -401,7 +408,7 @@ def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
     env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
     env.pop("XDG_CONFIG_HOME", None)
     install = subprocess.run(
-        ["bash", str(INSTALLER), "install"], env=env, capture_output=True, text=True, timeout=30,
+        ["bash", str(INSTALLER), "install"], env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert install.returncode == 0, install.stderr
     # The definition file IS on disk (install wrote it) ...
@@ -421,7 +428,7 @@ def test_status_reports_unloaded_job_as_not_installed(tmp_path: Path) -> None:
         return subprocess.run(
             [bash, str(INSTALLER), "status"],
             env={**env, "PATH": str(pathdir)},
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=_T30,
         )
 
     unloaded = _status(loaded=False)
@@ -481,7 +488,7 @@ def _run_installer_with_path(fake_home: Path, fakebin: Path) -> None:
     env.pop("XDG_CONFIG_HOME", None)
     proc = subprocess.run(
         [bash, str(INSTALLER), "install"],
-        env=env, capture_output=True, text=True, timeout=30,
+        env=env, capture_output=True, text=True, timeout=_T30,
     )
     assert proc.returncode == 0, proc.stderr
 
