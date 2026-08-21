@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying 6h ago and re-broadcasts a stale network verdict it will never re-test
 column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-21T14:11:01+0200
+updated: 2026-08-21T14:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -53,13 +53,42 @@ It also actively contradicts the other channel: `session-start.log` says *"run
 evidence."* One of them is wrong for the current state, and today it is both — the credentials
 were never judged, AND the transport is fine.
 
-## What is NOT claimed
+## ⏵ CAUSE FOUND IN SOURCE + STATE — 2026-08-21 14:20. **And it CORRECTS this card's premise.**
 
-Why it stopped retrying is UNKNOWN — a dead retry loop, an exhausted backoff with no ceiling
-reset, a latched terminal state, or a supervisor that stopped scheduling the tick. Do not guess:
-the frozen count and the empty log are symptoms, not a diagnosis. The tick process itself IS
-alive (the log's own mtime advances with each alert re-emission), so "the daemon is dead" is
-already ruled out.
+Read from `oauth-rotator/state.json` (non-secret metadata only — slot indices, no emails, no
+tokens):
+
+| slot | `refresh_failures` | `last_refresh_failure` | token expires in |
+|---|---|---|---|
+| #0 | 572 | **credential-dead** | **−191.9 h** (expired ~8 days ago) |
+| #1 | 224 | **credential-dead** | **−237.6 h** (expired ~10 days ago) |
+| #2 | 775 | network | **−160.5 h** (expired ~6.7 days ago) |
+
+**THE CORRECTION, and it matters because this card was filed partly on the opposite premise:**
+only **ONE of three** slots last failed on the network. The other two recorded
+**`credential-dead`** — for those the credential WAS judged, and it is dead. So
+`session-start.log`'s advice to run `/janitor-refresh-cc-logins` is **RIGHT for slots #0 and
+#1** and wrong only for #2. I generalised one slot's alert text ("do NOT re-login on this
+evidence") to all three; that was an over-reach, and the state file refutes it.
+
+**The mechanism, from source, not guessed:**
+1. `rotator.py:2305` increments `refresh_failures` on EVERY failure, and its own comment says
+   the recorded cause "is purely diagnostic and must NEVER change the escalation counter".
+   So 775 network failures count exactly like 775 revocations.
+2. `DEFAULT_MAX_REFRESH_FAILURES = 3` (`cascade.py:57`). All three slots are 74×–258× past it,
+   so the cascade classifies every one as dead-refresh.
+3. The runway gate at `rotator.py:2288` (`eh > KEEPALIVE_AHEAD_H`, 6 h) is **NOT** what stops
+   the attempts — every token is already EXPIRED, so `eh` is deeply negative and inside the
+   window. Something upstream skips these slots before keepalive is reached. That last hop is
+   the one piece still unread.
+4. `rotator.py:1888` documents this trap already: a rescued slot "would otherwise keep
+   `refresh_failures >= max` forever (keepalive skips it: a freshly-refreshed token is outside
+   `KEEPALIVE_AHEAD_H`, so it never re-runs the reset)". The reset exists; the path to it does
+   not, for a slot in this state.
+
+**So the headline is bigger and simpler than "a stale verdict": all three accounts' tokens
+expired 6.7–10 days ago and the automatic refresh path is exhausted for all of them.** Two need
+a human re-login. The stale-verdict defect is real but is now the SECOND finding, not the first.
 
 Distinct from [[TRDD-A8DPTDOU]], which is about two alert KEYS describing one condition. This
 card is about a state machine that latched and a verdict that is never re-tested. Fixing the
@@ -67,7 +96,10 @@ key hygiene would not fix this, and vice versa.
 
 ## Acceptance
 
-- [ ] The cause of the stall is identified from evidence (which loop, which state), not guessed
+- [x] The cause of the stall is identified from evidence (which loop, which state), not guessed
+      — see the CAUSE FOUND section: the counter is cause-blind by design, max is 3, all three
+      slots are 74x-258x past it, and every token expired 6.7-10 days ago. One hop still unread:
+      exactly where a dead-refresh slot is skipped before keepalive.
 - [ ] A cited failure reason is RE-TESTED before it is re-broadcast — an alert that repeats an
       unverified verdict for 6 h is the defect, independent of whether retrying resumes
 - [ ] Retry resumes on its own once the cited cause clears, with a bounded backoff that has a
