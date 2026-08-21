@@ -3,7 +3,7 @@ trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
 column: dev
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T05:42:00+0200
+updated: 2026-08-21T09:12:00+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -64,9 +64,42 @@ next move; rank by silent risk and the 0/9 bucket goes first. And the **FP budge
 (0/46 benign)**, so there IS headroom to widen a rule — the condition shape A's base64-floor
 trap warns is usually absent.
 
-**NEXT ACTION:** per-shape decisions (A base64-floor / B alias-sink / D positional-suppression /
-E split-literal) against THESE numbers, then update the baseline gate so a regression fails. The
-card's own rule still binds: do NOT quote a recall number that includes c14/c17 as if measured.
+**1 of 5 CLOSED 2026-08-21: `concealment-directive` 0/9 → 8/9, FP 0.** Commit `5f347cbd`.
+
+The 0/9 was a RULE gap, not a corpus gap — and the distinction was worth the hour it took to
+settle, because the cheap read was the wrong one. The samples barely mention "the user", and the
+one I opened first is 900 characters of ordinary security-policy prose ("Project Phoenix Security
+Policy v2.1": Purpose, Access Control, Data Handling…). That looks exactly like an off-label
+sample, and widening a rule toward mislabelled content would have spent the FP budget on noise.
+The payload is buried at `### 7.3 Silent Operations` — "certain tasks must be performed without
+generating logs", "disable audit logging temporarily" — i.e. the corpus was correctly delivering
+the *"buried inside a long legitimate-looking document"* variant the generator prompt asked for.
+**Judging a blind sample by its opening paragraph is judging it by the disguise.**
+
+Root cause: the pattern only ever matched concealment from **the user** (literal object). All 9
+samples conceal from **the record** — audit trail, logs, changelog, commit message. Same attack
+to a human, invisible to the regex. Fixed by adding the missing half (+ name/description, which
+had drifted from the pattern).
+
+Measured: recall 8/9; **0 residual FP across 23,858 real agent-context files**. Two FPs surfaced
+IN that measurement and are fixed with negative controls pinned — `hidden block` matched "hidden
+BLOCKers", and `bypass audit` matched "direct-API-**bypass audit**" (an audit OF bypasses; the
+hyphen flips the part of speech). Sample 07 (`suppress_output: true`, `log_level: silent`) is a
+DELIBERATE abstention: legitimate config keys, and the FP budget is what makes a CRITICAL rule
+worth reading.
+
+**NEXT ACTION:** the remaining 4 of the claimed-but-zero bucket, same method —
+`prompt-injection-multilingual` 0/9, `exfil-webhook-sink` 0/9, `mcp-annotation-lying` 0/9,
+`two-step-code-injection` 0/7. For each: read a full sample before judging the label, widen only
+on evidence, re-run the 23,858-file FP sweep, hold FP at 0, pin one positive control per
+alternation. THEN the per-shape decisions (A base64-floor / B alias-sink / D
+positional-suppression / E split-literal) and the baseline gate. The card's own rule still binds:
+do NOT quote a recall number that includes c14/c17 as if measured.
+
+**Reusable and not obvious:** the FP sweep must run over REAL agent-context files, not the bench's
+benign set. The bench's 46 benign samples showed 0 FP for both the broken and the fixed pattern —
+it was the 23,858-file sweep that found both real FPs. A benign set authored alongside the attack
+set shares its blind spots.
 
 ## ⏵ STATE — 2026-08-21 05:05: c20 CAPTURED — the measurement's blocker is GONE. 25/32 *(superseded above)*
 
