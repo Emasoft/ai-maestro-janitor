@@ -3,7 +3,7 @@ trdd-id: R4XC8MV1
 title: require_pull_request_for is caller-context dependent so two appliers flip-flop the same ruleset
 column: todo
 created: 2026-08-21T03:57:15+0200
-updated: 2026-08-21T03:57:15+0200
+updated: 2026-08-21T08:24:48+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -44,6 +44,31 @@ this applier carry `required_status_checks` only; 6 still carry the hub's unifor
 the two appliers' PAYLOADS agree does NOT fix it — the same applier flips against itself
 depending on where it is invoked from, and each writer's own post-condition reports success, so
 the oscillation is invisible to both. This is the a-green-gate-over-an-oscillating-resource shape.
+
+## Still live — re-measured 2026-08-21 08:25 (6-repo sample, read-only `gh api`)
+
+The split is not historical; the two appliers are still fighting. `baseline-pr-and-checks`
+rule sets, read live:
+
+| repo | rules present | last writer implied |
+|---|---|---|
+| `ai-maestro-janitor` | `required_status_checks` | janitor applier (predicate False) |
+| `ai-maestro-maintainer-agent` | `required_status_checks` | janitor applier (predicate False) |
+| `ai-maestro` | `pull_request`, `required_status_checks` | hub applier (predicate True) |
+| `claude-plugins-validation` | `pull_request`, `required_status_checks` | hub applier (predicate True) |
+| `ai-maestro-plugins` | `pull_request` | hub applier |
+| `agent-identity` | `pull_request` | hub applier |
+
+**A 6-of-9 SAMPLE, not a census** — I queried six repos, so do not quote this as a fleet total;
+the earlier 3/6 census figure came from the hub and is not contradicted by this.
+
+Two things this adds beyond the original finding. First, it is **direct per-repo evidence of the
+predicate's two answers coexisting on one fleet at one instant**, which is stronger than
+inferring the flip-flop from an audit log. Second, `ai-maestro-plugins` and `agent-identity`
+carry `pull_request` with NO `required_status_checks` — a THIRD shape, and an expected one
+rather than a fourth bug: the baseline omits `required_status_checks` entirely when no CI job is
+detectable (GitHub 422s an empty list), and that detection is itself cwd-dependent. Worth
+naming so a reader does not count it as more oscillation than there is.
 
 ## What
 
