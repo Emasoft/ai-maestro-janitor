@@ -166,7 +166,10 @@ def _gh_api(path: str) -> tuple[object | None, str | None]:
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
-            capture_output=True, text=True, timeout=60,
+            # Scaled by the shared knob (TRDD-7NSRD8OV); 1.0 in production. Same reason as
+            # its twin in `gh_notify_poll.gh_api` — under suite load this expired against a
+            # stub, and the resulting "did not run" read as a logic bug.
+            capture_output=True, text=True, timeout=60 * state.timeout_scale(),
         )
     except FileNotFoundError:
         return None, "gh CLI not found on PATH"

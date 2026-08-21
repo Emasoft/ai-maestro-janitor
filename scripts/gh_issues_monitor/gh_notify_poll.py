@@ -42,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import gh_notify_inbox  # noqa: E402  # the fleet-wide inbox SSOT (TRDD-079778RM)
+import state  # noqa: E402  # SSOT for the subprocess-timeout scale (TRDD-7NSRD8OV)
 
 STATE_VERSION = 3
 SEEN_TTL_DAYS = 30
@@ -204,7 +205,11 @@ def gh_api(path: str) -> tuple[object | None, str | None]:
     try:
         proc = subprocess.run(
             ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
-            capture_output=True, text=True, timeout=60,
+            # Scaled by the shared knob (TRDD-7NSRD8OV). 1.0 in production, so the real
+            # ceiling is unchanged. Under the test suite's own load this call expired and
+            # the poller reported "MONITOR DEGRADED -- gh api timed out" against a stub
+            # that answers instantly — a timeout masquerading as a monitor defect.
+            capture_output=True, text=True, timeout=60 * state.timeout_scale(),
         )
     except FileNotFoundError:
         return None, "gh CLI not found on PATH"

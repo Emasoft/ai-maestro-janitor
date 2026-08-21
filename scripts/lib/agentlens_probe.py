@@ -148,7 +148,11 @@ def probe_cache_expired(
             argv,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            # Scaled like `probe_json` (TRDD-7NSRD8OV); 1.0 in production. Without it this
+            # expired under suite load and returned None — and None here is the tri-state
+            # "unknown", so the test failed on `assert None is True` with nothing naming a
+            # timeout. The same shape the card was opened for.
+            timeout=timeout * _state.timeout_scale(),
         )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None

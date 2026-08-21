@@ -126,7 +126,7 @@ def _refresh_marketplace(mp: str, log_path: Path) -> None:
                 subprocess.run(
                     ["claude", "plugin", "marketplace", "update", mp],
                     stdout=logf, stderr=subprocess.STDOUT,
-                    timeout=60, check=False,
+                    timeout=60 * state.timeout_scale(), check=False,  # TRDD-7NSRD8OV; 1.0 in prod
                 )
         except subprocess.TimeoutExpired:
             state.log_line("plugin-updates", f"marketplace refresh timed out: {mp}")
@@ -219,7 +219,10 @@ def main() -> int:
     try:
         proc = subprocess.run(
             ["claude", "plugin", "list", "--json"],
-            capture_output=True, text=True, timeout=30, check=False,
+            # Scaled by the shared knob (TRDD-7NSRD8OV); 1.0 in production. On expiry this
+            # returns 0 having called `claude` ZERO times, so the test sees `calls=[]` — a
+            # timeout that looks exactly like "the detector decided not to act".
+            capture_output=True, text=True, timeout=30 * state.timeout_scale(), check=False,
         )
     except subprocess.TimeoutExpired:
         state.log_line("plugin-updates", "claude plugin list --json timed out — skipping")
