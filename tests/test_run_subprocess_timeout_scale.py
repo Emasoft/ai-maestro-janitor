@@ -186,6 +186,47 @@ def test_a_DIRECT_subprocess_run_expires_when_the_seam_is_off() -> None:
         )
 
 
+def test_an_ALREADY_scaling_site_is_scaled_TWICE_in_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CHARACTERIZATION of a known defect: in-process, the two halves COMPOUND to 100x.
+
+    The suite installs two mechanisms. The env knob reaches a detector running as a CHILD
+    process (a monkeypatch cannot); the `Popen` patch reaches in-process calls. For the 13
+    production sites that ALREADY do `timeout=X * state.timeout_scale()`, an in-process call
+    gets BOTH — so the ceiling is X*100, not X*10.
+
+    Latent, not realized: the suite is green in 240 s because nothing currently drives one of
+    those sites to a genuine hang without `no_timeout_scale`. The exposure is that
+    `probe_cache_expired`'s 90 s ceiling becomes 9000 s, so an UNINTENTIONAL timeout — the very
+    flake this TRDD exists for — would WEDGE the suite for hours instead of failing it.
+
+    This asserts the CURRENT behaviour so a fix is provably a change; flip it when the design
+    conflict (child vs in-process) is resolved.
+
+    Measured deterministically — no sleeps, no wall-clock. An outcome/duration probe was tried
+    first and was itself load-dependent: it PASSED under load (child outran the ceiling) and
+    FAILED on a quiet box, i.e. it reported the wrong answer in exactly the conditions this
+    TRDD is about. The spy sees the number instead of inferring it from a race.
+    """
+    sys.path.insert(0, str(_REPO / "scripts" / "lib"))
+    import agentlens_probe
+
+    seen: dict[str, object] = {}
+
+    def _spy(*_a: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        raise OSError("stop here — the timeout is the whole measurement")
+
+    monkeypatch.setattr(subprocess, "run", _spy)
+    assert agentlens_probe.probe_json("/bin/echo hi", timeout=1.0) is None
+
+    # Half one: the site multiplied by the env knob before subprocess.run ever saw it.
+    assert seen["timeout"] == 1.0 * conftest.SUBPROCESS_TIMEOUT_SCALE
+    # Half two: Popen is wrapped, so communicate would multiply that AGAIN.
+    assert getattr(subprocess.Popen.communicate, "__wrapped__", None) is not None
+
+
 @pytest.mark.no_timeout_scale
 def test_the_no_timeout_scale_marker_removes_the_seam() -> None:
     """The opt-out a timeout-subject test relies on actually opts out.

@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T13:40:00+0200
+updated: 2026-08-21T17:35:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -814,5 +814,46 @@ Sweep for the whole class, not just these two: grep the suite for tests that bui
       36-user box that also runs the janitor daemon, the ai-maestro server and other Claude
       sessions — an outward-facing side effect I will not take unilaterally for marginal
       evidence. **USER call:** accept the 4-run evidence, or authorize a synthetic-load run.
+
+## ⏵ THE RESIDUAL MECHANISM IS NO LONGER UNKNOWN — measured 2026-08-21 17:2x
+
+The card has said twice that the residual empty-stdout family's mechanism was undetermined.
+It is now measured, and it is not load in the abstract — it is **the first exec of a
+newly-written executable**.
+
+Every one of these tests does the same thing: write a `.sh` into `tmp_path`, `chmod +x`, exec
+it. On macOS the FIRST exec of a newly-created executable pays a one-time scan.
+
+| shape | cost | n |
+|---|---|---|
+| fresh script, `chmod +x`, `./script` | **0.22–0.25 s** | 40/40 |
+| the SAME 40 files, re-exec'd | 0.00–0.02 s | 40/40 |
+| fresh script, `/bin/sh script` (data, trusted interpreter) | **0.00 s** | 12/12 |
+| one outlier, fresh executable under load | **14.99 s** | 1 |
+
+**Why that is the flake.** ~230 ms is invisible on a quiet box. Under load it stretches, and
+the stretch is what eats the ceiling: the five probe tests measured **15.46 / 15.10 / 14.97 /
+14.41 / 14.20 s** while the suite was saturated, and **0.23–0.26 s each** on the same code
+minutes later on a quiet one. The whole file: **81.52 s under load → 10.30 s quiet.** A
+production 5 s ceiling has no headroom against a 15 s scan, so `run` expires, fail-open
+returns `None`, the caller returns empty stdout, and the test asserts on `''` with nothing
+naming a timeout — **the card's signature exactly.**
+
+**Load was never the mechanism, only the amplifier.** That distinction is the whole finding:
+"it flakes under load" pointed at scheduling and made the fix look like "wait longer", which
+is what the seam does. The actual cause is a per-file cost the tests create for themselves,
+and it is removable rather than merely survivable.
+
+**The removal, for a follow-up card, not this one:** invoke the fixture script as DATA —
+`/bin/sh <path>` instead of `chmod +x` + `./path`. Measured 0.00 s vs 0.23 s, and it is
+load-IMMUNE because there is no new executable to scan. That is a change across several test
+files and belongs behind its own TRDD; the seam already covers the symptom (50 s ceilings
+absorb a 15 s scan), so nothing is urgent.
+
+**Honest limits.** The exec-vs-data discriminator is strong but INDIRECT: I did not attribute
+the cost to a named scanner, so "macOS scans a new executable on first exec" is the best-fit
+explanation, not a proven one. Alternatives I did not rule out are dyld/codesign caching
+effects. The 14.99 s figure is ONE sample and did not reproduce in 40 — treat it as evidence
+that the tail is heavy, not as the typical cost.
 
 ## Approval log
