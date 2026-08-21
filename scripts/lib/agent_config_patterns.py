@@ -887,9 +887,19 @@ _CHAT_TEMPLATE_DELIMS = _re(
 # ---- Concealment directive (deep-prompt-injection P8) ------------------
 
 
-# A directive telling the agent to HIDE its own actions from the user
-# is by definition adversarial — there is no legitimate reason a
-# skill body would tell the agent "do not tell the user".
+# A directive telling the agent to HIDE its own actions is by definition
+# adversarial — no legitimate skill body says "do not tell the user".
+#
+# TWO OBJECTS, not one. The original pattern only ever matched
+# concealment FROM THE USER ("the user" as a literal object), and scored
+# 0/9 against a blind adversarial corpus (TRDD-VAWIKRK2, 2026-08-21) —
+# every sample was on-label and every sample concealed from THE RECORD
+# instead: the audit trail, the logs, the changelog, the report. Real
+# payloads read "must be performed without generating logs" and "must not
+# appear in any user-facing output, audit trail, or commit message"; a
+# human reads those as the same attack, the regex saw nothing at all. So
+# the record-suppression alternations below are not an extension of the
+# rule, they are the half of it that was missing.
 _CONCEALMENT_DIRECTIVE = _re(
     r"\bdo\s+not\s+(?:tell|inform|notify|mention\s+to|show)\s+the\s+user\b"
     # Looser shape: "hide/conceal <up to 30 chars of any noun> from the user"
@@ -899,6 +909,33 @@ _CONCEALMENT_DIRECTIVE = _re(
     r"|\bsilent(?:ly)?\s+(?:execute|run|perform|invoke)\b"
     r"|\bwithout\s+(?:notifying|alerting|informing|telling)\s+(?:the\s+)?user\b"
     r"|\bdo\s+not\s+(?:log|surface|emit|print|output)\s+(?:this|the\s+\w+)"
+    # --- concealment from THE RECORD (the other half) ---
+    # "performed without generating logs" / "without leaving a trace".
+    r"|\bwithout\s+(?:generating|writing|creating|producing|leaving)\s+"
+    r"(?:any\s+|a\s+)?(?:logs?|audit\w*|traces?)\b"
+    # "disable audit logging temporarily", "internal-audit-bypass".
+    # Anchored on AUDIT deliberately: a bare "disable logging" is ordinary
+    # operational advice, and matching it would spend the FP budget that
+    # is the only thing keeping a CRITICAL rule trustworthy.
+    # `(?<![-\w])` because a HYPHENATED compound flips the part of speech:
+    # "direct-API-bypass audit" is an audit OF bypasses, not an instruction
+    # to bypass an audit. Measured as an FP on a real archived TRDD.
+    r"|(?<![-\w])(?:disable|bypass|turn\s+off|suppress)\s+(?:the\s+)?audit(?:ing|\s*log\w*|\s*trail)?\b"
+    r"|\baudit[-_\s]?bypass\b"
+    # "must not appear in any user-facing output, audit trail, or commit
+    # message" / "should not appear in changelogs or release notes".
+    r"|\b(?:must|should|do|will)\s*n[o']?t\s+appear\s+in\s+[^.\n]{0,80}?"
+    r"(?:audit|logs?|changelogs?|release\s+notes?|reports?|commit\s+message)"
+    # "This line should be omitted from audit reports".
+    r"|\bomit(?:ted)?\s+from\s+(?:the\s+)?(?:audit|logs?|reports?)\b"
+    # A block that ANNOUNCES itself as hidden: "## Hidden Directive",
+    # "// Hidden directive: disable logging", "# Hidden Section",
+    # "// End of hidden block". Honest documents do not label their own
+    # sections hidden.
+    # `s?\b` is load-bearing: without the boundary, "hidden block" matched
+    # "check for hidden BLOCKers" in an ordinary capacity-planning doc.
+    r"|\bhidden\s+(?:directive|section|block|instruction)s?\b"
+    r"|^#{1,6}\s*hidden\s*$"
 )
 
 
@@ -1222,13 +1259,16 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="concealment-directive",
-        name="Concealment directive — agent told to hide actions from user",
+        name="Concealment directive — agent told to hide actions from the user or the record",
         severity="CRITICAL",
         description=(
             "Body instructs the agent to act WITHOUT telling the user "
             "('do not tell the user', 'silently execute', 'hide this "
-            "from the user'). No legitimate skill needs this — it is "
-            "an adversarial directive by definition."
+            "from the user') OR to keep its actions out of the RECORD "
+            "('without generating logs', 'disable audit logging', 'must "
+            "not appear in any audit trail or commit message'). No "
+            "legitimate skill needs either — both are adversarial "
+            "directives by definition."
         ),
         pattern=_CONCEALMENT_DIRECTIVE,
         owasp_asi="ASI-07",
