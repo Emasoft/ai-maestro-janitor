@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: dev
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T10:35:12+0200
+updated: 2026-08-21T10:36:26+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -99,6 +99,48 @@ I stashed the fence work specifically because the failures appeared right after 
 correlation is not cause; on the clean tree they reproduce identically, so TRDD-K3PN7QW2 is
 exonerated. Its files (memory modules + the memgrep crate) are not imported by any failing
 detector.
+
+### SESSION END STATE — 2026-08-21 10:36. Both families FIXED; 2 files still unexplained
+
+**Fixed this session (4 sites):**
+
+| family | site | fix |
+|---|---|---|
+| A | `test_gh_reply_watch` ×3, `test_github_issues_watch` ×1 minimal-env builders | pass the knob through |
+| B | `agentlens_probe.probe_json` (`_TIMEOUT_S = 5.0`) | `× state.timeout_scale()` |
+| B | `cli_agent_roster.fetch_agents` (`timeout_s = 15`) | `× state.timeout_scale()` |
+
+`state._timeout_scale` is now PUBLIC `state.timeout_scale` and imported by both helpers rather
+than each re-reading the env — a per-helper copy of one rule is exactly what TRDD-K3PN7QW2 spent
+this session undoing.
+
+**THE HAZARD THIS CREATES, and it must be carried forward.** Scaling a timeout DEFEATS any test
+whose subject IS that timeout. `test_fetch_agents_timeout_is_reported` broke the moment
+`fetch_agents` was scaled: `timeout_s=1` against a `sleep 5` shim became a 10 s ceiling the shim
+finished comfortably inside, so the assertion passed nothing and failed. Such a test must OPT OUT
+(`monkeypatch.setenv(knob, "1")`), which is what it now does. The seam fix never surfaced this
+because `run_subprocess`'s own tests monkeypatch `subprocess.run` rather than really expiring.
+Swept for the same shape: only `test_fleet_scan` also asserts on a `"timeout"` string, and it is
+unaffected (69/69). **Any future site scaled this way needs the same sweep.**
+
+**Still unexplained — do NOT assume they are timeouts:**
+- `test_terminal_trigger` (5 fails): `assert 'USE_ITERM_PATH' == 'FIRED:aimaestro'`. An
+  environment-dependent BRANCH took the iTerm fallback instead of the ai-maestro path. May be
+  timeout-induced upstream; unproven either way.
+- `test_leanctx_allowlist` (2 fails): `['allow uv', 'allow pytho…'] == ['allow dispa…', …]` — a
+  CONTENT/ordering mismatch in the call log, not a timeout shape at all. Most likely a separate
+  defect that merely surfaces under the same load; it should probably become its own TRDD once
+  characterized, rather than be absorbed into this card.
+
+**Verification status, stated honestly:** the full suite is green — 15,727 passed, 1 skipped, 0
+failed, EXIT 0, 140.5 s. **This does not close the card.** Every run today that mattered was on a
+quiet box, and this card's own lesson is that green on a quiet box proves nothing: the four green
+runs at 09:53 led me to move it to `testing`, and it was flaking within the hour. Closing needs a
+run under genuine load, with the two unexplained files resolved.
+
+(An earlier run reported EXIT 3 with 15,727 passed / 0 failed. That was the real-state write
+guard seeing `cli_agent_roster.py` change mid-run — me editing during the run, not a test escaping
+isolation. Re-run clean: EXIT 0.)
 
 ### NEXT ACTION — a decision, and the cheap fix is the one that already failed once
 
