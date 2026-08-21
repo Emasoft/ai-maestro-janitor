@@ -120,6 +120,17 @@ _CODE_COVERAGE: dict[str, str | None] = {
     "link-one-sided": None,
     "link-downward-cross-scope": None,
     "stray-display-bracket": None,
+    # Orphaned BY DESIGN, not by oversight. `page-unclosed-fence` exists to explain a
+    # SILENT read failure to whoever is standing in front of it: an odd fence count makes
+    # every walker swallow the rest of the page, so atoms below it vanish from lint, from
+    # recall, and from the refusal message that sent you looking. Its two consumers are
+    # `memgrep lint` and the atom-not-found hint — both synchronous, both human-facing.
+    # A repair chore is the wrong owner: closing a fence requires knowing WHERE the author
+    # meant it to end, which is an editorial judgement, and a chore that guessed would
+    # silently restructure a page nobody asked it to touch. `memory_content_precheck` is
+    # deliberately not body-fence-aware for the same reason (see its own comment at the
+    # `_footer_heading_line` twin).
+    "page-unclosed-fence": None,
 }
 
 _ALL_INTERVENTIONS = (
@@ -148,7 +159,10 @@ def test_classification_table_matches_the_source_exactly():
     # code AND its row together, which is precisely the moment someone should have to state
     # whether a chore gate covers it. This constant is the one thing that fails then.
     # 30 -> 31: `atom-after-footer` (janitor#260 endgame), classified `repair` on a measurement.
-    assert len(_CODE_COVERAGE) == 31
+    # 31 -> 32: `page-unclosed-fence`, classified ORPHANED on a measurement — `repair_defect`
+    # returns no fence code and the precheck's only fence logic is for FRONTMATTER, not the
+    # body. Orphaned here means "human-facing by design", see the row's own comment.
+    assert len(_CODE_COVERAGE) == 32
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():
