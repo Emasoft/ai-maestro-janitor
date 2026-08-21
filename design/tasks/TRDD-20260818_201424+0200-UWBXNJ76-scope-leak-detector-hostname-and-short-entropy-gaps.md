@@ -1,7 +1,7 @@
 ---
 trdd-id: UWBXNJ76
 title: memory-scope-leak misses bare hostnames and sub-24-char high-entropy ids
-column: testing
+column: complete
 created: 2026-08-18T20:14:25+0200
 updated: 2026-08-21T03:55:00+0200
 implementation-commits: [07bf1d16]
