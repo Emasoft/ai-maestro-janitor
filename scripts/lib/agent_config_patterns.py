@@ -668,7 +668,28 @@ _TWO_STEP_INJECT = _re(
     # `const enc = "<b64>"; (new Function(atob(enc)))();`
     rf"|{_B64_LITERAL}{_WITHIN_5_LINES}[^\n]*?{_EXEC_SINK}[^\n]*?{_DECODE_CALL}"
     # Branch D — same nesting, literal BELOW the call (a payload defined after its use site).
-    rf"|{_EXEC_SINK}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_B64_LITERAL})"
+    rf"|{_EXEC_SINK}[^\n]*?{_DECODE_CALL}{_WITHIN_5_LINES}[^\n]*?{_B64_LITERAL}"
+    # ---- Branches E-H: the SHELL PIPELINE form (TRDD-VAWIKRK2) ----
+    # Branches A-D are all LANGUAGE-level: `Buffer.from`/`atob`/`b64decode` feeding
+    # `eval`/`exec`. Every one of the 7 blind-corpus samples uses the SHELL idiom
+    # instead, which is also the form seen in the wild far more often than the
+    # JavaScript one — so the rule scored 0/7 on the class this card exists for.
+    #
+    # E: `echo '<b64>' | base64 -d | bash` — decode piped straight into a shell.
+    #    No `_B64_LITERAL` co-requirement: piping ANY base64 decode into a shell is
+    #    the attack whether the blob is inline, in a variable, or read from a file,
+    #    and there is no benign reason to write it in an agent-context file.
+    r"|base64\s+(?:-d|-D|--decode)\b[^\n]{0,60}?\|\s*(?:ba|z|k|da|fi)?sh\b"
+    # F: `eval $(echo "$payload" | base64 -d)` — decode inside a command substitution.
+    r"|\beval\b[^\n]{0,80}?base64\s+(?:-d|-D|--decode)\b"
+    # G: ROT13 via `tr`, piped to a shell — the same two-step with a cipher that
+    #    needs no base64 alphabet. Matched on the rotated alphabet itself, which is
+    #    unmistakable: nothing legitimate rotates text and executes the result.
+    r"|\btr\s+['\"]?a-zA-Z['\"]?\s+['\"]?n-za-mN-ZA-M['\"]?[^\n]{0,40}\|\s*(?:ba|z|k)?sh\b"
+    # H: the intent declared as configuration — `"action": "decode_and_execute"`
+    #    beside an encoded blob. A config key that says it decodes and executes is
+    #    stating the two-step outright.
+    r"|decode[_\s-]?(?:and|&)[_\s-]?exec\w*)"
 )
 
 

