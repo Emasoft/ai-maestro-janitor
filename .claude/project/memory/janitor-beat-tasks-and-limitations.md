@@ -1,8 +1,8 @@
 ---
 name: janitor-beat-tasks-and-limitations
-description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go — the janitor's two-clock schedule and its known limitations"
+description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / the heartbeat keeps telling me to resume an agent I stopped / pending agents nag after TaskStop / how do I clear a pending agent entry / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go — the janitor's two-clock schedule and its known limitations"
 ocd: 2026-07-12
-lmd: 2026-08-19
+lmd: 2026-08-21
 metadata:
   node_type: memory
   type: project
@@ -139,6 +139,19 @@ user plugins EXCEPT the ai-maestro fleet").
   is missing degrades to zero findings and logs once — one broken unit never crashes the
   heartbeat or blocks the others.
 
+
+^ATOM-ET56-UFQN [desc: "TaskStop does NOT clear the pending-agents manifest — the killing session must call mark_stopped itself", keywords: the_heartbeat_keeps_telling_me_to_resume_an_agent_I_stopped pending_agents_nag_after_TaskStop stub_lists_a_background_agent_that_no_longer_exists resume_directive_names_a_killed_agent how_do_I_clear_a_pending_agent_entry, ocd: 2026-08-21, lmd: 2026-08-21]
+
+`TaskStop` does NOT clear the janitor's pending-agents manifest. There is no TaskStop hook on the platform, and `on-subagent-stop.py` (SubagentStop) is never invoked by a kill — so a deliberately stopped agent keeps appearing in every heartbeat's resume list until the manifest's time sweep ages it out. `pending_agents.mark_stopped(agent_id)` exists for exactly this and has **NO production caller**: the KILLING SESSION is the intended caller (TRDD-PGN5XSHA closed on the shipped code plus a unit test, without ever observing this live).
+
+Clear it by hand right after the kill:
+
+```
+uv run python -c "import sys; sys.path.insert(0,'scripts/lib'); import pending_agents as pa; pa.mark_stopped('<agentId>')"
+```
+
+`mark_stopped` KEEPS the entry (sets `stopped: True`) so it stays auditable while `directive_lines()` and the pending count skip it — verified live 2026-08-21: the directive went from naming the agent to `[]` immediately after the call. Prefer it over `remove()`, which drops the row entirely. It is fail-open on an unknown id, so a stale id costs nothing. [^5]
+
 ## Governed by
 
 - [[janitor-architecture]] — the two-tier hub this page details the schedule for.
@@ -236,3 +249,4 @@ MEASURED, not estimated (`agentlenspro heartbeat-cost`, 2026-08-04): ONE heartbe
 [^2]: [id:ATOM-0AOD-B2GJ, status:valid, desc:"The tier table's latency claim ignored cron jitter; the two jitter sources disagree", keywords:"recovery_latency_cron_jitter heartbeat_tier_worst_case_gap cron_fires_late_sources_disagree measure_fire_times_not_turn_end janitor_resume_slow_after_compact", ocd:2026-08-02, lmd:2026-08-02] DO NOT quote a heartbeat tier's recovery latency as exactly its cron period (this page pre-2026-08-02 read 'FAST */5 — recovery latency unchanged / ZERO regression'), BECAUSE a scheduled fire lands LATE by a documented jitter and the two sources for it DISAGREE (CronCreate tool: <=10% of the period, max 15 min; CC docs page: up to HALF the interval for sub-hourly tasks — both checked 2026-08-02), so */5 is really ~5 min + 0.5-2.5 min and */30 is ~30 min + 3-15 min. DO state period + jitter range with source and check date, and measure the real distribution ONLY from FIRE timestamps (.janitor/logs/heartbeat-fires.log, stamped by dispatch.main since TRDD-LI7ENU2A) — never token-meter turn-END times, whose ts-mod-300 is UNIFORM (they measure turn duration, not jitter).
 [^3]: [id:ATOM-3YQE-ACXU, status:valid, desc:"measure token and context numbers with agentlenspro, never state a remembered or felt figure", keywords:"I_estimated_the_context_percentage_instead_of_measuring_it how_full_is_my_context am_I_about_to_auto-compact do_not_guess_token_numbers", ocd:2026-08-04, lmd:2026-08-04] DO NOT state a context-percentage or token cost from memory, feel, or a hook warning read several turns ago, BECAUSE those numbers go stale the instant a compaction lands and a confidently wrong one gets acted on — on 2026-08-04 I claimed "~95% context" from a pre-compaction warning, when the measured figure was 406,239/700,000, and used the invented number to decline work the owner had asked for. DO run the agentlenspro CLI (owner directive 2026-08-04: always use it) — `heartbeat-cost` for a fire's real cost, `cache-expired` / `last-compact` for cache and compaction state — and quote what it prints.
 [^4]: [id: ATOM-GLM6-PIK9, status: valid, desc: "TRDD-E39YT9G6 retirement — this page's task table carried the sweep as live until 2026-08-20", keywords: "user-plugins-update_stamp_frozen where_did_the_plugin_sweep_go daemon_chore_missing_from_roster who_updates_user_scope_plugins_now sweep_retired_harness_autoupdate", ocd: 2026-08-19, lmd: 2026-08-19] DO NOT treat user-plugins-update as a live daemon chore or expect its last-run stamp to advance, BECAUSE it was RETIRED 2026-08-20 (TRDD-E39YT9G6): the harness self-updates user-scope plugins from autoUpdate catalogs, so the hourly sweep duplicated harness work and under load its serial spawns timed out until the workload cap SIGKILLed the child (2026-08-19, rc=-9 at 2184 s). DO use the targeted _consume_plugin_update_requests consumer for per-plugin updates — it is not a chore and stays daemon-owned.
+[^5]: [id: ATOM-JSLZ-XJNO, status: valid, desc: "after a TaskStop, clear the manifest yourself", keywords: "I_stopped_an_agent_and_the_heartbeat_still_lists_it do_not_resume_a_stopped_agent resuming_a_killed_agent_re-runs_what_killed_it", ocd: 2026-08-21, lmd: 2026-08-21] DO NOT walk away after `TaskStop`-ing a background agent, BECAUSE nothing clears the pending-agents manifest for you — no TaskStop hook exists — so every later heartbeat re-offers the corpse as a resume candidate, and the stub's own warning is that resuming a DIED agent re-runs the request that killed it. DO call `pending_agents.mark_stopped('<agentId>')` in the same turn as the kill; confirm with `pa.directive_lines() == []`.
