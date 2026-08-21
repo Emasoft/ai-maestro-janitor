@@ -397,6 +397,17 @@ provide provenance it never had.
       nothing on this machine yet that could advance the pin.
       (An agent must still NOT run `/janitor-repin-integrity` to satisfy this — see
       the STATE block.)
+
+      **Re-measured 2026-08-21 17:5x — STILL UNMOVED, and now across a much wider gap.**
+      `integrity/last-good.json` reads `{"version": "0.59.0"}` while the newest cached
+      plugin and the repo manifest are both **3.3.26**. The 2026-08-16 record in CLAUDE.md
+      had the same `0.59.0` anchor against a running 3.3.9, so the pin has not advanced
+      through **seventeen** subsequent releases. That is the signature of a pin nothing is
+      calling, not of a pin that is lagging: a lagging pin moves and arrives late.
+      Consistent with the absorbed-chore blocker (the server owns `version-update`, and the
+      C3 self-heal has only ever had one caller — the janitor's own `task_version_update`).
+      No action taken; this is a data point, and the box still waits on the release plus a
+      janitor-owned fire.
 - [x] The `CLAUDE.md` manual-update rule cross-references this behaviour, so the
       two rules stop contradicting each other. (Done 2026-08-14: the CI-pass upgrade
       rule now names the stale-anchor side effect and cites this card, so the
