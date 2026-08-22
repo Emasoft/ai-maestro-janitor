@@ -1,14 +1,15 @@
 ---
 name: memory-system
-description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update"
+description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update / memgrep refused my write because the atom is too big / can I raise the atom budget knob"
 ocd: 2026-06-13
-lmd: 2026-08-02
+lmd: 2026-08-22
 metadata:
   node_type: memory
   type: project
   tier: component
   functionality: janitor
   originSessionId: memory-audit-draft
+publish-globally: false
 ---
 
 # The wiki-memory system (janitor functionality)
@@ -315,6 +316,11 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
 The atom-insertion footer anchor exists TWICE and the copies must never drift: the crate's `footer_section_line` (scripts/memgrep/src/memory.rs) decides where `add-atom` splices a new atom, and `_footer_heading_line` (scripts/lib/memory_content_precheck.py) decides where `repair_defect` says an atom is MIS-placed (`atom-after-footer`). If they disagree, one relocates atoms the other then flags as defects, forever — a repair chore that can never converge. Change them in the same commit, by construction.
 
 The family is `## Applies to` / `## Governed by` / `## See also` / `## Notes and lessons learned`, but the RULE is "any trailing footer section that sits above Notes" — encode the rule, not the list. janitor#250 shipped twice for exactly this reason: the first fix (7edbb755) covered the three headings the issue body happened to exemplify, and a page whose only footer was `## See also` stayed broken until 36a416e4. The reporter had stated the general rule in a comment before the first fix was written.
+
+
+^ATOM-MZSU-TEZS [desc: "the atom budget WARNS and queues the page to the split chore — it never refuses a write; raising the knob is the wrong lever", keywords: memgrep_refused_my_write_because_the_atom_is_too_big add-atom_failed_on_the_atom_budget MEMGREP_ATOM_MAX_CHARS_blocked_a_memory_write can_I_raise_the_atom_budget_knob an_oversized_atom_warning_appeared_but_the_write_succeeded, ocd: 2026-08-22, lmd: 2026-08-22]
+
+The atom budget (`MEMGREP_ATOM_MAX_CHARS`, default 1500) is a NOTIFICATION, not a gate: `check_new_body_budget` prints a warning to stderr and writes the atom anyway (owner decision 2026-08-22, WM-LINT-03a). Refusing was worse than useless — a write verb that rejects an over-budget body pushes the author back to hand-editing markdown, which is exactly the bypass the memgrep-only write path exists to close, and the count of oversized atoms only ever refilled (TRDD-WN7M829Y). The OWNER of decomposition is the `janitor-memory-split` chore, which handles BOTH scales — oversized PAGES (`split_max_bytes`) and over-budget ATOMS — and finds its atom candidates by shelling out to `memgrep lint` and parsing `[atom-oversized]`, never by re-implementing the Rust parser in Python. Consequence for an author: an over-budget warning means "the librarian will split this later, and splitting it yourself now is better" — it never means retry, and it never means raise the knob.
 
 ## See also
 
