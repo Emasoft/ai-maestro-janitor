@@ -530,7 +530,8 @@ def main() -> int:
                 f"-> {_verify_path()}"
             )
             # SURFACE the missing flag — AMBIGUOUSLY, because it genuinely is ambiguous. Absence
-            # has two readings and this phase cannot tell them apart:
+            # has two readings and this phase does not currently tell them apart (it COULD — see
+            # the note below the two readings; not distinguishing is a choice, not a limit):
             #
             #   1. NORMAL. On the spawned-chain path (`CLEAR_CHAIN_SPAWNED`, the common case) the
             #      resume state is written by the DETACHED CHILD immediately before the `/clear`
@@ -546,6 +547,18 @@ def main() -> int:
             #      Measured 2026-08-22: exactly that left a resumed session idle until its user
             #      complained, while this line printed cron id, context and link count — every
             #      field except the one that decided the outcome.
+            #
+            # A PREDICATE DOES EXIST, and this deliberately does not use it (yet). The chain's
+            # detached child holds a NON-BLOCKING exclusive `flock` on `.janitor/state/
+            # clear-chain.lock` for the whole chain (`clear_trigger.py` ~:359-370), so a
+            # `LOCK_EX|LOCK_NB` probe here would separate (1) from (2) outright: lock busy ⇒ a
+            # chain is pending, lock free ⇒ nobody fired one. Not taken because the ambiguous
+            # message already puts the consequence in front of the one caller who can act on it,
+            # and adding a lock syscall to a FAIL-OPEN diagnostic buys precision with a new
+            # failure mode. What does NOT work — and was proposed — is gating on
+            # `resume-after-clear.ts`: the child writes ts and flag back-to-back in one function,
+            # so ts-without-flag is a microsecond window, not the in-flight period (which is
+            # BEFORE both writes, when neither exists).
             #
             # So it names BOTH readings and asks the caller — who knows whether it fired the
             # trigger — to decide. An earlier revision asserted (2) alone and would have cried
