@@ -1,11 +1,10 @@
 ---
 trdd-id: 4OFMHOZ7
 title: Non-atomic plugin-cache population bricked every session's tools for 20 minutes — post-mortem + staging-dir guard
-column: blocked
-pre-block-column: dev
-blocked-by: [USER-decision-upstream-harness-issue]
+column: dev
+blocked-by: []
 created: 2026-08-19T10:29:00+0200
-updated: 2026-08-20T00:32:00+0200
+updated: 2026-08-22T07:43:09+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -65,12 +64,26 @@ default — surfacing that flag to the user is the actionable residue, not a new
 ATOM-X3NR-20M8 (quarantine must live OUTSIDE every scanned tree) and its `description:` now
 carries the bricked-tools + quarantine-load-error symptoms.
 
-**Box 2 — HALF-BLOCKED.** The staging-dir+atomic-rename requirement goes to the hub's
-server-absorption design via peer message (sendable now). The UPSTREAM ask is harness-owned
-(`claude plugin update` populates the cache non-atomically) ⇒ filing it means posting on a
-repo NOT owned by this gh auth — forbidden without the USER's explicit word. NEXT ACTION:
-ask the USER whether to file the upstream harness issue; on yes, file with the evidence
-above (partial version dir observed live, 120/1758 files, loaded without complaint).
+**Box 2 — RESOLVED 2026-08-22: the upstream half is REFUSED PERMANENTLY, not deferred.**
+USER ruling (decision #13 of the 13-item review): *"you must file/interact only with repo
+owned by my gh auth user."* `gh api user` → `Emasoft`; the harness repo is not his. So the
+upstream ask is **off the table for good** — do not re-raise it, do not re-ask, and do not
+treat a future session's "we should file upstream" as a fresh idea. It was decided.
+
+What survives, and is the whole remaining scope of this card:
+
+1. **The ai-maestro-side ask IS filable** — `Emasoft/ai-maestro` is owned. The
+   staging-dir + atomic-rename requirement goes into the hub's server-absorption design
+   (issue or peer message), with the evidence above: a partial version dir observed live,
+   120/1758 files, loaded without complaint.
+2. **Local mitigation only, for the harness half.** Prevention is impossible without the
+   upstream change, so this repo's job is detection and recovery: `_plugin_cache_is_settled`
+   (`dispatch.py`) already defers `[janitor-reload]` during a refetch, `janitor-self-integrity`
+   flags an installed root missing its manifest, and the quarantine procedure
+   (`ATOM-X3NR-20M8`) covers the aftermath. Anything further is bounded by that ceiling —
+   which is a fact to state in the card, not a gap to keep re-opening.
+
+Un-blocked back to `dev` because the blocker was a USER decision and the USER decided.
 
 ## What happened (measured, two observers)
 
@@ -121,3 +134,9 @@ population is non-atomic. No emergency republish required.
 - [x] plugin-cache-install-integrity memory page updated (lesson ATOM-X3NR-20M8 + description)
 
 ## Approval log
+
+- 2026-08-22T07:43:09+0200 — UNBLOCKED by USER (decision #13). The `blocked-by:
+  USER-decision-upstream-harness-issue` gate is discharged with a NO: filing is restricted to
+  repos owned by the `gh` auth user (`Emasoft`), and the harness repo is not one. Recorded as a
+  permanent refusal rather than a pending question so no future session re-asks it. Card
+  returns to `dev` with the two surviving halves scoped in Box 2.

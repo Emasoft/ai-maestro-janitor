@@ -1,10 +1,10 @@
 ---
 trdd-id: D1UKVNUY
 title: Cache-thrash / tool-surface-churn detector — catch a "cheap-percent, murderous-re-read" marathon session the %-of-window watchdog misses
-column: proposal
+column: refused
 approval-tier: 2
 created: 2026-07-23T19:39:18+0200
-updated: 2026-07-23T19:39:18+0200
+updated: 2026-08-22T07:43:09+0200
 current-owner: main-session
 task-type: feature
 scope: project
@@ -81,3 +81,10 @@ when a session is pathologically expensive by a signal the %-gauge is blind to:
   root cause verified live (marathon MCP-thrash session 43e66c93 in ~/ai-maestro; NOT a janitor
   bug). The upstream-issue draft is REDACTED and must NOT be posted until the owner confirms the
   destination (23blocks-OS is a third-party public repo; the owner holds only the Emasoft fork).
+- 2026-08-22T07:43:09+0200 — REFUSED by USER (Tier 2, decision #4 of the 13-item review).
+  Rationale, in the owner's words: token-event notifications are handled by AgentlensPro
+  directly — it has hooks reporting events to the exact Claude causing the spike or the cache
+  miss — so a janitor detector would be a second, worse voice for a signal that already reaches
+  its cause. The motivating incident and its root-cause analysis remain valid and are NOT
+  refuted; what is refused is the janitor OWNING the alarm. Nothing here needs re-proposing
+  unless AgentlensPro stops covering it.

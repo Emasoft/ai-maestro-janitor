@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-21T18:07:49+0200
+updated: 2026-08-22T07:43:09+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -197,10 +197,28 @@ otherwise the next session will chase a subprocess bug that is really a full fil
 **Freeing space is the USER's call, not an agent's** (nothing here is safe for an agent to
 delete unasked), so this is reported, not acted on.
 
+> **DISK BLOCKER DISCHARGED 2026-08-22 — the 99 % claim above is STALE.** Re-measured:
+> **89 % used, 207 GB free** on `/` and `/System/Volumes/Data`. Whatever the state was on
+> 08-21, the host is not disk-pressured now, so step 1 below is answered and step 2 is
+> reachable without asking anyone.
+>
+> **STANDING USER RULINGS recorded here so no future session re-litigates them** (decisions
+> #9 and #10 of the 2026-08-22 review; the first is now also
+> `~/.claude/rules/never_free_space.md`):
+> - **NEVER handle disk space.** If exhaustion is approaching: STOP ALL ACTIVITY, notify the
+>   USER, wait. Only the USER frees space. The sole exception is `/tmp`, whose contents are
+>   ephemeral by definition.
+> - **NEVER delete backups or any `*_dev` folder** — including the 44 `auto-backup-*` stashes.
+>   Not on disk pressure, not on request from another agent, not as cleanup. Notify instead.
+>
+> These are not scoped to this card; they are why the disk question is permanently a REPORT
+> and never a task. The paragraph above already said "reported, not acted on" — this makes
+> it a rule rather than one card's good judgement.
+
 **NEXT ACTION on the residual, in this order:**
-1. Ask the USER about the 99 % disk; re-measure once it is resolved. A slow run on a
-   disk-pressured host proves nothing about subprocess timeouts.
-2. Only then: get a >500 s run and read the failing case's `.janitor/logs/*.log` plus the new
+1. ~~Ask the USER about the 99 % disk~~ — **DONE, discharged above.** 207 GB free; the
+   disk-pressure hypothesis is dead and must not be re-raised as a cause.
+2. Get a >500 s run and read the failing case's `.janitor/logs/*.log` plus the new
    `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
 3. Do NOT scale anything before that log exists.
 
