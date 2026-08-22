@@ -63,6 +63,7 @@ import ai_context_extras as acx  # noqa: E402
 import cicd_secret_leak_patterns as cicd  # noqa: E402
 import cloud_credential_patterns as cloud  # noqa: E402
 import dedupe  # noqa: E402
+import memory_edit_verify as mev  # noqa: E402
 import privacy_patterns as privacy  # noqa: E402
 import private_path_patterns as ppp  # noqa: E402
 import security_helpers as sec  # noqa: E402
@@ -84,6 +85,49 @@ _NON_PAGE_NAMES = frozenset({
 
 # Generated cache dir inside memory/ — never a page (memgrep's SQLite sidecar).
 _MEMGREP_DIRNAME = ".memgrep"
+
+# `publish-globally` (janitor#52) SYMLINKS a PROJECT page into the USER root, so it is
+# recalled from EVERY project on the machine. Two consequences the four leak catalogues
+# cannot see on their own, because both live in the FRONTMATTER rather than in a secret
+# shape:
+#
+#   * a leak on a PUBLISHED page has fleet-wide blast radius, so the proposal's stock
+#     "demote to LOCAL scope" remedy is actively wrong there — demoting one project's
+#     copy does not retract what every other project already reads;
+#   * only the BARE BOOLEAN may be committed. A value carrying data
+#     (`publish-globally: my-secret-project`) or a `published-*` identity key beside the
+#     flag publishes a private project name into a pushed file.
+_BOOLEAN_LITERALS = frozenset({"true", "false"})
+_PUBLISHED_MARKER = "published"
+_PUBLISHED_IDENTITY_LEAK = "published-identity-leak"
+
+
+def _published_state(text: str) -> tuple[bool, bool]:
+    """`(is_published, identity_leak)` read from a page's wikimem frontmatter.
+
+    Reuses `memory_edit_verify.parse_frontmatter`, which keeps scalars as verbatim
+    (quote-stripped) STRINGS — that is what makes the bare-boolean test possible at all; a
+    parser that coerced `true` to a Python bool would erase the distinction this check
+    exists to make.
+
+    Note `parse_frontmatter` hoists `metadata:` sub-keys to the top level, so a
+    `published-*` key hidden under `metadata:` is caught too — deliberate, not incidental.
+    """
+    fm = mev.parse_frontmatter(text)
+    if not fm:
+        return False, False
+    published = False
+    identity_leak = any(str(k).startswith("published-") for k in fm)
+    raw = fm.get("publish-globally")
+    if raw is not None:
+        val = raw.strip().lower() if isinstance(raw, str) else ""
+        if val in _BOOLEAN_LITERALS:
+            published = val == "true"
+        else:
+            # A non-boolean VALUE is itself the leak — the field's whole contract is that
+            # it says WHETHER, never WHAT.
+            identity_leak = True
+    return published, identity_leak
 
 # Bounds so a huge corpus can never blow up the heartbeat.
 _MAX_PAGES = 2000
@@ -393,6 +437,17 @@ def _scan_page(page: Path) -> list[str]:
     for label in _entropy_findings(text):
         labels.add(label)
 
+    # 5. publish-globally hygiene (janitor#52, TRDD-4GQ94FNJ). The identity leak is a
+    #    finding in its own right; being PUBLISHED is not. The marker is added ONLY
+    #    alongside a real finding, because publishing is an intentional, approved act and
+    #    a detector that flagged a clean published page would nag about the feature
+    #    working — which is how a true-positive channel gets ignored.
+    published, identity_leak = _published_state(text)
+    if identity_leak:
+        labels.add(_PUBLISHED_IDENTITY_LEAK)
+    if published and labels:
+        labels.add(_PUBLISHED_MARKER)
+
     return sorted(labels)
 
 
@@ -494,7 +549,23 @@ def _render_proposal(
         lines.append("")
         shown = 0
         for rel, classes in page_findings:
-            lines.append(f"- `{rel}` — {', '.join(classes)} — demote to LOCAL scope")
+            # A PUBLISHED page's remedy is NOT the stock one: the page is symlinked into
+            # the USER root and read by every project, so moving this copy to LOCAL
+            # retracts nothing. Say so instead of printing advice that under-states the
+            # blast radius. The marker is presentation only — drop it from the class list
+            # so the leak CLASSES stay the leak classes.
+            if _PUBLISHED_MARKER in classes:
+                shown_classes = [c for c in classes if c != _PUBLISHED_MARKER]
+                remedy = (
+                    "PUBLISHED (`publish-globally: true`) — symlinked into the USER root "
+                    "and recalled from EVERY project, so demoting THIS copy retracts "
+                    "nothing; fix the page itself, then reconsider whether it should stay "
+                    "published"
+                )
+            else:
+                shown_classes = classes
+                remedy = "demote to LOCAL scope"
+            lines.append(f"- `{rel}` — {', '.join(shown_classes)} — {remedy}")
             shown += 1
             if shown >= _MAX_FINDINGS_LISTED:
                 lines.append(f"- … ({len(page_findings) - shown} more pages elided)")

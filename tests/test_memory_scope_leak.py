@@ -507,6 +507,142 @@ class TestMemoryScopeLeak(unittest.TestCase):
             again = _run(home, root, extra_env={"CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL": "0"})
             self.assertIn("[memory-scope-leak]", again)
 
+    # ----- publish-globally awareness (issue #52, TRDD-4GQ94FNJ) -----------
+
+    def test_published_clean_page_not_flagged(self) -> None:
+        """A `publish-globally: true` page with NO private data is NOT flagged — publishing
+        is an intentional, approved act and a clean published note must not be nagged."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "arch.md",
+                "---\n"
+                "name: arch\n"
+                'description: "the deploy architecture"\n'
+                "publish-globally: true\n"
+                "metadata:\n"
+                "  type: project\n"
+                "  tier: hub\n"
+                "---\n"
+                "The parser retries 3x then fails. Portable, no private data.\n",
+            )
+            _git(["add", ".claude/project/memory/arch.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_publish_false_clean_page_not_flagged(self) -> None:
+        """`publish-globally: false` is a valid bare boolean meaning 'not published' — a
+        clean such page is no finding."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "arch.md",
+                "---\n"
+                "name: arch\n"
+                "publish-globally: false\n"
+                "metadata:\n"
+                "  type: project\n"
+                "---\n"
+                "Portable fact: the queue retries 3x then fails.\n",
+            )
+            _git(["add", ".claude/project/memory/arch.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_published_page_leak_is_escalated(self) -> None:
+        """A `publish-globally: true` page WITH a content leak is flagged AND the proposal
+        ESCALATES it — a published note is symlinked into the USER root and recalled in
+        every project, so the stock 'demote to LOCAL' remedy retracts nothing."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "deploy.md",
+                "---\n"
+                "name: deploy\n"
+                "publish-globally: true\n"
+                "metadata:\n"
+                "  type: project\n"
+                "---\n"
+                "the runner lives at /Users/emanuele/Code/run.sh on my box.\n",
+            )
+            _git(["add", ".claude/project/memory/deploy.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            prop = _proposal(root)
+            self.assertIn("deploy.md", prop)
+            self.assertIn("local-path", prop)
+            self.assertIn("PUBLISHED", prop)
+            self.assertIn("publish-globally", prop)
+            # The escalation REPLACES the stock advice for this page — it does not merely
+            # sit beside it, or a reader skimming the line still under-reacts.
+            leak_line = next(ln for ln in prop.splitlines() if "deploy.md" in ln)
+            self.assertNotIn("demote to LOCAL scope", leak_line)
+            # `published` is presentation, not a leak class — it must not pollute the list.
+            self.assertNotIn("— published,", leak_line)
+
+    def test_published_identity_key_flagged(self) -> None:
+        """The privacy invariant: ONLY the bare `publish-globally: true` may be committed.
+        A forbidden identity KEY (here `published-slug`) beside the flag is a
+        `published-identity-leak` even when the body is otherwise clean."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "shared.md",
+                "---\n"
+                "name: shared\n"
+                "publish-globally: true\n"
+                "published-slug: my-secret-project\n"
+                "metadata:\n"
+                "  type: project\n"
+                "---\n"
+                "Portable fact: the queue retries 3x then fails.\n",
+            )
+            _git(["add", ".claude/project/memory/shared.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            prop = _proposal(root)
+            self.assertIn("shared.md", prop)
+            self.assertIn("published-identity-leak", prop)
+
+    def test_published_nonboolean_value_flagged(self) -> None:
+        """A `publish-globally` VALUE that carries data (a slug) instead of a bare boolean
+        is itself an identity leak — the field says WHETHER, never WHAT."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(
+                root, "shared.md",
+                "---\n"
+                "name: shared\n"
+                "publish-globally: my-secret-project\n"
+                "metadata:\n"
+                "  type: project\n"
+                "---\n"
+                "Portable fact: the queue retries 3x then fails.\n",
+            )
+            _git(["add", ".claude/project/memory/shared.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            prop = _proposal(root)
+            self.assertIn("published-identity-leak", prop)
+            # A non-boolean value is NOT "published" — the flag never parsed, so the page
+            # is not symlinked anywhere and the escalation must not fire.
+            self.assertNotIn("PUBLISHED", prop)
+
     # ----- dedupe ---------------------------------------------------------
 
     def test_unchanged_findings_are_silent_on_rerun(self) -> None:
