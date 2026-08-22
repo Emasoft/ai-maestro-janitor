@@ -490,7 +490,13 @@ STATE block / plan steps.
 
 ## Todo list cross-reference
 
-Every TaskCreate entry that references a TRDD MUST include its
+> **The dedicated todo tools are gone by default.** Claude Code 2.1.233 removed
+> `TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList` and `TodoWrite` on Opus 4.8, Sonnet 5, Fable 5,
+> Mythos 5 and newer (`CLAUDE_CODE_ENABLE_TODO_TOOLS=1` restores them). So this section is about
+> whatever in-flight tracking the session actually has — it is no longer a promise that a task
+> tool exists. Where a session has none, the TRDD itself is the tracking.
+
+Every in-flight task entry that references a TRDD MUST include its
 `TRDD-<id8>` id in its subject or description:
 
 ```
@@ -528,7 +534,7 @@ land directly on the spec file.
    mandatory frontmatter; initialise `column: backburner` (or
    `live_auditing` for audit TRDDs), `trdd-id: $TID`, same ISO datetime
    in BOTH `created:` and `updated:`. Write the prose.
-5. Create a TaskCreate entry referencing the TRDD.
+5. Note the TRDD id in the session's in-flight task tracking, if it has any.
 6. Stage and commit:
 
    ```bash
@@ -874,8 +880,8 @@ itself blocked?") prefer `findtrdd.py --where ...` over chained `grep`.
 - **Scenario test files** — use `tests/scenarios/SCEN-NNN_*.scen.md`
   with sequential numbers, tracked in the scenarios folder.
 - **Proposal reports** — `tests/scenarios/reports/*_<timestamp>.md`.
-- **Trivial TODOs** that will be done in the current session — just use
-  TaskCreate, no TRDD needed.
+- **Trivial TODOs** that will be done in the current session — track them
+  in-session, no TRDD needed.
 - **Inline code comments / TODOs** — those are fine where they are.
 
 TRDDs are specifically for **non-trivial design tasks** that will be

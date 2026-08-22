@@ -54,7 +54,7 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    `-name`** (both load-bearing; why: the reference).
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
-   every commit that implements it, and in any TaskCreate entry that tracks it.
+   every commit that implements it, and in whatever the session uses to track work in flight.
    **A LOCAL TRDD may cite a PROJECT TRDD** (`parent-trdd`, `blocked-by`, `npt`, `eht`).
    **A PROJECT TRDD MUST NOT cite a LOCAL one** — a dangling reference for every other
    contributor. The one hard invariant the scope split introduces; greppable.
@@ -138,7 +138,8 @@ reference.
 
 Route the scope (1) → mint id + timestamps (2) → minimal frontmatter → `column: backburner`
 (`live_auditing` for an audit TRDD) → the same ISO datetime in BOTH `created:` and `updated:`
-→ the prose → a TaskCreate entry naming the id. A **PROJECT** TRDD is then `git add`-ed **by
+→ the prose → note the id in the session's own in-flight task tracking, if it has any. A
+**PROJECT** TRDD is then `git add`-ed **by
 name** and committed (`docs: add TRDD-<id8> — <summary>`); report the id + commit. A **LOCAL**
 one is in no repo — report the id + path.
 
@@ -150,5 +151,6 @@ frontmatter (hand-edits beat stale fields) — then fix the frontmatter. Exact c
 ## Does NOT apply to
 
 Session handoffs (`docs_dev/`), scenario tests, proposal reports, inline `TODO:` comments, or
-trivial same-session tasks (use TaskCreate). For **non-trivial design tasks that must survive
+trivial same-session tasks (track those in-session; they need no TRDD). For **non-trivial design
+tasks that must survive
 as tracked project artifacts**.

@@ -2,12 +2,13 @@
 name: project_janitor_cc_changelog_currency
 description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code / a forked session cleared itself or reloaded plugins it already had / the exfil guard missed a < redirection / the context watchdog never fires and looks healthy / my LOCAL TRDDs under ~/.claude/projects vanished"
 ocd: 2026-06-11
-lmd: 2026-06-13
+lmd: 2026-08-22
 metadata:
   node_type: memory
   type: project
   tier: component
   functionality: claude-code-coupling
+publish-globally: false
 ---
 
 Triaged the full Claude Code CHANGELOG (2.1.98 → **2.1.173**) against the
@@ -181,6 +182,11 @@ audit agents disagreed and the pessimistic one was WRONG. Measured directly: `sh
 REFUSES a symlinked version dir (raises `OSError`, deletes nothing), the linked dev checkout
 survives byte-intact, and `apply_prune_plan` already records the refusal as `failed` rather
 than raising. No fix needed — do not "harden" this again.
+
+
+^ATOM-Y4OP-5BLD [desc: "CC 2.1.232-2.1.240 triage: 1 real break (the todo tools are gone by default), everything else already-adopted or transparent", keywords: is_the_janitor_up_to_date_with_claude_code_2.1.240 did_the_CC_changelog_break_the_janitor TaskCreate_does_not_exist_any_more stale-task_detector_never_fires the_rules_tell_me_to_use_a_task_tool_I_do_not_have, ocd: 2026-08-22, lmd: 2026-08-22]
+
+Claude Code **2.1.232 → 2.1.240** triaged against the janitor 2026-08-22 (the prior sweep stopped at 2.1.212). **ONE real break, and it is in the RULES, not the code.** CC 2.1.233 removed `TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList` and `TodoWrite` on Opus 4.8, Sonnet 5, Fable 5, Mythos 5 and newer (`CLAUDE_CODE_ENABLE_TODO_TOOLS=1` restores them) — verified from inside a live Opus 5 session, whose tool list has none of them. The janitor's shipped `trdd-design-tasks` rule was ordering every agent on the machine to file a `TaskCreate` entry for each TRDD, so on a default modern session that step silently could not happen and the TRDD↔task link the rule promised never formed. Reworded tool-agnostically at 3 sites in the rule, 3 in its full reference. `stale-task` and `task-pr-mismatch` read `~/.claude/tasks/*.json`, which nothing writes any more — they are now correctly SILENT rather than broken, and the docstrings say so, because a detector that finds nothing forever is indistinguishable from a clean project. The rest: `SendMessage`/`ListAgents`, the fullscreen key changes (Ctrl+L repaint-only, Esc keeps a selection, focus-click), hooks/compaction/`<system-reminder>`, marketplace aliases — all NOT-AFFECTED or transparent fixes the janitor gains for free, and the 11 GitLab token families of 2.1.232 were already adopted in `secret_rotation_patterns.py`. Two items want a LIVE test rather than a code change: whether the `/model` badge `parse_pane_model` scans stays visible now that slash-command panels no longer cover the conversation, and whether the SOFT-enqueue/HARD-interrupt pair in `compact_trigger.py` benefits from the 2.1.239 queued-prompt race fix.
 
 ## Notes and lessons learned
 

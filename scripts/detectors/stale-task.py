@@ -8,6 +8,14 @@ Nudges Claude Code about tasks that have been sitting `in_progress` or
 `pending` for too long without any update. Relies on the mtime of
 ~/.claude/tasks/<team>/<task>.json as the 'last touched' signal, which
 Claude Code updates on every TaskUpdate call.
+
+DEPENDS ON AN OPT-IN HARNESS FEATURE (CC 2.1.233). The task tools that write those
+files — TaskCreate/TaskGet/TaskUpdate/TaskList — were removed on Opus 4.8, Sonnet 5,
+Fable 5, Mythos 5 and newer, and return only under CLAUDE_CODE_ENABLE_TODO_TOOLS=1.
+On a default modern session nothing writes ~/.claude/tasks/, so this detector scans an
+empty tree and is CORRECTLY silent — that silence means "the feature is off here", not
+"no tasks are stale". Left running rather than removed: it costs a directory listing,
+and it is still right on a session that opted back in.
 """
 
 from __future__ import annotations

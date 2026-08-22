@@ -6,6 +6,11 @@
 
 One-shot cross-check between Claude Code task entries and the current
 state of referenced GitHub PRs.
+
+DEPENDS ON AN OPT-IN HARNESS FEATURE (CC 2.1.233) — same dependency as `stale-task`:
+the task tools that author those entries were removed on Opus 4.8, Sonnet 5, Fable 5,
+Mythos 5 and newer, returning only under CLAUDE_CODE_ENABLE_TODO_TOOLS=1. With no task
+entries there is nothing to cross-check and this detector is correctly silent.
 """
 
 from __future__ import annotations
