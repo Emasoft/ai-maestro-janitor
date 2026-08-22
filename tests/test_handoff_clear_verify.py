@@ -188,20 +188,24 @@ def test_phase_before_writes_snapshot(tmp_path: Path) -> None:
     assert before["resume_flag_present"] is True
 
 
-def test_phase_before_warns_when_the_staging_cannot_resume(tmp_path: Path) -> None:
-    """--phase before with no resume-after-clear.flag WARNS that a hand-typed /clear won't resume."""
+def test_phase_before_surfaces_a_missing_flag_with_BOTH_readings(tmp_path: Path) -> None:
+    """--phase before with no resume-after-clear.flag names both readings — expected-on-the-chain AND nothing-will-resume."""
     p = tmp_path / "proj"
     sd = _state_dir(p)
     sd.mkdir(parents=True, exist_ok=True)
     (sd / "heartbeat-cron-id.txt").write_text("cron-abc", encoding="utf-8")
     (sd / "agent-handoff.md").write_text("NEXT: something\n", encoding="utf-8")
-    # deliberately NO resume-after-clear.flag — the 2026-08-22 staging that left a resumed
-    # session idle, which this script certified while silently recording the missing flag
+    # deliberately NO resume-after-clear.flag. This state is AMBIGUOUS by design: on the
+    # spawned-chain path the detached child writes the flag after this snapshot (skill step 4),
+    # so absence is normal there; run standalone, absence means nothing will resume the clear —
+    # the 2026-08-22 staging that left a resumed session idle. The message must not assert the
+    # second reading alone, or it cries wolf on every correct orchestrated clear.
 
     proc = _run(["--phase", "before"], project=p)
     assert proc.returncode == 0, proc.stderr
     assert "VERIFY_BEFORE" in proc.stdout
     assert "VERIFY_BEFORE_NO_RESUME_FLAG" in proc.stderr
+    assert "EXPECTED" in proc.stderr, "must name the benign reading (chain wrote it later)"
     # the WHOLE command, not just the flag: a bare `--phase after` substring would also match a
     # message that merely mentions the phase, which is coincidence rather than content
     assert "uv run scripts/handoff_clear_verify.py --phase after" in proc.stderr, (
@@ -210,7 +214,7 @@ def test_phase_before_warns_when_the_staging_cannot_resume(tmp_path: Path) -> No
 
 
 def test_phase_before_is_quiet_when_the_flag_is_there(tmp_path: Path) -> None:
-    """The no-resume warning stays silent on a properly staged clear — a warning that always fires gets ignored."""
+    """The warning stays silent once the flag has landed — a warning that always fires gets ignored."""
     p = tmp_path / "proj"
     sd = _state_dir(p)
     sd.mkdir(parents=True, exist_ok=True)

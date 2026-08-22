@@ -529,25 +529,39 @@ def main() -> int:
                 f"context={before['context_tokens']} handoff_links={before['handoff_link_count']} "
                 f"-> {_verify_path()}"
             )
-            # WARN when the staging cannot possibly resume. `resume-after-clear.flag` has ONE
-            # writer, `clear_trigger.py` (the automated chain) — so running THIS script standalone
-            # and asking a human to type `/clear` produces a snapshot with no resume behind it:
-            # `on-session-start._inject_post_clear_handoff` returns early (it is deliberately
-            # gated on the flag, because a manual `/clear` means DISCARD), no `[janitor-resume]`
-            # is ever emitted, and the session-only cron died with the cleared session. Measured
-            # 2026-08-22: exactly that staging left the resumed session idle until its user
-            # complained, while this line printed cron id, context and link count — every field
-            # except the one that decided the outcome. It is a WARNING, not an error: the module
-            # contract is FAIL-OPEN ("a fault here must NEVER break the resume"), and it does not
-            # write the flag itself, which would flip the documented manual-clear semantics for
-            # the flag's whole age window and make the after-phase's flag check self-fulfilling.
+            # SURFACE the missing flag — AMBIGUOUSLY, because it genuinely is ambiguous. Absence
+            # has two readings and this phase cannot tell them apart:
+            #
+            #   1. NORMAL. On the spawned-chain path (`CLEAR_CHAIN_SPAWNED`, the common case) the
+            #      resume state is written by the DETACHED CHILD immediately before the `/clear`
+            #      keystroke — i.e. AFTER this snapshot. The skill's step 4 says so outright:
+            #      running before-phase after the trigger "gives it a chance to observe
+            #      `resume-after-clear.flag` IF the trigger's write already landed", and the
+            #      dependent check "reads SKIP, never FAIL, when it hasn't". Line 227 of this very
+            #      file carries the same sentence.
+            #   2. BROKEN. Nobody fired the chain at all — this script was run standalone and a
+            #      human was asked to type `/clear`. Then `_inject_post_clear_handoff` returns
+            #      early (deliberately gated on the flag: a manual `/clear` means DISCARD), no
+            #      `[janitor-resume]` is emitted, and the session-only cron dies with the session.
+            #      Measured 2026-08-22: exactly that left a resumed session idle until its user
+            #      complained, while this line printed cron id, context and link count — every
+            #      field except the one that decided the outcome.
+            #
+            # So it names BOTH readings and asks the caller — who knows whether it fired the
+            # trigger — to decide. An earlier revision asserted (2) alone and would have cried
+            # wolf on every correct orchestrated clear; a warning that fires on the happy path is
+            # ignored, and then the real one is missed too. FAIL-OPEN either way ("a fault here
+            # must NEVER break the resume"), and it does NOT write the flag itself: that would
+            # flip the documented manual-clear-is-a-discard semantics for the flag's whole age
+            # window and make the after-phase's own flag check self-fulfilling.
             if not before.get("resume_flag_present"):
                 print(
-                    "VERIFY_BEFORE_NO_RESUME_FLAG no resume-after-clear.flag — a hand-typed "
-                    "/clear will NOT auto-resume (no handoff injection, no [janitor-resume], and "
-                    "the cron dies with the session). Either stage the clear through "
-                    "`clear_trigger.py` / the /janitor-handoff-and-clear skill, or hand the user "
-                    "the exact command to paste after clearing: "
+                    "VERIFY_BEFORE_NO_RESUME_FLAG no resume-after-clear.flag observed. If you "
+                    "fired clear_trigger.py / the /janitor-handoff-and-clear skill, this is "
+                    "EXPECTED — the detached child writes it later, and the after-phase check "
+                    "reads SKIP, not FAIL. If you did NOT, nothing will resume this clear (no "
+                    "handoff injection, no [janitor-resume], and the cron dies with the "
+                    "session), so hand the user the exact command to paste after clearing: "
                     "`uv run scripts/handoff_clear_verify.py --phase after`",
                     file=sys.stderr,
                 )

@@ -1,9 +1,9 @@
 ---
 trdd-id: 5RXBI65T
-title: The auto-composed handoff overwrites the model-authored one at the same path
+title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: todo
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T23:08:33+0200
+updated: 2026-08-22T23:14:58+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
