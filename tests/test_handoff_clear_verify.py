@@ -188,6 +188,37 @@ def test_phase_before_writes_snapshot(tmp_path: Path) -> None:
     assert before["resume_flag_present"] is True
 
 
+def test_phase_before_warns_when_the_staging_cannot_resume(tmp_path: Path) -> None:
+    """--phase before with no resume-after-clear.flag WARNS that a hand-typed /clear won't resume."""
+    p = tmp_path / "proj"
+    sd = _state_dir(p)
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "heartbeat-cron-id.txt").write_text("cron-abc", encoding="utf-8")
+    (sd / "agent-handoff.md").write_text("NEXT: something\n", encoding="utf-8")
+    # deliberately NO resume-after-clear.flag — the 2026-08-22 staging that left a resumed
+    # session idle, which this script certified while silently recording the missing flag
+
+    proc = _run(["--phase", "before"], project=p)
+    assert proc.returncode == 0, proc.stderr
+    assert "VERIFY_BEFORE" in proc.stdout
+    assert "VERIFY_BEFORE_NO_RESUME_FLAG" in proc.stderr
+    assert "--phase after" in proc.stderr, "the warning must carry the command to paste"
+
+
+def test_phase_before_is_quiet_when_the_flag_is_there(tmp_path: Path) -> None:
+    """The no-resume warning stays silent on a properly staged clear — a warning that always fires gets ignored."""
+    p = tmp_path / "proj"
+    sd = _state_dir(p)
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "heartbeat-cron-id.txt").write_text("cron-abc", encoding="utf-8")
+    (sd / "agent-handoff.md").write_text("NEXT: something\n", encoding="utf-8")
+    (sd / "resume-after-clear.flag").write_text("resume me", encoding="utf-8")
+
+    proc = _run(["--phase", "before"], project=p)
+    assert proc.returncode == 0, proc.stderr
+    assert "VERIFY_BEFORE_NO_RESUME_FLAG" not in proc.stderr
+
+
 def test_phase_after_no_before_is_graceful(tmp_path: Path) -> None:
     """--phase after with no before-snapshot → a warning, never a crash."""
     p = tmp_path / "proj"

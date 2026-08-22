@@ -529,6 +529,28 @@ def main() -> int:
                 f"context={before['context_tokens']} handoff_links={before['handoff_link_count']} "
                 f"-> {_verify_path()}"
             )
+            # WARN when the staging cannot possibly resume. `resume-after-clear.flag` has ONE
+            # writer, `clear_trigger.py` (the automated chain) — so running THIS script standalone
+            # and asking a human to type `/clear` produces a snapshot with no resume behind it:
+            # `on-session-start._inject_post_clear_handoff` returns early (it is deliberately
+            # gated on the flag, because a manual `/clear` means DISCARD), no `[janitor-resume]`
+            # is ever emitted, and the session-only cron died with the cleared session. Measured
+            # 2026-08-22: exactly that staging left the resumed session idle until its user
+            # complained, while this line printed cron id, context and link count — every field
+            # except the one that decided the outcome. It is a WARNING, not an error: the module
+            # contract is FAIL-OPEN ("a fault here must NEVER break the resume"), and it does not
+            # write the flag itself, which would flip the documented manual-clear semantics for
+            # the flag's whole age window and make the after-phase's flag check self-fulfilling.
+            if not before.get("resume_flag_present"):
+                print(
+                    "VERIFY_BEFORE_NO_RESUME_FLAG no resume-after-clear.flag — a hand-typed "
+                    "/clear will NOT auto-resume (no handoff injection, no [janitor-resume], and "
+                    "the cron dies with the session). Either stage the clear through "
+                    "`clear_trigger.py` / the /janitor-handoff-and-clear skill, or hand the user "
+                    "the exact command to paste after clearing: "
+                    "`uv run scripts/handoff_clear_verify.py --phase after`",
+                    file=sys.stderr,
+                )
             return 0
 
         # phase == after
