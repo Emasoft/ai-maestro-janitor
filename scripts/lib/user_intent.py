@@ -227,10 +227,20 @@ def hid_idle_seconds(*, timeout_s: float = 3.0) -> float | None:
     # Test/operator seam (TRDD-D2DD5GO8): a subprocess-driven test cannot monkeypatch this
     # module, and the REAL rung-0 probe reads the live keyboard — which made every test that
     # spawns the real injector hostage to whether a human happened to touch the machine
-    # during its window. Set to a float ("9999" = provably idle, "1" = provably typing);
-    # malformed values fall through to the real probe rather than inventing a reading.
+    # during its window. Set to a float ("9999" = provably idle, "1" = provably typing) or the
+    # literal "blind" (probe unreadable — the incident's own condition, unreachable via any
+    # number); malformed values fall through to the real probe rather than inventing a reading.
     override = os.environ.get(HID_IDLE_OVERRIDE_ENV, "").strip()
     if override:
+        # "blind" reproduces the 2026-08-19 incident's actual condition — the probe EXISTS on
+        # this platform and cannot be read (ioreg hung under load) — which the float values
+        # cannot express, because a number is always a confident answer. Without it the one
+        # state that caused the harm is the one state no drill can stage, so the guard against
+        # it stays untestable on a healthy machine. Deliberately not spelled as a number: a
+        # sentinel float would be indistinguishable from a real reading if it ever leaked into
+        # an arithmetic path.
+        if override.lower() == "blind":
+            return None
         try:
             return float(override)
         except ValueError:

@@ -1,9 +1,9 @@
 ---
 trdd-id: VOWAUVE5
 title: memgrep write verbs refuse an over-budget atom at write time
-column: testing
+column: complete
 created: 2026-08-18T19:54:51+0200
-updated: 2026-08-22T10:01:59+0200
+updated: 2026-08-22T10:26:29+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -253,3 +253,10 @@ hazard. The new predicate MUST read the same env var — a second source of trut
 gate and the lint drift apart, which is the defect this whole card exists to prevent.
 
 ## Approval log
+
+- 2026-08-22T10:26:29+0200 — COMPLETED (commits `9e32c1ed` Part 1, `5ac80f11` Part 2). The card
+  ends somewhere its title no longer describes: it was authored as "the write verbs REFUSE an
+  over-budget atom", and it ships with the refusal REMOVED. That is not drift — the refusal was
+  only ever the least-bad answer to "nothing drains this backlog", and the USER's ruling answered
+  that question differently by creating an owner. The title is left as written so the reversal
+  stays visible in the board's own history.

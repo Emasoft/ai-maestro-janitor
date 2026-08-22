@@ -1,9 +1,9 @@
 ---
 trdd-id: D2DD5GO8
 title: Terminal injection typed over the USER mid-sentence — the typing probe fails OPEN exactly when osascript is blind
-column: testing
+column: complete
 created: 2026-08-19T19:38:25+0200
-updated: 2026-08-21T07:58:01+0200
+updated: 2026-08-22T10:43:50+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -115,9 +115,69 @@ UWBXNJ76's positive-control lesson: a guard disarmed by the event it guards.
 
 ## Acceptance
 
-- [ ] both gates' fail-directions audited and named in the detector docstring
-- [ ] sustained-unknown ⇒ defer (with backoff + log), single-unknown ⇒ proceed; both pinned by tests
-- [ ] `uv run pytest -q`, ruff, mypy clean
-- [ ] USER-visible behavior: injection never lands while keys are being pressed, even at loadavg 200
+- [x] both gates' fail-directions audited and named in the detector docstring —
+      `terminal_trigger.py:696-707` audits BOTH by name (the `typing_now` probe and rule 1's
+      pane reader) and states each one's direction.
+- [x] **AMENDED, and the amendment is the finding.** As written this box asked for
+      *"sustained-unknown ⇒ defer, **single-unknown ⇒ proceed**"* — design direction §2, tolerate
+      one blip. Implementation REJECTED that half deliberately, and the docstring says why:
+      *"the dangerous moment is the FIRST iteration meeting an empty-looking field, so a
+      tolerate-one-blip rule would re-open the exact incident hole."* The shipped rule is
+      STRICTER than the card asked for — EVERY unknown defers, and the streak counter gates only
+      the diagnostic line. Recorded rather than silently ticked, because a design direction
+      overruled during implementation is a decision, not a detail. Both halves now pinned:
+      `test_a_BLINDED_typing_probe_DEFERS_and_never_licenses_injection` (None defers) and
+      `test_a_probe_that_confirms_NOT_typing_proceeds` (False proceeds — the contrast without
+      which the first test would also pass against an injector that never injects).
+- [x] `uv run pytest -q`, ruff, mypy clean.
+- [x] USER-visible behavior: injection never lands while keys are being pressed — **proven by a
+      staged drill, not by waiting.** Report:
+      `reports/d2dd5go8-injection-drill/20260822_104228+0200-part-b-drill.md`.
+
+## ⏵ STATE — 2026-08-22: closed on staged evidence, plus one defect the drill found
+
+**The card's own title is now false and that is the good outcome.** "The typing probe fails OPEN
+exactly when osascript is blind" describes the pre-fix code. `terminal_trigger.py:696-707` cites
+this TRDD by name and does the opposite. The gate looked unreachable because the FIX WORKS and no
+injection was pending — not because anything was broken.
+
+**Part A — regression tests.** Three, in `test_terminal_trigger_readback.py`. Mutation-verified
+independently of the worker that wrote them: reintroducing the `None → False` reading turns the
+blinded test red with **17 keystrokes typed over the user**, and the file restores clean.
+
+**Part B — the drill.** `inject_until_sent` runs its real loop and its real default probe; only
+the ioreg READING is faulted, through the operator seam, exactly as host load faulted it on
+2026-08-19. That seam previously accepted only floats, so the ONE state that caused the harm —
+*the probe exists and cannot be read* — was the one state no drill could stage; a number is
+always a confident answer. `JANITOR_HID_IDLE_OVERRIDE_S=blind` now expresses it.
+
+| case | probe | typed | result |
+|---|---|---|---|
+| provably idle **MAY** type | `9999` | yes | PASS — the positive control |
+| **blinded** must not type | `blind` | no | PASS |
+| user typing must not type | `1` | no | PASS |
+
+The positive control is load-bearing: without a case that DOES type, the two "did not type" rows
+would look identical if the injector were simply broken.
+
+**THE DRILL FOUND A REAL DEFECT, which is the argument for drills over waiting.** My first run
+used `quiet_s=0.1` for speed and its *typing* case INJECTED. That was my harness, not the
+product — but only because production passes 8.0. `typing_now(idle_s=...)` takes whole seconds,
+so a bare `int(quiet_s)` sends **0** for any sub-second window, and "typed within 0 s" is
+unsatisfiable: the gate answers "not typing" for a user who is actively typing. A safety gate
+that disarms on a plausible argument, in the dangerous direction. Fixed to `max(1, int(quiet_s))`
+at both call sites, pinned by
+`test_a_subsecond_quiet_window_does_not_disarm_the_typing_gate`, and confirmed by re-running the
+drill at the disarming value: now all three PASS.
+
+**Passive observability (the standing gap this closes).** The probe used to be consulted only
+when an injection was pending, so on a quiet host "is the probe healthy here?" had no answer and
+this card's acceptance was unfalsifiable — a gate that works and a gate that never runs look
+identical. `daemon._record_hid_probe_verdict` records the verdict on the daemon beat, which
+ALREADY calls `hid_idle_seconds()` for the typing gate, so it costs one integer and no new
+probe. Logged on a streak (and on recovery), never per beat: a 60 s loop writing a line a minute
+is a log nobody reads. The two alternatives were rejected as unsound rather than as expensive —
+lowering the streak threshold manufactures a firing instead of observing one, and waiting longer
+is the unfalsifiable hold TRDD-UQW5IOAE already spent weeks inside.
 
 ## Approval log

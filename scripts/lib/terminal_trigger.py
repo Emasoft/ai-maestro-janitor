@@ -596,7 +596,14 @@ def wait_until_pane_free(
         try:
             import user_intent  # noqa: PLC0415
 
-            verdict = user_intent.typing_now(idle_s=int(quiet_s), env=os.environ)
+            # `max(1, ...)`, not a bare int(): truncation takes any sub-second `quiet_s` to a
+            # ZERO-second typing window, which means "typed within 0s" — a condition nothing
+            # can satisfy, so the gate answers "not typing" for a user actively typing and
+            # silently disarms. Found by measurement, not review: the D2DD5GO8 part-B drill ran
+            # at quiet_s=0.1 for speed and its typing case injected. Production passes 8.0 so
+            # this was never live, but a safety gate that disarms on a plausible argument is a
+            # trap for the next caller, and it fails in the dangerous direction.
+            verdict = user_intent.typing_now(idle_s=max(1, int(quiet_s)), env=os.environ)
         except Exception:  # noqa: BLE001 - a broken probe is a blinded probe, not a licence
             verdict = None
         if verdict is None:
@@ -715,7 +722,14 @@ def inject_until_sent(
         try:
             import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
 
-            verdict = user_intent.typing_now(idle_s=int(quiet_s), env=os.environ)
+            # `max(1, ...)`, not a bare int(): truncation takes any sub-second `quiet_s` to a
+            # ZERO-second typing window, which means "typed within 0s" — a condition nothing
+            # can satisfy, so the gate answers "not typing" for a user actively typing and
+            # silently disarms. Found by measurement, not review: the D2DD5GO8 part-B drill ran
+            # at quiet_s=0.1 for speed and its typing case injected. Production passes 8.0 so
+            # this was never live, but a safety gate that disarms on a plausible argument is a
+            # trap for the next caller, and it fails in the dangerous direction.
+            verdict = user_intent.typing_now(idle_s=max(1, int(quiet_s)), env=os.environ)
         except Exception:  # noqa: BLE001 - a broken probe is a blinded probe, not a licence
             verdict = None
         if verdict is None:

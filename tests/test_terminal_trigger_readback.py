@@ -388,6 +388,35 @@ def test_a_BLINDED_typing_probe_DEFERS_and_never_licenses_injection(monkeypatch)
     assert reads == [], "a deferred pass must not even read the pane, exactly like a typing user"
 
 
+def test_a_subsecond_quiet_window_does_not_disarm_the_typing_gate(monkeypatch) -> None:
+    """A `quiet_s` below 1.0 must not silently turn the typing gate off.
+
+    `typing_now(idle_s=...)` takes whole seconds, so a bare `int(quiet_s)` sends ZERO for any
+    sub-second window — and "typed within 0 s" is a condition nothing can satisfy, so the gate
+    answers "not typing" for a user who is actively typing. Found by MEASUREMENT, not review:
+    the D2DD5GO8 part-B drill used quiet_s=0.1 for speed and watched its typing case inject.
+    Production passes 8.0 so it was never live, but a safety gate that disarms on a plausible
+    argument, in the dangerous direction, is a trap set for the next caller."""
+    import user_intent  # noqa: PLC0415
+
+    seen: list[int] = []
+
+    def _probe(*, idle_s: int, **_kw):
+        seen.append(idle_s)
+        return idle_s <= 1  # a user idle ~1 s: TYPING under any honest window
+
+    monkeypatch.setattr(user_intent, "typing_now", _probe)
+    typed: list[str] = []
+    ok, _why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: typed.append("typed"), submit_fn=lambda: None, clear_fn=lambda: None,
+        reader=lambda _t: _pane(""),
+        sleeper=lambda _s: None, clock=lambda: 0.0, giveup_s=2.0, quiet_s=0.1,
+    )
+    assert seen and min(seen) >= 1, f"the gate must never ask for a 0-second window: {seen}"
+    assert ok is False and typed == [], "a sub-second quiet window must still defer"
+
+
 def test_a_probe_that_confirms_NOT_typing_proceeds(monkeypatch) -> None:
     """The contrast that makes the test above meaningful: `typing_now()` returning `False`
     (a live, definite "not typing" verdict) still lets the injection proceed. If this failed

@@ -914,6 +914,52 @@ def task_cache_prune() -> None:
         state.log_line("daemon", f"  cache-prune removed: {rel}")
 
 
+# Consecutive blinded HID reads seen by the daemon beat. Module-level because the daemon is a
+# long-lived process, so the streak survives across beats the way it must to mean anything.
+_hid_blind_streak = 0
+_HID_BLIND_LOG_EVERY = 10  # ~10 min at the 60 s beat
+
+
+def _record_hid_probe_verdict(hid: float | None) -> None:
+    """Record PASSIVELY whether the HID probe could be read this beat (TRDD-D2DD5GO8).
+
+    The problem this solves is observability, not safety. The injection gate already defers on
+    a blinded probe, but it only ever LOOKS at the probe when an injection is pending — so on a
+    host where nothing is being injected, "is the probe healthy here?" has no answer, and the
+    card's acceptance ("injection never lands while keys are being pressed, even at loadavg
+    200") is unfalsifiable: you cannot distinguish a gate that works from a gate that never ran.
+
+    The two obvious alternatives were both worse. Lowering the streak threshold would
+    manufacture a firing rather than observe one, which is fabricating evidence. Waiting longer
+    is the unfalsifiable hold TRDD-UQW5IOAE already spent weeks on. Recording here is neither:
+    `hid_idle_seconds()` is ALREADY called unconditionally on this beat for the typing gate, so
+    the verdict costs one integer and no extra probe.
+
+    Logged on a streak, not per beat: a 60 s loop writing a line every minute is a log nobody
+    reads, and a single blinded read is a transient worth nothing on its own. The RECOVERY is
+    logged too — a streak that ends without saying so leaves the reader unable to tell a
+    resolved blindness from a daemon that stopped checking.
+    """
+    global _hid_blind_streak
+    if hid is not None:
+        if _hid_blind_streak >= _HID_BLIND_LOG_EVERY:
+            with contextlib.suppress(Exception):
+                state.log_line(
+                    "daemon",
+                    f"hid-probe: readable again after {_hid_blind_streak} blinded beats",
+                )
+        _hid_blind_streak = 0
+        return
+    _hid_blind_streak += 1
+    if _hid_blind_streak % _HID_BLIND_LOG_EVERY == 0:
+        with contextlib.suppress(Exception):  # a diagnostic must never break the beat
+            state.log_line(
+                "daemon",
+                f"hid-probe: BLINDED for {_hid_blind_streak} consecutive beats — any injection "
+                "on this host is deferring rather than typing (TRDD-D2DD5GO8)",
+            )
+
+
 def _recovery_state_path(rec_dir: Path, project_root: str) -> Path:
     """Per-instance recovery-state file, keyed by a filesystem-safe slug of the
     project root (the identity fleet_scan + the dashboard both use)."""
@@ -1297,6 +1343,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
     # exists to prevent. Deferral is safe: the beat re-runs in ~2 min and a frozen session
     # recovers the moment the human steps away. Fail-open: probe None ⇒ no gate.
     hid = user_intent.hid_idle_seconds()
+    _record_hid_probe_verdict(hid)
     if hid is not None and hid <= user_intent.USER_PRESENT_IDLE_S:
         state.log_line(
             "daemon",
