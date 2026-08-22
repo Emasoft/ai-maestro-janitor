@@ -64,8 +64,22 @@ malformed page" — an over-budget atom is the same class of malformation, caugh
       regating_it` pins that `--supersedes` relocates the existing oversized body verbatim
       without it ever passing the gate; only the NEW body is measured. 5 new crate tests,
       145/145 green.
-- [ ] after one drain batch, `memgrep lint` atom-oversized (net of the 3K8SVX2H frozen class)
-      is 0 and stays 0 across a week of heartbeats — HALF DONE: the drain batch ran
+- [x] **RE-SCOPED 2026-08-22 under the USER's ruling — the old text is kept below, struck, so
+      the change is auditable rather than quietly passable.** What the system now promises, and
+      what is proven: (a) every write through `add-atom`/`add-lesson` is MEASURED against the one
+      budget — proven by the crate tests; (b) an over-budget body is WRITTEN and QUEUED, never
+      refused and never lost — proven by
+      `budget_gate_admits_an_over_budget_body_and_leaves_it_to_the_chore`; (c) the queue has an
+      OWNER that can drain it — proven by
+      `test_atom_oversized_is_flagged_and_dispatched_by_split`, which asserts the exact opposite
+      of what it asserted yesterday, on the same fixture. Steady state is "small and repaired",
+      not zero; the USER accepted that explicitly ("no real hurry"), on the grounds that atoms
+      are grepped programmatically so bloat costs focus, not correctness.
+      ~~after one drain batch, `memgrep lint` atom-oversized (net of the 3K8SVX2H frozen class)
+      is 0 and stays 0 across a week of heartbeats~~ — unmeetable as written, and the day-2/day-3
+      measurements above are why: it asks for an OUTCOME across writers the protocol permits
+      outside the crate, which a write-time check can influence but never enforce. HALF DONE
+      then: the drain batch ran
       2026-08-19 (janitor-memory-subconscious-agent, direct dispatch): 4 PROJECT atoms
       decomposed into 12, LOCAL/USER already clean, re-lint across all 3 scope roots =
       **0 atom-oversized anywhere** (commit `5c9684bd`; report
@@ -177,7 +191,36 @@ mutation-verified. Fails OPEN on every uncertainty; `.maint-staging/` excluded b
 writes its own transaction through that path. `post-edit-wikimem-lint.py`'s header — which
 asserted the opposite rule — was corrected in the same commit.
 
-#### Part 2 NOT STARTED, and the ORDER is load-bearing — do not invert it
+#### Part 2 SHIPPED 2026-08-22 — in the stated order, owner first
+
+Built in ONE change, but authored and verified in the order below, because the reverse order
+re-creates the measured failure with a nicer message:
+
+1. **The owner.** `split` now covers over-budget atoms as well as over-cap pages —
+   `memory_content_precheck.oversized_atom_pages()` asks `memgrep lint` for `atom-oversized`
+   (~40 ms/scope root, measured) and `split_has_work` returns True on it. The skill grew an atom
+   branch that terminates on its own, and `_CODE_COVERAGE["atom-oversized"]` moved from `None`
+   to `"split"`, flipping the janitor#200 orphan proof into a coverage proof on the same fixture.
+2. **Then the relax.** `check_new_body_budget` warns to stderr and writes; the Rust test that
+   asserted the refusal now asserts the write.
+3. Box 4 re-scoped above, old text struck rather than deleted.
+4. Spec: `WM-LINT-03a` (warns, never refuses — with the two-way constraint that the refusal must
+   return in the SAME change if the chore is ever removed), `WM-SCHED-06` (split owns both
+   scales), and the severity table corrected — it still listed `oversized-atom` as WARN, which
+   janitor#200 changed to INFO long ago and nothing had updated.
+
+**Two decisions worth keeping, because the obvious alternative was wrong in each:**
+
+- **No eighth intervention.** A new `[janitor-memory-decompose]` marker would be unknown to any
+  session running an older cached copy of `janitor-heartbeat-protocol.md`, so the fire would
+  print a token nobody acts on. `split` was already the right owner anyway — memgrep's own
+  refusal message named `janitor-memory-split` before any of this.
+- **No Python mirror of the budget.** The plan flagged the two-languages hazard and the fix is
+  not "read the same env var" but "do not have a second implementation at all": the atom
+  SEGMENTATION is as much a source of disagreement as the number. Shelling out to the linter
+  cannot drift from the linter.
+
+##### The superseded reasoning (kept — it was correct under the old rule)
 
 `check_new_body_budget` (`memory.rs:4272`) still `bail!`s, deliberately. Its own docstring says
 why relaxing it first would be a regression, not progress:

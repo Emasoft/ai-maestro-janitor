@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-split
-description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. One page per run, one level deep (recursion across later heartbeats). Mutates only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large".
+description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. When no page is over cap it decomposes ONE over-budget ATOM instead (memgrep lint atom-oversized) into one-fact atoms via memgrep add-atom. One unit per run, one level deep (recursion across later heartbeats). Page splits mutate only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large", "the atom is too long".
 ---
 
 # Janitor memory — SPLIT
@@ -112,8 +112,44 @@ find "$SCOPE_ROOT" -type f -name '*.md' \
 ```
 
 Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL` under
-`$SCOPE_ROOT`). If the list is empty, nothing is due in this scope — STOP cleanly
-(emit nothing). Never batch multiple pages: one page per run.
+`$SCOPE_ROOT`). Never batch multiple pages: one page per run.
+
+**If the list is empty, you are not done — check the OTHER thing this chore splits.**
+An over-budget ATOM is the same job at a smaller scale, and it rides this same marker
+(TRDD-VOWAUVE5, USER ruling 2026-08-22; memgrep's own refusal message names this skill):
+
+```bash
+memgrep lint "$SCOPE_ROOT" 2>/dev/null | grep -F '[atom-oversized]'
+```
+
+Each line is `INFO <abs-path>:<line> [atom-oversized] — atom body is N chars (> BUDGET) …`.
+Ask memgrep rather than measuring yourself: the budget and the atom segmentation both live
+inside it, and a second opinion here is the janitor#227 shape — a gate dispatching work its
+arbiter cannot confirm re-dispatches forever. **Only if BOTH lists are empty is nothing due
+in this scope — then STOP cleanly (emit nothing).**
+
+**This is a SEPARATE, smaller job with its own ending — do it, report, and STOP. Do not
+continue into steps 2-6**, which are page-seam machinery (`is_legal_split`, the split txn,
+inbound-link redirection) and have nothing to operate on here: the page is not over cap.
+
+Take the **single first** flagged atom and decompose it: read the page, split that one
+atom's body into the several one-fact atoms it is actually carrying, and write them with
+`memgrep add-atom` — never by editing the page directly, and never by shortening the prose
+to fit the budget. **Decomposition preserves every fact; it only changes how many atoms
+carry them.** Give each new atom its own `keywords:` drawn from the SYMPTOM phrases a future
+session would search with, not from the words the prose happens to use — an atom nobody can
+recall is worse than an oversized one. Then retire the original with `add-lesson
+--supersedes` (same atom id) when it stated something now spread across the new atoms.
+
+No `memory_txn_cli` transaction is needed and you should not open one: the memgrep write
+verbs are already scope-locked and CAS-guarded, so they carry the same crash-safety the
+split txn provides for hand-staged page edits. Re-run the `lint` line above afterwards and
+confirm the finding is gone — an unverified decomposition that left the atom over budget
+re-dispatches this chore forever.
+
+The `## Superseded` carve-out applies here exactly as it does to the write gate: a body
+below that delimiter is protocol-frozen history. Leave it alone even when it is over
+budget — rewriting retired facts destroys the record they exist to be.
 
 ### 2. Decide legality + splittability BEFORE opening a transaction
 
@@ -255,7 +291,11 @@ aborts rather than landing a half-split page. Full statement of all five:
 
 STOP on the first outcome (one page, one level, retry ≤ 3):
 
-- [ ] NOTHING DUE — no over-cap note (step 1).
+- [ ] NOTHING DUE — no over-cap note AND no `atom-oversized` finding (step 1). Both
+  lists must be empty; an empty page list alone is not "nothing due".
+- [ ] ATOM DECOMPOSED — one over-budget atom rewritten as several one-fact atoms
+  through the memgrep verbs, lint re-run clean (step 1, atom branch). Terminates
+  there; steps 2-6 do not run.
 - [ ] RE-TIER SURFACED — an over-cap `component` (mis-tier; left intact, flagged —
   step 2). A hub/aspect is NEVER left intact: it splits at natural OR synthesized
   seams (fail-safe, step 3a).

@@ -96,8 +96,12 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # on a page whose ONLY defect is the placement, `repair_defect` returns 'atom-after-footer',
     # and '' once the atom moves above the footer.
     "atom-after-footer": "repair",
-    # Orphaned — no scheduled chore's precheck detects the condition today.
-    "atom-oversized": None,
+    # Covered — TRDD-VOWAUVE5 / USER ruling 2026-08-22. `split_has_work` asks `memgrep lint`
+    # itself for over-budget atoms, so the gate and this linter cannot disagree. Rides the
+    # `split` chore rather than an eighth intervention because it is the same trigger class
+    # (something is too big, break it into smaller pieces of the same kind) and because
+    # memgrep's own refusal message already names janitor-memory-split as the owner.
+    "atom-oversized": "split",
     "lesson-uncited": None,
     "atom-no-keywords": None,
     "atom-no-lmd": None,
@@ -239,11 +243,18 @@ def test_atom_no_keywords_is_flagged_but_dispatched_by_nothing(tmp_path):
 
 
 @needs_memgrep
-def test_atom_oversized_is_flagged_but_dispatched_by_nothing(tmp_path):
-    """ORPHANED, proven live — the code that gave janitor#200 its title. An atom body
-    past the 1500-char budget, inside an otherwise well-formed, already-atomized,
-    under-cap page, is invisible to every content_has_work gate — split measures the
-    PAGE, not the atom, and the page here is tiny."""
+def test_atom_oversized_is_flagged_and_dispatched_by_split(tmp_path):
+    """COVERED by `split`, proven live — the code that gave janitor#200 its title, and the
+    last of the three the issue singled out to still be orphaned.
+
+    This test asserted the OPPOSITE until 2026-08-22, and the inversion is the point:
+    janitor#200 demoted `atom-oversized` to INFO for one stated reason — decomposition is
+    semantic, so no chore could act on it. The USER's ruling (TRDD-VOWAUVE5 #6) created that
+    owner, so the premise is gone. The fixture is unchanged; only the verdict moved.
+
+    The page here is TINY, which is exactly what makes this a real proof: `split`'s size
+    gate measures the PAGE, so nothing about the page's own bytes can be what dispatches.
+    Only the atom-level check can be."""
     filler = "word " * 400  # collapses to ~2000 chars, well past the 1500 budget
     page = tmp_path / "oversized.md"
     page.write_text(
@@ -259,7 +270,15 @@ def test_atom_oversized_is_flagged_but_dispatched_by_nothing(tmp_path):
 
     results = _content_has_work_everywhere(tmp_path)
     dispatching = [iv for iv, has_work in results.items() if has_work]
-    assert not dispatching, (
-        f"atom-oversized is documented ORPHANED, but {dispatching} would dispatch on this "
-        "fixture — either the classification is stale or a gate now covers it; update _CODE_COVERAGE"
+    assert "split" in dispatching, (
+        f"atom-oversized is documented COVERED by split, but only {dispatching} would "
+        "dispatch on this fixture — the gate and _CODE_COVERAGE disagree, which is the "
+        "janitor#227 shape this whole file exists to catch"
+    )
+    # The gate must agree with the linter about WHICH page, not merely that some work exists
+    # — a boolean that happens to be True for an unrelated reason would pass the assert above
+    # while leaving the agent with nothing to find.
+    named = [p for p, _line in mcp.oversized_atom_pages(tmp_path)]
+    assert [Path(p).name for p in named] == ["oversized.md"], (
+        f"the gate must name the page the linter flagged, got {named}"
     )

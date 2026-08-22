@@ -4260,22 +4260,40 @@ fn atom_max_chars() -> usize {
         .unwrap_or(1500)
 }
 
-/// The WRITE-TIME half of the atom budget (TRDD-VOWAUVE5). The `oversized-atom` lint is
-/// deliberately INFO-tier (janitor#200: decomposition is semantic, no chore may act on it), so
-/// detection alone never drains the backlog — measured four times over three weeks on
-/// TRDD-WN7M829Y, the count only ever refills. Refusing the body at the verbs is what stops the
-/// INFLOW; the same `atom_max_chars()` the lint reads is the ONE budget, so gate and lint cannot
+/// The WRITE-TIME half of the atom budget (TRDD-VOWAUVE5). WARNS; it does NOT refuse.
+///
+/// This REFUSED until 2026-08-22, and the reason it stopped is the whole story. The
+/// `oversized-atom` lint is INFO-tier (janitor#200: decomposition is semantic, so no chore may
+/// act on it), which meant detection alone never drained the backlog — measured four times over
+/// three weeks on TRDD-WN7M829Y, the count only ever refilled. With no owner, refusing the body
+/// here was the only thing holding the line, so it refused.
+///
+/// The USER's ruling created the owner: over-budget content is now QUEUED for the librarian
+/// (`split_has_work` asks `memgrep lint` for `atom-oversized`, the `janitor-memory-split` skill
+/// decomposes one per pass). A refusal is the wrong shape once something drains the queue — it
+/// puts the cost on the author, at the moment they have the fact in hand and the least appetite
+/// for restructuring, and the measured result is not smaller atoms but a fact that never gets
+/// written down at all. Warning keeps the knowledge and defers the shape.
+///
+/// ORDER MATTERS AND WAS DELIBERATE: the chore landed FIRST, in the same change. Relaxing this
+/// before an owner existed would have re-created the exact measured failure with a nicer message.
+///
+/// The same `atom_max_chars()` the lint reads is the ONE budget, so warning and lint cannot
 /// drift. Raw stdin chars here vs the lint's whitespace-joined `body_chars` differ only by blank
-/// lines, and raw >= joined — the gate is stricter-or-equal, so nothing it admits can lint
+/// lines, and raw >= joined — this is stricter-or-equal, so nothing it passes silently can lint
 /// oversized. Supersession carve-out is BY CONSTRUCTION: `--supersedes` moves the EXISTING body
 /// verbatim without re-reading it — only the NEW body ever reaches this check.
+///
+/// Infallible by signature: `Result` is kept so the two call sites read unchanged and so a future
+/// hard-gate needs no re-plumbing, but nothing here can fail any more.
 fn check_new_body_budget(body: &str, max_chars: usize, what: &str) -> Result<()> {
     let n = body.chars().count();
     if max_chars > 0 && n > max_chars {
-        anyhow::bail!(
-            "refusing this {what}: body is {n} chars, over the {max_chars}-char atom budget \
-             (MEMGREP_ATOM_MAX_CHARS) — one atom holds ONE fact; split it into smaller atoms \
-             (the janitor-memory-split skill) instead of raising the knob. Nothing was written."
+        eprintln!(
+            "warning: this {what} body is {n} chars, over the {max_chars}-char atom budget \
+             (MEMGREP_ATOM_MAX_CHARS). WRITTEN ANYWAY — one atom holds ONE fact, and the \
+             janitor-memory-split chore will decompose it on a later pass. Splitting it \
+             yourself now is better than waiting; raising the knob is not."
         );
     }
     Ok(())
@@ -11045,19 +11063,21 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(final_content.contains("publish-globally: false"), "got: {final_content}");
     }
 
-    /// TRDD-VOWAUVE5: the write-time half of the atom budget. The lint's `oversized-atom` is
-    /// INFO by ratified decision (janitor#200), so nothing drains the backlog — the gate stops
-    /// the INFLOW at the verbs instead. These drive the pure check (`max_chars` passed
-    /// explicitly, not via the env — the crate's tests run in parallel and the env is
-    /// process-global); the shared-constant property needs no runtime assertion because both
-    /// the gate call sites and the lint literally call the same `atom_max_chars()`.
+    /// TRDD-VOWAUVE5: the write-time half of the atom budget. It REFUSED until 2026-08-22 and
+    /// now only WARNS — the USER's ruling gave the backlog an owner (`split_has_work` reads
+    /// this crate's own `atom-oversized` findings; `janitor-memory-split` decomposes one per
+    /// pass), and a refusal is the wrong shape once something drains the queue. These drive
+    /// the pure check (`max_chars` passed explicitly, not via the env — the crate's tests run
+    /// in parallel and the env is process-global); the shared-constant property needs no
+    /// runtime assertion because both call sites and the lint literally call the same
+    /// `atom_max_chars()`.
     #[test]
-    fn budget_gate_refuses_an_over_budget_body() {
+    fn budget_gate_admits_an_over_budget_body_and_leaves_it_to_the_chore() {
+        // The behavioural inversion, pinned: an over-budget body must now be WRITTEN. If this
+        // ever goes back to Err, the write path silently starts dropping facts on the floor
+        // again — which is the failure the ruling was about, not the one it was avoiding.
         let big = "w".repeat(1501);
-        let err = check_new_body_budget(&big, 1500, "atom").unwrap_err().to_string();
-        assert!(err.contains("1501 chars"), "got: {err}");
-        assert!(err.contains("Nothing was written"), "got: {err}");
-        assert!(err.contains("split it"), "the refusal must name the fix: {err}");
+        assert!(check_new_body_budget(&big, 1500, "atom").is_ok());
     }
 
     #[test]

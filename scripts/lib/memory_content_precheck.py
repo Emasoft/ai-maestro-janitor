@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 from pathlib import Path
 
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
@@ -131,6 +132,54 @@ def oversized_mistiered_pages(root: Path, *, max_bytes: int) -> list[tuple[Path,
     return out
 
 
+_OVERSIZED_ATOM_RE = re.compile(r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[atom-oversized\]")
+
+
+def oversized_atom_pages(root: Path) -> list[tuple[str, int]]:
+    """Pages under `root` carrying an over-budget atom, as `(abs-path, line)` — asked of
+    `memgrep lint` itself rather than re-derived here (TRDD-VOWAUVE5, USER ruling 2026-08-22).
+
+    WHY A SUBPROCESS AND NOT A PYTHON PREDICATE, in a module that is otherwise all Python
+    predicates: the atom budget lives in Rust (`memory.rs::atom_max_chars`, env
+    `MEMGREP_ATOM_MAX_CHARS`), and so does the atom SEGMENTATION that decides what "one
+    atom's body" even is. A Python mirror of either is a second source of truth for a number
+    and a parser — the exact drift class this file already names as a known hazard, and the
+    one janitor#227 was: a gate and its arbiter disagreeing, so the chore dispatches an agent
+    that finds nothing and re-dispatches forever. Asking the linter cannot drift from the
+    linter. It costs ~40 ms for a whole scope root (measured on the live corpus), which is
+    cheaper than the stat-and-read loops around it.
+
+    NO CANDIDATES when memgrep is missing or fails, and that direction is deliberate — it is
+    the opposite of this module's usual fail-OPEN. Everywhere else "unreadable" means "not
+    provably idle, so dispatch"; here a dispatched agent would have no memgrep either, so it
+    could neither find the candidates nor decompose them. Dispatching into that is a
+    guaranteed no-op agent, which is the waste the whole precheck layer exists to prevent.
+    A broken memgrep is a much louder problem than an undrained atom, and it surfaces
+    elsewhere.
+    """
+    try:
+        import user_mem_lib  # noqa: PLC0415 -- optional; a lib import must not break the gate
+
+        binary = user_mem_lib.find_memgrep()
+    except Exception:  # noqa: BLE001
+        binary = None
+    if not binary:
+        return []
+    try:
+        proc = subprocess.run(  # noqa: S603 - resolved binary + one path, no shell
+            [binary, "lint", str(root)],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out: list[tuple[str, int]] = []
+    for ln in (proc.stdout or "").splitlines():
+        m = _OVERSIZED_ATOM_RE.match(ln)
+        if m:
+            out.append((m.group("path"), int(m.group("line"))))
+    return out
+
+
 def split_has_work(
     root: Path,
     *,
@@ -140,8 +189,10 @@ def split_has_work(
     recheck_after_s: float = _DEFAULT_RECHECK_S,
 ) -> bool:
     """True iff some committed page in `root` is strictly larger than `max_bytes`
-    (the split cap). Mirrors the split skill's `find -size +<cap>c` size gate with
-    the SAME cap source (memory_settings split_max_bytes).
+    (the split cap), OR some atom on any page is over the memgrep atom budget. Mirrors
+    the split skill's `find -size +<cap>c` size gate with the SAME cap source
+    (memory_settings split_max_bytes), and its `memgrep lint` atom scan with the same
+    binary (see `oversized_atom_pages`).
 
     UNCHANGED-CORPUS gate (issue #140): if the corpus is byte-identical to the stat map
     recorded at the last split dispatch, and that dispatch is still within its recheck
@@ -186,7 +237,14 @@ def split_has_work(
             # "no work" for the readable rest would wrongly SUPPRESS the chore.
             # Dispatch instead; the agent can surface the I/O problem.
             return True
-    return False
+    # An over-budget ATOM is the same trigger class as an over-cap PAGE — something is too
+    # big and must be broken into smaller pieces of the same kind — so it rides this chore
+    # rather than an eighth one. That is not just economy: memgrep's own refusal message
+    # already names `janitor-memory-split` as the owner, and a NEW bare marker would be
+    # unknown to any session running an older cached copy of the heartbeat-protocol rule,
+    # so the fire would print a token nobody acts on. Checked LAST because it is the only
+    # branch here that spawns a subprocess; the stat-only page scan short-circuits first.
+    return bool(oversized_atom_pages(root))
 
 
 def corpus_fingerprint(root: Path) -> str | None:

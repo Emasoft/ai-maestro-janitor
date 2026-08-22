@@ -1178,8 +1178,8 @@ would trade one unusable report (all-noise) for another (silently incomplete).
 | severity | meaning | checks |
 |---|---|---|
 | `ERROR` | corruption or invisibility — it does not parse, resolve, or rank | dangling `[^N]` reference · unquoted `desc:` (atom or lesson) · body-less lesson · supersession without `SUPERSEDED BODY:` · missing `ocd`/`lmd`/`description` · missing Notes section · downward cross-scope link · non-ASCII `⟦` atom marker · unclosed atom props · atom without `keywords:` · dropped props segment · duplicate atom id · `⟦` lesson metadata |
-| `WARN` | real, but nothing is lost and the fix is not mechanical | one-sided link (WM-WIKI-04a) · oversized atom (WM-LINT-03) · missing or non-ISO atom `ocd`/`lmd` · lesson without metadata / without `id:` / without `keywords:` · superseded lesson with no forward pointer |
-| `INFO` | the model BLESSES this shape; a pointer, not a defect | uncited page-level lesson |
+| `WARN` | real, but nothing is lost and the fix is not mechanical | one-sided link (WM-WIKI-04a) · missing or non-ISO atom `ocd`/`lmd` · lesson without metadata / without `id:` / without `keywords:` · superseded lesson with no forward pointer |
+| `INFO` | the model BLESSES this shape, or a chore owns it; a pointer, not a defect | uncited page-level lesson · oversized atom (WM-LINT-03) |
 
 The split is measured, not stylistic. Over the three live scopes (164 notes) the corpus held 262
 findings of which **150 (57%) were the single INFO check** — an uncited `[^N]:`, which the model
@@ -1189,10 +1189,16 @@ always fails is one people route around; the genuine errors were unreadable unde
 the split the USER scope reports 161 findings and **8 ERRORs** — a list an author can actually act
 on.
 
-The two `WARN`s are warnings for a reason that outlives this corpus: a one-sided link cannot be
-fixed from the page being edited (the missing half lives in the OTHER file), and an oversized atom
-needs a semantic decomposition. Blocking a write on either gates an unrelated edit behind work its
-author may not be positioned to do.
+A one-sided link is a `WARN` for a reason that outlives this corpus: it cannot be fixed from the
+page being edited, because the missing half lives in the OTHER file. Blocking a write on it gates
+an unrelated edit behind work its author is not positioned to do.
+
+An oversized atom sat in that same `WARN` row until janitor#200 demoted it to `INFO`: a semantic
+decomposition is not mechanical, and at the time no chore could act on it, so calling it a defect
+asserted actionable work nothing could dispatch. It stays `INFO` now for the opposite reason —
+the `split` chore DOES own it (WM-SCHED-06), so the finding is a queue entry rather than a demand
+on whoever happened to touch the page. Both readings agree on the severity; only the argument for
+it changed.
 
 `WM-LINT-02` **the-checks** — `lint` fires on, at minimum: `unquoted-desc` (WM-ATOM-03),
 `empty-lesson-body` (WM-LES-04), `oversized-atom` (WM-ATOM-01), `superseded-without-body`
@@ -1245,6 +1251,18 @@ preventing disclosure.
 `WM-LINT-03` **oversized-budget** — the `oversized-atom` budget is corpus-tuned (default 1500
 chars, env `MEMGREP_ATOM_MAX_CHARS`, `0` disables) — set from the live atom-size distribution to
 flag only the genuinely-bloated tail, not the healthy median.
+
+`WM-LINT-03a` **budget-warns-never-refuses** — `MUST NOT` refuse a write for being over the
+WM-LINT-03 budget. `add-atom` and `add-lesson` emit a warning to stderr and write the body
+anyway; the same `atom_max_chars()` the lint reads is the ONE budget, so warning and lint cannot
+drift. The over-budget atom is then QUEUED, not lost: WM-SCHED-03's split precheck reads this
+crate's own `atom-oversized` findings and the `janitor-memory-split` chore decomposes one per
+pass (WM-SCHED-06). Two constraints on any future change here, both learned rather than assumed
+— (a) a refusal `MUST NOT` be reinstated while a chore drains the queue, because it charges the
+author at the moment they hold the fact and the observed result is an unwritten fact rather than
+a smaller one; (b) if the chore is ever removed, the refusal `MUST` come back in the SAME change
+— detection without an owner was measured four times over three weeks (TRDD-WN7M829Y) and the
+count only ever refilled.
 
 `WM-LINT-04` **the-commit-gate-is-a-delta** — the transaction commit gate (WM-TXN-04) blocks
 only lint violations an edit INTRODUCES (before(live) vs after(staged) counts), never a page's
@@ -1400,10 +1418,22 @@ cadence (0 ⇒ OFF). The chores are OFF BY DEFAULT (USER cost decision 2026-06-3
 via `/janitor-memory-frequency`. A conformance reader MUST NOT treat "OFF by default" as "unused
 and removable".
 
-`WM-SCHED-03` **zero-LLM-precheck** — before dispatching an expensive agent, a stat-only
+`WM-SCHED-03` **zero-LLM-precheck** — before dispatching an expensive agent,
 `memory_content_precheck` decides whether the chore has actual work on the corpus (oversize for
 split, structural malformation for repair, free-prose for atomize, un-mirrored buffers for
-harvest, a real conflict for conflict) — so a due-but-empty chore costs no tokens.
+harvest, a real conflict for conflict) — so a due-but-empty chore costs no tokens. Zero LLM is
+the invariant; "stat-only" is not — split's atom half shells out to `memgrep lint` (WM-SCHED-06),
+which is ~40 ms for a whole scope root and still nowhere near an agent dispatch.
+
+`WM-SCHED-06` **split-owns-both-scales** — the `split` chore covers BOTH an over-cap PAGE
+(`split_max_bytes`) and an over-budget ATOM (WM-LINT-03). One marker, two scales of the same
+job: something is too big and must become several smaller things of the same kind. The atom
+half `MUST` be detected by asking `memgrep lint` for `atom-oversized` rather than by
+re-implementing the budget or the atom segmentation — a second copy of either is a gate and an
+arbiter that can disagree, which is the janitor#227 failure (a chore dispatching work its
+arbiter cannot confirm re-dispatches forever). A conformance reader `MUST NOT` add an eighth
+intervention for this: a new bare marker is unknown to any session running an older cached copy
+of the heartbeat-protocol rule, so the fire would print a token nobody acts on.
 
 `WM-SCHED-04` **dispatch-fingerprint** — a corpus fingerprint recorded at dispatch time prevents
 re-dispatching an unchanged corpus to the same chore (bounded, no-churn — mirrors the general
