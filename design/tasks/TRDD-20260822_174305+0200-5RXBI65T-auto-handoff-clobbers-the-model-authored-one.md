@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: The auto-composed handoff overwrites the model-authored one at the same path
 column: todo
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T23:05:01+0200
+updated: 2026-08-22T23:08:33+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -21,8 +21,26 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-**Not started.** Diagnosed 2026-08-22 by having it happen: a rich handoff this session had just
-authored was silently replaced mid-session.
+**Not started.** Filed 2026-08-22 after what was believed to be an incident: a rich handoff this
+session had just authored, silently replaced mid-session.
+
+**⚠ THE INCIDENT IS UNCORROBORATED — THE HAZARD IS NOT. Read this before using the card.**
+Four commits (`2994469a` → `9684a496` → `8490516b` → this one) argued about *which code* wrote at
+17:38, and never questioned the layer underneath: **a file's mtime was read as a writer's
+identity**, and F2 (*"and the replacement was already stale"*) presupposes F1's clobber rather
+than evidencing it. Settled by asking whether there was ever a victim instead of who wrote last —
+`git log --since=2026-08-22 -- .janitor/state/` is empty (gitignored, as expected) and **no log
+surface anywhere under `.janitor/logs/` mentions `agent-handoff` on any date**: the
+`/janitor-write-handoff` skill leaves no trace at all. So nothing establishes that a rich handoff
+existed before 17:38 to be destroyed. The "it has clobbered a rich handoff twice today" line came
+from the prior session's own handoff prose — the same session whose half-run drill and confident
+wrong claims took all night to correct.
+
+**This costs the card nothing, which is why it is worth doing.** F1-as-HAZARD — `atomic_write` at
+:428 is unconditional, no read-before-write, no merge, on a path shared with
+`/janitor-write-handoff` — is read directly in source, is untouched by any of this, and justifies
+the fix, the acceptance boxes and the priority on its own. F1-as-INCIDENT adds nothing but an
+unsupportable claim. Treat the card as a hazard card.
 
 ### F1 — the overwrite is unconditional (certain, read in source)
 
@@ -42,7 +60,7 @@ writer aimed at the rich one's path.
 So the cheap automatic artifact destroys the costly deliberate one, and the loss is silent —
 there is no `.prev`, and `.janitor/state/` is gitignored, so nothing recovers it.
 
-### F2 — and the replacement was already stale when written (certain from evidence)
+### F2 — and the replacement was already stale when written (PRESUPPOSES F1's incident — see the correction above)
 
 | fact | value |
 |---|---|
@@ -79,9 +97,11 @@ mtime. That scenario is F1 verbatim, so this evidence cannot exclude it.
   The residual hole is a run with `use_llm_ext()` false or an empty transcript, which skips that
   branch and logs nothing pre-write.
 - The daemon ran task **`cold-cache-clear` 190 times on 08-22** — including 17:34:48→17:34:55 and
-  17:39:55→17:40:02, which BRACKET the 17:38:10 mtime without covering it. Every run completed in
-  3-11 s, against the 25m41s a real fire took on 08-20. (A detached child could outlive its
-  parent's "done" line, so this narrows rather than closes.)
+  17:39:55→17:40:02, which BRACKET the 17:38:10 mtime without covering it. **190 `starting` lines
+  but only ~183 `done in Ns` — 7 starts have NO logged completion**, and an unmatched start is
+  exactly the killed-or-detached case, so that hole has candidate instances rather than being
+  merely theoretical. Of the runs that DID log completion, all took 3-11 s, against ~15-25 min for
+  the one real fire on 08-20.
 - **Independent of `_LOG` entirely:** `_fire` (:351) writes its directive as
   "…(link-only handoff, auto-composed…"; the `resume-directive.txt` found on disk read
   "(rich agent handoff)". Different text ⇒ that directive was not written by `_fire`. Limit: a
@@ -101,11 +121,13 @@ external-clear.log    08:21:29  summary: ok on attempt 2   →   fired:
 cold-cache-clear.log  08:21:29  watcher exited rc=0 — session start released
 ```
 
-**25m41s wall-clock**, start to exit. The two `summary:` lines alone are 15m41s apart — quote the
-launcher's pair, not that subtraction, or a reader recomputes 15m41s and concludes the figure was
-inflated. "`_compose` was blocked" is sound rather than inferred: those `summary:` lines come from
-the `log=` callback passed *into* `summarize_with_retry` from inside `_compose`, so everything
-between them is on that call stack, with `now_iso` and the cards already captured.
+**The compose-blocked figure is 15m41s — the two `summary:` lines.** That is the one with a proof
+behind it: those lines come from the `log=` callback passed *into* `summarize_with_retry` from
+inside `_compose`, so everything between them is provably on that call stack, with `now_iso` and
+the cards already captured. **25m41s is the WATCHER's lifetime**, not `_compose`'s: a "watcher
+started (blocking)" / "watcher exited rc=0" pair that a session start waits on is a supervised
+child process, and its span CONTAINS `_compose` plus startup, gathers, `_fire` and teardown. The
+bigger number was reached for and it lost the tighter proof.
 
 So the staleness hazard below is genuine; only its use to explain the 17:38 observation is
 withdrawn.
@@ -195,10 +217,19 @@ space because the shape survived every correction and only changed disguise:
    190 invocations on the day in question. Enumerating the distinct `task '<name>'` values found
    in one command what grepping for the name I expected could not.
 
-**DO NOT** grep a log for the name of the *implementation* and conclude anything from zero hits.
-**DO** enumerate the identifiers the log actually uses first (`grep -o "task '[a-z-]*'" | sort
--u`), then search within those. A zero-hit grep is evidence about your search term before it is
-evidence about the world.
+4. **A file's mtime for a writer's identity** — the one underneath all three, unexamined for four
+   commits because each correction argued about *which code* wrote at 17:38 instead of whether
+   17:38 establishes a clobber at all. A correction that stays inside the previous claim's frame
+   cannot reach the assumption that built the frame.
+
+**THE RULE — this is the transferable part:** *a zero-hit grep (or an empty log, or an absent
+line) is evidence about your search term before it is evidence about the world.* Ask what the
+system would have to have written for your search to hit, and confirm it writes that at all —
+`.janitor/logs/` turned out to contain no `agent-handoff` mention on ANY date, so searching it for
+one proved nothing until that was known.
+
+The `grep -o "task '[a-z-]*'" | sort -u` recipe is one illustration of the rule against one log's
+format, discovered after the fact — not the rule itself.
 
 The operational lesson, which applies before any code changes: **`.janitor/state/agent-handoff.md`
 is not durable storage.** It is gitignored and has an automatic second writer. Anything that must
