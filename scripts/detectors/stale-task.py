@@ -24,6 +24,12 @@ That silence therefore means "this session has no task dir", NOT "no tasks are s
 and it is not evidence the feature is unused machine-wide either. Left running rather
 than removed: it costs one directory listing, and it is still right on a session that
 opted back in.
+
+Coverage, stated accurately because the commit that added this note got it wrong: this
+file IS named in `tests/test_scanner_walk_invariants.py:102`, which holds it to the
+shared scanner-walk invariants. What it has no test for is its OWN staleness logic —
+the thresholds, the team-uuid scoping, the nudge text. Do not read "there are tests
+that mention this file" as "this behaviour is pinned".
 """
 
 from __future__ import annotations
