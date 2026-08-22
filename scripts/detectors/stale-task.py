@@ -12,10 +12,18 @@ Claude Code updates on every TaskUpdate call.
 DEPENDS ON AN OPT-IN HARNESS FEATURE (CC 2.1.233). The task tools that write those
 files — TaskCreate/TaskGet/TaskUpdate/TaskList — were removed on Opus 4.8, Sonnet 5,
 Fable 5, Mythos 5 and newer, and return only under CLAUDE_CODE_ENABLE_TODO_TOOLS=1.
-On a default modern session nothing writes ~/.claude/tasks/, so this detector scans an
-empty tree and is CORRECTLY silent — that silence means "the feature is off here", not
-"no tasks are stale". Left running rather than removed: it costs a directory listing,
-and it is still right on a session that opted back in.
+
+Be precise about what that means here, because the tree is NOT empty: measured on the
+dev host 2026-08-22 it held 635 task files, all but one written before 2026-08-15 —
+i.e. by sessions predating the removal. What went away is NEW writes, and this detector
+scopes to `_resolve_team_uuid`, the CURRENT session's uuid dir, which a default modern
+session never creates. So it scans a directory that does not exist and is CORRECTLY
+silent, while a heap of older sessions' tasks sits untouched beside it.
+
+That silence therefore means "this session has no task dir", NOT "no tasks are stale" —
+and it is not evidence the feature is unused machine-wide either. Left running rather
+than removed: it costs one directory listing, and it is still right on a session that
+opted back in.
 """
 
 from __future__ import annotations
