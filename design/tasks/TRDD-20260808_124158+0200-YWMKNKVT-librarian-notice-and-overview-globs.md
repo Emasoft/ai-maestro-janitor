@@ -3,8 +3,8 @@ trdd-id: YWMKNKVT
 title: Librarian notice must not carry a machine-local path; overview pages exempt from globs
 column: blocked
 created: 2026-08-08T12:41:58+0200
-updated: 2026-08-13T02:00:00+0200
-blocked-by: [TRDD-KVS6K7P9, stale-plugin-session-in-another-project]
+updated: 2026-08-22T12:02:05+0200
+blocked-by: [stale-plugin-session-in-another-project]
 pre-block-column: todo
 current-owner: janitor-main-session
 task-type: bugfix
@@ -16,6 +16,22 @@ external-refs: [janitor#243]
 ---
 
 # Librarian notice channeling fix + overview-page globs exemption
+
+## ✅ 2026-08-22 — one of the two blockers is discharged; the card stays blocked on the other
+
+`blocked-by` listed `[TRDD-KVS6K7P9, stale-plugin-session-in-another-project]`. **TRDD-KVS6K7P9
+is `column: complete`** — verified today — so it is dropped from the list.
+
+The remaining blocker is real and NOT checkable from this repo: a session in ANOTHER project
+holding an older cached plugin keeps re-writing the machine-global notice
+([[claude-code-plugin-rollout-staleness]]). Nothing here can observe or clear another project's
+plugin version, so this stays `blocked` rather than moving — a genuinely un-actionable wait, which
+is what the column is for.
+
+Worth pairing with today's TRDD-9T0U3M00 finding, which is the same root cause seen from the
+other side: the installed plugin on THIS host is 3.3.26 while the repo is an unpushed 3.4.0. A
+fleet running mixed plugin versions produces exactly this class of blocker, and the publish is
+what drains it.
 
 ## Why (janitor#243, maintainer peer — measured)
 

@@ -3,14 +3,14 @@ trdd-id: CGOV2XO4
 title: Write the context-integrity file the ai-maestro wake gate reads
 column: blocked
 created: 2026-08-02T21:26:43+0200
-updated: 2026-08-13T02:05:00+0200
+updated: 2026-08-22T12:02:05+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
 scope: project
 release-via: publish
-external-refs: [167]
-blocked-by: [ai-maestro-schema-decision-janitor#167]
+external-refs: [167, ai-maestro#151]
+blocked-by: [ai-maestro#151]
 pre-block-column: todo
 implementation-commits: []
 ---
@@ -33,6 +33,31 @@ FILE contract, the proven `server-liveness.json` pattern INVERTED:
   ai-maestro wake gate (janitor#167)". What is missing is only the atomic write of the
   file (bounded, per-workdir, ts-stamped, atomic_write; clear/refresh semantics so a
   healed workdir stops being blocked — a stale poisoned claim is itself a DoS).
+
+## ⛔ 2026-08-22 — THE BLOCKER NAMED A DEAD CHANNEL. Re-asked as `ai-maestro#151`.
+
+`blocked-by` read `ai-maestro-schema-decision-janitor#167`. **janitor#167 has been CLOSED since
+2026-08-12**, and — this is the part that matters — it closed on an unrelated claim: *"the
+automatic scan exists … this issue's specific claim, that nothing scans automatically, no longer
+holds."* The schema decision this card waits on was never delivered there and now never will be.
+
+**The janitor's half was NOT the missing piece — verified, not assumed.** I expected to find that
+the (a)/(b) answers below had never been sent, and that was wrong: a comment on janitor#167 does
+carry them. So the sequence is: we answered, the decision did not come back, the channel closed
+for other reasons, and the card kept waiting on an issue that had stopped being able to help.
+
+**This is the SECOND card today whose blocker resolved without answering** (the first was
+TRDD-JPL0JU86, waiting on AZ6QRK0D, which closed on a privacy-gate question and never made the
+direction call). The shared failure is that `blocked-by` records WHERE an answer was expected,
+never WHETHER it arrived — so a closed blocker reads as progress from the board, and only opening
+the issue reveals it closed on something else. Worth checking the closure REASON, not just the
+state, whenever a blocker clears.
+
+Re-asked on the owned repo as **`Emasoft/ai-maestro#151`**, carrying (a) and (b) restated so the
+issue stands alone, plus the concrete per-workdir proposal (one file per workdir instead of one
+shared `findings[]` array — it makes the 23-writer problem structural rather than managed). The
+card stays `blocked`, now against a LIVE question. No urgency was implied: it has been parked
+since 2026-08-02 and can stay parked; it just should not be parked against a closed issue.
 
 ## 2026-08-13 — picked up, NOT built. Two verified findings changed the shape of the ask.
 
