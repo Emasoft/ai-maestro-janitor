@@ -3,7 +3,7 @@ trdd-id: VOWAUVE5
 title: memgrep write verbs refuse an over-budget atom at write time
 column: testing
 created: 2026-08-18T19:54:51+0200
-updated: 2026-08-21T08:30:42+0200
+updated: 2026-08-22T10:01:59+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -151,5 +151,62 @@ still leaves the Edit-tool path open, so it buys less than it looks.
 **Option 2 + 3 together is the recommendation**; option 1 alone would let the box keep claiming
 an enforcement it still would not have. Needs the USER, because it changes what this card
 promises.
+
+### ✅ USER DECIDED 2026-08-22 — and chose something none of the three options offered
+
+*"Enforce the use of memgrep when writing/updating/editing/migrate/create new pages/create new
+atoms. Everything must pass via memgrep, so memgrep can lint and ensure always 100% compliance
+with the wikimem specs. Budget is also handled by memgrep, and made so that in case of wikimem
+pages too long the memgrep automatically notify the librarian agent, so that it will split the
+atom or the whole wikimem page at the next librarian chore (no hurry… there is no real hurry in
+splitting atoms too long or wikimem pages too big, so the librarian chores even once every 6-12
+hours are enough)."*
+
+That is option 3's schedule PLUS the thing option 1 could not reach — the Edit-tool hole — closed
+by ENFORCEMENT rather than by widening the refusal. The budget stops being a refusal and becomes a
+notification.
+
+**It also settles janitor#200 from the other end.** The `oversized-atom` lint was demoted to
+INFO-tier for one stated reason: *decomposition is semantic, no chore may act on it.* The USER
+has now created that owner, so the demotion's premise is gone.
+
+#### Part 1 SHIPPED — `9e32c1ed`
+
+PreToolUse deny on wikimem pages (`pre-tool-wikimem-write-path.py`), 17 tests,
+mutation-verified. Fails OPEN on every uncertainty; `.maint-staging/` excluded because memgrep
+writes its own transaction through that path. `post-edit-wikimem-lint.py`'s header — which
+asserted the opposite rule — was corrected in the same commit.
+
+#### Part 2 NOT STARTED, and the ORDER is load-bearing — do not invert it
+
+`check_new_body_budget` (`memory.rs:4272`) still `bail!`s, deliberately. Its own docstring says
+why relaxing it first would be a regression, not progress:
+
+> the `oversized-atom` lint is deliberately INFO-tier … so detection alone never drains the
+> backlog — **measured four times over three weeks on TRDD-WN7M829Y, the count only ever
+> refills**. Refusing the body at the verbs is what stops the INFLOW.
+
+So the refusal is the only thing currently holding the line. Turning it into a notification
+BEFORE a chore exists to consume the notification re-creates exactly the measured failure, with
+a nicer message.
+
+**Build the owner first, then relax:**
+1. A new intervention for oversized ATOMS. None exists today — `split` splits PAGES
+   (`split_max_bytes`), `atomize` converts prose to atom markers. Add to `_MARKERS`
+   (`memory-maintenance.py:107-115`) + `INTERVENTIONS` (`memory_settings.py:71-79`); the USER's
+   6-12 h cadence sits inside the existing per-day model.
+2. Only then replace the `bail!` with an enqueue.
+3. Re-scope box 4 to what this actually promises: *every write goes through memgrep;
+   over-budget content is QUEUED for the librarian, not rejected.* Steady state is "small and
+   repaired", not zero — the USER accepted that explicitly ("no real hurry"), on the grounds
+   that atoms are grepped programmatically so bloat costs focus, not correctness.
+4. Update `design/specs/wikimem-memgrep-spec.md` in the same change — it is the written
+   contract for this subsystem and currently describes the advisory behaviour.
+
+⚠ **One budget, two languages.** `MEMGREP_ATOM_MAX_CHARS` is a RUST env var (`memory.rs:4256`);
+chore cadence and `split_max_bytes` live in a PYTHON JSON store (`memory_settings.py:51-62`).
+`memory_content_precheck.py` already mirrors memgrep's parser and flags that mirroring as a known
+hazard. The new predicate MUST read the same env var — a second source of truth here is how the
+gate and the lint drift apart, which is the defect this whole card exists to prevent.
 
 ## Approval log
