@@ -1,9 +1,9 @@
 ---
 trdd-id: WMQQYLSZ
 title: Test fixture scripts pay a first-exec scan per file - invoke them as data instead
-column: human_review
+column: complete
 created: 2026-08-21T17:20:33+0200
-updated: 2026-08-22T01:15:45+0200
+updated: 2026-08-22T22:10:36+0200
 current-owner: janitor-main-session
 task-type: refactor
 project-id: ai-maestro-janitor
@@ -105,3 +105,8 @@ which it is — passing the script as data avoids the cost either way — but a 
 should not cite the cause as settled.
 
 ## Approval log
+
+- 2026-08-22T22:10:36+0200 — COMPLETE (human_review → complete) by USER, as one of a batch of six
+  signed off together via a comment on the "What's Waiting On You" artifact ("sign off the six").
+  All 5 acceptance boxes verified open=0 immediately before the transition, counted with a
+  permissive checkbox regex rather than read from a handoff.

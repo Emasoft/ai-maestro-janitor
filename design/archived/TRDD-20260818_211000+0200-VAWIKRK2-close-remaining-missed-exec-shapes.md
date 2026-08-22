@@ -1,9 +1,9 @@
 ---
 trdd-id: VAWIKRK2
 title: Close the remaining missed dynamic-exec shapes (A, B, D, E) with a fresh blind set
-column: human_review
+column: complete
 created: 2026-08-18T21:10:00+0200
-updated: 2026-08-21T17:25:07+0200
+updated: 2026-08-22T22:10:36+0200
 current-owner: janitor-main-session
 task-type: security
 severity: medium
@@ -376,3 +376,8 @@ Tier-0 and self-approvable in a mono-agent repo, but the conservative reading is
 rules ask for when unsure, and the honest caveats above are exactly what a human should weigh.
 
 ## Approval log
+
+- 2026-08-22T22:10:36+0200 — COMPLETE (human_review → complete) by USER, as one of a batch of six
+  signed off together via a comment on the "What's Waiting On You" artifact ("sign off the six").
+  All 4 acceptance boxes verified open=0 immediately before the transition, counted with a
+  permissive checkbox regex rather than read from a handoff.

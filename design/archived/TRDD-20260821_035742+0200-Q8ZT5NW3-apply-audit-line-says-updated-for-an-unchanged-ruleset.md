@@ -1,9 +1,9 @@
 ---
 trdd-id: Q8ZT5NW3
 title: The apply audit line reports updated for a ruleset a no-op PUT did not change
-column: human_review
+column: complete
 created: 2026-08-21T03:57:42+0200
-updated: 2026-08-21T17:25:07+0200
+updated: 2026-08-22T22:10:36+0200
 implementation-commits: [342f3f6f]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -97,3 +97,11 @@ count, which are this card's own new tests. ruff, mypy (486 files) and pyright c
    a ruleset write just to watch the log line.
 
 **Not moved to `complete`:** `ai_review → human_review → complete` is the USER's gate.
+
+## Approval log
+
+- 2026-08-22T22:10:36+0200 — COMPLETE (human_review → complete) by USER, as one of a batch of six
+  signed off together via a comment on the "What's Waiting On You" artifact ("sign off the six").
+  All 4 acceptance boxes verified open=0 immediately before the transition, counted with a
+  permissive checkbox regex rather than read from a handoff. The gate named just above is the one
+  this entry satisfies.

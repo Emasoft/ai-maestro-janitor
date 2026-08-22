@@ -1,9 +1,9 @@
 ---
 trdd-id: XWWRE9V0
 title: The fleet lane is content-blind — the audit has no ruleset-content-drift finding, so baseline changes never propagate finding-driven
-column: human_review
+column: complete
 created: 2026-08-20T08:25:18+0200
-updated: 2026-08-21T17:45:00+0200
+updated: 2026-08-22T22:10:36+0200
 implementation-commits: [068d1574]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -82,3 +82,7 @@ is named here rather than quietly folded into a ticked box.
 ## Approval log
 
 - 2026-08-20T09:35:00+0200 — SHIPPED (todo → testing) by janitor-main-session (068d1574). Acceptance: fixture fails-pre-fix; converged/asymmetry/shell/solo falsifications green (54 across the three affected suites); FIXABLE mapping in place; #282 lane-split comment pending (next action). Gate to complete: rides 3.3.19 + one fleet-audit fire observed emitting/omitting the finding correctly.
+- 2026-08-22T22:10:36+0200 — COMPLETE (human_review → complete) by USER, as one of a batch of six
+  signed off together via a comment on the "What's Waiting On You" artifact ("sign off the six").
+  All 4 acceptance boxes verified open=0 immediately before the transition, counted with a
+  permissive checkbox regex rather than read from a handoff.

@@ -1,9 +1,9 @@
 ---
 trdd-id: KNTZ79HE
 title: memory-librarian conflict candidates are 3-for-3 false positives because the topic key admits low-information tokens
-column: human_review
+column: complete
 created: 2026-08-21T11:50:51+0200
-updated: 2026-08-21T17:25:07+0200
+updated: 2026-08-22T22:10:36+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -85,3 +85,8 @@ because the day a REAL contradiction appears it will look identical.
       on the bug, one stays green to show the check still works.
 
 ## Approval log
+
+- 2026-08-22T22:10:36+0200 — COMPLETE (human_review → complete) by USER, as one of a batch of six
+  signed off together via a comment on the "What's Waiting On You" artifact ("sign off the six").
+  All 5 acceptance boxes verified open=0 immediately before the transition, counted with a
+  permissive checkbox regex rather than read from a handoff.
