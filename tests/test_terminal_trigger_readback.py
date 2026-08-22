@@ -358,6 +358,73 @@ def test_the_DEFAULT_presence_probe_is_callable(monkeypatch) -> None:
     assert sent == ["Enter"]
 
 
+def test_a_BLINDED_typing_probe_DEFERS_and_never_licenses_injection(monkeypatch) -> None:
+    """Pins TRDD-D2DD5GO8: on 2026-08-19 a blinded HID probe (`typing_now()` → None, ioreg
+    hung under load) was laundered into "not typing" and the injector typed over a user's
+    live draft. `None` must defer exactly like a typing user — never be read as `False` —
+    bounded only by the loud give-up, and it must never type or press Enter."""
+    import user_intent  # noqa: PLC0415
+
+    monkeypatch.setattr(user_intent, "typing_now", lambda **_kw: None)
+    typed: list[str] = []
+    reads: list[str] = []
+    sent: list[str] = []
+
+    def _reader(_t=None):
+        reads.append("read")
+        return _pane("")
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: typed.append("typed"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
+        reader=_reader,
+        # is_typing deliberately NOT passed — the default probe is the one that must defer.
+        sleeper=lambda _s: None, clock=lambda: 0.0, giveup_s=2.0,
+    )
+    assert ok is False, why
+    assert sent == [], "a blinded probe must never be treated as licence to type"
+    assert typed == [], "a deferral must never even ATTEMPT a keystroke over the user"
+    assert reads == [], "a deferred pass must not even read the pane, exactly like a typing user"
+
+
+def test_a_probe_that_confirms_NOT_typing_proceeds(monkeypatch) -> None:
+    """The contrast that makes the test above meaningful: `typing_now()` returning `False`
+    (a live, definite "not typing" verdict) still lets the injection proceed. If this failed
+    too, the deferral above would be masking something broader than the None case."""
+    import user_intent  # noqa: PLC0415
+
+    monkeypatch.setattr(user_intent, "typing_now", lambda **_kw: False)
+    sent: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
+        reader=_seq(_pane(""), _pane("/compact")),
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok, why
+    assert sent == ["Enter"]
+
+
+def test_wait_until_pane_free_FAILS_OPEN_on_an_unreadable_pane() -> None:
+    """The deliberately DIFFERENT fail direction, and it must stay different.
+
+    `inject_until_sent`'s probe fails CLOSED (None defers, never types). `wait_until_pane_free`
+    fails OPEN on an unreadable pane by design (docstring above `wait_until_pane_free`):
+    refusing here would resurrect the presence-cancel the owner removed, silently dropping a
+    command the user actually typed on any pane this code cannot read. If someone "fixes the
+    inconsistency" by making this fail closed too, this test goes red — that is the point."""
+    ok, why = tt.wait_until_pane_free(
+        {"kind": "tmux", "pane": "%1"},
+        reader=lambda _t: None,       # unreadable channel
+        is_typing=lambda _t: False,   # not typing, so we reach the reader
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok is True, why
+    assert "not readable" in why
+
+
 def test_user_typing_DURING_injection_backs_off_and_never_clears_their_text() -> None:
     """The dangerous case, and the reason the typing check sits BEFORE `clear_fn`.
 
