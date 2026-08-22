@@ -3,7 +3,7 @@ trdd-id: HC7CQT10
 title: The arm-once claim is undermined by two user-visible SessionStart lines that read as a chore
 column: testing
 created: 2026-08-20T17:20:03+0200
-updated: 2026-08-20T17:20:03+0200
+updated: 2026-08-22T11:53:41+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -77,7 +77,30 @@ If the platform ever gains a durable cron, this branch becomes deletable.
 - [x] Both lead with NO USER ACTION REQUIRED (regression-pinned)
 - [x] compact/clear still skip the re-plumb; startup/resume still perform it
 - [x] pytest (79 across the 3 affected suites), ruff, mypy, pyright clean
-- [ ] Gate to complete: one fresh startup/resume observed emitting the new wording
+- [ ] Gate to complete: one fresh startup/resume observed emitting the new wording —
+      **STILL OPEN, and the reason is CONDITIONAL EMISSION, not a missing deploy. Checked
+      2026-08-22.**
+
+      Unlike TRDD-9T0U3M00's box, this one is NOT publish-gated: the new wording IS in the
+      installed plugin (`…/3.3.26/scripts/hooks/on-session-start.py`, 2 occurrences). The
+      obstacle is that **both sites are `print()` to stdout, not log writes** — SessionStart
+      stdout is rendered into the transcript and never reaches `session-start.log` (confirmed:
+      0 occurrences of either the new OR the old wording in 2102 log lines). So it cannot be
+      grepped after the fact; it has to be SEEN at a session start.
+
+      And it only fires in the branch that does work: the cron-liveness nudge returns early when
+      a `[janitor-heartbeat]` cron already exists, and the re-plumb line prints only when
+      SessionStart actually re-plumbs. On this session's own `SessionStart:compact` neither
+      fired — correctly, since the session is armed and its cron is live. **A healthy host is
+      precisely the host where this box cannot be ticked.** It needs a start that re-plumbs
+      (a restart, or a cron that expired).
+
+      **Checked while here whether a THIRD emission was missed, because the card says "both":**
+      `on-session-start.py:866` still reads *"…run `/janitor-arm` to arm it"* — the exact shape
+      the other two were reworded away from. It is CORRECT and must not be "fixed": it is the
+      `else` of the armed check, so it fires only when the janitor is genuinely NOT armed, where
+      asking the user to arm once IS the arm-once request rather than a false chore. Recorded so
+      the next reader does not file it as a missed instance.
 
 ## Approval log
 
