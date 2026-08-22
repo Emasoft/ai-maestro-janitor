@@ -202,7 +202,11 @@ def test_phase_before_warns_when_the_staging_cannot_resume(tmp_path: Path) -> No
     assert proc.returncode == 0, proc.stderr
     assert "VERIFY_BEFORE" in proc.stdout
     assert "VERIFY_BEFORE_NO_RESUME_FLAG" in proc.stderr
-    assert "--phase after" in proc.stderr, "the warning must carry the command to paste"
+    # the WHOLE command, not just the flag: a bare `--phase after` substring would also match a
+    # message that merely mentions the phase, which is coincidence rather than content
+    assert "uv run scripts/handoff_clear_verify.py --phase after" in proc.stderr, (
+        "the warning must carry the exact command to paste after clearing"
+    )
 
 
 def test_phase_before_is_quiet_when_the_flag_is_there(tmp_path: Path) -> None:
