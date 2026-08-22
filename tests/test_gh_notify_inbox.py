@@ -212,10 +212,29 @@ def test_the_POLLER_actually_writes_the_inbox_end_to_end(tmp_path: Path,
             "HOME": str(tmp_path),
             "JANITOR_CONTROL_DIR": str(control),
             "CLAUDE_PROJECT_DIR": str(tmp_path / "proj"),
+            # One of the minimal-env builders TRDD-7NSRD8OV is about. This dict REPLACES the
+            # environment, so conftest's suite-wide relaxation never reaches the child and it
+            # runs at scale 1.0. Under load its internal `gh` call hits a short timeout and
+            # `run_subprocess` fails OPEN — returning None so a hung child can never park the
+            # heartbeat, which is right in production — so the poller writes nothing and still
+            # EXITS 0. The `returncode == 0` assert below then passes and the next line dies on
+            # a FileNotFoundError that names a tmp path and explains nothing. Measured on
+            # 2026-08-22 at loadavg 12/14 CPUs with 14 xdist workers on top.
+            "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE": os.environ.get(
+                "CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE", "1"
+            ),
         },
     )
     assert proc.returncode == 0, proc.stderr
-    written = json.loads((control / "gh-notify-inbox.json").read_text(encoding="utf-8"))
+    inbox = control / "gh-notify-inbox.json"
+    # Assert the SIDE EFFECT explicitly. Exit 0 does not mean "wrote the inbox" when the
+    # write is downstream of a fail-open network call, and a bare read_text turns that
+    # distinction into an unreadable traceback.
+    assert inbox.is_file(), (
+        f"poller exited 0 but wrote no inbox — a fail-open timeout inside it, not a missing "
+        f"file. stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+    written = json.loads(inbox.read_text(encoding="utf-8"))
     assert [t["id"] for t in written["threads"]] == ["77"]
     assert written["fetched_at"] > 0
 

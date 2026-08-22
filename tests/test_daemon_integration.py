@@ -259,13 +259,45 @@ def harness(tmp_path: Path):
 _DEADLINE_SLACK = 4.0
 
 
+def _deadline_slack() -> float:
+    """The wall-clock headroom multiplier, taken from the SUITE-WIDE knob when it is richer.
+
+    `_DEADLINE_SLACK` alone was a SECOND, private copy of a rule that already has an owner.
+    `state.timeout_scale()`'s own docstring names this exact drift: *"helpers with their OWN
+    short timeouts outside this seam must scale by the SAME number. A second private copy of
+    this env read in each of them is exactly the drift that gave TRDD-K3PN7QW2 five spellings
+    of one rule."* The suite sets that knob to 10 and this file quietly held itself to 4, so
+    the one lever meant to make the suite load-tolerant could not reach the tests that spawn
+    real processes — the very ones load hurts most (TRDD-7NSRD8OV).
+
+    Read at CALL time, never at import. A module-level `_X = 8 * state.timeout_scale()` is
+    VACUOUS here: conftest's autouse fixture sets the env var per-test, which happens AFTER
+    this module is imported, so the module-level read would always see the 1.0 default. That
+    exact mistake is recorded on TRDD-7NSRD8OV; do not "simplify" this back to a constant.
+
+    `max`, not replace: 4.0 stays the floor, so nothing gets LESS patient than it is today.
+    """
+    try:
+        import sys  # noqa: PLC0415 -- local: this file has no module-level scripts/ path setup
+        from pathlib import Path as _P  # noqa: PLC0415
+
+        lib = str(_P(__file__).resolve().parent.parent / "scripts" / "lib")
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        import state as _state  # noqa: PLC0415
+
+        return max(_DEADLINE_SLACK, float(_state.timeout_scale()))
+    except Exception:  # noqa: BLE001 -- a slack lookup must never decide a test's verdict
+        return _DEADLINE_SLACK
+
+
 def _wait_for(predicate, timeout: float = 8.0, interval: float = 0.1) -> bool:
     """Poll until `predicate()` returns truthy, or timeout. Return its value.
 
-    `timeout` is multiplied by `_DEADLINE_SLACK` (see above) so the same test is
+    `timeout` is multiplied by `_deadline_slack()` (see above) so the same test is
     not held to an idle-machine deadline while a shared runner is briefly busy.
     """
-    deadline = time.time() + timeout * _DEADLINE_SLACK
+    deadline = time.time() + timeout * _deadline_slack()
     while time.time() < deadline:
         v = predicate()
         if v:
