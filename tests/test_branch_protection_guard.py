@@ -249,27 +249,25 @@ def test_standalone_omits_the_pull_request_rule(project_env: Path) -> None:
     assert {r["type"] for r in hist["rules"]} == {"deletion", "non_fast_forward"}
 
 
-def test_require_pull_request_for_covers_all_three_governance_cases(
+def test_require_pull_request_for_covers_the_governance_cases(
     project_env: Path, monkeypatch
 ) -> None:
-    """The USER governance ruling (2026-08-13) has THREE cases, not two — pin all of them.
+    """USER ruling 2026-08-13, amended 2026-08-22 (TRDD-R4XC8MV1).
 
-    harness → PR (MAINTAINER/INTEGRATOR reviews it) · foreign repo → PR (a real second
-    party) · own repo standalone → NO PR (a PR to yourself reviews nothing).
+    The repo's own PRRD wins; else a foreign repo → PR (a real second party); else no PR
+    (a PR to yourself reviews nothing). The harness/standalone branch is GONE — it keyed on
+    the calling process, not the repo.
     """
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     import cross_project_issue as cpi  # type: ignore[import-not-found]
-    import harness_backend as hb  # type: ignore[import-not-found]
 
     monkeypatch.setattr(cpi, "gh_login", lambda: "Emasoft")
+    # Governance UNSTATED for every slug below — pin the fallback ladder on its own.
+    monkeypatch.setattr(bpl, "prrd_pull_request_requirement", lambda _s: None)
 
-    monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_AIMAESTRO)
-    assert bpl.require_pull_request_for("Emasoft/anything") is True, "harness always demands a PR"
-
-    monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_STANDALONE)
     assert bpl.require_pull_request_for("Emasoft/ai-maestro-janitor") is False, (
-        "own repo standalone must push directly — a PR to yourself is the deadlock"
+        "own repo, governance unstated, must push directly — a PR to yourself is the deadlock"
     )
     assert bpl.require_pull_request_for("someone-else/their-repo") is True, (
         "a repo owned by another party is a real hand-off"
@@ -278,6 +276,54 @@ def test_require_pull_request_for_covers_all_three_governance_cases(
     # whole point; demanding a PR we cannot justify is the disaster this ruling ends.
     monkeypatch.setattr(cpi, "gh_login", lambda: "")
     assert bpl.require_pull_request_for("someone-else/their-repo") is False
+
+    # A STATED requirement is authoritative and overrides both fallbacks, in both directions.
+    monkeypatch.setattr(cpi, "gh_login", lambda: "Emasoft")
+    monkeypatch.setattr(bpl, "prrd_pull_request_requirement", lambda _s: True)
+    assert bpl.require_pull_request_for("Emasoft/ai-maestro-janitor") is True, (
+        "a project that states it wants PR review gets it, even on its owner's own repo"
+    )
+    monkeypatch.setattr(bpl, "prrd_pull_request_requirement", lambda _s: False)
+    assert bpl.require_pull_request_for("someone-else/their-repo") is False, (
+        "an explicit 'false' beats the foreign-owner default — the repo answers for itself"
+    )
+
+
+def test_require_pull_request_is_independent_of_the_calling_process(
+    project_env: Path, monkeypatch
+) -> None:
+    """THE regression guard for TRDD-R4XC8MV1: same repo, both caller shapes, one verdict.
+
+    The old predicate returned True whenever `harness_backend.backend()` reported the
+    ai-maestro harness — a property of the CALLING PROCESS. So the janitor standalone and
+    the hub inside the harness computed opposite answers for the same repo and flip-flopped
+    its ruleset; 15 of 22 fleet repos were measured carrying a `pull_request` rule that the
+    2026-08-13 ruling says none of them should have.
+
+    Asserting the two callers AGREE (rather than asserting a particular value) is deliberate:
+    it stays true no matter what governance the repo later states, so the guard cannot be
+    silently satisfied by a change of default.
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    import cross_project_issue as cpi  # type: ignore[import-not-found]
+    import harness_backend as hb  # type: ignore[import-not-found]
+
+    monkeypatch.setattr(cpi, "gh_login", lambda: "Emasoft")
+    slug = "Emasoft/ai-maestro-janitor"
+
+    for stated in (None, True, False):
+        monkeypatch.setattr(bpl, "prrd_pull_request_requirement", lambda _s, _v=stated: _v)
+
+        monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_AIMAESTRO)
+        inside = bpl.require_pull_request_for(slug)
+        monkeypatch.setattr(hb, "backend", lambda *a, **k: hb.BACKEND_STANDALONE)
+        outside = bpl.require_pull_request_for(slug)
+
+        assert inside == outside, (
+            f"caller-context leak: harness={inside} standalone={outside} for {slug} with "
+            f"stated={stated!r} — two appliers will flip-flop this repo's ruleset"
+        )
 
 
 def test_baseline_never_demands_immutable_history(project_env: Path) -> None:

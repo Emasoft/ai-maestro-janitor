@@ -132,40 +132,100 @@ _ADMIN_REPOSITORY_ROLE_ID = 5
 _TAG_PROTECT_REF = "refs/tags/v*.*.*"
 
 
+def prrd_pull_request_requirement(slug: str | None) -> bool | None:
+    """The repo's OWN governance: `require-pull-request:` in its PRRD frontmatter.
+
+    `None` means the repo has not stated a requirement — NOT "no". Only an explicit
+    `true`/`false` is an answer, because "absent" and "false" have to stay distinguishable
+    for the caller's fallback to mean anything.
+
+    Read from the repo ITSELF, over the network for a foreign slug, because that is the
+    whole point (TRDD-R4XC8MV1): `design/` is project-scoped and public, one repo per
+    project, so the repo is the single source every applier can agree on. A predicate
+    derived from the CALLING PROCESS instead is what let the janitor and the hub compute
+    different verdicts for the same repo and flip-flop its ruleset.
+
+    Fails soft to `None` on every error — no `gh`, no network, no file, unparseable
+    frontmatter. A governance question we could not ask is not a governance answer.
+    """
+    if not slug:
+        return None
+    text: str | None = None
+    # The local checkout first: no network, and it is the common case (a repo applying its
+    # own baseline). Only trust it when the slug really is THIS repo, or a fleet audit would
+    # read one project's governance for another's.
+    try:
+        import state as _st  # noqa: PLC0415 -- local, same reason as the imports below
+
+        local = _st.project_root() / "design" / "requirements" / "PRRD.md"
+        if local.is_file() and slug.split("/")[-1] == _st.project_root().name:
+            text = local.read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 -- a local-read fault must fall through to the network
+        text = None
+    if text is None and gh_available():
+        try:
+            proc = subprocess.run(
+                ["gh", "api", f"repos/{slug}/contents/design/requirements/PRRD.md",
+                 "-H", "Accept: application/vnd.github.raw"],
+                capture_output=True, text=True, timeout=_t(10), check=False,
+            )
+            if proc.returncode == 0:
+                text = proc.stdout
+        except (OSError, subprocess.SubprocessError):
+            text = None
+    if not text:
+        return None
+    # Frontmatter only — a `require-pull-request:` mentioned in the PROSE is discussion,
+    # not governance, and must not be mistaken for the field.
+    head = text.split("\n---", 1)[0] if text.startswith("---") else ""
+    m = re.search(r"^require-pull-request:[ \t]*(\S+)[ \t]*$", head, re.MULTILINE)
+    if not m:
+        return None
+    val = m.group(1).strip().lower()
+    if val in {"true", "yes"}:
+        return True
+    if val in {"false", "no"}:
+        return False
+    return None
+
+
 def require_pull_request_for(slug: str | None = None) -> bool:
     """Should the baseline demand a PULL REQUEST for this repo? PR only when a party OTHER
-    than the author reviews it. USER governance ruling, 2026-08-13.
+    than the author reviews it. USER governance ruling, 2026-08-13, amended 2026-08-22.
 
-    TRUE in exactly two situations:
+    Resolved in this order:
 
-    1. **Inside the ai-maestro harness.** Governance there is that every repo is managed by
-       the MAINTAINER agent (and the INTEGRATOR within a team): a working agent may only
-       change things locally on its own branch and then open a PR, which the MAINTAINER
-       reviews and approves or rejects. The PR is the hand-off that governance is built on,
-       so it MUST be enforced — dropping it there would remove the review authority itself.
+    1. **The repo's own PRRD `require-pull-request:` field** — authoritative, ends the
+       decision. USER ruling 2026-08-22 (TRDD-R4XC8MV1): each project owns its governance
+       under its own public `design/`, so the repo answers for itself and every applier
+       reads the same answer.
 
-    2. **A repo owned by SOMEONE ELSE.** Collaborating on another owner's project means the
-       PR is a genuine request to a genuine second party, harness or not. (Push would be
-       refused anyway; the ruleset should not pretend otherwise.)
+    2. **A repo owned by SOMEONE ELSE** → True. Collaborating on another owner's project
+       means the PR is a genuine request to a genuine second party. (Push would be refused
+       anyway; the ruleset should not pretend otherwise.)
 
-    FALSE standalone on your own repo — the overwhelmingly common case here. The same agent
-    writes the code and reviews it, so a PR is addressed to its own author: it reviews
-    nothing, gates nothing, and is the direct cause of a repo sitting "eternally stuck with
-    dozens of feature branches it can open but never merge" (USER, 2026-08-13). A direct
-    push is the correct workflow.
+    3. **Otherwise False** — your own repo, governance unstated. The same agent writes the
+       code and reviews it, so a PR is addressed to its own author: it reviews nothing,
+       gates nothing, and is the direct cause of a repo sitting "eternally stuck with dozens
+       of feature branches it can open but never merge" (USER, 2026-08-13).
 
-    Fail-open toward the WORKFLOW: an undeterminable backend or login returns False. A
-    wrongly-DEMANDED PR silently halts all merging (the disaster this ruling exists to end);
+    **The `harness_backend.backend()` branch was REMOVED, and that removal is the fix.** It
+    returned True whenever the CALLING PROCESS ran inside the ai-maestro harness — a property
+    of the caller, not of the repo. So the janitor standalone computed "no PR" and the hub
+    inside the harness computed "PR" for the SAME repo, and the two appliers flip-flopped its
+    ruleset; 15 of 22 fleet repos were measured carrying a `pull_request` rule none of them
+    should have under the 2026-08-13 ruling. Harness governance did not go away — it moved to
+    where it can be read consistently: a harness-managed project sets
+    `require-pull-request: true` in its own PRRD and every applier obeys it.
+
+    Fail-open toward the WORKFLOW: an unstated requirement or an unknown login returns False.
+    A wrongly-DEMANDED PR silently halts all merging (the disaster this ruling exists to end);
     a wrongly-omitted one only means a solo owner pushes to their own default branch, which
     is what they would do anyway.
     """
-    try:
-        import harness_backend  # noqa: PLC0415 -- local: keeps this module importable alone
-
-        if harness_backend.backend() == harness_backend.BACKEND_AIMAESTRO:
-            return True
-    except Exception:  # noqa: BLE001 -- never let a backend probe break a baseline apply
-        pass
+    stated = prrd_pull_request_requirement(slug)
+    if stated is not None:
+        return stated
     if not slug:
         return False
     try:

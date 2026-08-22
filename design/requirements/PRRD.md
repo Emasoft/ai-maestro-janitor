@@ -1,9 +1,10 @@
 ---
-prrd-version: 1.4
-updated: 2026-08-05T06:17:59+0200
+prrd-version: 1.5
+updated: 2026-08-22T07:43:09+0200
 project: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
 mirrors: []
+require-pull-request: false
 ---
 
 # Project Requirements & Rules — ai-maestro-janitor
