@@ -112,7 +112,14 @@ def records_in(text: str):
 # A local hygiene gate and the remote scanner are two different graders; passing one is
 # not passing the other.
 _SECRET_MASKS = (
-    (re.compile(r"\b(sk_live_)[A-Za-z0-9]{6,}"), r"\1****9999"),
+    # The PREFIX is masked too, not just the tail (2026-08-22). Keeping a literal
+    # `sk_live_` and masking only what follows leaves the exact token every payment-key
+    # scanner keys on, and the digit-tail form was never proven to pass: measured on
+    # origin/main, `API_KEY=sk_live_` appears ZERO times in the pushed corpus — what
+    # survived a push was a one-line PROSE mention, not this credential block. Nothing in
+    # the bench exercises `pci_dss_patterns`/`payment_sdk_patterns`, so breaking the
+    # prefix costs no measurement fidelity; it only removes a shape no grader here needs.
+    (re.compile(r"\bsk_live_[A-Za-z0-9*]{4,}"), r"sk_****_****9999"),
     (re.compile(r"(-----BEGIN\s+)(RSA|EC|OPENSSH|DSA)?(\s*PRIVATE KEY-----)"),
      r"\1\2****\3"),
     # A conn-string password that is not an obvious placeholder. The replacement is
