@@ -4,7 +4,7 @@ title: Subconscious agent — full per-changed-page wikimem maintenance duties s
 column: todo
 blocked-by: []
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-22T00:50:41+0200
+updated: 2026-08-22T11:37:45+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -125,6 +125,37 @@ agent loads. These duties EXTEND / TIGHTEN those.
 | 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | ✅ EXISTS — corpus-wide `atom-dup-id` landed (`memory.rs:3979`, Check 8, Severity::Error, every location reported; verified first-hand 2026-08-02) |
 | 20 | expander/reducer (hub/aspect/component) revalidation | write (at creation) + librarian | 🟡 flagged, not corrected |
 | 21 | scope validation + published-globally USER symlink | scope-leak detector | 🟡 privacy direction policed; symlink publishing infra MISSING (= issue **#52**) |
+
+### ✅ 2026-08-22 — ALL FOUR CHILDREN ARE TERMINAL. The block is discharged; the card is workable.
+
+Measured today: `57WJL5L2` complete · `AZ6QRK0D` published · `J3ZH3RSI` complete ·
+`3SOO1RWE` complete. So NEXT ACTION step 2 — "implement the NET-NEW infra in priority order" —
+is done for all four pieces that were split out, and step 3 was already closed.
+
+**Two errors that happened to cancel, worth naming so neither is repeated.** The note below says
+the parent is `blocked` on the children, but the frontmatter has read `column: todo` with
+`blocked-by: []` the entire time — the split was performed in prose and never in the fields. So
+for three weeks the board claimed this card was ready to pick up while it was genuinely blocked,
+and it now claims the same thing while that is finally TRUE. A card whose column is right by
+accident is not a card you can trust; `blocked-by:` is the field the drain rule keys on, and
+prose is invisible to it.
+
+**WHAT ACTUALLY REMAINS, because "the children are done" must not be read as "the card is done".**
+Only the four listed pieces were split out. Three ❌ NET-NEW duties in the table above were NOT,
+and no child owns them:
+
+- **13** — split a multi-topic ATOM (atomize adds markers, it never splits an atom). Note this is
+  adjacent to but DISTINCT from the over-budget-atom decomposition shipped under TRDD-VOWAUVE5:
+  that one triggers on SIZE, this one on an atom carrying two topics at any size.
+- **14** — relocate an off-topic atom (the move rule is spec'd, no executor exists).
+- **18** — TRDD backlinks per atom.
+
+Plus the 🟡 partials (3, 4, 5, 11, 15, 15b, 16-17, 20), each of which is a real half-built duty
+rather than a missing one. Step 4 (publish) is gated on the repo's publish blocker, not on work.
+
+Next time this card is pulled: split those three ❌ duties the same way, one card each — the
+card's own resume note is right that pulling it means SPLITTING it, not implementing several
+features under one id.
 
 ### 2026-08-02 19:38 — SPLIT into 4 child TRDDs; parent `blocked` on them (rule 13)
 
