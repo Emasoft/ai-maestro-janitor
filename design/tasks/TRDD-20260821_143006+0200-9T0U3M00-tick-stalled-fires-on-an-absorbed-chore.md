@@ -3,7 +3,7 @@ trdd-id: 9T0U3M00
 title: The tick-stalled alert fires on an absorbed chore and reports healthy server-side execution as rotation being OFF
 column: testing
 created: 2026-08-21T14:30:06+0200
-updated: 2026-08-21T14:55:00+0200
+updated: 2026-08-22T11:47:21+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -106,7 +106,27 @@ by the same test.
 - [x] `uv run pytest tests/test_oauth_supervisor.py` 21 passed · `ruff` clean · `mypy` clean
       across 486 files
 - [ ] Observed on a fresh heartbeat: `session-start.log` no longer carries the false
-      `tick-stalled` line
+      `tick-stalled` line — **UNOBSERVABLE ON THIS HOST UNTIL THE PUBLISH, measured
+      2026-08-22. Do NOT read a firing alert as the fix having failed.**
+
+      The alert IS still firing: `session-start.log:2096`, `[2026-08-22T10:08:26+0200] …
+      ALERT tick-stalled: the 60s rotator tick has not COMPLETED for 80888s … rotation is
+      effectively OFF` — with an ACTIVE server that claims `oauth-rotator-tick` (liveness 30 s
+      fresh, `claimed_chores()` contains it), i.e. exactly the false-positive shape this card
+      describes. 80888 s ≈ 22.5 h is the janitor's own stamp frozen because the server owns the
+      chore, which is not evidence of a stall.
+
+      **The fix is not running.** `scripts/oauth_rotator/supervisor.py` in the REPO carries the
+      guard (3 `9T0U3M00` citations); the same file in the INSTALLED plugin —
+      `~/.claude/plugins/cache/…/ai-maestro-janitor/3.3.26/scripts/oauth_rotator/supervisor.py`
+      — carries **0**. The repo is 3.4.0 with 159 unpushed commits; the heartbeat runs 3.3.26.
+
+      So this box is gated on the publish, exactly like TRDD-ZM5LZ24Y's C3-pin box, and for the
+      same reason: a fix committed is not a fix deployed (see the
+      `claude-code-plugin-rollout-staleness` wikimem page — "the fix is published but the bug
+      keeps happening"). Re-check it AFTER `publish.py` lands and the plugin is updated; the
+      observation is meaningless before that, and reading the surviving alert as a failed fix
+      would send the next session to re-debug working code.
 
 ## DERIVED CHECK — is this the only one? **Yes.** Swept 2026-08-21 14:55
 
