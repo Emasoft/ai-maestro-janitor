@@ -6,6 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- **bench:** The secret mask emitted a tail GitHub push protection reads as a live key (98ed407)
+- **governance:** The PR requirement is a property of the REPO, not of the caller (1eeb3fe)
+- **integrity:** Give the C3 re-pin its own unabsorbable chore (TRDD-ZM5LZ24Y) (51d4978)
+- **oauth:** The daemon finishes a 429 recovery the hook could not (TRDD-6054NY8H) (2d30dd7)
+- **tests:** Two load-flakes that blocked a publish — one was a real fail-open bug (837dc0a)
+- **governance:** Drop the remote PRRD fetch — wrong place, and not what fixed the bug (81387b7)
+
+### Documentation
+
+- Land four USER decisions on the board (#4 refuse, #9/#10 disk rulings, #13 unblock) (aa84915)
+- Regenerate ISSUE-CODES.md for SELFINT-004 (dbaf117)
+
+### Testing
+
+- **keepalive:** Raise the daemon-closure bound to 65 — the C3 safeguard stages 5 modules (5c1cda7)
+## [3.4.0] — 2026-08-22
+
+### Bug Fixes
+
 - **memgrep:** Detect an unclosed code fence and name it in the atom-not-found refusal (janitor#279, #277) (e5d642d)
 - **bench:** Assemble per-line first — one malformed sample was swallowing its file's remainder (3457742)
 - **security:** Concealment-directive missed every attack that hides from the RECORD (TRDD-VAWIKRK2) (5f347cb)
@@ -141,6 +160,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Refresh the stale wikimem index; record LFSWY0C6's five-day recurrence (62d72d0)
+- Bump version to 3.4.0 (e6b3fde)
 
 ### Performance
 
