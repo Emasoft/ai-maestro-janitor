@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: The auto-composed handoff overwrites the model-authored one at the same path
 column: todo
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T17:43:05+0200
+updated: 2026-08-22T22:58:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -52,11 +52,35 @@ there is no `.prev`, and `.janitor/state/` is gitignored, so nothing recovers it
 | what that card actually said, since 17:04 | `column: human_review` (`07d3bb2e`) |
 
 Written at 17:38 carrying a card snapshot from 16:48 that had been wrong for 34 minutes. The
-mechanism is not pinned down — `_compose` calls `_gather_cards(root)` live and stamps `now_iso`
-at compose time, so a 50-minute-old header suggests the verdict/facts (and the composed text)
-are produced well before the write, or reused across triggers. **Do not guess it; instrument
-it.** What is certain is the outcome: the clobber traded current information for stale
-information.
+clobber traded current information for stale information.
+
+**MECHANISM PINNED DOWN 2026-08-22 — read in source, no instrumentation needed.** The earlier
+guess ("produced well before the write, or reused across triggers") is WRONG and is superseded.
+`_compose` and `atomic_write` are adjacent in `main()` (compose at :416, write at :428), so the
+delay is not between them — it is INSIDE `_compose`, and it is by design:
+
+```
+external_handoff_clear._compose
+  :278  _gather_cards(root)          ← the card snapshot is taken HERE
+  :286  now_iso = time.strftime(…)   ← the header is stamped HERE
+  :306  ec.summarize_with_retry(…, deadline = now + ec.summary_deadline_s())
+                                      ← BLOCKS up to DEFAULT_SUMMARY_DEADLINE_S = 2600 s (43m20s)
+  :318  ec.compose_handoff(…, now_iso=now_iso, tail=ec.recent_messages(transcript))
+```
+
+The cards and the stamp are captured BEFORE a retry loop budgeted at four 600 s llm-ext attempts
+plus backoff. Observed gap 16:48:21 → 17:38:10 = **2 989 s**; the deadline alone accounts for
+2 600 s of it, with the remainder plausibly `recent_messages()` + `compose_handoff()` parsing a
+multi-MB transcript (that residue is NOT yet measured — do not assert it as fact).
+
+**The fix is a move, not a redesign:** take `_gather_*` and `now_iso` AFTER the summary returns,
+immediately before `compose_handoff`. `summarize_with_retry` consumes only `transcript`, so
+nothing else depends on the current ordering. Keep `facts["idle_seconds"]` / `["context_tokens"]`
+at DECISION time — those justified the fire and are correctly historical; only the material the
+next session reads as current state must be write-time.
+
+**This is independent of the A/B/C question below** — the stale stamp is wrong under every one of
+the three options, so it can land first without pre-judging the design decision.
 
 ### Why this is the same defect class we have hit twice already
 
