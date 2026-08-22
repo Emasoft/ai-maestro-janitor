@@ -139,14 +139,18 @@ def prrd_pull_request_requirement(slug: str | None) -> bool | None:
     `true`/`false` is an answer, because "absent" and "false" have to stay distinguishable
     for the caller's fallback to mean anything.
 
-    Read from the repo ITSELF, over the network for a foreign slug, because that is the
-    whole point (TRDD-R4XC8MV1): `design/` is project-scoped and public, one repo per
-    project, so the repo is the single source every applier can agree on. A predicate
-    derived from the CALLING PROCESS instead is what let the janitor and the hub compute
-    different verdicts for the same repo and flip-flop its ruleset.
+    Read from the LOCAL checkout only, and only when the slug really is this repo —
+    otherwise a fleet audit would read one project's governance for another's. There is no
+    remote fetch: see the note at the read below for the measurement that ruled it out.
 
-    Fails soft to `None` on every error — no `gh`, no network, no file, unparseable
-    frontmatter. A governance question we could not ask is not a governance answer.
+    `design/` is project-scoped and public (TRDD-R4XC8MV1), so a project states its own
+    governance and the local answer is the one that matters where it is applied. The
+    caller-independence that fixes the flip-flop comes from DELETING the
+    `harness_backend.backend()` branch, not from this lookup — every remaining input
+    (`gh_login()` ownership, this file) answers the same in the janitor and in the hub.
+
+    Fails soft to `None` on every error — no file, unreadable, unparseable frontmatter. A
+    governance question we could not ask is not a governance answer.
     """
     if not slug:
         return None
@@ -162,17 +166,25 @@ def prrd_pull_request_requirement(slug: str | None) -> bool | None:
             text = local.read_text(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 -- a local-read fault must fall through to the network
         text = None
-    if text is None and gh_available():
-        try:
-            proc = subprocess.run(
-                ["gh", "api", f"repos/{slug}/contents/design/requirements/PRRD.md",
-                 "-H", "Accept: application/vnd.github.raw"],
-                capture_output=True, text=True, timeout=_t(10), check=False,
-            )
-            if proc.returncode == 0:
-                text = proc.stdout
-        except (OSError, subprocess.SubprocessError):
-            text = None
+    # NO REMOTE FETCH, on two grounds — and the second one is not the one it first looked like.
+    #
+    # 1. It is UNNECESSARY. The flip-flop this predicate was changed to fix came from
+    #    `harness_backend.backend()`, a read of the CALLING PROCESS's environment. Deleting
+    #    that branch is what makes the verdict caller-independent; every remaining input
+    #    (`gh_login()` ownership, the local file above) already answers the same in the
+    #    janitor and in the hub. A remote repo's own governance is a nice extra, not the fix.
+    #
+    # 2. It does not belong on a DETECTOR's hot path. Measured 2026-08-22, and the first
+    #    reading was WRONG so the real numbers are recorded here: a `gh api` version of this
+    #    lookup made `test_inactive_ruleset_still_nags` 56.8 s against a BASELINE of 51.1 s
+    #    with the whole change stashed — about +6 s, not the +94 s a single loaded run first
+    #    suggested. So the fetch did not create the slowness; that test is simply slow, and
+    #    adding seconds to an already-marginal path is what tips it over its budget under
+    #    full-suite load. When the detector is killed it emits EMPTY stdout, which reads as
+    #    "no findings" — the cost is not slowness, it is a silently disarmed check.
+    #
+    # If a remote repo's governance is ever wanted: fetch it OUT of band and cache it on
+    # disk. Never inline in a predicate a detector calls per repo.
     if not text:
         return None
     # Frontmatter only — a `require-pull-request:` mentioned in the PROSE is discussion,
