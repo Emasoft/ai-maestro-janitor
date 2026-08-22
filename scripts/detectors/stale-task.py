@@ -25,11 +25,13 @@ and it is not evidence the feature is unused machine-wide either. Left running r
 than removed: it costs one directory listing, and it is still right on a session that
 opted back in.
 
-Coverage, stated accurately because the commit that added this note got it wrong: this
-file IS named in `tests/test_scanner_walk_invariants.py:102`, which holds it to the
-shared scanner-walk invariants. What it has no test for is its OWN staleness logic —
-the thresholds, the team-uuid scoping, the nudge text. Do not read "there are tests
-that mention this file" as "this behaviour is pinned".
+Coverage: THIS FILE HAS NO TEST. Three test files mention it and none exercises it —
+`test_scanner_walk_invariants.py:102` lists it in `out_of_scope`, a set of detectors
+EXEMPT from that invariant; `test_chore_coordination.py` seeds a stale *chore*, an
+unrelated subject that shares the word; `test_dispatch_defang.py` passes the string
+"stale-task" as a detector NAME to the defang helper. So the thresholds, the team-uuid
+scoping and the nudge text are all unpinned. Grepping the test tree for this file's
+name returns three hits and zero coverage — check what a hit IS before counting it.
 """
 
 from __future__ import annotations
