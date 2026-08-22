@@ -1,10 +1,10 @@
 ---
 trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
-column: todo
+column: human_review
 blocked-by: []
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-22T00:50:41+0200
+updated: 2026-08-22T11:21:01+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -159,6 +159,35 @@ mutation is outside a bugfix's blast radius) and stays open below.
       satisfying it, so building either way now would be picking the answer. The two options and
       their real costs are written up on TRDD-AZ6QRK0D, which is in `human_review` for exactly
       this call — hence `blocked-by: [AZ6QRK0D]`.
+
+      > **⚠ 2026-08-22 — THE GATE DISCHARGED WITHOUT ANSWERING, and executing this box as
+      > written would now FIGHT shipped behaviour.** Three things measured today:
+      >
+      > 1. **TRDD-AZ6QRK0D is `published`, not `human_review`.** It closed 2026-08-18 — but on
+      >    the PRIVACY-gate question (where the scan lives), not on the direction question this
+      >    box was waiting for. The blocker named here is terminal and the call was never made,
+      >    so nothing will arrive to unblock this box on its own. The frontmatter already reads
+      >    `blocked-by: []` while this text still claims `[AZ6QRK0D]` — the frontmatter is right.
+      > 2. **The symlinks now number SIX, not four**, and two of them point into a DIFFERENT
+      >    project (`ai-maestro-assistant-manager-agent`). Those two are not this repo's to touch
+      >    at all.
+      > 3. **All four janitor pages carry `publish-globally: true`, declared DELIBERATELY** in
+      >    `fba278d4` ("declare publish-globally on the 4 pages whose symlinks already existed").
+      >    Not an engine accident — a decision. So the symlinks are now correct by the shipped
+      >    mechanism's own rules and are MAINTAINED: deleting them makes
+      >    `TrueNoSymlink` re-create each one on the next write. This box would be a loop.
+      >
+      > **The de facto answer is option A**, arrived at by shipping rather than by ruling: the
+      > canonical page lives in PROJECT (where it IS maintainable), the USER-scope symlink gives
+      > it recall reach, `iter_note_files` excludes it so no chore wastes a dispatch on it, and
+      > `_surface_scope_escapes` reports the condition instead of hiding it. That is a coherent
+      > end state and it is what runs today.
+      >
+      > **So this box is not work — it is one question for the USER:** leave it (option A, the
+      > status quo, nothing to do), or invert the direction so the canonical file lives at USER
+      > scope with project-side pointers out (option B, and note it must then also account for
+      > the two foreign-project links, which this repo must not touch). Executing it as written
+      > without that ruling would delete symlinks the engine immediately restores.
 - [x] A structurally-refused page produces a countable finding; a transient refusal still does not
 - [x] Test: a scope-escaping symlink yields exactly one finding, and a second pass over the
       unchanged corpus does NOT duplicate it
