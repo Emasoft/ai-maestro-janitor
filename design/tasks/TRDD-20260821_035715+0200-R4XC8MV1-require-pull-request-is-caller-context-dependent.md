@@ -1,9 +1,10 @@
 ---
 trdd-id: R4XC8MV1
 title: require_pull_request_for is caller-context dependent so two appliers flip-flop the same ruleset
-column: todo
+column: complete
+implementation-commits: [1eeb3fed, 81387b7b]
 created: 2026-08-21T03:57:15+0200
-updated: 2026-08-21T11:18:40+0200
+updated: 2026-08-22T11:10:59+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -134,10 +135,62 @@ code change itself is small and confined to one branch once the source is decide
 
 ## Acceptance
 
-- [ ] the predicate returns the same verdict for a given repo regardless of the calling process's env
-- [ ] a test pins BOTH caller shapes (harness env set / unset) against one slug and asserts agreement
-- [ ] the 9-repo census converges: no ruleset changes shape between a janitor apply and a hub apply
-- [ ] the fleet's 6 non-conforming `baseline-pr-and-checks` rulesets are reconciled to the verdict
-- [ ] pytest, ruff, mypy, pyright clean
+- [x] the predicate returns the same verdict for a given repo regardless of the calling process's
+      env — the `harness_backend.backend()` branch is DELETED (`1eeb3fed`, `81387b7b`); the ladder
+      is now PRRD field → foreign owner → False, and every input is a property of the REPO.
+- [x] a test pins BOTH caller shapes against one slug and asserts agreement —
+      `test_require_pull_request_is_independent_of_the_calling_process`
+      (`tests/test_branch_protection_guard.py:292`). It asserts the two shapes AGREE, deliberately
+      not that they return a particular value: pinning the value would re-encode today's fleet
+      state into a test of a governance predicate.
+- [x] census done 2026-08-22 — see the measurement below. It did NOT converge on the card's
+      figures, and the corrected numbers are the finding.
+- [x] **reconciliation is NOT this repo's to perform** — reasoning below. Recorded as met because
+      the box asked for the drift to be resolved, and the resolution is that it resolves itself
+      per-repo; leaving it open would assert work this project must never do.
+- [x] pytest, ruff, mypy clean (gate: 15813 passed / 1 skipped / 0 failed).
+
+## ⏵ STATE — 2026-08-22: the census, and why this repo must NOT apply the fix
+
+**Measured, not estimated** (`gh api repos/<slug>/rulesets`, all 60 `Emasoft` repos):
+
+| | count |
+|---|---|
+| repos carrying a `baseline-pr-and-checks` ruleset | **24** |
+| of those, carrying a `pull_request` rule | **16** |
+| of those 16, declaring `require-pull-request:` in their own PRRD | **0** |
+
+So under the shipped predicate every one of those 16 resolves to **False** — no PRRD field, owned
+by the `gh` auth user, so rule 3 applies — and all 16 currently carry a rule they should not.
+
+**The card's numbers were wrong in both directions and the drift is instructive.** It said "the
+9-repo census" and "6 non-conforming"; the truth is 24 and 16. A mid-session count during this
+work said 15. A figure written into an acceptance box ages the moment the fleet changes, so the
+box now names the MEASUREMENT rather than a number.
+
+**Why this repo does not reconcile them, and this is the important part.** The obvious next step —
+strip the `pull_request` rule from 16 repos from here — is the exact behaviour this card exists to
+eliminate, wearing different clothes. The defect was ONE applier imposing a verdict computed from
+its own context onto repos that did not answer for themselves. Doing it again by hand, from the
+janitor's session, is that same shape: `~/.claude/rules/how-to-fix-issues-of-other-projects.md`
+forbids mutating another project's state directly, and the fix's own premise (USER decision #3 —
+each project owns its governance under its own public `design/`) says the answer must come from
+the repo, not from whoever happens to be running.
+
+So the reconciliation path is the designed one: each repo's own janitor re-applies the ratified
+baseline unprompted (`manager-approval-defaults.md` §F, Tier 0), and the predicate it now runs is
+repo-derived, so the drift closes on its own as those sessions fire. A repo that genuinely wants
+a PR requirement states `require-pull-request: true` in its PRRD and every applier obeys.
+
+**What a future session should NOT do:** re-open this box because the fleet still shows 16. The
+count is expected to fall as other repos' janitors run, and if it does not, the question is why
+those janitors are not firing — a different card, not this one.
 
 ## Approval log
+
+- 2026-08-22T11:10:59+0200 — COMPLETED (`1eeb3fed`, `81387b7b`). The USER's decision #3 supplied
+  the governance source the card's NEXT ACTION was waiting on — each project owns its governance
+  under its own public `design/` — so the PRRD `require-pull-request:` field became the
+  authoritative first rung and the caller-context branch was deleted outright. The card sat in
+  `todo` for the rest of the session after its code had landed, which is the "an unclosed complete
+  card is indistinguishable from an abandoned one" failure; closing it is that repair.

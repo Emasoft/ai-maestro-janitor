@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-21T16:10:00+0200
+updated: 2026-08-22T11:12:16+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -194,6 +194,22 @@ owns `oauth-rotator-tick`, and the janitor's own copy of the cascade is not the 
 **Method note, because this is the third correction here:** each one came from reading a FIELD
 and inferring the SYSTEM. `credential-dead` was true of the refresh token and false of the
 account. The alert text named the thing to check and I did not check it.
+
+## ⚠ `2d30dd7b` CITES THIS CARD BUT DOES NOT CLOSE IT — read this before trusting the commit log
+
+Commit `2d30dd7b` ("the daemon finishes a 429 recovery the hook could not") carries
+`TRDD-6054NY8H` in its subject, so a `git log --grep` makes this card look implemented. It is
+not. That commit is USER decision #2 — a daemon-hosted `oauth-recovery` chore that services the
+`recovery-requested.ts` marker the session hook can no longer finish once its own turn is
+rate-limited. Adjacent subsystem, different defect.
+
+**This card's defect is untouched by it:** the rotator LATCHES on a cited failure reason and
+re-broadcasts that verdict for hours without ever re-testing it (measured: frozen at one value
+for 6 h 40 m). A recovery chore that runs does not make a stale verdict fresh.
+
+Recorded here because the citation is exactly the kind of thing that closes a card by accident:
+the commit is real, it names the id, and nothing about it says "partial". Boxes 2-5 below are
+genuinely open and the card stays in `todo`.
 
 ## Acceptance
 
