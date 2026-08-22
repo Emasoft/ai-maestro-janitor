@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: The auto-composed handoff overwrites the model-authored one at the same path
 column: todo
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T22:58:00+0200
+updated: 2026-08-22T22:59:10+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -54,8 +54,39 @@ there is no `.prev`, and `.janitor/state/` is gitignored, so nothing recovers it
 Written at 17:38 carrying a card snapshot from 16:48 that had been wrong for 34 minutes. The
 clobber traded current information for stale information.
 
-**MECHANISM PINNED DOWN 2026-08-22 — read in source, no instrumentation needed.** The earlier
-guess ("produced well before the write, or reused across triggers") is WRONG and is superseded.
+**⚠ RETRACTED 2026-08-22, SAME DAY, BY THE LOG. The section below was headed "MECHANISM PINNED
+DOWN — read in source, no instrumentation needed". That heading was wrong twice over: the card
+had said "do NOT guess it; instrument it", and I answered it with a better-sourced guess, then
+committed it as fact (`2994469a`).**
+
+**The settling evidence: `.janitor/logs/external-clear.log` contains ZERO lines dated
+2026-08-22** (file mtime 2026-08-20T08:21). `main()` logs on every path that reaches the write —
+`fired:` (:430, immediately after `atomic_write` at :428), `handoff degraded to template` (:317),
+`handoff violates the concision contract` (:419), `declined:` (:413). None of them fired that
+day. **So `external_handoff_clear` did not write `agent-handoff.md` at 17:38 on 2026-08-22, and
+F2's premise — that the clobbering write came from this script — is unsupported.** F1's
+attribution of the clobber inherits that doubt: the unconditional `atomic_write` at :428 is real
+and dangerous, but it is not shown to be what happened on 08-22. *(Bound on this evidence: a run
+whose verdict is HOLD logs nothing, so silence does not prove the script never RAN — only that it
+never reached the write.)*
+
+**What survives, and is now EMPIRICAL rather than deduced:** the compose-blocks-for-tens-of-
+minutes mechanism is real, and the log proves it on a different date —
+`2026-08-20T08:05:48 summary: transient — timed out after 600s; retrying in 6s` →
+`08:21:29 summary: ok on attempt 2` → `08:21:29 fired:`. `_compose` was inside the retry loop for
+~26 minutes on that run, with `now_iso` and the cards already captured. So the staleness hazard
+below is genuine; only its use to explain the 17:38 observation is withdrawn.
+
+Two further proxy reads in the retracted reasoning, worth keeping as guardrails: I quoted
+`DEFAULT_SUMMARY_DEADLINE_S = 2600` as the effective value when `summary_deadline_s()` prefers
+`$CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_SUMMARY_DEADLINE_S`; and I never confirmed the
+`if ec.use_llm_ext() and transcript:` branch was taken. The 2 989 s vs 2 600 s shortfall I booked
+as "unmeasured residue" also had a better candidate sitting in the same file — the deadline is
+checked BETWEEN attempts, so a final attempt starting just under it runs a further
+`LLM_EXT_TIMEOUT_S = 600` and overshoots.
+
+**The code shape below is still accurately read; treat it as the hazard's description, not as an
+explanation of the 17:38 event.**
 `_compose` and `atomic_write` are adjacent in `main()` (compose at :416, write at :428), so the
 delay is not between them — it is INSIDE `_compose`, and it is by design:
 

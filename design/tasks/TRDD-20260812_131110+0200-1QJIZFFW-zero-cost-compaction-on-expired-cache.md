@@ -9,7 +9,6 @@ task-type: feature
 approval-tier: 0
 scope: project
 severity: high
-review-after: 2026-09-02
 relevant-rules: []
 npt: []
 eht: []
@@ -50,7 +49,9 @@ measurement when both agree. Two things it cost, both of which the code would ha
     — and `None` fails open, so a too-short bound is INDISTINGUISHABLE from "agentlensPro is
     not installed". Its own 30 s constant now, pinned by a test that carries the measurement.
 
-**BOX 1 IS DISCHARGED — the drill RAN, 2026-08-22.** Report:
+**BOX 1 IS DISCHARGED ONLY AS WRITTEN — "a cross-`/clear` run through the harness" happened,
+2026-08-22. The HARNESS crossed a clear; the FEATURE this card is about did not.** Read the box
+strictly or it becomes the same overclaim box 2 warns against one paragraph down. Report:
 `reports/continuity-build/20260822_223959+0200-handoff-clear-verify.md` — **4 PASS · 0 FAIL · 1
 SKIP**. Timeline: `--phase before` 22:29:50 → `/clear` observed 22:31:20 → re-arm 22:35:35 →
 `--phase after` 22:39:59.
@@ -73,7 +74,9 @@ AUTOMATED path (`clear_trigger.py` / the skill), not another manual one.
 **AND THE RUN EXPOSED A REAL DEFECT, which is the more valuable output.** Zero model turns was
 satisfied *because nothing happened*: the resumed session sat idle 4m15s until the human
 complained. Root cause, verified in code —
-`resume-after-clear.flag` has exactly ONE writer, `clear_trigger.py:236` (the automated chain).
+`resume-after-clear.flag` has ONE writer — `clear_trigger.py:236`, the automated chain — verified
+by literal-string grep across `scripts/ hooks/ skills/`, which holds only because every module
+names the file as a string literal rather than composing the name.
 This drill was staged by running `--phase before` STANDALONE and asking the human to type
 `/clear` — the shape `skills/janitor-handoff-and-clear/SKILL.md` explicitly warns against. So no
 flag ⇒ `on-session-start.py:258 _inject_post_clear_handoff` returned early (it is *deliberately*
