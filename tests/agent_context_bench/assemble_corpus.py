@@ -100,8 +100,19 @@ def records_in(text: str):
 # 2026-08-21 corpus — the two affected samples fired the same set (nothing) before and
 # after. If a future rule ever DOES key on one of these shapes, that rule's sample must
 # stop relying on a contiguous literal, not the other way round.
+# The replacement tail is `9999` (digits), NOT an alphabetic word, and that is
+# load-bearing: GitHub PUSH PROTECTION reads the live-key prefix followed by a masked
+# ALPHABETIC tail as a Stripe API Key and rejects the whole push (measured 2026-08-22 —
+# it blocked v3.4.0 on three refs at once), while the digit form is already on
+# origin/main in `corpus.jsonl` and `benign.jsonl` and passed. Do not spell the rejected
+# form out anywhere in tracked source, including in a comment explaining it — that is how
+# this needle keeps coming back. The comment above says this mask "matches the convention already used in
+# corpus.jsonl" — it did not; that file uses the DIGIT form, and appending an alphabetic
+# word instead is what re-created a key-shaped literal the remote scanner still matches.
+# A local hygiene gate and the remote scanner are two different graders; passing one is
+# not passing the other.
 _SECRET_MASKS = (
-    (re.compile(r"\b(sk_live_)[A-Za-z0-9]{6,}"), r"\1****REDACTED"),
+    (re.compile(r"\b(sk_live_)[A-Za-z0-9]{6,}"), r"\1****9999"),
     (re.compile(r"(-----BEGIN\s+)(RSA|EC|OPENSSH|DSA)?(\s*PRIVATE KEY-----)"),
      r"\1\2****\3"),
     # A conn-string password that is not an obvious placeholder. The replacement is
