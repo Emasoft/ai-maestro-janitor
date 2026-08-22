@@ -115,6 +115,15 @@ GLOBAL_CHORES: dict[str, tuple[str, int]] = {
     # runs, and where it is suppressed the readers' own staleness check degrades them to the
     # pre-existing gated poll — the same starvation as before, never a silence worse than it.
     "gh-notify-inbox": ("CLAUDE_PLUGIN_OPTION_DAEMON_GH_NOTIFY_INBOX_INTERVAL", 60),
+    # DELIBERATELY NOT in SERVER_ABSORBED_TASKS (TRDD-ZM5LZ24Y, USER decision #8
+    # 2026-08-22). The C3 last-good integrity anchor used to be certified only inside
+    # `task_version_update` — and `version-update` IS absorbed, so the moment the server
+    # claimed it the janitor's task stopped firing and the ONLY caller of the self-heal
+    # went with it. Measured consequence: the anchor named 0.59.0 while 3.3.x ran, pinned
+    # 2026-07-21, frozen for a month with the daemon healthy and on cadence. Giving the
+    # certification its own unabsorbed chore removes the coupling instead of negotiating
+    # it; the coupling was the defect. Do NOT "tidy" this into the absorbed set.
+    "integrity-repin": ("CLAUDE_PLUGIN_OPTION_DAEMON_INTEGRITY_REPIN_INTERVAL", 21600),
 }
 
 

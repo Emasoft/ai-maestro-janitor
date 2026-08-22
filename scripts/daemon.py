@@ -203,6 +203,19 @@ _INTERVAL_GH_NOTIFY_INBOX = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_GH_NOTIFY_INBOX_INTERVAL", 60
 )
 
+# 6 h — the C3 last-good re-pin, on its OWN unabsorbed chore (TRDD-ZM5LZ24Y). Same cadence
+# as version-update because it certifies the same thing; the point of the split is WHO runs
+# it, not how often.
+_INTERVAL_INTEGRITY_REPIN = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_INTEGRITY_REPIN_INTERVAL", 21600
+)
+# How many consecutive fires may DECLINE to certify before the daemon files a ticket. Not 1:
+# a decline is normal and frequent — the newest cached version legitimately fails the F1
+# provenance gate for as long as its release is unpublished, and pinning on the first
+# decline would page a human for a release in flight. Three fires at 6 h is ~18 h of a pin
+# that cannot advance, which is a real fault and not a slow afternoon.
+_REPIN_DECLINE_TICKET_AFTER = 3
+
 _INTERVAL_RULES_CLEANUP = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
@@ -1869,6 +1882,84 @@ def task_cold_cache_clear() -> None:
     cold_cache_clear_task.run_once()
 
 
+def task_integrity_repin() -> None:
+    """Certify the newest cached version as C3 last-good — on a chore the server cannot absorb.
+
+    TRDD-ZM5LZ24Y, USER decision #8 (2026-08-22). The self-heal itself is not new and is not
+    duplicated here: `task_version_update` still calls `certify_newest_if_clean` on its own
+    fires, and certify is a no-op once the pin is current, so the two callers cost nothing
+    when both run. What is new is that ONE of them cannot be taken away.
+
+    The defect this closes is an ownership one, not a logic one. `version-update` is in
+    `SERVER_ABSORBED_TASKS`, so when the ai-maestro server claims it the janitor's task stops
+    firing — and the C3 self-heal's only caller went with it. Measured: the anchor named
+    0.59.0 while 3.3.x ran, pinned 2026-07-21 and frozen for a month, with the daemon healthy,
+    on cadence, and logging `yielding to active ai-maestro server` every start. Nothing was
+    broken; the caller had simply been absorbed away.
+
+    `force=False` always: the F1 provenance gate stays, and a DECLINE is the normal, correct
+    outcome whenever the newest cached version has no published release yet. Only a decline
+    that PERSISTS is a fault, which is what the counter below is for.
+    """
+    plugin_root = Path(__file__).resolve().parent.parent
+    declines_path = gs.control_dir() / "integrity-repin.declines"
+
+    def _log(msg: str) -> None:
+        state.log_line("daemon", f"  integrity-repin: {msg}")
+
+    try:
+        import version_update_lib as vu  # noqa: PLC0415 — heavy; only on this chore's fire
+
+        # Resolve provenance HERE rather than reusing version-update's value: this chore
+        # runs on its own cadence and may be the only one running at all, which is the
+        # entire reason it exists. Failure is fine — an unresolvable tag makes certify's
+        # gate fail CLOSED, leaving the existing pin untouched rather than advancing it on
+        # evidence we do not have.
+        published = vu.resolve_latest_published(plugin_root, on_failure=_log)
+        newly_pinned = vu.certify_newest_if_clean(
+            # resolve_cache_parent, NOT plugin_root.parent — from the staged DATA closure the
+            # latter lists zero versions and certify's empty-installed path is its ONE silent
+            # return. That is precisely how the month-long freeze stayed invisible.
+            vu.resolve_cache_parent(plugin_root), published or None, log=_log,
+        )
+    except Exception as exc:  # noqa: BLE001 — an integrity chore must never kill the daemon
+        _log(f"skipped: {exc}")
+        return
+
+    if newly_pinned:
+        _log(f"certified last-good={newly_pinned} (C3 manifest-HMAC trust anchor refreshed)")
+        with contextlib.suppress(Exception):
+            declines_path.unlink()
+        return
+
+    # No pin advanced. Count it, and only escalate once the silence is long enough to be a
+    # fault rather than a release in flight.
+    try:
+        prior = int((declines_path.read_text(encoding="utf-8") or "0").strip() or "0")
+    except Exception:  # noqa: BLE001 — an unreadable counter restarts the count, never crashes
+        prior = 0
+    declines = prior + 1
+    with contextlib.suppress(Exception):
+        state.atomic_write(declines_path, str(declines))
+
+    if declines != _REPIN_DECLINE_TICKET_AFTER:
+        # `!=`, not `>=`: file the ticket EXACTLY once per stuck episode. `>=` would open a
+        # fresh ticket every 6 h for as long as the condition lasts, and a queue full of the
+        # same finding is how a real one stops being read.
+        _log(f"declined to certify ({declines} consecutive) — see the reason logged above")
+        return
+    _log(f"declined {declines} consecutive fires — filing a ticket; the anchor is stuck")
+    with contextlib.suppress(Exception):
+        import issue_catalog  # noqa: PLC0415 — only on the escalation path
+
+        issue_catalog.raise_issue(
+            "SELFINT-004",
+            declines=declines,
+            dedupe_key="integrity-repin-stuck",
+            where=str(gs.control_dir()),
+        )
+
+
 def task_gh_notify_inbox() -> None:
     """Fetch the account's GitHub notifications ONCE, fleet-wide, for every project to read.
 
@@ -2137,6 +2228,10 @@ def _build_tasks() -> list[Task]:
         Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
         Task("cold-cache-clear", _INTERVAL_COLD_CACHE_CLEAR, task_cold_cache_clear),
         Task("gh-notify-inbox", _INTERVAL_GH_NOTIFY_INBOX, task_gh_notify_inbox),
+        # NOT background: one stat-walk plus at most one `gh` call, and it must not queue
+        # behind a 20-minute marketplace refresh in the bulk lane — the whole point is that
+        # this chore keeps running when the others are taken away.
+        Task("integrity-repin", _INTERVAL_INTEGRITY_REPIN, task_integrity_repin),
     ]
 
 

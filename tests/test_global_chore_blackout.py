@@ -86,7 +86,7 @@ def test_absorbed_and_unabsorbed_partition_the_roster_without_overlap() -> None:
     assert absorbed <= set(hb.GLOBAL_CHORES), "an absorbed chore that is not a real chore"
 
 
-def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
+def test_unabsorbed_chores_are_pinned_by_name() -> None:
     """The exact gap ai-maestro#111 is about, pinned by name so a silent re-classification fails.
 
     `fleet-plugins-update` joined the roster on 2026-08-11 (TRDD-G4BCRUP7 R3) and is the
@@ -123,6 +123,15 @@ def test_unabsorbed_chores_names_the_seven_the_server_never_claimed() -> None:
         # exactly the behaviour it had before this chore existed. The blackout costs the
         # IMPROVEMENT, not the feature — which is why it is listed rather than absorbed.
         "gh-notify-inbox",
+        # `integrity-repin` joined 2026-08-22 as the TENTH (TRDD-ZM5LZ24Y, USER decision #8)
+        # — and unlike every other name here it is unabsorbed BY DESIGN, not by omission.
+        # The C3 last-good certification used to live inside `task_version_update`, which IS
+        # absorbed; the month the server owned `version-update`, the self-heal's only caller
+        # went with it and the trust anchor sat frozen at 0.59.0 while 3.3.x ran, with the
+        # daemon healthy and on cadence. So this one must NEVER be moved into
+        # SERVER_ABSORBED_TASKS to "tidy" the roster: being unclaimable is the fix. If the
+        # server ever does claim it, that is a REGRESSION of ZM5LZ24Y, not an improvement.
+        "integrity-repin",
         # user-plugins-update briefly returned here 2026-08-19 (TRDD-TIZHEPNC) and was
         # then RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the
         # harness self-updates installed plugins, so no sweep exists to be absorbed OR

@@ -210,6 +210,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="That preamble is the skill's anti-injection boundary, stated where the agent will actually read it. A skill that has quietly lost it is one an attacker's payload can argue with.",
         fix="Restore the notice in the janitor's SOURCE repository and ship it. Do NOT patch the plugin CACHE — that directory is replaced wholesale by the next update, so a fix applied there disappears without a trace and the finding comes back looking like a new one.",
     ),
+    "SELFINT-004": Issue(
+        scanner="integrity-repin",
+        kind="self-integrity",
+        severity="high",
+        title="the C3 last-good pin has declined to advance for {declines} consecutive fires",
+        what="The `integrity-repin` chore ran on cadence and `certify_newest_if_clean` refused to certify the newest cached version every time. The chore is alive; the ANCHOR is stuck. Its log lines name the refusing predicate — grep the daemon log for `integrity-repin: `.",
+        why="C3 is the trust anchor the janitor checks its own running code against. An anchor that names a version nobody runs cannot detect tampering in the version everyone runs, and it fails QUIETLY: fires keep happening on cadence, so from the outside a stuck anchor is indistinguishable from a healthy one. This exact state persisted for a month (TRDD-ZM5LZ24Y) because the only caller lived inside an absorbed chore and nothing reported the silence.",
+        fix="DIAGNOSE, do not re-pin. Read the decline reason from the daemon log and fix the cause — an unpublished release (F1 provenance gate, correct and self-clearing), a quarantined version, or a genuine C2 manifest failure, which is a real integrity finding and must be escalated, never papered over. An agent MUST NOT force the anchor forward: rewriting the trust anchor it was asked to audit destroys the property the anchor exists to provide. Forcing is `/janitor-repin-integrity` and is a HUMAN action.",
+    ),
     "STATE-001": Issue(
         scanner="state-guard",
         kind="state-corruption",
