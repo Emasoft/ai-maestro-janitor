@@ -1,9 +1,9 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: blocked
+column: dev
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-14T11:58:00+0200
+updated: 2026-08-22T22:51:57+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -13,13 +13,13 @@ review-after: 2026-09-02
 relevant-rules: []
 npt: []
 eht: []
-blocked-by: [user-decision-run-the-clear]
+blocked-by: []
 external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 ---
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-22
 
 **~~PARKED ON THE OWNER'S GO-AHEAD~~ — GO-AHEAD GIVEN 2026-08-12, and the core is BUILT
 (`df7d4cb3`).** The owner's words were "before publishing you must implement the zero tokens
@@ -50,16 +50,49 @@ measurement when both agree. Two things it cost, both of which the code would ha
     — and `None` fails open, so a too-short bound is INDISTINGUISHABLE from "agentlensPro is
     not installed". Its own 30 s constant now, pinned by a test that carries the measurement.
 
-**STILL OPEN — this is why the column is `dev`, not `complete`:**
-  1. no cross-`/clear` run through the existing `handoff_clear_verify.py` harness. This one is
-     deliberately NOT self-serve: exercising it means clearing a live session's context, so it
-     is run at a chosen safe point, not folded into unrelated work;
-  2. the zero-Claude-token claim is REASONED (no model turn on the clear path, $0 summary) but
-     not MEASURED end-to-end. Do it in the same sitting as (1) — the same run answers both.
+**BOX 1 IS DISCHARGED — the drill RAN, 2026-08-22.** Report:
+`reports/continuity-build/20260822_223959+0200-handoff-clear-verify.md` — **4 PASS · 0 FAIL · 1
+SKIP**. Timeline: `--phase before` 22:29:50 → `/clear` observed 22:31:20 → re-arm 22:35:35 →
+`--phase after` 22:39:59.
 
-**NEXT ACTION:** at a deliberate stopping point, run `handoff_clear_verify.py --phase before`,
-`/clear`, then `--phase after`, and record BOTH the PASS/FAIL table and the turn's token
-accounting on the clear path.
+| check | verdict | evidence |
+|---|---|---|
+| cron_recreated | PASS | `b549cb16` → `368ce188`; the targeted `CronDelete` of the old id returned *not found*, i.e. `/clear` had already destroyed it |
+| context_collapsed | PASS | 657 959 → 199 020 tok (install floor ~229 542) |
+| handoff_links_resolve | PASS | 4/4 `[[links]]` resolve via memgrep in the virgin session |
+| session_restarted | PASS | armed 1787430935 > snapshot 1787430590, `source=clear` |
+| resume_flag_consumed | **SKIP** | no `resume-after-clear.flag` existed to consume |
+
+**BOX 2 IS *NOT* DISCHARGED — do not read the 4 PASSes as closing it.** The run measured the
+*model-turn* half of the claim (zero model turns between the clear and the resumed session's
+first turn — verifiable in the transcript) but NOT the *$0-summary* half: this was a **hand-typed
+`/clear` with a MODEL-AUTHORED handoff**, so `external_handoff_clear._compose` / `llm-ext
+session-summary` — the whole thing box 2 is about — never ran. Box 2 needs a run through the
+AUTOMATED path (`clear_trigger.py` / the skill), not another manual one.
+
+**AND THE RUN EXPOSED A REAL DEFECT, which is the more valuable output.** Zero model turns was
+satisfied *because nothing happened*: the resumed session sat idle 4m15s until the human
+complained. Root cause, verified in code —
+`resume-after-clear.flag` has exactly ONE writer, `clear_trigger.py:236` (the automated chain).
+This drill was staged by running `--phase before` STANDALONE and asking the human to type
+`/clear` — the shape `skills/janitor-handoff-and-clear/SKILL.md` explicitly warns against. So no
+flag ⇒ `on-session-start.py:258 _inject_post_clear_handoff` returned early (it is *deliberately*
+gated on the flag: "a MANUAL `/clear` … the user meant that as a discard") ⇒ no
+`[janitor-resume]` ⇒ and the heartbeat cron was dead anyway. `resume-directive.txt` sat on disk
+with the exact next command; its only consumer is `post-compact-resume.py`, which cannot run on a
+clear path. It then re-fired `[janitor-resume]` on every heartbeat until trashed by hand.
+
+**The harness is complicit:** `--phase before` already records `resume_flag_present: false` and
+prints NOTHING about it — its stdout reports cron id, context and link count only. It certified a
+staging that could not resume. And the one check that would have caught it degrades to SKIP
+(fail-open), so the drill reports **green on a cycle whose resume path failed completely**.
+
+**NEXT ACTION:** (a) make `--phase before` WARN on stderr when no `resume-after-clear.flag` is
+present — a hand-typed `/clear` will not auto-resume, so the caller must use `clear_trigger.py`/
+the skill or hand the user the `--phase after` command; (b) then re-run the drill through the
+AUTOMATED path to discharge box 2. Deliberately NOT chosen: making `--phase before` write the
+flag itself — it would flip the documented "manual clear = discard" semantics for 24 h and make
+check #4 self-fulfilling.
 
 **SUPERSEDED — do NOT carry forward:**
   - *"STARTS WHEN: the owner says go"* / *"NEXT ACTION when unblocked: give
