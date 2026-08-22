@@ -1,9 +1,9 @@
 ---
 trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
-column: todo
+column: human_review
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-22T11:12:16+0200
+updated: 2026-08-22T11:26:14+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -194,6 +194,53 @@ owns `oauth-rotator-tick`, and the janitor's own copy of the cascade is not the 
 **Method note, because this is the third correction here:** each one came from reading a FIELD
 and inferring the SYSTEM. `credential-dead` was true of the refresh token and false of the
 account. The alert text named the thing to check and I did not check it.
+
+## ⏰ RE-MEASURED 2026-08-22 11:2x — THE CLOCK IS 8.4 DAYS AND THE DECISION IS THE USER'S
+
+Every number below read fresh today (non-secret metadata only), against the 2026-08-21 16:10 row
+above.
+
+| slot | `refresh_failures` 08-21 → now | cause 08-21 → now | token expiry | cookie expiry | days |
+|---|---|---|---|---|---|
+| #0 `fmu***` | 572 → **572** (frozen) | credential-dead → credential-dead | −213 h | 2026-08-30 | **+8.4 VALID** |
+| #1 `ema***` | 224 → **224** (frozen) | credential-dead → credential-dead | −259 h | 2026-08-20 | −1.7 EXPIRED |
+| #2 `ipa***` | 775 → **776** (+1) | **network → credential-dead** | −182 h | 2026-08-30 | **+8.4 VALID** |
+
+**Three things this measurement settles.**
+
+1. **The "stale verdict never re-tested" defect is REAL but narrower than filed.** Slot #2 WAS
+   re-tested in the last 19 h — once — and its verdict CHANGED from `network` to
+   `credential-dead`. So the verdict is not frozen by construction. Slots #0 and #1 did not move
+   at all, which is consistent with their being skipped rather than latched.
+2. **`last_reconcile_at` is 2026-08-22 09:33** — about two hours before this reading. The rotator
+   IS beating. This corroborates the peer's box 1 on `ai-maestro#95` ("the chore beats", verified
+   live from the server side) from the janitor's side of the same system.
+3. **All three refresh tokens are genuinely dead**, which the peer confirmed independently as
+   `invalid_grant`. Nothing here is a misdiagnosis to unwind.
+
+**THE DEADLINE, and it is the only urgent thing on this card.** Two slots hold claude.ai session
+cookies valid until **2026-08-30 — 8.4 days from this reading**, and the `RENEW_COOKIE` leg is
+designed to mint fresh tokens from exactly those with NO human. After that date all three accounts
+become human-only. The 9-day clock recorded yesterday is now 8.4.
+
+**Why nothing automated will close it, established on the ai-maestro side and not re-litigated
+here** (`Emasoft/ai-maestro#95`, comment 2026-08-21T21:01Z): cookie access is deliberately outside
+the server tick's reach (`tick.ts` docstring, TRDD-XV9BLQC5), the server owns `oauth-rotator-tick`
+so the janitor's own cascade is not the code executing, and the two remaining recovery paths are
+both USER decisions —
+
+- run `/janitor-refresh-cc-logins` (a human re-login), or
+- re-arm `reauth-repair`, **which the owner disabled on 2026-08-07** because it opened disruptive
+  headed browser windows. Re-arming it reverses that decision and is credential-affecting.
+
+**No comment was posted to `#95` for this.** The peer's analysis is complete and correct, the ball
+is not on their side, and restating their own findings back at them is noise on a tracker. What
+was missing was nobody telling the USER the clock exists — that is this update, and the report to
+them.
+
+**Nothing was run against the credentials.** `/janitor-refresh-cc-logins` and re-arming
+`reauth-repair` are both the user's calls; an agent picking either would be reversing a
+credential decision the owner made deliberately.
 
 ## ⚠ `2d30dd7b` CITES THIS CARD BUT DOES NOT CLOSE IT — read this before trusting the commit log
 
