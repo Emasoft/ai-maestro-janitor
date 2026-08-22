@@ -112,3 +112,41 @@ to it repeats the whole cycle.
 Splitting right up to the cap is not efficient use of space; it schedules the next expensive
 re-litigation. (The durable fix — explicit split lineage so siblings are never conflict
 candidates at all — is TRDD-3QIQ2E6J; this rule stands whichever card ships.)
+
+## Decomposing an over-budget atom
+
+The atom half of this chore (TRDD-VOWAUVE5, USER ruling 2026-08-22). Step 1 of the skill
+runs it when no page is over cap; these are the rules that make it safe.
+
+**Ask memgrep, never measure it yourself.** `memgrep lint "$SCOPE_ROOT" | grep -F
+'[atom-oversized]'` prints `INFO <abs-path>:<line> [atom-oversized] — atom body is N chars
+(> BUDGET) …`. Both the budget (`MEMGREP_ATOM_MAX_CHARS`) and the atom SEGMENTATION that
+decides where one body ends live inside the crate, so any second opinion is a second source
+of truth. That is the janitor#227 shape — a gate dispatching work its arbiter cannot confirm
+re-dispatches an agent forever — and it has already been paid for once in this codebase.
+
+**Decomposition preserves every fact; it only changes how many atoms carry them.** Never
+shorten the prose to fit the budget, and never edit the page directly: write the new atoms
+through `memgrep add-atom` so the parser synthesises each element and a malformed atom is
+impossible by construction.
+
+**Give each new atom its own `keywords:`, drawn from the SYMPTOM phrases a future session
+will search with** — not from the words the prose happens to use. Recall ranks on
+`description + title + keywords`, never the body, so an atom nobody can recall is worse than
+an oversized one: splitting a findable atom into three unfindable ones is a net loss.
+
+**Retire the original with `add-lesson --supersedes` (same atom id)** when it stated
+something now spread across the new atoms. Never overwrite it — supersession is what keeps
+the old statement readable as dated history instead of deleting knowledge.
+
+**No transaction, deliberately.** The memgrep write verbs are already scope-locked and
+CAS-guarded, so they carry the same crash-safety `memory_txn_cli` provides for hand-staged
+page edits. Opening one here would nest two locking schemes for no benefit.
+
+**Verify before you finish.** Re-run the lint line; an unverified decomposition that left the
+atom over budget re-dispatches this chore forever, which is the failure the write-side gate
+was originally built to prevent.
+
+**The `## Superseded` carve-out applies exactly as it does to the write gate**: a body below
+that delimiter is protocol-frozen history. Leave it alone even when it is over budget —
+rewriting retired facts destroys the record they exist to be.

@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-22T07:43:09+0200
+updated: 2026-08-22T10:55:29+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -218,9 +218,13 @@ delete unasked), so this is reported, not acted on.
 **NEXT ACTION on the residual, in this order:**
 1. ~~Ask the USER about the 99 % disk~~ — **DONE, discharged above.** 207 GB free; the
    disk-pressure hypothesis is dead and must not be re-raised as a cause.
-2. Get a >500 s run and read the failing case's `.janitor/logs/*.log` plus the new
-   `subprocess.log`. It will now name which of (a)/(b)/(c) it was.
-3. Do NOT scale anything before that log exists.
+2. **FIX THE HARVEST BLOCK FIRST** (see the ⛔ box below) — it cannot run on this host and
+   fails silently, so any run harvested with it collects nothing while reporting success.
+3. Then get a run that actually FAILS and read the failing case's `.janitor/logs/*.log` plus
+   the new `subprocess.log`. It will name which of (a)/(b)/(c) it was. Note the 2026-08-22
+   soak did NOT reproduce: 95.7 s at `-n 28`, and its only two failures were deterministic
+   regressions, not flakes.
+4. Do NOT scale anything before that log exists.
 
 **THE HARVEST COMMAND — run it in the SAME shell invocation as the soak, not afterwards.**
 pytest keeps only the last 3 run dirs, so a later session's runs evict the evidence. Paste this
@@ -228,10 +232,15 @@ whole block; the `find`/`grep` half costs nothing when the run is green:
 
 ```bash
 S=<scratchdir>; T=$(python3 -c "import tempfile;print(tempfile.gettempdir())")
+# ISO cutoff, computed once. `-newermt '-30 minutes'` is a GNU/BSD-findism that `bfs` REJECTS
+# (this host's `find` IS bfs), and the BSD `date -v` form fails on GNU date — so compute it
+# portably and pass an absolute timestamp both accept. Measured 2026-08-22: the original block
+# harvested NOTHING and said nothing about it.
+CUT=$(date -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -v-30M +%Y-%m-%dT%H:%M:%S)
 uv run pytest tests/ -q --tb=line -n 28 --dist loadgroup > "$S/soak.txt" 2>&1
 tail -1 "$S/soak.txt"; grep "^FAILED" "$S/soak.txt"
-for d in $(find "$T/pytest-of-$USER" -maxdepth 1 -type d -name 'pytest-*' -newermt '-30 minutes'); do
-  find "$d" -path '*/.janitor/logs/*.log' -newermt '-30 minutes' | while read lg; do
+for d in $(find "$T/pytest-of-$USER" -maxdepth 1 -type d -name 'pytest-*' -newermt "$CUT"); do
+  find "$d" -path '*/.janitor/logs/*.log' -newermt "$CUT" | while read lg; do
     grep -qE "timed out|not in PATH|OSError" "$lg" && { echo "--- ${lg#$T/}"; \
       grep -hE "timed out|not in PATH|OSError" "$lg" | tail -3; }
   done
@@ -240,6 +249,49 @@ done
 
 An EMPTY harvest on a green run is the expected result and means nothing failed open — it was
 proven working at 13:51 (below), so do not read silence as a broken harvest.
+
+> ### ⛔ THE HARVEST BLOCK ABOVE IS BROKEN ON THIS HOST — measured 2026-08-22, and this is the
+> > most important line on this card
+>
+> Running it verbatim produced `bfs: error: Invalid timestamp` and harvested **nothing**. Two
+> independent portability faults, both silent:
+>
+> 1. **`find` here is `bfs 4.1.1`**, not BSD or GNU find. `bfs` rejects `-newermt '-30 minutes'`
+>    and accepts only ISO-8601-like timestamps.
+> 2. **`date` here is GNU**, so the BSD `date -v-30M` fallback fails too. Portable form:
+>    `CUT=$(date -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -v-30M +%Y-%m-%dT%H:%M:%S)`
+>    then `-newermt "$CUT"`. Verified working: 5 dirs found.
+>
+> **Why this outranks the soak result it was meant to collect.** The paragraph directly above
+> instructs the next session that an empty harvest means "nothing failed open" — so a harvest
+> that CANNOT RUN is indistinguishable from a clean one, and the card's own text tells the
+> reader to interpret the failure as success. This card exists because of load-dependent
+> silence; its evidence-gathering step had the same defect. A diagnostic whose failure mode
+> looks exactly like its healthy output collects nothing and reports success, which is worse
+> than having no diagnostic at all.
+>
+> Note also that the block's `--- exit=$? ---` style reporting reads the exit of the LAST
+> command in a pipeline (`head`), not `find` — it printed `exit=0` while `find` was erroring.
+> Same family of fault: a check whose result nothing branches on.
+
+### Soak run 2026-08-22 ~10:48 — no flakes, and that is a real data point
+
+`uv run pytest tests/ -q --tb=line -n 28 --dist loadgroup`: **15811 passed, 1 skipped, 2 failed
+in 95.7 s.** Not the >500 s run step 2 asks for — the suite simply does not take that long at
+`-n 28` on this host today, which is itself worth recording, because the card's premise is that
+load induces the flake and this run did not reproduce it.
+
+**Both failures were DETERMINISTIC REGRESSIONS OF MINE, not flakes** —
+`test_every_skill_description_stays_under_the_frontmatter_token_cap` and
+`test_every_skill_body_stays_under_the_context_token_cap`, both caused by that session's edits
+to `skills/janitor-memory-split/SKILL.md`, both reproducing identically on re-run, both fixed.
+Recorded here because the distinction is this card's central method: **a regression fails the
+SAME tests every run; a flake differs between runs.** Two failures in a soak are not evidence
+for this card unless they move.
+
+So the (a)/(b)/(c) question is still unanswered, and step 2 still needs a run that actually
+fails — but the harvest that would explain such a run must be fixed FIRST, or the run's
+evidence is collected into nothing.
 
 **THE INSTRUMENTATION IS VERIFIED END-TO-END, and it reproduced the exact signature.**
 Not asserted — measured, 2026-08-21 13:51. `branch-protection.py` run against a throwaway

@@ -62,10 +62,24 @@ USE_LLM_EXT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_USE_LLM_EXT"
 # context is gone. It ships opt-in until the card's "one observed end-to-end unattended cycle"
 # acceptance box is ticked; flipping this default is that box's payoff, not its precondition.
 DEFAULT_ENABLED = False
-# Low on purpose. Size is NOT the reason to clear (owner directive 2026-08-04 dropped it from the
-# in-model gate); it is only a floor below which clearing buys nothing measurable. Anything under
-# this is cheap to keep, so leave it alone.
-DEFAULT_MIN_CONTEXT_TOKENS = 150_000
+# Size is NOT the reason to clear (owner directive 2026-08-04 dropped it from the in-model gate);
+# it is only a floor below which clearing buys nothing measurable. Anything under this is cheap to
+# keep, so leave it alone.
+#
+# 300k is the USER's number, given verbatim on 2026-08-22 (decision #11): cache expiry should
+# always trigger the externalized compaction "unless the context currently used is <300k or the
+# compaction just happened". Raised from 150k.
+#
+# ⚠ ONE TENSION THIS RAISE SHARPENS, recorded rather than resolved, because resolving it would
+# reverse a standing owner ruling. `context_tokens is None` does NOT veto (see
+# `should_clear_externally`'s docstring — an unknown-context veto silently disabled the whole
+# lever for every unmeasurable transcript, owner directive 2026-08-04). So a session whose
+# context cannot be measured skips this floor entirely, and doubling the floor doubles what that
+# bypass is worth. Both rulings are the USER's and they do not contradict each other — one is
+# about a measured value, the other about the absence of one — but if the USER ever wants
+# unknown-context to be treated as "below the floor", that is a deliberate reversal of the
+# 2026-08-04 directive and belongs in its own decision, not in a constant.
+DEFAULT_MIN_CONTEXT_TOKENS = 300_000
 # The chain types /clear, waits for the fresh session, then types the bootstrap. Firing with less
 # than this before the next cron fire means the fire lands mid-chain — survivable (the injector
 # waits for a free pane) but it wastes the very fire we were trying to prevent.
