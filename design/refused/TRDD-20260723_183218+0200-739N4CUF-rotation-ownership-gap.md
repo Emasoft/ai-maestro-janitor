@@ -1,10 +1,11 @@
 ---
 trdd-id: 739N4CUF
 title: Close the janitor to-server OAuth-rotation ownership gap — never yield a chore the server has disabled
-column: proposal
+column: refused
 approval-tier: 2
 created: 2026-07-23T18:32:18+0200
-updated: 2026-07-23T18:32:18+0200
+updated: 2026-08-22T10:52:00+0200
+external-refs: [janitor#134, ai-maestro#111, ai-maestro#95]
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -65,3 +66,21 @@ directive; surfaces the gap rather than closing it.
   2026-07-17 binary-switch directive (TRDD-LU0C5KAR), so it waits for owner approval. Root cause
   verified live: server OAuth tick gated off (flag absent) + janitor binary-yields = ownerless
   rotation. Related: TRDD-GZXTSJSR (proactive login nudge — the keep-tokens-fresh half).
+- 2026-08-22T10:52:00+0200 — REFUSED as MOOT, which is not the same as declined on its merits,
+  and the difference matters enough to write down. **Option A shipped** — under the owner's
+  janitor#134 ruling (2026-08-05), months before this proposal was ever reviewed:
+  `harness_backend.claimed_chores()` yields a chore only when the live server actually advertises
+  it, which is exactly what this card proposed. So the card sat asking for a decision whose
+  subject had already been decided and built by another route. **Refusing it does not unship
+  anything**, and no one reading this should revert that code.
+  What survived was the ai-maestro-side half — "advertise `capabilities` accurately and treat a
+  claim as a commitment to execute" — and that is now FILED, on the existing open
+  `Emasoft/ai-maestro#111`, together with the measured switching latencies (server appears →
+  janitor yields ≤60 s; server vanishes → janitor reclaims ~150 s, covered meanwhile by the
+  cross-process locks). Filed as a comment on the open issue rather than a new one, because #111
+  and #95 already cover this subject and a third would be noise on a peer's tracker.
+  The USER's 2026-08-22 ruling (#5) pointed the other way — "server running ⇒ the janitor stops
+  its global functions" — and was deliberately NOT implemented literally, because a binary
+  alive-switch is precisely what produced #111. The reasoning was posted there rather than acted
+  on unilaterally. If the owner still wants the binary form after reading it, that is a NEW card
+  against that incident, not this one.
