@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-21T11:32:10+0200
+updated: 2026-08-22T11:35:20+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,46 @@ eht: []
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+
+## ⛔ 2026-08-22 — THE FIVE-DAY EVIDENCE IS WRONG. **The nudge was never reachable.**
+
+The section below is this card's strongest argument: *"the advisory mechanism G8.1 rules out
+demonstrably does not get acted on, measured over five days rather than argued."* It rests on the
+nudge having FIRED and been ignored. **It did not fire.** Read from source today:
+
+`project-map-drift.py::main()` returned 0 at its FIRST line — `repomap-opt-in.flag` absent — and
+even with the flag it returns 0 again at `header is None`. `read_fence_header` reads the
+**REPO-MAP** fence (`JANITOR-REPO-MAP-*`). This repo's CLAUDE.md carries **1** wikimem-index fence
+and **0** map fences, and the flag is absent — measured, both.
+
+So the slim/index check sat behind TWO gates belonging to a DIFFERENT feature, one this project
+turned off **on purpose**: the repo map cost ~46k tokens on every turn of every session and was
+deliberately deleted (CLAUDE.md says so, and names `/janitor-auto-repomap-on` as the switch).
+Keeping the index while dropping the map is a perfectly coherent choice — and it silently bought
+zero index checks.
+
+**So the five-day staleness is not evidence that advisories get ignored. It is evidence that this
+advisory did not exist.** Those are opposite diagnoses with opposite fixes: the card's reading
+argues for replacing the nudge with an automatic chore; the true cause is fixed by making the
+nudge reachable. Fixed today — `_slim_contract_nudge` now runs unconditionally, ahead of both map
+gates, and a mutation-verified test pins it (re-couple the gate and the test goes red on empty
+stdout). Verified live: the detector, which had been silent in this repo, immediately reported
+`wikimem index stale`.
+
+**What this does NOT settle, and must not be read as settling it:** PRRD G8.1 still requires
+migration to be AUTOMATIC, and a nudge — now reachable — is still a nudge. The *narrative
+migration* half is genuinely semantic and still needs the chore this card specifies. But the
+recurring symptom that kept re-opening this card was the INDEX going stale, which is mechanical,
+and its cause was a gating bug rather than an un-actioned advisory.
+
+**Also: do NOT "just autofix the index" from a detector.** That was my first instinct today and
+the module docstring refutes it in two lines: CLAUDE.md sits in the cached prompt prefix, so a
+background rewrite busts the context cache for the whole session and every forked subagent (a
+careless write can burn a 5 h token budget), and CLAUDE.md is co-owned with the human, so a
+background writer racing their edits is the corruption class the owner fears. The write stays
+human/agent-initiated at a cache-cheap moment. The index is stale in this repo RIGHT NOW and was
+deliberately left that way for exactly this reason — refreshing it mid-session would have cost
+more than the staleness does.
 
 ## ⏵ 2026-08-21 11:26 — THIRD INDEPENDENT RECURRENCE, and it stayed stale for FIVE DAYS
 

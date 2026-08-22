@@ -238,6 +238,49 @@ def test_detector_slim_nudge_gates_on_corpus_and_dedupes(tmp_path: Path) -> None
     assert "slim contract" not in run_detector(root)
 
 
+def test_slim_nudge_fires_without_the_repomap_optin_or_a_map_block(tmp_path: Path) -> None:
+    """The slim/wikimem-index half must NOT be gated behind the repo-MAP feature.
+
+    These are two different fences and two different features: a project can want the wikimem
+    index and not want the map. This repo IS that project — it deleted its map deliberately
+    because the map cost ~46k tokens on every turn of every session — and under the old order
+    it therefore got NO index check at all, via two gates it had no reason to connect (the
+    `repomap-opt-in.flag` early-return, and `header is None` for a map fence it does not have).
+
+    Measured consequence before the fix (TRDD-LFSWY0C6): the wikimem index sat STALE for FIVE
+    DAYS across many sessions. The card read that as "the advisory fires and nobody acts on
+    it" and built its argument on it — but the advisory was never reachable. This test is the
+    guard that it stays reachable, so no future tidy-up re-couples them.
+    """
+    import os
+
+    detector = _PROJECT_ROOT / "scripts" / "detectors" / "project-map-drift.py"
+    root = tmp_path
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, timeout=30)
+    _corpus(root)
+    claude_md = root / "CLAUDE.md"
+    # NO map block, and NO repomap-opt-in.flag — deliberately the shape this repo has.
+    claude_md.write_text("# P\n\nprose without url\n", encoding="utf-8")
+    (root / ".janitor" / "state").mkdir(parents=True)
+    assert not (root / ".janitor" / "state" / "repomap-opt-in.flag").exists()
+
+    env = dict(os.environ)
+    env["CLAUDE_PROJECT_DIR"] = str(root)
+    before = claude_md.read_text(encoding="utf-8")
+    res = subprocess.run(
+        [sys.executable, str(detector)], capture_output=True, text=True, timeout=120,
+        env=env, cwd=root,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "slim contract" in res.stdout, (
+        f"the slim half must run with the MAP feature off — got: {res.stdout!r}"
+    )
+    assert claude_md.read_text(encoding="utf-8") == before, (
+        "decoupling the check must not have made the detector a writer — CLAUDE.md sits in "
+        "the cached prompt prefix and is co-owned with the human"
+    )
+
+
 def test_cli_verify_accepts_faithful_and_rejects_lossy(tmp_path: Path) -> None:
     """The preservation oracle: a migration whose facts all moved into wikimem pages
     passes; deleting a fact line (and its token) from both the new CLAUDE.md and the

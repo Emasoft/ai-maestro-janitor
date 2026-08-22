@@ -16,12 +16,21 @@ deliberately does the CHEAP DETECTION ONLY — it NEVER writes CLAUDE.md:
     which carries the lock + lost-update guard + byte-preservation invariant)
     at a cache-cheap moment (fresh session / post-compaction / pre-commit).
 
-Per heartbeat (when due): opt-in flag present AND a map block exists →
-compare the fence's `digest=` to the current repo digest (git HEAD +
-porcelain hash — ZERO extraction cost). Unchanged → silent. Changed → ONE
-deduped nudge naming the refresh command. No flag, no CLAUDE.md, no block,
-malformed fences → silent no-op (the on-command owns insertion; malformed
-fences are surfaced by the generator itself when run).
+TWO INDEPENDENT HALVES, and keeping them independent is load-bearing:
+
+  * THE SLIM / WIKIMEM-INDEX HALF runs on every fire, with NO opt-in. It governs the
+    `JANITOR-WIKIMEM-INDEX-*` fence and the narrative-byte budget — a different fence and a
+    different feature from the map. Silent when the project has no PROJECT wikimem corpus.
+  * THE MAP HALF needs the opt-in flag AND an existing `JANITOR-REPO-MAP-*` block →
+    compare the fence's `digest=` to the current repo digest (git HEAD + porcelain hash —
+    ZERO extraction cost). Unchanged → silent. Changed → ONE deduped nudge naming the
+    refresh command. No flag, no CLAUDE.md, no block, malformed fences → silent no-op (the
+    on-command owns insertion; malformed fences are surfaced by the generator when run).
+
+The slim half used to sit BEHIND both map gates, which is a defect with a measured cost
+(TRDD-LFSWY0C6): a project that keeps the index but deletes the map — this repo, deliberately,
+because the map cost ~46k tokens per turn — got no index check at all, and its index sat stale
+for FIVE DAYS. Do not re-couple them.
 
 Opt-in: `$PROJECT/.janitor/state/repomap-opt-in.flag` — project-scoped
 (this is a per-project map, NOT a machine-global daemon op), written by
@@ -49,12 +58,17 @@ from repomap_generate import extract_all, load_excludes, repo_digest  # type: ig
 
 
 def _slim_contract_nudge(root: Path, text: str) -> None:
-    """The slim-CLAUDE.md half (TRDD-H12K9JYX): when a janitor-managed CLAUDE.md (it
-    carries the map fence — that is what opted it in) violates the slim contract or its
-    wikimem index went stale, emit ONE deduped nudge. NUDGE-ONLY for the same two reasons
-    the map half never writes: the prompt-cache bust and the co-ownership race. The
-    dedupe key carries the corpus digest + a violation fingerprint so a FIXED contract
-    stays silent and a NEW violation re-fires."""
+    """The slim-CLAUDE.md half (TRDD-H12K9JYX): when a CLAUDE.md violates the slim contract
+    or its wikimem index went stale, emit ONE deduped nudge. NUDGE-ONLY for the same two
+    reasons the map half never writes: the prompt-cache bust and the co-ownership race. The
+    dedupe key carries the corpus digest + a violation fingerprint so a FIXED contract stays
+    silent and a NEW violation re-fires.
+
+    The GATE is the PROJECT wikimem corpus, not the map fence. This docstring used to say
+    "a janitor-managed CLAUDE.md (it carries the map fence — that is what opted it in)",
+    which described a coupling that was itself the bug (TRDD-LFSWY0C6): the index and the map
+    are separate features, and a project can keep one without the other. Presence of a corpus
+    is what makes an index check meaningful; presence of a map says nothing about it."""
     try:
         pages = cslim.scan_pages(root / ".claude" / "project" / "memory")
         if not pages:
@@ -93,23 +107,39 @@ def main() -> int:
     state.init_state()
     root = state.project_root()
 
-    if not (Path(state.state_dir()) / "repomap-opt-in.flag").is_file():
-        return 0  # feature OFF (default) — total no-op
-
     claude_md = root / "CLAUDE.md"
     if not claude_md.is_file():
         return 0
     try:
         text = claude_md.read_text(encoding="utf-8")
-        header = read_fence_header(text)
     except Exception:
         return 0  # malformed/unreadable → the generator reports it when run
-    if header is None:
-        return 0  # no block yet — insertion is the on-command's job
 
-    # A map-managed CLAUDE.md is also slim-managed (owner directive 2026-08-02) — check
-    # the cheap half first; it needs no extraction.
+    # THE SLIM/WIKIMEM-INDEX HALF RUNS UNCONDITIONALLY — it is NOT part of the map feature,
+    # and gating it behind one was a real defect with a measured cost (TRDD-LFSWY0C6).
+    #
+    # These are two different fences. `read_fence_header` reads the REPO-MAP fence
+    # (`JANITOR-REPO-MAP-*`); the slim contract and the staleness check below are about the
+    # WIKIMEM INDEX fence (`JANITOR-WIKIMEM-INDEX-*`) and the narrative-byte budget. A project
+    # can want the index and not the map — THIS repo is exactly that case: it deleted its map
+    # deliberately (it cost ~46k tokens on every turn of every session) while keeping the index.
+    #
+    # Under the old order that project got NEITHER, via two independent gates it had no reason
+    # to connect: the `repomap-opt-in.flag` early-return, and `header is None` for the map fence
+    # it does not have. Measured consequence: the wikimem index sat STALE for FIVE DAYS across
+    # many sessions. TRDD-LFSWY0C6 read that as "the advisory fires and nobody acts on it" and
+    # built its whole argument on it — but the advisory was never reachable. The nudge did not
+    # go unheeded; it did not exist.
     _slim_contract_nudge(root, text)
+
+    if not (Path(state.state_dir()) / "repomap-opt-in.flag").is_file():
+        return 0  # the MAP feature is OFF (default) — the slim half above already ran
+    try:
+        header = read_fence_header(text)
+    except Exception:
+        return 0
+    if header is None:
+        return 0  # no map block yet — insertion is the on-command's job
 
     current = repo_digest(root)
     recorded = header.get("digest", "")
