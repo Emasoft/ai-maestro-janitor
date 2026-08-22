@@ -154,6 +154,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-publish-lock.py",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-wikimem-write-path.py",
+            "timeout": 3
           }
         ]
       },

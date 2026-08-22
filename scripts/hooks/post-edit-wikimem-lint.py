@@ -25,10 +25,22 @@ Net effect: a USER-scope page acquired a downward cross-scope wikilink via the E
 the author's own `validate`, and was caught ~15 minutes later by the heartbeat's `wikimem-syntax`
 detector. The rule existed, the linter existed, and nothing connected them at write time.
 
-This hook is that connection. It is deliberately a POST hook rather than a Pre-deny: the standing
-rule ALLOWS the Edit tool, so denying it would fight the documented workflow. Instead the finding
-lands in the same turn, while the author still has the context to fix it — which is the difference
-between a correction and an archaeology exercise.
+This hook is that connection. It lands the finding in the same turn, while the author still has
+the context to fix it — the difference between a correction and an archaeology exercise.
+
+⚠ THE PREMISE IN (1) NO LONGER HOLDS — updated 2026-08-22 (USER ruling, TRDD-VOWAUVE5). This
+header used to end: *"It is deliberately a POST hook rather than a Pre-deny: the standing rule
+ALLOWS the Edit tool, so denying it would fight the documented workflow."* That was true of the
+old rule, and the rule changed — *"enforce the use of memgrep when writing/updating/editing/
+migrate/create new pages/create new atoms. Everything must pass via memgrep."* The Pre-deny now
+exists (`pre-tool-wikimem-write-path.py`), so the Edit-tool hole named in (1) is CLOSED at the
+door rather than reported after the fact.
+
+This hook is NOT redundant, and is deliberately kept: the deny fails OPEN on every uncertainty
+(unreadable stdin, an unclassifiable path, its own knob turned off), and memgrep's own verbs
+write through paths this hook still sees. It is the second line, not the first. Reasons (2)-(4)
+above are untouched — `validate` is still not `lint`, and it still prints NONE for a file it
+never read.
 
 FAIL-OPEN, always: no memgrep, a timeout, garbage stdin, or a lint crash must never block a write.
 A guard that breaks editing gets disabled, and a disabled guard protects nothing.
