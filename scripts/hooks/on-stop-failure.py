@@ -19,6 +19,7 @@ degrade (no resume cue) than block the session on a plugin misconfig.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -181,6 +182,23 @@ def main() -> int:
         opt_in = _gs.global_state_dir().parent / "oauth-rotator" / "opt-in.flag"
         if opt_in.exists() and rotator.is_file():
             import subprocess  # noqa: PLC0415 -- only needed on this rare path
+
+            # DURABILITY MARKER, written BEFORE the spawn (TRDD-6054NY8H, USER decision #2).
+            # The Popen below is detached and fire-and-forget with both streams on DEVNULL:
+            # if that child dies — uv unavailable, OOM, the machine sleeping through the
+            # network calls, the user quitting the terminal — nothing retries and nothing
+            # reports, because there is no waiter and no output. The session that would have
+            # noticed is the one that just died of the 429.
+            #
+            # So the request is recorded on disk and the DAEMON services it if it is still
+            # there. The daemon is the right owner precisely because it is NOT a Claude turn:
+            # the reasoning above rules out `dispatch` (a heartbeat fire IS a turn and dies of
+            # the same 429), and that argument does not extend to a plain background process.
+            #
+            # Written before the spawn, not after: a marker written after a spawn that never
+            # returns is a marker that is never written.
+            with contextlib.suppress(Exception):
+                state.atomic_write(opt_in.parent / "recovery-requested.ts", str(int(time.time())))
 
             subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
                 ["uv", "run", "--script", "--quiet", str(rotator), "auto"],

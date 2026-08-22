@@ -124,6 +124,11 @@ GLOBAL_CHORES: dict[str, tuple[str, int]] = {
     # certification its own unabsorbed chore removes the coupling instead of negotiating
     # it; the coupling was the defect. Do NOT "tidy" this into the absorbed set.
     "integrity-repin": ("CLAUDE_PLUGIN_OPTION_DAEMON_INTEGRITY_REPIN_INTERVAL", 21600),
+    # Also deliberately unabsorbed (TRDD-6054NY8H, USER decision #2). It finishes a 429
+    # recovery the session hook started, and the server has no equivalent — absorbing it
+    # would hand the chore to something that does not run it, which is the ai-maestro#111
+    # hole. If the server ever implements reactive recovery, absorb it THEN, not before.
+    "oauth-recovery": ("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_RECOVERY_INTERVAL", 120),
 }
 
 

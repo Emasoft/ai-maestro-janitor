@@ -216,6 +216,16 @@ _INTERVAL_INTEGRITY_REPIN = _env_interval(
 # that cannot advance, which is a real fault and not a slow afternoon.
 _REPIN_DECLINE_TICKET_AFTER = 3
 
+# 120 s — service an unfinished 429 recovery (TRDD-6054NY8H). A cheap stat in the common
+# case (no marker, no work), and the marker only ever exists after a real rate limit.
+_INTERVAL_OAUTH_RECOVERY = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_RECOVERY_INTERVAL", 120
+)
+# How long to let the hook's own detached child finish before the daemon does the work
+# itself. Long enough that the healthy path is not duplicated, short enough that a dead
+# child does not cost a session the rest of its window.
+_OAUTH_RECOVERY_GRACE_S = 120
+
 _INTERVAL_RULES_CLEANUP = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
@@ -1882,6 +1892,80 @@ def task_cold_cache_clear() -> None:
     cold_cache_clear_task.run_once()
 
 
+def task_oauth_recovery() -> None:
+    """Finish a 429 recovery the session hook started and may not have completed.
+
+    TRDD-6054NY8H, USER decision #2: *the daemon owns retry, because it must survive even
+    the background process.*
+
+    `on-stop-failure.py` reacts to a rate limit by spawning a DETACHED `rotator.py auto`
+    with both streams on DEVNULL. That is the right fast path — the rotation must happen
+    outside a Claude turn, and a heartbeat fire IS a turn, so `dispatch` cannot own it — but
+    it is fire-and-forget: nothing waits on that child, nothing reads its output, and the one
+    session that would have noticed it die is the session that just died of the 429. If the
+    child never lands (no `uv`, OOM, the host asleep through the network calls, the terminal
+    closed), the account stays rate-limited until the window resets, which on a spent 7-day
+    window is days.
+
+    The daemon closes that hole because it is a plain background process: not a turn, so the
+    429 cannot reach it, and unlike the hook it is still here five minutes later.
+
+    Re-running `auto` is SAFE BY CONSTRUCTION, which is what keeps this simple: it is
+    self-guarding (no live credential, no SAFE alternate, or an anti-thrash dwell ⇒ no-op),
+    so the worst case when the hook's child DID succeed is one redundant no-op. That is
+    cheaper than tracking whether it succeeded, and it cannot strand a session on an account
+    near its own limit.
+    """
+    try:
+        marker = gs.global_state_dir().parent / "oauth-rotator" / "recovery-requested.ts"
+        if not marker.is_file():
+            return
+        opt_in = marker.parent / "opt-in.flag"
+        if not opt_in.exists():
+            # Rotation was disabled between the request and now. Drop the request rather than
+            # act on it — an opt-in that stopped applying must not be honoured retroactively,
+            # and on macOS reading a credential can raise a keychain prompt.
+            with contextlib.suppress(Exception):
+                marker.unlink()
+            return
+        try:
+            requested = int((marker.read_text(encoding="utf-8") or "0").strip() or "0")
+        except Exception:  # noqa: BLE001 — an unreadable marker is still a request
+            requested = 0
+        age = int(time.time()) - requested
+        if 0 <= age < _OAUTH_RECOVERY_GRACE_S:
+            return  # the hook's own child is probably still working; let it
+    except Exception as exc:  # noqa: BLE001 — never let recovery bookkeeping kill the daemon
+        state.log_line("daemon", f"  oauth-recovery: skipped: {exc}")
+        return
+
+    rotator = Path(__file__).resolve().parent / "oauth_rotator" / "rotator.py"
+    if not rotator.is_file():
+        with contextlib.suppress(Exception):
+            marker.unlink()
+        return
+    state.log_line(
+        "daemon", f"  oauth-recovery: servicing a {age}s-old request the hook did not clear"
+    )
+    try:
+        # `run_subprocess` never raises and returns None on timeout / missing binary, so the
+        # None branch below is the real "the retry did not happen" signal, not an exception.
+        proc = state.run_subprocess(
+            ["uv", "run", "--script", "--quiet", str(rotator), "auto"], timeout=300,
+        )
+        rc = "timed out or uv missing" if proc is None else f"exited {proc.returncode}"
+        state.log_line("daemon", f"  oauth-recovery: rotator auto {rc}")
+    except Exception as exc:  # noqa: BLE001 — a failed retry must not kill the daemon
+        state.log_line("daemon", f"  oauth-recovery: rotator auto failed: {exc}")
+    # Clear either way. The marker records that a recovery was REQUESTED, not that one is
+    # owed forever: leaving it after a failed attempt would re-run `auto` every 120s against
+    # an account that is plainly not recoverable right now, which is the thrash the rotator's
+    # own dwell exists to prevent. A genuinely still-limited account produces a fresh 429 and
+    # a fresh marker.
+    with contextlib.suppress(Exception):
+        marker.unlink()
+
+
 def task_integrity_repin() -> None:
     """Certify the newest cached version as C3 last-good — on a chore the server cannot absorb.
 
@@ -2232,6 +2316,7 @@ def _build_tasks() -> list[Task]:
         # behind a 20-minute marketplace refresh in the bulk lane — the whole point is that
         # this chore keeps running when the others are taken away.
         Task("integrity-repin", _INTERVAL_INTEGRITY_REPIN, task_integrity_repin),
+        Task("oauth-recovery", _INTERVAL_OAUTH_RECOVERY, task_oauth_recovery),
     ]
 
 

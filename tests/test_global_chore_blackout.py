@@ -132,6 +132,12 @@ def test_unabsorbed_chores_are_pinned_by_name() -> None:
         # SERVER_ABSORBED_TASKS to "tidy" the roster: being unclaimable is the fix. If the
         # server ever does claim it, that is a REGRESSION of ZM5LZ24Y, not an improvement.
         "integrity-repin",
+        # `oauth-recovery` joined 2026-08-22 (TRDD-6054NY8H, USER decision #2) — also
+        # unabsorbed by design. It finishes a 429 recovery the session hook started and the
+        # server has no equivalent, so absorbing it would hand the chore to something that
+        # does not run it: the ai-maestro#111 hole, on the one path whose failure costs a
+        # spent 7-day window. Absorb it if and when the server implements reactive recovery.
+        "oauth-recovery",
         # user-plugins-update briefly returned here 2026-08-19 (TRDD-TIZHEPNC) and was
         # then RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the
         # harness self-updates installed plugins, so no sweep exists to be absorbed OR
