@@ -1,16 +1,16 @@
 ---
 trdd-id: 4OFMHOZ7
 title: Non-atomic plugin-cache population bricked every session's tools for 20 minutes — post-mortem + staging-dir guard
-column: dev
+column: complete
 blocked-by: []
 created: 2026-08-19T10:29:00+0200
-updated: 2026-08-22T07:43:09+0200
+updated: 2026-08-22T10:09:12+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
 approval-tier: 0
 scope: project
-external-refs: [janitor#232, TRDD-ZM5LZ24Y, ai-maestro PE54D95Q]
+external-refs: [janitor#232, TRDD-ZM5LZ24Y, ai-maestro PE54D95Q, ai-maestro#150]
 npt: []
 eht: []
 ---
@@ -126,9 +126,12 @@ population is non-atomic. No emergency republish required.
 
 - [x] interrupted actor identified (daemon exonerated with evidence; remaining candidates —
       hub-side updater / peer session — named and outside this repo's logs; see STATE)
-- [ ] staging-dir+rename requirement recorded in the server-absorption design (hub §) + upstream
-      ask filed if the extraction is harness-owned — peer message sendable; upstream ask BLOCKED
-      on USER approval (repo not owned by this gh auth)
+- [x] staging-dir+rename requirement recorded in the server-absorption design — filed as
+      `Emasoft/ai-maestro#150` (owned repo ⇒ permitted under decision #13), carrying the
+      120/1758 measurement and the "loaded without complaint" observation. The HARNESS half is
+      **permanently refused**, not pending: that repo is not owned by the `gh` auth user, and
+      the issue says so explicitly rather than leaving it as an open question a later session
+      would re-ask.
 - [x] detector coverage decided: measured refusal of a dedicated scripts/-loss alarm; the .md
       manifest proxy covers the class WHEN the opt-in flag is armed (see STATE)
 - [x] plugin-cache-install-integrity memory page updated (lesson ATOM-X3NR-20M8 + description)
@@ -140,3 +143,7 @@ population is non-atomic. No emergency republish required.
   repos owned by the `gh` auth user (`Emasoft`), and the harness repo is not one. Recorded as a
   permanent refusal rather than a pending question so no future session re-asks it. Card
   returns to `dev` with the two surviving halves scoped in Box 2.
+- 2026-08-22T10:09:12+0200 — COMPLETED. Box 2's surviving half landed as `Emasoft/ai-maestro#150`
+  (staging-dir + atomic rename for server-owned plugin/CLI population). All four acceptance
+  boxes are now met, and the one that cannot ever be met — the harness-side ask — is closed as a
+  permanent refusal rather than carried as debt. Archived as `complete`.
