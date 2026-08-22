@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-20T19:00:00+0200
+updated: 2026-08-22T11:43:33+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -315,5 +315,37 @@ finding is fully resolved, and it cannot see a fix that landed without citing th
 - [ ] **F11** R42.5 compliance — the guardian must not cross-inject.
 - [ ] The card's own status block is reconciled with the code on each pass, or this list rots the
       way the "2 fixed, 8 deferred" summary did: it was four findings out of date.
+
+### Reconciliation pass — 2026-08-22 (this is the box above, performed)
+
+**F3 / F4 — still blocked, and their vehicle is PARKED.** `TRDD-OZNG3N2D` is `column: backburner`,
+not in flight. So "blocked on OZNG3N2D, not on design" is still true, but it should be read as
+*deferred indefinitely* rather than *arriving soon*: nothing advances these until someone promotes
+that card out of backburner. That is a decision, not work.
+
+**F7 — RE-CLASSIFIED from an open defect to a gate on an opt-in, measured.** The hard-restart
+rungs (`relaunch`, `force_restart`, `resurrect` — `session_liveness.HARD_RUNGS`) run only behind
+`fleet_restart.hard_restart_enabled()`, which is **DEFAULT-OFF and reads False on this host**;
+otherwise `_run_hard_restart` dry-run-logs the plan it built. So nothing is bypassing the server
+lifecycle today, because nothing executes. F7 is therefore not an active bug — it is a constraint
+that MUST be satisfied before that opt-in is ever turned on, and it should be recorded on the
+opt-in rather than tracked as outstanding breakage. Turning the knob on without honouring
+`hibernate`→`wake` is what would make it real.
+
+**F11 — NOT VERIFIED, and deliberately not guessed.** `grep -rn "R42.5\|cross.inject" scripts/`
+returns nothing, so no code cites the finding. That is evidence of no CITATION, not evidence of a
+violation or of compliance — R42.5's exact scope lives in the ai-maestro rule set, which this repo
+does not carry, and `fleet_inject.py` does inject into other agents' panes by design, so the
+question "is that the cross-injection R42.5 forbids?" cannot be answered from here. Left open with
+the reason stated, rather than ticked or condemned on a null grep.
+
+**F1 — unchanged, and correctly out of scope.** Prompt-provenance is a root-of-trust problem the
+card already records as USER/server scope.
+
+**So what is actually PULLABLE on this card today: nothing to implement.** F1 is elsewhere, F3/F4
+wait on a parked card, F7 is a note to attach to a knob, F11 needs an answer this repo cannot
+source. That is worth saying plainly, because a `severity: major` card in `todo` reads as
+available work, and re-deriving "there is none" is exactly the 272-line re-read this acceptance
+section was added to stop.
 
 ## Notes and lessons learned
