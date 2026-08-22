@@ -3,7 +3,7 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: testing
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-22T01:49:42+0200
+updated: 2026-08-22T11:57:34+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -261,6 +261,36 @@ into a pane it does not own)?
       would-fire audited) for N days with zero false positives, PLUS one staged end-to-end
       drill on a sacrificial session proving handoff → `/clear` → bootstrap → old-transcript
       resume actually recovers.
+
+      > **⛔ 2026-08-22 — SHADOW MODE HAS NO IMPLEMENTATION. The N-day clock cannot start,
+      > and would not start by enabling the lever either.** Traced the whole chain today;
+      > three INDEPENDENT reasons no verdict is ever recorded:
+      >
+      > 1. `cold_cache_clear_task.run_once()` returns at `if not ec.enabled(): return 0` —
+      >    before the fleet scan, before any watcher spawn ("ships inert", deliberately).
+      > 2. `external_handoff_clear.py` prints `DISABLED` and returns 0 **before** computing a
+      >    verdict, unless `--dry-run` is passed. Nothing passes it.
+      > 3. **The sharpest one:** the daemon spawns the watcher with
+      >    `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`. So even AFTER the lever is
+      >    enabled and the drill passes, every `VERDICT FIRE/HOLD … why=…` line the watcher
+      >    prints goes to `/dev/null`. The audit trail this box asks for is discarded by
+      >    design, in the enabled case too.
+      >
+      > So this is not a box waiting on time. It is waiting on a channel that does not exist,
+      > and (3) means enabling the feature would not create it. Someone re-reading this in a
+      > month would conclude "shadow mode has been running and found nothing", which is the
+      > opposite of the truth — nothing has been running, and nothing is being found because
+      > nothing is being recorded.
+      >
+      > **NOT BUILT HERE, because it is a trade rather than a patch.** Shadow data requires
+      > walking the fleet and spawning a watcher per candidate on every beat WHILE THE FEATURE
+      > IS OFF, and `run_once`'s "ships inert" early-return exists precisely to avoid that
+      > cost. Capturing the watcher's stdout into the janitor log is the cheap half and is
+      > unambiguously right (an audit line the daemon already generates and throws away);
+      > running the disabled path in dry-run to generate those lines is the half that costs
+      > something and should be a decision, not an agent's initiative. The ordering lesson
+      > from TRDD-VOWAUVE5 applies exactly: build the channel first, then let the criterion
+      > depend on it — never the reverse.
 
 ## Advisor verdict — 2026-08-14 (Fable 5), and the answers
 
