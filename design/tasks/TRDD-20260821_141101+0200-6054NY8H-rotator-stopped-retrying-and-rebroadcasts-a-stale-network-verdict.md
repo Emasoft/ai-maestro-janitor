@@ -68,8 +68,8 @@ tokens):
 **THE CORRECTION, and it matters because this card was filed partly on the opposite premise:**
 only **ONE of three** slots last failed on the network. The other two recorded
 **`credential-dead`** — for those the credential WAS judged, and it is dead. So
-`session-start.log`'s advice to run `/janitor-refresh-cc-logins` is **RIGHT for slots #0 and
-#1** and wrong only for #2. I generalised one slot's alert text ("do NOT re-login on this
+`session-start.log`'s advice to run `/janitor-refresh-cc-logins` is **RIGHT for slots #0
+and #1** and wrong only for #2. I generalised one slot's alert text ("do NOT re-login on this
 evidence") to all three; that was an over-reach, and the state file refutes it.
 
 **The mechanism, from source, not guessed:**

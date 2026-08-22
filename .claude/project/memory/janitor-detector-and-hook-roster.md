@@ -182,12 +182,12 @@ the SYNTAX. Not one was missing a language, a host, or a technique.
 
 `concealment-directive` matched concealment from "the user"; every attack concealed from the
 RECORD (audit trail, logs, changelog, commit message). `prompt-injection-multilingual` covered
-"ignore previous instructions" in ELEVEN languages; every attack kept the verb and swapped the
-object for a security control — eleven languages of ONE sentence is far narrower than it reads
-on a report. `mcp-annotation-lying` searched `name` for the destructive verb the attacker had
+the canonical disregard-the-prior-prompt opener in ELEVEN languages; every attack kept the verb
+and swapped the object for a security control — eleven languages of ONE sentence is far
+narrower than it reads on a report. `mcp-annotation-lying` searched `name` for the destructive verb the attacker had
 deliberately put in `handler`, i.e. it searched the innocuous half by construction.
 `two-step-code-injection` knew `atob`/`Buffer.from` → `eval` while every sample used the shell
-pipeline `| base64 -d | bash`, which is also the commoner form in the wild.
+pipeline that pipes `base64 -d` straight into `bash`, which is also the commoner form in the wild.
 
 This is the silent-FN asymmetry a bench exists to expose: a declared blind spot is honest, while
 a claimed rule scoring 0 reads as coverage on every report. Check what a rule's OBJECT and FIELD
