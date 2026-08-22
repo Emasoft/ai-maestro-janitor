@@ -2,6 +2,159 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] — 2026-08-22
+
+### Bug Fixes
+
+- **memgrep:** Detect an unclosed code fence and name it in the atom-not-found refusal (janitor#279, #277) (e5d642d)
+- **bench:** Assemble per-line first — one malformed sample was swallowing its file's remainder (3457742)
+- **security:** Concealment-directive missed every attack that hides from the RECORD (TRDD-VAWIKRK2) (5f347cb)
+- **security:** Prompt-injection-multilingual covered 11 languages but ONE frame — 0/9 → 9/9 (TRDD-VAWIKRK2) (8a9830e)
+- **security:** Exfil-structural-probe could not see inside a snake_case payload (TRDD-VAWIKRK2) (8419883)
+- **security:** Mcp-annotation-lying searched `name` for the verb the attacker put in `handler` — 0/9 → 4/9 (TRDD-VAWIKRK2) (17d0fed)
+- **security:** Two-step-code-injection knew only the JavaScript form — 0/7 → 7/7 (TRDD-VAWIKRK2) (d010495)
+- **security:** Dynamic-exec-in-body stopped at a nested paren — 5/9 → 7/9, and Shape A needed no floor change (TRDD-VAWIKRK2) (7c1d17e)
+- **security:** Dynamic-exec-in-body Shape B — the sink reached by alias (TRDD-VAWIKRK2) (559fa7f)
+- **security:** Dynamic-exec Shape D — a heading is a TITLE, not a disclaimer (TRDD-VAWIKRK2) (7cc45cf)
+- **guard:** The apply audit line reports the EFFECT, not the action (TRDD-Q8ZT5NW3) (342f3f6)
+- **tests:** Timeout scale at the run_subprocess seam — PARTIAL fix for the load flake (TRDD-7NSRD8OV) (99d2f7d)
+- **memgrep:** Fence openers follow CommonMark; one shared rule, both languages (TRDD-K3PN7QW2) (849f94d)
+- **TRDD-7NSRD8OV:** Root cause found — the knob never reaches the child; testing -> dev (19b66a7)
+- **tests:** Pass the timeout scale through minimal child envs — family A (TRDD-7NSRD8OV) (95f71cb)
+- **agentlens:** Scale probe_json's own 5s timeout by the shared knob — family B (TRDD-7NSRD8OV) (133f463)
+- **roster:** Scale fetch_agents' own 15s timeout; opt the timeout test out (TRDD-7NSRD8OV) (985f096)
+- **terminal:** Scale _run_aimaestro_cli's timeout — family B site 3; find category C (TRDD-7NSRD8OV) (c08b011)
+- Leanctx family-B site 4 + external_clear category D — all 9 files now explained (TRDD-7NSRD8OV) (245eba5)
+- Branch_protection_lib's 6 gh timeouts + the spawn helper my own fix missed (TRDD-7NSRD8OV) (a22df75)
+- **tests:** Scale the founding example's own 30s timeouts — category D (TRDD-7NSRD8OV) (e611357)
+- **librarian:** Close the do/did/does + own hole in _STOPWORDS (TRDD-KNTZ79HE); todo -> testing (c8d7bf8)
+- **inbox:** Parse UTC stamps as UTC — mktime was reading them as LOCAL time (2ffbdd2)
+- **tests:** Scale branch_protection_guard's own 30s ceiling — category D (TRDD-7NSRD8OV) (ae2e569)
+- **tests:** Scale plugin_updates' own 60s ceiling — the last category-D site (TRDD-7NSRD8OV) (c574356)
+- **TRDD-7NSRD8OV:** Scale the 4 production ceilings the soak actually implicated (bf245a9)
+- **TRDD-7NSRD8OV:** Scale test-owned timeouts at ONE seam, not 258 call sites (912f55a)
+- **TRDD-7NSRD8OV:** Mark the 2 tests my own seam regressed (8bdc8ba)
+- **TRDD-7NSRD8OV:** Run_subprocess records WHY it failed open, always (2b88f67)
+- **TRDD-7NSRD8OV:** The 4th minimal-env builder, found by AST instead of grep (1ea8b73)
+- **TRDD-9T0U3M00:** Tick-stalled no longer fires on a chore the server owns (0a00927)
+- **TRDD-ZM5LZ24Y:** The F1 provenance decline now names WHICH cause refused (e7c1ec4)
+- **TRDD-ZM5LZ24Y:** Raise the F1 provenance ceiling 5s -> 30s, from measurement (2679154)
+- **TRDD-9T0U3M00:** The tick-stalled guard must AND the chore claim, not just server liveness (ed4242f)
+- **tests:** Stamp gh-notify fixtures relative to the clock, never a calendar literal (2d40ae7)
+- **tests:** Mask the corpus `note` field too — the hygiene scan reads raw whole-file text (0073722)
+- **TRDD-7NSRD8OV:** Prove the direct subprocess.run family IS covered — retract the "second family" claim (935daa7)
+- **TRDD-7NSRD8OV:** Name the residual mechanism (first-exec scan) and pin the 100x double-scale (de08aa1)
+- **trdd:** A `[~]` partial box is REMAINING work — closeable-candidate misread two cards (5b0a464)
+- **heartbeat:** A NEGATED severity word must not claim urgency (janitor#276) (ba4a530)
+- **heartbeat:** Do not ask for a reload mid-refetch — age-gated cache settle check (janitor#271) (8cff9a9)
+- **detectors:** Gitignore-coverage.py was committed non-executable (mode 100644) (fcc453a)
+- **security:** Devitalize the execution-class shapes blocking the publish (7f802f2)
+- **security:** De-contiguate the last quoted injection needle — a COMMENT, not a pattern (f3f7d6a)
+
+### Documentation
+
+- **TRDD-079778RM:** Testing -> complete — lane verified live on 3.3.26 (af5d785)
+- **TRDD-PGN5XSHA:** Testing -> complete — verified on the installed 3.3.26 runtime (bc78a8d)
+- Close E39YT9G6 + BEIG83VR on live 3.3.26 evidence; 9ZPU69UC stays in testing (f6e0577)
+- **TRDD-JEEQCHFG:** Open the fresh runaway tally; todo -> backburner + review-after (86f21be)
+- **TRDD-VAWIKRK2:** Todo -> dev — option (a) confirmed working, c13 captured at 1800s/conc-1 (b290d69)
+- Add TRDD-K3PN7QW2 — fence-opener detection ignores the CommonMark info-string rule (f4241e5)
+- **TRDD-DD0M4QL7:** The open box's blocker expired — verified live, but NOT ticked (625c7d8)
+- **DD0M4QL7:** CLOSE the unattended-repair box — my caveat was wrong; UWBXNJ76 citation repaired (0be116b)
+- **TRDD-UWBXNJ76:** Testing -> complete — all 3 boxes done, hub ledgered it DECIDED (bdc06f4)
+- Add TRDD-R4XC8MV1 + TRDD-Q8ZT5NW3 — two applier defects found via the hub's fleet census (837c130)
+- **TRDD-VAWIKRK2:** C20 two-step-code-injection CAPTURED — the measurement's blocker is gone (8fe5573)
+- **TRDD-VAWIKRK2:** Run complete 30/32; measurement run — recall 39%, FP 0% (5aca4c3)
+- **TRDD-VAWIKRK2:** Out-of-sample triage — 5 rules catch ZERO, and dynamic-exec is mid-pack (0e1770f)
+- VAWIKRK2 concealment verdict (1 of 5 closed) + add TRDD-7NSRD8OV (load-flaky subprocess tests) (3b22eda)
+- VAWIKRK2 — all 5 claimed-but-zero rules closed; one root cause, four measured refusals (1864509)
+- **TRDD-VAWIKRK2:** All four acceptance boxes closed; dev → testing (69b4203)
+- **memory:** Record the TRDD-VAWIKRK2 detector-widening findings (3 atoms + 1 lesson) (0dc8fbc)
+- **TRDD-VAWIKRK2:** Testing → ai_review; full suite green, self-review recorded (0c4bff8)
+- **TRDD-7NSRD8OV:** Correct my own root-cause diagnosis; todo → dev (1152d58)
+- **TRDD-BEXY5KIP:** Gate met — server-published reload signal observed live; testing → complete (2aeb662)
+- **TRDD-D2DD5GO8:** Its completion gate is structurally unreachable here — say so instead of waiting (f603dab)
+- **TRDD-7NSRD8OV:** Enumerate the class — 52 fail-open call sites, which settles the fix shape (8179a74)
+- **TRDD-K3PN7QW2:** Claim reproduced first-hand, design settled; todo → dev (5f11df3)
+- **TRDD-R4XC8MV1:** The oscillation is still live — 6-repo sample read from the API (eb100da)
+- **TRDD-VOWAUVE5:** The stays-at-zero hold has already regressed, and the gate cannot prevent it (5bbef9b)
+- **TRDD-Q8ZT5NW3:** Testing → ai_review; full suite green, self-review recorded (42e41e7)
+- **TRDD-ZM5LZ24Y:** The soak still cannot close — a SECOND blocker, the chore is absorbed (1691b3d)
+- **TRDD-LMLKF0JV:** It rode the publish — gate met; testing → complete (9c77b67)
+- **TRDD-KDLJ04AM:** Gate met on a POSITIVE live observation; testing → complete (7815e14)
+- **TRDD-7NSRD8OV:** Un-check the enumeration box — the class was NOT fully enumerated (f5ec031)
+- **TRDD-7NSRD8OV:** Name the load source (xdist) and rule out the subset repro (c57daa0)
+- **TRDD-7NSRD8OV:** 4 clean full-suite runs under load; dev -> testing (fd32d2a)
+- **TRDD-K3PN7QW2:** Zero live victims; both defects now RED at unit level (bb4e848)
+- **TRDD-K3PN7QW2:** Acceptance met; dev -> testing (7e8db15)
+- **TRDD-7NSRD8OV:** Session-end state — both families fixed, 2 files still unexplained (e0e8da6)
+- **TRDD-7NSRD8OV:** Loaded before/after — 24+12 failures -> 0+0; dev -> testing (238a816)
+- **TRDD-R4XC8MV1:** Narrow the option space; reject the obvious fix as a trap (d09affb)
+- **TRDD-LFSWY0C6:** Auto-refresh is NOT the cheap win; G8.1 and the cache invariant conflict (21a9506)
+- **TRDD-9ZPU69UC:** Write the EXTERNAL gate as a box — it has nearly closed this card twice (c2372e8)
+- **memory:** Record the FOUR load-flake categories on the publish-pipeline page (8d6f5c9)
+- **memory:** Resolve two memory-librarian CONFLICT candidates — both are false positives (f8e931c)
+- Add TRDD-KNTZ79HE — conflict candidates are 3/3 false positives on low-information tokens (29d2c9e)
+- **TRDD-7NSRD8OV:** Caveat RETIRED — a loaded post-fix run, slower than both failing ones (7fe0259)
+- **TRDD-7NSRD8OV:** REFUTE my own 'caveat retired' — 39 failures at 383s (ad985c0)
+- **TRDD-7NSRD8OV:** STATE — no fifth category; the fix moved to a seam (54f3e7e)
+- **memory:** Two lessons on the FIX shape for a category-D load flake (TRDD-7NSRD8OV) (69514f4)
+- **TRDD-7NSRD8OV:** Soak result — 39 failures at 383s becomes 1 at 473s (4aed244)
+- **TRDD-7NSRD8OV:** The 3x wall-clock swing is other software, not the tests (02bfeff)
+- **TRDD-7NSRD8OV:** Soak-5 — category D is closed, the empty-stdout family is not (93ab52d)
+- **TRDD-7NSRD8OV:** The host disk is 99% full — a confound that outranks (a)/(b)/(c) (6c155d8)
+- **memory:** TaskStop does not clear the pending-agents manifest — the killer must (648833e)
+- TRDD-K3PN7QW2 + TRDD-KNTZ79HE testing -> ai_review (ac4cde6)
+- Correct 4 fabricated future timestamps I wrote on 3 cards (b63c09c)
+- Add TRDD-A8DPTDOU — OAuth-supervisor alerts flap 83x a day (two keys, one condition) (45d6a76)
+- **TRDD-7NSRD8OV:** The fail-open breadcrumb is VERIFIED end-to-end, not asserted (f4e34d5)
+- **TRDD-7NSRD8OV:** Soak-6 gives the matched-load comparison the card never had (7754a8f)
+- **TRDD-7NSRD8OV:** Put the harvest command on the card, runnable as written (561b575)
+- Add TRDD-6054NY8H — the rotator latched 6h ago and re-broadcasts a stale verdict (211217b)
+- **TRDD-6054NY8H:** Cause found in source + state — and it CORRECTS my own premise (39ae628)
+- **TRDD-6054NY8H:** CORRECTION 2 — the janitor is not running this chore at all (d57f417)
+- **TRDD-6054NY8H:** Ownership ANSWERED — the server runs its own implementation (e0c05c9)
+- **TRDD-9T0U3M00:** Derived sweep — supervisor.py was the ONLY one (70dcd05)
+- **TRDD-7NSRD8OV:** The disk is not merely full, it is FILLING — 24GB to 20.7GB in 55min (0aef422)
+- **TRDD-7NSRD8OV:** RETRACT my own "4GB/h, 5h to zero" disk projection (9537252)
+- **TRDD-ZM5LZ24Y:** The version-update fire DID come — the log names the refusal (bca6bcc)
+- **TRDD-ZM5LZ24Y:** The diagnostic is shipped — revised close path reads the cause (f1cf0b3)
+- **TRDD-ZM5LZ24Y:** Candidate 2 (gh not on the daemon's PATH) is RULED OUT (4d78e7b)
+- **TRDD-6054NY8H:** CORRECTION 3 — the cookie layer is ALIVE; two slots need NO human (68389c4)
+- Add TRDD-WMQQYLSZ — test fixtures pay a first-exec scan per script (derived from TRDD-7NSRD8OV) (cf6a8f7)
+- Backfill implementation-commits on the three ai_review cards that had none (4829b48)
+- Ai_review -> human_review for the four cards with zero open acceptance boxes (db96182)
+- **TRDD-VOWAUVE5:** Day-3 hold measurement — static at USER 1, and the ungated path is the ordinary workflow (e7e3caf)
+- **TRDD-XWWRE9V0:** Verify all four acceptance boxes first-hand; testing -> human_review (9025980)
+- **TRDD-ZM5LZ24Y:** Re-measure the C3 anchor — 0.59.0 against 3.3.26, unmoved across 17 releases (d109a07)
+- **TRDD-7NSRD8OV:** The 100x double-scale is STRUCTURAL — decision: accept + document (49f8225)
+- Unstick two cards whose blocker is terminal; correct a third's half-satisfied gate (ee76b65)
+- **TRDD-WMQQYLSZ:** Re-scoped and closed — the sweep it proposed is NOT owed (545dd0f)
+- **TRDD-UQW5IOAE:** Two-layer test met; the box's own pointer found the bug. todo -> testing (6aac292)
+- **TRDD-UQW5IOAE:** The nudge HAS fired — 22 times — but none of it counts yet (6474f93)
+
+### Features
+
+- **security:** Gitignore-coverage detector (TRDD-6WM4BFKF) + fix a discarded awaiting_user (e607e95)
+- **oauth:** The login nudge reaches a HUMAN — notify channel + proactive window (TRDD-GZXTSJSR P1) (cf9fb7a)
+
+### Miscellaneous Tasks
+
+- Refresh the stale wikimem index; record LFSWY0C6's five-day recurrence (62d72d0)
+
+### Performance
+
+- **memgrep:** Lint the page text in place instead of rebuilding it per file (e1aff71)
+- **tests:** Pass fixture scripts to /bin/sh as DATA — 10.30s -> 2.80s in one file (TRDD-WMQQYLSZ) (2cbb8a9)
+
+### Testing
+
+- **bench:** Make the corpus generator's call ceiling and concurrency tunable (TRDD-VAWIKRK2) (e007196)
+- **bench:** Commit the fresh BLIND corpus from the 2026-08-21 run (TRDD-VAWIKRK2) (9690e5f)
+- **memory:** Classify page-unclosed-fence in the lint coverage table (e74fa00)
+- **bench:** Mask contiguous credential shapes at corpus assembly (8284944)
+- **bench:** Per-class regression floors for the five fixed rules + correct my own recall claim (TRDD-VAWIKRK2) (76ad2f8)
+- **terminal:** Assert detachment by causality, not by clock — category C (TRDD-7NSRD8OV) (4b53cdb)
 ## [3.3.26] — 2026-08-21
 
 ### Bug Fixes
@@ -11,6 +164,10 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - **memory:** Record that the daemon runs from a STAGED import closure, not the plugin cache (7d27ef4)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.3.26 (ce03b9c)
 ## [3.3.25] — 2026-08-20
 
 ### Bug Fixes
