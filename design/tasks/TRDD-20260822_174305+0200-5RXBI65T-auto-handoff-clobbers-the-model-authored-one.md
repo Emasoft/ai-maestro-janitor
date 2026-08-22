@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: The auto-composed handoff overwrites the model-authored one at the same path
 column: todo
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T22:59:10+0200
+updated: 2026-08-22T23:05:01+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -60,22 +60,55 @@ had said "do NOT guess it; instrument it", and I answered it with a better-sourc
 committed it as fact (`2994469a`).**
 
 **The settling evidence: `.janitor/logs/external-clear.log` contains ZERO lines dated
-2026-08-22** (file mtime 2026-08-20T08:21). `main()` logs on every path that reaches the write —
-`fired:` (:430, immediately after `atomic_write` at :428), `handoff degraded to template` (:317),
-`handoff violates the concision contract` (:419), `declined:` (:413). None of them fired that
-day. **So `external_handoff_clear` did not write `agent-handoff.md` at 17:38 on 2026-08-22, and
-F2's premise — that the clobbering write came from this script — is unsupported.** F1's
-attribution of the clobber inherits that doubt: the unconditional `atomic_write` at :428 is real
-and dangerous, but it is not shown to be what happened on 08-22. *(Bound on this evidence: a run
-whose verdict is HOLD logs nothing, so silence does not prove the script never RAN — only that it
-never reached the write.)*
+2026-08-22** (file mtime 2026-08-20T08:21). **F2's premise — that the clobbering write came from this script — is UNSUPPORTED. That is the
+whole claim; the stronger "it did NOT write" is NOT provable from these logs and is not asserted.**
+F1's attribution inherits the same doubt: the unconditional `atomic_write` at :428 is real and
+dangerous, but nothing positively places it at 17:38 on 08-22.
+
+*What the silence does and does not bound* (corrected — the first version of this paragraph said
+silence proves the script "never reached the write", which is off by two statements in the
+direction that matters): `fired:` is at **:430**, `atomic_write` at **:428**, `_fire` at **:429**
+in between. So silence proves only that no run reached **:430**. A run that wrote at :428 and then
+died inside `_fire` — which spawns a chain against a resolved pane, an entirely ordinary place to
+raise — produces EXACTLY the observed evidence: a clobbered file, no `fired:` line, untouched log
+mtime. That scenario is F1 verbatim, so this evidence cannot exclude it.
+
+*What narrows it further, from the other logged surfaces:*
+- `handoff degraded to template` (:317) and the `summary:` progress lines are emitted **inside
+  `_compose`, BEFORE the write**. Zero on 08-22 ⇒ no run reached the summary branch that day.
+  The residual hole is a run with `use_llm_ext()` false or an empty transcript, which skips that
+  branch and logs nothing pre-write.
+- The daemon ran task **`cold-cache-clear` 190 times on 08-22** — including 17:34:48→17:34:55 and
+  17:39:55→17:40:02, which BRACKET the 17:38:10 mtime without covering it. Every run completed in
+  3-11 s, against the 25m41s a real fire took on 08-20. (A detached child could outlive its
+  parent's "done" line, so this narrows rather than closes.)
+- **Independent of `_LOG` entirely:** `_fire` (:351) writes its directive as
+  "…(link-only handoff, auto-composed…"; the `resume-directive.txt` found on disk read
+  "(rich agent handoff)". Different text ⇒ that directive was not written by `_fire`. Limit: a
+  crash between :428 and :429 would leave a prior writer's directive intact, so this evidences
+  :429, not :428. *(Restored after being wrongly discarded — it had been rejected on the grounds
+  that `_fire` sits on "the path shown never to have run", which used the disputed conclusion to
+  throw out the one piece of evidence that did not depend on it.)*
 
 **What survives, and is now EMPIRICAL rather than deduced:** the compose-blocks-for-tens-of-
-minutes mechanism is real, and the log proves it on a different date —
-`2026-08-20T08:05:48 summary: transient — timed out after 600s; retrying in 6s` →
-`08:21:29 summary: ok on attempt 2` → `08:21:29 fired:`. `_compose` was inside the retry loop for
-~26 minutes on that run, with `now_iso` and the cards already captured. So the staleness hazard
-below is genuine; only its use to explain the 17:38 observation is withdrawn.
+minutes mechanism is real, measured on 08-20, with **both ends logged by the launcher** so no
+back-dating inference is needed:
+
+```
+cold-cache-clear.log  07:55:48  watcher started (blocking)
+external-clear.log    08:05:48  summary: transient — timed out after 600s; retrying in 6s
+external-clear.log    08:21:29  summary: ok on attempt 2   →   fired:
+cold-cache-clear.log  08:21:29  watcher exited rc=0 — session start released
+```
+
+**25m41s wall-clock**, start to exit. The two `summary:` lines alone are 15m41s apart — quote the
+launcher's pair, not that subtraction, or a reader recomputes 15m41s and concludes the figure was
+inflated. "`_compose` was blocked" is sound rather than inferred: those `summary:` lines come from
+the `log=` callback passed *into* `summarize_with_retry` from inside `_compose`, so everything
+between them is on that call stack, with `now_iso` and the cards already captured.
+
+So the staleness hazard below is genuine; only its use to explain the 17:38 observation is
+withdrawn.
 
 Two further proxy reads in the retracted reasoning, worth keeping as guardrails: I quoted
 `DEFAULT_SUMMARY_DEADLINE_S = 2600` as the effective value when `summary_deadline_s()` prefers
@@ -146,6 +179,26 @@ before building.**
       that survives a clear, so a regression here is unrecoverable by construction)
 
 ## Notes and lessons learned
+
+**Three proxy reads in one session, on ONE question, each one the fix for the last.** Worth the
+space because the shape survived every correction and only changed disguise:
+
+1. **A code comment for the code.** F2's original mechanism guess, taken from `dispatch.py`'s
+   prose about who consumes what.
+2. **An absence of log lines for the absence of an event.** The retraction that replaced (1)
+   asserted "the script did not write the file" from silence in `_LOG` — while the log call sits
+   at :430 and the write at :428, so the silence could not speak to the write at all. *A
+   retraction is not automatically sounder than what it retracts.*
+3. **A script name for a task name.** Checking whether the daemon was a second launcher, I ran
+   `grep -c "external_handoff_clear\|external-clear" daemon.log` → **0**, and read that as "the
+   daemon never launches it". The daemon names the chore **`cold-cache-clear`** — **380 hits**,
+   190 invocations on the day in question. Enumerating the distinct `task '<name>'` values found
+   in one command what grepping for the name I expected could not.
+
+**DO NOT** grep a log for the name of the *implementation* and conclude anything from zero hits.
+**DO** enumerate the identifiers the log actually uses first (`grep -o "task '[a-z-]*'" | sort
+-u`), then search within those. A zero-hit grep is evidence about your search term before it is
+evidence about the world.
 
 The operational lesson, which applies before any code changes: **`.janitor/state/agent-handoff.md`
 is not durable storage.** It is gitignored and has an automatic second writer. Anything that must
