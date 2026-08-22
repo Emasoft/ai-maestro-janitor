@@ -1,9 +1,9 @@
 ---
 trdd-id: 4GQ94FNJ
 title: The scope-leak detector is blind to publish-globally, so a published page's leak reads as a one-project problem
-column: dev
+column: human_review
 created: 2026-08-22T16:20:25+0200
-updated: 2026-08-22T16:20:25+0200
+updated: 2026-08-22T17:04:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -14,7 +14,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [52]
-implementation-commits: []
+implementation-commits: [9818c205]
 ---
 
 # `memory-scope-leak` must know a page is published — and must refuse an identity key beside the flag
