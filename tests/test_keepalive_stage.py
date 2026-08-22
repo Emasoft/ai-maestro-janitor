@@ -15,6 +15,14 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+# ONE bound, two guards. This number was written out twice — 55 in the balloon guard AND 55 in
+# the pattern-lib guard — so raising it in the obvious place left the other still failing, which
+# is how the same rule ends up with two spellings that drift (TRDD-K3PN7QW2's lesson, and the
+# same shape as the private `_DEADLINE_SLACK` in test_daemon_integration).
+# The full raise history and WHY each module legitimately joined lives on
+# `test_closure_is_bounded_and_excludes_pattern_libs` — the one place it is explained.
+_CLOSURE_MAX = 65
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import keepalive_stage  # type: ignore[import-not-found]  # noqa: E402
@@ -70,9 +78,23 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
     because tests run from the repo. Shipped in 3.3.25, caught only by watching the live
     daemon. Keeping this number down by NOT importing is how the feature breaks, so the
     bound is raised rather than defended.
+
+    55 -> 65 when the C3 re-pin safeguard landed (TRDD-ZM5LZ24Y, USER decision #8,
+    2026-08-22). Biggest single jump so far — FIVE modules, measured 51 -> 56 — so name them,
+    because a jump this size is exactly what this bound exists to make someone look at:
+    `task_integrity_repin` files a SELFINT-004 ticket when the trust anchor cannot advance,
+    and the ticket machinery is `issue_catalog` -> `tickets` -> `ticket_proposal` ->
+    `trdd_common`, plus a package `__init__`. The import is already function-local, on the
+    escalation path only; `daemon_closure` follows those too, and it is RIGHT to — under
+    launchd the daemon runs from the staged copy, so a lazy import of an unstaged module
+    would raise at the exact moment the safeguard is supposed to speak. That is the
+    `gh_notify_inbox` failure above re-run: a chore that logs success and does nothing.
+
+    Headroom to 65 rather than a nudge to 56, per the convention set at 45. The sharp
+    assertion is still the pattern-lib check below and is unaffected — 0 leaked at 56.
     """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 55, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= _CLOSURE_MAX, f"closure unexpectedly large: {len(closure)}"
     leaked = [p.name for p in closure if p.name.endswith("_patterns.py")]
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 
@@ -85,7 +107,7 @@ def test_closure_excludes_detectors_and_reuses_wake_modules() -> None:
     FAILS the build instead of letting the daemon crash-loop on a bloated stage exactly in the
     all-sessions-down scenario the keepalive exists for."""
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 55, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= _CLOSURE_MAX, f"closure unexpectedly large: {len(closure)}"
     detectors = [str(p) for p in closure if "detectors" in p.parts]
     assert not detectors, f"detector modules leaked into the L0 daemon closure: {detectors}"
     assert not [p.name for p in closure if p.name.endswith("_patterns.py")]
