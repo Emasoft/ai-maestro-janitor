@@ -99,6 +99,40 @@ def _last_touched_epoch(path: Path, project_root: Path) -> int:
     return state.file_mtime(path)
 
 
+def _autofix_frontmatter(path: Path) -> str | None:
+    """Repair `path`'s frontmatter prelude in place; return what was removed, or None.
+
+    The return value is a SHORT human label of the removed bytes ("a UTF-8 BOM", "2 blank
+    lines"), not the bytes themselves — the drift line quotes it, and the bytes are by
+    definition invisible, so echoing them would print nothing useful and risk pasting a BOM
+    into a terminal.
+
+    FAILS SILENT, on purpose. An unreadable or unwritable card is not a repair opportunity,
+    and a detector that raised here would take the whole heartbeat down over one bad file —
+    turning a cosmetic finding into an outage. It simply declines, and the notify path below
+    still reports the defect, so nothing is lost by the decline.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    fixed = trdd_common.repair_frontmatter_prelude(text)
+    if fixed is None:
+        return None
+    removed = text[: len(text) - len(fixed)]
+    parts = []
+    if removed.startswith(trdd_common.BOM):
+        parts.append("a UTF-8 BOM")
+    blanks = removed.lstrip(trdd_common.BOM).count("\n")
+    if blanks:
+        parts.append(f"{blanks} blank line{'s' if blanks != 1 else ''}")
+    try:
+        state.atomic_write(path, fixed)
+    except OSError:
+        return None
+    return " and ".join(parts) or "leading whitespace"
+
+
 def main() -> int:
     state.init_state()
     # Context gate (TRDD-db169d9e R1): TRDD enforcement is an ai-maestro/Emasoft
@@ -143,6 +177,26 @@ def main() -> int:
             uid = trdd_common.extract_uid(f.name)
             if defect is not None and uid is not None:
                 tag = " (local)" if scope == trdd_common.LOCAL else ""
+                # AUTOFIX LANE (USER decision #12, 2026-08-22): formatting is repaired, content
+                # is only ever reported. `repair_frontmatter_prelude` returns non-None ONLY for
+                # the two cases where the removed bytes carry no assertion (a BOM, blank lines),
+                # so the repaired card says exactly what it said before — that is what makes
+                # acting without asking defensible here and not for the sibling defects, which
+                # all need a human to decide something. `updated:` is deliberately NOT bumped:
+                # the board sorts on it, and a repair that changes no fact must not reorder it.
+                fixed = _autofix_frontmatter(f) if state.autofix_enabled() else None
+                if fixed is not None:
+                    line = dedupe.emit_once(
+                        seen,
+                        f"frontmatter@{uid}",
+                        f"[trdd-drift] TRDD-{uid[:8]}{tag} unreadable frontmatter AUTOFIXED: "
+                        f"{state.sanitize_for_drift_line(fixed)} removed from above the YAML "
+                        f"block, which now opens on line 1. No assertion changed; `updated:` "
+                        f"deliberately left alone. `/janitor-autofix-off` to stop this.",
+                    )
+                    if line is not None:
+                        print(line)
+                    continue
                 # `defect` embeds a slice of line 1 — author-controlled text.
                 line = dedupe.emit_once(
                     seen,

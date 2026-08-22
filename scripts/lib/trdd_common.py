@@ -409,6 +409,49 @@ def frontmatter_defect(head: str) -> str | None:
     return f"frontmatter does not open on line 1 (line 1 is {first[:48]!r})"
 
 
+def repair_frontmatter_prelude(text: str) -> str | None:
+    """`text` with meaningless bytes before the frontmatter removed, or None when this
+    file is not a case that can be repaired MECHANICALLY (USER decision #12, 2026-08-22).
+
+    The USER's rule is that TRDD/PRRD/SPEC **formatting** errors are always autofixed while
+    their **content** is always notify-only, so the whole design problem is drawing that line
+    somewhere a machine can be trusted with. It is drawn here at the narrowest possible place:
+    this removes a UTF-8 BOM and whitespace-only lines that sit above the opening `---`, and
+    NOTHING else. Both are invisible to a reader and carry no assertion, so the repaired file
+    says exactly what the original said — which is the entire safety argument, and the reason
+    the check below is an equality on the surviving bytes rather than a judgement call.
+
+    Everything else `frontmatter_defect` can report is deliberately left to a human:
+      * `file is empty` — nothing to repair.
+      * `frontmatter opens on line 1 but never closes` — the fix requires knowing where the
+        author meant it to end, and a guess silently re-partitions the file into frontmatter
+        and body at a boundary nobody chose.
+      * a real line above the block (the TRDD-WEBA1RMF case, a stray `# title`) — that line is
+        CONTENT. Deleting it destroys an assertion, and moving it means deciding where it
+        belongs. Either way a machine would be answering a question only the author can.
+
+    NOTE FOR THE CALLER: a repair that changes no fact MUST NOT bump `updated:` (TRDD rule §7)
+    — the board sorts on that field, so touching it here would silently reorder every card this
+    ever fixes. Returning only the repaired text, with no frontmatter rewrite, is what makes
+    that impossible rather than merely discouraged.
+    """
+    if FRONTMATTER_RE.match(text):
+        return None  # already well-formed — nothing to do
+    stripped = text.lstrip(BOM)
+    while True:
+        line, sep, rest = stripped.partition("\n")
+        if not sep or line.strip():
+            break
+        stripped = rest
+    if stripped == text or not FRONTMATTER_RE.match(stripped):
+        # Either there was nothing removable, or removing it did not actually produce a
+        # parseable file — in which case the real defect is something else and this is not
+        # our case. Never return a partial "improvement": a file that still fails to parse
+        # has been rewritten for nothing, and the next reader cannot tell it was touched.
+        return None
+    return stripped
+
+
 def frontmatter_defect_for(path: Path) -> str | None:
     """File-reading wrapper around `frontmatter_defect`. None on a read error.
 
