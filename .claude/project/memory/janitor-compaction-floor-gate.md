@@ -1,8 +1,8 @@
 ---
 name: janitor-compaction-floor-gate
-description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything"
+description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now"
 ocd: 2026-07-17
-lmd: 2026-08-18
+lmd: 2026-08-23
 metadata:
   node_type: memory
   type: project
@@ -95,6 +95,75 @@ Blast radius measured across 19 project handoffs on this host: 1 poisoned. Full 
 TRDD-IFZQ98BA. The upstream half is llm-externalizer's `driver.ts:996-997` prompt, whose
 "Your output REPLACES the transcript ... it is a handoff, not a report" reads as injection-shaped
 to a safety-tuned model; that reword is theirs, and they have it.
+
+
+
+^ATOM-Q656-7J9E [desc: "2026-08-23: the HARNESS no longer compacts — autoCompactEnabled false, so a full window is a HARD ERROR and only the janitor's triggers prevent it", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+
+**The harness does not compact any more.** `"autoCompactEnabled": false` is set in
+`~/.claude/settings.json` (owner, 2026-08-23, TRDD-79LXF6PJ). Every compaction is the janitor's
+external clear, its payload produced by `llm-ext session-summary` — free models, out of process,
+zero tokens from the session being compacted.
+
+**The consequence that bites: a full window is now a HARD ERROR, not a compaction.** The docs are
+explicit — the session stops at the boundary, no automatic recovery (`/compact` still works by
+hand). So the janitor's triggers are the ONLY thing between a session and a hard stop, and until
+2026-08-23 all four (`next-fire-misses`, `long-idle`, `cache-certain-expired`, `resumed-cold`)
+were IDLE or CACHE conditions. **A busy session — working, cache warm, never idle — was
+structurally unreachable by every one of them.** `min_context_tokens()` is a FLOOR ("nothing worth
+reclaiming"), never a high-water mark; reading it as protection is the trap.
+
+`TRIGGER_CONTEXT_PRESSURE` closes that and is checked FIRST — the other four are economies (avoid
+a cold-cache write), this one is survival. It does NOT outrank the safety vetoes: `awaiting_user`
+still wins, because a context-limit error is recoverable by the user and a discarded question is
+not. High-water resolves `CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER` →
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` → **0 = DISABLED**; no hardcoded default, because windows differ
+~5x between models. **0 means a busy session has no backstop** — check before assuming coverage.
+
+
+^ATOM-LMYC-WI62 [desc: "the clear cooldown is 300s not 2h — min_context was always the real repeat-guard, and 2h suppressed the very cache-expired fires it was meant to allow", keywords: clear_cooldown_too_long cache_expired_but_nothing_happened why_did_the_janitor_not_clear_after_the_cache_died cooldown_suppressed_the_clear compacting_it_twice DEFAULT_CLEAR_COOLDOWN_SECONDS, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+
+**The clear cooldown is 300s, not the 7200s it was** (owner, 2026-08-23: *"a cache can expire at
+any time.. 5 minutes is enough.. the 300k boundary already protects against useless
+compactions"*).
+
+The 2h encoded a MISCONCEPTION: that the cooldown was what stopped a cleared session clearing
+again, so it had to outlast any re-fattening. It never did that job — `min_context` (300k) does,
+vetoing ahead of every trigger, and a just-cleared session sits an order of magnitude below it, so
+a second clear is impossible on size alone. The cooldown only has to cover the gap between the
+chain firing and the context measurement catching up: seconds.
+
+**And 2h was ACTIVELY HARMFUL once the cache-expired trigger existed.** A prompt cache dies on its
+own schedule, so a session whose cache expired 20 minutes after a clear burned a full
+cache-creation write on its whole context and then waited out 100 more minutes before the janitor
+was permitted to act — the cooldown suppressing precisely the fires that trigger was added to
+catch. A guard aimed at a problem another guard already solved, blocking the one case it was never
+meant to touch.
+
+Pinned as a VALUE. The pre-existing `test_clear_cooldown_suppresses_a_repeat` computes its
+boundary FROM the constant, so it passes at any value and would stay green if 7200 returned — it
+pins the mechanism, never the decision.
+
+
+^ATOM-AUCL-C04J [desc: "the post-clear payload is ACTIVE SKILLS in full then the llm-ext summary; no summary means NO CLEAR, reversing the earlier always-clear ruling", keywords: what_survives_a_clear_now no_handoff_after_the_clear skills_missing_after_compaction summary_references_a_skill_I_no_longer_have why_did_the_janitor_decline_to_clear no_summary_no_clear empty_payload_declined, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+
+**The post-`/clear` payload is: ACTIVE SKILLS in full, THEN the `llm-ext session-summary`.** The
+order is a requirement, not a preference (owner, 2026-08-23) — the summary describes a session
+that had those skills loaded, so it REFERS to them; placed after it, they arrive too late to
+resolve references the reader has already hit.
+
+"Active" means INVOKED IN THAT SESSION, not every installed skill — the broad reading injects tens
+of thousands of tokens the session never touched, defeating the clear. `lib/active_skills.py`
+extracts them from the transcript, and matches TWO shapes: a `Skill` tool call AND
+`<command-name>/plugin:skill</command-name>`. **A first draft looked only for the tool call and
+found ZERO in a session that had visibly run two skills** — slash-invoked skills never produce
+one. Resolution IS the filter: `/clear` and `/reload-plugins` share that exact shape, and a name
+survives only if it resolves to a `SKILL.md`, so built-ins drop out with no denylist to maintain.
+
+**NO SUMMARY MEANS NO CLEAR.** This REVERSES the 2026-08-13 ruling that the clear must succeed
+unconditionally. That ruling was written when a network-free composed template always existed, so
+"degrade" meant a smaller handoff. The template is retired, so an empty summary means NOTHING
+survives: clearing blind costs the work, declining costs one full-price turn.
 
 ## Governed by
 
@@ -229,6 +298,43 @@ Measuring beats reasoning on this one. With a probed 60-min cache TTL and a `*/5
 
 ## Superseded
 
+
+^ATOM-6CVT-218G [desc: "2026-08-23: the HARNESS no longer compacts at all — autoCompactEnabled false, the janitor clears via llm-ext, and a busy session needs the new context-pressure trigger or it dies at the boundary", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared clear_cooldown_too_long cache_expired_but_nothing_happened, type: project, ocd: 2026-08-23, lmd: 2026-08-23, status: superseded, superseded-by: ATOM-Q656-7J9E]
+
+**The harness does not compact any more. On this machine, `"autoCompactEnabled": false` is set in
+`~/.claude/settings.json`** (owner directive 2026-08-23, TRDD-79LXF6PJ). Every compaction is now
+the janitor's external clear, and its payload is produced by `llm-ext session-summary` — free
+models, out of process, zero tokens from the session being compacted.
+
+**The consequence that bites: with auto-compact off, a full window is a HARD ERROR, not a
+compaction.** The docs are explicit — the session stops at the boundary and there is no automatic
+recovery (`/compact` still works by hand). So the janitor's triggers are now the ONLY thing
+standing between a session and a hard stop, and until 2026-08-23 all four of them
+(`next-fire-misses`, `long-idle`, `cache-certain-expired`, `resumed-cold`) were IDLE or CACHE
+conditions. **A busy session — working, cache warm, never idle — was structurally unreachable by
+every one of them.** `min_context_tokens()` is a FLOOR ("nothing worth reclaiming"), never a
+high-water mark; reading it as protection is the trap.
+
+`TRIGGER_CONTEXT_PRESSURE` closes that, and is checked FIRST: the other four are economies (avoid
+paying for a cold cache), this one is survival. It does NOT outrank the safety vetoes —
+`awaiting_user` still wins, because a context-limit error is recoverable by the user and a
+discarded question is not. Its high-water resolves
+`CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER` → `CLAUDE_CODE_AUTO_COMPACT_WINDOW` → **0 =
+DISABLED**. There is deliberately no hardcoded default: windows differ ~5x between models, so a
+constant would clear a 1M session five times too early or fire far too late on a 200K one. **0
+means a busy session has no backstop at all** — check it before assuming coverage.
+
+The policy, all three pinned by tests:
+
+    context >= high-water                                  -> clear via llm-ext
+    cache expired AND context > 300k AND >=5min since last -> clear via llm-ext
+    awaiting a human decision                              -> never
+
+The cooldown moved 2h -> **300s** the same day. The 2h assumed the cooldown was what stopped a
+cleared session re-clearing; it never was — `min_context` (300k) is, and a just-cleared session
+sits an order of magnitude below it. Worse, 2h SUPPRESSED THE VERY FIRES the cache-expired trigger
+exists to catch: a cache dies on its own schedule, so a session expiring 20 minutes after a clear
+paid a full cache-creation write and then waited out 100 more minutes.
 
 ^ATOM-MK02-SA6C [desc: "the handoff that authorised a destructive clear was never validated — 'summary: ok' only ever meant the process printed something", keywords: handoff_was_a_refusal compaction_cleared_my_session_and_the_handoff_was_useless summary_ok_but_the_summary_was_garbage model_refused_the_compaction agent-handoff.md_contains_a_lecture externalized_compaction_lost_my_work exit_0_but_wrong_output llm-ext_returned_a_refusal, type: project, ocd: 2026-08-18, lmd: 2026-08-18, status: superseded, superseded-by: ATOM-V42V-4CJO]
 

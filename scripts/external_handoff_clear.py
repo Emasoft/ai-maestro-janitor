@@ -14,8 +14,12 @@ today the model does all three. Here:
 
   1. DECIDE  — `external_clear.should_clear_externally`, from files the session already writes
      (transcript mtime, `ttl-regime.json`, `armed-cadence.cron`, the presence breadcrumb).
-  2. COMPOSE — the handoff is built from on-disk facts (TRDD STATE blocks, git log, the findings
-     ledger). No model, no tokens. `--llm-ext` upgrades the prose; the template is what ships.
+  2. COMPOSE — the ACTIVE SKILLS in full, then the `llm-ext session-summary`. Zero tokens from
+     THIS session (llm-ext runs on its own free models, out of process), which is what "zero
+     turn" means — not that no model is involved. **No summary means NO CLEAR** (TRDD-79LXF6PJ):
+     the composed handoff that used to be the network-free fallback is gone, so an empty payload
+     would clear a session with nothing to resume from. Declining costs a full-price turn;
+     clearing blind costs the work.
   3. TYPE    — `clear_trigger`'s ALREADY-RATIFIED verified injection chain, reused verbatim by
      spawning its `--__chain` child with a payload we build. Nothing in `clear_trigger` had to
      change: `_run_chain_payload` takes the pane, the state dir and the directive as DATA, and
