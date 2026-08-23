@@ -2141,7 +2141,11 @@ fn lint_min_severity_gates_the_exit_code_not_the_report() {
     let d = TempDir::new("lint-severity");
     d.write(
         "info_only.md",
-        "---\nname: info-only\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\nBody.\n\n## Notes and lessons learned\n[^1]: an uncited page-level lesson.\n",
+        // The description must clear the 15-distinct-phrase gate, or the fixture carries an ERROR
+        // of its own and stops being INFO-only — which is the one property this test measures.
+        &format!(
+            "---\nname: info-only\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody.\n\n## Notes and lessons learned\n[^1]: an uncited page-level lesson.\n"
+        ),
     );
     let (o, code) = run_with_code(&["lint", d.as_str()]);
     assert_eq!(code, 0, "INFO-only findings must NOT fail the gate:\n{o}");
@@ -3174,9 +3178,12 @@ fn add_atom_supersedes_chains_across_multiple_generations() {
         assert!(text.contains(id) && text.contains(body), "generation {id} survives:\n{text}");
     }
     // Exactly ONE live (non-superseded) atom marker remains — v3.
+    // Match the `keywords:` PROP, not `[keywords:` — the prop block leads with `desc:` now that
+    // atoms carry one, so anchoring on the bracket silently matched zero lines and the assertion
+    // read "0 live atoms" as a pass-shaped failure.
     let live_markers = text
         .lines()
-        .filter(|l| l.trim_start().starts_with('^') && l.contains("[keywords:") && !l.contains("status:"))
+        .filter(|l| l.trim_start().starts_with('^') && l.contains("keywords:") && !l.contains("status:"))
         .count();
     assert_eq!(live_markers, 1, "no duplicate LIVE atom is left behind:\n{text}");
 
@@ -3403,9 +3410,18 @@ fn recall_does_not_flag_ordinary_symptom_phrases_as_jargon() {
 fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
     let d = TempDir::new("addlesson-gap");
     let page = d.join("p.md");
+    // A 15-phrase description (the page gate) about a DIFFERENT subject than the lesson keywords
+    // below — this test needs a real, gate-passing description that still shares no word with
+    // them, so the gap it measures is a genuine coverage gap and not a malformed fixture.
+    const GAP_PAGE_DESC: &str = "the printer jams on every second sheet / \
+         why does paper feed crooked / the printer pulls two sheets at once / \
+         ink smears across the sheet / how do I clear a jam / the rollers grab nothing / \
+         the tray keeps reporting empty / printer offline after sleep / spooler queue stuck / \
+         the driver refuses to install / duplex module grinds / toner low warning will not clear / \
+         where is the jam sensor / printouts come out blank / the lid latch keeps popping open";
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "example page for testing lesson keyword coverage",
+        "--name", "p", "--description", GAP_PAGE_DESC,
         "--type", "reference",
     ]);
     let atom_out = run_stdin(
@@ -3422,7 +3438,7 @@ fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
     let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
 
     // Every phrase below deliberately shares NO word with the page's `description:`
-    // ("example page for testing lesson keyword coverage") — that gap is this test's subject.
+    // (`GAP_PAGE_DESC`, above) — that gap is this test's subject.
     let (out, err, code) = run_stdin_full(
         &[
             "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
@@ -3466,9 +3482,19 @@ fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
 fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
     let d = TempDir::new("addlesson-covered");
     let page = d.join("p.md");
+    // 15 phrases (the page gate), the FIRST of which carries every word the lesson keywords below
+    // are covered by — the extra phrases only widen the surface, so coverage cannot be lost.
+    const COVERED_PAGE_DESC: &str = "keychain rotation retry cap guessed variable name / \
+         where are the credentials stored on this machine / the macos keychain lookup fails / \
+         the secret is not in the environment / how do I rotate the stored token / \
+         the stored secret cannot be read / the credential prompt keeps reappearing / \
+         the token expired without warning / the rotation schedule is unclear / \
+         which limit applies before it gives up / it was read off the wrong constant / \
+         a plaintext secret in a config file / why does the keychain dialog open / \
+         how many attempts does it make / what does the default fall back to";
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "keychain rotation retry cap guessed variable name",
+        "--name", "p", "--description", COVERED_PAGE_DESC,
         "--type", "reference",
     ]);
     let atom_out = run_stdin(
@@ -3485,7 +3511,7 @@ fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
     let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
 
     // Every phrase below shares AT LEAST one word with the page's `description:`
-    // ("keychain rotation retry cap guessed variable name") — that coverage is this test's subject.
+    // (`COVERED_PAGE_DESC`, above) — that coverage is this test's subject.
     let (_out, err, code) = run_stdin_full(
         &[
             "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
