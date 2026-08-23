@@ -1,6 +1,6 @@
 ---
 name: janitor-compaction-floor-gate
-description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now"
+description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now"
 ocd: 2026-07-17
 lmd: 2026-08-23
 metadata:
@@ -98,7 +98,7 @@ to a safety-tuned model; that reword is theirs, and they have it.
 
 
 
-^ATOM-Q656-7J9E [desc: "2026-08-23: the HARNESS no longer compacts — autoCompactEnabled false, so a full window is a HARD ERROR and only the janitor's triggers prevent it", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+^ATOM-Q656-7J9E [desc: "2026-08-23: the HARNESS no longer compacts — autoCompactEnabled false, so a full window is a HARD ERROR and only the janitor's triggers prevent it", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared how_do_I_turn_auto_compact_back_on prompt_is_too_long context_window_full_and_nothing_happened claude_stopped_responding_near_the_limit my_long_session_died_suddenly TRIGGER_CONTEXT_PRESSURE CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER high_water_mark_vs_floor min_context_is_not_protection why_did_my_active_session_never_compact idle_only_triggers_miss_busy_sessions who_owns_compaction_now harness_vs_janitor_compaction disable_auto_compact_settings_json, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
 
 **The harness does not compact any more.** `"autoCompactEnabled": false` is set in
 `~/.claude/settings.json` (owner, 2026-08-23, TRDD-79LXF6PJ). Every compaction is the janitor's
@@ -121,7 +121,7 @@ not. High-water resolves `CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER` →
 ~5x between models. **0 means a busy session has no backstop** — check before assuming coverage.
 
 
-^ATOM-LMYC-WI62 [desc: "the clear cooldown is 300s not 2h — min_context was always the real repeat-guard, and 2h suppressed the very cache-expired fires it was meant to allow", keywords: clear_cooldown_too_long cache_expired_but_nothing_happened why_did_the_janitor_not_clear_after_the_cache_died cooldown_suppressed_the_clear compacting_it_twice DEFAULT_CLEAR_COOLDOWN_SECONDS, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+^ATOM-LMYC-WI62 [desc: "the clear cooldown is 300s not 2h — min_context was always the real repeat-guard, and 2h suppressed the very cache-expired fires it was meant to allow", keywords: clear_cooldown_too_long cache_expired_but_nothing_happened why_did_the_janitor_not_clear_after_the_cache_died cooldown_suppressed_the_clear compacting_it_twice DEFAULT_CLEAR_COOLDOWN_SECONDS 2h_cooldown_too_long five_minute_cooldown janitor_waited_two_hours_to_clear clear_fired_once_then_never_again cache_expired_but_cooldown_blocked_it repeat_clear_guard why_is_there_a_cooldown_at_all min_context_is_the_real_repeat_guard idle_clear_fired_ts CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_COOLDOWN_SECONDS, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
 
 **The clear cooldown is 300s, not the 7200s it was** (owner, 2026-08-23: *"a cache can expire at
 any time.. 5 minutes is enough.. the 300k boundary already protects against useless
@@ -145,7 +145,7 @@ boundary FROM the constant, so it passes at any value and would stay green if 72
 pins the mechanism, never the decision.
 
 
-^ATOM-AUCL-C04J [desc: "the post-clear payload is ACTIVE SKILLS in full then the llm-ext summary; no summary means NO CLEAR, reversing the earlier always-clear ruling", keywords: what_survives_a_clear_now no_handoff_after_the_clear skills_missing_after_compaction summary_references_a_skill_I_no_longer_have why_did_the_janitor_decline_to_clear no_summary_no_clear empty_payload_declined, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+^ATOM-AUCL-C04J [desc: "the post-clear payload is ACTIVE SKILLS in full then the llm-ext summary; no summary means NO CLEAR, reversing the earlier always-clear ruling", keywords: what_survives_a_clear_now no_handoff_after_the_clear skills_missing_after_compaction summary_references_a_skill_I_no_longer_have why_did_the_janitor_decline_to_clear no_summary_no_clear empty_payload_declined skills_not_reinjected_after_clear active_skills_in_full order_of_injection_after_clear skills_before_summary dangling_skill_reference command_name_vs_Skill_tool_call active_skills_extractor slash_invoked_skills_are_invisible resolution_is_the_filter llm_ext_returned_nothing_so_no_clear declined_to_clear_blind post_clear_payload_shape, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
 
 **The post-`/clear` payload is: ACTIVE SKILLS in full, THEN the `llm-ext session-summary`.** The
 order is a requirement, not a preference (owner, 2026-08-23) — the summary describes a session

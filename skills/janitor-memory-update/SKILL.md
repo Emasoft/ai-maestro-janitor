@@ -146,6 +146,11 @@ in a new page):
    additive fact** is authored with `memgrep add-atom --page <page> --keywords
    "<symptom>" --desc "<≤200-char summary>"` (the fact on stdin) — memgrep
    synthesises the `^id [keywords:…]` grammar, so never hand-write the atom marker.
+   **Both flags are hard-gated (owner, 2026-08-23): at least 10 keyphrases and a
+   real `--desc` (24-char floor), or the write is REFUSED.** `recall` ranks on
+   those two fields and never reads the body, so thin metadata is the one defect
+   that cannot be fixed later — only the author knows the phrasings a future
+   session will search with. Do not lower `MEMGREP_MIN_KEYWORDS` to get past it.
    **If instead it SUPERSEDES a statement already on the page** (replaces a value,
    reverses a prior choice), this is not a plain add — apply THE UPDATE INVARIANT:
    the new atom goes up top and the OLD atom is moved down below `## Superseded`,

@@ -2898,6 +2898,37 @@ fn run_stdin_full(args: &[&str], input: &str) -> (String, String, i32) {
     )
 }
 
+/// Like `run_stdin` but sets an extra env var on the child. `add-atom`/`add-lesson` now REFUSE
+/// under `MEMGREP_MIN_KEYWORDS` (default 10) when handed fewer keyphrases — a fixture written
+/// before that floor and pinned to a LITERAL 3-keyword stored-marker string (a round-trip proof
+/// that would break the instant a 4th keyword is spliced in anywhere) opts out via this env var
+/// rather than padding the phrase list with keywords the literal assertion can't accommodate.
+fn run_stdin_env(args: &[&str], input: &str, env_key: &str, env_val: &str) -> String {
+    use std::io::Write;
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let mut child = Command::new(bin)
+        .args(args)
+        .env(env_key, env_val)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn memgrep");
+    child
+        .stdin
+        .take()
+        .expect("stdin handle")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait memgrep");
+    assert!(
+        out.status.success(),
+        "memgrep exited non-zero for {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// Like `run_stdin` but expects a clean NON-zero exit (a refusal — missing page, empty body, …).
 fn run_stdin_fail(args: &[&str], input: &str) {
     use std::io::Write;
@@ -2959,8 +2990,11 @@ fn add_atom_round_trips_through_the_parser_and_index() {
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
         "--name", "p", "--description", "the page recall surface", "--type", "reference",
     ]);
-    // add-atom: body from stdin, a multi-word phrase keyword, a desc + type.
-    let out = run_stdin(
+    // add-atom: body from stdin, a multi-word phrase keyword, a desc + type. The stored marker is
+    // asserted LITERALLY below against exactly these 3 keyphrases, so this call opts out of the
+    // >=10-keyphrase floor (MEMGREP_MIN_KEYWORDS=0) rather than splicing extra phrases into a
+    // fixed-position literal string.
+    let out = run_stdin_env(
         &[
             "add-atom", "--page", page.to_str().unwrap(),
             "--keywords", "rate limit, resume, 429 error",
@@ -2968,6 +3002,7 @@ fn add_atom_round_trips_through_the_parser_and_index() {
             "--type", "reference",
         ],
         "The window already closed — mint a fresh token.",
+        "MEMGREP_MIN_KEYWORDS", "0",
     );
     let id = out.split_whitespace().next().expect("printed id").to_string();
     assert!(id.starts_with("ATOM-"), "printed a canonical id: {out}");
@@ -3023,14 +3058,22 @@ fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
         "--name", "p", "--description", "d", "--type", "reference",
     ]);
     let old_out = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "old, thing"],
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords",
+            "old, thing, retired fact, superseded record, previous version, \
+             old value stored, legacy data point, prior fact recorded, \
+             obsolete information, historical record entry",
+        ],
         "the old fact.",
     );
     let old_id = old_out.split_whitespace().next().unwrap().to_string();
 
     let new_out = run_stdin(
         &[
-            "add-atom", "--page", page.to_str().unwrap(), "--keywords", "new, thing",
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords",
+            "new, thing, refined fact, current record, updated version, \
+             fresh value stored, latest data point, corrected fact recorded, \
+             current information, updated record entry",
             "--supersedes", &old_id,
         ],
         "the refined fact.",
@@ -3076,16 +3119,23 @@ fn add_atom_supersedes_chains_across_multiple_generations() {
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
         "--name", "p", "--description", "d", "--type", "reference",
     ]);
+    // >=10-keyphrase floor (MEMGREP_MIN_KEYWORDS, default 10): every fixture below carries a full
+    // keyphrase list plausibly belonging to its subject, not filler — a future author copying a
+    // fixture copies a compliant one.
+    const CHAIN_KEYWORDS: &str = "chain, thing, multi generation supersession, \
+        version chain history, atom retirement sequence, superseded chain test, \
+        generation tracking id, chain of custody record, provenance chain trace, \
+        sequential supersession chain";
     let v1 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing"],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS],
         "v1 fact.",
     ).split_whitespace().next().unwrap().to_string();
     let v2 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing", "--supersedes", &v1],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--supersedes", &v1],
         "v2 fact.",
     ).split_whitespace().next().unwrap().to_string();
     let v3 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "chain, thing", "--supersedes", &v2],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--supersedes", &v2],
         "v3 fact.",
     ).split_whitespace().next().unwrap().to_string();
 
@@ -3120,7 +3170,13 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
         "--name", "p", "--description", "d", "--type", "reference",
     ]);
     let atom_out = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "keychain creds"],
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords",
+            "keychain creds, macos keychain storage, credential never plaintext, \
+             secret storage location, where are credentials stored, keychain access item, \
+             stored secret lookup, credential retrieval macos, security find generic password, \
+             keychain entry format",
+        ],
         "Creds live in the macOS keychain, never plaintext.",
     );
     let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
@@ -3128,7 +3184,11 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
     let lesson_out = run_stdin(
         &[
             "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
-            "--keywords", "retry cap guessed variable name, max_retries",
+            "--keywords", "retry cap guessed variable name, max_retries, \
+                wrong retry constant name, guessed environment variable, \
+                retry limit misconfigured, max attempts undefined, \
+                incorrect retry cap source, hardcoded retry guess, \
+                retry count wrong constant, environment variable guessed wrongly",
         ],
         "DO NOT read the cap off a guessed variable name, BECAUSE max_attempts does not exist. DO read the constant from the source instead.",
     );
@@ -3313,16 +3373,29 @@ fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
         "--type", "reference",
     ]);
     let atom_out = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "example atom body"],
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords",
+            "example atom body, sample fixture atom, demo atom content, \
+             placeholder atom text, test double atom, mock atom fixture, \
+             illustrative atom sample, scratch atom body, throwaway atom fixture, \
+             stub atom content",
+        ],
         "some atom body text.",
     );
     let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
 
+    // Every phrase below deliberately shares NO word with the page's `description:`
+    // ("example page for testing lesson keyword coverage") — that gap is this test's subject.
     let (out, err, code) = run_stdin_full(
         &[
             "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
             "--keywords",
-            "pure function tests all passed but the guard was never wired",
+            "pure function tests all passed but the guard was never wired, \
+             guard wiring skipped silently, wrong assumption unit test green, \
+             value never actually exercised, broken integration path hidden, \
+             false confidence from pure tests, missing assertion on real wiring, \
+             silent gap between logic and wiring, code path never invoked, \
+             passing suite hides real defect",
         ],
         "DO NOT skip the guard-wiring test, BECAUSE a pure-function pass proves nothing about wiring. DO wire and assert instead.",
     );
@@ -3362,15 +3435,27 @@ fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
         "--type", "reference",
     ]);
     let atom_out = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "keychain creds"],
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords",
+            "keychain creds, macos keychain storage, credential never plaintext, \
+             secret storage location, where are credentials stored, keychain access item, \
+             stored secret lookup, credential retrieval macos, security find generic password, \
+             keychain entry format",
+        ],
         "Creds live in the macOS keychain, never plaintext.",
     );
     let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
 
+    // Every phrase below shares AT LEAST one word with the page's `description:`
+    // ("keychain rotation retry cap guessed variable name") — that coverage is this test's subject.
     let (_out, err, code) = run_stdin_full(
         &[
             "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
-            "--keywords", "retry cap guessed variable name",
+            "--keywords",
+            "retry cap guessed variable name, keychain credential rotation, \
+             retry limit configuration, guessed environment variable, \
+             variable name typo, keychain rotation schedule, retry cap value, \
+             guessed constant name, rotation retry logic, variable cap guess",
         ],
         "DO NOT read the cap off a guessed variable name, BECAUSE max_attempts does not exist. DO read the constant from the source instead.",
     );

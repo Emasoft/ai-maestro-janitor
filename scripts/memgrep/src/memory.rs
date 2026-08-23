@@ -2659,9 +2659,18 @@ struct AddAtomArgs {
     page: PathBuf,
     /// The atom's RECALL SURFACE — a comma-separated key-phrase list (`"rate limit, resume, 429"`).
     /// Each comma item is ONE phrase; internal spaces become `_`. Mandatory: no keywords ⇒ unfindable.
+    /// AT LEAST 10 are required (`MEMGREP_MIN_KEYWORDS`, 0 disables) — write the phrases a FUTURE
+    /// session will search with: the symptom in the user's words, the error text, the identifier or
+    /// env var by name, and the wrong-but-natural guess someone would try first.
     #[arg(long = "keywords")]
     keywords: String,
-    /// Optional one-line prose summary (the LISTING triage surface); ≤200 chars, stored quoted.
+    /// The one-line prose summary — the LISTING TRIAGE SURFACE a `recall` hit shows instead of the
+    /// body; ≤200 chars, stored quoted. REQUIRED (owner, 2026-08-23: the write verbs must refuse a
+    /// command that does not carry enough metadata). It was optional until then, and an atom
+    /// without one surfaces in a listing as a bare id — the reader must open the page to learn
+    /// whether the hit is even relevant, which is the cost the two-hop design exists to avoid.
+    /// State WHAT IS TRUE, not what the atom is filed under: "the cooldown is 300s because
+    /// min_context is the real guard", never "notes on the cooldown".
     #[arg(long = "desc")]
     desc: Option<String>,
     /// Optional atom `type` (a single-word class, e.g. `reference` / `feedback` / `project`).
@@ -2712,6 +2721,8 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
             a.keywords
         );
     }
+    check_keyword_floor(&keywords, "atom")?;
+    check_desc(a.desc.as_deref(), "atom")?;
     let body = read_body_from_stdin()?;
     check_new_body_budget(&body, atom_max_chars(), "atom")?;
 
@@ -2947,6 +2958,30 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     if name.is_empty() {
         anyhow::bail!("--name must not be empty (it is the page's `[[name]]` wikilink slug)");
     }
+    // The page's recall surface, gated exactly like an atom's (owner, 2026-08-23) — and harder,
+    // because this one description has to surface every fact the page will ever hold.
+    let phrases = page_description_phrases(&a.description);
+    let min_p = min_page_phrases();
+    if min_p > 0 && unique_phrases(&phrases).len() < min_p {
+        anyhow::bail!(
+            "--description carries only {} DISTINCT `/`-separated phrase(s); {min_p} is the minimum \
+             (MEMGREP_MIN_PAGE_PHRASES).\nA page description is the recall surface for EVERY fact \
+             the page will hold, so it needs the union of their symptom vocabularies — write \
+             alternative phrasings separated by ` / `, in the words a future session will arrive \
+             with, e.g. \"the janitor compacted my context over and over / why is the context \
+             still huge right after a compaction / what should the threshold be\".",
+            unique_phrases(&phrases).len()
+        );
+    }
+    let dupes = duplicate_phrases(&phrases);
+    if !dupes.is_empty() {
+        anyhow::bail!(
+            "--description repeats {} phrase(s): {:?}. A repeated phrase inflates the count \
+             without adding a way to FIND the page, which is the only thing the count stands for.",
+            dupes.len(),
+            dupes
+        );
+    }
     let description = a.description.trim();
     if description.is_empty() {
         anyhow::bail!("--description must not be empty — it is the PAGE recall surface memgrep ranks on");
@@ -3094,6 +3129,7 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
             a.keywords
         );
     }
+    check_keyword_floor(&keywords, "lesson")?;
     let lesson_text = read_body_from_stdin()?;
     // The lesson text is one logical line (DO NOT … BECAUSE … DO … instead) — collapse any pasted
     // newlines so the `[^N]:` definition stays a single, parser-clean line.
@@ -4247,6 +4283,154 @@ fn atoms_for_lint(text: &str) -> Vec<AtomLintFacts> {
     out
 }
 
+/// The MINIMUM number of keyphrases a new atom or lesson must carry. Env-tunable via
+/// `MEMGREP_MIN_KEYWORDS` (default 10); 0 disables the gate.
+///
+/// WHY THIS ONE REFUSES WHILE THE BODY BUDGET ONLY WARNS — the asymmetry is deliberate, and it
+/// turns on the same reasoning `check_new_body_budget` documents for going the other way.
+///
+/// That budget stopped refusing because decomposition is SEMANTIC work: refusing put the cost on
+/// the author at the moment they had the fact in hand and least appetite for restructuring, and
+/// the measured outcome was not smaller atoms but facts never written down at all. It needed an
+/// owner (the split chore) before a warning could safely replace the gate.
+///
+/// Keyphrases are not that. Listing more of the phrases a future session will search with is
+/// MECHANICAL, takes seconds, and needs no queue and no chore — the author is the only party who
+/// will ever know them, so deferring it means it never happens. And the cost of getting it wrong
+/// is total rather than cosmetic: an oversized atom is still FOUND and still readable, while an
+/// under-keyworded one is simply invisible to `recall`, which ranks on description/keywords and
+/// never on the body. A memory nobody can find does not exist, so this is the one place where
+/// refusing loses less than accepting.
+fn min_keywords() -> usize {
+    std::env::var("MEMGREP_MIN_KEYWORDS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(10)
+}
+
+/// The minimum useful length of an atom/lesson `desc:`. A one-word description is the same
+/// failure as no description — it occupies the triage slot without discharging it.
+const MIN_DESC_CHARS: usize = 24;
+
+/// Minimum `/`-separated phrases in a PAGE `description:` (owner, 2026-08-23). Higher than the
+/// atom floor of 10 because a page's description is the recall surface for EVERY fact it holds:
+/// an atom answers one question, a page answers all of them, so it needs the union of their
+/// symptom vocabularies. Env-tunable via `MEMGREP_MIN_PAGE_PHRASES`; 0 disables.
+fn min_page_phrases() -> usize {
+    std::env::var("MEMGREP_MIN_PAGE_PHRASES")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(15)
+}
+
+/// Split a page `description:` into its `/`-separated symptom phrases, trimmed, blanks dropped.
+/// The convention is load-bearing, not cosmetic: a page description is written as a run of
+/// alternative phrasings a future search might carry, and `/` is what separates them.
+pub fn page_description_phrases(desc: &str) -> Vec<String> {
+    desc.split('/')
+        .map(|s| s.trim().trim_matches('"').trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// The DISTINCT phrases in a list, case-insensitively, first spelling wins.
+///
+/// **Every count in this file measures THIS, never the raw length** (owner, 2026-08-23: "the
+/// check on the number of keywords must be done after deduplicating them"). A raw count is a
+/// proxy for coverage, and the proxy breaks exactly where it matters: twelve keyphrases of which
+/// three repeat is nine ways to find the memory, and a floor checked against twelve passes an
+/// atom that should fail. The duplicate rule and the floor rule are therefore not independent —
+/// the floor is only meaningful on the deduplicated set.
+pub fn unique_phrases(phrases: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    phrases
+        .iter()
+        .filter(|p| seen.insert(p.to_lowercase()))
+        .cloned()
+        .collect()
+}
+
+/// Case-insensitive duplicate detection over a phrase list. Returns the offending phrases.
+///
+/// WHY DUPLICATES ARE A DEFECT AND NOT MERE UNTIDINESS (owner: "10 keywords are useless if they
+/// are all the same"): a count is a proxy for COVERAGE, and a repeated phrase inflates the count
+/// while adding no new way to find the memory. Enforcing only a minimum would therefore be
+/// trivially satisfiable in the exact way that defeats the purpose — the gate would measure
+/// compliance instead of findability.
+pub fn duplicate_phrases(phrases: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut dupes = Vec::new();
+    for p in phrases {
+        let k = p.to_lowercase();
+        if !seen.insert(k) && !dupes.contains(p) {
+            dupes.push(p.clone());
+        }
+    }
+    dupes
+}
+
+/// Enforce the presence and substance of the `desc:` triage surface (owner, 2026-08-23).
+///
+/// A `recall` hit prints `<date> <id> <desc>` and NOTHING of the body — that is the whole point of
+/// the two-hop design. So an atom with no description, or a stub one, forces the reader to open
+/// the page just to discover the hit is irrelevant, and the cheap triage hop stops being cheap.
+/// Refusing here costs the author one sentence they already have in their head.
+fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
+    let d = desc.map(str::trim).unwrap_or("");
+    if d.is_empty() {
+        anyhow::bail!(
+            "--desc is REQUIRED for this {what}: it is the triage surface a `recall` listing shows \
+             INSTEAD of the body, so without it every hit costs a page-open to evaluate.\n\
+             Write what is TRUE, not what the {what} is filed under — \"the cooldown is 300s \
+             because min_context is the real guard\", never \"notes on the cooldown\"."
+        );
+    }
+    if d.chars().count() < MIN_DESC_CHARS {
+        anyhow::bail!(
+            "--desc is only {} chars ({MIN_DESC_CHARS} minimum) — `{d}` is a label, not a triage \
+             surface. A reader seeing it in a listing still cannot tell whether this {what} \
+             answers their question, which is the one job the field has.",
+            d.chars().count()
+        );
+    }
+    Ok(())
+}
+
+/// Enforce `min_keywords()`. Refuses with the count it got, the count it needs, and — the part
+/// that makes it actionable rather than annoying — WHAT KIND of phrase is missing.
+fn check_keyword_floor(keywords: &[String], what: &str) -> Result<()> {
+    let dupes = duplicate_phrases(keywords);
+    if !dupes.is_empty() {
+        anyhow::bail!(
+            "this {what} repeats {} keyphrase(s): {:?}.\nTen identical phrases are one phrase — \
+             the count stands for COVERAGE, so a duplicate satisfies the number while adding no \
+             new way to reach this {what}. Replace each repeat with a genuinely different \
+             phrasing someone might search instead.",
+            dupes.len(),
+            dupes
+        );
+    }
+    let min = min_keywords();
+    // Counted on the DEDUPLICATED set — see `unique_phrases`. Reached only when there are no
+    // duplicates (the check above bails first), so today the two counts agree; counting unique
+    // anyway keeps the floor correct rather than incidentally correct, and keeps this in step
+    // with the lint, which sees pages the write verbs never touched.
+    let distinct = unique_phrases(keywords);
+    if min > 0 && distinct.len() < min {
+        anyhow::bail!(
+            "only {} distinct keyphrase(s) for this {what}; {min} is the minimum (MEMGREP_MIN_KEYWORDS).\n\
+             Keywords are the RECALL SURFACE — `recall` ranks on them and IGNORES the body, so a \
+             thin list makes this {what} unfindable no matter how good its content is.\n\
+             Add the phrases a FUTURE session will arrive with, not the jargon of the fix: the \
+             SYMPTOM in the user's words, the error text, the identifier/env var/flag by name, \
+             the wrong-but-natural guess someone would search first, and the question this \
+             {what} answers.",
+            distinct.len()
+        );
+    }
+    Ok(())
+}
+
 /// The atom-body char budget for the `oversized-atom` lint. Env-tunable via `MEMGREP_ATOM_MAX_CHARS`
 /// (default 1500); 0 disables the check. An atom past this should be DECOMPOSED into smaller atoms.
 /// 1500 was chosen from the live corpus distribution (median 559, p90 1241, p95 1624): it flags only
@@ -4907,6 +5091,47 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 "missing required frontmatter field `description`".into(),
                 "page-no-description",
             ));
+        } else {
+            // The PAGE recall surface, held to a HIGHER bar than an atom's (owner, 2026-08-23:
+            // 15 vs 10). An atom answers one question; a page has to be reachable from any
+            // question its atoms answer, so its description needs the UNION of their symptom
+            // vocabularies. ERROR for the same reason as the atom rules: a page nobody can reach
+            // takes every fact on it down too, and no later pass can reconstruct the phrasings.
+            let desc = fm
+                .get("description")
+                .or_else(|| fm.get("summary"))
+                .map(String::as_str)
+                .unwrap_or("");
+            let phrases = page_description_phrases(desc);
+            let min_p = min_page_phrases();
+            if min_p > 0 && unique_phrases(&phrases).len() < min_p {
+                violations.push((
+                    Severity::Error,
+                    p.clone(),
+                    0,
+                    format!(
+                        "page `description:` carries {} `/`-separated phrase(s), below the \
+                         {min_p} minimum — it is the recall surface for EVERY fact on this page, \
+                         so add the alternative phrasings a future session will arrive with",
+                        unique_phrases(&phrases).len()
+                    ),
+                    "page-description-too-few-phrases",
+                ));
+            }
+            let d_dupes = duplicate_phrases(&phrases);
+            if !d_dupes.is_empty() {
+                violations.push((
+                    Severity::Error,
+                    p.clone(),
+                    0,
+                    format!(
+                        "page `description:` repeats {} phrase(s): {d_dupes:?} — a repeat raises \
+                         the count without widening the set of searches that can find this page",
+                        d_dupes.len()
+                    ),
+                    "page-description-duplicated-phrases",
+                ));
+            }
         }
 
         // Check — `publish-globally:` reconciliation state (read-only report; the fix itself is
@@ -5188,6 +5413,57 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
             // is the BODY. The PROPS block is metadata, not the historical claim, so integrity
             // rules over props (`atom-bad-ocd`, `atom-bad-lmd`, `atom-dropped-props`) still apply
             // to superseded atoms — those are repairable without rewriting what the atom asserted.
+            // KEYWORD FLOOR + DUPLICATES — ERROR tier (owner, 2026-08-23).
+            //
+            // ERROR, not WARN, and the Severity doc is the argument: Error is "corruption or
+            // invisibility: … a lost recall surface". That is precisely this. Unlike
+            // `atom-oversized` (INFO — an oversized atom is still FOUND, still readable, and
+            // its repair is semantic work needing a chore), a thin or repetitive keyword list
+            // makes the atom UNREACHABLE by `recall`, which ranks on keywords and never reads
+            // the body. Nothing downstream can recover it, because only the author ever knew
+            // the phrasings a future session would arrive with.
+            //
+            // Superseded atoms are checked too, deliberately: they remain searchable with
+            // `--include-superseded`, so an unfindable one is still a hole.
+            // Keywords come out of `props_raw` via the SAME parser the rest of the file uses
+            // (`parse_block_props`), never a second ad-hoc split — two parsers for one
+            // grammar is how a lint and a write verb start disagreeing about what a page says.
+            let atom_kw: Vec<String> = parse_block_props(&a.props_raw)
+                .get("keywords")
+                .cloned()
+                .unwrap_or_default();
+            let kw_min = min_keywords();
+            if kw_min > 0 && unique_phrases(&atom_kw).len() < kw_min {
+                violations.push((
+                    Severity::Error,
+                    p.clone(),
+                    a.line,
+                    format!(
+                        "atom `^{}` has {} keyphrase(s), below the {kw_min} minimum — `recall` \
+                         ranks on keywords and never reads the body, so this atom is close to \
+                         unfindable. Add the phrasings a future session will search with.",
+                        a.id,
+                        unique_phrases(&atom_kw).len()
+                    ),
+                    "atom-keywords-too-few",
+                ));
+            }
+            let kw_dupes = duplicate_phrases(&atom_kw);
+            if !kw_dupes.is_empty() {
+                violations.push((
+                    Severity::Error,
+                    p.clone(),
+                    a.line,
+                    format!(
+                        "atom `^{}` repeats {} keyphrase(s): {kw_dupes:?} — a repeat inflates \
+                         the count without adding a way to REACH the atom, which is the only \
+                         thing the count stands for",
+                        a.id,
+                        kw_dupes.len()
+                    ),
+                    "atom-keywords-duplicated",
+                ));
+            }
             let atom_is_superseded = status_from_props(&props) == "superseded";
             if atom_is_superseded {
                 superseded_atom_lines.push(a.line);
@@ -8322,15 +8598,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let dir = lint_tmpdir("clean");
         std::fs::write(
             dir.join("a.md"),
-            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the a page\"\n---\n\
+            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the a page / symptom one / symptom two / symptom three / symptom four / symptom five / symptom six / symptom seven / symptom eight / symptom nine / symptom ten / symptom eleven / symptom twelve / symptom thirteen / symptom fourteen\"\n---\n\
              body cites a lesson.[^1]\nsee [[b]]\n\n## Notes and lessons learned\n\
-             [^1]: [id:ATOM-0000-AAAA, status:valid, keywords:\"the why\", ocd:2026-01-01, \
+             [^1]: [id:ATOM-0000-AAAA, status:valid, keywords:\"the why, second phrase, third phrase, fourth phrase, fifth phrase, sixth phrase, seventh phrase, eighth phrase, ninth phrase, tenth phrase\", ocd:2026-01-01, \
              lmd:2026-01-02] the why.\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("b.md"),
-            "---\nname: b\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the b page\"\n---\n\
+            "---\nname: b\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the b page / symptom one / symptom two / symptom three / symptom four / symptom five / symptom six / symptom seven / symptom eight / symptom nine / symptom ten / symptom eleven / symptom twelve / symptom thirteen / symptom fourteen\"\n---\n\
              body.\nsee [[a]]\n\n## Notes and lessons learned\n",
         )
         .unwrap();
@@ -8367,7 +8643,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
         std::fs::write(
             dir.join("page.md"),
-            "---\nname: page\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"a real page\"\n---\n\
+            "---\nname: page\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"a real page / symptom one / symptom two / symptom three / symptom four / symptom five / symptom six / symptom seven / symptom eight / symptom nine / symptom ten / symptom eleven / symptom twelve / symptom thirteen / symptom fourteen\"\n---\n\
              body.\n\n## Notes and lessons learned\n",
         )
         .unwrap();
