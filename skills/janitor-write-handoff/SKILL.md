@@ -1,6 +1,6 @@
 ---
 name: janitor-write-handoff
-description: Write a rich, agent-authored session handoff to .janitor/state/agent-handoff.md before a context compaction, so the next turn re-grounds from YOUR semantic account (what you were doing, the plan, the next action, the traps hit) — not just the mechanical PreCompact snapshot. Invoke for a delicate juncture where the always-on zero-cost pre-compact-handoff hook isn't enough. Usually run by /janitor-compact-context --handoff (which passes --then-compact so this chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff, or by asking to write a handoff before compacting.
+description: Write a rich, agent-authored session handoff before a context compaction, so the next turn re-grounds from YOUR semantic account (what you were doing, the plan, the next action, the traps hit) — not just the mechanical PreCompact snapshot. Invoke at a delicate juncture where the always-on zero-cost pre-compact-handoff hook isn't enough. Usually run by /janitor-compact-context --handoff (which passes --then-compact so this chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff, or by asking to write a handoff before compacting.
 ---
 
 # Janitor write-handoff
@@ -14,7 +14,7 @@ blocks, VERBATIM recent transcript turns). That is un-hallucinatable but **mecha
 it captures *what the filesystem says*, not *what you were thinking*.
 
 This skill writes the **semantic** layer on top: a rich, agent-authored handoff to
-`.janitor/state/agent-handoff.md` capturing the reasoning a snapshot can't — the plan,
+`.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` capturing the reasoning a snapshot can't — the plan,
 the next concrete action, the OPEN issues and why each is still unsolved, the
 load-bearing facts, the trap you already wasted time on, the alternative you rejected
 and why. It is **opt-in** because authoring it costs tokens
@@ -34,15 +34,23 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
 
 ## Instructions
 
-1. **Ensure the state dir exists** (the handoff + directive land in the project's
-   janitor state dir, the same one the resume machinery reads):
+1. **Ensure the state dir exists, and compute YOUR handoff's filename** — one command,
+   which prints the exact path to Write to:
 
    ```bash
-   mkdir -p "${CLAUDE_PROJECT_DIR}/.janitor/state"
+   mkdir -p "${CLAUDE_PROJECT_DIR}/.janitor/state" && \
+   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/lib/handoff_files.py" --path
    ```
 
-2. **Author a dense, semantic handoff** and Write it to
-   `${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff.md`. Cover, in this order,
+   **Never Write to `agent-handoff.md` itself.** That fixed path had several independent
+   writers and no coordination, so one silently destroyed another — measured twice in two
+   days (TRDD-5RXBI65T). Every handoff now lands on its own
+   `agent-handoff-<session>-<timestamp>-<pid>.md`, which is what the printed path gives you.
+   The timestamp and pid are what stop two sessions of THIS project — which share one state
+   dir — from overwriting each other's account. Readers load the whole group in write order,
+   so nothing is lost by there being more than one.
+
+2. **Author a dense, semantic handoff** and Write it to **the path step 1 printed**. Cover, in this order,
    only what a fresh post-compaction turn genuinely needs:
    - **Task + TRDD** — what you are doing and the governing `TRDD-<id8>` (so the next
      turn reads its `## STATE` block, the authoritative record).
@@ -72,7 +80,7 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
    Write ONE line to `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt`:
 
    ```text
-   read .janitor/state/agent-handoff.md FIRST (rich agent handoff), then <your one-line resume tail>
+   read the newest .janitor/state/agent-handoff-*.md FIRST (rich agent handoff), then <your one-line resume tail>
    ```
 
    The PostCompact `post-compact-resume.py` hook reads this first line, prepends its own
@@ -101,7 +109,7 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
 ## Output
 
 One short line to the user, then the turn ends. Side effects: writes
-`${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff.md` (the rich handoff) and
+`${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` (the rich handoff) and
 `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt` (the one-shot resume
 pointer). With `--then-compact` it also launches the detached `/compact` enqueue.
 
@@ -123,8 +131,10 @@ is written independently by the PreCompact hook and the two coexist).
 
 ## Resources
 
-- `${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff.md` — the rich handoff this skill
-  writes; read FIRST on resume, alongside `precompact-handoff.md`.
+- `${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` — the rich
+  handoff this skill writes, one file per write (TRDD-5RXBI65T); read FIRST on resume,
+  alongside `precompact-handoff.md`. `scripts/lib/handoff_files.py --path` prints the name;
+  `handoff_files.newest_group()` is how readers collect a session's handoffs in write order.
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt` — the one-shot resume
   pointer the PostCompact hook consumes.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py` — the `/compact` trigger this skill

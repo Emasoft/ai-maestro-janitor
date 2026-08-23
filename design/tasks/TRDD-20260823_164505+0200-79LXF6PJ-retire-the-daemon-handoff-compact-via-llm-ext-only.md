@@ -36,9 +36,41 @@ line of work several retractions:**
 > of concise handoff. this will also save lots of token otherwise used by the compaction, since we
 > use instead the free models of the llm-externalizer to compact instead.
 
-**NEXT ACTION:** settle the blocking unknown in "Open questions" #1 (the auto-compaction disable
-mechanism) — everything else is downstream of it, and nothing should touch `~/.claude/settings.json`
-until it is verified rather than guessed.
+**USER chose option 1 (2026-08-23), after being shown option 2:** remove the daemon's handoff
+composition entirely, paired with the llm-ext compaction replacement. Option 2 (keep the free
+mechanical index, strip only `session-summary` + the raw `Recent turns` tail) was offered
+explicitly and declined. Do not re-litigate it.
+
+**DONE:** Q1 settled and applied — `"autoCompactEnabled": false` is in `~/.claude/settings.json`
+(backup `/tmp/settings.json.bak-20260823_165008+0200`, JSON re-validated).
+
+**NEXT ACTION:** read TRDD-1QJIZFFW's STATE block, then make the post-`/clear` payload the
+llm-ext **session-summary** instead of the composed handoff. The removal may not land before that
+payload works — see "The load-bearing risk".
+
+## Amendment, USER 2026-08-23 — skills re-injection, and who owns compaction
+
+> as i said, lets make the compaction always handled by the janitor instead than by the claude
+> code harness. and do it always via the llm-externalizer. the session summary already includes a
+> concise handoff-like section at the end, so its completely self sufficient. also the active
+> skills must still be re-injected in the clean context in full, and right before the summarized
+> context (since the context summary certainly will reference them).
+
+Two requirements, one of them new:
+
+1. **The janitor owns compaction; the harness never does.** Satisfied on the harness side by
+   `autoCompactEnabled: false` (applied). The janitor's external-clear + llm-ext summary is now
+   the ONLY compaction path.
+2. **NEW — the post-`/clear` injection is ORDERED: active skills IN FULL, then the summary.**
+   Rationale given: the summary will reference the skills, so a summary injected without them
+   dangles. This makes the injection a two-part document with a mandatory order, not a blob.
+
+**INTERPRETATION, stated because it is load-bearing and was not specified:** "active skills" is
+read as *the skills that were INVOKED in the pre-`/clear` session* — those whose `SKILL.md` was
+actually in the context the summary describes, recoverable from the transcript's `Skill` tool
+calls. The alternative reading (every enabled skill on the machine) is rejected: it would inject
+tens of thousands of tokens of skills the session never touched, which defeats the point of
+clearing. **If the owner meant the broader reading, this is the line to correct.**
 
 ## One correction the directive should be read against
 
@@ -84,10 +116,14 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
 
 ## Open questions — all blocking, none guessed
 
-1. **What actually disables auto-compaction?** The directive says "an env var added to
-   `~/.claude/settings.json`" — but env vars and settings keys are different surfaces, and a
-   `claude-code-guide` lookup for this FAILED (`Prompt is too long`). **UNVERIFIED. Do not write a
-   key into the user's settings.json on a guess.** Needed: exact name, type, scope, precedence.
+1. ~~What actually disables auto-compaction?~~ **ANSWERED + APPLIED 2026-08-23.** Three surfaces:
+   the settings key **`autoCompactEnabled`** (docs list its scope as "Any file"; it is what
+   `/config` → *Auto-compact* writes), a per-session env var `DISABLE_AUTO_COMPACT` (named only in
+   a search summary, **absent from the settings-reference page — lower confidence**), and the
+   `/config` toggle itself. Whichever surface turns it off wins; the other cannot turn it back on.
+   `/compact` keeps working manually. Applied as `"autoCompactEnabled": false` in
+   `~/.claude/settings.json`. The directive said "env var" — it is a settings KEY; the env var is
+   a separate surface.
 2. **What happens at the context limit with auto-compaction off?** Error, refused turn, silent
    truncation? This decides whether the llm-ext path is a *replacement* or merely a *race*.
 3. **Does the llm-ext summary really end with a pending-tasks section?** The directive says it

@@ -32,8 +32,27 @@ consulted 2026-08-23 10:53; **it is NOT a gate** — three prior advisor spawns 
 `stopped: true` in `pending-agents.json` and last night's ran from 22:50 without returning.
 Treating a possibly-hung agent as a blocker is how `column: dev` becomes a lie.
 
-**The forensics above are CLOSED — do not reopen them.** F1 is the writer on both days. What
-remains is code.
+**The forensics above are CLOSED — do not reopen them.** F1 is the writer on both days.
+
+**IMPLEMENTED 2026-08-23 — and then largely SUPERSEDED the same day.** Option D shipped in
+`0581b940` (per-write filenames via `lib/handoff_files.py`), and every writer is now migrated:
+
+| writer | before | after |
+|---|---|---|
+| daemon `external_handoff_clear.py:428` | unconditional `atomic_write` on the shared path | **retired entirely** — TRDD-79LXF6PJ; it no longer composes a handoff at all |
+| keyless daemon fallback | same bug verbatim on the same path | `UNKEYED` sentinel — still per-write |
+| `/janitor-write-handoff` (the skill) | unconditional `Write` on the shared path | keyed name from `handoff_files.py --path`, using `in_session_key()` |
+
+**The system-level claim is finally supportable, and it took three attempts to earn:** no writer
+can now clobber another. It was asserted twice before it was true — first while the keyless
+daemon branch still wrote the shared path, then while the skill still did. Both times the
+narrower claim ("no *daemon* write can clobber another") was the honest one.
+
+**SUPERSEDED BY TRDD-79LXF6PJ:** the owner's directive removed the second writer outright
+(option E — *eliminate the writer*), which is strictly stronger than D. D is NOT wasted and must
+not be reverted: two sessions of ONE project share a state dir, so the surviving skill-authored
+writer would still destroy its own predecessor without it. **Do not close this card as "solved by
+D"** — the clobber between the two ORIGINAL writers was solved by deleting one of them.
 
 **✅ CORROBORATED 2026-08-23 10:52 — a live clobber, caught by two DIRECT reads (not mtime).**
 The 2026-08-22 incident claim was rightly demoted to uncorroborated (see the superseded reasoning

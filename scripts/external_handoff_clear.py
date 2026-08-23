@@ -134,6 +134,9 @@ def _decide(
         "in_cooldown": in_cooldown,
         "awaiting_user": awaiting_user,
         "cache_expired": cache_expired,
+        # TRDD-79LXF6PJ — the ONLY trigger that can fire on a busy session. 0 means the backstop
+        # is off, which is a real state worth noticing rather than a quiet default.
+        "context_high_water": ec.context_high_water_tokens(),
     }
     # `trailing_enqueues` is log-only (see the comment where it is unpacked above) — carried in
     # `facts`, never in `gate`, so it stays visible for diagnosis without becoming an undeclared
@@ -274,9 +277,9 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         "state_dir": str(sd),
         "gate_baseline": clear_trigger._gate_baseline(),
         "directive": (
-            "read .janitor/state/agent-handoff.md FIRST (link-only handoff, auto-composed "
-            "with no model turn — follow its wikimem/TRDD links via memgrep recall on "
-            "demand), then resume your prior in-flight task."
+            "read the injected SessionStart handoff summary FIRST (auto-composed with no "
+            "model turn — follow its wikimem/TRDD links via memgrep recall on demand), "
+            "then resume your prior in-flight task."
         ),
         # Let the chain's warm-cancel probe run ONLY when coldness is what fired us. The other
         # two triggers are idleness/prediction rules that fire with the cache deliberately warm.

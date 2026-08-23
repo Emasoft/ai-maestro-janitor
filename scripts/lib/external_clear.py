@@ -121,6 +121,18 @@ TRIGGER_NEXT_FIRE_MISSES = "next-fire-misses"
 TRIGGER_LONG_IDLE = "long-idle"
 TRIGGER_CACHE_CERTAIN_EXPIRED = "cache-certain-expired"
 TRIGGER_RESUMED_COLD = "resumed-cold"
+# TRDD-79LXF6PJ. The other four triggers are all IDLE/CACHE conditions, so an ACTIVE session —
+# busy, cache warm, never idle — was never a candidate for clearing. That was harmless while the
+# HARNESS still auto-compacted at the boundary. It is not harmless now: with
+# `autoCompactEnabled: false` the harness stops at the context limit with a hard ERROR and no
+# automatic recovery, so without this trigger a busy session simply dies at the boundary.
+TRIGGER_CONTEXT_PRESSURE = "context-pressure"
+
+# The high-water mark, in tokens. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is the natural default: it is
+# the point at which the harness USED to auto-compact, so firing there reproduces the old
+# behaviour through the janitor instead of the harness — same moment, different mechanism.
+_CONTEXT_HIGH_WATER_ENV = "CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER"
+_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 
 # The SessionStart `source` values that mean "Claude was loaded after being away", and so are
 # the only ones the resume path may act on. `compact` and `clear` are excluded BY NAME because
@@ -167,6 +179,27 @@ __all__ = [
 
 def enabled() -> bool:
     return state.is_truthy_env(ENABLED_ENV, DEFAULT_ENABLED)
+
+
+def context_high_water_tokens() -> int:
+    """Tokens at which context pressure alone authorizes a clear. 0 disables the trigger.
+
+    Resolution order, and each fallback is deliberate:
+      1. `CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER` — an explicit override.
+      2. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — where the harness used to auto-compact. Reusing it
+         means the janitor fires at exactly the moment the old behaviour did.
+      3. 0 — DISABLED, and that is the honest answer rather than a guessed constant. Context
+         windows differ by an order of magnitude between models (200 K vs 1 M); a hardcoded
+         default would either clear a 1 M session five times too early or fire far too late on a
+         200 K one. A caller that wants the backstop must say where it is.
+
+    ⚠ 0 means a busy session has NO backstop against the context-limit error once auto-compaction
+    is off. Callers should say so out loud rather than let it pass as normal.
+    """
+    explicit = state.coerce_int(os.environ.get(_CONTEXT_HIGH_WATER_ENV), 0)
+    if explicit > 0:
+        return explicit
+    return max(0, state.coerce_int(os.environ.get(_AUTO_COMPACT_WINDOW_ENV), 0))
 
 
 def min_context_tokens() -> int:
@@ -1394,6 +1427,7 @@ def should_clear_externally(
     in_cooldown: bool,
     awaiting_user: bool,
     cache_expired: bool | None = None,
+    context_high_water: int = 0,
 ) -> ClearVerdict:
     """PURE. The whole external-clear decision, with the deciding rule named.
 
@@ -1457,6 +1491,22 @@ def should_clear_externally(
             False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
         )
 
+    # CONTEXT PRESSURE FIRST — its alternative is not a wasted cache write, it is a session that
+    # STOPS. With `autoCompactEnabled: false` the harness no longer rescues a full window; it
+    # errors. Every other trigger here is an economy (avoid paying for a cold cache); this one is
+    # survival, so it outranks them. It is also the only trigger that can fire on a BUSY session,
+    # which is precisely the case the other four structurally cannot reach.
+    if (
+        context_high_water > 0
+        and context_tokens is not None
+        and context_tokens >= context_high_water
+    ):
+        return ClearVerdict(
+            True,
+            TRIGGER_CONTEXT_PRESSURE,
+            f"context {context_tokens} >= high-water {context_high_water} and the harness no "
+            "longer auto-compacts — without a clear this session stops at the context limit",
+        )
     if cache_expired is True:
         return ClearVerdict(
             True,

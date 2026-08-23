@@ -1265,8 +1265,8 @@ def _phase_clear_resume() -> bool:
         # Flag present but empty/unreadable: still cue a generic resume so the fresh
         # session doesn't stall idle after a /clear.
         note = (
-            f"Session was cleared {age}s ago — auto-resume. Read "
-            ".janitor/state/agent-handoff.md (link-only handoff) and resume your prior task."
+            f"Session was cleared {age}s ago — auto-resume. Read the injected "
+            "SessionStart handoff summary and resume your prior task."
         )
     # A /clear wipes the working memory of in-flight background agents from the fresh
     # context — list them so the resumed turn re-attaches to each via SendMessage.

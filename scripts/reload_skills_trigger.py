@@ -152,7 +152,7 @@ def main() -> int:
         "--directive",
         default="",
         help="one-line resume pointer recorded for the post-clear auto-resume (shrink path "
-        "only; defaults to a pointer at the link-only agent-handoff.md)",
+        "only; defaults to a pointer at the injected SessionStart handoff summary)",
     )
     ap.add_argument(
         "--dry-run",

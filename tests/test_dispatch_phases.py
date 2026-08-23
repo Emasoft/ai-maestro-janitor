@@ -799,7 +799,7 @@ def test_phase_clear_resume_generic_cue_when_flag_empty(env_isolation: dict) -> 
     _arm_clear_flag(state, "")
     out = _capture_stdout(dispatch._phase_clear_resume)
     assert out.startswith("[janitor-resume]")
-    assert "agent-handoff.md" in out
+    assert "injected SessionStart handoff summary" in out
 
 
 def test_compact_resume_must_not_consume_the_pending_clear_flag(env_isolation: dict) -> None:

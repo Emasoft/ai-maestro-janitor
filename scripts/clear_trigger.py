@@ -599,8 +599,8 @@ def spawn_shrink_chain(
     handoff = _read_handoff()
     if handoff is None:
         print(
-            "HANDOFF_MISSING no .janitor/state/agent-handoff.md — /clear is unrecoverable; "
-            "author the link-only handoff BEFORE shrinking",
+            "HANDOFF_MISSING no handoff file found in .janitor/state/ — /clear is "
+            "unrecoverable; author a handoff BEFORE shrinking",
             file=sys.stderr,
         )
     else:
@@ -715,7 +715,7 @@ def main() -> int:
         "--directive",
         default="",
         help="one-line resume pointer recorded for the post-clear auto-resume "
-        "(defaults to a pointer at the link-only agent-handoff.md)",
+        "(defaults to a pointer at the injected SessionStart handoff summary)",
     )
     ap.add_argument(
         "--delay",
@@ -743,9 +743,8 @@ def main() -> int:
     #    link-only handoff, so the post-clear cron always has a resume target (there is no
     #    PostClear hook to synthesise one, unlike the compact path).
     directive = args.directive.strip() or (
-        "read .janitor/state/agent-handoff.md FIRST (link-only handoff — follow its "
-        "wikimem/TRDD links via memgrep recall on demand), then resume your prior "
-        "in-flight task."
+        "read the injected SessionStart handoff summary FIRST (follow its wikimem/TRDD "
+        "links via memgrep recall on demand), then resume your prior in-flight task."
     )
 
     # 2. NO PRESENCE CANCEL. It used to `print("USER_PRESENT"); return 0` here — and that is
@@ -792,8 +791,8 @@ def main() -> int:
     handoff = _read_handoff()
     if handoff is None:
         print(
-            "HANDOFF_MISSING no .janitor/state/agent-handoff.md — /clear is "
-            "unrecoverable; author the link-only handoff BEFORE clearing",
+            "HANDOFF_MISSING no handoff file found in .janitor/state/ — /clear is "
+            "unrecoverable; author a handoff BEFORE clearing",
             file=sys.stderr,
         )
     else:

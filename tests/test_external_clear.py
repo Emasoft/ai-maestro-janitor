@@ -432,6 +432,81 @@ def test_the_watchers_gate_dict_matches_the_gates_signature():
     assert keys <= params, f"passed but not accepted: {sorted(keys - params)}"
 
 
+def test_context_pressure_fires_on_a_BUSY_session_the_other_triggers_cannot_reach():
+    """TRDD-79LXF6PJ: the whole point — a session that is NOT idle and whose cache is warm.
+
+    The other four triggers are idle/cache economies, so none of them can fire here. Before this
+    trigger existed that was harmless, because the HARNESS auto-compacted at the boundary. With
+    `autoCompactEnabled: false` it no longer does — it errors — so this is the only thing standing
+    between a busy session and a hard stop.
+    """
+    v = verdict(
+        idle_seconds=5,  # actively working: long-idle cannot fire
+        last_turn_age_s=1,  # cache warm …
+        seconds_to_next_fire=120,  # … and the next fire lands INSIDE the 5min TTL, so
+        #                            next-fire-misses cannot fire either. Without this the
+        #                            baseline's 300s makes 1+300 > TTL and that term fires; the
+        #                            test would still pass — context-pressure is checked first —
+        #                            but it would no longer be testing what its name claims.
+        cache_expired=False,  # measured warm: cache-certain-expired cannot fire
+        context_tokens=700_000,
+        context_high_water=700_000,
+    )
+    assert v.fire is True
+    assert v.trigger == ec.TRIGGER_CONTEXT_PRESSURE
+    assert "context limit" in v.why
+
+
+def test_context_pressure_is_off_when_no_high_water_is_configured():
+    """0 disables it. A hardcoded default would be wrong by ~5x between a 200K and a 1M window,
+    so the backstop is opt-in — and its absence must read as OFF, never as 'fire always'."""
+    # `seconds_to_next_fire` is kept well inside the TTL on purpose: at the FIRING baseline's 300s
+    # the next-fire-misses term fires on its own (1+300 > the 5min TTL), and this test would then
+    # "pass" or "fail" for a reason that has nothing to do with the high-water mark. A test whose
+    # subject is one term must silence the others, or it is measuring the fixture.
+    v = verdict(
+        idle_seconds=5,
+        last_turn_age_s=1,
+        seconds_to_next_fire=120,
+        cache_expired=False,
+        context_high_water=0,
+    )
+    assert v.fire is False, "an unset high-water must not authorize anything"
+
+
+def test_cache_expired_needs_300k_of_context_and_no_recent_clear():
+    """Owner's rule, verbatim: compact on an expired cache ONLY when context >300k AND the
+    session was not just compacted — 'to avoid compacting it twice'.
+
+    Written to PIN behaviour that already existed rather than to add any: min_context defaults to
+    300_000 and vetoes ahead of every trigger, and in_cooldown (2h) is the not-just-compacted
+    guard. Pinned because the rule is now explicit, and an unpinned coincidence is one refactor
+    away from silently becoming false.
+    """
+    # Below the floor: an expired cache alone must NOT authorize a clear.
+    assert verdict(cache_expired=True, context_tokens=250_000, min_context=300_000).fire is False
+    # Above it, with no recent clear: fires, and names the measurement.
+    hot = verdict(cache_expired=True, context_tokens=400_000, min_context=300_000)
+    assert hot.fire is True and hot.trigger == ec.TRIGGER_CACHE_CERTAIN_EXPIRED
+    # Above it, but just compacted: the cooldown wins — this is the "twice" the owner ruled out.
+    assert verdict(
+        cache_expired=True, context_tokens=400_000, min_context=300_000, in_cooldown=True
+    ).fire is False
+
+
+def test_context_pressure_never_overrides_a_SAFETY_veto():
+    """Pressure is urgent, not supreme: a question addressed to a human still wins.
+
+    `awaiting_user` means the session is parked on a decision only a person can make. Clearing it
+    would discard that decision — and unlike a context-limit error, which is recoverable by the
+    user, a discarded question is not.
+    """
+    v = verdict(
+        awaiting_user=True, context_tokens=900_000, context_high_water=700_000, idle_seconds=5
+    )
+    assert v.fire is False and v.why == "awaiting-user"
+
+
 def test_the_expiry_probe_gets_its_own_generous_timeout():
     """MEASURED 0.15s / 11.5s / 19.7s on one warm host. At the burn probes' 5s this returned
     None on 2 of 3 runs — and None fails open, so a too-short bound is indistinguishable from

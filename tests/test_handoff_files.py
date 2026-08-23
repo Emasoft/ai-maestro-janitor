@@ -114,6 +114,25 @@ def test_keyed_file_outranks_an_older_legacy_file(tmp_path: Path) -> None:
     assert hf.newest_group(sd) == [fresh]
 
 
+def test_in_session_key_comes_from_the_writers_own_session(monkeypatch) -> None:
+    """The IN-SESSION writer is its own target, so CLAUDE_CODE_SESSION_ID is correct HERE only.
+
+    The daemon must never use this path: it is a long-lived singleton carrying whichever
+    session launched it (one id stood for three days across every project it served), so keying
+    on the writer would file a handoff under a stranger's id. The two derivations are separate
+    functions precisely so that mistake cannot be made by reaching for the convenient one.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "fdde8723-a897-4d76-b74d-72783da6048f")
+    assert hf.in_session_key() == "fdde8723"
+
+
+def test_in_session_key_falls_back_rather_than_returning_nothing(monkeypatch) -> None:
+    """No session id must still yield a usable filename — an unkeyed handoff groups imprecisely,
+    a missing one is lost."""
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    assert hf.in_session_key() == hf.UNKEYED_KEY
+
+
 def test_empty_state_dir_is_not_an_error(tmp_path: Path) -> None:
     """No handoff is a normal state (a fresh project), reported as emptiness, never a raise."""
     sd = _sd(tmp_path)

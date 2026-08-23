@@ -144,6 +144,21 @@ def newest_group(state_dir: Path) -> list[Path]:
     return [p for _, p in sorted(best)]
 
 
+def in_session_key() -> str:
+    """The key for a writer running INSIDE the session it is handing off.
+
+    Here — and ONLY here — `CLAUDE_CODE_SESSION_ID` is the right source: the writer IS the
+    target, so the writer's own id is the target's id. The daemon must never use this (it is a
+    long-lived singleton carrying whichever session launched it); it derives the key from the
+    target's transcript instead. Same function name would have invited exactly that mistake, so
+    the two paths are deliberately separate and each says why.
+
+    Falls back to `UNKEYED_KEY` rather than "" so a caller always has a usable filename: an
+    unkeyed handoff groups imprecisely, a missing one is lost.
+    """
+    return session_key(os.environ.get("CLAUDE_CODE_SESSION_ID", "")) or UNKEYED_KEY
+
+
 def newest(state_dir: Path) -> Path | None:
     """The single most recent handoff — for callers asking only "does one exist, is it concise".
 
@@ -156,3 +171,29 @@ def newest(state_dir: Path) -> Path | None:
     if not entries:
         return None
     return max(entries, key=lambda e: e[1])[2]
+
+
+def _main() -> int:
+    """`handoff_files.py --path` — print the filename an in-session writer should Write to.
+
+    Exists because the `/janitor-write-handoff` skill is executed by the MODEL, which cannot be
+    asked to build a timestamp+pid filename by hand every time and get it right. One command,
+    one absolute path, no room to improvise the grammar.
+    """
+    import sys
+
+    if "--path" not in sys.argv[1:]:
+        print("usage: handoff_files.py --path", file=sys.stderr)
+        return 2
+    project = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if not project:
+        print("CLAUDE_PROJECT_DIR unset — cannot locate the janitor state dir", file=sys.stderr)
+        return 1
+    sd = Path(project) / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    print(str(sd / handoff_name(in_session_key())))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
