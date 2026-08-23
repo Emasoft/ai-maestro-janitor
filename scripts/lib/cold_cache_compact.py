@@ -119,7 +119,19 @@ CLEAR_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_COOLDOWN_SECONDS"
 # (`fleet_scan.transcript_activity` discounts trailing heartbeat enqueues), so an hour of it
 # already means an hour of nothing but beats. There is no "between turns" left to protect.
 DEFAULT_CLEAR_MIN_IDLE_SECONDS = 3600
-DEFAULT_CLEAR_COOLDOWN_SECONDS = 7200  # 2h — a cleared session that re-fattens is not urgent
+# 5 MINUTES, not the 2h it was (owner, 2026-08-23). The old value assumed the cooldown was what
+# stopped a cleared session from clearing again — so it had to outlast any plausible re-fattening.
+# It never was: `min_context` (300k) is the real guard, and a just-cleared session sits an order
+# of magnitude below it, so a second clear is already impossible on size alone. What the cooldown
+# actually has to cover is only the gap between the chain firing and the context measurement
+# catching up — seconds, not hours.
+#
+# And 2h was ACTIVELY HARMFUL once the cache-expired trigger existed: a prompt cache can expire at
+# any moment, so a session that expired 20 minutes after a clear had to burn a full
+# cache-creation write on its whole context and wait out the remaining 100 minutes before the
+# janitor was allowed to act. The cooldown was suppressing exactly the fires the trigger was
+# added to catch.
+DEFAULT_CLEAR_COOLDOWN_SECONDS = 300
 _CLEAR_FIRED_STAMP = "idle-clear-fired.ts"
 
 

@@ -399,6 +399,32 @@ def test_clear_is_gated_by_its_own_knob_not_the_compact_master(monkeypatch):
     assert ccc.clear_enabled() is False
 
 
+def test_the_clear_cooldown_is_SHORT_because_min_context_is_the_real_guard(tmp_path):
+    """Owner ruling 2026-08-23: 5 minutes, not 2 hours.
+
+    The old 2h assumed the cooldown was what stopped a cleared session clearing again. It never
+    was — `min_context` (300k) is, and a just-cleared session sits an order of magnitude below it,
+    so a second clear is impossible on size alone. The cooldown only has to cover the gap between
+    the chain firing and the context measurement catching up.
+
+    2h was also ACTIVELY HARMFUL once the cache-expired trigger existed: a prompt cache can expire
+    at any moment, so a session expiring 20 minutes after a clear had to pay a full
+    cache-creation write and wait out 100 more minutes before the janitor could act — the
+    cooldown suppressing exactly the fires the trigger exists to catch.
+
+    Pinned as a VALUE, deliberately: the sibling test above uses the constant, so it would keep
+    passing if someone restored 7200 and would prove nothing about the decision.
+    """
+    import time as _t
+
+    assert ccc.DEFAULT_CLEAR_COOLDOWN_SECONDS == 300
+    now = int(_t.time())
+    ccc.mark_clear_fired(tmp_path, now=now)
+    assert ccc.clear_in_cooldown(tmp_path, now=now + 301) is False, (
+        "a cache expiring minutes after a clear must not be suppressed"
+    )
+
+
 def test_clear_cooldown_suppresses_a_repeat(tmp_path):
     import time as _t
     now = int(_t.time())
