@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: dev
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-23T10:59:48+0200
+updated: 2026-08-23T11:05:03+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -59,15 +59,47 @@ better dressed. What the logs actually say (2026-08-23 ~10:55):
 |---|---|
 | project `.janitor/logs/external-clear.log` | no 2026-08-23 entry (mtime Aug 20) — but this is the WRONG log, see next row |
 | DATA `global-state/external-clear.log` | fires today at `09:21:12`, `09:22:21`, `09:26:17`, all `[s:cf997868]` |
-| this project's session ids today | `9248f90c`, `fdde8723` — **`cf997868` is neither** |
-| `ls` mtime of `agent-handoff.md` | `09:22` (matches the 09:22:21 fire) |
-| the file's own header stamp | `09:16:12` (matches **no** fire) |
+| `cf997868` — POSITIVE id | its transcript is `~/.claude/projects/-Users-…-Code-EMASOFT-INTEGRATOR-AGENT/cf997868-f2fe-…` ⇒ **a session of a DIFFERENT project**. Those three fires never touched this state dir |
+| `ls` mtime of `agent-handoff.md` | `09:22` |
+| the file's own header stamp | `09:16:12` |
 | any `.janitor/logs/` line at 09:16 | none |
 
-So F1 remains the leading candidate and is no longer a demonstrated fact. **OPEN: who wrote at
-09:16:12, and why the header stamp and the mtime disagree by ~6 minutes.** Left open on purpose —
-this card was filed because a confident wrong attribution cost a night, and a fourth invented
-story would be the fifth proxy read, not a fix.
+**The "~6 minute skew" was NOT an anomaly — it is the summary call, and recording it as a mystery
+was itself an error.** Read in source: `external_clear.py:286` captures `now_iso` on entry to
+`_compose`; the LLM summarization runs *inside* `_compose` (`:309` log lambda, `:317` degrade
+path — that is what emits `summary: ok on attempt 1`); `external_handoff_clear.py:430` writes
+`fired:` only after `_compose` returns and `:428` has written the file. So the header stamps
+**compose start** and the log line stamps **compose end**, and the interval between them simply
+*is* the model call. Header-vs-log disagreement is the design, not a symptom.
+
+**OPEN, and now sharper: who wrote at 09:16:12?** The same reading narrows it usefully —
+`idle-clear-fired.ts` = `09:16:06` PRECEDES the header's `09:16:12`, and
+`external_handoff_clear` cannot produce that order: it stamps via `_fire()` at `:369`, called at
+`:429`, i.e. **after** the write at `:428`. A stamp-then-compose ordering points instead at
+`dispatch.py:2348`, which stamps only after `send_verified` types `/janitor-handoff-and-clear`
+into the pane. That in turn collides with TRDD-FB84YUGT's measurement (no heartbeat fired in this
+project between `00:35:42` and `10:55:32`, and `dispatch.py` runs from a heartbeat). **Two
+readings that cannot both be true — which is exactly why this stays open.** A fourth invented
+story would be the next proxy read, not a fix.
+
+**The `cf997868` row was itself repaired once, and the repair is the lesson.** It first read
+*"this project's session ids today are `9248f90c`, `fdde8723` — `cf997868` is neither"*, sourced
+from `session-start.log` + `heartbeat-fires.log`. That basis is UNSOUND, and the same full read
+that confirmed it also destroyed it: `session-start.log` for 2026-08-23 contains **only**
+`fdde8723`, yet `9248f90c` fired eight heartbeats that same day. A log that omits a session which
+was demonstrably alive cannot be used to prove a third session was not. The conclusion survives
+only because a *different*, wider probe supports it — `cf997868` appears in **no** file under
+this project's `.janitor/logs/`. Same shape as every other error on this card: **absence from
+the files I happened to grep, read as absence from the world.** A zero-hit grep is evidence about
+the search term before it is evidence about reality.
+
+That absence argument has since been **replaced by a positive identification** and no longer
+carries any weight of its own: `cf997868`'s transcript lives under the `EMASOFT-INTEGRATOR-AGENT`
+project slug, so it is that project's session — established by finding where it *is*, not by
+failing to find it here. Note what the absence argument could never have caught: a session that
+**started before midnight and was still alive** at 09:21 writes no `2026-08-23` SessionStart line
+at all, so no date-filtered grep of `session-start.log` could ever have ruled it out. Prefer
+locating the thing over enumerating where it is not.
 
 **None of this weakens the card.** The fix does not depend on the writer's name: F1's `:428` is
 unconditional on a shared path, read directly in source, and a shared path with two or more

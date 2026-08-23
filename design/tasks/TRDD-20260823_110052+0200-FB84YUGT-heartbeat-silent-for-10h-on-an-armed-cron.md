@@ -3,7 +3,7 @@ trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
 column: todo
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-23T11:00:52+0200
+updated: 2026-08-23T11:05:03+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -30,12 +30,23 @@ should separate them.
 
 ## The measurement
 
-`.janitor/logs/heartbeat-fires.log`, 2026-08-23 — **10 fires all day**:
+`.janitor/logs/heartbeat-fires.log`, 2026-08-23 — **10 fires all day**. The probe was
+`grep -c` plus `head -3` and `tail -3`, so **only 6 of the 10 lines were ever printed** and the
+rendering below marks the 4 that were not:
 
 ```
-[00:00:37] [s:9248f90c]   [00:05:20] [s:9248f90c]   [00:10:04] [s:9248f90c]
-[00:33:54] [s:9248f90c]   [00:35:42] [s:fdde8723]   …then NOTHING…   [10:55:32] [s:fdde8723]
+[00:00:37] [s:9248f90c]   [00:05:20] [s:9248f90c]   [00:10:04] [s:9248f90c]     ← head -3 (#1-3)
+                    … 4 fires ELIDED, never printed (#4-7) …
+[00:33:54] [s:9248f90c]   [00:35:42] [s:fdde8723]   …NOTHING…   [10:55:32]      ← tail -3 (#8-10)
 ```
+
+**The elided 4 do not weaken the gap, and the arithmetic says where they are.** `tail -3` returns
+matches #8/#9/#10, so on an append-ordered log nothing can lie between `00:35:42` (#9) and
+`10:55:32` (#10) — the gap is bounded by adjacency, not by inspection. The unseen #4-#7 are
+necessarily inside `00:10:04`–`00:33:54`, and four fires at `*/5` (≈00:15/20/25/30) fill that
+window exactly. Marked explicitly because a reader of the un-annotated version counts the
+`00:10→00:33` jump as a *second* gap that does not exist — and a card arguing against
+under-measured data is the worst possible place to elide silently.
 
 The cron was armed at `00:35` (this session, `arm_record.py` wrote `heartbeat-cron-id.txt` +
 `heartbeat-armed-at.ts`) at cadence `*/5`. Between `00:35:42` and `10:55:32` that is **10h20m
@@ -69,7 +80,23 @@ an unstarted card": the state asserts activity that is not happening.
    start a turn*. A rate-limit UI, a stuck turn, or a modal would suppress every fire while the
    job stays scheduled. Then the fix is not re-arming — it is noticing the suppression.
 
-Both are distinguishable from data already on disk (`heartbeat-fires.log` gaps vs the OAuth
+### A third data point that contradicts the gap — resolve it, do not ignore it
+
+TRDD-5RXBI65T's forensics landed a fact this card must answer. `.janitor/state/idle-clear-fired.ts`
+= `09:16:06` — **inside the gap**. Only two callers stamp it: `external_handoff_clear.py:369`
+(via `_fire()` at `:429`, i.e. *after* its write at `:428`) and `dispatch.py:2348` (*after*
+`send_verified` types `/janitor-handoff-and-clear`). The neighbouring `agent-handoff.md` header
+stamps `09:16:12`, six seconds LATER — a stamp-then-compose order that only `dispatch.py:2348`
+can produce.
+
+But `dispatch.py` runs **from a heartbeat**, and this card's measurement says none fired at 09:16.
+Both cannot be true. Either the gap is not what it looks like (some fires do not reach
+`heartbeat-fires.log`, which would make the log an unreliable instrument and this card's premise
+wrong), or something other than those two callers stamps that file. Whichever it is, it is
+load-bearing here — **settle it before building the detector**, because a watchdog calibrated on
+a log that silently misses fires would inherit the same blindness it exists to remove.
+
+Both hypotheses are distinguishable from data already on disk (`heartbeat-fires.log` gaps vs the OAuth
 rotator's `rotator.log`, which recorded `cookie-leg-stuck` ONSET at `09:04:38` and a
 `tick-stalled` alert saying rotation "is effectively OFF"). **The rotator alerts overlapping this
 window are a strong hint for hypothesis 2 and MUST NOT be treated as proof** — that is the exact
