@@ -138,9 +138,13 @@ def _decide(
         "in_cooldown": in_cooldown,
         "awaiting_user": awaiting_user,
         "cache_expired": cache_expired,
-        # TRDD-79LXF6PJ — the ONLY trigger that can fire on a busy session. 0 means the backstop
-        # is off, which is a real state worth noticing rather than a quiet default.
-        "context_high_water": ec.context_high_water_tokens(),
+        # TRDD-79LXF6PJ — the ONLY trigger that can fire on a busy session, and it is OWNED
+        # CONDITIONALLY: while Claude Code still auto-compacts, the janitor must stay out of the
+        # way or the session is compacted twice. 0 disables the trigger, so resolving ownership
+        # here keeps the pure gate free of the question.
+        "context_high_water": (
+            0 if ec.harness_auto_compacts() else ec.context_high_water_tokens()
+        ),
     }
     # `trailing_enqueues` is log-only (see the comment where it is unpacked above) — carried in
     # `facts`, never in `gate`, so it stays visible for diagnosis without becoming an undeclared

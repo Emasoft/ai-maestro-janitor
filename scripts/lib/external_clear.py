@@ -202,6 +202,46 @@ def context_high_water_tokens() -> int:
     return max(0, state.coerce_int(os.environ.get(_AUTO_COMPACT_WINDOW_ENV), 0))
 
 
+def harness_auto_compacts(*, home: Path | None = None) -> bool:
+    """True when CLAUDE CODE still compacts on its own — i.e. the janitor must NOT.
+
+    THIS IS AN OWNERSHIP QUESTION, AND IT HAS TO BE ASKED RATHER THAN ASSUMED (owner,
+    2026-08-23: *"the janitor must be aware that auto-compact is off. it's its responsibility to
+    compact the context when autocompact is off"*). The two states need OPPOSITE behaviour and
+    getting it backwards is costly in both directions:
+
+      * harness ON  + janitor fires  → the session is compacted twice, and the janitor's clear
+        races a compaction the harness was about to do anyway. Pure waste.
+      * harness OFF + janitor silent → nothing compacts, and the session dies at the context
+        limit with a hard error. That is the hole this function closes; it was open on this
+        machine for several hours today because the setting was flipped before the janitor could
+        see it.
+
+    WHY THE JANITOR IS THE BETTER OWNER, not merely an adequate one: the harness compacts
+    WHENEVER the boundary is crossed, which is necessarily MID-TURN — it interrupts the work and
+    discards a warm cache. The janitor's fires come from the heartbeat cron, and a cron fires
+    only when the REPL is IDLE, so a janitor compaction is at a turn boundary BY CONSTRUCTION.
+    It cannot interrupt. That is why overshooting the threshold is acceptable and interrupting is
+    not: a few percent of extra context costs a little, a severed turn costs the turn.
+
+    Reads USER-scope `~/.claude/settings.json` and the per-session `DISABLE_AUTO_COMPACT` env
+    var. Either one turning it off wins, per the documented precedence — whichever disables it,
+    the other cannot re-enable it. UNREADABLE OR ABSENT ⇒ True (assume the harness still owns
+    compaction), because the safe default is the janitor doing NOTHING: a wrongly-silent janitor
+    costs a redundant harness compaction, while a wrongly-eager one clears a session that was
+    never in danger.
+    """
+    if state.is_truthy_env("DISABLE_AUTO_COMPACT", False):
+        return False
+    root = home or Path(os.path.expanduser("~"))
+    try:
+        raw = (root / ".claude" / "settings.json").read_text(encoding="utf-8")
+        value = json.loads(raw).get("autoCompactEnabled")
+    except (OSError, ValueError, AttributeError):
+        return True  # unparseable config is not evidence the harness stopped compacting
+    return True if value is None else bool(value)
+
+
 def min_context_tokens() -> int:
     return state.coerce_int(os.environ.get(MIN_CONTEXT_ENV), DEFAULT_MIN_CONTEXT_TOKENS)
 
@@ -1496,6 +1536,11 @@ def should_clear_externally(
     # errors. Every other trigger here is an economy (avoid paying for a cold cache); this one is
     # survival, so it outranks them. It is also the only trigger that can fire on a BUSY session,
     # which is precisely the case the other four structurally cannot reach.
+    # `context_high_water == 0` now means BOTH "not configured" and "the harness still owns
+    # compaction" — the caller resolves ownership (`harness_auto_compacts`) and passes 0 when the
+    # janitor must stay out of the way. Keeping that decision in the CALLER leaves this function
+    # pure and keeps the two questions separate: this one asks "is the context too big", never
+    # "whose job is it".
     if (
         context_high_water > 0
         and context_tokens is not None

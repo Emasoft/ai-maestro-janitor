@@ -494,6 +494,44 @@ def test_cache_expired_needs_300k_of_context_and_no_recent_clear():
     ).fire is False
 
 
+def test_the_janitor_owns_compaction_only_when_the_harness_stopped(tmp_path, monkeypatch):
+    """Ownership is DETECTED, never assumed — and both wrong answers are expensive.
+
+    harness ON + janitor fires  => the session is compacted twice, the janitor racing a
+    compaction the harness was about to do anyway.
+    harness OFF + janitor silent => nothing compacts and the session dies at the context limit.
+    That second one was live on this machine for hours today: the setting was flipped before the
+    janitor could see it.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    cfg = tmp_path / ".claude"
+    cfg.mkdir(parents=True, exist_ok=True)
+    settings = cfg / "settings.json"
+
+    settings.write_text('{"autoCompactEnabled": false}', encoding="utf-8")
+    assert ec.harness_auto_compacts(home=tmp_path) is False, "janitor must take over"
+
+    settings.write_text('{"autoCompactEnabled": true}', encoding="utf-8")
+    assert ec.harness_auto_compacts(home=tmp_path) is True, "harness still owns it"
+
+    # Absent key, absent file, and unparseable JSON must ALL read as "the harness still
+    # compacts". The safe default is the janitor doing nothing: a wrongly-silent janitor costs a
+    # redundant compaction, a wrongly-eager one clears a session that was never in danger.
+    settings.write_text("{}", encoding="utf-8")
+    assert ec.harness_auto_compacts(home=tmp_path) is True
+    settings.write_text("{not json", encoding="utf-8")
+    assert ec.harness_auto_compacts(home=tmp_path) is True
+    settings.unlink()
+    assert ec.harness_auto_compacts(home=tmp_path) is True
+
+    # The per-session env var disables it on its own — whichever surface turns auto-compact off
+    # wins, and the other cannot turn it back on.
+    settings.write_text('{"autoCompactEnabled": true}', encoding="utf-8")
+    monkeypatch.setenv("DISABLE_AUTO_COMPACT", "1")
+    assert ec.harness_auto_compacts(home=tmp_path) is False
+
+
 def test_context_pressure_never_overrides_a_SAFETY_veto():
     """Pressure is urgent, not supreme: a question addressed to a human still wins.
 
