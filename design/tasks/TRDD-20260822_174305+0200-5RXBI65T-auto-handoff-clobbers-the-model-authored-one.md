@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: dev
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-23T11:07:39+0200
+updated: 2026-08-23T11:08:19+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -26,9 +26,14 @@ after what was believed to be an incident: a rich handoff this session had just 
 replaced mid-session. The owner ruled on the design 2026-08-23 — **option D**, see
 [The design question](#the-design-question--do-not-pick-unilaterally); A/B/C are superseded.
 
-**NEXT ACTION:** apply the advisor's verdict on the four open mechanics of D (the session key both
-writers can derive independently, reader group-selection, per-file vs per-group concision budget,
-retention), then implement. Advisor consulted 2026-08-23 10:53.
+**NEXT ACTION:** decide D's four mechanics (session key derivable by BOTH writers, reader
+group-selection, per-file vs per-group concision budget, retention) and implement. An advisor was
+consulted 2026-08-23 10:53; **it is NOT a gate** — three prior advisor spawns on this project sit
+`stopped: true` in `pending-agents.json` and last night's ran from 22:50 without returning.
+Treating a possibly-hung agent as a blocker is how `column: dev` becomes a lie.
+
+**The forensics above are CLOSED — do not reopen them.** F1 is the writer on both days. What
+remains is code.
 
 **✅ CORROBORATED 2026-08-23 10:52 — a live clobber, caught by two DIRECT reads (not mtime).**
 The 2026-08-22 incident claim was rightly demoted to uncorroborated (see the superseded reasoning
@@ -45,7 +50,8 @@ on any of the proxies that made the first attempt wrong:
    4032 B, and `idle-clear-fired.ts` = 1787469366 (`09:16:06`).
 
 Content that provably existed at that path is provably no longer there. **THE CLOBBER IS
-ESTABLISHED; THE WRITER IS NOT.** Read 1 is the injected bytes themselves — and the injection
+ESTABLISHED — and as of ~11:07 so is the WRITER (F1); the paragraphs below trace how, through
+three wrong attributions.** Read 1 is the injected bytes themselves — and the injection
 banner in context is byte-identical to the `print()` literal at `on-session-start.py:~301`, which
 fingerprints that exact code path, so the bytes provably came from that read of that path.
 

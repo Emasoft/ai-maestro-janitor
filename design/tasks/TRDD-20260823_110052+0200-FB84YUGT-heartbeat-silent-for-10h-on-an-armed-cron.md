@@ -3,7 +3,7 @@ trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
 column: todo
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-23T11:05:03+0200
+updated: 2026-08-23T11:08:27+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -80,21 +80,25 @@ an unstarted card": the state asserts activity that is not happening.
    start a turn*. A rate-limit UI, a stuck turn, or a modal would suppress every fire while the
    job stays scheduled. Then the fix is not re-arming — it is noticing the suppression.
 
-### A third data point that contradicts the gap — resolve it, do not ignore it
+### A contradiction that looked fatal and WASN'T — retired, recorded
 
-TRDD-5RXBI65T's forensics landed a fact this card must answer. `.janitor/state/idle-clear-fired.ts`
-= `09:16:06` — **inside the gap**. Only two callers stamp it: `external_handoff_clear.py:369`
-(via `_fire()` at `:429`, i.e. *after* its write at `:428`) and `dispatch.py:2348` (*after*
-`send_verified` types `/janitor-handoff-and-clear`). The neighbouring `agent-handoff.md` header
-stamps `09:16:12`, six seconds LATER — a stamp-then-compose order that only `dispatch.py:2348`
-can produce.
+An earlier revision of this card carried a blocker here: `idle-clear-fired.ts` = `09:16:06` sits
+**inside the gap**, and the ordering seemed to require `dispatch.py:2348` — which runs from a
+heartbeat, contradicting the gap and impugning `heartbeat-fires.log` as an instrument. That
+would have been load-bearing, so it was written as a pre-build gate.
 
-But `dispatch.py` runs **from a heartbeat**, and this card's measurement says none fired at 09:16.
-Both cannot be true. Either the gap is not what it looks like (some fires do not reach
-`heartbeat-fires.log`, which would make the log an unreliable instrument and this card's premise
-wrong), or something other than those two callers stamps that file. Whichever it is, it is
-load-bearing here — **settle it before building the detector**, because a watchdog calibrated on
-a log that silently misses fires would inherit the same blindness it exists to remove.
+**It dissolved.** TRDD-5RXBI65T settled it in source: `external_handoff_clear.main()` captures
+`now = int(time.time())` at `:390` on ENTRY and passes that same integer down to `_fire(…, now)`
+→ `mark_clear_fired(sd, now=now)`. The stamp therefore records the run's **entry** time while
+being **written** minutes later, so a stamp inside the gap implies no fire inside the gap. One
+`external_handoff_clear` run explains it, `dispatch.py` is not implicated, and
+`heartbeat-fires.log` is not impugned.
+
+**The gap stands, and the detector is unblocked.** Kept rather than deleted because the mistake
+is the reusable part: a stamped VALUE was read as its WRITE time. Any watchdog built here will be
+comparing timestamps from exactly this family of files — so before treating `now - last-stamp` as
+elapsed time, check whether the stamp records when the run STARTED or when the file was WRITTEN.
+Get that backwards and the detector mismeasures every long-running writer on the machine.
 
 Both hypotheses are distinguishable from data already on disk (`heartbeat-fires.log` gaps vs the OAuth
 rotator's `rotator.log`, which recorded `cookie-leg-stuck` ONSET at `09:04:38` and a
