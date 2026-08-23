@@ -60,6 +60,30 @@ fn run_any(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// A page `description:` that satisfies the 15-distinct-phrase gate, for fixtures whose subject
+/// is NOT the description itself.
+///
+/// Written as a real recall surface rather than `p1 / p2 / …` on purpose: test fixtures are read
+/// as worked examples, and the next author reaching for a `new-page` call will copy whatever is
+/// here. Filler would teach exactly the shape the gate exists to reject — a count satisfied
+/// without coverage gained.
+const FIXTURE_PAGE_DESC: &str = "the widget stopped responding / why does the widget hang / \
+     widget freezes on load / the panel never finishes rendering / clicking does nothing / \
+     spinner spins forever / how do I reset the widget / widget state is stuck / \
+     what makes the widget hang / is the widget deadlocked / widget unresponsive after resize / \
+     the component stops updating / no error but nothing happens / widget needs a restart / \
+     where is the widget state stored";
+
+/// A keyphrase list satisfying the 10-distinct-keyphrase gate, for atoms whose subject is not
+/// their own keywords. Same reasoning as `FIXTURE_PAGE_DESC`.
+const FIXTURE_KEYWORDS: &str = "the widget stopped responding, why does the widget hang, \
+     widget freezes on load, spinner spins forever, how do I reset the widget, \
+     widget state is stuck, is the widget deadlocked, widget unresponsive after resize, \
+     the component stops updating, where is the widget state stored";
+
+/// An atom `--desc` past the 24-char floor.
+const FIXTURE_DESC: &str = "what makes the widget hang and how to clear it";
+
 /// Run memgrep and return BOTH stdout and the exit code. `lint`'s severity model makes the exit
 /// code a first-class result — "printed but did not gate" and "printed and gated" differ ONLY in
 /// that number, so a helper returning stdout alone cannot tell the two apart.
@@ -2964,7 +2988,7 @@ fn new_page_scaffolds_a_valid_parseable_page() {
         "--name",
         "comp",
         "--description",
-        "how does the widget resolve / where does the config live",
+        FIXTURE_PAGE_DESC,
         "--type",
         "reference",
     ]);
@@ -2978,7 +3002,7 @@ fn new_page_scaffolds_a_valid_parseable_page() {
     // A second new-page onto the same path is refused — never clobber an existing page.
     run_fail(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "comp", "--description", "x", "--type", "reference",
+        "--name", "comp", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
 }
 
@@ -2988,7 +3012,7 @@ fn add_atom_round_trips_through_the_parser_and_index() {
     let page = d.join("p.md");
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "the page recall surface", "--type", "reference",
+        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
     // add-atom: body from stdin, a multi-word phrase keyword, a desc + type. The stored marker is
     // asserted LITERALLY below against exactly these 3 keyphrases, so this call opts out of the
@@ -2998,7 +3022,10 @@ fn add_atom_round_trips_through_the_parser_and_index() {
         &[
             "add-atom", "--page", page.to_str().unwrap(),
             "--keywords", "rate limit, resume, 429 error",
-            "--desc", "a summary, with a comma",
+            // Still comma-bearing — that IS this test's subject (a comma must survive the
+            // quoted round-trip) — but past the 24-char desc floor, which "a summary, with a
+            // comma" missed by one character.
+            "--desc", "a summary, with a comma, long enough to triage on",
             "--type", "reference",
         ],
         "The window already closed — mint a fresh token.",
@@ -3037,7 +3064,7 @@ fn add_atom_refuses_a_missing_page_and_empty_body() {
     let page = d.join("p.md");
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "d", "--type", "reference",
+        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
     run_stdin_fail(
         &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "a,b"],
@@ -3055,7 +3082,7 @@ fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
     let page = d.join("p.md");
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "d", "--type", "reference",
+        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
     let old_out = run_stdin(
         &[
@@ -3063,6 +3090,7 @@ fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
             "old, thing, retired fact, superseded record, previous version, \
              old value stored, legacy data point, prior fact recorded, \
              obsolete information, historical record entry",
+        "--desc", FIXTURE_DESC,
         ],
         "the old fact.",
     );
@@ -3074,6 +3102,7 @@ fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
             "new, thing, refined fact, current record, updated version, \
              fresh value stored, latest data point, corrected fact recorded, \
              current information, updated record entry",
+            "--desc", FIXTURE_DESC,
             "--supersedes", &old_id,
         ],
         "the refined fact.",
@@ -3117,7 +3146,7 @@ fn add_atom_supersedes_chains_across_multiple_generations() {
     let page = d.join("p.md");
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "d", "--type", "reference",
+        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
     // >=10-keyphrase floor (MEMGREP_MIN_KEYWORDS, default 10): every fixture below carries a full
     // keyphrase list plausibly belonging to its subject, not filler — a future author copying a
@@ -3127,15 +3156,15 @@ fn add_atom_supersedes_chains_across_multiple_generations() {
         generation tracking id, chain of custody record, provenance chain trace, \
         sequential supersession chain";
     let v1 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--desc", FIXTURE_DESC],
         "v1 fact.",
     ).split_whitespace().next().unwrap().to_string();
     let v2 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--supersedes", &v1],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--desc", FIXTURE_DESC, "--supersedes", &v1],
         "v2 fact.",
     ).split_whitespace().next().unwrap().to_string();
     let v3 = run_stdin(
-        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--supersedes", &v2],
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", CHAIN_KEYWORDS, "--desc", FIXTURE_DESC, "--supersedes", &v2],
         "v3 fact.",
     ).split_whitespace().next().unwrap().to_string();
 
@@ -3167,7 +3196,7 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
     let page = d.join("p.md");
     run(&[
         "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", "d", "--type", "reference",
+        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
     ]);
     let atom_out = run_stdin(
         &[
@@ -3176,6 +3205,7 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
              secret storage location, where are credentials stored, keychain access item, \
              stored secret lookup, credential retrieval macos, security find generic password, \
              keychain entry format",
+        "--desc", FIXTURE_DESC,
         ],
         "Creds live in the macOS keychain, never plaintext.",
     );
@@ -3379,6 +3409,7 @@ fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
              placeholder atom text, test double atom, mock atom fixture, \
              illustrative atom sample, scratch atom body, throwaway atom fixture, \
              stub atom content",
+        "--desc", FIXTURE_DESC,
         ],
         "some atom body text.",
     );
@@ -3441,6 +3472,7 @@ fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
              secret storage location, where are credentials stored, keychain access item, \
              stored secret lookup, credential retrieval macos, security find generic password, \
              keychain entry format",
+        "--desc", FIXTURE_DESC,
         ],
         "Creds live in the macOS keychain, never plaintext.",
     );
