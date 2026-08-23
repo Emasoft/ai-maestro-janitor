@@ -1,12 +1,12 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: todo
+column: dev
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-22T23:14:58+0200
+updated: 2026-08-23T10:56:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
-severity: medium
+severity: high
 scope: project
 approval-tier: 0
 release-via: publish
@@ -21,26 +21,44 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-**Not started.** Filed 2026-08-22 after what was believed to be an incident: a rich handoff this
-session had just authored, silently replaced mid-session.
+**Design DECIDED, implementation not started — `column: dev` since 2026-08-23.** Filed 2026-08-22
+after what was believed to be an incident: a rich handoff this session had just authored, silently
+replaced mid-session. The owner ruled on the design 2026-08-23 — **option D**, see
+[The design question](#the-design-question--do-not-pick-unilaterally); A/B/C are superseded.
 
-**⚠ THE INCIDENT IS UNCORROBORATED — THE HAZARD IS NOT. Read this before using the card.**
-Four commits (`2994469a` → `9684a496` → `8490516b` → this one) argued about *which code* wrote at
-17:38, and never questioned the layer underneath: **a file's mtime was read as a writer's
-identity**, and F2 (*"and the replacement was already stale"*) presupposes F1's clobber rather
-than evidencing it. Settled by asking whether there was ever a victim instead of who wrote last —
-`git log --since=2026-08-22 -- .janitor/state/` is empty (gitignored, as expected) and **no log
-surface anywhere under `.janitor/logs/` mentions `agent-handoff` on any date**: the
-`/janitor-write-handoff` skill leaves no trace at all. So nothing establishes that a rich handoff
-existed before 17:38 to be destroyed. The "it has clobbered a rich handoff twice today" line came
-from the prior session's own handoff prose — the same session whose half-run drill and confident
-wrong claims took all night to correct.
+**NEXT ACTION:** apply the advisor's verdict on the four open mechanics of D (the session key both
+writers can derive independently, reader group-selection, per-file vs per-group concision budget,
+retention), then implement. Advisor consulted 2026-08-23 10:53.
 
-**This costs the card nothing, which is why it is worth doing.** F1-as-HAZARD — `atomic_write` at
-:428 is unconditional, no read-before-write, no merge, on a path shared with
-`/janitor-write-handoff` — is read directly in source, is untouched by any of this, and justifies
-the fix, the acceptance boxes and the priority on its own. F1-as-INCIDENT adds nothing but an
-unsupportable claim. Treat the card as a hazard card.
+**✅ CORROBORATED 2026-08-23 10:52 — a live clobber, caught by two DIRECT reads (not mtime).**
+The 2026-08-22 incident claim was rightly demoted to uncorroborated (see the superseded reasoning
+below); on 2026-08-23 a fresh occurrence supplied the evidence that was missing, without relying
+on any of the proxies that made the first attempt wrong:
+
+1. `scripts/hooks/on-session-start.py:291` injects the handoff by **reading**
+   `.janitor/state/agent-handoff.md`. This session's SessionStart injection — verbatim in the
+   session context — is the **rich model-authored** handoff (`# Agent handoff — 2026-08-23 ~00:0x`,
+   the continuity-drill session). Therefore that path held the rich text at `00:35:09`
+   (`clear-observed.ts` = 1787438109).
+2. `head` of the **same path** at `10:51` returns
+   `# Handoff — 2026-08-23T09:16:12+0200 (auto-composed, no model turn — TRDD-PXP08ZQC)`,
+   4032 B, and `idle-clear-fired.ts` = 1787469366 (`09:16:06`).
+
+Content that provably existed at that path is provably no longer there, and the only writer in
+between is the unconditional `atomic_write` of F1. **No mtime was read as an identity** — read 1
+is the injected bytes themselves, read 2 is the file's own self-declared header stamp. The
+inference chain the four 2026-08-22 commits could not close is closed.
+
+**The hazard was always sufficient on its own**, and still is: F1 — `atomic_write` at :428 is
+unconditional, no read-before-write, no merge, on a path shared with `/janitor-write-handoff` —
+is read directly in source and justifies the fix, the acceptance boxes and the priority with or
+without an incident. The corroboration raises severity, it does not create the case.
+
+**SUPERSEDED — do NOT carry forward:** the header of this block previously read *"THE INCIDENT IS
+UNCORROBORATED"*, and F2 below is still presupposition, not evidence — it is left standing only
+as the worked example of the mistake. The 2026-08-22 reasoning that produced it (mtime-as-writer,
+"no log surface mentions agent-handoff", "nothing establishes a victim") was **sound for the
+evidence available that night** and is retained as method, not as a current verdict.
 
 ### F1 — the overwrite is unconditional (certain, read in source)
 
@@ -190,6 +208,29 @@ C looks right on the merits — the contract's target is not inlining what a poi
 and a handoff the model chose to write is not that. But the contract is ratified, so widening it
 is a decision, not an implementation detail. **Consult the advisor and confirm with the USER
 before building.**
+
+### ✅ DECIDED 2026-08-23 by the USER — option **D**, none of A/B/C
+
+Asked to pick A/B/C, the owner declined all three and specified a fourth:
+
+> each handoff file should have a datetime stamp in the filename, and if an handoff is for the
+> same session it should have the same session hash in the filename. in this way the janitor
+> resume handoff will automatically load all handoff of the same session using the hash, and it
+> will use the datetime to decide the order of injection/loading of the handoffs.
+
+**D — one file per WRITE, never one shared path.** Filename carries a session key plus a
+timestamp; the reader loads every file sharing the key, injecting in timestamp order.
+
+Why it beats the three that were offered: A, B and C all keep a single canonical path and then
+negotiate over who gets to own it — so each one is a *policy* preventing a clobber that remains
+*structurally possible*. D removes the shared path, so there is no write to lose and no
+coordination to get wrong. It also subsumes their benefits: nothing is lost (C), ordering is
+explicit rather than implied by two filenames a reader must remember (A), and the pointer keeps
+resolving to real content (B). And it does **not** widen `HANDOFF_NOT_CONCISE` — multiplicity
+replaces merging, so each file stays inside the ratified per-file budget.
+
+**A, B and C are superseded — do not carry them forward as live options.** The table above stays
+only to record what was weighed.
 
 ## Acceptance
 
