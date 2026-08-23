@@ -3044,7 +3044,7 @@ fn add_atom_round_trips_through_the_parser_and_index() {
 
     // The stored marker is the canonical `^id [desc:…, keywords:…, type:…, ocd:…, lmd:…]` shape.
     let text = std::fs::read_to_string(&page).unwrap();
-    assert!(text.contains(&format!("^{id} [desc: \"a summary, with a comma\", keywords: rate_limit resume 429_error, type: reference, ocd: ")));
+    assert!(text.contains(&format!("^{id} [desc: \"a summary, with a comma, long enough to triage on\", keywords: rate_limit resume 429_error, type: reference, ocd:")));
     // The atom landed BEFORE the notes section (its marker precedes the heading in the file).
     let mpos = text.find(&format!("^{id}")).unwrap();
     let npos = text.find("## Notes and lessons learned").unwrap();
@@ -3258,7 +3258,13 @@ fn lint_reports_zero_findings_on_a_clean_corpus_instead_of_staying_silent() {
     let d = TempDir::new("lint-clean");
     d.write(
         "clean.md",
-        "---\nname: clean\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"a page with no defects\"\n---\nBody prose with no findings.\n\n## Notes and lessons learned\n",
+        // The description now has to clear the 15-distinct-phrase gate. That is the CORRECT fix
+        // rather than an exemption: a "clean corpus" fixture that the linter would flag was never
+        // clean, and the whole point of this test is that clean and did-not-look are
+        // distinguishable.
+        &format!(
+            "---\nname: clean\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody prose with no findings.\n\n## Notes and lessons learned\n"
+        ),
     );
     // The summary is on STDERR (stdout stays the machine-parseable violation list), so this must
     // use run_full — asserting on stdout alone would pass vacuously against the old silent build.
