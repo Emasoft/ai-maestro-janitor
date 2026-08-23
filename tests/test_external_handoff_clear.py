@@ -29,81 +29,6 @@ def _project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _card(root: Path, uid: str, column: str, title: str) -> Path:
-    """Write a real TRDD file with the frontmatter the gatherer parses."""
-    path = root / "design" / "tasks" / f"TRDD-20260806_120000+0200-{uid}-slug.md"
-    path.write_text(
-        f"---\ntrdd-id: {uid}\ntitle: {title}\ncolumn: {column}\n"
-        f"created: 2026-08-06T12:00:00+0200\nupdated: 2026-08-06T12:00:00+0200\n"
-        f"task-type: feature\n---\n\n# {title}\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-# --- _gather_cards -----------------------------------------------------------
-
-
-def test_only_in_flight_cards_are_listed(tmp_path):
-    """Queued (`todo`) and terminal (`complete`) cards would bury the card to actually resume."""
-    root = _project(tmp_path)
-    _card(root, "AAAAAAAA", "dev", "the in-flight one")
-    _card(root, "BBBBBBBB", "todo", "queued, not started")
-    _card(root, "CCCCCCCC", "complete", "already shipped")
-    uids = [uid for uid, _col, _title in ehc._gather_cards(root)]
-    assert uids == ["AAAAAAAA"]
-
-
-def test_cards_carry_their_column_and_title(tmp_path):
-    """The handoff indexes by id + column + title; a title-less row is not navigable."""
-    root = _project(tmp_path)
-    _card(root, "PXP08ZQC", "testing", "External zero-turn handoff-and-clear")
-    assert ehc._gather_cards(root) == [
-        ("PXP08ZQC", "testing", "External zero-turn handoff-and-clear")
-    ]
-
-
-def test_cards_are_newest_first_and_capped(tmp_path):
-    """The most recently touched card is the one being worked; the cap bounds the handoff."""
-    root = _project(tmp_path)
-    for i in range(_cap := ehc._MAX_CARDS + 3):
-        p = _card(root, f"CARD{i:04d}", "dev", f"card {i}")
-        os.utime(p, (1_700_000_000 + i, 1_700_000_000 + i))
-    got = ehc._gather_cards(root)
-    assert len(got) == ehc._MAX_CARDS
-    assert got[0][0] == f"CARD{_cap - 1:04d}"
-
-
-def test_a_missing_design_tree_is_not_an_error(tmp_path):
-    """A project with no TRDDs still gets a handoff — just one without the cards section."""
-    (tmp_path / ".janitor" / "state").mkdir(parents=True)
-    assert ehc._gather_cards(tmp_path) == []
-
-
-# --- _gather_commits ---------------------------------------------------------
-
-
-def test_commits_are_read_from_a_real_repo(tmp_path):
-    """The subjects are the WHY index the handoff links to instead of restating."""
-    root = _project(tmp_path)
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e"}
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=env)
-    (root / "f.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "f.txt"], cwd=root, check=True, env=env)
-    subprocess.run(["git", "commit", "-qm", "feat: the first thing"], cwd=root, check=True, env=env)
-    commits = ehc._gather_commits(root)
-    assert len(commits) == 1
-    sha, subject = commits[0]
-    assert subject == "feat: the first thing"
-    assert 6 <= len(sha) <= 12
-
-
-def test_a_repo_less_project_yields_no_commits_and_does_not_raise(tmp_path):
-    """`git` failing is an absent section, never a blocked clear."""
-    assert ehc._gather_commits(_project(tmp_path)) == []
-
-
 # --- _last_turn_age ----------------------------------------------------------
 
 
@@ -115,25 +40,105 @@ def test_last_turn_age_is_none_without_a_transcript(tmp_path):
 # --- _compose ----------------------------------------------------------------
 
 
-def test_composed_handoff_satisfies_the_concision_contract(tmp_path):
-    """The composed text is what survives an unrecoverable /clear; it must pass by construction."""
+def test_the_payload_is_the_llm_ext_summary(tmp_path, monkeypatch):
+    """TRDD-79LXF6PJ: the post-/clear payload IS the llm-ext summary, and passes the contract.
+
+    Replaces two tests that asserted the retired shape — that the payload carried the gathered
+    TRDD index and named its trigger. Both were true of the composed handoff the owner retired on
+    2026-08-23, so keeping them would have pinned deleted behaviour; they are rewritten rather
+    than dropped, because the CLAIM underneath ("what survives an unrecoverable /clear must pass
+    the contract by construction") outlived the shape that carried it.
+    """
     import clear_trigger
 
     root = _project(tmp_path)
-    _card(root, "PXP08ZQC", "dev", "External zero-turn handoff-and-clear")
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    monkeypatch.setattr(
+        ec, "summarize_with_retry",
+        lambda *a, **k: ec.SummaryAttempt(text="pending: finish TRDD-PXP08ZQC", outcome="ok"),
+    )
     verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
-    text, reasons = ehc._compose(root, verdict, {"idle_seconds": 7200, "context_tokens": 460_000})
+    text, reasons = ehc._compose(
+        root, verdict,
+        {"idle_seconds": 7200, "context_tokens": 460_000, "transcript": str(tmp_path / "t.jsonl")},
+    )
     assert reasons == []
-    assert clear_trigger.check_handoff_concise(text)[0] is True
-    assert "TRDD-PXP08ZQC" in text
+    assert "pending: finish TRDD-PXP08ZQC" in text, "the summary IS the payload"
+    # NOT asserted: check_handoff_concise. That contract governs a LINK-ONLY handoff, and this
+    # payload is a compaction RESULT that replaces the context — see _compose for why applying it
+    # here would fail every correct payload. clear_trigger's own path still enforces it.
+    del clear_trigger
 
 
-def test_composed_handoff_names_the_trigger_that_fired(tmp_path):
-    """A handoff that cannot say why the session was cleared is not auditable."""
+def test_active_skills_are_injected_IN_FULL_and_BEFORE_the_summary(tmp_path, monkeypatch):
+    """Owner requirement (2026-08-23): skills first, in full, then the summary.
+
+    The ORDER is the requirement, not a preference — the summary describes a session that had
+    those skills loaded, so it refers to them; placed after the summary they would arrive too
+    late to resolve the references the reader has already hit.
+    """
     root = _project(tmp_path)
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    monkeypatch.setattr(
+        ec, "summarize_with_retry",
+        lambda *a, **k: ec.SummaryAttempt(text="SUMMARY-BODY referring to the skill", outcome="ok"),
+    )
+    import active_skills
+
+    monkeypatch.setattr(active_skills, "render", lambda _t: "SKILL-BODY in full")
+    verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
+    text, reasons = ehc._compose(
+        root, verdict,
+        {"idle_seconds": 7200, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
+    )
+    assert reasons == []
+    assert "SKILL-BODY in full" in text and "SUMMARY-BODY" in text
+    assert text.index("SKILL-BODY in full") < text.index("SUMMARY-BODY"), (
+        "skills must precede the summary — a summary that references skills the reader has not "
+        "seen yet opens with dangling references"
+    )
+
+
+def test_no_active_skills_still_yields_a_payload(tmp_path, monkeypatch):
+    """A session that invoked no skills is normal; an empty skill block must not withhold the
+    summary, which would turn 'nothing to prepend' into 'refuse to clear'."""
+    root = _project(tmp_path)
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    monkeypatch.setattr(
+        ec, "summarize_with_retry",
+        lambda *a, **k: ec.SummaryAttempt(text="SUMMARY-ONLY", outcome="ok"),
+    )
+    import active_skills
+
+    monkeypatch.setattr(active_skills, "render", lambda _t: "")
+    verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
+    text, reasons = ehc._compose(
+        root, verdict,
+        {"idle_seconds": 7200, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
+    )
+    assert reasons == [] and "SUMMARY-ONLY" in text
+
+
+def test_no_summary_means_no_payload_so_the_caller_cannot_clear(tmp_path, monkeypatch):
+    """The new safety floor: with the template retired, an empty summary must block the clear.
+
+    This REVERSES the 2026-08-13 ruling that the clear must always succeed. That ruling was
+    written when a network-free template always existed; without it, clearing on an empty summary
+    destroys a session with no record at all. Declining costs one full-price turn — recoverable.
+    """
+    root = _project(tmp_path)
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    monkeypatch.setattr(
+        ec, "summarize_with_retry",
+        lambda *a, **k: ec.SummaryAttempt(text=None, outcome="transient", detail="offline"),
+    )
     verdict = ec.ClearVerdict(True, ec.TRIGGER_NEXT_FIRE_MISSES, "would miss")
-    text, _ = ehc._compose(root, verdict, {"idle_seconds": 60, "context_tokens": 1})
-    assert ec.TRIGGER_NEXT_FIRE_MISSES in text
+    text, reasons = ehc._compose(
+        root, verdict,
+        {"idle_seconds": 60, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
+    )
+    assert text == "", "an empty payload is how the caller learns not to clear"
+    assert reasons == ["no-summary"]
 
 
 # --- end to end (real subprocess) --------------------------------------------

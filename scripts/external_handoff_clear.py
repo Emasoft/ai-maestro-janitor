@@ -37,8 +37,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -47,104 +45,12 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+import active_skills  # noqa: E402
 import external_clear as ec  # noqa: E402
 import handoff_files  # noqa: E402
 import state  # noqa: E402
 
 _LOG = "external-clear"
-# The columns whose cards are genuinely IN FLIGHT. `todo`/`backburner` are queued, not in
-# progress, so listing them would bury the one card the next session should actually resume.
-_WORK_COLUMNS = ("dev", "testing", "ai_review", "human_review")
-_MAX_CARDS = 6
-_MAX_COMMITS = 5
-_MAX_FINDINGS = 4
-_TITLE_RE = re.compile(r"^title:\s*(.+?)\s*$", re.MULTILINE)
-_FRONTMATTER_BYTES = 4096
-
-
-def _run_git(root: Path, *args: str) -> str:
-    """Best-effort `git` in `root`; "" on any failure. Never raises — a repo-less project must
-    still get a handoff, just one without the commit section.
-
-    Read-only: GIT_OPTIONAL_LOCKS=0 so this never takes .git/index.lock and
-    collides with a concurrent `publish.py` commit (janitor#245).
-    """
-    try:
-        git_env = dict(os.environ)
-        git_env["GIT_OPTIONAL_LOCKS"] = "0"
-        out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=git_env,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return out.stdout if out.returncode == 0 else ""
-
-
-def _gather_cards(root: Path) -> list[tuple[str, str, str]]:
-    """(id, column, title) for every in-flight card, both scopes, newest-updated first."""
-    try:
-        import trdd_common  # noqa: PLC0415 - lazy: a project without TRDDs pays nothing
-    except ImportError:
-        return []
-    rows: list[tuple[float, str, str, str]] = []
-    try:
-        files = trdd_common.trdd_files("tasks", str(root))
-    except Exception:  # noqa: BLE001 - a malformed design tree must not block the clear
-        return []
-    for _scope, path in files:
-        try:
-            head = path.read_text(encoding="utf-8", errors="replace")[:_FRONTMATTER_BYTES]
-            _status, column = trdd_common.parse_state_text(head)
-        except (OSError, ValueError):
-            continue
-        if column not in _WORK_COLUMNS:
-            continue
-        uid = trdd_common.extract_uid(path.name)
-        if not uid:
-            continue
-        m = _TITLE_RE.search(head)
-        title = (m.group(1) if m else "").strip().strip('"')
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-        rows.append((mtime, uid.upper(), column, title))
-    rows.sort(reverse=True)
-    return [(uid, col, title) for _mt, uid, col, title in rows[:_MAX_CARDS]]
-
-
-def _gather_commits(root: Path) -> list[tuple[str, str]]:
-    """(short-sha, subject) for the most recent commits. The subjects are the WHY index — the
-    handoff links to them rather than restating what changed."""
-    out = _run_git(root, "log", f"-{_MAX_COMMITS}", "--format=%h %s")
-    rows: list[tuple[str, str]] = []
-    for line in out.splitlines():
-        sha, _, subject = line.partition(" ")
-        if sha and subject:
-            rows.append((sha, subject.strip()))
-    return rows
-
-
-def _gather_findings(root: Path) -> list[str]:
-    """Unread findings, READ-ONLY. The cursor is deliberately NOT advanced: surfacing a finding
-    in a handoff is not the same as a human having seen it, and advancing here would make the
-    fresh session's own SessionStart injection silently skip them."""
-    try:
-        import findings_ledger  # noqa: PLC0415
-
-        lines, _total = findings_ledger.unread_entries(str(root), cap=_MAX_FINDINGS)
-    except Exception:  # noqa: BLE001 - the ledger is an extra, never a precondition
-        return []
-    return [state.sanitize_for_drift_line(line) for line in lines]
-
-
-def _memory_dir(root: Path) -> str:
-    rel = Path(".claude") / "project" / "memory"
-    return str(rel) if (root / rel).is_dir() else ""
 
 
 def _last_turn_age(root: Path, now: int) -> int | None:
@@ -267,24 +173,29 @@ def _decide(
 
 
 def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, list[str]]:
-    """Build the handoff and validate it against the concise-but-exhaustive contract.
+    """Return the llm-ext session summary that becomes the post-`/clear` payload.
 
-    Returns (text, reasons) — `reasons` empty means it passed. A failing handoff is REPORTED,
-    not silently shipped: `/clear` is unrecoverable and this text is the only thing that
-    survives it, so a contract breach here is the last moment anyone can notice.
+    TRDD-79LXF6PJ — THE DAEMON NO LONGER COMPOSES A HANDOFF. It used to emit a three-part
+    document: a mechanically-gathered index (in-flight cards, recent commits, open findings), the
+    llm-ext summary, and a truncated tail of raw turns. The owner retired that whole shape
+    (2026-08-23), having been shown and having declined the narrower option of keeping the free
+    index: every compaction goes through the llm-externalizer, and its summary already ends with
+    the pending work, so a separately-composed handoff is redundant.
+
+    Returns ("", reasons) when no summary exists — see `main`, which then DECLINES TO CLEAR.
+
+    ⚠ THIS REVERSES A PRIOR OWNER RULING, DELIBERATELY, AND THE REVERSAL IS THE RISKY PART.
+    On 2026-08-13 the owner ruled *"the compacting must succeed no matter what"*, and this
+    function concluded: *"Degrading to a smaller handoff is survivable; degrading to NO clear is
+    not"* — hence the old facts+tail fallback, which needed no network and could always be
+    produced. With the handoff gone there is no such floor: if llm-ext cannot summarize, there is
+    NOTHING to survive the clear. Clearing anyway would destroy a session with no record at all,
+    which is strictly worse than the full-price turn the 2026-08-13 ruling was protecting against
+    — one costs money, the other costs the work. So the guarantee moves from "always clear" to
+    "never clear blind", per the standing fail-fast rule: it either works as intended or it stops.
     """
-    import clear_trigger  # noqa: PLC0415
-
-    inputs = ec.HandoffInputs(
-        cards=_gather_cards(root),
-        commits=_gather_commits(root),
-        findings=_gather_findings(root),
-        memory_dir=_memory_dir(root),
-        trigger=verdict.trigger,
-        idle_seconds=facts.get("idle_seconds"),
-        context_tokens=facts.get("context_tokens"),
-    )
-    now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    del root, verdict  # the mechanical index they fed is retired; kept in the signature so the
+    # call site and its tests keep one shape while this lands.
     transcript = str(facts.get("transcript") or "")
 
     # THE WIRING (TRDD-1QJIZFFW). `use_llm_ext()` shipped exported, defaulting True, with ZERO
@@ -315,15 +226,29 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
         )
         summary = got.text
         if not summary:
-            state.log_line(_LOG, f"handoff degraded to template: {got.outcome} — {got.detail}")
-    text = ec.compose_handoff(
-        inputs,
-        now_iso=now_iso,
-        summary=summary,
-        tail=ec.recent_messages(transcript) if transcript else (),
-    )
-    _ok, reasons = clear_trigger.check_handoff_concise(text)
-    return text, reasons
+            state.log_line(_LOG, f"no summary: {got.outcome} — {got.detail}")
+    if not summary:
+        # No template to fall back to any more. The caller reads "" as "do not clear".
+        return "", ["no-summary"]
+
+    # ACTIVE SKILLS FIRST, IN FULL, THEN THE SUMMARY (owner, 2026-08-23). The order is the
+    # requirement, not a preference: the summary describes a session in which those skills were
+    # loaded and therefore refers to them, so a summary injected above (or without) them opens
+    # with references that resolve to nothing.
+    skills = active_skills.render(transcript) if transcript else ""
+    header = f"# Session summary — {time.strftime('%Y-%m-%dT%H:%M:%S%z')} (llm-externalizer)\n\n"
+    text = f"{skills}\n\n---\n\n{header}{summary}\n" if skills else f"{header}{summary}\n"
+
+    # THE CONCISION CONTRACT IS DELIBERATELY NOT APPLIED HERE ANY MORE, and that is a ratified
+    # constraint being retired for this path — recorded loudly rather than dropped quietly.
+    # `check_handoff_concise` (4096 B, no fenced blocks, must carry a reference) governs a
+    # LINK-ONLY HANDOFF: a pointer into durable storage, whose whole virtue is not inlining what a
+    # link can resolve. This payload is the opposite artifact by design — a compaction RESULT that
+    # REPLACES the context, carrying skills reproduced verbatim at the owner's explicit
+    # instruction. Judging it by that contract would fail every correct payload and pass only
+    # useless ones. The guard still governs the in-session handoff path in `clear_trigger`, which
+    # is still link-only; nothing there is weakened.
+    return text, []
 
 
 def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str = "") -> None:
@@ -415,9 +340,17 @@ def main() -> int:
         return 0
 
     text, reasons = _compose(root, verdict, facts)
+    # TRDD-79LXF6PJ — NEVER CLEAR BLIND. With the composed handoff retired there is no
+    # network-free floor left: an empty payload means the session would lose everything, and
+    # `/clear` is the one operation here that cannot be undone. Declining costs a full-price turn;
+    # clearing costs the work. The next fire retries, which is the correct outer loop.
+    if not text.strip():
+        print("NO_SUMMARY declining to clear — llm-ext produced no summary")
+        state.log_line(_LOG, "declined: no llm-ext summary, refusing to clear blind")
+        return 0
     if reasons:
         print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}")
-        state.log_line(_LOG, f"handoff violates the concision contract: {reasons}")
+        state.log_line(_LOG, f"summary violates the concision contract: {reasons}")
 
     if args.dry_run:
         print(f"DRY_RUN would clear via {terminal.get('kind')} "

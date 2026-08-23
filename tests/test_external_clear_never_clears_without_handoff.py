@@ -60,13 +60,21 @@ def _firing_project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     monkeypatch.setenv(ec.ENABLED_ENV, "true")
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no third-party probe
-    # The llm-ext summariser is OFF for the same reason the probe is, and the omission was a
-    # real leak: these tests spawned the machine's REAL llm-ext against a pytest tmp transcript,
-    # which the suite's allow-list correctly refused (SandboxViolation) — after which the retry
-    # loop slept its way through the backoff, making the file slow as well as impure. Nothing
-    # here asserts anything about summarisation: the subject is the ORDER of the handoff write
-    # versus the chain spawn, and `compose_handoff` produces the template handoff without it.
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "false")
+    # llm-ext is ON but its subprocess is STUBBED — the summariser must never really spawn here.
+    # The original leak is worth keeping in view: these tests once spawned the machine's REAL
+    # llm-ext against a pytest tmp transcript, which the suite's allow-list correctly refused
+    # (SandboxViolation), after which the retry loop slept through its backoff — slow AND impure.
+    #
+    # It used to be switched OFF instead, because `compose_handoff` produced a template handoff
+    # with no summary. TRDD-79LXF6PJ retired that template: no summary now means NO CLEAR, so an
+    # OFF switch would make every test in this file assert nothing. Stubbing keeps the subject
+    # intact — the ORDER of the payload write versus the chain spawn — without a subprocess.
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    monkeypatch.setattr(
+        ec,
+        "summarize_with_retry",
+        lambda *a, **k: ec.SummaryAttempt(text="stubbed llm-ext session summary", outcome="ok"),
+    )
     monkeypatch.setenv(ec.MIN_CONTEXT_ENV, "0")  # size must not veto
 
     import cold_cache_compact  # noqa: PLC0415
