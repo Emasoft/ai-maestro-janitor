@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: dev
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-23T10:56:00+0200
+updated: 2026-08-23T10:59:48+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -44,10 +44,34 @@ on any of the proxies that made the first attempt wrong:
    `# Handoff — 2026-08-23T09:16:12+0200 (auto-composed, no model turn — TRDD-PXP08ZQC)`,
    4032 B, and `idle-clear-fired.ts` = 1787469366 (`09:16:06`).
 
-Content that provably existed at that path is provably no longer there, and the only writer in
-between is the unconditional `atomic_write` of F1. **No mtime was read as an identity** — read 1
-is the injected bytes themselves, read 2 is the file's own self-declared header stamp. The
-inference chain the four 2026-08-22 commits could not close is closed.
+Content that provably existed at that path is provably no longer there. **THE CLOBBER IS
+ESTABLISHED; THE WRITER IS NOT.** Read 1 is the injected bytes themselves — and the injection
+banner in context is byte-identical to the `print()` literal at `on-session-start.py:~301`, which
+fingerprints that exact code path, so the bytes provably came from that read of that path.
+
+**⚠ The first version of this block over-reached and is corrected here.** It said *"the only
+writer in between is the unconditional `atomic_write` of F1"* and called the file's own header
+stamp a direct read. Both were wrong, in the card's own signature way: a **self-declared header
+was read as a writer's identity**, which is the same error family as mtime-as-identity, merely
+better dressed. What the logs actually say (2026-08-23 ~10:55):
+
+| probe | result |
+|---|---|
+| project `.janitor/logs/external-clear.log` | no 2026-08-23 entry (mtime Aug 20) — but this is the WRONG log, see next row |
+| DATA `global-state/external-clear.log` | fires today at `09:21:12`, `09:22:21`, `09:26:17`, all `[s:cf997868]` |
+| this project's session ids today | `9248f90c`, `fdde8723` — **`cf997868` is neither** |
+| `ls` mtime of `agent-handoff.md` | `09:22` (matches the 09:22:21 fire) |
+| the file's own header stamp | `09:16:12` (matches **no** fire) |
+| any `.janitor/logs/` line at 09:16 | none |
+
+So F1 remains the leading candidate and is no longer a demonstrated fact. **OPEN: who wrote at
+09:16:12, and why the header stamp and the mtime disagree by ~6 minutes.** Left open on purpose —
+this card was filed because a confident wrong attribution cost a night, and a fourth invented
+story would be the fifth proxy read, not a fix.
+
+**None of this weakens the card.** The fix does not depend on the writer's name: F1's `:428` is
+unconditional on a shared path, read directly in source, and a shared path with two or more
+writers is the defect whoever holds the pen.
 
 **The hazard was always sufficient on its own**, and still is: F1 — `atomic_write` at :428 is
 unconditional, no read-before-write, no merge, on a path shared with `/janitor-write-handoff` —
@@ -226,8 +250,23 @@ negotiate over who gets to own it — so each one is a *policy* preventing a clo
 *structurally possible*. D removes the shared path, so there is no write to lose and no
 coordination to get wrong. It also subsumes their benefits: nothing is lost (C), ordering is
 explicit rather than implied by two filenames a reader must remember (A), and the pointer keeps
-resolving to real content (B). And it does **not** widen `HANDOFF_NOT_CONCISE` — multiplicity
-replaces merging, so each file stays inside the ratified per-file budget.
+resolving to real content (B).
+
+**Two honest limits on D, so nobody implements it believing more than it delivers:**
+
+- **It does not delete the failure, it MOVES it** — from "a writer clobbers another writer" to
+  "the reader selects the wrong group". That is a strictly better failure (it is recoverable —
+  the bytes still exist on disk) but it is not *no* failure, and reader-selection is now the
+  load-bearing part. This is advisor mechanic 2.
+- **"No collision" needs a tiebreak to be true.** Same key + same-second timestamps still
+  collide at 1 s granularity, so the filename needs a pid or counter component. A design whose
+  whole claim is "no shared path" must not reintroduce one at the second boundary.
+
+**Contract-neutrality is the INTENT, not yet a finding.** D is *intended* to leave
+`HANDOFF_NOT_CONCISE` untouched — multiplicity replaces merging, so each file should stay inside
+the ratified per-file budget. Whether the budget is per-file or per-group is **advisor mechanic
+3, still open**; asserting neutrality before that answer would be pre-answering my own
+outstanding question, which is how the A/B/C round went wrong.
 
 **A, B and C are superseded — do not carry them forward as live options.** The table above stays
 only to record what was weighed.
