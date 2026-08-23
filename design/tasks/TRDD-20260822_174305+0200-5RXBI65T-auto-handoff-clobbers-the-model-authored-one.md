@@ -3,7 +3,7 @@ trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: dev
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-23T11:05:03+0200
+updated: 2026-08-23T11:07:39+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -59,7 +59,7 @@ better dressed. What the logs actually say (2026-08-23 ~10:55):
 |---|---|
 | project `.janitor/logs/external-clear.log` | no 2026-08-23 entry (mtime Aug 20) — but this is the WRONG log, see next row |
 | DATA `global-state/external-clear.log` | fires today at `09:21:12`, `09:22:21`, `09:26:17`, all `[s:cf997868]` |
-| `cf997868` — POSITIVE id | its transcript is `~/.claude/projects/-Users-…-Code-EMASOFT-INTEGRATOR-AGENT/cf997868-f2fe-…` ⇒ **a session of a DIFFERENT project**. Those three fires never touched this state dir |
+| `cf997868` — POSITIVE id | `~/.claude/projects/-Users-…-Code-EMASOFT-INTEGRATOR-AGENT/cf997868-f2fe-…`. **It is the session the WATCHER RUNS UNDER — NOT the target.** The target is the `transcript=` field, and on 08-22 `[s:cf997868]` lines name **this project's** `d30bf250-….jsonl`. The daemon is machine-wide: it logs under its own project while acting on another |
 | `ls` mtime of `agent-handoff.md` | `09:22` |
 | the file's own header stamp | `09:16:12` |
 | any `.janitor/logs/` line at 09:16 | none |
@@ -72,15 +72,31 @@ path — that is what emits `summary: ok on attempt 1`); `external_handoff_clear
 **compose start** and the log line stamps **compose end**, and the interval between them simply
 *is* the model call. Header-vs-log disagreement is the design, not a symptom.
 
-**OPEN, and now sharper: who wrote at 09:16:12?** The same reading narrows it usefully —
-`idle-clear-fired.ts` = `09:16:06` PRECEDES the header's `09:16:12`, and
-`external_handoff_clear` cannot produce that order: it stamps via `_fire()` at `:369`, called at
-`:429`, i.e. **after** the write at `:428`. A stamp-then-compose ordering points instead at
-`dispatch.py:2348`, which stamps only after `send_verified` types `/janitor-handoff-and-clear`
-into the pane. That in turn collides with TRDD-FB84YUGT's measurement (no heartbeat fired in this
-project between `00:35:42` and `10:55:32`, and `dispatch.py` runs from a heartbeat). **Two
-readings that cannot both be true — which is exactly why this stays open.** A fourth invented
-story would be the next proxy read, not a fix.
+**✅ CLOSED — F1 wrote it, and the "impossible ordering" was one more proxy read.** The argument
+that nearly stood here was: `idle-clear-fired.ts` = `09:16:06` PRECEDES the header's `09:16:12`,
+yet `external_handoff_clear` stamps that file via `_fire()` (`:369`) called at `:429`, i.e. AFTER
+the write at `:428` — so it cannot have produced that order, and `dispatch.py:2348` must have.
+Which then collided with TRDD-FB84YUGT (no heartbeat fired here between `00:35:42` and
+`10:55:32`, and `dispatch.py` runs from a heartbeat).
+
+**Both horns dissolve on one line of source.** `main()` captures `now = int(time.time())` at
+**`:390`**, on ENTRY — before `_decide`, before `_compose` — and passes that same integer down to
+`_fire(…, now)` → `mark_clear_fired(sd, now=now)`. So `idle-clear-fired.ts` holds the RUN'S ENTRY
+TIME even though it is WRITTEN minutes later. The mistake was **reading a stamped value as its
+write time** — the identity-by-proxy family again, one level further in.
+
+A single run accounts for every artifact, with nothing left over:
+
+| `:390` | entry, `now` = `09:16:06` → later written verbatim into `idle-clear-fired.ts` |
+|---|---|
+| `_compose` | stamps `now_iso` = `09:16:12` into the header (~6 s later, after `_decide`) |
+| inside `_compose` | the LLM summary — the ~6 minutes |
+| `:428` | `atomic_write` of `agent-handoff.md` → mtime `09:22` |
+| `:429`→`:369` | writes `09:16:06` (the entry value) |
+| `:430` | `fired:` logged at `09:22:21` |
+
+No heartbeat is required, no second writer is required, and FB84YUGT's gap is untouched. **F1 —
+`external_handoff_clear.py:428` — is the writer on 2026-08-23, as it is on 2026-08-22.**
 
 **The `cf997868` row was itself repaired once, and the repair is the lesson.** It first read
 *"this project's session ids today are `9248f90c`, `fdde8723` — `cf997868` is neither"*, sourced
@@ -93,13 +109,39 @@ this project's `.janitor/logs/`. Same shape as every other error on this card: *
 the files I happened to grep, read as absence from the world.** A zero-hit grep is evidence about
 the search term before it is evidence about reality.
 
-That absence argument has since been **replaced by a positive identification** and no longer
-carries any weight of its own: `cf997868`'s transcript lives under the `EMASOFT-INTEGRATOR-AGENT`
-project slug, so it is that project's session — established by finding where it *is*, not by
-failing to find it here. Note what the absence argument could never have caught: a session that
+That absence argument was then replaced by a **positive identification** —
+`cf997868`'s transcript lives under the `EMASOFT-INTEGRATOR-AGENT` slug — and **that was wrong
+too, in the same family, for the third time on this row.** Locating the session id told me which
+project the *writing process* runs under; I read it as which project the fire *acted on*. For a
+**machine-wide daemon those are different things**, and row 62 above has the disproof: the target
+is the `transcript=` field, and on 08-22 `[s:cf997868]` lines name this project's
+`d30bf250-….jsonl`. So the daemon logs under its own session while acting on another project's
+state dir, and F1 is a live candidate again.
+
+Three attempts, three variants of one mistake — **writer identity read as target identity**
+(header stamp → writer; wrong log's silence → absence; owning slug → target). Worth stating
+plainly because the *third* one arrived while explicitly trying to avoid the first two.
+
+What none of the three could have caught, and which still stands as method: a session that
 **started before midnight and was still alive** at 09:21 writes no `2026-08-23` SessionStart line
-at all, so no date-filtered grep of `session-start.log` could ever have ruled it out. Prefer
-locating the thing over enumerating where it is not.
+at all, so no date-filtered grep of `session-start.log` could ever have ruled it out.
+
+### This directly answers mechanic 1 — and it is a trap, not a detail
+
+`state.py:890-905`: `log_line` tags each line `[s:<8-char>]` from **`CLAUDE_CODE_SESSION_ID`**,
+the env var of the **writing process**. That is precisely why the daemon's lines carry
+`cf997868` while acting on this project — the tag names the writer, never the target.
+
+**So D's session key MUST be the TARGET session's, and the external writer MUST NOT use its own
+`CLAUDE_CODE_SESSION_ID` to name the file.** If it did, it would write
+`agent-handoff-<watcher>-<ts>.md` into the target's state dir, and the target session — which
+looks for its own key — would never find it. The reader would be structurally blind to exactly
+the handoff that matters, which is the current bug wearing a new costume: today's failure is a
+lost write, that one would be an unreadable write.
+
+The external writer already resolves the target (the `transcript=` field it logs, and
+`fleet_restart.recorded_terminal`), so the key is available on both sides — it just is not the
+variable the logging convention reaches for by default.
 
 **None of this weakens the card.** The fix does not depend on the writer's name: F1's `:428` is
 unconditional on a shared path, read directly in source, and a shared path with two or more
@@ -156,6 +198,24 @@ committed it as fact (`2994469a`).**
 whole claim; the stronger "it did NOT write" is NOT provable from these logs and is not asserted.**
 F1's attribution inherits the same doubt: the unconditional `atomic_write` at :428 is real and
 dangerous, but nothing positively places it at 17:38 on 08-22.
+
+**⚠ VOID 2026-08-23 — THE SETTLING EVIDENCE ABOVE WAS A DEAD LOG.** `.janitor/logs/
+external-clear.log`'s **last line is dated `2026-08-20T08:21:29`**; the daemon writes to
+`~/.claude/plugins/data/…/global-state/external-clear.log` instead. Silence in a log nobody
+writes bounds nothing, so the `:428`/`:429`/`:430` reasoning above is void at its premise — not
+at its logic. The live log carries **143 entries for 2026-08-22**, ending:
+
+```
+[16:58:21] attempt 1 [transient] timed out after 600s | transcript=…/-Users-…-ai-maestro-janitor/d30bf250-….jsonl
+[17:08:27] attempt 2 …  [17:18:35] attempt 3 …  [17:28:54] attempt 4 …
+[17:38:10] summary: ok on attempt 5
+[17:38:10] fired: trigger=next-fire-misses
+```
+
+`17:38:10` **is F2's file mtime to the second**, and `transcript=` names THIS project. So F2's
+premise is not merely re-supported, it is confirmed — and the 40-minute `16:58`→`17:38` span is
+the same compose-latency that produced the ~6-minute gap on 08-23, at ten times the scale.
+**F2 and the 08-22 incident are REINSTATED; the "HAZARD-only" framing is retired.**
 
 *What the silence does and does not bound* (corrected — the first version of this paragraph said
 silence proves the script "never reached the write", which is off by two statements in the
