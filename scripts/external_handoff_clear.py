@@ -48,6 +48,7 @@ sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
 import external_clear as ec  # noqa: E402
+import handoff_files  # noqa: E402
 import state  # noqa: E402
 
 _LOG = "external-clear"
@@ -425,7 +426,27 @@ def main() -> int:
         print(text)
         return 0
 
-    state.atomic_write(sd / "agent-handoff.md", text)
+    # TRDD-5RXBI65T — write to a path NOBODY ELSE WILL WRITE, never the shared
+    # `agent-handoff.md`. This line was an unconditional `atomic_write` on that shared path, and
+    # it destroyed the model-authored handoff twice in two days (2026-08-22 17:38:10 and
+    # 2026-08-23 09:22), silently: no `.prev`, and `.janitor/state/` is gitignored.
+    #
+    # The key is the TARGET session's — `facts["transcript"]`, resolved once at :236 — and NOT
+    # this process's `CLAUDE_CODE_SESSION_ID`. That distinction is the whole fix: this script
+    # usually runs from the machine-wide daemon, a long-lived singleton that inherits its session
+    # id from whichever session launched it (one id held for three days across every project it
+    # served). Keying on the writer would file this handoff under a stranger's id, in the state
+    # dir of a session that will never look for it — a lost write traded for an unreadable one.
+    # An unresolvable target gets the UNKEYED sentinel, NOT the legacy shared path. Writing
+    # `agent-handoff.md` here would have reproduced this card's bug verbatim on the very line
+    # meant to remove it: an unconditional `atomic_write` to a path other writers use, so two
+    # keyless runs would clobber each other and either would destroy a pre-upgrade handoff that
+    # is some session's ONLY record. An unkeyed handoff groups slightly wrong and stays readable;
+    # a clobbered one is gone. Nothing writes the legacy path any more — it is read-only.
+    key = handoff_files.session_key(facts.get("transcript"))
+    if not key:
+        state.log_line(_LOG, "no target transcript — filing the handoff under the unkeyed group")
+    handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
     _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")

@@ -287,12 +287,29 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
     age = int(time.time()) - (written_at or state.file_mtime(flag))
     if max_age > 0 and age > max_age:
         return  # dispatch will sweep it; injecting a day-old handoff is worse than silence
-    try:
-        body = (sd / "agent-handoff.md").read_text(encoding="utf-8").strip()
-    except OSError:
+    # TRDD-5RXBI65T — a session may leave SEVERAL handoffs (the model's semantic one and the
+    # daemon's auto-composed index no longer share a path, so neither destroys the other). Read
+    # the whole group, oldest write first, so the account is replayed in the order it was
+    # authored. `newest_group` also still returns a pre-D `agent-handoff.md`, which is why an
+    # upgrade cannot make an existing handoff invisible.
+    import handoff_files  # noqa: PLC0415 - sys.path gains scripts/lib only inside main()
+
+    # Pairs, not two parallel lists: a skipped unreadable file would shift every later chunk
+    # against its filename, labelling each handoff with its neighbour's name.
+    parts: list[tuple[str, str]] = []
+    for path in handoff_files.newest_group(sd):
+        try:
+            chunk = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue  # one unreadable file must not swallow the rest of the session's account
+        if chunk:
+            parts.append((path.name, chunk))
+    if not parts:
         return
-    if not body:
-        return
+    # Separated by a rule carrying the source filename: two handoffs concatenated with no seam
+    # read as one document that contradicts itself, and the timestamp in the name is what tells
+    # the reader which claim is the later one.
+    body = "\n\n---\n\n".join(f"<!-- {name} -->\n{chunk}" for name, chunk in parts)
     # DEFANG. The handoff's tail is raw prior-session messages, so a `[janitor-…]`-shaped line
     # inside it would arrive at session start as marker mimicry — outside the dispatcher stub's
     # defense, which never sees this path. dispatch.py:1099 defangs the directive for exactly

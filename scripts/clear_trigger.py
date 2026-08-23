@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # `user_intent` is deliberately NOT imported here any more: the presence CANCEL it backed is
 # gone, and the deferral that replaced it lives in terminal_trigger (which consults user_intent
 # itself). Re-adding the import here would be the first step back toward a local cancel.
+import handoff_files  # noqa: E402
 import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 
@@ -128,7 +129,6 @@ _HANDOFF_MAX_FENCE_LINES = 8  # a longer fenced block == inlined payload the han
 # nothing to recall from, so it is concise but no longer exhaustive.
 _REFERENCE_RE = re.compile(r"\[\[|ATOM-[A-Z0-9]|TRDD-[A-Za-z0-9]|memgrep|#\d+")
 
-_HANDOFF_FILENAME = "agent-handoff.md"
 
 
 def plan_clear() -> tuple[list[str], list[str]]:
@@ -239,10 +239,21 @@ def _write_clear_marker(directive: str) -> Path:
 
 
 def _read_handoff() -> str | None:
-    """The link-only handoff the skill authored, or None when it wasn't written."""
-    f = _project_root() / ".janitor" / "state" / _HANDOFF_FILENAME
+    """The most recent handoff, or None when none was written.
+
+    TRDD-5RXBI65T — the NEWEST FILE, deliberately, not the newest group. The two callers ask
+    "does a handoff exist, and is it concise", and `check_handoff_concise` judges ONE artifact:
+    its budget is what a reader must swallow per handoff, and each file is one handoff. Judging a
+    concatenated group would make a session's SECOND handoff trip a contract neither file
+    violates — and would force editing the ratified `_HANDOFF_MAX_BYTES` / `_REFERENCE_RE`
+    constants, which per-file leaves untouched.
+    """
+    sd = _project_root() / ".janitor" / "state"
+    newest = handoff_files.newest(sd)
+    if newest is None:
+        return None
     try:
-        return f.read_text(encoding="utf-8")
+        return newest.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
 

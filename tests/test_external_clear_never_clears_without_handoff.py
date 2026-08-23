@@ -36,6 +36,7 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
 import external_handoff_clear as ehc  # noqa: E402
+import handoff_files  # noqa: E402
 
 
 def _iso(epoch: float) -> str:
@@ -114,9 +115,15 @@ def test_the_handoff_is_on_disk_before_the_clear_chain_is_spawned(tmp_path, monk
     # learn the thing it stands in for has changed.
     def _spy_fire(_root, _sd, _terminal, _now, trigger=""):
         del trigger  # not part of this test's claim; named so the call shape is exact
-        handoff = sd / "agent-handoff.md"
-        seen["existed_at_fire"] = handoff.is_file()
-        seen["bytes_at_fire"] = handoff.stat().st_size if handoff.is_file() else 0
+        # Resolved by CONTENT, not by a literal filename. This test's claim is an ORDERING one —
+        # a handoff is on disk before the chain spawns — and since TRDD-5RXBI65T each write lands
+        # on its own `agent-handoff-<key>-<ts>-<pid>.md` path so two writers cannot clobber each
+        # other. Hard-coding the old shared name pinned the implementation instead of the claim,
+        # and would have gone on "passing" only until the day it silently guarded nothing.
+        handoff = handoff_files.newest(sd)
+        existed = handoff is not None and handoff.is_file()
+        seen["existed_at_fire"] = existed
+        seen["bytes_at_fire"] = handoff.stat().st_size if handoff is not None and existed else 0
 
     monkeypatch.setattr(ehc, "_fire", _spy_fire)
 
@@ -128,6 +135,33 @@ def test_the_handoff_is_on_disk_before_the_clear_chain_is_spawned(tmp_path, monk
         "with nothing to resume from is unrecoverable data loss."
     )
     assert seen["bytes_at_fire"] > 0, "the handoff existed but was empty at fire time"
+
+
+def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkeypatch) -> None:
+    """TRDD-5RXBI65T acceptance box 1: the daemon's auto handoff must not destroy the model's.
+
+    Drives the REAL `external_handoff_clear.main()`, not a fabricated second writer — the unit
+    tests around `handoff_files` prove filenames are unique, which is a claim about NAMING, not
+    about whether the two production writers actually take that path. This is the one that would
+    have caught the original bug: before the fix, :428 wrote `agent-handoff.md` unconditionally,
+    so the rich text below was simply gone by the time the chain spawned.
+    """
+    root, sd = _firing_project(tmp_path, monkeypatch)
+    rich = "# Rich model handoff\n\nTRDD-5RXBI65T — the reasoning a snapshot cannot produce.\n"
+    # Seeded on the LEGACY path on purpose: that is where `/janitor-write-handoff` wrote before
+    # the fix, so this also covers the upgrade case where a pre-D handoff is on disk when the
+    # daemon next fires.
+    (sd / handoff_files.LEGACY_NAME).write_text(rich, encoding="utf-8")
+
+    monkeypatch.setattr(ehc, "_fire", lambda *a, **k: None)
+    assert _run_main(root, monkeypatch) == 0
+
+    survivors = [p.read_text(encoding="utf-8") for p in sd.glob("agent-handoff*.md")]
+    assert rich in survivors, (
+        "the external composer destroyed the model-authored handoff — the exact TRDD-5RXBI65T "
+        "defect: a cheap automatic artifact overwriting an expensive deliberate one, silently"
+    )
+    assert len(survivors) >= 2, "the auto-composed handoff should exist ALONGSIDE the rich one"
 
 
 def test_a_failed_handoff_write_never_reaches_the_clear(tmp_path, monkeypatch) -> None:

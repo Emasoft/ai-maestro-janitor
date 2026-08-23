@@ -61,8 +61,9 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
+import handoff_files  # noqa: E402 - needs the sys.path line above
+
 _VERIFY_FILENAME = "handoff-clear-verify.json"
-_HANDOFF_FILENAME = "agent-handoff.md"
 _CRON_ID_FILENAME = "heartbeat-cron-id.txt"
 _ARMED_AT_FILENAME = "heartbeat-armed-at.ts"
 _RESUME_FLAG_FILENAME = "resume-after-clear.flag"
@@ -426,7 +427,10 @@ def _memory_roots() -> list[Path]:
 
 def gather_before(now: int) -> dict:
     sd = _state_dir()
-    handoff = _read_text(sd / _HANDOFF_FILENAME)
+    # TRDD-5RXBI65T — the newest handoff FILE, whatever its name. The verifier's question is
+    # "was a handoff written before the /clear", and since option D each write has its own path.
+    _newest = handoff_files.newest(sd)
+    handoff = _read_text(_newest) if _newest is not None else ""
     ctx, ctx_src = _context_tokens()
     return {
         "ts": now,
