@@ -120,6 +120,12 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="Recall surfaces notes and lessons that belong to a page that is gone, so the agent acts on knowledge the corpus no longer contains.",
         fix="Delete the orphans, then find the delete path that failed to cascade — the orphans are a symptom, the missing cascade is the defect.",
     ),
+    # HISTORICAL — current binaries no longer emit it (kept so old ledger entries still resolve).
+    # Its territory was split by measurement, one false-ticket loop per half: newer-than-us stamp
+    # → MEMGREP-010 (T-DMGDWWE0, 2026-07-28: the defect is a stale BINARY, and 006's "rebuild the
+    # DB" repair loops forever); behind-stamp → MEMGREP-011 STALE (shape-behind in 06a5b469, and
+    # the shape-complete stamp variant on 2026-08-25, T-YZ9S5EJU class: the next open runs the
+    # ladder, so nothing is broken and nothing must be rebuilt).
     "MEMGREP-006": Issue(
         scanner="memgrep-validate",
         kind="migration-failure",

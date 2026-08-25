@@ -912,11 +912,21 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
         }
     }
 
-    // 6. version stamp. `ver > expect_version` is already gone (check 0), so what remains here is
-    // strictly the UNDER-stamped case: a stamp the migration ladder never earned.
+    // 6. version stamp. `ver > expect_version` is already gone (check 0), and a behind-stamp WITH
+    // a shape defect already reported as BEHIND-the-ladder at check 2/3 — so what reaches here is
+    // strictly "stamped below, shape complete". That state is HEALTHY and self-correcting, not a
+    // failure: the very next `open` runs the pending ladder steps (each add_column tolerates the
+    // already-present columns), and `is_fresh` refuses to answer from it meanwhile. Measured
+    // 2026-08-25 (AgentlensPro ticket T-YZ9S5EJU class): this branch said `[MEMGREP-006]` — a FAIL
+    // — so the health detector ticketed a database whose only "defect" was that nothing had opened
+    // it since a schema bump, once per heartbeat, forever. Same false-ticket loop as the shape
+    // variant fixed in 06a5b469; the stamp variant just came through the other door.
     if ver != expect_version {
         anyhow::bail!(
-            "[MEMGREP-006] schema validation: user_version is {ver}, expected {expect_version}"
+            "{BEHIND_LADDER_CODE} this index is BEHIND the migration ladder (schema v{ver} on \
+             disk < v{expect_version} in this binary; its shape is already complete) — nothing \
+             failed and nothing is damaged; opening or reindexing this root stamps it current. \
+             Do NOT rebuild it."
         );
     }
     Ok(())
@@ -2075,14 +2085,20 @@ mod tests {
             "it must NOT wear the migration-failure code — that code's repair rebuilds the DB: {err}"
         );
 
-        // And the UNDER-stamped case — the one MEMGREP-006 actually describes — still reports 006,
-        // so this fix narrows the code rather than retiring it.
+        // And the UNDER-stamped case with a COMPLETE shape is BEHIND-the-ladder (MEMGREP-011),
+        // never a failure code: nothing failed, the next open stamps it current, and reporting it
+        // as MEMGREP-006 ticketed a healthy database once per heartbeat after every schema bump
+        // (the 2026-08-25 T-YZ9S5EJU class — the stamp-variant twin of the shape case above).
         conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION - 1))
             .unwrap();
         let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
         assert!(
-            err.contains("[MEMGREP-006]"),
-            "an unearned (too-low) stamp is still MEMGREP-006: {err}"
+            err.contains("[MEMGREP-011]"),
+            "a behind-stamp with a complete shape is BEHIND the ladder, not a failure: {err}"
+        );
+        assert!(
+            !err.contains("[MEMGREP-006]"),
+            "MEMGREP-006's catalogued repair rebuilds a database that is not broken: {err}"
         );
         let _ = std::fs::remove_dir_all(&d);
     }

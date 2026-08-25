@@ -94,6 +94,12 @@ unattended access to your repository.
 
 ### `MEMGREP-006` — the schema version stamp in {scope} disagrees with the database's actual shape
 
+> **HISTORICAL** — current binaries no longer emit this code; kept so old ledger entries resolve.
+> Newer-than-us stamps report `MEMGREP-010` (stale binary, not a broken DB); behind stamps —
+> shape-behind or shape-complete — report `MEMGREP-011` STALE (pending ladder, self-corrects on
+> the next open). Both splits exist because 006's "rebuild the DB" repair looped forever on
+> databases that were never broken (T-DMGDWWE0 2026-07-28; T-YZ9S5EJU class 2026-08-25).
+
 - **Scanner:** `memgrep-validate` · **Severity:** `high` · **Kind:** `migration-failure`
 - **What it is:** `PRAGMA user_version` was stamped without the migration that earns it (or the database is NEWER than this build's schema).
 - **Why it matters:** A wrong stamp makes every future migration skip or repeat. A newer-than-expected database must never be 'migrated' downward — that mangles data written by a build we do not know.
