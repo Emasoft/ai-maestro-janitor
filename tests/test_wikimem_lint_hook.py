@@ -121,7 +121,7 @@ def _memory_page(tmp_path: Path, body: str) -> Path:
 
 CLEAN_PAGE = """---
 name: scratch-page
-description: "a syntactically valid scratch page used only by this test"
+description: "a syntactically valid scratch page used only by this test / why does the hook fire on this page / what does this scratch fixture test / clean page for the wikimem-lint write-gate hook / does an Edit on this page produce a finding / hook regression fixture for a clean page / page with no footnote references at all / scratch page for the lint-hook test suite / does the gate stay silent on a conformant page / conformant fixture for the write-gate hook / lint hook happy-path test page / no ERROR-level finding expected on this page / page used to prove the gate is not noisy / fixture proving a clean page produces no stderr / baseline page for the wikimem lint hook tests"
 ocd: 2026-08-06
 lmd: 2026-08-06
 metadata:

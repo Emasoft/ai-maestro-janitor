@@ -77,13 +77,24 @@ def test_an_unlabelled_defect_page_is_caught_as_a_false_positive(tmp_path: Path)
     # otherwise the corpus grows weaker every time someone drops a file into it.
     work = tmp_path / "corpus"
     shutil.copytree(CORPUS, work)
+    # The page `description:` is deliberately compliant (15 `/`-separated phrases) so it
+    # contributes no finding of its own — the ONLY defect left is the atom's missing
+    # `keywords:`, which now fires BOTH `atom-no-keywords` (the prop is absent) and
+    # `atom-keywords-too-few` (an absent list is 0 < the 10 minimum) from that one root cause.
     (work / "defects" / "zz-unlabelled.md").write_text(
-        '---\nname: sneaky\ndescription: "unlabelled"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n'
+        '---\nname: sneaky\ndescription: "an unlabelled sneaky defect page / why is this page '
+        'flagged / what makes this page sneaky / undeclared defect fixture / a page absent from '
+        'cases.json / does the bench catch an undeclared defect / unlabelled corpus entry / a '
+        'page nobody declared in ground truth / atom missing its keywords entirely / recall '
+        "surface absent from this atom / bench false-positive detection fixture / proves an "
+        'unlabelled defect is not silently tolerated / corpus growth safety net / undeclared '
+        'page must still be caught / sneaky unlabelled test page"\nocd: 2026-01-01\n'
+        "lmd: 2026-01-02\n---\n"
         "^ATOM-SNEK-0001 [ocd: 2026-01-01, lmd: 2026-01-01]\nb.\n\n## Notes and lessons learned\n",
         encoding="utf-8",
     )
     res = bench.score(work, json.loads(CASES.read_text(encoding="utf-8")))
-    assert res["summary"]["false_positives"] == 1, res
+    assert res["summary"]["false_positives"] == 2, res
     assert res["summary"]["false_negatives"] == 0, res
 
 
