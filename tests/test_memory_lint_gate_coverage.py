@@ -176,7 +176,10 @@ def test_classification_table_matches_the_source_exactly():
     # 31 -> 32: `page-unclosed-fence`, classified ORPHANED on a measurement — `repair_defect`
     # returns no fence code and the precheck's only fence logic is for FRONTMATTER, not the
     # body. Orphaned here means "human-facing by design", see the row's own comment.
-    assert len(_CODE_COVERAGE) == 32
+    # 32 -> 36: the four metadata-gate codes from 3461ef6d (atom-keywords-too-few/-duplicated,
+    # page-description-too-few-phrases/-duplicated-phrases), classified ORPHANED pending the
+    # `enrich` chore (TRDD-437UHNFS, owner's drain-then-install ruling) — see their row comment.
+    assert len(_CODE_COVERAGE) == 36
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():
