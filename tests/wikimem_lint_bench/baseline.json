@@ -2,11 +2,11 @@
   "summary": {
     "corpus_files": 31,
     "labelled_defect_files": 23,
-    "expected_findings": 29,
-    "observed_findings": 29,
+    "expected_findings": 30,
+    "observed_findings": 30,
     "false_positives": 0,
     "false_negatives": 0,
-    "codes_covered": 27
+    "codes_covered": 28
   },
   "false_positives": [],
   "false_negatives": []

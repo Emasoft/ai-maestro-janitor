@@ -16,7 +16,7 @@
 
     "defects/atom-unquoted-desc.md": ["atom-unquoted-desc"],
     "defects/atom-dropped-props.md": ["atom-dropped-props"],
-    "defects/atom-no-keywords.md": ["atom-no-keywords"],
+    "defects/atom-no-keywords.md": ["atom-no-keywords", "atom-keywords-too-few"],
     "defects/atom-dates.md": ["atom-no-ocd", "atom-no-lmd", "atom-bad-ocd", "atom-bad-lmd"],
     "defects/atom-oversized.md": ["atom-oversized"],
 
