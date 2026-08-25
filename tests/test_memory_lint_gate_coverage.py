@@ -102,6 +102,16 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # (something is too big, break it into smaller pieces of the same kind) and because
     # memgrep's own refusal message already names janitor-memory-split as the owner.
     "atom-oversized": "split",
+    # Orphaned FOR NOW, by explicit ruling (TRDD-437UHNFS, owner 2026-08-23): the metadata
+    # gates (>=10 atom keyphrases, >=15 page-description phrases, no duplicates) landed with
+    # 1184 ERROR findings across the live corpus, and the drain mechanism is a PLANNED
+    # `enrich` chore that does not exist yet. These rows flip to "enrich" when that chore
+    # lands — do not point them at `repair`, whose defect predicate deliberately knows
+    # nothing about keyphrase counts (a repair dispatch aimed at these is a provable no-op).
+    "atom-keywords-too-few": None,
+    "atom-keywords-duplicated": None,
+    "page-description-too-few-phrases": None,
+    "page-description-duplicated-phrases": None,
     "lesson-uncited": None,
     "atom-no-keywords": None,
     "atom-no-lmd": None,
