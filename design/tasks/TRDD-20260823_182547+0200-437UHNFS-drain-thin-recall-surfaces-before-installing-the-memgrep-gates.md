@@ -40,10 +40,36 @@ Measured first-hand with the release binary on 2026-08-23, across **277 pages**:
 | LOCAL (`~/.claude/projects/<slug>/memory`) | 147 | 75 | 39 | 32 |
 | **total** | **1184** | **907** | **220** | **51** |
 
-Every scope fails the default lint gate, and `dispatch.py` promotes the lint line past quiet
-mode — so installing today would put an ERROR count on **every heartbeat fire, permanently**,
-because no single maintenance pass can move a number that large. That is janitor#276 verbatim:
-*a completed pass could not move the number, so the same line repeated forever.*
+Every scope fails the default lint gate.
+
+**What installing today would actually do — traced, 2026-08-23, correcting the handoff.** The
+handoff said `dispatch.py:611` would promote a lint line past quiet mode on every heartbeat
+fire. That is **FALSE**, twice over, and the card said it before it was checked:
+
+- Line 611 is an unrelated advisory muzzle list. The memory-marker promotion is at
+  `dispatch.py:559-561`, and it is a generic `\[janitor-memory-[a-z0-9-]+\]` regex.
+- **No detector surfaces `memgrep lint`'s summary at all.** The only heartbeat-path caller is
+  `memory_content_precheck.oversized_atom_pages` (`memory_content_precheck.py:170`), which
+  captures the output and parses **stdout** for oversized atoms only; the
+  `memgrep lint: N finding(s), …` summary goes to **stderr** (`memory.rs:4597,4608`) and is
+  discarded. The janitor#276 guard in `dispatch.py:615-626` (`_NEGATED_SEVERITY_RE`) is a
+  standing regression guard for a line no current detector emits.
+
+The real blast radius, verified:
+
+1. **The WRITE gates go hard everywhere** — `new-page`, `add-atom` and `add-lesson` start
+   REFUSING below the floors. This is the intended effect and the reason to be deliberate
+   about when it lands, not a side effect.
+2. `scripts/hooks/post-edit-wikimem-lint.py:144` lints each edited page, so nearly every
+   memory page anyone touches would come back dirty until the corpus is drained.
+3. The commit-time authoring gate is **unaffected**: `memory_txn_cli._authoring_gate` is a
+   DELTA gate over four named classes (`memory_txn_cli.py:127-133`), and neither
+   `atom-keywords-too-few` nor `page-description-too-few-phrases` is one of them, so a
+   pre-existing violation can never block an unrelated commit.
+
+So the drain still has to come first — because of (1), which is the point of the gates, and
+(2), which would make every editorial pass noisy. It does NOT have to come first because of a
+heartbeat line, and a future session must not go looking for one.
 
 Three options were put to the owner: (1) install and ship noisy, (2) install with the two new
 lint rules downgraded to WARN while the write gates stay hard, (3) **drain the corpus first,
