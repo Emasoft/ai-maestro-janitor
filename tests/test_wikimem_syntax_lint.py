@@ -42,9 +42,22 @@ det = _load(_SCRIPTS / "detectors" / "wikimem-syntax.py", "wikimem_syntax_detect
 needs_memgrep = pytest.mark.skipif(MEMGREP_BIN_PATH is None, reason="memgrep binary unavailable")
 
 
+# ≥15 distinct `/`-separated phrases: the page-description gate (3461ef6d) is a hard ERROR, so
+# every fixture page — clean OR defect — must clear it or it carries a second finding its test
+# never declared. Written as a real recall surface, not filler (fixtures are worked examples).
+_DESC = (
+    "the widget stopped responding / why does the widget hang / widget freezes on load / "
+    "the panel never finishes rendering / clicking does nothing / spinner spins forever / "
+    "how do I reset the widget / widget state is stuck / is the widget deadlocked / "
+    "widget unresponsive after resize / the component stops updating / no error but nothing "
+    "happens / widget needs a restart / where is the widget state stored / what makes the "
+    "widget hang"
+)
+
+
 def _page(body: str, *, name: str = "n") -> str:
     return (
-        f"---\nname: {name}\nocd: 2026-07-21\nlmd: 2026-07-21\ndescription: \"a page\"\n---\n"
+        f"---\nname: {name}\nocd: 2026-07-21\nlmd: 2026-07-21\ndescription: \"{_DESC}\"\n---\n"
         f"{body}\n\n## Notes and lessons learned\n"
     )
 
@@ -153,7 +166,7 @@ def test_well_formed_corpus_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("MEMGREP_BIN", str(MEMGREP_BIN_PATH))
     root = _corpus(
         tmp_path / "mem",
-        {"a.md": _page("^ATOM-AAAA-BBBB [keywords: alpha_beta gamma, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")},
+        {"a.md": _page("^ATOM-AAAA-BBBB [keywords: widget_stopped_responding why_does_the_widget_hang widget_freezes_on_load spinner_spins_forever how_do_I_reset_the_widget widget_state_is_stuck is_the_widget_deadlocked widget_unresponsive_after_resize component_stops_updating where_is_widget_state_stored, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")},
     )
     code, _stdout, findings = lint.run_lint([root])
     assert findings == [], findings
@@ -173,7 +186,7 @@ def _scope_with(tmp_path: Path, monkeypatch, files: dict[str, str]) -> Path:
 @needs_memgrep
 def test_detector_signatures_flag_broken_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _scope_with(tmp_path, monkeypatch, {
-        "clean.md": _page("^ok [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
+        "clean.md": _page("^ok [keywords: widget_stopped_responding why_does_the_widget_hang widget_freezes_on_load spinner_spins_forever how_do_I_reset_the_widget widget_state_is_stuck is_the_widget_deadlocked widget_unresponsive_after_resize component_stops_updating where_is_widget_state_stored, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
         "broken.md": _page("^bad ⟦keywords: x⟧\nb."),
     })
     sigs = det._error_signatures()
@@ -185,7 +198,7 @@ def test_detector_signatures_flag_broken_page(tmp_path: Path, monkeypatch: pytes
 @needs_memgrep
 def test_detector_silent_on_clean_corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     _scope_with(tmp_path, monkeypatch, {
-        "clean.md": _page("^ok [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
+        "clean.md": _page("^ok [keywords: widget_stopped_responding why_does_the_widget_hang widget_freezes_on_load spinner_spins_forever how_do_I_reset_the_widget widget_state_is_stuck is_the_widget_deadlocked widget_unresponsive_after_resize component_stops_updating where_is_widget_state_stored, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
     })
     assert det.main() == 0
     assert capsys.readouterr().out == ""
