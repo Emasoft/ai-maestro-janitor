@@ -611,6 +611,7 @@ def fleet_lease_ttl_s() -> int:
 
 
 SUMMARY_DEADLINE_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_SUMMARY_DEADLINE_S"
+RESUME_SUMMARY_DEADLINE_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_RESUME_SUMMARY_DEADLINE_S"
 # How long the whole summarize effort — lane waits, attempts and backoff together — may run
 # before the handoff degrades to the network-free template and the clear proceeds anyway.
 #
@@ -632,6 +633,35 @@ def summary_deadline_s() -> int:
         DEFAULT_SUMMARY_DEADLINE_S,
         detector_name="external-clear",
         var_name=SUMMARY_DEADLINE_ENV,
+    )
+
+
+# THE RESUME BUDGETS — sized against a HUMAN, not against the network (incident 2026-08-25).
+# The on-resume path runs inside a BLOCKING SessionStart hook: the session cannot take its first
+# prompt until the summary lands. The 2600 s abandoned-session deadline is correct where nobody
+# is watching; applied at resume it froze 16 simultaneously-restarted sessions for 40+ minutes,
+# because every blocking hook queued on the same `fleet_max_concurrent()` llm-ext lane at 600 s
+# per attempt. Two bounds follow, both resume-only:
+#
+#   * ONE attempt, not four. `LLM_EXT_TIMEOUT_S` + margin: a person is at the keyboard, and a
+#     second 600 s attempt spends 10 more visible minutes to save a token cost the decline
+#     already accepted. llm-ext checkpoints per chunk, so the paid work is not lost — the next
+#     cold resume of the same transcript reuses it.
+#   * A saturated lane is a VERDICT, not a queue position. At most `RESUME_LEASE_WAIT_S` waiting
+#     for a lease: if every lane slot is busy the moment a resume asks, the fleet is in a resume
+#     storm, and N blocked startups serialized behind the lane is exactly the incident. Decline
+#     fast; the session starts normally and pays its cold turn — human time outranks token cost.
+DEFAULT_RESUME_SUMMARY_DEADLINE_S = LLM_EXT_TIMEOUT_S + 60
+RESUME_LEASE_WAIT_S = 45
+
+
+def resume_summary_deadline_s() -> int:
+    """The on-resume summarize budget — one attempt plus margin, never the 2600 s deadline."""
+    return state.coerce_int(
+        os.environ.get(RESUME_SUMMARY_DEADLINE_ENV, ""),
+        DEFAULT_RESUME_SUMMARY_DEADLINE_S,
+        detector_name="external-clear",
+        var_name=RESUME_SUMMARY_DEADLINE_ENV,
     )
 
 
@@ -999,6 +1029,7 @@ def summarize_with_retry(
     jitter: Callable[[], float] | None = None,
     log: Callable[[str], Any] | None = None,
     progress_fn: Callable[[], float] | None = None,
+    lease_wait_budget_s: float | None = None,
 ) -> SummaryAttempt:
     """Keep trying to summarize until it works, the deadline passes, or trying is pointless.
 
@@ -1046,11 +1077,27 @@ def summarize_with_retry(
             say(f"summary: deadline reached after {i} attempt(s) — {last.detail}")
             return SummaryAttempt(None, last.outcome, f"deadline: {last.detail}")
 
+        # `lease_wait_budget_s` caps how long ONE wait for a lane slot may poll (the resume path
+        # passes `RESUME_LEASE_WAIT_S`). Unbounded waiting is correct for the abandoned-session
+        # path — nobody is watching, and the deadline is the policy — but inside a blocking
+        # SessionStart hook it serialized a fleet-wide resume behind the lane cap for 40+ minutes
+        # (incident 2026-08-25). A lane that stays full past the budget is treated as a verdict:
+        # decline now, let the session start.
+        lease_deadline = (
+            deadline if lease_wait_budget_s is None
+            else min(deadline, now + float(lease_wait_budget_s))
+        )
         lease = await_fleet_lease(
-            deadline=deadline, max_concurrent=cap, ttl_s=ttl, lane_dir=lane_dir,
+            deadline=lease_deadline, max_concurrent=cap, ttl_s=ttl, lane_dir=lane_dir,
             now_fn=now_fn, sleeper=sleeper,
         )
         if lease is None:
+            if lease_deadline < deadline:
+                say(
+                    f"summary: fleet lane full past the {lease_wait_budget_s:.0f}s lease budget "
+                    "— a saturated lane at resume means a resume storm; declining fast"
+                )
+                return SummaryAttempt(None, last.outcome, f"lane full past budget: {last.detail}")
             say("summary: fleet lane full through the deadline — degrading to the template")
             return SummaryAttempt(None, last.outcome, f"lane full: {last.detail}")
         # try/finally, not a bare call: an exception between here and the release would strand

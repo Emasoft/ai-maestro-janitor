@@ -523,3 +523,77 @@ def test_an_empty_transcript_path_is_permanent() -> None:
     """The other install-time precondition, pinned without depending on the host's PATH."""
     got = ec.attempt_llm_ext_summary("")
     assert got.outcome == ec.OUTCOME_PERMANENT
+
+
+# ---------- the resume budgets (incident 2026-08-25) --------------------------------------
+
+
+def test_a_resume_lease_budget_bounds_the_lane_wait(tmp_path: Path) -> None:
+    """A saturated lane at resume declines within the budget, never at the 2600 s deadline.
+
+    Pins the 2026-08-25 incident numbers: 16 sessions resumed together, every blocking
+    SessionStart hook queued on the same lane, and the fleet froze for 40+ minutes. With the
+    budget, a lane still full after `lease_wait_budget_s` is a verdict, not a queue position.
+    """
+    clock = _Clock()
+    # One-slot lane, already held by someone else — full for the whole test.
+    held = ec.acquire_fleet_lease(
+        now=clock.now(), max_concurrent=1, ttl_s=10_000, lane_dir=tmp_path
+    )
+    assert held is not None
+
+    got = ec.summarize_with_retry(
+        "/tmp/t.jsonl",
+        deadline=clock.now() + 2600.0,
+        now_fn=clock.now,
+        sleeper=clock.sleep,
+        attempt=_attempts(_OK),
+        max_concurrent=1,
+        lease_ttl_s=10_000,
+        lane_dir=tmp_path,
+        jitter=lambda: 1.0,
+        lease_wait_budget_s=45.0,
+    )
+
+    assert got.text is None, "no lease ⇒ no attempt ⇒ no summary"
+    assert "lane full past budget" in got.detail
+    waited = clock.now() - 1_000_000.0
+    assert waited <= 45.0 + ec.FLEET_POLL_S + 1.0, (
+        f"the decline must land within the lease budget, not the deadline (waited {waited:.0f}s)"
+    )
+
+
+def test_without_a_lease_budget_a_full_lane_polls_to_the_deadline(tmp_path: Path) -> None:
+    """The abandoned-session path keeps the old behaviour: nobody is watching, the deadline is
+    the policy, and a lane that frees up late is still worth using."""
+    clock = _Clock()
+    held = ec.acquire_fleet_lease(
+        now=clock.now(), max_concurrent=1, ttl_s=10_000, lane_dir=tmp_path
+    )
+    assert held is not None
+
+    got = ec.summarize_with_retry(
+        "/tmp/t.jsonl",
+        deadline=clock.now() + 300.0,
+        now_fn=clock.now,
+        sleeper=clock.sleep,
+        attempt=_attempts(_OK),
+        max_concurrent=1,
+        lease_ttl_s=10_000,
+        lane_dir=tmp_path,
+        jitter=lambda: 1.0,
+    )
+
+    assert got.text is None
+    assert "lane full past budget" not in got.detail, "no budget ⇒ the deadline message"
+    assert clock.now() - 1_000_000.0 >= 300.0 - ec.FLEET_POLL_S - 1.0, (
+        "without a budget the wait runs to the deadline"
+    )
+
+
+def test_the_resume_deadline_budgets_one_attempt_not_four() -> None:
+    """The on-resume budget is one `LLM_EXT_TIMEOUT_S` attempt plus margin — a human is waiting
+    at the keyboard, so the 4-attempt abandoned-session deadline must never apply there."""
+    assert ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S == ec.LLM_EXT_TIMEOUT_S + 60
+    assert ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S < ec.DEFAULT_SUMMARY_DEADLINE_S
+    assert 0 < ec.RESUME_LEASE_WAIT_S < ec.LLM_EXT_TIMEOUT_S

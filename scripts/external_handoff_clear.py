@@ -226,14 +226,22 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
     # prevent. So the summary is best-effort and the clear is the guarantee.
     summary = None
     if ec.use_llm_ext() and transcript:
+        # RESUME RUNS ON THE HUMAN'S CLOCK (incident 2026-08-25): this compose executes inside a
+        # BLOCKING SessionStart hook, so its budget is one attempt plus a bounded lane wait —
+        # never the 2600 s abandoned-session deadline, which froze 16 simultaneously-resumed
+        # sessions for 40+ minutes behind the shared llm-ext lane. The abandoned-session path
+        # (daemon-driven, nobody watching) keeps the full deadline and the unbounded lane wait.
+        on_resume = facts.get("gate") == "resume"
         got = ec.summarize_with_retry(
             transcript,
-            deadline=time.time() + ec.summary_deadline_s(),
+            deadline=time.time()
+            + (ec.resume_summary_deadline_s() if on_resume else ec.summary_deadline_s()),
             log=lambda m: state.log_line(_LOG, m),
             # TRDD-YOZ9TS3W: engages the progress-observed retry gate so a chunk stuck past
             # LLM_EXT_TIMEOUT_S is given up on instead of restarting the same doomed chunk until
             # the deadline. None (llm-ext unresolvable) simply runs without the gate.
             progress_fn=ec.llm_ext_progress_fn(),
+            lease_wait_budget_s=ec.RESUME_LEASE_WAIT_S if on_resume else None,
         )
         summary = got.text
         if not summary:
@@ -333,6 +341,43 @@ def main() -> int:
         print(f"NO_JANITOR_STATE {sd}")
         return 0
 
+    # PER-ROOT SINGLEFLIGHT (incident 2026-08-23, external-clear.log): the daemon re-fired while
+    # a prior watcher for the SAME session was still summarizing, and the log shows two retry
+    # chains interleaved (attempt sequences 1..5 twice, distinct backoffs) — each holding fleet
+    # leases, each restarting llm-ext on a transcript the other was growing. One watcher per
+    # state dir at a time; a second invocation exits instead of queueing. The lock goes stale
+    # after the largest budget any holder can legitimately spend, so a killed watcher can never
+    # park the lever forever.
+    lock = sd / "external-clear.lock"
+    stale_after = ec.summary_deadline_s() + 600
+    for _ in range(2):  # second pass only after removing a stale lock
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, f"{os.getpid()} {now}\n".encode())
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                held_s = now - int(lock.stat().st_mtime)
+            except OSError:
+                held_s = stale_after + 1  # unreadable ⇒ treat as stale, take over
+            if held_s <= stale_after:
+                print(f"ALREADY_RUNNING a watcher has held {lock.name} for {held_s}s — exiting")
+                return 0
+            lock.unlink(missing_ok=True)
+    else:
+        print("LOCK_RACE could not take the singleflight lock — exiting")
+        return 0
+
+    try:
+        return _run(root, sd, now, args)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
+    """The body of `main` past the singleflight lock — split so the lock's try/finally stays
+    two lines instead of indenting the whole flow."""
     verdict, facts = _decide(root, sd, now, force=args.force, on_resume=args.on_resume)
     print(f"VERDICT {'FIRE' if verdict.fire else 'HOLD'} "
           f"trigger={verdict.trigger or '-'} why={verdict.why}")

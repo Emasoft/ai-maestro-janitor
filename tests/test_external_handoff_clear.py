@@ -353,3 +353,52 @@ def test_the_payload_carries_the_verdict_timestamp(tmp_path, monkeypatch):
     payload = _captured_payload(monkeypatch, tmp_path, ec.TRIGGER_LONG_IDLE)
     assert payload["verdict_ts"] == 0  # _fire was called with now=0 in the helper
     assert "verdict_ts" in payload
+
+
+# --- the resume budgets + singleflight (incident 2026-08-25) ------------------
+
+
+def test_the_resume_gate_uses_the_one_attempt_budget(tmp_path, monkeypatch):
+    """`_compose` on the RESUME gate passes the human-sized budget: one attempt's deadline and a
+    bounded lane wait. The abandoned-session gate keeps the full deadline and no lane budget."""
+    root = _project(tmp_path)
+    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    captured: dict = {}
+
+    def fake_retry(_transcript, **kw):
+        captured.update(kw)
+        return ec.SummaryAttempt(text="s", outcome="ok")
+
+    monkeypatch.setattr(ec, "summarize_with_retry", fake_retry)
+    verdict = ec.ClearVerdict(True, ec.TRIGGER_RESUMED_COLD, "resumed cold")
+
+    t0 = time.time()
+    ehc._compose(root, verdict, {"transcript": str(tmp_path / "t.jsonl"), "gate": "resume"})
+    assert captured["lease_wait_budget_s"] == ec.RESUME_LEASE_WAIT_S
+    assert captured["deadline"] - t0 <= ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S + 10
+
+    captured.clear()
+    t0 = time.time()
+    ehc._compose(root, verdict, {"transcript": str(tmp_path / "t.jsonl")})
+    assert captured["lease_wait_budget_s"] is None, "the abandoned path waits unbounded"
+    assert captured["deadline"] - t0 >= ec.DEFAULT_SUMMARY_DEADLINE_S - 10
+
+
+def test_a_second_watcher_for_the_same_root_exits_instead_of_queueing(tmp_path):
+    """Singleflight: a held lock turns invocation 2 into a no-op (the 2026-08-23 interleaved
+    retry chains), and a STALE lock is taken over rather than parking the lever forever."""
+    root = tmp_path / "p"
+    sd = root / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    lock = sd / "external-clear.lock"
+
+    lock.write_text("999999 0\n")  # fresh mtime — a live holder
+    got = _run(root, "--dry-run")
+    assert "ALREADY_RUNNING" in got.stdout, got.stdout
+
+    stale = time.time() - (ec.DEFAULT_SUMMARY_DEADLINE_S + 601)
+    os.utime(lock, (stale, stale))
+    got = _run(root, "--dry-run")
+    assert "ALREADY_RUNNING" not in got.stdout, got.stdout
+    assert "VERDICT" in got.stdout, "past a stale lock the watcher must actually run"
+    assert not lock.exists(), "the takeover's own lock is released on exit"
