@@ -28,13 +28,11 @@ drift out of sync — the TRDDs ARE the board.
 
 ## The ratified 22-column vocabulary (3-pillars 3.0.0)
 
-> Ratified by the USER 2026-08-23 (TRDD-UNTF690M, `PRRD G2.1`; spec
-> `3-pillars-spec.md` 3.0.0, clause 3P-KAN-01/-20 at ai-maestro
-> `governance-rules` head `c8b0e9cb`). This section replaced the
-> pre-3.0.0 "17 columns" text on 2026-08-25 (janitor#286).
+USER-ratified 2026-08-23 (TRDD-UNTF690M, `PRRD G2.1`; spec
+`3-pillars-spec.md` 3.0.0 at ai-maestro `governance-rules` head
+`c8b0e9cb` — the canonical text for every clause cited here).
 
-The board has exactly **22 columns**, 1:1 with the TRDD `column:`
-enum — **19 lifecycle**:
+**22 columns**, 1:1 with the TRDD `column:` enum — **19 lifecycle**:
 
 ```
 backburner → approval → design → design_ai_review
@@ -44,49 +42,28 @@ backburner → approval → design → design_ai_review
 ```
 
 plus **3 exception** columns: `blocked`, `failed`, `superseded`.
-(Enum identifiers are snake_case — 3P-KAN-17: hyphenated spellings may
-appear in prose, never in a `column:` value.)
+Identifiers are snake_case; hyphenated spellings are prose-only
+(3P-KAN-17). The five 3.0.0 additions' normative meanings
+(3P-KAN-18/-19) live in
+`rules/references/universal-kanban-3p300-columns.md` — READ IT before
+moving any card into one of them; note `design` now sits BEFORE
+`todo`, so `todo` asserts approved AND designed.
 
-The five columns added in 3.0.0, normatively (3P-KAN-18/-19):
+**The LEGAL SET for `column:` is 27, not 22** (3P-KAN-20): five
+BRACKET values sit outside the board — `proposal`, `planned`,
+`refused`, `completed`, `cancelled` — defined by the folder lifecycle
+in `trdd-design-tasks.md`. `proposal`/`planned` are the intake
+antechamber ahead of `backburner`; terminal values leave the board,
+each archived AS ITSELF (3P-ZON-05) into `design/archived/`
+(`refused` into `design/refused/`).
 
-- `approval` — with the approver named by `min-approval-requirement:`;
-  `backburner` now means only *not yet approved*.
-- `design` — the card is expanded IN PLACE with detailed design/specs
-  (no second file). It sits BEFORE `todo` now: `todo` asserts approved
-  AND designed.
-- `design_ai_review` / `design_human_review` — the design body is
-  reviewed (the human step is SKIPPED entirely when
-  `min-approval-requirement: none`).
-- `verify_assumptions` — every claim in the card verified, or a test
-  created to verify it; passes only when nothing is still an
-  assumption.
-- `plan` — plan-mode run non-interactively over verified facts; passes
-  only when a complete plan FILE exists. `dev` then ENFORCES that
-  plan's steps.
+**Pre-3.0.0 cards are grandfathered** (3P-KAN-21): entered `todo`,
+`design` or `backburner` on or before 2026-08-23 ⇒ conformant under
+that column's OLD meaning — never flagged, never auto-migrated.
 
-**The LEGAL SET for a `column:` field is 27, not 22** (3P-KAN-20):
-five BRACKET values sit outside the board and are legal values —
-`proposal`, `planned`, `refused`, `completed`, `cancelled` — defined
-by the folder lifecycle in `trdd-design-tasks.md`, not by the board.
-`proposal`/`planned` are the intake antechamber ahead of `backburner`;
-the terminal values leave the board, each archived AS ITSELF (no
-rename on the way in; 3P-ZON-05) —
-`complete`/`completed`/`cancelled`/`superseded`/`published`/`live`
-into `design/archived/`, `refused` into `design/refused/`. A board
-view may render them as an intake lane and a done lane.
-
-**Pre-3.0.0 cards are grandfathered** (3P-KAN-21): a card that entered
-`todo`, `design` or `backburner` on or before 2026-08-23 is conformant
-under the OLD meaning of that column and MUST NOT be flagged or
-auto-migrated — the drifts run in opposite directions, so each is a
-per-card judgment, never a sweep.
-
-This vocabulary is CANONICAL. Any tool, script, UI, or mirror that
-displays or mutates tasks aligns TO these 22 columns — never the
-reverse. A consumer must not invent a divergent column set, rename
-columns, or collapse them; a coarser view (e.g. a 4-column summary
-board) may GROUP columns for display but must round-trip mutations
-back to the full vocabulary.
+This vocabulary is CANONICAL: every consumer aligns TO it, never the
+reverse; a coarser view may GROUP columns for display but must
+round-trip mutations back to the full vocabulary.
 
 ## Mono-agent operation (the standalone mode)
 
@@ -114,11 +91,7 @@ The board is greppable — no server required:
 ```bash
 # The whole board in one shot (column per card)
 grep -H "^column:" design/tasks/*.md design/proposals/*.md 2>/dev/null
-
-# One column
-grep -l "^column: dev$" design/tasks/*.md
-
-# The exception columns (needs attention)
+# Needs attention
 grep -lE "^column: (blocked|failed)$" design/tasks/*.md
 ```
 
@@ -138,11 +111,7 @@ Render it for the USER as a compact table (column → cards with
 
 ## Why this exists
 
-- **One source of truth.** A kanban that mirrors a task database
-  drifts; a kanban that IS the TRDD corpus cannot.
-- **Portability.** Any project — with or without ai-maestro — gets a
-  full task system from nothing but git + markdown + grep.
-- **Upgrade path.** When the project joins ai-maestro, the overlay
-  turns the same board multi-agent (shared assignees, dashboard UI,
-  GitHub-Project mirror) without migrating any data: the cards were
-  TRDDs all along.
+One source of truth (a kanban that IS the TRDD corpus cannot drift),
+portability (git + markdown + grep is the whole stack), and an upgrade
+path (the ai-maestro overlay turns the same board multi-agent without
+migrating any data — the cards were TRDDs all along).

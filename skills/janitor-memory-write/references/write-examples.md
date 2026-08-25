@@ -106,3 +106,20 @@ printf '%s' "DO NOT <X>, BECAUSE <why>. DO <Y> instead." | memgrep add-lesson \
   --page "$MEMDIR/wikimem/<name>.md" --atom <atom-id> \
   --keywords "<recall phrase>" [--desc "<≤200-char context>"]
 ```
+
+## Reaching ten keyphrases (the five prompts)
+
+Ten is a floor, not a target — write every phrasing you can think of, sourced
+from these five questions:
+
+1. the SYMPTOM in the user's words;
+2. the exact error text;
+3. the identifier / env var / flag by name;
+4. the wrong-but-natural guess someone tries first;
+5. the question this fact answers.
+
+The gate is `MEMGREP_MIN_KEYWORDS` (atoms/lessons, default 10) and the 24-char
+`--desc` floor; page descriptions carry their own 15-phrase floor
+(`MEMGREP_MIN_PAGE_PHRASES`). Duplicated phrases are refused too — a count is a
+proxy for COVERAGE, and a repeat inflates it without adding a way to find the
+memory.

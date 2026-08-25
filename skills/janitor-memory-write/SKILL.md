@@ -70,14 +70,13 @@ esac
 mkdir -p "$MEMDIR"
 ```
 
-The janitor's `memory-scope-leak` detector polices secrets/local paths in
-PROJECT/USER scope — keep machine-specific detail in LOCAL.
+The `memory-scope-leak` detector polices secrets/local paths in PROJECT/USER —
+keep machine-specific detail in LOCAL.
 
-Every PROJECT page also carries `publish-globally: true|false` (default `false`) —
-`true` symlinks it into the USER root so every other project's agent can find it, opt-in
-because PROJECT memory is pushed while USER scope is machine-private. `new-page` doesn't
-set it; memgrep inserts the default and reconciles the symlink around every write. Full
-mechanism: `~/.claude/rules/markdown-memory-recall.md` §`publish-globally:`.
+Every PROJECT page also carries `publish-globally: true|false` (default `false`;
+`true` symlinks it into the USER root for cross-project recall). memgrep inserts
+the default and reconciles the symlink around every write — full mechanism:
+`~/.claude/rules/markdown-memory-recall.md` §`publish-globally:`.
 
 ### 2. FIND the home first — never duplicate
 
@@ -145,22 +144,14 @@ always the SYMPTOM/recall surface, never the answer's jargon; `--desc` is a
 required ≤200-char prose summary, never a slug; THE LESSON FORM is ONE mistake,
 ≤3 lines, `DO NOT`/`BECAUSE`/`DO … instead`).
 
-**THE TOOL NOW REFUSES THIN METADATA — expect it, and do not work around it**
-(owner, 2026-08-23). `add-atom` / `add-lesson` reject a write carrying **fewer
-than 10 keyphrases** (`MEMGREP_MIN_KEYWORDS`) or a missing/stub `--desc` (24-char
-floor). This is not a formality: `recall` ranks on keywords and description and
-**never reads the body**, so a thin list makes an otherwise-perfect memory
-invisible — the one failure mode that cannot be repaired later, because only the
-author knows the phrases a future session will arrive with. Ten is a floor, not a
-target; write every phrasing you can think of. **Never set the env knob to 0 to
-get past a refusal** — that trades a permanent loss for a moment's convenience.
-Reach ten by asking: the SYMPTOM in the user's words · the exact error text · the
-identifier / env var / flag by name · the wrong-but-natural guess someone tries
-first · the question this fact answers.
-
-See [references/write-examples.md](references/write-examples.md) for the full
-`new-page`/`add-atom`/`add-lesson` command reference and the exact frontmatter
-fields each verb guarantees.
+**THE TOOL REFUSES THIN METADATA — expect it, never work around it** (owner,
+2026-08-23). `add-atom`/`add-lesson` reject fewer than **10 keyphrases** or a
+stub `--desc`: `recall` ranks on keywords+description and **never reads the
+body**, so a thin list makes the memory invisible — unrepairable later, because
+only the author knows the phrases a future session will arrive with. Ten is a
+floor; **never set the env knob to 0 to pass a refusal**. How to reach ten (the
+five prompts) + the full verb reference:
+[references/write-examples.md](references/write-examples.md).
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
