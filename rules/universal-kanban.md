@@ -26,32 +26,63 @@ between design/ folders when the move crosses a lifecycle zone, per
 the TRDD folder-lifecycle rules). There is no second task database to
 drift out of sync — the TRDDs ARE the board.
 
-## The ratified 17-column vocabulary
+## The ratified 22-column vocabulary (3-pillars 3.0.0)
 
-The board has exactly **17 columns**, 1:1 with the TRDD `column:`
-enum — **14 lifecycle**:
+> Ratified by the USER 2026-08-23 (TRDD-UNTF690M, `PRRD G2.1`; spec
+> `3-pillars-spec.md` 3.0.0, clause 3P-KAN-01/-20 at ai-maestro
+> `governance-rules` head `c8b0e9cb`). This section replaced the
+> pre-3.0.0 "17 columns" text on 2026-08-25 (janitor#286).
+
+The board has exactly **22 columns**, 1:1 with the TRDD `column:`
+enum — **19 lifecycle**:
 
 ```
-backburner → todo → design → dispatch → dev → testing → ai_review
-  → human_review → complete → publish → published → deploy → live
-  → live_auditing
+backburner → approval → design → design_ai_review
+  → design_human_review → todo → verify_assumptions → plan
+  → dispatch → dev → testing → ai_review → human_review
+  → complete → publish → published → deploy → live → live_auditing
 ```
 
 plus **3 exception** columns: `blocked`, `failed`, `superseded`.
+(Enum identifiers are snake_case — 3P-KAN-17: hyphenated spellings may
+appear in prose, never in a `column:` value.)
 
-The folder-lifecycle overlay values (`proposal`, `planned`, `refused`,
-`cancelled`, `completed`, `superseded` — defined in
-`trdd-design-tasks.md`) BRACKET this pipeline; they are states of the
-same `column:` field, not additional work columns. `proposal`/`planned`
-cards sit in an intake antechamber ahead of `backburner`, and the
-terminal values leave the board, each archived AS ITSELF (no rename on
-the way in; 3-pillars spec 2.0.0, 3P-ZON-05) —
+The five columns added in 3.0.0, normatively (3P-KAN-18/-19):
+
+- `approval` — with the approver named by `min-approval-requirement:`;
+  `backburner` now means only *not yet approved*.
+- `design` — the card is expanded IN PLACE with detailed design/specs
+  (no second file). It sits BEFORE `todo` now: `todo` asserts approved
+  AND designed.
+- `design_ai_review` / `design_human_review` — the design body is
+  reviewed (the human step is SKIPPED entirely when
+  `min-approval-requirement: none`).
+- `verify_assumptions` — every claim in the card verified, or a test
+  created to verify it; passes only when nothing is still an
+  assumption.
+- `plan` — plan-mode run non-interactively over verified facts; passes
+  only when a complete plan FILE exists. `dev` then ENFORCES that
+  plan's steps.
+
+**The LEGAL SET for a `column:` field is 27, not 22** (3P-KAN-20):
+five BRACKET values sit outside the board and are legal values —
+`proposal`, `planned`, `refused`, `completed`, `cancelled` — defined
+by the folder lifecycle in `trdd-design-tasks.md`, not by the board.
+`proposal`/`planned` are the intake antechamber ahead of `backburner`;
+the terminal values leave the board, each archived AS ITSELF (no
+rename on the way in; 3P-ZON-05) —
 `complete`/`completed`/`cancelled`/`superseded`/`published`/`live`
-into `design/archived/`, `refused` into `design/refused/`. A board view
-may render them as an intake lane and a done lane.
+into `design/archived/`, `refused` into `design/refused/`. A board
+view may render them as an intake lane and a done lane.
+
+**Pre-3.0.0 cards are grandfathered** (3P-KAN-21): a card that entered
+`todo`, `design` or `backburner` on or before 2026-08-23 is conformant
+under the OLD meaning of that column and MUST NOT be flagged or
+auto-migrated — the drifts run in opposite directions, so each is a
+per-card judgment, never a sweep.
 
 This vocabulary is CANONICAL. Any tool, script, UI, or mirror that
-displays or mutates tasks aligns TO these 17 columns — never the
+displays or mutates tasks aligns TO these 22 columns — never the
 reverse. A consumer must not invent a divergent column set, rename
 columns, or collapse them; a coarser view (e.g. a 4-column summary
 board) may GROUP columns for display but must round-trip mutations
