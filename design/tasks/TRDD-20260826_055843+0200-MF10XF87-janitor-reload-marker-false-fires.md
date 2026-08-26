@@ -30,6 +30,31 @@ relevant-rules: []
   so the detector's "you have reloaded, stand down" signal is never written. A
   session the user reloaded by hand therefore keeps receiving the marker forever.
 
+## Reproduced first-hand, 2026-08-26 06:14 — and it is WORSE than reported
+
+The CORE session's report was "8 fires with only `__pycache__` churn newer than the ack".
+Measured on this machine at the moment of a live fire, there was not even that:
+
+```
+find ~/.claude/plugins/cache -type f -newermt '-24 hours' | wc -l   → 0
+.janitor/state/reload-acked.ts                                      → 1787717450 (06:10:50)
+[janitor-reload] emitted at                                          → 06:14
+```
+
+**Zero plugin-cache files changed in 24 hours, the ack was 3.7 minutes old, and the marker
+fired anyway.** So the bytecode-churn story is at most a contributing cause and cannot be the
+whole one — a mtime-vs-ack comparison with nothing newer than the ack should suppress, and it
+did not. Whatever the detector keys on, it is not "something under the plugin cache is newer
+than the ack".
+
+That widens the fix rather than changing it: keying on the cached VERSION SET is still right,
+but the change must also explain why the CURRENT ack is not suppressing, or the same
+never-suppressing bug will simply reappear behind a new key.
+
+The fire was NOT actioned. A reload destroys the prompt-cache prefix and re-bills the whole
+window (TRDD-VHPYSN56) — paying that for a provable no-op is the cost this card exists to
+stop, and the project CLAUDE.md already directs sessions away from `/reload-plugins`.
+
 ## Root cause (hypothesis — NOT yet traced in code)
 
 Change detection is keyed on **file mtimes under the plugin cache**, so any write
