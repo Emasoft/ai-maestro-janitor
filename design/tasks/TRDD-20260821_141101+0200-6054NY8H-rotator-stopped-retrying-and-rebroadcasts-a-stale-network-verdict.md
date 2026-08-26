@@ -211,9 +211,12 @@ waiting on. Found only by enumerating every column instead of the ones I expecte
   gone.
 - `rotation-stuck.json` (25.7 h): `all-accounts-maxed`,
   `fmuaddib@gmail.com:refresh-failed; ipazia.emasoft@gmail.com:refresh-failed`.
-- `active-alerts.json` (**6 minutes old**): `STUCK: no alternate is healthy — but the live ACCOUNT
-  is NOT exhausted (5h 2% / 7d 67%). Only the Fable window is spent (100%), so the remedy is to
-  move agents OFF Fable, not to rotate the credential.`
+- `active-alerts.json` — ⚠ **the "6 minutes old" I wrote here was the FILE's mtime, not the
+  message's age; its `firstSeenAt` was 3.6 h earlier. See the retraction below before quoting any
+  number from it.** Verbatim, as a stored snapshot: `STUCK: no alternate is healthy — but the live
+  ACCOUNT is NOT exhausted (5h 2% / 7d 67%). Only the Fable window is spent (100%), so the remedy
+  is to move agents OFF Fable, not to rotate the credential.` The account-wide figures happen to
+  match live readings; **the Fable clause does not and is retracted.**
 
 **That last line matters and is NEW since 08-22.** Two distinct problems were being read as one:
 
