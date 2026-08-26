@@ -1,6 +1,6 @@
 ---
 name: janitor-is-not-a-role-agent
-description: "why are ai-maestro role plugins erroring in this repo / can I install chief-of-staff or maintainer-agent here / claude says 'enabled in project settings but isn't installed here' and offers --scope project / why is the janitor user-scope / what memory survives if another agent takes over this repo"
+description: "why are ai-maestro role plugins erroring in this repo / can I install chief-of-staff or maintainer-agent here / claude says 'enabled in project settings but isn't installed here' and offers --scope project / why is the janitor user-scope / what memory survives if another agent takes over this repo / can the janitor play a role like autonomous-agent or chief-of-staff / why does /janitor-arm refuse a project or local scope install / should I run claude plugin install role@ai-maestro-plugins --scope project here / why is there a stale enabledPlugins key for a role plugin / what happens to LOCAL and USER scope memory if a maintainer clones this repo into a container / why must project-scope memory carry no private data / does deleting an enabledPlugins key uninstall anything / is reports/ project-scoped / why are role plugins mutually exclusive / what is a purely functional plugin with no main agent"
 ocd: 2026-07-09
 lmd: 2026-07-09
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: reference_oauth_token_cloudflare_1010_useragent
-description: "OAuth rotator can't mint or renew a slot — token exchange / refresh FAILS with HTTP 403 'error code: 1010' / Cloudflare 'banned browser signature' / capture clicks Authorize then dies / renew silently does nothing. The urllib token POST is missing a User-Agent."
+description: "OAuth rotator can't mint or renew a slot — token exchange / refresh FAILS with HTTP 403 'error code: 1010' / Cloudflare 'banned browser signature' / capture clicks Authorize then dies / renew silently does nothing. The urllib token POST is missing a User-Agent. / why does the token exchange fail after clicking Authorize / what does error code 1010 mean from Cloudflare / does urllib default to Python-urllib user agent / how to fix HTTP 403 banned browser signature on platform.claude.com / does the keepalive refresh also fail with 1010 / how to diagnose a Cloudflare block versus an app error with a bogus grant_type POST / what User-Agent string fixes the rotator token POST / is the browser side a red herring for this failure / tests/test_oauth_token_useragent.py regression guard / commit 6fdbeaa fix reference"
 ocd: 2026-06-09
 lmd: 2026-06-13
 metadata:

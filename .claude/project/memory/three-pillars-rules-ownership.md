@@ -1,6 +1,6 @@
 ---
 name: three-pillars-rules-ownership
-description: "which repo owns trdd-design-tasks / prrd-design-rules / universal-kanban / I edited a rule file in the repo and nothing changed on disk / two plugins install rules with the same filename / an agent seems to be reading two different generations of the same governance rule / where do the aimaestro-* overlays come from / a rule in ~/.claude/rules matches no repo"
+description: "which repo owns trdd-design-tasks / prrd-design-rules / universal-kanban / I edited a rule file in the repo and nothing changed on disk / two plugins install rules with the same filename / an agent seems to be reading two different generations of the same governance rule / where do the aimaestro-* overlays come from / a rule in ~/.claude/rules matches no repo / who owns aimaestro-trdd-approval aimaestro-prrd-governance aimaestro-kanban-multiagent / why do overlay filenames matter as a cross-repo contract / does editing a rule file in the repo change anything on disk without a stamp file / what is install-governance-rules.cjs stamp guard / are trdd-approval-tiers.md and manager-approval-defaults.md orphan files / does the janitor's orphaned-rule sweep ever delete a foreign rule file / which repo installs universal rules at user scope versus workdir scope"
 ocd: 2026-07-22
 lmd: 2026-07-22
 metadata:

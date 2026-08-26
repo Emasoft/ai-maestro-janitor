@@ -1,6 +1,6 @@
 ---
 name: reference_cpv_dotclaude_gitignore_fp
-description: "CPV --strict blocks the janitor publish on '.gitignore missing coverage for .claude/' — why it can't be satisfied, and that it's a filed false positive, not something to fix in our gitignore"
+description: "CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/ / why can't the .claude gitignore MINOR be satisfied / is this a filed false positive not something to fix in our gitignore / claude-plugins-validation issue 120 / does git check-ignore .claude exit 0 when we track .claude/project/memory / can git re-include a path under an excluded parent directory / why not add a bare .claude/ gitignore line / would a bare .claude/ line untrack the memory corpus / when does this publish block auto-unblock / should PROJECT memory move out from under .claude to dodge this check / validate_skill.py broken file reference two different fence handling checks / why does a markdown link example inside a fenced template still trip validate_supporting_files / how to clear a Referenced file not found finding in SKILL.md / does a fenced bash block strip literal paths from the check"
 ocd: 2026-06-14
 lmd: 2026-06-14
 metadata:

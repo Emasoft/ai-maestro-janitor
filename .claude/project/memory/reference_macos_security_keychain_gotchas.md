@@ -1,6 +1,6 @@
 ---
 name: reference_macos_security_keychain_gotchas
-description: "Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string / garbled — value doesn't round-trip. Two `security add/find-generic-password` gotchas: stdin 128-byte getpass cap, and hex-dump on non-printable/unicode values."
+description: "Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string / garbled — value doesn't round-trip. Two `security add/find-generic-password` gotchas: stdin 128-byte getpass cap, and hex-dump on non-printable/unicode values. / why is my stored secret truncated to 128 bytes / security add-generic-password -w with no value uses getpass with a hard 128 byte buffer / why does find-generic-password -w return a hex string instead of my value / how to store a non-ASCII or multi-KB secret in the macOS keychain / should I pass the secret on argv or via stdin to security / does base64-wrapping a secret avoid the hex-dump gotcha / an 8.8KB OAuth blob was stored as 128 bytes of corrupt JSON / value read back does not match what was stored / are these gotchas visible under a mocked keychain / what is safe_storage.py StoreResult / trailing newline ambiguity in keychain values / secret-tool and DPAPI backends and base64 uniformity / see also macos-keychain aspect page for the ACL prompt flood"
 ocd: 2026-06-09
 lmd: 2026-06-13
 metadata:

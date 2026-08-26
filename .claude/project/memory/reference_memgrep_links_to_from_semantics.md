@@ -1,6 +1,6 @@
 ---
 name: reference_memgrep_links_to_from_semantics
-description: "memgrep links --to --from look inverted / backlinks vs out-links confusion / which flag shows who points at a page"
+description: "memgrep links --to --from look inverted / backlinks vs out-links confusion / which flag shows who points at a page / does --to mean out-links or backlinks / does --from mean out-links or backlinks / memgrep links --to NOTE shows NOTE's out-links / memgrep links --from NOTE shows NOTE's backlinks / how was the inverted intuition first documented wrong / does fm.KEY match nested frontmatter at any depth / does fm.metadata.tier work as a dotted path / where does --where live on the memgrep command / why did a symmetric link fixture fail to catch the inversion / how to verify a CLI's directional flags with an asymmetric fixture / what confirms any hypothesis about link direction / see also memory-system for the wikimem model"
 ocd: 2026-06-10
 lmd: 2026-06-13
 metadata:

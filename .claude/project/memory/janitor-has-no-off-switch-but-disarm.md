@@ -1,6 +1,6 @@
 ---
 name: janitor-has-no-off-switch-but-disarm
-description: "can I add a pause / quiet mode / temporary silence to the janitor — the heartbeat is too noisy or too expensive, is there a way to suspend it for a while without disarming, and why did /janitor-pause and /janitor-keep-going disappear"
+description: "can I add a pause / quiet mode / temporary silence to the janitor / is there a way to suspend the heartbeat for a while without disarming / why did the janitor-pause command disappear / where did janitor-keep-going off go / is there a per-feature off switch / why does disarm delete the cron but pause did not / a suspended fleet looked exactly like a healthy one / keep-going-off flag found stale 14 days later / how to silence a noisy or expensive heartbeat / can I add a config knob that silences a guard / what are hard_restart_enabled fleet_stop_enabled issues-watch opt-in flags / does disarm survive being mistaken for a working session / why was maintenance mode removed in v0.67.0 / a guard that can be silenced invisibly is not a guard"
 ocd: 2026-07-31
 lmd: 2026-07-31
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: janitor-hooks-two-import-conventions
-description: "writing a new janitor hook / ModuleNotFoundError: No module named 'state' / my hook dies on import but the detectors work / from lib import X fails at runtime / which sys.path entries does a hook need / why does dispatch.py import differently than the hooks"
+description: "writing a new janitor hook / ModuleNotFoundError: No module named 'state' / my hook dies on import but the detectors work / from lib import X fails at runtime / which sys.path entries does a hook need / why does dispatch.py import differently than the hooks / why do detectors use bare import state but hooks use from lib import state / what two sys.path entries must a hook add / global_state.py bare-imports its sibling state module / on-session-start.py died silently for three weeks over this / why does the CPV hook validator require the from lib import form / how to write a lib module safe under both import conventions / trdd_common.py try except import pattern / does tests/test_hooks_execute.py catch a missing sys.path entry / on-stop-proactive-compact.py patched bare state instead of lib.state and typed /compact into the developer's pane"
 ocd: 2026-07-11
 lmd: 2026-07-17
 metadata:

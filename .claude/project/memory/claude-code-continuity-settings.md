@@ -1,6 +1,6 @@
 ---
 name: claude-code-continuity-settings
-description: "claude stopped on an api error instead of retrying / AskUserQuestion dialog blocked an unattended session forever / which settings.json entries keep claude working in my absence / askUserQuestionTimeout ignored in project settings / CLAUDE_AFK_TIMEOUT_MS vs askUserQuestionTimeout which wins — the ensured continuity settings stack"
+description: "claude stopped on an api error instead of retrying / AskUserQuestion dialog blocked an unattended session forever / which settings.json entries keep claude working in my absence / askUserQuestionTimeout ignored in project settings / CLAUDE_AFK_TIMEOUT_MS vs askUserQuestionTimeout which wins — the ensured continuity settings stack / why did an unattended overnight session freeze on a dialog / CLAUDE_AFK_TIMEOUT_MS=0 does not disable auto-continue it dismisses instantly / does the retry watchdog make claude survive rate-limit errors / ENABLE_BACKGROUND_TASKS CLAUDE_AUTO_BACKGROUND_TASKS CLAUDE_CODE_FORK_SUBAGENT env vars / what env vars does the janitor add to settings.json / two writers janitor and ai-maestro server must enforce the same askUserQuestionTimeout value / why is my project .claude/settings.json askUserQuestionTimeout having no effect / what is CLAUDE_AFK_COUNTDOWN_MS / lockstep invariant between janitor settings_ensurer and the ai-maestro server / how to make claude keep working while I'm away"
 ocd: 2026-07-18
 lmd: 2026-07-18
 metadata:

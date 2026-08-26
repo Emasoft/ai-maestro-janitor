@@ -1,6 +1,6 @@
 ---
 name: janitor-daemon-bulk-lane
-description: "oauth rotation missed / account hit rate limit wall while janitor was running — daemon blind for 20 minutes / task stamps frozen but heartbeat fresh / marketplace-refresh runs back to back / why are bulk tasks detached children"
+description: "oauth rotation missed / account hit rate limit wall while janitor was running — daemon blind for 20 minutes / task stamps frozen but heartbeat fresh / marketplace-refresh runs back to back / why are bulk tasks detached children / why did the daemon miss an oauth rotation window / marketplace-refresh cadence equals its own runtime causing back-to-back runs / what is the bulk lane in daemon.py / which tasks run background=True detached child / why is .last-run.ts frozen while daemon.heartbeat.ts is fresh / does a bulk task block the 60 second survival beats / what is _BULK_RECHECK_SEC / never set task cadence near its worst-case runtime / monkeypatched CLAUDE_PROJECT_DIR ignored in tests lru_cache project_root / test wrote into the real repo .janitor state seen file"
 ocd: 2026-07-17
 lmd: 2026-07-17
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: janitor-fleet-control-plane
-description: "a chore ran twice / two daemons / the ai-maestro server ignored maintenance mode and kept running chores / a flag I set had no effect on the other daemon / where do the kill-switch and maintenance flags actually live / why is there a ~/.claude/janitor-control folder when the rule says use the DATA dir / a lock stopped excluding anything after I moved it / a chore skips forever but the logs only say contended"
+description: "a chore ran twice / two daemons / the ai-maestro server ignored maintenance mode and kept running chores / a flag I set had no effect on the other daemon / where do the kill-switch and maintenance flags actually live / why is there a ~/.claude/janitor-control folder when the rule says use the DATA dir / a lock stopped excluding anything after I moved it / a chore skips forever but the logs only say contended / what is the audience scope rule for the control plane / why does JANITOR_CONTROL_DIR only apply to tests / flock conflicts across independent open file descriptions even in one process / dual flock new-then-old order deadlock free / external consumer hardcoded one rung of the resolution ladder and silently missed the flag / does moving a lock differ from moving a flag / integration test caught coincident JANITOR_CONTROL_DIR and JANITOR_GLOBAL_STATE_DIR paths"
 ocd: 2026-07-22
 lmd: 2026-07-22
 metadata:

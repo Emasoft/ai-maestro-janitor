@@ -1,6 +1,6 @@
 ---
 name: janitor-self-update-bootstrap-gap
-description: "I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update / after publishing vX the local plugin cache is still on vX-1 / why is the janitor cache behind GitHub right after a release / the version-update detector didn't request the update for its own release"
+description: "I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update / after publishing vX the local plugin cache is still on vX-1 / why is the janitor cache behind GitHub right after a release / the version-update detector didn't request the update for its own release / why did v0.42.0 not fast-pull itself / can a self-updater accelerate its own first deployment / what is request_version_update / does the slow 6-hour version-update beat still apply after a fast-update ships / should I force claude plugin update from a session to fix a stale cache / why is forcing plugin update from N sessions a stampede / does a janitor-reload prove the cache actually rolled to the new version / how to verify the cache version with ls and claude plugin list / a reload marker is not proof of a new cache / I told the user the session runs the new hooks but the cache was still old / what is the fallback cadence for a self-update accelerator"
 ocd: 2026-07-13
 lmd: 2026-07-13
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: project_janitor_publish_blocked_cpv_fps
-description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it"
+description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get"
 ocd: 2026-06-11
 lmd: 2026-07-16
 metadata:

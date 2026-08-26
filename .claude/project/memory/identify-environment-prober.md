@@ -1,6 +1,6 @@
 ---
 name: identify-environment-prober
-description: "how does /janitor-identify-environment detect the environment — why did terminal/TTY detection report wrong (headless/'??') inside an interactive session, where is env_detect code, how to add a detector, why secret-safe/no-network/fail-open"
+description: "how does /janitor-identify-environment detect the environment / why did terminal or TTY detection report wrong headless or '??' inside an interactive session / where is the env_detect code / how do I add a new detector to identify-environment / why is the tool secret-safe no-network fail-open / a background agent was falsely reported inside a fully interactive iTerm session / ITERM_SESSION_ID is absent on a resumed or --continue session / why does subprocess ps report tty ?? for the bash tool / how to read process identity from an ancestor not self / NAT detection misclassified a Tailscale CGNAT address as public / is 100.64.0.0/10 private in python ipaddress / where does identify-environment write its report json / what does --fast skip in identify-environment / what does --online enable in identify-environment / does identify-environment ever emit secret values"
 ocd: 2026-07-13
 lmd: 2026-07-13
 metadata:
