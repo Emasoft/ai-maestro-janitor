@@ -3,7 +3,7 @@ trdd-id: AR9IUGIJ
 title: Eliminate the re-arm requirement — no session should need /janitor-arm on every start, update, or tier change
 column: backburner
 created: 2026-08-06T13:31:48+0200
-updated: 2026-08-12T09:40:00+0200
+updated: 2026-08-26T20:17:39+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 scope: project
@@ -13,6 +13,37 @@ implementation-commits: []
 ---
 
 # Eliminate the re-arm requirement (owner failure report 2026-08-06, item 6)
+
+## ⏵ 2026-08-26 — this card's 68 `TRDD-DEAD-SYMBOL` findings are a LINE-WRAP artifact, not rot
+
+This card is the single largest contributor to that finding class fleet-wide — **68 of 104** —
+and every one of them is the detector punishing the card for doing exactly the right thing.
+
+The correction block below deliberately names the deleted symbols in order to record that they
+are dead. `check5_dead_symbol_citations` already has an exemption for that (TRDD-Q4AMWYCY: a
+token whose OWN LINE carries a deletion verb — `deleted|removed|retired|gutted|gone|no longer
+exists` — or a commit SHA is excluded). It is **line-scoped on purpose**, so that a genuinely
+stale NEXT ACTION a few lines under an unrelated obituary still fires.
+
+The cost of that scoping, measured here: this card's obituary is one SENTENCE wrapped over three
+lines —
+
+```
+`should_emit_renew`, `commit_tier`, `stable_count`, `raw_tier`, `committed_tier` and   ← no verb, no SHA
+`last_rearm_ts` return **zero hits** anywhere under `scripts/`. They were removed by   ← "removed" ✓
+`af499ee3 feat(cadence)!: one arm per session …`                                       ← SHA ✓
+```
+
+Lines 2-3 are exempt; **line 1 is not**, because `"zero hits"` is not in the verb list. Five
+symbols × repeated occurrences is where 68 comes from. Nothing about the card is stale.
+
+**Not proposing a code change here**, because the line-scoping is a reasoned trade with its own
+recorded rationale and the finding is LOW severity and already 10 days quiet. If it is ever worth
+tightening, the smallest fix preserving the intent is **sentence-scoped rather than
+paragraph-scoped** matching: a wrapped sentence keeps its obituary status, while a NEXT ACTION
+paragraph below remains a different sentence and still fires. Recorded so the next reader of
+either this card or that ledger class does not re-derive it — which is what I just spent a fire
+doing.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
 
