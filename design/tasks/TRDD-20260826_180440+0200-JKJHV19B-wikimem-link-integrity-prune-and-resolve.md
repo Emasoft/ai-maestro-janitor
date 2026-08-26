@@ -179,7 +179,17 @@ different ways while reporting success.
       lost
 - [ ] A test drives a page carrying one duplicate link, one dangling forward-reference, and one
       link to a deleted page, and asserts exactly one prune, one keep, one create/repair — the
-      three outcomes must be distinguishable or the pass has no decision in it
+      three outcomes must be distinguishable or the pass has no decision in it.
+
+      **AMENDED 2026-08-26 by the box-2 measurement — that fixture would pass while the pass stays
+      broken.** It exercises only the three outcomes the duty pair names, and box 2 measured that
+      `CREATE` never fires on the real corpus while the dominant outcome is `not-a-defect`, which
+      the fixture cannot even express. The test that actually pins this pass must ALSO carry:
+      a page in a **subdirectory** (catches the non-recursive walk), a page whose frontmatter
+      `name:` differs from its filename (catches resolution by filename), and a `[[Placeholder]]`
+      in prose using a word no allowlist contains (catches the lexical filter). Each of those
+      three produced a false defect in the real run; none of them is visible in a fixture built
+      from the duty text.
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
 
 ## Notes and lessons learned
