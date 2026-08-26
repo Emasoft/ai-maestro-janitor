@@ -3,7 +3,7 @@ trdd-id: 3UX67NT5
 title: implementation-commits is empty or missing on most cards that have shipped code
 column: backburner
 created: 2026-08-26T08:32:00+0200
-updated: 2026-08-26T18:35:00+0200
+updated: 2026-08-26T18:45:00+0200
 current-owner: janitor-main-session
 task-type: docs
 project-id: ai-maestro-janitor
@@ -119,13 +119,43 @@ sufficient; the file list is the arbiter, and only for the handful the filters l
 **Remaining:** the 21 docs-only cards need no action. This card can go terminal once someone
 confirms that reading.
 
+### ⏵ Box 2 is MOSTLY BUILT ALREADY — and the residual gap is exactly the JPL0JU86 case
+
+Checked before building the flagging check this card asks for. `detectors/trdd-state-reconciliation.py`
+already merges `implementation-commits:` with subject-matched SHAs and filters them through
+`_commit_touches_impl` — "true iff the sha changes at least one file OUTSIDE the board dir" —
+explicitly so a `docs: add TRDD-…` authoring commit cannot make a never-implemented backburner
+card read as shipped (their TRDD-7C787DUS). It reports; it does not auto-fill. That is box 2's
+substance, shipped.
+
+**It covers 21 of today's 28 candidates** — the docs-only ones — by exactly the rule I re-derived
+by hand this morning.
+
+**It does NOT cover the 22nd, and no path rule can.** `7b2c64eb` touches
+`scripts/detectors/trdd-state-reconciliation.py` and `scripts/lib/trdd_common.py` — real code,
+outside the board dir — so `_commit_touches_impl` KEEPS it. It is still wrong for JPL0JU86,
+because those files are board machinery and the commit merely REPORTS that JPL0JU86's fix was
+undone. The discriminator there is not WHERE the files are but WHETHER THEY RELATE TO THE CARD'S
+SUBJECT, and that is a semantic judgment: both a real implementation and this false positive
+touch legitimate code outside the board.
+
+So the honest state of box 2 is: **built, with a known residual that is not closable by
+tightening the filter.** The remedy is that the detector REPORTS rather than fills — which it
+already does — and the human check happens at fill time, which is what today's pass did.
+
+Ticking box 2 on that basis; leaving box 3 (does NOT auto-fill) ticked by the same code.
+
 ## Acceptance
 
 - [ ] Each swept card's field filled from SUBJECT-matched commits, confirmed per card by a human
       or an agent that read the diff — never from a body grep
-- [ ] A check that flags a card whose column has reached `complete` with an empty
-      `implementation-commits:` while subject-matched commits exist
-- [ ] The check does NOT auto-fill; it reports, because of the false-positive class above
+- [x] A check that flags a card whose column has reached `complete` with an empty
+      `implementation-commits:` while subject-matched commits exist. **ALREADY BUILT** —
+      `trdd-state-reconciliation.py` + `_commit_touches_impl`; see the section above for the
+      one residual it cannot decide
+- [x] The check does NOT auto-fill; it reports, because of the false-positive class above.
+      **Satisfied by the same detector** — and today's JPL0JU86 rejection is the case that
+      proves reporting-not-filling is the right contract
 
 ## Notes and lessons learned
 
