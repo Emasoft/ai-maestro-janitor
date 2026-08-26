@@ -2,12 +2,13 @@
 name: wikimem-retrieval-engine
 description: "recall returned the wrong page / why is a memory search so expensive / what does memgrep rank on / lint fails on everything and I cannot find the real errors / how do I hop from a search result to the full atom / a superseded atom is missing from search results / keywords went missing from a lesson after a write / a bracket in a description broke parsing / link-one-sided reported a pair that plainly links both ways / a wikilink resolved into the wrong scope / recall printed a huge absolute path instead of a short locator / should I add a tie-break to the ranking scorer / does the keyword order matter for recall ranking / lint prints info warn and error but which one gates the exit code / why is a lesson footnote reported as uncited when it exists / recall is expensive because it costs search plus a hop / lint prints all findings but only errors block the gate"
 ocd: 2026-07-26
-lmd: 2026-07-26
+lmd: 2026-08-26
 metadata:
   node_type: memory
   type: project
   tier: component
   functionality: janitor
+publish-globally: false
 ---
 
 # wikimem-retrieval-engine
@@ -50,7 +51,7 @@ queries and 1 in 201 half-remembered ones. Tie-breaks after `score` therefore al
 page-level lesson, which was 57% of all findings when it was rated an error, so the gate failed on
 every corpus. WARN is real but not fixable from the page being edited (one-sided link) or needs a
 semantic judgement (oversized atom). ERROR is corruption or invisibility. On the live USER scope:
-161 findings, 8 ERRORs. [^1]
+161 findings, 8 ERRORs. [^1] [^3]
 
 ## See also
 
@@ -85,3 +86,4 @@ Diagnosing it: three plausible causes were tested and DISCARDED first — inline
 
 [^1]: [id:ATOM-I4FM-82K6, status:valid, desc:"the lint was right and the parser was wrong — documenting the grammar declared atoms", keywords:"lint_flags_my_own_documentation_page prose_example_became_a_real_atom duplicate_atom_id_I_never_wrote is_this_lint_finding_a_false_positive documenting_a_syntax_is_not_using_it", ocd:2026-07-28, lmd:2026-07-28] DO NOT dismiss a lint finding that fires on a page DOCUMENTING the syntax as a false positive, BECAUSE the atom parser scanned the whole line, so `^id [k: v]` written inside backticks declared 13 REAL atoms — four sharing one id, a collision no author wrote. DO fix the parser (anchor the marker at line start) instead: the lint was right and the defect was one layer deeper, in the code that feeds the index.
 [^2]: [id:ATOM-9MBI-LL4R, status:valid, desc:"a parse WARN that recall seems to contradict is the parser being right and recall succeeding by accident", keywords:"lint_warns_but_recall_still_finds_it the_warning_must_be_a_false_positive keywords_are_right_there_in_the_file memgrep_lint_disagrees_with_memgrep_recall", ocd:2026-08-04, lmd:2026-08-04] DO NOT dismiss a memgrep parse/lint WARN because a symptom query still returns the page, BECAUSE a leaked metadata field lands in the BODY, where full-text search still matches it — so recall succeeding proves nothing about whether the STRUCTURED field survived, and the two tools are not disagreeing. DO open the raw page and confirm the field is where the model says it belongs before calling the finding a false positive.
+[^3]: [id: ATOM-TLL1-PZOJ, status: valid, desc: "measured 2026-08-26 across all four sub-ERROR kinds in a 71-finding run: none of them breaks retrieval", keywords: "lint_reports_71_findings_should_I_fix_them are_the_sub-ERROR_lint_findings_real_defects does_atom-after-footer_break_recall is_publish-globally-missing_a_defect atom-oversized_and_lesson-uncited_do_they_matter which_memgrep_lint_findings_actually_affect_retrieval the_heartbeat_keeps_surfacing_a_lint_count", ocd: 2026-08-26, lmd: 2026-08-26] DO NOT re-triage a sub-ERROR `memgrep lint` run as though the count implied damage, BECAUSE none of the four kinds it emits affects whether a memory can be FOUND — measured 2026-08-26 on a 71-finding run across all three scopes. `atom-after-footer` (25, WARN) is page SHAPE only: three sampled after-footer atoms were indexed, recalled by id, and one surfaced at HOP-1 by symptom as the #2 hit. `publish-globally-missing` (33, WARN) is a write-time backlog whose absence already means the correct default (`false`, opt-in). `atom-oversized` (5, INFO) were 2-15% over a 1500-char soft cap. `lesson-uncited` (8, INFO) is a conditional prompt — "cite it from an atom IF it should travel with one" — and a page-level lesson is legitimate. DO check the one thing that would make a finding real — retrievability — with a hop-1 SYMPTOM recall, not an id lookup: an id lookup proves only that the atom is in the index, while symptom recall is the path that decides whether the memory effectively exists. And when triaging a multi-kind lint run, open EVERY kind before concluding: this run was examined twice in one session and abandoned both times after only the largest bucket, which is how a real item inside a small bucket stays unread (here, one `lesson-uncited` was a genuinely MISPLACED lesson — a test-isolation guardrail parked on a daemon-bulk-lane page — i.e. duty-14 work, not a citation nit).
