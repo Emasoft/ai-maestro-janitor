@@ -3,12 +3,12 @@ trdd-id: A8DPTDOU
 title: OAuth-supervisor alerts flap 83 times a day because two keys describe one condition
 column: backburner
 created: 2026-08-21T13:44:09+0200
-updated: 2026-08-21T13:44:09+0200
+updated: 2026-08-26T05:58:43+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 scope: project
-severity: minor
+severity: major
 approval-tier: 0
 labels: [oauth-rotator, alerts, noise]
 npt: []
@@ -83,6 +83,26 @@ about the alert layer flapping.
 - [ ] A test that drives the same unchanged condition across N supervisor ticks and asserts
       exactly ONE ONSET — flapping must be RED, and the test must fail on today's code
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+
+## Fresh evidence — 2026-08-26 (the flap is a FALSE RECOVERY, not just noise)
+
+Five overnight ONSET→CLEARED cycles for `cookie-leg-stuck` / `reauth-needed:refresh-dead`
+(21:27, 23:16, 01:26, 04:26, 04:47) while **nothing was ever minted** — all three credentials
+stayed dead (`invalid_grant`, expired 2026-08-11/13/14, 233/576/789 failed exchanges) and
+`rotation-stuck.json` stayed `all-accounts-maxed` throughout.
+
+This raises the severity of the card beyond noise: the detector **CLEARS on a signal that is
+not a real recovery**. That is precisely why this looked handled while staying broken for two
+weeks — a cleared alert reads as "resolved" to every consumer, including the human. So the
+acceptance box about symmetric counts is necessary but NOT sufficient: a CLEARED must be
+gated on evidence a credential was actually minted, not on the absence of the failing probe.
+
+Add to acceptance:
+
+- [ ] `CLEARED` for any `reauth-needed:*` / `cookie-leg-stuck` key requires positive evidence
+      of a successful mint (a fresh token with a future expiry), never merely a probe that
+      stopped failing; a test drives "probe quiet, nothing minted" and asserts the alert
+      STAYS onset
 
 ## Notes
 
