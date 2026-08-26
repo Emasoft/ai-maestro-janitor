@@ -356,3 +356,49 @@ def test_session_start_hook_writes_nothing_outside_the_project_in_harness_mode(
         "the control run must write settings.json — otherwise the thin-mode assertions "
         "above prove nothing (the isolation, not the gate, would explain the absence)"
     )
+
+
+def test_a_degenerate_cached_root_never_owns_the_whole_machine() -> None:
+    """AM8JD9SG F11: a cached workdir of "/" would make EVERY session server-owned.
+
+    The cache is written by another process, so its contents are untrusted. `"/"` collapses
+    the prefix test to `root.startswith("/")` — true for every absolute path — and since
+    `_DIAGNOSIS_RECOVERY["server_owned"]` is None, the guardian would stop recovering the
+    entire fleet. It would look like nothing at all: hands-off is the safe direction for any
+    ONE instance, so no alarm distinguishes "correctly excluded" from "silently disarmed".
+
+    Measured, not imagined: ai-maestro's registry carries an entry named `default` with
+    `workingDirectory: "/"`, and the proposed F11 remedy was to write that registry into
+    this cache.
+    """
+    for degenerate in ("/", "", "   ", "//", "relative/path"):
+        assert hb.instance_is_server_owned(
+            tagged=False,
+            root="/Users/someone/Code/AnyProject",
+            cli_present=True,
+            list_ok=False,
+            cached_roots=[degenerate],
+            override=None,
+        ) is False, f"cached root {degenerate!r} must never own an unrelated root"
+
+
+def test_a_degenerate_entry_does_not_poison_the_valid_ones() -> None:
+    """Dropping the bad entry must not drop the good ones — a real workdir alongside a
+    degenerate one still owns its own subtree, and only its own."""
+    roots = ["/", "/Users/someone/agents/frank"]
+    assert hb.instance_is_server_owned(
+        tagged=False, root="/Users/someone/agents/frank", cli_present=True,
+        list_ok=False, cached_roots=roots, override=None,
+    ) is True
+    assert hb.instance_is_server_owned(
+        tagged=False, root="/Users/someone/Code/Unrelated", cli_present=True,
+        list_ok=False, cached_roots=roots, override=None,
+    ) is False
+
+
+def test_a_cached_root_does_not_own_a_sibling_by_string_prefix() -> None:
+    """`/a/foo` must not own `/a/foobar` — the separator is what makes it a subtree."""
+    assert hb.instance_is_server_owned(
+        tagged=False, root="/a/foobar", cli_present=True, list_ok=False,
+        cached_roots=["/a/foo"], override=None,
+    ) is False

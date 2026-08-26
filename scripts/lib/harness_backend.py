@@ -496,8 +496,35 @@ def instance_is_server_owned(
     if tagged or under_agents_home:
         return True
     if not list_ok and root:
-        return any(root == wd or root.startswith(wd.rstrip("/") + "/") for wd in cached_roots)
+        return any(_cached_root_covers(wd, root) for wd in cached_roots)
     return False
+
+
+def _cached_root_covers(wd: str, root: str) -> bool:
+    """Does cached workdir `wd` cover `root`? REJECTS a degenerate `wd` first.
+
+    `wd` comes from a file this process does not write, so it is untrusted input. A `wd`
+    of `"/"` (or `""`) makes the prefix test `root.startswith(wd.rstrip("/") + "/")`
+    collapse to `root.startswith("/")` — TRUE for every absolute path on the machine. The
+    whole fleet would then read server-owned, `_DIAGNOSIS_RECOVERY["server_owned"] = None`
+    would fire for all of it, and EVERY janitor recovery would silently stop. Silently is
+    the operative word: hands-off is the safe direction for one instance, so nothing would
+    look wrong — the fleet would simply never be rescued again.
+
+    Not hypothetical (measured 2026-08-26, AM8JD9SG F11): ai-maestro's agent registry
+    carries an entry literally named `default` with `workingDirectory: "/"`, and the
+    proposed fix for F11 was to have the server write that registry into this cache. That
+    fix would have disarmed the guardian fleet-wide, from a file whose 13th line looked
+    unremarkable.
+
+    So a cache entry must be an absolute path with at least one real component. A
+    degenerate one is DROPPED, never widened — it can only ever have meant "everything",
+    which is not a claim a workdir is allowed to make.
+    """
+    wd = (wd or "").strip()
+    if not wd.startswith("/") or not wd.strip("/"):
+        return False
+    return root == wd or root.startswith(wd.rstrip("/") + "/")
 
 
 def self_agent_ref(env: Optional[Mapping[str, str]] = None) -> str | None:
