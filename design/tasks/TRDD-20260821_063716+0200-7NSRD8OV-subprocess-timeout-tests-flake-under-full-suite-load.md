@@ -1,9 +1,11 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-26T08:05:00+0200
+updated: 2026-08-26T20:35:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,6 +17,36 @@ eht: []
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ 2026-08-26 20:35 — `testing` → `blocked`. Nobody was testing it, and both gates are the owner's
+
+The column said `testing` for five days while nothing tested it. The card's own two open
+questions are both explicitly deferred to a human — *"it is a USER call, because forcing 80+
+means deliberately saturating a shared 36-user box"*, and on the env-propagation fix *"this
+changes test-harness behaviour broadly, so it wants a human's eye; I did not pick unilaterally
+after three advisor wedges"*. A card whose every remaining gate belongs to someone else is not
+in `testing`; leaving it there hides the stall in the one column anyone checks.
+
+**Added one distribution point today (soak-6), and it is nearly worthless — which is the honest
+report, not a hedge.** Full suite `-n auto`: **15849 passed, 0 failures, wall 91 s**, start
+load 9.29, end load 114.56. Green, and it reached a 1-min loadavg *above* the historical 80+
+this card said was never reached — but that load is the suite's own `-n auto` fan-out at the
+tail, not sustained external contention, and **91 s is far under the 300 s bar this card set
+for itself** (*"a green run FASTER than 300 s proves nothing, because 189 s and 238 s were
+already nearly green before this fix"*). So it goes in the distribution and moves nothing.
+
+Recorded because the tempting misread was right there: "green at load 114" reads like the
+missing evidence, and it is not — the card pre-committed to wall-clock as the load proxy
+precisely so a fast green could not be spent as proof later. The artifacts are in
+`reports_dev/soak/soak-6.{txt,meta}` (gitignored).
+
+**The two decisions that would unblock it, unchanged:**
+1. Does the accumulated green evidence close the card, or does it need a run under deliberate
+   external saturation of a shared box (which is why it was never done unilaterally)?
+2. The 28 minimal-env builders that do not propagate
+   `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE` to their children — recommendation stands at
+   option 2 (a shared `child_env()` helper for the rule) **plus** option 3 (an autouse
+   `subprocess.run` patch for the enforcement), test-only, production untouched.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 13:40
 
