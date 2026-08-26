@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-22T11:43:33+0200
+updated: 2026-08-26T12:20:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -56,6 +56,76 @@ both the 8s inner cap and the CLI's ~11s worst case, so the harness kills the wh
 regardless. The real fix reconciles the whole 5s/8s/11s budget (most likely: make the ai-maestro
 self-trigger send DETACHED like the tmux path, so the hook returns fast and `_mark_compacted` is
 deterministic). Not a one-liner → deferred.
+
+## ⛔ 2026-08-26 — F11 IS NOT A THEORETICAL GAP. It is firing, 275 times, and the mitigation covers ZERO instances.
+
+`harness_backend.instance_is_server_owned`'s docstring calls `under_agents_home` the
+"REGISTRY-FREE signal" that is "LOAD-BEARING today", because the CLI list always 401s from the
+daemon's context (F6) so nothing is ever tagged and the cache never fills. **Measured today: it
+carries nothing here, because no ai-maestro agent on this machine lives under `~/agents/`.**
+
+Every one of the 20 project roots the guardian has ever injected into is under `~/Code/` or is
+`~/ai-maestro` itself — `under~/agents=False` for all 20. And the cache the docstring falls back
+to **does not exist on disk**:
+
+```
+$ ls …/global-state/aimaestro-agent-roots.json
+No such file or directory
+```
+
+So all three signals are dead at once: `tagged` (needs a list that 401s), `cached_roots` (file
+absent), `under_agents_home` (no agent is there). `instance_is_server_owned` therefore returns
+**False for every ai-maestro agent on this host**, and the PZLVT2RN hands-off split — which is
+correctly implemented, `_DIAGNOSIS_RECOVERY["server_owned"] = None` — never engages.
+
+**The consequence, straight from `recovery-audit.ndjson`:**
+
+```
+275 injections into ai-maestro-looking roots since 2026-08-11 19:54
+  187  rearm       (/janitor-arm — per-project, NOT one of R42.5's global switches)
+   88  esc_nudge   (ESC into the pane)
+```
+
+Recipients include the live role agents by name — EMASOFT-ASSISTANT-MANAGER,
+EMASOFT-ORCHESTRATOR-AGENT, EMASOFT-ARCHITECT-AGENT, EMASOFT-INTEGRATOR-AGENT,
+EMASOFT-PROGRAMMER-AGENT, EMASOFT-CHIEF-OF-STAFF, AI-MAESTRO-AUTONOMOUS-AGENT,
+AI-MAESTRO-WEBDESIGN-AGENT, ai-maestro-assistant-role-agent, ai-maestro-web-scenario-tester,
+and `~/ai-maestro` itself — each of which appears as a live peer session in `ListAgents`.
+
+**This upgrades F11 from "compliance finding" to "measured, ongoing".** The audit reasoned that
+the guardian *would* inject into other agents' panes; the audit log proves it *does*, 275 times
+over 15 days, and that the safeguard designed to prevent it is inert on this host rather than
+merely imperfect.
+
+### Why it looked handled
+
+The docstring is honest and specific — it names F6, names the 401, and flags "adopted workdirs
+OUTSIDE `~/agents` remain covered only by tag/cache (a known gap until that probe lands)". What
+it does not say, because nobody measured it, is that on THIS machine that gap is the entire
+population. A mitigation described as load-bearing and a mitigation that covers 0 of 20 read
+identically in code review; only the audit log tells them apart.
+
+Same shape as TRDD-FB84YUGT and TRDD-LFSWY0C6 on this board: the mechanism is present, correct,
+and never reaches the case it was built for.
+
+### NOT FIXED HERE — and the reason is not caution
+
+Two of the three plausible fixes are wrong to take unilaterally:
+
+- **Widening the exclusion** (treat `~/Code/*-AGENT` as server-owned, or seed the cache) stops
+  the janitor rescuing ~20 sessions it currently rescues. Whether the server actually recovers
+  them is THEIR fact, not mine — and their `driveConsent` leg is itself unproven (see the
+  handoff). Turning off a working rescue on the assumption that another one exists is exactly
+  the trade that leaves a fleet unattended.
+- **Doing nothing on the grounds that R42 binds their API, not tmux** is a technicality. R42's
+  own text names the principals who may put characters into an agent's session; a direct pane
+  write is precisely what it is about.
+
+The third — an auth-free canonical probe (ai-maestro#100) — is the real fix and needs their side.
+
+**NEXT ACTION on F11: hand the measurement to ai-maestro and ask whether their server recovers
+these 20 roots. If it does, widen the exclusion. If it does not, the janitor's injections are
+the only thing keeping them alive and R42 needs an amendment, not an enforcement.**
 
 ## ⏵ DIRECTION RECEIVED — ai-maestro#68 answered (2026-07-16), the ground shifted under 3 findings
 
