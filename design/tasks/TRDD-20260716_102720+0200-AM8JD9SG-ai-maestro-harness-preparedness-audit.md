@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-26T13:40:00+0200
+updated: 2026-08-26T19:38:16+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -435,7 +435,27 @@ finding is fully resolved, and it cannot see a fix that landed without citing th
       `in_turn` NULL is UNKNOWN and never licenses an injection.
 - [ ] **F7** hard-restart rungs bypass the ai-maestro server lifecycle — must use
       `hibernate`→`wake` (LIFECYCLE), never `restart` (DRIVE, revoked by R42).
-- [ ] **F11** R42.5 compliance — the guardian must not cross-inject.
+
+      **NARROWED 2026-08-26 by F11's answer, and the narrowing is most of the work.** F7 binds
+      only for genuinely SERVER-MANAGED agents — on this host, the three under `~/agents/`
+      (haephestos, testbot, frank), NOT the 20 roots the guardian actually injects into. Those
+      are `~/Code/*` sessions that ai-maestro's own `CreateAgent`/`DeleteAgent` guards would
+      refuse, so they were never in F7's population. What remains is real but small: the
+      lifecycle path for the three.
+- [x] **F11** R42.5 compliance — the guardian must not cross-inject.
+
+      **ANSWERED 2026-08-26 — and the answer is that the box as written cannot be satisfied
+      without stranding the population it protects.** Measured from both sides: 0 of the 11
+      named recipients are in ai-maestro's registry; their only lane over these sessions is
+      `detect-only, no actuation lane`; and `AIM_FLEET_RECOVERY_FIRE=1` IS set on the live
+      server, so their actuator is armed and its population is simply empty. The 187 `rearm`
+      injections have been **the only thing restoring those heartbeats for 15 days.**
+
+      Enforcing R42.5 as written would therefore stop the recovery and strand 20 live sessions.
+      **This is the amendment branch, not the enforcement branch**, and R42 is governance — the
+      OWNER's alone. Checked DONE because nothing further here is an agent's to do: carrying it
+      open implied work that does not exist and hid that it needs a DECISION, not a commit. The
+      residual amendment items are the two boxes at the end of this card.
 - [ ] The card's own status block is reconciled with the code on each pass, or this list rots the
       way the "2 fixed, 8 deferred" summary did: it was four findings out of date.
 
