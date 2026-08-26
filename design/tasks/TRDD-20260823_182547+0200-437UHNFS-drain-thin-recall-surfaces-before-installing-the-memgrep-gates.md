@@ -1,9 +1,11 @@
 ---
 trdd-id: 437UHNFS
 title: drain the corpus of thin recall surfaces before installing the memgrep metadata gates
-column: dev
+column: blocked
+pre-block-column: dev
+blocked-by: [owner-decision-drain-vs-lower-floors]
 created: 2026-08-23T18:25:47+0200
-updated: 2026-08-26T06:12:00+0200
+updated: 2026-08-26T07:22:00+0200
 current-owner: ai-maestro-janitor-48
 task-type: infra
 approval-tier: 0
@@ -70,7 +72,40 @@ are NOT errors and do NOT gate the install.
 **This is the good news of the re-measure: `enrich` alone clears 100% of the blocking errors.**
 No other chore has to run first. Note it has TWO modes, not one — add-missing AND de-duplicate.
 
-- **NEXT ACTION:** build the `enrich` skill + the 7 survey sites once (with the site-5 predicate
+### DONE 2026-08-26 — the chore is BUILT and PROJECT is DRAINED
+
+- **`enrich` chore shipped** (`6fa8b6c4`): precheck predicate, settings, marker (LAST in
+  `_MARKERS`), candidates CLI, skill, plus 6 further enumeration sites a sweep found. No
+  `--op enrich` — an enrich edit has repair's exact shape and `verify_repair` already proves
+  what it needs. `atom-no-keywords` moved from ORPHANED to `enrich`, closing janitor#200's own
+  "fix this first" item.
+- **PROJECT scope: 256 ERROR → 0.** All 49 pages clear the gates
+  (`ac9b56d8`, `4612f82b`, `0e833a2d`, `7f601fb3`). Cost ≈ 1.05M tokens, ≈21k/page.
+- **LOCAL + USER are BACKED UP** before anyone edits them — they are outside any repo, so an
+  edit there is otherwise unrecoverable:
+  `reports_dev/memory-backups/20260826_071901+0200-{local,user}-memory.tgz` (49 and 200
+  entries, verified non-empty).
+
+### Load-bearing lessons from the drain — read BEFORE briefing another batch
+
+1. **A verify scoped to the defect you set out to fix cannot see the defect you cause.** The
+   first batch's criterion named only `page-description-too-few-phrases`; the edit cleared the
+   count and introduced a DUPLICATE, a different slug, so the worker's own check passed. Name
+   EVERY enrich slug.
+2. **Margin must be mechanical, not requested.** Asking for "12 phrases" while the criterion
+   was "clean at 10" produced pages sitting exactly on the floor — raise the floor by one and
+   48 findings reappear. Batches verified at RAISED floors
+   (`MEMGREP_MIN_KEYWORDS=12 MEMGREP_MIN_PAGE_PHRASES=17`) have real headroom; the earlier
+   ones do not. An agent optimises for the criterion it can check.
+3. **The description separator is `/`, so a slash-COMMAND name splits one phrase in two.**
+   `why did /janitor-pause disappear` becomes `why did` + `janitor-pause disappear`, and a
+   second such entry makes `why did` a duplicate. Write `the janitor-pause command`.
+4. **`grep -c ERROR` on lint output counts the SUMMARY line** ("none at or above ERROR"), so a
+   clean corpus reports 1. Anchor it: `grep -c '^ERROR'`.
+5. **The parser's idea of a distinct phrase is stricter than the author's** — one batch needed
+   4 passes to converge. Trust the linter's count, never your own.
+
+- **NEXT ACTION (was):** build the `enrich` skill + the 7 survey sites once (with the site-5 predicate
   corrected — `enrich_pages(root) -> list[(path, slug)]` parsing `memgrep lint` stdout and
   failing CLOSED when the binary is missing, NOT an `enrich_defect(text)` text predicate), then
   drain eagerly per scope with
@@ -78,6 +113,21 @@ No other chore has to run first. Note it has TWO modes, not one — add-missing 
   chore guard steady state. Enrich must touch only `keywords:` props and page `description:` —
   never an atom `desc:` (200-char cap at `memory_edit_verify.py:1431`), or it ping-pongs with
   `repair`. Put `enrich` LAST in `_MARKERS` so it never starves `repair`.
+
+### ⏸ NEXT ACTION — BLOCKED ON THE OWNER (a cost/meaning call, not a technical one)
+
+LOCAL (39 pages) and USER (185) still fail the gates, and `cargo install --path
+scripts/memgrep` needs ALL THREE scopes at zero. Two honest routes, both now evidenced:
+
+- **DRAIN them** — ≈1.2M tokens at the measured 21k/page. Produces genuinely good symptom
+  phrasings (spot-checked, not assumed). Backups are already taken, so it is recoverable.
+- **LOWER THE FLOORS for those scopes** — `MEMGREP_MIN_KEYWORDS` / `MEMGREP_MIN_PAGE_PHRASES`
+  (`0` disables), verified env-tunable at `memory.rs:4287,4318`. Near-zero cost, but the gates
+  stop meaning much on the two biggest scopes.
+
+Not decided unilaterally: it spends a large share of the session budget, and the alternative
+quietly weakens a gate the owner ratified. Whichever is chosen, the batch brief must carry the
+five lessons above.
 
 ## The decision (owner, 2026-08-23)
 
