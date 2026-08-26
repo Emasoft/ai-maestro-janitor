@@ -1,9 +1,9 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: testing
+column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-22T11:57:34+0200
+updated: 2026-08-26T08:14:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -13,6 +13,22 @@ implementation-commits: [d2a5204, 67802e0]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+
+### ⏵ 2026-08-26 — column corrected `testing` → `todo`. Nothing is being tested.
+
+4 of 5 acceptance boxes are ticked. The 5th is the advisor-mandated SHADOW-MODE soak + staged
+drill, and the card's own 2026-08-22 box says shadow mode **has no implementation** — so there
+is no soak to be in the middle of, and `testing` was asserting an activity that cannot exist
+yet. Confirmed no soak artifact anywhere under `reports/`.
+
+**It is NOT blocked, and that distinction is the reason for `todo` rather than `blocked`.** The
+disabled external-clear lever (`ec.enabled()` → early return) is only reason 1 of the three
+INDEPENDENT reasons the card itself records; building shadow mode is ordinary unblocked work
+that does not need the 3.4.0 publish, even though a live soak eventually will.
+
+Everything the card already warns about stands unchanged — in particular **do NOT close this on
+the 2026-08-14 triage row**; the advisor's DO-NOT-SHIP verdict landed the same day and rewrote
+the boxes rather than ticking them.
 
 **Not started. FABLE-ADVISOR VERDICT RECEIVED 2026-08-02 — it RE-SCOPES this card. Read the
 verdict section below BEFORE the design notes further down, which were written on a premise that
