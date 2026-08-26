@@ -3,7 +3,7 @@ trdd-id: MF10XF87
 title: The janitor-reload marker fires on __pycache__ churn and never clears after a manual reload
 column: backburner
 created: 2026-08-26T05:58:43+0200
-updated: 2026-08-26T05:58:43+0200
+updated: 2026-08-26T16:45:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -30,7 +30,50 @@ relevant-rules: []
   so the detector's "you have reloaded, stand down" signal is never written. A
   session the user reloaded by hand therefore keeps receiving the marker forever.
 
-## Reproduced first-hand, 2026-08-26 06:14 — and it is WORSE than reported
+## ⛔ 2026-08-26 16:45 — MY "REPRODUCTION" BELOW IS FALSE. The probe was broken, not the detector.
+
+**`find -newermt '-24 hours'` does not mean what this card assumed.** On BSD/macOS find that
+relative form does not parse as "24 hours ago" — it silently yields a near-empty result instead
+of an error. Every "0 files changed" in the section below came from it.
+
+The same directory, measured three ways at 16:40 today:
+
+```
+find . -type f -newermt '-24 hours'        →     10      ← the broken probe
+find . -type f -newermt '2026-08-25 17:00' →  6,475
+os.walk + st_mtime > time.time()-86400     →  6,490      ← ground truth
+newest file mtime                          →  2026-08-26 16:38:31
+```
+
+**So the plugin cache HAD changed — 6,490 files in 24 h — and the `[janitor-reload]` markers
+were LEGITIMATE.** I declined three of them today (this card's 06:14 fire, and two more at
+~16:30 and ~16:38) on the strength of a probe that cannot report the positive case. The
+detector was doing its job throughout.
+
+**This is the exact failure class I catalogued in USER memory the same afternoon** —
+`ATOM-XNZ8-BEBF` / `ATOM-W99A-N60G`, *"a check that cannot produce the negative result has not
+been run"* — with the sign flipped: a check that could not produce the POSITIVE. Writing the
+lesson four hours earlier did not stop me running the broken probe twice more, which is worth
+recording plainly: a lesson in the corpus is not a guard in the path.
+
+**What survives of this card, and it is not nothing:**
+
+- The SECOND observation is untouched and still real: a MANUAL `/reload-plugins` fires no hook,
+  so it advances no ack, so a hand-reloaded session keeps receiving the marker. That half was
+  never measured with the broken probe.
+- The CORE session's original report (8 fires whose only newer files were `__pycache__/*.pyc`)
+  is THEIRS, measured independently, and this correction does not touch it. Bytecode churn
+  advancing a reload generation is still a plausible defect worth keying off the version set.
+
+**What is retracted:** the "worse than reported" escalation, the claim that a current ack fails
+to suppress, and the inference that the detector keys on something other than the cache. All
+three rested on the broken probe.
+
+**Column stays `backburner` and severity stays `minor`** — but for a different reason than
+before: the remaining defect is the no-ack-on-manual-reload half, not a phantom never-suppressing
+detector.
+
+## ~~Reproduced first-hand, 2026-08-26 06:14 — and it is WORSE than reported~~ ⛔ RETRACTED — broken probe
 
 The CORE session's report was "8 fires with only `__pycache__` churn newer than the ack".
 Measured on this machine at the moment of a live fire, there was not even that:
