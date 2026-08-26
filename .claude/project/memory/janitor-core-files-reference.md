@@ -1,6 +1,6 @@
 ---
 name: janitor-core-files-reference
-description: "what does dispatch.py do / what does daemon.py do / what is in scripts/lib/state.py / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of scripts/ and scripts/lib/ core modules"
+description: "what does dispatch.py do / what does daemon.py do / what is in state.py under the lib folder / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of the top-level scripts and their lib core modules / where does the dispatcher-stub live / what does doctor.py check / what does safe_delete.py do / what does branch_protection_apply.py do / what does dedupe.py do / what does version_update.py do / what does rules_installer.py do / which module owns rate-limit resume"
 ocd: 2026-08-02
 lmd: 2026-08-02
 metadata:
@@ -13,7 +13,7 @@ metadata:
 # janitor-core-files-reference
 
 
-^ATOM-SVVF-IY1P [desc:"Verified core-files reference: top-level scripts/ (dispatcher-stub, dispatch, daemon, doctor, publish, safe_delete, branch_protection_apply) and scripts/lib/ core modules (state, global_state, dedupe,", keywords: top_level_scripts_core_files_list dispatcher-stub_dispatch_daemon_publish_safe_delete_branch_protection_apply scripts_lib_core_state_global_state_dedupe_version_update_lib_rules_installer_usage_probe, type: reference, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-SVVF-IY1P [desc:"Verified core-files reference: top-level scripts/ (dispatcher-stub, dispatch, daemon, doctor, publish, safe_delete, branch_protection_apply) and scripts/lib/ core modules (state, global_state, dedupe,", keywords: top_level_scripts_core_files_list dispatcher-stub_dispatch_daemon_publish_safe_delete_branch_protection_apply scripts_lib_core_state_global_state_dedupe_version_update_lib_rules_installer_usage_probe what_does_dispatch_py_do what_does_daemon_py_do where_is_publish_py what_does_doctor_py_check what_does_usage_probe_py_throttle which_file_owns_the_janitor_self-update which_module_writes_global_state, type: reference, ocd: 2026-08-02, lmd: 2026-08-02]
 
 ### Core files (verified)
 

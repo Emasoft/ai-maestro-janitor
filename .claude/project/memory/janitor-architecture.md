@@ -1,6 +1,6 @@
 ---
 name: janitor-architecture
-description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
+description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub / a session stayed dead after a compaction / resume-after-compact flag never consumed / why does CLAUDE_PLUGIN_ROOT get wiped on every update / where should persistent state be written / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / why must user/global-scope operations go through the daemon only / what is the runtime installed tree layout / how does the janitor decide project-scope vs user-scope for a given operation"
 ocd: 2026-06-13
 lmd: 2026-07-22
 metadata:
@@ -335,7 +335,7 @@ must report a crash.[^3]
   the two single-curator agents.
 
 
-^ATOM-DUXK-QD2D [desc:"why unattended sessions were stranded after a compaction — the resume push read machine-global presence", keywords: dead_claude_sessions_I_have_to_wake_by_hand session_stranded_after_compaction resume-after-compact_flag_never_consumed post-compact_resume_did_not_fire per-pane_user_presence, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+^ATOM-DUXK-QD2D [desc:"why unattended sessions were stranded after a compaction — the resume push read machine-global presence", keywords: dead_claude_sessions_I_have_to_wake_by_hand session_stranded_after_compaction resume-after-compact_flag_never_consumed post-compact_resume_did_not_fire per-pane_user_presence why_did_one_typing_pane_mark_every_pane_attended what_is_terminal_pane_key what_is_per_pane_presence_path five_projects_holding_stale_flags_for_days machine-global_presence_vs_per-pane_presence, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
 
 The post-compact resume PUSH is gated on PER-PANE user presence, never on a machine-global one. A
 resume directive is recorded on every compaction, but the nudge that makes an UNATTENDED session
@@ -348,7 +348,7 @@ human woke it by hand. Measured at the fix: five projects holding flags, two of 
 cannot be resolved. Fixed in eb52843 (v0.63.2). [^12]
 
 
-^ATOM-HTZM-49B5 [desc:"CLAUDE.md's original purpose note + the two-tier 'what it is' overview (verbatim historical text, kept for provenance)", keywords: compact_map_recall_janitor_without_re-reading_tree what_it_is_two_tiers per_session_heartbeat_cron_five_minutes global_daemon_owns_user_global_scope_mutation, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-HTZM-49B5 [desc:"CLAUDE.md's original purpose note + the two-tier 'what it is' overview (verbatim historical text, kept for provenance)", keywords: compact_map_recall_janitor_without_re-reading_tree what_it_is_two_tiers per_session_heartbeat_cron_five_minutes global_daemon_owns_user_global_scope_mutation why_is_the_janitor_cron_session-scoped does_the_janitor_cron_survive_a_claude_restart what_is_the_janitor-renew_marker_for how_many_detectors_and_pattern_libs_does_the_janitor_ship what_is_the_SessionStart_re-arm_nudge what_is_the_two-tier_architecture, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 > **Purpose of this file:** a compact map so a session can recall how the
 > janitor works WITHOUT re-reading the tree. Keep it current when structure
@@ -372,7 +372,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
    command — issue #7). Spawned lazily by any session's heartbeat.
 
 
-^ATOM-N9XA-YR3U [desc:"The scope invariant bullets verbatim: user/global-scope ops go to the daemon only, project/local-scope ops stay per-session, atomic file writes are the one exception", keywords: scope_invariant_hard_rule_issue_7 user_global_scope_ops_daemon_only project_local_scope_ops_per_session_detectors atomic_file_writes_user_scope_rules, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-N9XA-YR3U [desc:"The scope invariant bullets verbatim: user/global-scope ops go to the daemon only, project/local-scope ops stay per-session, atomic file writes are the one exception", keywords: scope_invariant_hard_rule_issue_7 user_global_scope_ops_daemon_only project_local_scope_ops_per_session_detectors atomic_file_writes_user_scope_rules why_must_a_bulk_marketplace_update_go_through_the_daemon what_stops_N_sessions_from_stampeding_the_same_command what_is_the_tmp_plus_os_replace_pattern which_ops_are_user-scope_vs_project-scope what_is_issue_7 does_a_cheap_idempotent_file_write_need_the_daemon, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 ### Scope invariant (HARD RULE — issue #7)
 
@@ -385,7 +385,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
   single-writer lock for expensive commands.
 
 
-^ATOM-MQ9L-E7LV [desc:"Filesystem & state conventions table + current state locations + the ONE SANCTIONED EXCEPTION principle box for ~/.claude/janitor-control/ (verbatim)", keywords: filesystem_state_conventions_table CLAUDE_PLUGIN_ROOT_ephemeral_CLAUDE_PLUGIN_DATA_persistent one_sanctioned_exception_janitor-control_folder global_state_dir_ladder_migration, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-MQ9L-E7LV [desc:"Filesystem & state conventions table + current state locations + the ONE SANCTIONED EXCEPTION principle box for ~/.claude/janitor-control/ (verbatim)", keywords: filesystem_state_conventions_table CLAUDE_PLUGIN_ROOT_ephemeral_CLAUDE_PLUGIN_DATA_persistent one_sanctioned_exception_janitor-control_folder global_state_dir_ladder_migration where_should_persistent_state_be_written why_is_janitor-control_not_migrated_into_the_data_dir what_does_global_state_dir_resolve_to why_must_the_control_plane_be_a_fixed_literal_path_for_the_ai-maestro_server what_lives_in_the_legacy_global_state_folder what_is_CLAUDE_PLUGIN_DATA, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 ### Filesystem & state conventions (per plugins-reference.md)
 
@@ -423,7 +423,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 > stays in `<DATA>/global-state/` and the principle governs it unchanged.
 
 
-^ATOM-UZAL-KYBJ [desc:"The Runtime / installed tree ASCII diagram (verbatim) showing every on-disk path the plugin uses", keywords: runtime_installed_tree_diagram plugin_cache_data_dir_memory_mirror_legacy_global_state_layout per_project_janitor_state_files_list, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-UZAL-KYBJ [desc:"The Runtime / installed tree ASCII diagram (verbatim) showing every on-disk path the plugin uses", keywords: runtime_installed_tree_diagram plugin_cache_data_dir_memory_mirror_legacy_global_state_layout per_project_janitor_state_files_list what_does_the_janitor_installed_tree_look_like where_is_the_plugin_cache_directory where_is_the_per_project_janitor_state_folder show_me_the_on-disk_layout_of_the_janitor what_is_the_memory_mirror_directory where_do_per-project_janitor_state_files_go what_is_the_legacy_global_state_layout, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 ### Runtime / installed tree
 

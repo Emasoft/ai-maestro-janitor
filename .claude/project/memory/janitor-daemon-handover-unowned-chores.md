@@ -1,6 +1,6 @@
 ---
 name: janitor-daemon-handover-unowned-chores
-description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone / daemon.heartbeat.ts is hours stale and the spawn-attempt stamp is days old / the daemon starts and then exits after about one second / daemon.log says stopping server-owns-host / os-keepalive activate then uninstall on every spawn / should I force the janitor daemon back up"
+description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone / daemon.heartbeat.ts is hours stale and the spawn-attempt stamp is days old / the daemon starts and then exits after about one second / daemon.log says stopping server-owns-host / os-keepalive activate then uninstall on every spawn / should I force the janitor daemon back up / what is claimed_chores and server_owns_every_chore / is a chore claimed or merely absorbed on paper / does a live server suppress the daemon partially or all at once / how do I tell a crashed daemon from a deliberate stand-down"
 ocd: 2026-07-29
 lmd: 2026-08-18
 metadata:
@@ -11,7 +11,7 @@ metadata:
 publish-globally: false
 ---
 
-^one-daemon-per-host-withdraws-the-whole-daemon [desc: "a live ai-maestro server makes the janitor withdraw its ENTIRE daemon, not just the absorbed chores", keywords: all_chore_stamps_frozen_at_the_same_age daemon_pid_missing_but_no_kill_switch recent_spawn_count_zero_while_heartbeat_fires ensure_daemon_running_returns_without_spawning server_owns_host_guard one_daemon_per_host, type: project, ocd: 2026-07-29, lmd: 2026-07-29]
+^one-daemon-per-host-withdraws-the-whole-daemon [desc: "a live ai-maestro server makes the janitor withdraw its ENTIRE daemon, not just the absorbed chores", keywords: all_chore_stamps_frozen_at_the_same_age daemon_pid_missing_but_no_kill_switch recent_spawn_count_zero_while_heartbeat_fires ensure_daemon_running_returns_without_spawning server_owns_host_guard one_daemon_per_host why_does_the_janitor_withdraw_the_whole_daemon_not_just_absorbed_chores what_is_server_owns_host why_is_there_no_trace_when_the_guard_refuses_to_spawn which_chores_does_the_server_actually_execute_vs_absorb_on_paper, type: project, ocd: 2026-07-29, lmd: 2026-07-29]
 When a live ai-maestro server is on the host, `ensure_daemon_running()` refuses to spawn
 the standalone daemon — third guard, `_server_owns_host()` (TRDD-5ZVS1DDP,
 `ARCHITECTURE.md` §7.2, ONE DAEMON PER HOST). The refusal is correct in isolation: without
@@ -35,7 +35,7 @@ absent and no amount of restarting will help. Then ask the only question that ma
 **which chores does the server actually EXECUTE**, versus having absorbed on paper
 (`SERVER_ABSORBED_TASKS`)? The gap is the difference.
 
-^absorbed-set-is-narrower-than-the-daemon [desc: "six daemon chores are in no absorbed set and belong to nobody while the server owns the host", keywords: session_liveness_watchdog_down_for_days memory_guard_and_cache_prune_stopped fleet_stop_never_actuates who_owns_the_chores_the_server_did_not_absorb unowned_chore_gap, type: project, ocd: 2026-07-29, lmd: 2026-07-29]
+^absorbed-set-is-narrower-than-the-daemon [desc: "six daemon chores are in no absorbed set and belong to nobody while the server owns the host", keywords: session_liveness_watchdog_down_for_days memory_guard_and_cache_prune_stopped fleet_stop_never_actuates who_owns_the_chores_the_server_did_not_absorb unowned_chore_gap which_six_chores_are_in_no_absorbed_set why_does_a_frozen_stamp_for_an_unabsorbed_chore_mean_nobody_is_doing_it why_is_session-liveness_the_chore_that_matters_most how_do_I_split_frozen_stamps_by_SERVER_ABSORBED_TASKS_membership what_chores_are_in_the_absorbed_set, type: project, ocd: 2026-07-29, lmd: 2026-07-29]
 `SERVER_ABSORBED_TASKS` holds the OAuth pair plus the update trio — **five** of the
 daemon's eleven chores. The other six are in no absorbed set, are not gated by the server's
 auto-update master toggle, and are assigned to the server by no design on either side:
@@ -58,7 +58,7 @@ all-or-nothing (daemon lives, yields only claimed chores), or the remaining six 
 deliberately and advertised in `capabilities`.
 
 
-^ATOM-KYRU-GT5O [desc: "Rev-8 contract: executor-declared staleness bounds (claim-bounds.json, widen-only, fail-open); github-config-audit joined the absorbed set", keywords: claimed_chore_stale_false_alarm server_cadence_differs_from_janitor_roster claim-bounds.json widen-only_declared_bound github-config-audit_yields_to_server absorbed_set_changed rev_8_contract chore_stamp_bound_table, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
+^ATOM-KYRU-GT5O [desc: "Rev-8 contract: executor-declared staleness bounds (claim-bounds.json, widen-only, fail-open); github-config-audit joined the absorbed set", keywords: claimed_chore_stale_false_alarm server_cadence_differs_from_janitor_roster claim-bounds.json widen-only_declared_bound github-config-audit_yields_to_server absorbed_set_changed rev_8_contract chore_stamp_bound_table why_did_a_claimed_chore_raise_a_false_stale_alarm what_is_widen-only_enforcement did_github-config-audit_join_the_absorbed_set, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 Ratified 2026-08-18 (both sessions under the USER's delegation; janitor ARCHITECTURE.md §9 rev 8; server mirror docs/claimed-chores-contract.md @ eccbd02a; thread ai-maestro#126). The claimed-chore watchdog no longer trusts only the JANITOR roster cadence for a chore the SERVER executes: the executor declares its own bound in ~/.claude/janitor-control/claim-bounds.json and claimed-chore-stale reads it FAIL-OPEN, with widen-only enforcement in claimed_chore_watch.stale_threshold — a declaration can only RAISE a bound, because honouring a narrower one would let the other side's config manufacture false positives (janitor#225 mirrored). Same round: github-config-audit JOINED SERVER_ABSORBED_TASKS (janitor#274 — the server has stamped it since 2026-08-05), so it is class-2 absorbed, no longer class-4 janitor-internal; its declared 14400s bound is below the 64800s roster default and widen-only deliberately ignores it.
 
@@ -75,7 +75,7 @@ Ratified 2026-08-18 (both sessions under the USER's delegation; janitor ARCHITEC
   but blocked behind a ~20 min bulk run. Same symptom, opposite cause.
 
 
-^ATOM-FDNM-LHZ0 [desc:"the decisive tell for 'stood down' vs 'died' is the daemon's own 'stopping (server-owns-host)' log line — never the heartbeat gap, which looks identical either way", keywords: is_the_daemon_dead_or_deliberately_absent daemon_heartbeat_is_hours_stale_and_daemon_pid_is_gone spawn_attempt_stamp_is_a_week_old stopping_server_owns_host should_I_force_the_janitor_daemon_back_up daemon_starts_then_exits_after_one_second, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-FDNM-LHZ0 [desc:"the decisive tell for 'stood down' vs 'died' is the daemon's own 'stopping (server-owns-host)' log line — never the heartbeat gap, which looks identical either way", keywords: is_the_daemon_dead_or_deliberately_absent daemon_heartbeat_is_hours_stale_and_daemon_pid_is_gone spawn_attempt_stamp_is_a_week_old stopping_server_owns_host should_I_force_the_janitor_daemon_back_up daemon_starts_then_exits_after_one_second why_do_a_crash_and_a_stand-down_look_identical_from_stamps what_line_in_daemon_log_settles_it what_does_os-keepalive_activate_then_uninstall_mean does_a_crash_ever_print_a_stopping_line, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **The absence has two causes that look identical from state files, and one that tells them
 apart.** `daemon.pid` missing + `daemon.heartbeat.ts` hours stale + `daemon.spawn-attempt.ts`
@@ -98,7 +98,7 @@ withdrawal handshake, and it repeats on every spawn. A crash leaves no `stopping
 all; a kill-switch stop names the kill-switch instead. [^3]
 
 
-^ATOM-N7UC-RFOR [desc:"once the withdrawal handshake is confirmed, corroborate against server-liveness and then do NOT force a daemon up — the defect to escalate is server-side", keywords: should_I_restart_the_janitor_daemon_myself server_liveness_json_staleness_window the_withdrawal_was_not_justified is_this_a_janitor_bug_or_a_server_bug escalate_the_absorbed_chore_that_never_runs, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-N7UC-RFOR [desc:"once the withdrawal handshake is confirmed, corroborate against server-liveness and then do NOT force a daemon up — the defect to escalate is server-side", keywords: should_I_restart_the_janitor_daemon_myself server_liveness_json_staleness_window the_withdrawal_was_not_justified is_this_a_janitor_bug_or_a_server_bug escalate_the_absorbed_chore_that_never_runs how_do_I_corroborate_a_stand-down_from_the_other_side why_should_I_not_force_a_daemon_back_up what_is_the_binary_coordination_rule_TRDD-LU0C5KAR what_is_the_90s_staleness_window does_the_contract_treat_a_running_server_bug_as_a_janitor_guard, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **Corroborate from the other side before acting.** `~/.aimaestro/server-liveness.json` with a
 beat inside its ~90 s staleness window means a live server owns the host — the condition that
@@ -113,7 +113,7 @@ repo's contract is explicit that a running server which does not run an absorbed
 server bug, never a janitor guard.
 
 
-^ATOM-E3NC-H279 [desc:"Chore coordination Phase B2 — a fresh server-liveness.json probe file decides whether absorbed chores yield or the janitor runs them ALL", keywords: chore_coordination_phase_b2 server_liveness_json_probe server_is_alive_server_runs_chores binary_chore_switch_trdd_lu0c5kar capabilities_informational_field, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-E3NC-H279 [desc:"Chore coordination Phase B2 — a fresh server-liveness.json probe file decides whether absorbed chores yield or the janitor runs them ALL", keywords: chore_coordination_phase_b2 server_liveness_json_probe server_is_alive_server_runs_chores binary_chore_switch_trdd_lu0c5kar capabilities_informational_field what_is_the_30s_beat_90s_staleness_probe how_does_server_is_alive_decide_the_switch what_env_override_forces_janitor_chore_execution is_chore_coordination_binary_or_gradual what_does_capabilities_informational_field_mean, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 - **Chore coordination (Phase B2, BINARY since TRDD-LU0C5KAR — owner directive
   2026-07-17):** responsibility follows server LIVENESS. A fresh auth-free probe file
@@ -129,7 +129,7 @@ server bug, never a janitor guard.
   (proposed on janitor#100) is the canonical contract doc.
 
 
-^ATOM-2VMQ-2U7X [desc:"The FIX for the all-or-nothing handover: a chore is the server's only when it is CLAIMED, and the daemon is suppressed only once EVERY chore is claimed", keywords: claim_gate alive_and_claimed server_owns_every_chore claimed_chores per-chore_capability_token daemon_suppressed_by_live_server chore_handover_incremental, ocd: 2026-08-05, lmd: 2026-08-05]
+^ATOM-2VMQ-2U7X [desc:"The FIX for the all-or-nothing handover: a chore is the server's only when it is CLAIMED, and the daemon is suppressed only once EVERY chore is claimed", keywords: claim_gate alive_and_claimed server_owns_every_chore claimed_chores per-chore_capability_token daemon_suppressed_by_live_server chore_handover_incremental does_alive_mean_the_same_as_claimed why_does_the_daemon_keep_looping_while_one_chore_is_unclaimed how_does_the_janitor_avoid_a_two-owner_hazard_during_handover, ocd: 2026-08-05, lmd: 2026-08-05]
 
 Owner ruling 2026-08-05 (janitor#134, "does the server's responsibility mean ALIVE or CLAIMED?"):
 **it means BOTH**, and all chores must eventually pass to ai-maestro equivalents. This SUPERSEDES
