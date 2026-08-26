@@ -1,15 +1,16 @@
 ---
 trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
-column: human_review
+column: todo
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-26T20:52:50+0200
+updated: 2026-08-27T01:29:25+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 scope: project
 severity: major
-deadline: 2026-08-30
+blocker-probe: bash ~/.claude/account-rotator/lifetime-status.sh
+blocker-holds-if: match:refresh-due|EXPIRED|login-needed
 priority: high
 approval-tier: 0
 labels: [oauth-rotator, alerts, self-heal, upstream-ai-maestro]
@@ -20,6 +21,43 @@ relevant-rules: []
 ---
 
 # The rotator gave up, kept the reason, and stopped checking whether it still applies
+
+## ⛔ CORRECTION 4 — 2026-08-27 01:29: **the deadline is VOID and this card caused a false alarm to the USER**
+
+**Everything below about dead refresh tokens and a 2026-08-30 cookie expiry is SUPERSEDED.** It
+was true on 2026-08-21. The owner re-captured all three accounts on **2026-08-26 morning**, which
+silently invalidated the whole card — and the card kept asserting the old state, in
+`human_review`, with `deadline: 2026-08-30` in its frontmatter.
+
+Measured just now, first-hand, read-only, no browser:
+
+```
+$ bash ~/.claude/account-rotator/lifetime-status.sh          # exit 0
+emanuele.sabetta@gmail.com   27.4 d   refresh-capable (auto)   ok
+fmuaddib@gmail.com           27.3 d   refresh-capable (auto)   ok
+ipazia.emasoft@gmail.com     27.4 d   refresh-capable (auto)   ok
+✓ All accounts healthy; cookie vs OAuth lifetimes are staggered — nothing to do.
+```
+
+Corroborated by `oauth-rotator/state.json`: all three slots `captured_at: 2026-08-26T09:43 /
+09:56 / 10:00`, `via: slot_capture_browser(full-oauth)`, **`refresh_failures: 0`** on every one
+(was 572 / 224 / 776). Cookie lifetime ≈ **2026-09-23**, not 08-30.
+
+**The cost, and it landed on the USER.** This card's stale text was relayed to the ai-maestro hub
+session, which relayed it to the owner twice and was about to have them re-do a full three-account
+cookie re-login that was **not needed**. The owner stopped it. The bad datum originated HERE.
+
+**Why it rotted invisibly:** the card stored the ANSWER ("tokens are dead, 3.1 days left") instead
+of the QUESTION ("run `lifetime-status.sh`; the blocker holds iff it reports refresh-due"). An
+answer has a silent timestamp; parking the card is exactly what stops anyone re-deriving it. The
+frontmatter now carries `blocker-probe:` / `blocker-holds-if:` so the claim is re-runnable in one
+second instead of re-read as current. See the ai-maestro peer's TRDD-CV5KDCB7, which proposes
+exactly this and a `stale-blocker` heartbeat detector on our side.
+
+**What survives:** the ORIGINAL defect — a cited failure reason re-broadcast for hours without
+being re-tested — is untouched and still open. Per CORRECTION 3 it belongs to **ai-maestro**, not
+this repo. The card returns to `todo` with no deadline; the only open decision is the routing one
+already stated below (file an issue on `Emasoft/ai-maestro`, or fork + PR).
 
 ## Measured 2026-08-21 14:05, three independent facts that only make sense together
 
