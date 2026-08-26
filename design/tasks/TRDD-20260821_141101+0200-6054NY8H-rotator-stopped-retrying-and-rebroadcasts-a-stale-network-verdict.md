@@ -10,7 +10,7 @@ project-id: ai-maestro-janitor
 scope: project
 severity: major
 blocker-probe: bash ~/.claude/account-rotator/lifetime-status.sh
-blocker-holds-if: match:refresh-due|EXPIRED|login-needed
+blocker-holds-if: match:ACTION DUE
 priority: high
 approval-tier: 0
 labels: [oauth-rotator, alerts, self-heal, upstream-ai-maestro]
@@ -40,8 +40,24 @@ ipazia.emasoft@gmail.com     27.4 d   refresh-capable (auto)   ok
 ```
 
 Corroborated by `oauth-rotator/state.json`: all three slots `captured_at: 2026-08-26T09:43 /
-09:56 / 10:00`, `via: slot_capture_browser(full-oauth)`, **`refresh_failures: 0`** on every one
-(was 572 / 224 / 776). Cookie lifetime ≈ **2026-09-23**, not 08-30.
+09:56 / 10:00`, `via: slot_capture_browser(full-oauth)`. Cookie lifetime ≈ **2026-09-23**, not
+08-30.
+
+**What that measurement does and does NOT prove — checked at the source, `lifetime-status.sh`
+lines 80-105, not inferred from the column headers:**
+
+| output | what it actually reads | strength |
+|---|---|---|
+| `27.4 d` | `cookie_days()` → sqlite `SELECT expires_utc … WHERE name='sessionKey'` on the live Chrome profile DB | **the thing itself**. The 08-30 deadline is dead on this evidence alone |
+| `refresh-capable (auto)` | `bool(h.get("has_refresh"))` — **PRESENCE of a refreshToken string** | **a proxy**, structurally blind to `invalid_grant`. Cites nothing about validity |
+| `refresh_failures: 0` | a counter the 08-26 re-capture RESET | **a proxy**. Zero failures can mean zero ATTEMPTS |
+
+So: the **cookie** leg is proven live and that is what voids the deadline and the re-login ask.
+The **refresh-token** leg is unproven in BOTH directions — and this card must not now assert
+"the tokens are alive" from a reset counter, which would be the identical proxy-for-the-thing
+error in the opposite direction. The peer flagged both traps (`refresh=yes` is presence; `tick`
+returns before the candidate loop while usage is within limits, so a clean tick never exercises
+the refresh path). Neither instrument can settle it; only an actual exchange can.
 
 **The cost, and it landed on the USER.** This card's stale text was relayed to the ai-maestro hub
 session, which relayed it to the owner twice and was about to have them re-do a full three-account
@@ -221,7 +237,42 @@ so nothing is blocking a read.
 the cascade's `RENEW_COOKIE` leg is designed to mint fresh tokens from, with no human at all.
 Only `ema***` genuinely needs a re-login, and only because its cookie lapsed **yesterday**.
 
-**What that makes urgent:** the two live cookies expire **2026-08-30**. If whatever stopped the
+## ⛔ CORRECTION 5 — 2026-08-27 01:33: **I committed this card's OWN defect while correcting it**
+
+Ten minutes after writing CORRECTION 4 I told the owner "the one real alert on this host is
+`rotator-stuck:all-maxed` — the Fable window is 100% spent". I read that out of
+`active-alerts.json`, whose mtime was minutes old, and reported it as the current state. Measured:
+
+| field | age |
+|---|---|
+| `firstSeenAt` | **8.31 h** |
+| `lastDeliveredAt` | 8.06 h |
+| `lastSeenAt` | **7.55 h** ← the newest evidence the alert still holds |
+| `updatedAt` (file bookkeeping) | **0.01 h** ← what makes the file *look* live |
+
+The payload had not been re-observed in **7.5 hours**; only the envelope was being rewritten. The
+peer independently re-ran `rotator.py tick` → *"live ipazia 5h=6% 7d=11% — within limits"*, which
+contradicts the alert's own `5h 2% / 7d 67%`. Worse, its remedy — "move agents OFF Fable" — names
+a population that on the peer's side does not exist (0 of 13 registered agents carry a Fable
+model).
+
+**So the alert I quoted as fresh evidence IS an instance of the exact defect this card is about.**
+A latched verdict, re-broadcast for hours, never re-tested. I read the newest line instead of
+comparing occurrences — the same mistake recorded in this card's own `## Notes` section from
+2026-08-21, committed again 2026-08-27 by the person who wrote that note.
+
+**The generalisation, which is the durable part** — two state files on this host mislead about
+age in OPPOSITE directions, so neither is readable as freshness:
+
+- `findings-ledger.ndjsonl` is **append-only** → a resolved HIGH stays maximally alarming forever.
+- `active-alerts.json` **is** rewritten, but only its bookkeeping → the file looks fresh while the
+  payload is frozen.
+
+**Rule:** an alert's own `lastSeenAt` is the only age it has. A file mtime is not evidence about
+its contents, and `seen: 46` counts re-emissions, not re-observations.
+
+**What that made urgent (2026-08-21, now VOID — see CORRECTION 4):** the two live cookies expire
+**2026-08-30**. If whatever stopped the
 cookie leg from running is not fixed before then, the no-human recovery path closes and all
 three accounts become human-only. That is a 9-day clock, and it is the real deadline on this
 card — not the refresh tokens, which are already dead.
