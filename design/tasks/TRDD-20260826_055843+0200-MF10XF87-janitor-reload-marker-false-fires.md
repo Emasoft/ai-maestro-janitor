@@ -3,7 +3,7 @@ trdd-id: MF10XF87
 title: The janitor-reload marker fires on __pycache__ churn and never clears after a manual reload
 column: backburner
 created: 2026-08-26T05:58:43+0200
-updated: 2026-08-26T16:45:00+0200
+updated: 2026-08-26T16:55:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -72,6 +72,42 @@ three rested on the broken probe.
 **Column stays `backburner` and severity stays `minor`** — but for a different reason than
 before: the remaining defect is the no-ack-on-manual-reload half, not a phantom never-suppressing
 detector.
+
+## ⏵ 2026-08-26 16:55 — SEPARATE DEFECT, verified: a DECLINED marker still advances the ack
+
+Independent of the broken probe above, and it is the reason today's staleness became silent.
+
+`dispatch.py::_phase_plugin_reload` writes the ack and THEN emits:
+
+```python
+state.atomic_write(acked_path, str(gen))
+_emit_decision("[janitor-reload]")
+```
+
+So the ack records **that the marker was SENT**, never that a reload HAPPENED. A session that
+declines the marker — for a good reason or a bad one — silently converts "needs reload" into
+"reloaded". Measured on this project at 16:55, after three declines:
+
+```
+server generation : 1787754771  (16:32:51)
+project ack       : 1787754926  (16:35:26)
+ack >= gen        : True  → marker permanently SUPPRESSED
+```
+
+The plugin cache had changed (6,490 files in 24 h, newest 16:38:31), this session did not
+reload, and the janitor now believes it did. **Nothing will re-raise it**, so the staleness is
+now invisible to every surface — which is strictly worse than the noisy over-firing this card
+was originally about.
+
+This is the same shape as TRDD-A8DPTDOU's false CLEARED and TRDD-FB84YUGT's expired-correct
+decline: a state transition recorded on the ATTEMPT rather than on the OUTCOME. The fix has the
+same shape too — advance the ack on evidence that a reload occurred, not on the decision to ask
+for one. Note the constraint that makes it hard, already recorded above: a `/reload-plugins`
+fires no hook, so "a reload occurred" has no direct signal. A version-set comparison after the
+fact is the obvious candidate and is the same key this card already proposes.
+
+Not fixed here — the marker's ack semantics are load-bearing for every project on the machine,
+and the CORE session's report plus this one should be reconciled before changing them.
 
 ## ~~Reproduced first-hand, 2026-08-26 06:14 — and it is WORSE than reported~~ ⛔ RETRACTED — broken probe
 
