@@ -3,7 +3,7 @@ trdd-id: JKJHV19B
 title: Wikimem link integrity — prune stale and duplicate links, resolve dangling ones
 column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T19:00:00+0200
+updated: 2026-08-26T19:40:00+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -91,17 +91,16 @@ targets, and the exclusion list is short and stable (`wikilink(s)`, `wikilinked`
 a trivially different spelling. Done through `memgrep edit --replace-all` per page; LOCAL scope
 now lints 0, USER 2 (pre-existing `atom-oversized`, unrelated).
 
-**Class 4 — the 12 distinct missing subjects, for whoever implements the pass:**
+**Class 4 — as box 1 reported it, 12 distinct missing subjects:**
 `who-verifies-and-closes-work` · `project-ai-maestro-janitor-oauth-rotator` ·
 `reference_memory_system_integration` · `universal-plugins-ignore-aimaestro-instruction-set` ·
 `what-ai-maestro-is` · `security-act-dont-ask` · `removal-blast-radius` ·
 `agent-claims-the-api-was-never-delivered` · `claim-verification` ·
-`governance-ssot-is-the-governance-rules-branch` · plus `B` and `Note`, which are junk from a
-table or template and are the only two that should simply be PRUNED.
+`governance-ssot-is-the-governance-rules-branch` · `B` · `Note`.
 
-Ten of these are exactly the deliberate forward-references the protocol sanctions ("a `[[name]]`
-that doesn't match yet marks something worth writing later"), so KEEP is the likely verdict for
-most — which is why this card demands KEEP be expressible.
+**⚠ SUPERSEDED — see the 19:40 section below. Half of that list is wrong, and the two entries it
+was most confident about ("junk … the only two that should simply be PRUNED") are both correct
+prose that pruning would have damaged.**
 
 ### A duplicate page found while fixing, worth its own attention
 
@@ -110,14 +109,72 @@ content — a genuine cross-scope duplicate, i.e. duty 10/11 territory (TRDD-E7D
 because the fix failed on the USER copy and succeeded on the LOCAL one. Not touched here beyond
 the link fix; recorded so E7D4QPH1 starts with a real instance instead of a hypothetical.
 
+## ⏵ 2026-08-26 19:40 — THE DECISION MADE PER LINK; box 1's list was 50% false, all one direction
+
+Every one of the 12 was checked against the corpus rather than trusted. **Six were not defects at
+all**, and the reason each was false is a distinct blind spot in the box-1 query — so the finding
+is not "the list had errors", it is **three separate ways a link-resolution query lies**:
+
+| # | name | verdict | why box 1 was wrong |
+|---|---|---|---|
+| 1 | `who-verifies-and-closes-work` | **EXISTS** | the query was **non-recursive** — the page is in a `wikimem/` SUBDIR |
+| 2 | `removal-blast-radius` | **EXISTS** | same subdir blind spot |
+| 3 | `security-act-dont-ask` | **EXISTS** | the query resolved by **FILENAME**; a page's identity is its frontmatter `name:` (file `feedback_security_act_dont_ask`, name `security-act-dont-ask`) |
+| 4 | `governance-ssot-is-the-governance-rules-branch` | **PHANTOM** | zero occurrences anywhere in the corpus — the list itself carried a name nothing references |
+| 5 | `B` | **KEEP (prose)** | placeholder in *"when a merge folds page A into page B, every `[[B]]` link read as dangling"* — the janitor#183 write-up |
+| 6 | `Note` | **KEEP (prose)** | already inside a code span: *"values may be `[[Note]]` links or `^block-ref` references"* |
+
+**The two blind spots that matter for the eventual pass**, because both are silent:
+
+- **Recursion.** 4 real pages live in `wikimem/` subdirs (1 LOCAL, 3 USER) — invisible to a
+  top-level scan, fully visible to `memgrep`. A pass that "resolved" #1 and #2 by CREATE would have
+  manufactured duplicates of pages that already exist — the exact cross-scope duplicate mess duty
+  10/11 exists to clean up. **The most destructive outcome available, reached by trying to help.**
+- **Identity.** `name:` ≠ filename stem on **4 pages** (measured corpus-wide; all LOCAL `feedback_*`).
+  Small, but it only takes one to turn a live link into a phantom hole.
+- And the prose filter's shape is unsound: box 1 excluded an **allowlist** of placeholder words
+  (`wikilink`, `link`, `page`, `name`…). `B` and `Note` slipped through because a writer may reach
+  for any word. The test must be **structural** — is the `[[…]]` inside a code span or in a sentence
+  *about* linking — never a name list.
+
+### The six real ones, decided, with the reason recorded
+
+| name | outcome | reason |
+|---|---|---|
+| `project-ai-maestro-janitor-oauth-rotator` | **RETARGET** → `feedback_oauth_rotator_resume_protocol` | a stale name for a page the SAME file already links two lines below; back-link present, so the LINK LAW held on the fix |
+| `claim-verification` | **PRUNE** → `` `~/.claude/rules/claim-verification.md` `` | **cross-namespace**: the subject is a global RULE file, not a memory page, so the wikilink can never resolve |
+| `reference_memory_system_integration` | **KEEP** | forward ref to a rollout tracker — board/TRDD territory, not a memory subject |
+| `universal-plugins-ignore-aimaestro-instruction-set` | **KEEP** | sanctioned forward ref |
+| `what-ai-maestro-is` | **KEEP** | sanctioned forward ref |
+| `agent-claims-the-api-was-never-delivered` | **KEEP** | forward ref to a case page worth writing |
+
+Both edits applied through `memgrep edit`; `validate` NONE and `lint` 0 findings on both pages.
+
+### What this settles about the duty pair itself
+
+**CREATE fired ZERO times out of 98 candidates.** Duty 17 — *"if a link is dangling, CREATE the
+missing page"* — has no instance in the real corpus. Meanwhile the outcomes that DID fire are
+`KEEP` (4), `RETARGET` (1), `PRUNE-as-wrong-namespace` (1), `DE-LINK` (2 prose), and — six times,
+more than any real outcome — **"your query is wrong"**.
+
+So the pass this card was scoped to build would have spent its whole duty-17 half on a case that
+never occurs, while the dominant outcome is one the duty pair does not name at all. That is the
+finding, and it should change the shape of the implementation rather than be filed as trivia: the
+expensive, careful part is **the candidate query**, not the decision. Get the query right and the
+decision is six easy judgments; get it wrong and a confident pass damages correct writing in three
+different ways while reporting success.
+
 ## Acceptance
 
 - [x] A candidate query that lists, per page: duplicated links, links to non-existent pages, and
       links whose target exists but no longer covers the subject. **Built and run** — see the
       taxonomy above; the load-bearing part is excluding prose-mention targets (72 of 98)
-- [ ] The PRUNE/CREATE decision is made per link with a recorded reason, and a deliberate
+- [x] The PRUNE/CREATE decision is made per link with a recorded reason, and a deliberate
       forward-reference is a THIRD outcome (KEEP) — a pass that cannot express KEEP is wrong by
-      construction
+      construction. **Done for all 12, in the 19:40 table — and KEEP was the majority verdict
+      (4 of 6 real), which is the box's own premise confirmed against the corpus rather than
+      assumed.** The outcome set is SIX, not three: `KEEP · RETARGET · PRUNE · DE-LINK · CREATE ·
+      not-a-defect`. `CREATE` fired zero times; `not-a-defect` fired six.
 - [ ] Every edit goes through the transaction core; `verify_repair` proves no lesson or atom is
       lost
 - [ ] A test drives a page carrying one duplicate link, one dangling forward-reference, and one
