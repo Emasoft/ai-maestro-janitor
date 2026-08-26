@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub / a session stayed dead after a compaction / resume-after-compact flag never consumed / why does CLAUDE_PLUGIN_ROOT get wiped on every update / where should persistent state be written / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / why must user/global-scope operations go through the daemon only / what is the runtime installed tree layout / how does the janitor decide project-scope vs user-scope for a given operation"
 ocd: 2026-06-13
-lmd: 2026-07-22
+lmd: 2026-08-26
 metadata:
   node_type: memory
   type: project
@@ -12,6 +12,7 @@ metadata:
     - "skills/**"
     - "CLAUDE.md"
     - "design/requirements/PRRD.md"
+publish-globally: false
 ---
 
 # ai-maestro-janitor — architecture hub
@@ -327,6 +328,8 @@ must report a crash.[^3]
   daemon-only human notification channel.
 - [[janitor-core-files-reference]] — the file-by-file reference for
   `scripts/` and `scripts/lib/` core modules.
+- [[git-index-lock-orphan-recovery]] — recovering an orphaned `.git/index.lock`
+  left by a killed writer, and why every guard there fails closed.
 - [[janitor-detector-and-hook-roster]] — the full 39-detector / 16-hook
   grouped roster behind this hub's abbreviated summaries.
 - [[janitor-gh-reply-monitor]] — the GH-REPLY MONITOR subsystem (replies to
