@@ -3,7 +3,7 @@ trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
 column: todo
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-26T07:44:00+0200
+updated: 2026-08-26T11:45:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -76,9 +76,76 @@ about a task that is running is a diagnostic that lies in the dangerous directio
 project's own CLAUDE.md teaches reading these stamps to judge chore health. Filed separately —
 it is not this card's subject, and it may or may not be why the guardian was silent on 08-23.
 
-**NEXT ACTION:** find out why the guardian did not rescue on 08-23 (start from the stamp defect
-in 5, and from whether `FLEET_RECOVERY_ENABLED` / `SESSION_LIVENESS_ENABLED` were set then).
-Do NOT start by writing new detection.
+> **⏵ 2026-08-26 — it was NOT.** The stamp defect (TRDD-SR7887LF) is real and unrelated: the
+> guardian ran on 08-23 and produced a decision, which is what the audit records. Following this
+> lead first would have chased a lying stamp while the actual answer sat in a different file.
+
+**NEXT ACTION:** ~~find out why the guardian did not rescue on 08-23~~ — **ANSWERED 2026-08-26,
+below. The guardian detected it and DECLINED, on purpose.**
+
+### ⏵ 2026-08-26 — ANSWERED. The guardian was not silent; it was REFUSED by the input field.
+
+`global-state/recovery-audit.ndjson` reaches back to 2026-08-10, so the window IS observable
+after all — `daemon.log`'s rotation hid the wrong artifact. Six recovery decisions fall inside
+the gap, and one of them is this project:
+
+```
+2026-08-23 00:52:53  cron_dead  declined_field_busy  rearm  …/AI-MAESTRO-JANITOR/ai-maestro-janitor
+```
+
+**Every link in the chain worked except the last one.** 17 minutes into the gap the guardian had
+already: scanned the fleet, computed a stale transcript, diagnosed `cron_dead`, selected the
+`rearm` rung, and built an injection plan. Then `fleet_inject.command_plan_field_busy` read the
+target's own input field back, found text in it, asked `field_holds_our_queued_command` whether
+the janitor had typed it, got **no**, and declined rather than type over it
+(`daemon.py:1643`).
+
+**That decline is CORRECT and must not be "fixed".** Text in the field the janitor did not type
+is a human's half-written line or a live prompt; typing a re-arm into it concatenates onto their
+words and submits the result. The janitor#261 fix — submit our OWN unsubmitted command instead
+of blocking on it forever — was already in the tree (`02b9ccee`, 2026-08-14, nine days BEFORE
+this incident), so the permissive path existed and was consulted. It correctly did not apply.
+
+**Only ONE audit row for this project across 10 hours because that is the designed behaviour,
+not a second failure.** `_decline` stamps the cooldown and skips re-auditing while the
+`(outcome, rung)` signature is unchanged (F9) — a steady unreachable state is recorded once,
+not 720 times a day.
+
+**So the causal chain is now complete, and nothing in it is a detection gap:**
+
+1. Text sat un-submitted in the session's input field from ~00:35.
+2. A cron job fires only when the REPL is idle, so no fire could land — the suppression
+   hypothesis (H2) is confirmed by an independent second artifact.
+3. The guardian detected `cron_dead` at 00:52 and correctly declined to type over the text.
+4. The cooldown suppressed further identical audit rows, so the decline left almost no trace.
+5. At 10:55 a human returned, the field drained, and the queued fire landed immediately —
+   exactly what a SUPPRESSED (not dead) cron does.
+
+### What is actually missing — and it is NOT a detector
+
+**There is no escalation to the human when a correct decline becomes a permanent stall.** The
+guardian's decline is right on beat 1 and still right on beat 300, but by then the meaning has
+changed: at 00:52 it is "a human is mid-sentence, wait"; at 06:00 it is "this session has been
+unable to run any chore for five hours and the only actor who can clear it does not know."
+Nothing spans those two readings, because the cooldown that (correctly) stops the audit spam
+also stops the only surface that could notice the duration.
+
+Note the shape: reason (4) above says the existing guardian is not missing, and this says the
+missing piece is not another guardian. **Do NOT build a stall detector** — `task_session_liveness`
+already detected this, at 00:52, correctly. What is absent is a NOTIFICATION path with a
+duration threshold on an unchanged decline.
+
+## Acceptance (revised 2026-08-26 — the original asked for detection that already exists)
+
+- [ ] A decline whose `(outcome, rung)` signature is unchanged for more than N hours raises a
+      human-visible finding naming the project, the diagnosis, and the elapsed time — it must
+      NOT re-audit every beat (that is the F9 regression `_decline` exists to prevent)
+- [ ] `declined_field_busy` specifically says WHAT is blocking, since the remedy is one
+      keystroke by a human who does not know they are the blocker
+- [ ] A test driving an unchanged decline across N beats asserts exactly ONE audit row AND one
+      escalation past the threshold — the two requirements pull in opposite directions, so a
+      test that only checks one of them passes on a broken implementation
+- [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
 
 ### Original STATE (2026-08-23 — retained; its measurement is superseded by the above)
 
@@ -167,16 +234,29 @@ rotator's `rotator.log`, which recorded `cookie-leg-stuck` ONSET at `09:04:38` a
 window are a strong hint for hypothesis 2 and MUST NOT be treated as proof** — that is the exact
 proxy-read failure TRDD-5RXBI65T is about. Correlation in a log is a lead, not a cause.
 
-## Acceptance
+## Acceptance (ORIGINAL — superseded 2026-08-26; the live list is in the STATE block above)
 
-- [ ] the gap's cause is established from logs, and the losing hypothesis is recorded as refuted
-      rather than dropped
-- [ ] a detector fires when `now - last heartbeat fire` exceeds a small multiple of the armed
-      cadence — the missing surface, and the part that is worth shipping whichever hypothesis wins
-- [ ] that detector is proven to survive the failure it detects (a watchdog that itself only runs
-      from the heartbeat cannot report the heartbeat being dead — this is the load-bearing design
-      constraint, not an afterthought)
-- [ ] `/janitor-arm`'s "persistent" wording is reconciled with what is actually guaranteed
+Kept rather than deleted because two of its four boxes were answered by investigation and the
+third turned out to ask for something that already exists — that outcome is the finding.
+
+- [x] the gap's cause is established from logs, and the losing hypothesis is recorded as refuted
+      rather than dropped. **Done.** H2 (suppressed, not dead) confirmed twice over: session
+      `fdde8723` fires on both sides of both gaps, and `recovery-audit.ndjson` independently
+      records `declined_field_busy` at 00:52:53. H1 (the cron died) is refuted in the STATE block
+      and left there in full.
+- [x] ~~a detector fires when `now - last heartbeat fire` exceeds a small multiple of the armed
+      cadence~~ **REFUTED AS A DELIVERABLE — it already exists and it already fired.**
+      `task_session_liveness` diagnosed this project `cron_dead` 17 minutes into the gap. Writing
+      it would have been a duplicate of the subsystem built for this exact failure. The real gap
+      is escalation on a long-unchanged DECLINE; that is now box 1 of the revised list.
+- [x] that detector is proven to survive the failure it detects. **Already satisfied by
+      construction** — the guardian runs from the DAEMON, not from a fire, which is why it was
+      able to diagnose a session whose cron could not fire.
+- [ ] `/janitor-arm`'s "persistent" wording is reconciled with what is actually guaranteed.
+      **STILL OPEN, and this incident sharpens it:** the arm was genuinely persistent the whole
+      time. Nothing about `armed.flag` was false — the session simply could not take a turn. So
+      the wording fix is not "admit the cron may die"; it is that ARMED and FIRING are different
+      claims and only the first is guaranteed. See `[^1]`.
 
 ## Notes and lessons learned
 
@@ -185,3 +265,16 @@ proxy-read failure TRDD-5RXBI65T is about. Correlation in a log is a lead, not a
     `heartbeat-cron-id.txt` and a successful `/janitor-arm` all stay true across a 10h silence —
     they record an intent, never an observation. DO read `heartbeat-fires.log` for a recent fire
     when the question is whether the janitor is alive.
+
+[^2]: [id: LESSON-FB84-2, status: active, keywords: guardian_did_not_rescue recovery_never_fired daemon_log_rotated_away evidence_window_lost nothing_tried_to_help janitor_ignored_a_frozen_session which_log_has_the_answer, ocd: 2026-08-26, lmd: 2026-08-26]
+    DO NOT conclude a subsystem was silent because its LOG rotated away, BECAUSE a decision log
+    and an activity log have different retention — `daemon.log` reached back only 2 days and made
+    the window look unobservable, while `recovery-audit.ndjson` held the answer for 16.
+    DO enumerate every artifact a subsystem WRITES before declaring its evidence lost.
+
+[^3]: [id: LESSON-FB84-3, status: active, keywords: recovery_declined_but_correct nothing_happened_for_hours janitor_refused_to_act_and_was_right decline_became_a_stall no_alert_while_stuck correct_decision_wrong_over_time, ocd: 2026-08-26, lmd: 2026-08-26]
+    DO NOT read a repeated correct refusal as a working guard, BECAUSE `declined_field_busy` is
+    right on beat 1 ("a human is mid-sentence") and still emitted on beat 300, when it means
+    "this session has run no chore for five hours" — and the cooldown that correctly stops the
+    audit spam also removes the only surface that could notice the duration. DO put a duration
+    threshold on an UNCHANGED decline, and escalate past it, without re-auditing every beat.
