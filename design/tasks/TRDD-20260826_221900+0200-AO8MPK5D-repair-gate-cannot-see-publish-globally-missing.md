@@ -3,7 +3,7 @@ trdd-id: AO8MPK5D
 title: The repair chore is told to fix publish-globally-missing but its gate cannot see it
 column: todo
 created: 2026-08-26T22:19:00+0200
-updated: 2026-08-26T22:19:00+0200
+updated: 2026-08-26T22:20:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -24,6 +24,38 @@ relevant-rules: []
 
 **The obvious fix reintroduces the exact bug the code it touches exists to prevent. Read the
 "why it cannot be closed the obvious way" section before writing anything.**
+
+### ⛔ CORRECTION 2026-08-26 22:20 — I NAMED A REAL CAUSE THAT IS NOT THE OPERATIVE ONE
+
+**Doing every acceptance box below would change NOTHING observable.** The reason these 29 never
+drain is not (only) that `repair_defect` cannot see them — it is that **the memory-maintenance
+scheduler never dispatches ANY chore for PROJECT scope at all.**
+
+`memory-maintenance._scopes_in_play` (`:135`) drops PROJECT unless `edit_project_scope` is on;
+`memory_settings.py:61` defaults it `False`, and it is `False` on this host (measured). The
+rationale is sound and is not a bug: *"PROJECT memory is in-repo and unpushable outside
+`publish.py`"* — an agent editing it would create commits nothing can push.
+
+So the gate order is: **scope gate first, candidacy predicate second.** Widening `repair_defect`
+would make the predicate correct while the pages remain unreachable, and the implementer would
+ship it, re-lint, see 29 findings unchanged, and have to find this out the hard way.
+
+**This also explains the OTHER class on this page's Notes.** 25 `atom-after-footer` findings sit
+on 10 pages and `repair_defect` DOES detect that one — so its persistence had to have a different
+cause, and it is the same cause. **54 of the 67 lint findings (81%) are PROJECT-scope and
+structurally out of every chore's reach by design.**
+
+**What this card is now really about, and it is smaller:** `repair_defect`'s blind spot is still
+a genuine latent gap — the day `edit_project_scope` is turned on, 29 pages would still be
+invisible while 25 others got fixed. Fix it as latent-correctness, not as a way to drain
+anything. **Do NOT turn `edit_project_scope` on to make this card's boxes observable** — that is
+a USER decision about what agents may write into a git-tracked, pushed store, and it is not this
+card's to make.
+
+**Reporting-fidelity residue, separate from the fix:** the heartbeat's `memgrep lint: 67
+finding(s)` line counts findings the janitor cannot act on, which reads as accumulating debt when
+it is out-of-scope-by-design. Worth splitting the count by actionability; not filed as its own
+card yet.
 
 ## The gap, measured 2026-08-26 22:15
 
@@ -103,11 +135,22 @@ way the chore's design forbids, for a WARN whose runtime behaviour is already id
 - [ ] The PROJECT test mirrors `memgrep`'s `scope_layer` PATH rule, NOT `metadata.type` — with a
       test that a `type: reference` page in the PROJECT root is still flagged, and a `type:
       project` page in the USER root is NOT
+- [ ] The card's own doc states the SCOPE GATE runs first, so nobody measures success by
+      re-linting: with `edit_project_scope` off, a correct predicate still drains nothing
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
 
 ## Notes and lessons learned
 
 The other 38 findings, recorded so this card is not mistaken for covering them: 25
-`atom-after-footer` (WARN — `repair_defect` DOES detect this one, so their persistence has a
-different cause and is worth its own look), 8 `lesson-uncited` (INFO), 5 `atom-oversized` (INFO,
-owned by the split chore).
+`atom-after-footer` (WARN, 10 pages — `repair_defect` DOES detect this one; **its persistence has
+the same cause as the 29**, the PROJECT scope gate, see the correction in the STATE block), 8
+`lesson-uncited` (INFO), 5 `atom-oversized` (INFO, owned by the split chore).
+
+[^1]: [id:ATOM-AO8M-PK01, status:valid, keywords:"a linter reports defects that never get fixed, the chore owns this defect but nothing ever repairs it, my fix is correct and the finding count did not move, findings persist across every run of a working chore, which gate runs first the scope gate or the candidacy check", ocd:2026-08-26, lmd:2026-08-26]
+    DO NOT diagnose "why does this chore never fix X" by studying the chore's CANDIDACY predicate
+    first, BECAUSE a scope/eligibility gate runs EARLIER and can exclude the whole root, making a
+    perfectly correct predicate unobservable — here `_scopes_in_play` drops PROJECT unless
+    `edit_project_scope` is on (default off), so 54 of 67 lint findings were unreachable no matter
+    what the predicate said, and I filed a card naming a real-but-secondary cause whose fix would
+    have changed nothing measurable. DO walk the gates in EXECUTION ORDER, outermost first, and
+    confirm the target is even in the eligible set before reading the predicate that judges it.
