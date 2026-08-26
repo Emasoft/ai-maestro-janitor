@@ -1,9 +1,11 @@
 ---
 trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [owner-decision-c3-selfheal-caller]
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-21T15:35:00+0200
+updated: 2026-08-26T07:38:00+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor

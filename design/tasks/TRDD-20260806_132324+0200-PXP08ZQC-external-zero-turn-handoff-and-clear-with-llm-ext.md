@@ -1,9 +1,11 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: testing
+column: blocked
+pre-block-column: todo
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-19T00:30:00+0200
+updated: 2026-08-26T07:38:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -14,7 +16,29 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-15
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+
+### ⚠ 2026-08-26 — the opt-in below was REVERSED, and the card's column was wrong
+
+Two corrections, both measured:
+
+1. **The lever is `false` again.** `~/.claude/settings.json:22` now reads
+   `"CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED": "false"`. The 2026-08-15 entry below
+   says it was set to `true`; that is no longer true. It was turned OFF during the 2026-08-26
+   resume-storm, in which the installed 3.3.26 template-`/clear`ed on a FAILED summary and
+   froze 16 sessions. The fix (`e789506c`) is in **3.4.0**, blocked on push protection — so
+   this card is blocked on that publish, exactly like TRDD-1QJIZFFW.
+2. **The frontmatter said `testing` while this block said "Column `todo` since 2026-08-12,
+   nobody is working this".** The STATE block was right and the frontmatter was stale — per
+   the TRDD rules the STATE block wins on disagreement, and the frontmatter is now corrected
+   to `blocked` rather than to either of the two columns that were arguing.
+
+The irony is worth keeping, because it is the card's own subject: this is a card about a
+feature that shipped DARK and cost ~7M tokens because a silent refusal left no trace. Its
+column had been silently wrong for two weeks for the same reason — nothing forced the claim
+to be re-checked against reality.
+
+### ⏵ STATE (2026-08-15 — retained below)
 
 ### ⏵ INCIDENT 2026-08-15 — the feature shipped DARK and cost the owner ~7M tokens
 
