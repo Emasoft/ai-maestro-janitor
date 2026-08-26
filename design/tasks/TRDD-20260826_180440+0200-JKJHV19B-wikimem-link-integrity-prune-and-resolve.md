@@ -3,7 +3,7 @@ trdd-id: JKJHV19B
 title: Wikimem link integrity — prune stale and duplicate links, resolve dangling ones
 column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T18:36:27+0200
+updated: 2026-08-26T22:15:44+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -19,6 +19,60 @@ relevant-rules: []
 ---
 
 # Duties 16-17 — link integrity in the wikimem editor
+
+## ⏵ 2026-08-26 22:15 — THE CHORE IS NOT THE DELIVERABLE. The corpus has ZERO defects for it.
+
+Advisor consulted (Fable 5) on where the candidate query belongs. Its verdict corrected my
+proposal — enumeration in Rust, but as a QUERY VERB, never a `lint` rule, because a rule whose
+majority honest outcome is KEEP fires forever and destroys the "gate and arbiter identical ⇒ the
+chore terminates" property that makes `enrich` work. It also split box 1's unsolved filter
+correctly: code-span masking is mechanical and **already shipped** (`mask_inline_code`,
+`memory.rs:4061`), while "a sentence ABOUT linking" is agent judgment that belongs in the refusal
+ledger, not in the tool.
+
+**Then the measurement made most of that moot, and this is the finding.** The verb it told me to
+build **already exists** — `memgrep links --broken` — and nobody had run it across all three
+scope roots at once:
+
+| run | result |
+|---|---|
+| box 1's hand-built Python query, one root at a time | **98** non-resolving |
+| `memgrep links --broken` over all THREE roots | **8** |
+
+And of those 8: **4 are `[[ATOM-…]]` links whose atoms all EXIST** (verified: every one is a
+defined marker), 1 is the prose placeholder `TRDD-id`, and 3 are forward refs this card already
+decided KEEP. **Actionable defects: ZERO.** Duty 17's CREATE fired zero times out of 98 in box 2
+and zero out of 8 here.
+
+**⚠ The two counts of `8` are NOT the same set** — `diff` says so. Scanning PROJECT alone gives 8
+(cross-scope targets like `debugging-methodology`, which lives in USER); scanning all three gives a
+DIFFERENT 8. I nearly read the equal totals as "the roots make no difference", which is precisely
+tonight's peer-exchange lesson arriving a third time: two equal numbers are not one set.
+
+### So the shipped work is a 20-line fix, not a chore
+
+`links --broken` answers *"does a target FILE exist"*. An atom is addressable but is not a file,
+so every atom link returns `[BROKEN]` — correct for the question asked, wrong for the question the
+finding then claims to answer. `memory-librarian._index_corpus` indexed only page slugs (stem +
+`name:`), so those 4 fell through `_classify_broken_link`'s unresolved branch and were reported as
+*"a forward reference … or a rename casualty"* — advice whose literal reading is **write a page
+named `ATOM-9E4P-KYW5`**. Four live false findings on every librarian run, each proposing to
+create a page for an atom that already exists.
+
+Fixed by widening what RESOLVES (`_note_slugs` now also indexes body-atom anchors and lesson
+`id:`s, fence-aware) rather than by teaching the reader to ignore a finding. Verified on the real
+corpus: all 4 index, a phantom control does not.
+
+**This is the same defect class as everything else measured today** — an instrument answering a
+different question than the sentence asks — and it is the third instance in one evening.
+
+### What is left of the chore
+
+Nothing to fix means the chore's value is preventing FUTURE rot, not clearing present rot, which
+is a much weaker case than the card was written on. Boxes 3-4 stay open deliberately: the honest
+next increment is the refusal-ledger design the advisor described (gate = memgrep's dangling list
+MINUS ledger), and it should be started only when the corpus actually accumulates candidates.
+Building a transaction-core pass now would be machinery with no input.
 
 Split out of **TRDD-87RKBYJ8** (the spec + reconciliation ledger) per its own rule: the remaining
 gap rows become their own cards when their turn comes, and are never implemented under the parent

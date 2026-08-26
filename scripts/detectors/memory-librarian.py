@@ -126,6 +126,13 @@ _LINK_RE = re.compile(r"^(?P<from>\S+):\d+\s+->\s+\S+\s+\[(?P<to>[^\]]+)\]\s*$")
 _BROKEN_LINK_RE = re.compile(r"^(?P<from>\S+):\d+\s+->\s+(?P<slug>\S+)\s+\[BROKEN\]\s*$")
 # `memgrep links --orphans` line: a bare path, one per line (`./nodesc.md`).
 _ORPHAN_RE = re.compile(r"^(?P<path>\S+\.md)\s*$")
+# The two shapes that DEFINE an addressable atom id on a page, so a `[[ATOM-…]]`
+# link can resolve to the page carrying it (TRDD-JKJHV19B). A body atom leads its
+# line with `^<id> [props…]` (the id half of the shared `_ATOM_MARKER_CORE` in
+# memory_edit_verify); a lesson declares its id inside the footnote's address
+# bracket, whose spelling varies (`id: X` and `id:X` both ship in the corpus).
+_ATOM_ANCHOR_RE = re.compile(r"^\^(?P<id>[A-Za-z0-9_-]+)\s*\[")
+_LESSON_ID_RE = re.compile(r"^\[\^[^\]]+\]:\s*\[[^\]]*?\bid:\s*(?P<id>[A-Za-z0-9_-]+)")
 
 # Page-shape regexes — applied to a note's RAW text (not memgrep's index output,
 # which is unreliable for frontmatter presence: a note with NO `description:`
@@ -1355,13 +1362,46 @@ def _index_corpus(scopes: list[tuple[str, Path]]) -> CorpusIndex:
 
 
 def _note_slugs(path: Path, text: str) -> set[str]:
-    """Every slug a `[[link]]` can resolve to this note by: stem + `name:`."""
+    """Every slug a `[[link]]` can resolve to this note by: stem + `name:` + its ATOM ids.
+
+    The atom half (TRDD-JKJHV19B): `[[ATOM-XXXX-XXXX]]` is a legal, common link
+    target — an atom is addressable, it just is not a FILE. `memgrep links
+    --broken` answers "does a target file exist", so every atom link comes back
+    `[BROKEN]`; without the ids here they then miss `slug_scope` too and
+    `_classify_broken_link` falls to its unresolved branch, whose advice is to
+    consider writing the missing page. Measured 2026-08-26: 4 live instances
+    across the corpus, every one pointing at an atom that EXISTS, each advising a
+    reader to create a page named `ATOM-9E4P-KYW5`. The instrument was answering
+    a different question than the finding claimed — so widen what resolves rather
+    than teach the reader to ignore the finding.
+
+    Fence-aware for the same reason `_referenced_slugs` is: an atom marker inside
+    a fenced doc EXAMPLE defines nothing, and letting one register a real slug
+    would silently bless a link that resolves nowhere.
+    """
     slugs = {path.stem}
-    fm_lines, _ = _split_frontmatter(text)
+    fm_lines, body_lines = _split_frontmatter(text)
     for ln in fm_lines:
         m = _FM_NAME_VALUE_RE.match(ln)
         if m:
             slugs.add(m.group("name"))
+    in_fence = False
+    for ln in body_lines:
+        if _FENCE_RE.match(ln):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        # Both atom shapes are addressable and both occur in the live corpus: a
+        # BODY atom declares its id as the `^anchor`, a LESSON declares it as
+        # `id:` inside the footnote's address bracket.
+        m = _ATOM_ANCHOR_RE.match(ln)
+        if m:
+            slugs.add(m.group("id"))
+            continue
+        m = _LESSON_ID_RE.match(ln)
+        if m:
+            slugs.add(m.group("id"))
     return slugs
 
 
