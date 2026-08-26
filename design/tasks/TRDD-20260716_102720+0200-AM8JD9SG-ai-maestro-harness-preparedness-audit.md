@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-26T13:05:00+0200
+updated: 2026-08-26T13:40:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -472,3 +472,50 @@ available work, and re-deriving "there is none" is exactly the 272-line re-read 
 section was added to stop.
 
 ## Notes and lessons learned
+
+## ⏵ 2026-08-26 — F12: the `esc_nudge` blast radius, measured (and my own flag corrected)
+
+Raised to `ai-maestro-bf` unprompted as an unaudited risk beside F11's rearm rung: 88 raw-ESC
+injections into `~/Code` roots, and unlike a typed command an ESC interrupts a turn in flight.
+Then audited it instead of leaving the flag standing. **The measurement narrows it a long way,
+and my framing to them was wrong.**
+
+```
+esc_nudge rows          102 fired · 3 esc_dismissed_awaiting
+actuated by diagnosis    89 frozen · 13 retry_wedged · 3 cron_dead
+window                   2026-08-13 19:10 → 2026-08-21 22:38
+```
+
+**An actively-working session is never reachable by this rung.** All three diagnoses that map to
+`esc_nudge` require `transcript_stale`; `diagnose_instance` returns `healthy` — recovery `None` —
+the moment the transcript is advancing. And the two that account for 102 of 105 are states in
+which the session is BLOCKED rather than working:
+
+- `frozen` (89) = stale AND `rate-limited.flag` — Claude Code's "Retrying in Xm" watchdog, which
+  blocks the input line. ESC-only is the DESIGNED recovery here (TRDD-P7WU40G9): typing a
+  slash-command into that state was the 2026-07-18 flood disaster, where the retry-wait buffers
+  keystrokes into `/janitor-arm/janitor-arm/…` and floods on release.
+- `retry_wedged` (13) = CC's own retry-watchdog wedge, never a working turn.
+- `esc_dismissed_awaiting` (3) additionally requires HID idle ≥ 30 min — nobody at the keyboard.
+
+**So "interrupts whatever turn is in flight" is true of the ESC primitive and false of the
+guarded path.** The residual risk is real but narrow: a session that is genuinely mid-turn yet
+appends nothing for longer than the staleness window (a long silent tool call) AND carries the
+rate-limit flag or the wedge signature. That is worth a bound; it is not the broad hazard I
+described.
+
+**Recorded because I raised the alarm myself and it deserves the same standard as anything I
+receive.** I flagged it from the primitive's semantics without reading the gate — the same
+"proxy read in place of the thing" this session has now hit four times, and the first time it
+was my own outbound claim rather than an inherited one. The peer was told.
+
+Does not change F11: the rearm rung's compliance question stands, and this rung is still
+injecting into panes the janitor does not own. It changes only the SEVERITY of the ESC half.
+
+### Acceptance for F12
+
+- [ ] A bound on the residual case: a session mid-turn but silent past the staleness window is
+      not ESC'd on the strength of silence alone — either an additional liveness signal, or an
+      explicit statement of why the rate-limit/wedge evidence is sufficient on its own
+- [ ] Whatever R42 amendment covers the rearm rung states its position on ESC separately —
+      different capability, different justification, and only one of them types a command
