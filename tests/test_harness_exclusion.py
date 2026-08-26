@@ -402,3 +402,35 @@ def test_a_cached_root_does_not_own_a_sibling_by_string_prefix() -> None:
         tagged=False, root="/a/foobar", cli_present=True, list_ok=False,
         cached_roots=["/a/foo"], override=None,
     ) is False
+
+
+def test_a_degenerate_agents_home_does_not_own_every_instance(monkeypatch) -> None:
+    """Pins the SHAPE of the prefix test, not a guard clause — this one needs no guard.
+
+    `root_under_agents_home` builds its prefix as `base + "/"`, so a degenerate base of "/"
+    yields "//" and matches nothing: already inert. Its sibling `_cached_root_covers` builds
+    `wd.rstrip("/") + "/"`, which for "/" yields "/" and matches EVERY absolute path — that
+    one needed the guard (AM8JD9SG F11).
+
+    So this test exists to fail if someone ever "tidies" this line to use rstrip too. That
+    edit would read as harmless normalization and would disarm the guardian fleet-wide: every
+    instance harness-owned, every diagnosis mapped to no recovery, no alarm — because
+    hands-off is the correct direction for any ONE instance.
+
+    Verified 2026-08-26 that a guard clause here is NOT what makes this pass: adding one and
+    removing it again left all tests green, which is exactly how dead code gets committed with
+    a test that appears to cover it.
+    """
+    monkeypatch.setenv("AIMAESTRO_AGENTS_HOME", "/")
+    assert hb.root_under_agents_home("/Users/someone/Code/AnyProject") is False
+
+
+def test_a_real_agents_home_still_owns_its_subtree(monkeypatch, tmp_path) -> None:
+    """The guard must not cost the signal it protects — this is the one that actually works
+    on this host (all three of tagged/cache/under-home, only this one returns True here)."""
+    home = tmp_path / "agents"
+    (home / "frank").mkdir(parents=True)
+    monkeypatch.setenv("AIMAESTRO_AGENTS_HOME", str(home))
+    import os as _os
+    assert hb.root_under_agents_home(_os.path.realpath(str(home / "frank"))) is True
+    assert hb.root_under_agents_home("/Users/someone/Code/Unrelated") is False

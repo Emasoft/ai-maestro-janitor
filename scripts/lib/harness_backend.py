@@ -455,6 +455,13 @@ def root_under_agents_home(root: str | None) -> bool:
     if not root:
         return False
     base = os.path.realpath(agents_home())
+    # DO NOT "normalize" this to `base.rstrip("/") + "/"`. It looks like tidying and it is a
+    # fleet-wide disarm: for a degenerate base of "/" the rstrip turns the prefix into "/",
+    # which every absolute path starts with, so every instance reads harness-owned, every
+    # diagnosis maps to no recovery, and the guardian stops rescuing anything — silently,
+    # because hands-off is the correct direction for any ONE instance. As written, "/" + "/"
+    # is "//", which nothing matches, so a degenerate base is already inert here.
+    # `_cached_root_covers` carries that rstrip and DID have the bug (AM8JD9SG F11).
     return root == base or root.startswith(base + "/")
 
 
