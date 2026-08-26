@@ -1,12 +1,13 @@
 ---
 name: window-burn-rate-alarm-contract
-description: "when does the janitor's burn alarm actually fire / why did window-burn-rate alarm about an account I am not using / why does one 7d reading alarm every day for a week / how does the burn line say which account it is about / where do per-model weekly windows like Fable come from / why is the usage-probe cache full of dead files / a usage percentage looks wrong for my own session / how old is the usage number I am being shown / two tools disagree about my usage percentage / does the usage-probe cache ever get cleaned / is a stale probe entry ever served to a reader / why did the alarm stay silent when it should have fired / did a payload-shape change accidentally mute a real burn / why did the same 7d window alarm seven days in a row / where do per-model weekly burn windows come from / burn ratio threshold default 1.5 / what is the token-quietness invariant for this alarm"
+description: "when does the janitor's burn alarm actually fire / why did window-burn-rate alarm about an account I am not using / why does one 7d reading alarm every day for a week / how does the burn line say which account it is about / where do per-model weekly windows like Fable come from / why is the usage-probe cache full of dead files / a usage percentage looks wrong for my own session / how old is the usage number I am being shown / two tools disagree about my usage percentage / does the usage-probe cache ever get cleaned / is a stale probe entry ever served to a reader / why did the alarm stay silent when it should have fired / did a payload-shape change accidentally mute a real burn / why did the same 7d window alarm seven days in a row / where do per-model weekly burn windows come from / burn ratio threshold default 1.5 / what is the token-quietness invariant for this alarm / the burn alarm has been silent for weeks is it dead / should I tell the user their account is burning fast / who owns rotation the agent or the daemon / I computed the burn pace myself and reported it / how do I get token usage numbers on purpose"
 ocd: 2026-08-01
-lmd: 2026-08-01
+lmd: 2026-08-26
 metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 # window-burn-rate-alarm-contract
@@ -31,7 +32,7 @@ the alarm was wrong without them (2026-08-01, issue #160):
 
 Model-scoped windows (e.g. `7d/Fable`) are evaluated on the SAME terms. The alarm remains gated by
 the TOKEN-QUIETNESS invariant — surface only in the CULPRIT project's own sessions — unchanged by
-any of this. Attribution is the sibling atom below.
+any of this. Attribution is the sibling atom below. [^1]
 
 
 ^ATOM-TS67-OTS6 [desc:"a usage figure must name the account it measured and the sample it came from — an unlabelled number is read as being about the reader's own session", keywords: which_account_is_this_burn_line_about the_janitor_reported_a_percentage_that_is_wrong_for_me live_versus_alternate_account_label how_old_is_the_usage_number_I_am_being_shown two_tools_disagree_about_my_usage_percentage every_emitted_usage_figure_carries_its_subject_and_sample_age a_bare_number_is_silently_completed_with_the_readers_own_account three_correct_numbers_three_different_subjects api_oauth_usage_is_rate-limited_served_from_one_throttled_cache sample_age_makes_two_readings_joinable_against_a_history unknown_liveness_prints_no_marker_rather_than_guess a_cross-agent_debugging_session_was_wasted_on_a_wrong_subject, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
@@ -88,3 +89,5 @@ throttle. That ordering is pinned by a test, not by comment.
   machine- and project-agnostic and lives there, not here.
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-N0JO-49TT, status: valid, keywords: "why_did_the_burn_alarm_stay_silent_for_weeks window-burn-rate_never_fires_any_more should_I_tell_the_user_the_account_is_burning_fast is_the_burn_detector_dead_or_disabled I_computed_the_burn_pace_myself_and_reported_it who_owns_rotation_the_agent_or_the_daemon how_do_I_get_token_usage_numbers_on_purpose", ocd: 2026-08-26, lmd: 2026-08-26] DO NOT read a long silence from `window-burn-rate` as a dead detector, and DO NOT hand-compute the pace from the usage probes and report it unprompted, BECAUSE the heartbeat alarm is DEFAULT OFF by OWNER DIRECTIVE (2026-08-07, `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED`, `window-burn-rate.py::main` returns 0 before any rotator or keychain work). The directive's own words: account-window usage "is not an agent's business: the daemon owns rotation, so an agent can do nothing with this line except be distracted by it mid-task". Reconstructing the numbers by hand and putting them in the conversation reproduces exactly the push the owner switched off — measured 2026-08-26, when I did it. DO use the PULL path the directive names — `/janitor-token-report` (5h/7d view) or `/janitor-token-attribution` (who is burning it) — and only when someone asks. When a detector is quiet, check its enable knob and its early returns BEFORE its logic: the gates, the dedupe key and the population are all downstream of a `main()` that may never reach them, and here every one of those was healthy while the feature was simply off on purpose.
