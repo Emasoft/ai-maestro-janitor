@@ -3,7 +3,7 @@ trdd-id: A8DPTDOU
 title: OAuth-supervisor alerts flap 83 times a day because two keys describe one condition
 column: backburner
 created: 2026-08-21T13:44:09+0200
-updated: 2026-08-26T05:58:43+0200
+updated: 2026-08-26T10:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -83,6 +83,26 @@ about the alert layer flapping.
 - [ ] A test that drives the same unchanged condition across N supervisor ticks and asserts
       exactly ONE ONSET — flapping must be RED, and the test must fail on today's code
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+
+## ⏵ 2026-08-26 10:05 — ROOT CAUSE FOUND, and it was not the alert layer
+
+All three accounts are live again (`oauth-health` → `status: ok`, `has_refresh: true` on
+each; first clean check since 2026-08-11). What actually broke rotation:
+
+**`slot_capture_browser.py` carried NO PEP-723 dependency header** (fixed in `41ccc80f`), so
+`uv run --script` installed nothing and every capture died at
+`from playwright.sync_api import …` → `ModuleNotFoundError`. Its sibling `reauth.py` HAS the
+header. Two legs can re-mint a credential; the refresh leg was failing (233/576/789 recorded
+failures) and the capture leg could not start at all.
+
+**That is what makes this card's defect serious rather than cosmetic.** The alert cycled
+ONSET→CLEARED all night reporting a recovery that NO code path was capable of performing —
+both re-minting legs were down. A false CLEARED is not noise here: it is the reason nobody
+looked for 19 days while the fleet ran on one expiring account.
+
+The acceptance box added on 2026-08-26 (CLEARED requires positive evidence of a mint) is
+exactly right and is now backed by a concrete case: a mint was impossible, and the alert
+cleared anyway.
 
 ## Fresh evidence — 2026-08-26 (the flap is a FALSE RECOVERY, not just noise)
 
