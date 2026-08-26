@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T14:45:00+0200
+updated: 2026-08-26T15:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -147,6 +147,15 @@ So option 4 is **a detection-driven backstop under an unreliable fast path**, no
 The middle row's failure mode is mine: my detector raises `version-update-requested.flag` from a
 per-SESSION heartbeat, so a host with no armed session never makes the lane overdue early and
 falls back to the 4 h floor. Correct behaviour, worth knowing rather than discovering.
+
+**The two silent failures are silent in DIFFERENT ways, and only one of them is ours to see**
+(ai-maestro-bf's refinement, adopted). The harness stopping is invisible to both of us BY
+CONSTRUCTION — FXPV7L4D found that class 11–155 days deep. But the flag's absence is
+OBSERVABLE: "this host has no armed janitor session" is a state either side can read at any
+time. So if option 4 is taken, the trigger degrading to the 4 h floor should be something the
+lane SAYS OUT LOUD, not something found later — the difference between an unavoidable blind
+spot and a chosen one. Neither of us has built this; it is a rider on option 4, not a
+separate proposal.
 
 **Nothing implemented on either side** — the change touches a shared chore contract, so it waits
 on the owner.
