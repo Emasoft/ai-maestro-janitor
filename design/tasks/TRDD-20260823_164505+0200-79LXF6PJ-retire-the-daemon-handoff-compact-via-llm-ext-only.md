@@ -1,9 +1,11 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: todo
+column: blocked
+pre-block-column: testing
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-23T16:45:05+0200
-updated: 2026-08-23T16:45:05+0200
+updated: 2026-08-26T07:58:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -21,8 +23,33 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-**Not started. USER directive, 2026-08-23 — verbatim, because paraphrase has already cost this
-line of work several retractions:**
+### ⏵ 2026-08-26 — "Not started" is WRONG. Both concrete asks already landed.
+
+Found by cross-check: TRDD-5RXBI65T's STATE says the daemon writer was *"retired entirely —
+TRDD-79LXF6PJ; it no longer composes a handoff at all"*, while this card claimed nothing had
+begun. Verified in the artifacts, not from either card:
+
+| the directive's ask | state | evidence |
+|---|---|---|
+| remove the daemon's cheap autocompose | **DONE** | `external_handoff_clear.py:19-22` — *"the composed handoff that used to be the network-free fallback is gone"*, citing this card's own id, with the consequence made explicit: **no summary means NO CLEAR** |
+| disable Claude Code's auto-compaction | **DONE** | `~/.claude/settings.json` → `"autoCompactEnabled": false` |
+
+**What is NOT reached is the directive's END STATE** — *"if all compactions are done via the
+llm-externalizer, we don't need any handoff anymore"*. Not all compactions go through it today,
+because the external-clear lever is OFF (`EXTERNAL_IDLE_CLEAR_ENABLED=false`) pending the 3.4.0
+publish. So the removals are done and the claim they enable cannot yet be verified.
+
+**Worth stating plainly: the current configuration is the risky middle of this migration.**
+Claude Code's auto-compaction is disabled AND the llm-ext replacement is disabled, so right now
+nothing rescues a session that fills its context — the fallback was removed before its
+replacement was switched on. That is a deliberate, temporary consequence of the resume-storm
+lever pull, not an oversight, but it should not be left standing longer than the publish.
+
+`todo` → `blocked` on the same 3.4.0 publish. A card whose code has shipped is not "todo", and
+one whose remaining verification nobody can perform is not in progress either.
+
+### The USER directive, 2026-08-23 — verbatim, because paraphrase has already cost this
+line of work several retractions:
 
 > are you saying that the daemon is tasked to generate an autocompose handoff? the cheap
 > autocompose is useless. remove such function from the daemon. only use the good one written by
