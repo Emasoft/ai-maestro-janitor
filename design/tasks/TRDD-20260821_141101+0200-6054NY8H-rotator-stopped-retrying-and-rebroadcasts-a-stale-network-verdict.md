@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: human_review
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-22T11:26:14+0200
+updated: 2026-08-26T20:27:06+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -195,7 +195,40 @@ owns `oauth-rotator-tick`, and the janitor's own copy of the cascade is not the 
 and inferring the SYSTEM. `credential-dead` was true of the refresh token and false of the
 account. The alert text named the thing to check and I did not check it.
 
-## ⏰ RE-MEASURED 2026-08-22 11:2x — THE CLOCK IS 8.4 DAYS AND THE DECISION IS THE USER'S
+## ⏰ 2026-08-26 20:26 — THE CLOCK IS **3.15 DAYS**. And this card's own deliverable had not happened.
+
+The 08-22 entry below ends: *"What was missing was nobody telling the USER the clock exists — that
+is this update, and the report to them."* **The report did not reach them.** This card has sat at
+`column: human_review` for four days, and every board summary I gave this session named the
+`dev`/`testing` columns and omitted `human_review` entirely — so the one column that means
+"waiting on the USER" was invisible in exactly the reports meant to tell them what they were
+waiting on. Found only by enumerating every column instead of the ones I expected.
+
+**Re-measured now, non-secret metadata only (no keychain access):**
+
+- **Cookie expiry 2026-08-30 → 3.15 days left**, down from 8.4. After it, all three accounts are
+  human-only and the `RENEW_COOKIE` leg — the one path that mints fresh tokens with NO human — is
+  gone.
+- `rotation-stuck.json` (25.7 h): `all-accounts-maxed`,
+  `fmuaddib@gmail.com:refresh-failed; ipazia.emasoft@gmail.com:refresh-failed`.
+- `active-alerts.json` (**6 minutes old**): `STUCK: no alternate is healthy — but the live ACCOUNT
+  is NOT exhausted (5h 2% / 7d 67%). Only the Fable window is spent (100%), so the remedy is to
+  move agents OFF Fable, not to rotate the credential.`
+
+**That last line matters and is NEW since 08-22.** Two distinct problems were being read as one:
+
+1. **The 3-day credential clock** — real, unchanged, and the only irreversible one.
+2. **Fable's model window at 100%** — live, and NOT a credential problem. It is why the rotator
+   reports stuck while the account itself is healthy. Worth knowing that the standing advisor rule
+   routes work to `fable-advisor:advisor`, so a spent Fable window degrades that path while the
+   account-wide windows still read fine.
+
+Nothing here changes the two remedies (`/janitor-refresh-cc-logins`, or re-arming `reauth-repair`
+which the owner disabled 2026-08-07) — both remain USER decisions, and re-arming reverses a
+deliberate call. What changed is that the clock is now short enough that the choice cannot keep
+waiting for a quiet moment.
+
+## ⏰ RE-MEASURED 2026-08-22 11:2x — the clock was 8.4 days
 
 Every number below read fresh today (non-secret metadata only), against the 2026-08-21 16:10 row
 above.
