@@ -1,9 +1,11 @@
 ---
 trdd-id: HC7CQT10
 title: The arm-once claim is undermined by two user-visible SessionStart lines that read as a chore
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [awaiting-a-session-start-that-replumbs]
 created: 2026-08-20T17:20:03+0200
-updated: 2026-08-22T11:53:41+0200
+updated: 2026-08-26T08:26:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,6 +17,18 @@ eht: []
 ---
 
 # "Why does the janitor still need re-arming?" — it does not; the MESSAGE said it did
+
+## ⏵ 2026-08-26 — `testing` → `blocked` (waiting on an event, NOT on the publish)
+
+Four boxes ticked; the fifth needs a session start that actually RE-PLUMBS, and as the card puts
+it, *a healthy host is precisely the host where this box cannot be ticked*. Nobody is testing it
+and nobody can, so `testing` was untrue — but the blocker is an EVENT (a restart, or an expired
+cron), not a person and not the 3.4.0 publish.
+
+Stated because I nearly mis-filed it: this card explicitly distinguishes itself from
+TRDD-9T0U3M00 — the new wording IS in the installed 3.3.26, so this is conditional emission, not
+a missing deploy. Six other cards blocked on that publish made it the easy wrong answer here.
+
 
 ## What the USER reported (2026-08-20 ~17:05)
 

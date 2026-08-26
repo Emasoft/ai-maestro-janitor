@@ -1,9 +1,11 @@
 ---
 trdd-id: 9ZPU69UC
 title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fire it without importing janitor code
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [peer-repo-hub-lane-wiring]
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-21T11:38:20+0200
+updated: 2026-08-26T08:26:00+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
@@ -15,6 +17,17 @@ eht: []
 ---
 
 # Cold-cache-clear launcher for the server lane (3.3.18, committed to the hub peer)
+
+## ⏵ 2026-08-26 — `testing` → `blocked` (peer-side gate)
+
+Four boxes ticked; the fifth is the card's own EXTERNAL gate — the hub wires its lane and that
+lane is observed firing, which is the PEER's side and cannot be observed from this repo. So no
+local work advances it and nothing here was being tested.
+
+The card already warns this box's absence nearly closed it TWICE, because every other box reads
+`[x]` and the real gate lived only inside a commit message. Putting the block in the COLUMN as
+well means the board itself now carries it, not just anyone who reads to the end.
+
 
 ## Why
 
