@@ -8,7 +8,7 @@ current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 scope: project
-severity: major
+severity: minor
 min-approval-requirement: none
 labels: [daemon, diagnostics, fleet-guardian, stamps]
 npt: []
@@ -35,7 +35,42 @@ chore-coordination yield list               → ['github-config-audit', 'marketp
 So the task is neither absorbed by the ai-maestro server nor crash-looping. It runs, it
 succeeds, and its cadence stamp has not moved in a month.
 
-## Why this is severity major rather than cosmetic
+## ⚠ CORRECTION, same session — this is probably NOT a defect, and the corpus already said so
+
+Filed the above, then recalled the corpus and found the answer already recorded on
+`janitor-daemon-handover-unowned-chores`, whose description literally leads with *"every daemon
+chore stamp is frozen at the same age but no flag is set"*.
+
+Two of its lessons apply directly:
+
+- **[1] DO NOT read a stale `*.last-run.ts` as "this work is not happening"** — the stamp moves
+  only when the JANITOR runs the chore, so for a chore executed by the ai-maestro server a
+  frozen stamp is exactly what CORRECT execution looks like. That is the reading I made.
+- **[5] DO NOT begin an investigation into janitor/server chore coverage without running
+  `memgrep recall` first** — recorded because this same ground was re-derived from scratch once
+  before, across dozens of turns, on a token window the owner was watching burn.
+
+I did precisely what [5] warns against: measured stamps, read `daemon.py`, `fleet_scan.py` and
+`session_liveness.py`, and filed a `severity: major` card — and only then recalled. The
+knowledge was not missing; the lookup was.
+
+**Refined measurement, which supports the stand-down reading.** The stamps did not stop at one
+instant but inside a ~90-second window — several at `2026-07-25 23:01:21–23:02:43`. That is the
+signature of one final janitor pass followed by silence, not of a per-chore stamping bug (which
+would leave each chore frozen at its own last run).
+
+**So the open question is narrower and much less alarming than the title:** when the server
+executes a chore the janitor still schedules, is a frozen janitor stamp the intended contract,
+or should execution-by-either-side advance it? Answer that from `janitor-two-runtime-backends`
+and by asking the server side what it EXECUTES (lesson [1]'s own instruction) — NOT by reading
+more of the janitor's own state files, which is what produced the wrong conclusion here.
+
+**Severity lowered `major` → `minor`, column stays `backburner`.** The one thing that may still
+be a real defect is diagnostic, not functional: nothing distinguishes "frozen because the server
+runs it" from "frozen because it stopped", and a human reading `session-liveness: 31 d` has no
+way to tell. That is worth fixing; a fleet guardian being dead is not.
+
+## Why this looked severity major
 
 **It lies in the dangerous direction.** A stamp reading 31 days is the signature of a dead
 chore, and this project's own `CLAUDE.md` explicitly teaches reading these stamps to judge
