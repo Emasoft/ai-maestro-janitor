@@ -116,8 +116,21 @@ def test_it_reads_the_real_project_root_field(wired, monkeypatch, tmp_path: Path
     )
 
 
-def test_it_is_inert_until_opted_in(wired, monkeypatch, tmp_path: Path) -> None:
-    """`/clear` is unrecoverable, so the capability ships OFF — same opt-in as the hook half."""
+def test_the_disabled_lane_evaluates_in_shadow_but_can_never_clear(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """TRDD-UQW5IOAE: OFF now means "takes no action", NOT "computes nothing".
+
+    This test previously asserted `spawns == []`, and that assertion was a stricter claim than
+    the invariant it was defending. Its docstring names the real one — *"`/clear` is
+    unrecoverable, so the capability ships OFF"* — which is about the CLEAR, not about whether
+    a verdict is computed. Holding the strict version had a cost the card measured: the
+    zero-false-positive evidence the feature needs before it can ever ship enabled could not be
+    collected, because the disabled lane returned before the fleet scan and recorded nothing.
+
+    So the spawn is now expected, and `--dry-run` is what carries the safety — the watcher
+    returns before the clear chain on that flag.
+    """
     d, spawns = wired
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", raising=False)
     monkeypatch.setattr(
@@ -126,7 +139,56 @@ def test_it_is_inert_until_opted_in(wired, monkeypatch, tmp_path: Path) -> None:
 
     d.task_cold_cache_clear()
 
+    assert len(spawns) == 1, "the disabled lane must still evaluate, or shadow collects nothing"
+    assert "--dry-run" in spawns[0], (
+        "a shadow spawn WITHOUT --dry-run would run the real clear chain on a feature the "
+        "owner has not opted into — the one outcome this test exists to prevent"
+    )
+
+
+def test_shadow_can_be_switched_off_making_the_disabled_lane_fully_inert(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """The escape hatch: shadow defaults ON, and one env var restores total inertness.
+
+    Worth a test rather than trust, because a default-ON behaviour whose off-switch does not
+    work is indistinguishable from having no switch — and this one exists precisely for a host
+    where the owner wants the lane to do nothing at all.
+    """
+    d, spawns = wired
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_CLEAR_SHADOW", "0")
+    monkeypatch.setattr(
+        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(_project(tmp_path))]
+    )
+
+    d.task_cold_cache_clear()
+
     assert spawns == []
+
+
+def test_the_enabled_lane_never_carries_the_shadow_flag(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """The inverse leak, and the more dangerous direction to get wrong.
+
+    If `--dry-run` ever rode along on the ENABLED lane, the feature would be silently dead: it
+    would log confident FIRE verdicts and clear nothing, and — because a dry-run verdict and a
+    live verdict print identically — the logs would look exactly like a working feature. That
+    is the same shape as the bug that put this card here (a chore that shipped inert and logged
+    `done in 0s` while reading as healthy), so it gets its own assertion rather than being
+    assumed from the branch above.
+    """
+    d, spawns = wired
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", "1")
+    monkeypatch.setattr(
+        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(_project(tmp_path))]
+    )
+
+    d.task_cold_cache_clear()
+
+    assert len(spawns) == 1
+    assert "--dry-run" not in spawns[0], "the enabled lane must actually clear, not shadow"
 
 
 def test_it_never_clears_a_session_that_is_working(wired, monkeypatch, tmp_path: Path) -> None:

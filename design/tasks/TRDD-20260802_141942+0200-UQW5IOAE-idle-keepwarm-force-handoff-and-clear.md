@@ -315,6 +315,42 @@ into a pane it does not own)?
       > unambiguously right", and the TRDD-VOWAUVE5 ordering lesson quoted below is exactly why
       > it went first: build the channel, THEN let the criterion depend on it.
       >
+      > **⏵ 2026-08-26 21:00 — REASON (1) IS FIXED TOO. Shadow mode now actually runs, so the
+      > N-day clock starts on the next beat.** Reason (2) needed nothing: the watcher already
+      > supports `--dry-run` and already returns before the clear chain on it — the flag simply
+      > had no caller. So the whole remaining gap was one early `return 0`.
+      >
+      > `cold_cache_clear_task.run_once()` no longer returns before the fleet scan when the
+      > feature is off. It sets `shadow = not ec.enabled()` and, in shadow, walks the fleet and
+      > spawns the watcher with `--dry-run` appended. **"Inert" now means "takes no action", not
+      > "computes nothing"** — the distinction the old code conflated, and the reason the
+      > evidence could never be gathered.
+      >
+      > **Default ON, with `CLAUDE_PLUGIN_OPTION_COLD_CACHE_CLEAR_SHADOW=0` as the escape
+      > hatch.** Deliberately NOT a second opt-in: this box asks for N days of shadow verdicts
+      > with zero FALSE positives, and a criterion gated behind a switch nobody flips collects
+      > nothing — precisely the state this card already spent weeks in, with a reader liable to
+      > conclude "shadow has been running and found nothing". Two opt-ins in series is how a
+      > feature stays permanently unevidenced and therefore permanently unshippable. The safety
+      > is carried by `--dry-run`, not by the switch.
+      >
+      > **The existing `test_it_is_inert_until_opted_in` broke, and it was right to break.** Its
+      > assertion (`spawns == []`) was a stricter claim than the invariant its own docstring
+      > names (*"`/clear` is unrecoverable, so the capability ships OFF"* — about the CLEAR, not
+      > about whether a verdict is computed). Rewritten to assert the real one, plus two new
+      > tests: the off-switch genuinely restores total inertness, and — the more dangerous
+      > direction — the ENABLED lane never carries `--dry-run`. That inverse leak would leave
+      > the feature silently dead while its logs read healthy, the same shape as the `done in
+      > 0s` chore that put this card here.
+      >
+      > **NEUTER-PROVEN:** forcing `if shadow:` to `if False:` (so the shadow spawn loses
+      > `--dry-run` and would run the real clear chain on a feature nobody opted into) reddens
+      > the safety test.
+      >
+      > **What is still open on this box:** N days of accumulated shadow verdicts with zero
+      > false positives, and the staged end-to-end drill on a sacrificial session. Those are
+      > now WAITING ON TIME, which is the first time that sentence has been true here.
+      >
       > A file handle, not a pipe — the child is detached and nobody survives to drain a pipe, so
       > a full buffer would block it forever. `PYTHONUNBUFFERED=1` so a killed child still leaves
       > its lines. The SessionStart lane never had this hole (blocking, and it logs its own

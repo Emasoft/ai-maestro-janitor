@@ -54,6 +54,23 @@ import state  # noqa: E402
 
 _COMPONENT = "cold-cache-clear"
 
+# SHADOW MODE (TRDD-UQW5IOAE). When the feature is OFF — which is how it ships, because
+# `/clear` is unrecoverable — this lane still walks the fleet and spawns the watcher with
+# `--dry-run`, so a verdict is COMPUTED and LOGGED for every candidate while nothing is ever
+# cleared. Default ON; set this to 0 to make the disabled lane fully inert again.
+#
+# Why it must default ON rather than be a second opt-in nobody sets: the card's acceptance is
+# "N days of shadow verdicts with zero FALSE POSITIVES", and the risk on an irreversible action
+# is a false positive, not a missed true one. A criterion gated behind a switch nobody flips
+# collects no evidence, and the card measured exactly that outcome once already — a reader
+# concluding "shadow mode has been running and found nothing" when nothing had run at all.
+# Two opt-ins in series is how a feature stays permanently unevidenced and therefore
+# permanently unshippable.
+#
+# Safe by construction: `--dry-run` returns before the clear chain (external_handoff_clear.py),
+# so the worst case is one extra detached python per beat, for AT MOST one candidate.
+_SHADOW_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_CLEAR_SHADOW"
+
 
 def run_once() -> int:
     """One beat: evaluate the fleet, spawn the watcher for AT MOST one candidate.
@@ -67,8 +84,12 @@ def run_once() -> int:
     except Exception as exc:  # noqa: BLE001 - a missing sibling must not kill the beat
         state.log_line(_COMPONENT, f"cold-cache-clear: libs unavailable: {exc}")
         return 0
-    if not ec.enabled():
-        return 0  # ships inert, exactly like the SessionStart half — /clear is unrecoverable
+    # ships inert, exactly like the SessionStart half — /clear is unrecoverable. But "inert"
+    # now means "takes no action", NOT "computes nothing": the shadow lane below evaluates and
+    # logs a verdict so the card's zero-false-positive clock can actually run.
+    shadow = not ec.enabled()
+    if shadow and not state.is_truthy_env(_SHADOW_ENV, True):
+        return 0
     now = int(time.time())
     try:
         fleet = fleet_scan.gather_fleet(now=now)
@@ -115,7 +136,18 @@ def run_once() -> int:
         # Log the header BEFORE the spawn, not after: it puts the "evaluating <root>" line
         # ahead of the watcher's own lines in the same file (they interleave otherwise), and
         # a beat that dies mid-spawn still says which root it was on.
-        state.log_line(_COMPONENT, f"cold-cache-clear: evaluating {root}")
+        state.log_line(
+            _COMPONENT,
+            f"cold-cache-clear: evaluating {root}" + (" [SHADOW — dry-run]" if shadow else ""),
+        )
+        # The shadow marker rides in the ARGV, not in an env var, because the watcher's own
+        # `--dry-run` branch is the thing that guarantees no clear happens. Reusing the flag the
+        # tool already documents keeps one code path instead of two, and means a shadow verdict
+        # and a live verdict are produced by identical code — which is the only way N days of
+        # shadow evidence says anything about the live case.
+        argv = [sys.executable, str(watcher), "--project-root", root]
+        if shadow:
+            argv.append("--dry-run")
         try:
             log_dir = state.log_dir()
             # Explicit, not inherited from log_line's init_state() side effect — an open() that
@@ -125,7 +157,7 @@ def run_once() -> int:
             log_dir.mkdir(parents=True, exist_ok=True)
             with (log_dir / f"{_COMPONENT}.log").open("a", encoding="utf-8") as sink:
                 subprocess.Popen(  # noqa: S603 - fixed argv, feature-detected script
-                    [sys.executable, str(watcher), "--project-root", root],
+                    argv,
                     stdout=sink,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
