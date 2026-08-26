@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["playwright>=1.40"]
+# ///
 """Automated full-OAuth slot capture via the account's OWN Chrome profile.
+
+⚠ THE PEP-723 HEADER ABOVE IS LOAD-BEARING — do not drop it. Without it `uv run
+--script` installs nothing, `from playwright.sync_api import …` raises
+ModuleNotFoundError, and this script cannot capture ANYTHING. Measured
+2026-08-26: it had no header while its sibling `reauth.py` did, so every capture
+attempt died at the import while the refresh leg failed separately — the two
+legs that could each have re-minted a credential were both down, which is why
+three accounts sat dead for ~19 days while the alert flapped ONSET/CLEARED.
+Playwright here is ONLY a CDP client for a Chrome this script launches itself;
+it is never the launcher (see the transport rationale below).
 
 Faithful port of the audited `claude-login-automation` project's
 `completeOAuthInBrowser` (downloads_dev/CLAUDE-BROWSER-PROJECTS/_audit/
