@@ -46,8 +46,7 @@ Identifiers are snake_case; hyphenated spellings are prose-only
 (3P-KAN-17). The five 3.0.0 additions' normative meanings
 (3P-KAN-18/-19) live in
 `rules/references/universal-kanban-3p300-columns.md` — READ IT before
-moving any card into one of them; note `design` now sits BEFORE
-`todo`, so `todo` asserts approved AND designed.
+moving any card into one of them (`design` now precedes `todo`).
 
 **The LEGAL SET for `column:` is 27, not 22** (3P-KAN-20): five
 BRACKET values sit outside the board — `proposal`, `planned`,
