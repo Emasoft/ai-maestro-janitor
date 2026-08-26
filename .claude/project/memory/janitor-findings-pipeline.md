@@ -2,7 +2,7 @@
 name: janitor-findings-pipeline
 description: "where do janitor findings/drift lines actually get recorded / what is the findings ledger / where does a sev>=HIGH finding get pushed to a human / what does janitor-findings show / findings-ledger.ndjsonl format / notify.py human channel gates / how does SessionStart surface unread findings / the lint count jumped and the corpus looks like it is rotting / are two findings counts even comparable / a checker printed nothing did it even run / silence cannot distinguish clean from did-not-look / a detector reported zero findings and I assumed it was clean / how many detectors ran and over what scope / stale binary reported old counts after a fix / did the memory corpus actually decay / how to compare a lint count across linter versions / memgrep --version carries the build commit / what does findings_ledger.record do"
 ocd: 2026-08-02
-lmd: 2026-08-16
+lmd: 2026-08-26
 metadata:
   node_type: memory
   type: project
@@ -28,7 +28,7 @@ publish-globally: false
   default-on; Tier 2 opt-in webhook `CLAUDE_PLUGIN_OPTION_NOTIFY_WEBHOOK_URL`; gates:
   sev ≥ HIGH + content-hash dedupe + 24 h cap with one-per-day digest fold) — wired to
   supervisor alerts, the F4 keychain-degradation probe, task-quarantine entry, and the
-  fleet github-config digest.
+  fleet github-config digest. [^1]
 
 
 ^ATOM-HJGX-SQLI [desc: "A lint/findings COUNT is only comparable within one linter version — check what the older binary could emit before reading a jump as decay", keywords: lint_count_jumped findings_exploded corpus_is_rotting_fast 240_findings_vs_50 count_comparison_across_versions did_the_memory_corpus_decay a_finding_count_is_only_comparable_within_one_linter_version newly_visible_debt_not_new_debt git_merge-base_is-ancestor_checks_rule_availability memgrep_--version_carries_the_build_commit a_trend_drawn_across_an_instrument_change_is_not_a_trend which_lint_codes_are_actually_comparable_across_versions, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
@@ -69,3 +69,5 @@ Cost when it goes unfixed: a clean scope was read as a skipped root, producing a
 So a finding count is not enough on its own: emit the SCOPE too (`0 finding(s) … (1 scope(s): LOCAL)`). A bare "0 findings" still cannot prove the right corpus was scanned.
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-W30O-YTBD, status: valid, keywords: "a_recent_HIGH_finding_in_the_ledger_is_it_still_live how_do_I_know_a_janitor_finding_was_resolved the_findings_ledger_shows_an_alarm_from_3_hours_ago is_this_drift_line_current_or_historical triaging_findings_by_recency_is_wrong where_is_the_resolution_of_a_finding_recorded I_almost_reported_a_resolved_alarm_as_live", ocd: 2026-08-26, lmd: 2026-08-26] DO NOT read a finding's RECENCY in the ledger as evidence that its condition still holds, BECAUSE `findings-ledger.ndjsonl` is APPEND-ONLY and carries no resolution record — the fix is recorded by the underlying FLAG being cleared (e.g. `iterm-automation-blocked.flag`, whose disappearance also triggers `findings_ledger.clear_surfaced_to_human`), never by a new ledger line. Measured 2026-08-26: `ITERM-AUTOMATION-TCC` (HIGH) showed entries 3.8h old and read as a live outage on a session with no tmux fallback; the flag was already gone and the channel demonstrably worked. DO check the condition's own artifact before reporting any ledger entry as current — the flag, the state file, or a direct probe. Recency ranks entries; only the artifact says whether the problem is still there. The failure mode is asymmetric and points the wrong way: a resolved HIGH still looks urgent forever, so triage-by-recency manufactures alarms rather than missing them.
