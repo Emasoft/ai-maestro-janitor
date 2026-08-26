@@ -3,7 +3,7 @@ trdd-id: AO8MPK5D
 title: The repair chore is told to fix publish-globally-missing but its gate cannot see it
 column: todo
 created: 2026-08-26T22:19:00+0200
-updated: 2026-08-26T22:20:55+0200
+updated: 2026-08-26T22:34:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -54,8 +54,29 @@ card's to make.
 
 **Reporting-fidelity residue, separate from the fix:** the heartbeat's `memgrep lint: 67
 finding(s)` line counts findings the janitor cannot act on, which reads as accumulating debt when
-it is out-of-scope-by-design. Worth splitting the count by actionability; not filed as its own
-card yet.
+it is out-of-scope-by-design. **Do NOT file this as a card** — janitor#276 already litigated that
+line and fixed the real half (a severity regex matching `ERROR` inside the clause that NEGATES
+it, promoting the most routine line in the system on every fire). The line prints unconditionally
+by design: a linter silent on success cannot be told apart from one that never ran (janitor#191).
+
+### ⛔ SECOND CORRECTION 2026-08-26 22:34 — the PROJECT-gate finding is NOT new
+
+**TRDD-LFSWY0C6 recorded it on 2026-08-13**, thirteen days earlier: same file, same two line
+numbers, same conclusion that a chore hosted there would be *"silently disabled on every default
+install — wired, reachable, documented, and inert"*. It goes further than the correction above
+does, naming a second defect (an axis mismatch: the scheduler's subject is a memory scope ROOT,
+while that chore's subject is a FILE) and leaving the host choice as an open design decision.
+
+I re-derived the whole thing from source tonight and wrote it up as a discovery. **The reason is
+worth more than the embarrassment:** `memgrep recall` indexes MEMORY pages, and nothing indexes
+`design/tasks/*.md` — so a fact that lives only in a card body is invisible to the retrieval path
+every session actually uses. Recall found nothing because there was nothing in the corpus to
+find, and the card that held it was never going to surface for the symptom I searched with.
+
+Migrated to `[[memory-system]]` (`ATOM-HO67-QC61`) citing LFSWY0C6, with the transferable half as
+`ATOM-LATA-4NGJ`: grep `design/tasks/` for the symbol or setting name alongside the memory recall
+before claiming a mechanism is unrecorded — and when the grep hits, migrate the fact rather than
+leaving it where recall cannot reach it.
 
 ## The gap, measured 2026-08-26 22:15
 
