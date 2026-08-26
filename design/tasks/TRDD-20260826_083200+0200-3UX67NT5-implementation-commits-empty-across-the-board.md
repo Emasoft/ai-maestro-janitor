@@ -3,7 +3,7 @@ trdd-id: 3UX67NT5
 title: implementation-commits is empty or missing on most cards that have shipped code
 column: backburner
 created: 2026-08-26T08:32:00+0200
-updated: 2026-08-26T08:32:00+0200
+updated: 2026-08-26T18:20:00+0200
 current-owner: janitor-main-session
 task-type: docs
 project-id: ai-maestro-janitor
@@ -57,6 +57,37 @@ Cards are getting their code shipped without the field being updated in the same
 12 cards retroactively is worth little if the 13th is authored the same way tomorrow. The
 durable fix is at the moment of the commit, not in a later sweep — the `commit-discipline` rule
 already requires the id in the subject, which is what makes recovery possible at all.
+
+## ⏵ 2026-08-26 18:20 — SIX CARDS FILLED, per-card, by reading each commit rather than grepping
+
+The six named in the sweep above are done. Method exactly as this card demands — SUBJECT-matched
+candidates, then a human read of each before writing it:
+
+| card | filled | candidates rejected |
+|---|---|---|
+| 1QJIZFFW | `df7d4cb3, 169d967d, 295c1243` | 8 docs commits (STATE edits, column moves, policy verdicts) |
+| WP7TCRME | `b8dbc254, 7ad7c0ee, da249936, d4d9f726` | 6 docs commits |
+| 87RKBYJ8 | `3179af38` | 7 docs commits |
+| 5RXBI65T | `0581b940` | 9 docs commits — this card is mostly a whodunit, so its history is nearly all reasoning |
+| 88ZVEQY7 | `cda30a23` | 2 (one card-creation, one a shared CLAUDE.md map refresh citing two cards) |
+| GZXTSJSR | `cf9fb7a1` | 1 card-creation |
+
+**The discriminator that did the work is `feat(`/`fix(` vs `docs(`** — this field is the
+backtracking chain from a BUG to the change that caused it, so a commit that edited the card's
+own prose can never answer it. 33 of the 39 subject-matched commits were docs. That ratio is
+itself the finding: subject-matching alone would have written mostly noise into the one field
+whose value is precision.
+
+**One case needed more than the subject, and it is the one this card warned about.**
+`3179af38 feat(memory): sync subconscious procedures … (AP2X9A0H b, NM4TPCQ9 prong 2, 87RKBYJ8
+gap list)` cites THREE cards in one subject. Reading its file list settled it — it touched
+`skills/janitor-memory-{atomize,consolidate,harvest}/SKILL.md`, which are exactly the artifacts
+87RKBYJ8 governs ("make the existing ones enforce these rules"). Kept. A subject-only rule would
+have had to guess, and a body-grep would have taken all three.
+
+**Remaining:** the sweep said "12+ cards"; six are done here and the rest were not re-enumerated
+today. The next pass should re-run the sweep rather than trust that number — it was a count, not
+a list.
 
 ## Acceptance
 

@@ -10,6 +10,7 @@ task-type: feature
 scope: project
 severity: major
 labels: [wikimem, memgrep, memory-maintenance, subconscious-agent, desc-field]
+implementation-commits: [3179af38]
 relevant-rules: []
 ---
 
