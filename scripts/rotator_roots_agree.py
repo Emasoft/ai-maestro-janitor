@@ -57,7 +57,13 @@ def main() -> int:
         print("DESYNC canonical root missing — ai-maestro would silently adopt the legacy state")
         return 0
     if legacy is None:
-        print("agree (no legacy root — the silent fallback cannot arm)")
+        # COUPLING, named so a future reader knows where to re-check: this
+        # sentence is a claim about ai-maestro's `lib/oauth-rotator/slots.ts`
+        # ::rotatorRoot — the legacy root is the ONLY fallback it has. If a
+        # different fallback is ever reintroduced there, this branch reports
+        # "agree" about a hazard that has simply moved somewhere else. Raised by
+        # the ai-maestro peer, who owns that resolver.
+        print("agree (no legacy root — slots.ts::rotatorRoot has no other fallback)")
         return 0
 
     c_live, l_live = canonical.get("live_email"), legacy.get("live_email")

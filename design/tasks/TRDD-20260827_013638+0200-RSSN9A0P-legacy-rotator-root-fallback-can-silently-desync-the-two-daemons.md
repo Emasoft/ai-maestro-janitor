@@ -229,6 +229,26 @@ The canary survives every branch — that is the property being tested, and it i
 printed first. **The probe reports DESYNC right now**: the two roots genuinely disagree today, so
 the hazard is not theoretical, only unarmed.
 
+## The cookie vault — SETTLED: janitor-private, with an explicit staleness marker
+
+The peer owns the capture path and ruled `Claude Code-rotator-cookies` **janitor-private** rather
+than shared, and the reasoning is right: the Chrome profile sqlite is the shared substrate and is
+already single; the keychain vault is a DERIVED copy, and a derived copy is tolerable only while
+exactly ONE writer exists. Making it shared would create two writers over a schema only one side
+understands — the very failure the owner's directive aims at.
+
+That leaves the real risk: their capture re-mints cookies and my vault silently ages. So the
+contract is explicit and **derivable, not assumed** — the same discipline as the probes:
+
+| who | writes | shape |
+|---|---|---|
+| ai-maestro, after each successful cookie capture | `<canonical-root>/cookie-capture.<email>.last-success.ts` | epoch seconds, one line, no newline needed — matches the existing `tick-completed.ts` convention (`1787786653`) |
+| janitor, after each `cookie_vault.snapshot_to_keychain` | `<canonical-root>/cookie-vault.<email>.snapshot.ts` | same shape |
+
+**Vault is stale ⟺ `cookie-capture.<email>.last-success.ts` > `cookie-vault.<email>.snapshot.ts`.**
+Per-account, not global: a single-account capture must not imply all three were refreshed.
+Missing capture marker ⇒ could-not-determine, never "fresh".
+
 ## Acceptance
 
 - [ ] Peer answers on options 1/2; shape agreed before either half is built
