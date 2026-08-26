@@ -28,6 +28,7 @@ import sys
 
 CANONICAL = "~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/state.json"
 LEGACY = "~/.claude/account-rotator/state.json"
+BEACON = "~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/oauth-rotator/live-identity.json"
 
 
 def load(path: str) -> dict | None:
@@ -43,6 +44,38 @@ def load(path: str) -> dict | None:
         return json.load(fh)
 
 
+def split_brain(canonical: dict) -> None:
+    """Does the rotator's BOOKKEEPING agree with the last OBSERVED live credential?
+
+    The ai-maestro peer raised the failure this catches, and it is the dangerous
+    one: if a state write is discarded while a live switch proceeds, the keychain
+    holds account B while state.json still says account A. Each reader is
+    self-consistent alone, so nothing notices — unlike an empty state, which
+    announces itself.
+
+    This compares state.json against `live-identity.json`, and that is NOT a
+    value compared with itself: rotator.py:882 re-stamps the beacon ONLY when the
+    credential actually CHANGED, and :2962 writes it from a session context that
+    touches neither state.json nor the keychain. Two independent writers, so
+    agreement is evidence.
+
+    It deliberately does NOT read the keychain item itself, which would be the
+    stronger check. A probe on a heartbeat cadence that reads a `security` item
+    is how the July incident produced hundreds of "Security wants to use the
+    login keychain" dialogs with no Always-Allow button (memory: macos-keychain).
+    A detector that locks the owner out of their own machine is not a detector.
+    """
+    beacon = load(BEACON)
+    if beacon is None:
+        print("beacon-absent (no live-identity.json — cannot cross-check bookkeeping)")
+        return
+    if beacon.get("email") != canonical.get("live_email") or beacon.get("fp") != canonical.get("live_fp"):
+        print(
+            f"SPLITBRAIN state says {canonical.get('live_email')!r}/{str(canonical.get('live_fp'))[:8]} "
+            f"but last observed live was {beacon.get('email')!r}/{str(beacon.get('fp'))[:8]}"
+        )
+
+
 def main() -> int:
     # The canary is printed BEFORE any fallible work, and that ordering is the
     # whole point of it. It proves the probe EXECUTED; if it is emitted after
@@ -56,6 +89,12 @@ def main() -> int:
         # The trap is ARMED right now: ai-maestro would take the legacy root.
         print("DESYNC canonical root missing — ai-maestro would silently adopt the legacy state")
         return 0
+    # Runs BEFORE the legacy-absent early return, deliberately. Retiring the
+    # legacy root is the goal, and once it is gone that return fires on every
+    # run — so a split-brain check placed after it would silently stop executing
+    # at exactly the moment the rest of this file starts reporting "agree".
+    split_brain(canonical)
+
     if legacy is None:
         # COUPLING, named so a future reader knows where to re-check: this
         # sentence is a claim about ai-maestro's `lib/oauth-rotator/slots.ts`

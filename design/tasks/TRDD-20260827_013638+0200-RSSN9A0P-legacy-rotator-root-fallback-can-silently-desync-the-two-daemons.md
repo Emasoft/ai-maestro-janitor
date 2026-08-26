@@ -12,7 +12,7 @@ severity: major
 priority: high
 blocker-probe: python3 scripts/rotator_roots_agree.py
 blocker-probe-canary: match:CANARY roots-compared
-blocker-holds-if: match:DESYNC
+blocker-holds-if: match:DESYNC|SPLITBRAIN
 labels: [oauth-rotator, shared-state, upstream-ai-maestro]
 npt: []
 eht: []
@@ -229,6 +229,40 @@ The canary survives every branch — that is the property being tested, and it i
 printed first. **The probe reports DESYNC right now**: the two roots genuinely disagree today, so
 the hazard is not theoretical, only unarmed.
 
+## ⛔ THE MARKER CONTRACT IS WITHDRAWN — its premise was false (2026-08-27 01:52)
+
+**Do not build the reader described in the next section.** I asked the peer for a
+`cookie-capture.<email>.last-success.ts` marker on the premise that *"if their capture path
+re-mints cookies, my vault goes stale with nothing to notice."* **They have no cookie capture
+path.** They went to implement my marker, could not find an honest site for it, and stopped —
+which is the correct outcome and the one I made harder by asking.
+
+Verified here rather than accepted: `grep -rn "inject_jar\|injectJar\|snapshot_to_keychain\|
+writeCookies\|\"Cookies\"" lib app --include=*.ts` in their tree returns **nothing**. Their
+`reauth-drive.ts:46` states outright that it never inspects, stores or logs a token, a cookie or
+the verifier; `:34` harvests cookies FROM the environment — it reads, it does not write.
+
+The only site that knows which account a credential belongs to is
+`reauth-flow.ts::completeReauth`, and that takes a **pasted code**: the human may have logged in
+in their everyday browser, entirely outside the shared profile. A success there means *"an OAuth
+slot was re-filed"*, never *"the shared cookie store changed"*. A marker named
+`cookie-capture.…` written at that site would assert something the event does not establish —
+and it would lie in the direction that makes me refresh a vault that was fine, or trust one that
+was not.
+
+**So the vault cannot be staled by their side.** The staleness risk is real but its sources are
+my own capture path and the human's logins — both already mine. Nothing to coordinate.
+
+They offered `slot-refile.<email>.last-success.ts` for the fact they DO have. **Declined**: my
+vault pairs with the cookie store, not with slot state, so consuming it would recreate the same
+name-does-not-match-event defect one rename later. "Nothing" is the right artifact here.
+
+**The lesson, and it is the same one twice tonight:** I specified a marker for an event I had not
+verified occurs, in someone else's system. The premise was as unchecked as the invented regex in
+TRDD-6054NY8H. Asking a peer to emit a signal is exactly as much an assertion as emitting one.
+
+<details><summary>SUPERSEDED — the withdrawn marker contract, kept verbatim</summary>
+
 ## The cookie vault — SETTLED: janitor-private, with an explicit staleness marker
 
 The peer owns the capture path and ruled `Claude Code-rotator-cookies` **janitor-private** rather
@@ -248,6 +282,41 @@ contract is explicit and **derivable, not assumed** — the same discipline as t
 **Vault is stale ⟺ `cookie-capture.<email>.last-success.ts` > `cookie-vault.<email>.snapshot.ts`.**
 Per-account, not global: a single-account capture must not imply all three were refreshed.
 Missing capture marker ⇒ could-not-determine, never "fresh".
+
+</details>
+
+## SPLITBRAIN — the check that replaced the marker, and it catches the worse failure
+
+The peer's `1cb2fc62` refused a bad state write by returning early. Their own review then found
+`saveState` is `void`, so a silent refusal is **undetectable at every call site by construction** —
+now throws (`ffafa40b`), caught by `server-tick.ts:195-277`, so it surfaces as a reported tick
+failure instead of a discarded write.
+
+They also **withdrew a reachability argument they had given me and I had relied on**: "unresolved
+root ⇒ zero slots ⇒ the candidate loop never runs ⇒ `switchLiveTo` unreachable" holds only when
+the root is unresolved AT LOAD. It does not cover the root going unresolved MID-TICK — my DATA dir
+being restored, a reinstall in flight — where slots loaded fine and the write is then discarded.
+Result: **keychain live = account B while `state.json` still says account A.**
+
+That split-brain is worse than the empty shadow and my roots probe could not see it: comparing
+canonical-vs-legacy `state.json` answers *"do the two files agree"*, never *"does state agree with
+reality"*. Each reader is self-consistent alone, so nothing announces it.
+
+`split_brain()` in the probe now compares `state.json` against `live-identity.json`. **That is not
+a value compared with itself** — `rotator.py:882` re-stamps the beacon ONLY when the credential
+actually CHANGED, and `:2962` writes it from a session context that touches neither `state.json`
+nor the keychain. Two independent writers, so agreement is evidence.
+
+**It deliberately does NOT read the keychain item**, which would be the stronger check. A probe on
+a heartbeat cadence that reads a `security` item is exactly what produced hundreds of "Security
+wants to use the login keychain" dialogs with no Always-Allow button in July (memory:
+`macos-keychain`). A detector that locks the owner out of their machine is not a detector.
+
+Verified by neuter, not by argument: beacon repointed at a disagreeing identity ⇒
+`SPLITBRAIN state says 'ipazia…'/f61bb0c7 but last observed live was 'other@example.com'/deadbeef`.
+It runs BEFORE the legacy-absent early return on purpose — retiring the legacy root is the goal,
+and a check placed after that return would silently stop executing at the exact moment the rest of
+the probe starts reporting "agree".
 
 ## Acceptance
 
