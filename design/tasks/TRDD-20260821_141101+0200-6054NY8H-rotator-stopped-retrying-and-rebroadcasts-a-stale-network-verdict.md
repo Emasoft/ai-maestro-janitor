@@ -10,6 +10,7 @@ project-id: ai-maestro-janitor
 scope: project
 severity: major
 blocker-probe: bash ~/.claude/account-rotator/lifetime-status.sh
+blocker-probe-canary: match:cookie/session
 blocker-holds-if: match:ACTION DUE
 priority: high
 approval-tier: 0
@@ -67,8 +68,16 @@ cookie re-login that was **not needed**. The owner stopped it. The bad datum ori
 of the QUESTION ("run `lifetime-status.sh`; the blocker holds iff it reports refresh-due"). An
 answer has a silent timestamp; parking the card is exactly what stops anyone re-deriving it. The
 frontmatter now carries `blocker-probe:` / `blocker-holds-if:` so the claim is re-runnable in one
-second instead of re-read as current. See the ai-maestro peer's TRDD-CV5KDCB7, which proposes
-exactly this and a `stale-blocker` heartbeat detector on our side.
+second instead of re-read as current. `ACTION DUE` is the script's REAL failing-state banner
+(`lifetime-status.sh:135`), read from source, not guessed — a first regex here was invented from a
+single healthy run and matched nothing the script can emit, which is fail-open by construction.
+
+**STILL DEFECTIVE, and it is the grammar, not this instance:** `blocker-holds-if: match:<regex>`
+is a TWO-VALUED predicate. A timeout, a non-zero exit, a missing script and an empty file all
+collapse to no-match, i.e. "blocker cleared" — the exact fail-open shape I made condition 3 of
+accepting the design when replying to the peer. No `stale-blocker` detector may consume this field
+until the grammar can express a third verdict (could-not-run ≠ cleared). Raised with the peer;
+their half owns the grammar.
 
 **What survives:** the ORIGINAL defect — a cited failure reason re-broadcast for hours without
 being re-tested — is untouched and still open. Per CORRECTION 3 it belongs to **ai-maestro**, not
@@ -237,6 +246,39 @@ so nothing is blocking a read.
 the cascade's `RENEW_COOKIE` leg is designed to mint fresh tokens from, with no human at all.
 Only `ema***` genuinely needs a re-login, and only because its cookie lapsed **yesterday**.
 
+## ⛔ CORRECTION 6 — 2026-08-27 01:36: **`match:<regex>` is TWO-VALUED and therefore fail-open by construction**
+
+Fixing my invented regex (CORRECTION 5, defect 1) left the deeper defect standing, and an
+adversarial review caught it: **`blocker-holds-if: match:<regex>` has no third state.** A timeout,
+a non-zero exit, a deleted script, an empty output file — every one of them produces *no match*,
+and no-match means *cleared*. I made "could-not-run is NEVER cleared" the condition I said I would
+hold hardest, and then shipped, in the same turn, a worked example that cannot express it.
+
+**The minimal fix is a CANARY**, and it is now on this card:
+
+```yaml
+blocker-probe:        bash ~/.claude/account-rotator/lifetime-status.sh
+blocker-probe-canary: match:cookie/session     # MUST appear in any run that really ran
+blocker-holds-if:     match:ACTION DUE
+```
+
+Three verdicts, decided in this order:
+
+| verdict | condition |
+|---|---|
+| **2 · could-not-run** | non-zero exit **OR** timeout **OR** canary ABSENT — never "cleared", never un-parks |
+| **1 · holds** | canary present **AND** `blocker-holds-if` matches |
+| **0 · cleared** | canary present **AND** `blocker-holds-if` does not match |
+
+The canary is what makes verdict 0 mean *"the probe ran and said no"* instead of *"nothing was
+observed"*. Without it, an empty result is indistinguishable from a clean one — the same shape as
+the lenient reader in TRDD-NB70FKKT, and the reason grep's exit-2 exists at all.
+
+**Note on adoption:** no detector, lint, or schema in this repo parses `blocker-probe*` yet. These
+three lines are inert documentation today. That is deliberate — the detector ships DISABLED under
+NB70FKKT — but it also means a consumer built later against a slightly different spelling would
+silently no-op, so the spelling above is the one to implement against.
+
 ## ⛔ CORRECTION 5 — 2026-08-27 01:33: **I committed this card's OWN defect while correcting it**
 
 Ten minutes after writing CORRECTION 4 I told the owner "the one real alert on this host is
@@ -270,6 +312,14 @@ age in OPPOSITE directions, so neither is readable as freshness:
 
 **Rule:** an alert's own `lastSeenAt` is the only age it has. A file mtime is not evidence about
 its contents, and `seen: 46` counts re-emissions, not re-observations.
+
+**And the alert may not even be about the account it claims.** It says `5h 2% / 7d 67%` and
+attributes that to "the live ACCOUNT". `state.json` says the live account is `ipazia`, whose
+newest sample is **`5h 6.0 / 7d 11.0`**. The alert's `67` is within rounding of **`fmuaddib`'s
+68** — a different, non-live account. Two readings, both bad: it is quoting a stale sample, or it
+is mixing accounts. (In fairness the ONSET lines DO vary over time — `5h 45%`, then `47%` — so the
+message is recomputed *sometimes*; "latched" is too strong, "not re-observed in 7.5 h" is exact.)
+Either way it is not a fact about the live account right now, and I broadcast it as one.
 
 **What that made urgent (2026-08-21, now VOID — see CORRECTION 4):** the two live cookies expire
 **2026-08-30**. If whatever stopped the
