@@ -112,6 +112,17 @@ switch.` Append `(replaced <N>)` if you deleted any. **Never claim the CRON itse
 restarts"** — no scheduled job does on the current platform; it is the ARM STATE that persists and
 re-plumbs a new cron every session.
 
+**"Persistent" is a claim about ARMED, never about FIRING** — and the two come apart. A cron only
+fires when the REPL can take a turn, so a session blocked mid-turn stays perfectly armed and
+silent: on 2026-08-23 this project went **10h20m** between fires with `armed.flag`,
+`heartbeat-cron-id.txt` and this skill's own success report all still true, and a second 5.4 h gap
+the same day (TRDD-FB84YUGT). Nothing here was lying — arming records an INTENT, it never observes
+a fire. So do not answer "is the janitor running?" from an arm; read the last line of
+`$CLAUDE_PROJECT_DIR/.janitor/logs/heartbeat-fires.log` (**`logs/`, not `state/`** — the timestamped
+`fire epoch=` line `dispatch.py` appends on each fire) and compare it to the cadence. The daemon
+guardian (`task_session_liveness`, out-of-band by construction) is what notices the gap — this
+command cannot, because a suppressed cron suppresses whatever you would have armed to check it.
+
 ## Scope
 
 ONLY installs the stub and arms the cron. Does NOT run detectors (`/janitor-audit`) or install the

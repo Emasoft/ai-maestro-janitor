@@ -1,9 +1,9 @@
 ---
 trdd-id: KHM8XOYN
 title: Enumerate every site that executes or resolves-what-to-execute from agent-writable input
-column: dev
+column: complete
 created: 2026-08-26T18:56:42+0200
-updated: 2026-08-26T19:06:00+0200
+updated: 2026-08-26T21:48:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: normal
@@ -117,10 +117,17 @@ that recommendation before reading line 226.
 - [x] Each entry carries whether a verification gate stands between the writable input and the
       exec — and **that box produced the report's sharpest finding, by contradicting what I was
       about to write.** See below.
-- [ ] Sent to the hub for NB70FKKT's acceptance; their card asks for exactly this and has no
-      other source for it
-- [ ] **NO code change in this card.** Remediation waits on the confinement contract; if a fix
-      lands here it is a different TRDD
+- [x] Sent to the hub for NB70FKKT's acceptance; their card asks for exactly this and has no
+      other source for it. **SENT 2026-08-26 21:46** to peer session `ai-maestro-bf`
+      (msg `5bf4a4d1`), carrying the report path plus the two corrections that matter to THEIR
+      design and not just to mine: the headline instance is `$MEMGREP_BIN`, not the
+      `aimaestro-agent.sh` exec that opened this; and the stub's C2/C3 walk must NOT be cited as
+      the pattern to copy, because it is fail-open by cardinal rule. The empty class 4 went with
+      it as an explicit negative result — a zero nobody has to re-derive.
+      Acceptance is theirs to give; if it comes back with corrections that is a new card, not a
+      reopening of this one.
+- [x] **NO code change in this card.** Held — `implementation-commits:` is empty and stays empty.
+      Remediation waits on the confinement contract; if a fix lands here it is a different TRDD.
 
 ## Notes and lessons learned
 

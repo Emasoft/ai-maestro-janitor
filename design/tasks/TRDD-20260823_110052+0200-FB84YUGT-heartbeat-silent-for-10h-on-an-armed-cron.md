@@ -1,9 +1,11 @@
 ---
 trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-26T18:44:55+0200
+updated: 2026-08-26T21:47:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -14,7 +16,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: []
-implementation-commits: []
+implementation-commits: [feddf82b]
 ---
 
 # The heartbeat went silent for 10h20m on an armed cron, and nothing noticed
@@ -271,11 +273,19 @@ third turned out to ask for something that already exists — that outcome is th
 - [x] that detector is proven to survive the failure it detects. **Already satisfied by
       construction** — the guardian runs from the DAEMON, not from a fire, which is why it was
       able to diagnose a session whose cron could not fire.
-- [ ] `/janitor-arm`'s "persistent" wording is reconciled with what is actually guaranteed.
-      **STILL OPEN, and this incident sharpens it:** the arm was genuinely persistent the whole
-      time. Nothing about `armed.flag` was false — the session simply could not take a turn. So
-      the wording fix is not "admit the cron may die"; it is that ARMED and FIRING are different
-      claims and only the first is guaranteed. See `[^1]`.
+- [x] `/janitor-arm`'s "persistent" wording is reconciled with what is actually guaranteed.
+      **DONE 2026-08-26 21:47** — `skills/janitor-arm/SKILL.md` §5 now states outright that
+      "persistent" is a claim about ARMED and never about FIRING, cites this incident's 10h20m
+      and 5.4 h gaps as the case where every arm artifact stayed true through a silence, and
+      routes "is the janitor running?" to the one artifact that OBSERVES rather than intends —
+      the last `fire epoch=` line in `.janitor/logs/heartbeat-fires.log`.
+      **The path was wrong on the first pass and the check caught it:** the card and my draft
+      both said `.janitor/state/`; it is `.janitor/logs/` (`dispatch.py:2841`
+      `state.log_line("heartbeat-fires", …)`). A skill that names the wrong file teaches the
+      reader the artifact does not exist — worse than saying nothing, so the corrected text
+      calls the directory out explicitly.
+      The wording fix was never "admit the cron may die": the arm was genuinely persistent the
+      whole time and nothing about `armed.flag` was false. See `[^1]`.
 
 ## Notes and lessons learned
 
