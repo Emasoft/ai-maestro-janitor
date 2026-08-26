@@ -4,7 +4,7 @@ title: Subconscious agent — full per-changed-page wikimem maintenance duties s
 column: todo
 blocked-by: []
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-22T11:37:45+0200
+updated: 2026-08-26T12:05:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -156,6 +156,29 @@ rather than a missing one. Step 4 (publish) is gated on the repo's publish block
 Next time this card is pulled: split those three ❌ duties the same way, one card each — the
 card's own resume note is right that pulling it means SPLITTING it, not implementing several
 features under one id.
+
+### ⏵ 2026-08-26 — ALL FOUR CHILDREN ARE TERMINAL. Nothing here is blocked, and step 2 is DONE.
+
+Checked each one today:
+
+| child | duty | column |
+|---|---|---|
+| TRDD-57WJL5L2 | 7-8 superseded delimiter + memgrep default-exclude | `complete` |
+| TRDD-AZ6QRK0D | 21 `published-globally` symlink | `published` |
+| TRDD-J3ZH3RSI | 9 superseded→lesson retro-pass | `complete` |
+| TRDD-3SOO1RWE | 2 atom `desc` backfill | `complete` |
+
+So the 2026-08-02 note below — *"this card sits `blocked` on the four"* — is stale, and the
+frontmatter was already right (`column: todo`, `blocked-by: []`); the prose was the thing lying.
+**NEXT ACTION step 2 is complete in full**, and step 4 (publish) rode out with the children.
+
+**What `todo` means on this card now, precisely:** it is a SPEC + reconciliation ledger whose own
+instruction is *"do not implement [the remaining rows] under this id either — split them out the
+same way when their turn comes."* So pulling this card can only ever produce ANOTHER split, never
+an implementation. The remaining un-split gap rows are 11, 13, 14, 15, 15b-rename, 16-17, 18.
+
+Left in `todo` rather than moved to `backburner` because the next increment is genuinely
+available work — but anyone pulling it should expect to author a child TRDD, not to write code.
 
 ### 2026-08-02 19:38 — SPLIT into 4 child TRDDs; parent `blocked` on them (rule 13)
 
