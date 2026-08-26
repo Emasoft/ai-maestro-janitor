@@ -3,7 +3,7 @@ trdd-id: QDYQLM5V
 title: Move an off-topic atom to the page that owns its topic
 column: backburner
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T18:04:40+0200
+updated: 2026-08-26T20:03:23+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -53,6 +53,27 @@ conservation across the pair. Everything else is candidate selection.
 defect. It was resolved by a back-link rather than a move, deliberately, because the general form
 had by then been written onto the methodology page. That is duty 14's decision in miniature: MOVE,
 or LINK and leave. Both are legitimate and the pass must be able to choose.
+
+### A SECOND instance, found 2026-08-26 19:55 — and this one wants a MOVE, not a link
+
+`ATOM-BLKL-TEST` on `.claude/project/memory/janitor-daemon-bulk-lane.md:40`. The page is about
+the daemon's bulk lane; the lesson is about **test isolation** — *"DO NOT assume a monkeypatched
+`CLAUDE_PROJECT_DIR` isolates janitor state in tests, BECAUSE `state.project_root`/`janitor_root`/
+`state_dir`/`log_dir` are lru-cached process-wide"*. Nothing about it is true only of the bulk
+lane; it would be equally true of any janitor test, which is this duty's own test for off-topic.
+
+**And the destination already exists**: `janitor-keepalive-test-isolation-fsevents`, whose
+description is literally *"a unit test wrote to the REAL ~/.claude/janitor-global-state or the
+real plugin DATA dir"* — the same subject. So unlike the first fixture, the general form has NOT
+already been written elsewhere, which is exactly what made LINK the right call there and makes
+MOVE the right call here. **Two instances, opposite verdicts, same duty** — which is the pair
+this card needs, because a pass validated on one of them alone would hard-code the wrong default.
+
+How it was found is worth keeping too: it surfaced as a `lesson-uncited` INFO in a routine
+`memgrep lint` run, buried among 71 findings of which the other 70 were non-defects. The
+retrieval-engine page now carries the measured triage (`ATOM-TLL1-PZOJ`); the point for THIS card
+is that duty-14 defects do not announce themselves as duty-14 defects — this one arrived
+disguised as a footnote-citation nit.
 
 ## Acceptance
 
