@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-26T19:15:53+0200
+updated: 2026-08-26T19:20:13+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -114,6 +114,43 @@ should check whether `index` even changes the fence body, because a rewrite that
 
 **This is the same shape as the two other cards closed tonight** (TRDD-FB84YUGT, TRDD-JKJHV19B):
 a decision about what to build, resting on a measurement nobody took.
+
+### ⏵ 2026-08-26 19:20 — MEASURED. Claim A wins: a mid-session `CLAUDE.md` edit does NOT bust the cache
+
+Taken from RECORDED HISTORY, not a fresh experiment — the session transcripts under
+`~/.claude/projects/<slug>/*.jsonl` carry a per-turn `usage` block. Method: find every turn
+immediately following a `CLAUDE.md` Edit/Write and compare its `cache_creation_input_tokens`
+(the expensive re-write) against every other turn.
+
+| population | n | cache_WRITE max | median | max write/read |
+|---|---|---|---|---|
+| turn right **after** a `CLAUDE.md` edit | 307 | **65,923** | 1,525 | **0.35** |
+| every other turn | 108,303 | **598,351** | 1,104 | **11.36** |
+
+**Full-prefix rewrites are real and they happen in this corpus** — a 598k write at an 11.4×
+write/read ratio is exactly the catastrophic event claim B warns about. It simply never follows a
+`CLAUDE.md` edit: the worst post-edit turn is an order of magnitude below the worst ordinary
+turn, and the median is barely above baseline (1,525 vs 1,104 — consistent with nothing more than
+the edit itself being appended to the transcript).
+
+**So the re-scope this card defers to the owner is UNNECESSARY.** There is no "correct refusal
+with no path to a cheap moment", because the moment was never expensive. The days of index
+staleness have a different cause, and the 2026-08-22 block already found it and fixed it: the
+nudge sat behind two gates belonging to the deleted repo-map feature and *never fired at all*.
+The moment-problem reading was a second explanation invented for a symptom that already had one.
+
+**Honest limit of this measurement:** it proves the EDIT does not invalidate the cache. It does
+not prove the edited content takes effect in the same session — the harness may only read
+`CLAUDE.md` at SessionStart, which would produce identical data. That distinction does not
+rescue claim B, because either way the *cost* premise is false; it only means "refresh it now"
+may not help *this* session's own context, which nobody was claiming it would.
+
+**Follow-on defect, and it is shipped:** `project-map-drift.py:12,17,99,174` and
+`repomap_generate.py:50` tell every agent that reads them to DEFER the refresh on a cost basis
+now measured false. A false warning in shipped output is a defect regardless of this card's
+scope — it is the thing that manufactures the deferral. No test pins the wording (grepped), so
+correcting it is cheap. Left as the next step rather than bundled here, so the measurement above
+stands on its own and can be checked independently of any edit it motivates.
 
 ## ⛔ 2026-08-22 — THE FIVE-DAY EVIDENCE IS WRONG. **The nudge was never reachable.**
 
