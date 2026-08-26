@@ -110,6 +110,44 @@ identical addressing if anything exported that variable. Nothing does: it is abs
 the environment. Limit of this check, stated rather than hidden: I read the configs that START the
 daemons, not the env of the live PIDs.
 
+## ☠ DO NOT DELETE `~/.claude/account-rotator` — IT HOLDS THE LIVE COOKIES FOR ALL THREE ACCOUNTS
+
+**Read this before acting on the word "legacy" anywhere in this card.**
+
+```
+~/.claude/plugins/data/ai-maestro-janitor-…/oauth-rotator/profiles
+        →  SYMLINK  →  ~/.claude/account-rotator/profiles          ← the LIVE cookie store
+```
+
+`rm -rf ~/.claude/account-rotator` **destroys every account's session and ends unattended
+operation immediately** — the self-inflicted version of the 2026-08-30 scare that started this
+whole thread.
+
+The trap is that every true statement in this card points the wrong way for a tidy-up session: the
+directory is *named* legacy, its `state.json` *is* three months stale, and both this card and the
+peer's now record that the canonical root superseded it. All true, and the conclusion "so it can be
+deleted" is lethal. **Only `state.json` in that directory is dead. `profiles/` and
+`reauth-chrome/` are live.** Retiring it means moving the real profiles dir first and repointing
+the symlink — an owner decision, not cleanup. Raised by the ai-maestro peer, who is recording the
+same warning on their side, because the likely actor is a future session reading our cards rather
+than our shell history.
+
+Cookie-DB census corrected by the peer — **FOUR, not three**, verified here with the filter removed:
+
+```
+$ find ~/.claude ~/ai-maestro -name Cookies -type f          # 4
+~/.claude/account-rotator/reauth-chrome/Default/Cookies                    ← the one I missed
+~/.claude/account-rotator/profiles/chrome-profile-fmuaddib@gmail.com/Default/Cookies
+~/.claude/account-rotator/profiles/chrome-profile-ipazia.emasoft@gmail.com/Default/Cookies
+~/.claude/account-rotator/profiles/chrome-profile-emanuele.sabetta@gmail.com/Default/Cookies
+```
+
+My earlier search carried `-path '*chrome-profile*'`, so it could not have found the reauth
+browser's own profile — a sibling of `profiles/`, not inside it. The conclusion is unaffected (all
+four sit under the one shared directory, still a single store) but the certainty was not mine to
+claim: a filtered search reported as an exhaustive negative. And the missed file is precisely the
+profile a reauth path touches, so it is the one worth not losing track of.
+
 ## The hazard — `slots.ts:105-110`
 
 ```ts
