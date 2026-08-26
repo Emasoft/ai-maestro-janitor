@@ -3,7 +3,7 @@ trdd-id: KHM8XOYN
 title: Enumerate every site that executes or resolves-what-to-execute from agent-writable input
 column: dev
 created: 2026-08-26T18:56:42+0200
-updated: 2026-08-26T18:56:42+0200
+updated: 2026-08-26T19:06:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: normal
@@ -79,18 +79,44 @@ verified-walk the shape every other site should adopt?"** An enumeration that li
 alongside the unverified sites, with no column for the mitigation, would hide the one design
 answer already implemented in this repo. Whoever sends the list must not flatten that.
 
+## ⏵ 2026-08-26 19:06 — ENUMERATION DONE. Two corrections to this card's own framing.
+
+**1. The card guessed the wrong headline instance.** The `~/ai-maestro/scripts/aimaestro-agent.sh`
+exec that opened this only fires inside a harness agent. The sharper class is **`$MEMGREP_BIN`**:
+a bare env var naming a binary, falling back through `PATH` and `~/.cargo/bin` — all three legs
+agent-writable — read by **6 modules including `detectors/memory-librarian.py` (runs unattended
+on the heartbeat) and `hooks/post-edit-wikimem-lint.py` (fires on every edit)**. Every project,
+every beat, no harness required.
+
+**2. The STATE block above says the stub's C2/C3 walk "may be the ANSWER". Reading it says
+otherwise, and this is the finding worth sending.** The gate is real — inlined-stdlib manifest
+verify, quarantine list, last-good pin, walking down on rejection. But it is **FAIL-OPEN by
+cardinal rule**: *"if NOTHING is acceptable, exec the newest RUNNABLE version anyway"*, and
+*"every uncertainty (no/unreadable/malformed manifest, no key, no pin …) is ACCEPTED — we never
+block what we cannot prove bad."*
+
+So an attacker need not forge a manifest; **deleting one suffices**. That is correct engineering
+for the problem the stub actually solves — a bricked heartbeat needs a human and is strictly
+worse in the single-uid world — and I am proposing no change to it. The narrow, transferable
+point is: **the verified walk is an AVAILABILITY mechanism, not a confinement boundary, and must
+not be cited as the pattern other sites should copy.** I was one sentence from writing exactly
+that recommendation before reading line 226.
+
 ## Acceptance
 
-- [ ] A complete enumeration across `scripts/`, `hooks/`, `commands/`, `skills/`, `agents/`,
-      classified by the four shapes, each entry naming the file:line AND the symbol/env var that
-      *decides* — a list of exec calls without the deciding input is not actionable
-- [ ] **Every entry read first-hand before it is reported.** The sweep is a candidate generator;
-      this project's own rule is that a subagent's report is evidence, never a conclusion, and
-      an over-reported security list costs the reader a triage cycle and gets the real entries
-      discounted with it
-- [ ] Each entry carries whether a verification gate already stands between the writable input
-      and the exec (the stub's C2/C3 walk), because "mitigated" and "unmitigated" need opposite
-      follow-ups
+- [x] A complete enumeration across `scripts/`, `hooks/`, `commands/`, `skills/`, `agents/`,
+      classified by shape, each entry naming the file:line AND the symbol/env var that *decides*.
+      **DONE — `reports/exec-writable-audit/20260826_190600+0200-exec-from-writable-input.md`**
+      (gitignored). Four classes; class 4 (source/import from outside the repo) came back EMPTY
+      and is recorded as a negative result, since "importing is executing" was the shape most
+      likely to be missed.
+- [x] **Every entry read first-hand before it is reported.** The delegated sweep produced
+      NOTHING — the worker wedged at 182 bytes with no output after 6 minutes and was stopped —
+      so this is a hand audit throughout. Worth recording rather than hiding: had I taken a
+      wedged agent's silence for "no findings", the report would have been empty and confident.
+- [x] Each entry carries whether a verification gate stands between the writable input and the
+      exec — and **that box produced the report's sharpest finding, by contradicting what I was
+      about to write.** See below.
 - [ ] Sent to the hub for NB70FKKT's acceptance; their card asks for exactly this and has no
       other source for it
 - [ ] **NO code change in this card.** Remediation waits on the confinement contract; if a fix
