@@ -1,9 +1,11 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: dev
+column: blocked
+pre-block-column: dev
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-22T22:51:57+0200
+updated: 2026-08-26T07:33:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -18,7 +20,32 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-22
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+
+### ⚠ 2026-08-26 — BOX 2 IS UNREACHABLE RIGHT NOW, and it is not a scheduling problem
+
+Box 2 needs a run through the AUTOMATED path. That path cannot run on this machine: the lever
+is OFF, verified rather than recalled —
+
+```
+~/.claude/settings.json:22
+  "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED": "false"
+```
+
+It was turned off deliberately: the installed 3.3.26 still template-CLEARS on a FAILED summary,
+which is the resume-storm that froze 16 sessions. The fix (`e789506c` — resume-aware budgets,
+a per-root singleflight lock, and no `/clear` when the summary fails) ships in **3.4.0**, which
+is blocked on the GitHub push-protection decision.
+
+So the sequence is fixed and none of it is optional: **3.4.0 publishes → installs → the lever
+is re-enabled → box 2 can be attempted.** Re-enabling BEFORE 3.4.0 installs would re-arm the
+exact freeze the lever was pulled to stop. This card therefore moves to `blocked` on that
+publish; it is not idle work anyone can pick up.
+
+(Unchanged and still true: box 1 is discharged only as literally written, and the idle-resume
+defect the drill exposed remains the more valuable output of that run.)
+
+## ⏵ STATE (2026-08-22 — retained below)
 
 **~~PARKED ON THE OWNER'S GO-AHEAD~~ — GO-AHEAD GIVEN 2026-08-12, and the core is BUILT
 (`df7d4cb3`).** The owner's words were "before publishing you must implement the zero tokens
