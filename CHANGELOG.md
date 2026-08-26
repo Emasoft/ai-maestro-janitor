@@ -2,26 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.4.0] — 2026-08-22
-
-### Bug Fixes
-
-- **bench:** The secret mask emitted a tail GitHub push protection reads as a live key (98ed407)
-- **governance:** The PR requirement is a property of the REPO, not of the caller (1eeb3fe)
-- **integrity:** Give the C3 re-pin its own unabsorbable chore (TRDD-ZM5LZ24Y) (51d4978)
-- **oauth:** The daemon finishes a 429 recovery the hook could not (TRDD-6054NY8H) (2d30dd7)
-- **tests:** Two load-flakes that blocked a publish — one was a real fail-open bug (837dc0a)
-- **governance:** Drop the remote PRRD fetch — wrong place, and not what fixed the bug (81387b7)
-
-### Documentation
-
-- Land four USER decisions on the board (#4 refuse, #9/#10 disk rulings, #13 unblock) (aa84915)
-- Regenerate ISSUE-CODES.md for SELFINT-004 (dbaf117)
-
-### Testing
-
-- **keepalive:** Raise the daemon-closure bound to 65 — the C3 safeguard stages 5 modules (5c1cda7)
-## [3.4.0] — 2026-08-22
+## [3.4.0] — 2026-08-26
 
 ### Bug Fixes
 
@@ -69,6 +50,25 @@ All notable changes to this project will be documented in this file.
 - **detectors:** Gitignore-coverage.py was committed non-executable (mode 100644) (fcc453a)
 - **security:** Devitalize the execution-class shapes blocking the publish (7f802f2)
 - **security:** De-contiguate the last quoted injection needle — a COMMENT, not a pattern (f3f7d6a)
+- **bench:** The secret mask emitted a tail GitHub push protection reads as a live key (98ed407)
+- **governance:** The PR requirement is a property of the REPO, not of the caller (1eeb3fe)
+- **integrity:** Give the C3 re-pin its own unabsorbable chore (TRDD-ZM5LZ24Y) (51d4978)
+- **oauth:** The daemon finishes a 429 recovery the hook could not (TRDD-6054NY8H) (2d30dd7)
+- **tests:** Two load-flakes that blocked a publish — one was a real fail-open bug (837dc0a)
+- **governance:** Drop the remote PRRD fetch — wrong place, and not what fixed the bug (81387b7)
+- **inject:** A sub-second quiet window silently disarmed the typing gate (TRDD-D2DD5GO8) (855f3e4)
+- **skill:** Split SKILL.md broke both token caps; raise the clear floor to 300k (376f426)
+- **detector:** The wikimem-index check was gated behind the repo-MAP feature (TRDD-LFSWY0C6) (acdd0c3)
+- **memory-scope-leak:** A published page's leak is not a one-project problem (TRDD-4GQ94FNJ) (9818c20)
+- **cc-align:** The docstring I shipped an hour ago said the tree was empty; it holds 635 files (400a7e8)
+- **bench:** Mask the sk_live_ PREFIX too — my reason for not doing it was wrong (8f0fbc2)
+- **handoff-verify:** --phase before now warns when the staging cannot resume (8813106)
+- **handoff-verify:** 8813106e's warning cried wolf on the CORRECT path (529b54c)
+- **handoff:** One file per WRITE, so no writer can clobber another (TRDD-5RXBI65T) (0581b94)
+- **clear:** Cooldown 2h -> 5min — min_context was always the real guard (owner) (1f6ad45)
+- **external-clear:** Resume budgets + per-root singleflight — the 16-session freeze (e789506)
+- **memgrep:** A behind-stamp with a complete shape is STALE, not a MEMGREP-006 failure (5addfbb)
+- **catalog:** MEMGREP-006 historical note moved into the catalog SSOT — docs regenerated (6c2aec8)
 
 ### Documentation
 
@@ -151,16 +151,65 @@ All notable changes to this project will be documented in this file.
 - **TRDD-WMQQYLSZ:** Re-scoped and closed — the sweep it proposed is NOT owed (545dd0f)
 - **TRDD-UQW5IOAE:** Two-layer test met; the box's own pointer found the bug. todo -> testing (6aac292)
 - **TRDD-UQW5IOAE:** The nudge HAS fired — 22 times — but none of it counts yet (6474f93)
+- Land four USER decisions on the board (#4 refuse, #9/#10 disk rulings, #13 unblock) (aa84915)
+- Regenerate ISSUE-CODES.md for SELFINT-004 (dbaf117)
+- **TRDD-VOWAUVE5:** The USER's #6 answer, and why part 2 must NOT ship first (5defc10)
+- Archive TRDD-4OFMHOZ7 complete — the ai-maestro-side ask is filed ([#150](https://github.com/Emasoft/ai-maestro-janitor/issues/150)) (7fddae5)
+- Refuse TRDD-739N4CUF as MOOT — its Option A shipped, its ask is filed ([#111](https://github.com/Emasoft/ai-maestro-janitor/issues/111)) (0baf79a)
+- Close TRDD-R4XC8MV1 on a measured census; flag that 2d30dd7b does NOT close 6054NY8H (1225562)
+- TRDD-JPL0JU86 -> human_review — its gate discharged without ever answering (9e73c75)
+- TRDD-6054NY8H -> human_review — 8.4 days left to recover 2 of 3 accounts (8f41ac7)
+- TRDD-87RKBYJ8 — all 4 children terminal; name the 3 duties nobody owns (ce5c6f4)
+- Reconcile TRDD-AM8JD9SG against the code — nothing on it is pullable today (a1ac3a1)
+- TRDD-9T0U3M00's last box is UNOBSERVABLE until publish — do not read the alert as a failed fix (ff104b1)
+- HC7CQT10's box is conditional-emission gated, not deploy-gated — and the third line is correct (0b57a9c)
+- UQW5IOAE's shadow-mode box has no evidence channel — and enabling the lever won't create one (89495ed)
+- Audit all 9 blocked cards — 3 were waiting on things that had already resolved (b97de74)
+- **memory:** Capture three facts this session's work produced but never wrote down (ad99ea6)
+- TRDD-4GQ94FNJ dev -> human_review, records 9818c205 (07d3bb2)
+- Add TRDD-5RXBI65T — the auto handoff overwrites the model-authored one (96f6b39)
+- **cc-align:** The shipped TRDD rule ordered agents to use a tool CC deleted (134c5fb)
+- 400a7e88's commit message asserted a grep result that the grep contradicted (e442a93)
+- Revert e442a933's "correction" — it turned a TRUE claim into a FALSE one (37d4661)
+- Sign off six finished cards — USER approval via artifact comment (aa50213)
+- 8f0fbc23's commit message overstated one of its two reasons (5cee8ab)
+- TRDD-1QJIZFFW — the clear drill RAN; box 1 closed, box 2 explicitly NOT (d062294)
+- TRDD-5RXBI65T — F2's mechanism pinned in source; the guess was wrong (2994469)
+- Retract 2994469a's F2 "mechanism" — the log says that script never ran (9684a49)
+- 9684a496's retraction over-claimed too — weaken it to what logs support (8490516)
+- TRDD-5RXBI65T is a HAZARD card — the incident it was filed for is uncorroborated (5a15e1e)
+- **handoff-verify:** "cannot tell them apart" was false — the chain lock can (f4bcdfd)
+- **TRDD-5RXBI65T:** Clobber CORROBORATED; owner picks option D (per-write files) (4412c2f)
+- **TRDD-5RXBI65T:** Retract the ATTRIBUTION; the clobber stands, the writer is open (59fe84e)
+- Add TRDD-FB84YUGT — heartbeat silent 10h20m on an armed cron (03f05e3)
+- **TRDD-5RXBI65T,FB84YUGT:** The 6-min skew was never a mystery; cf997868 pinned (3dcad65)
+- **TRDD-5RXBI65T:** Whodunit CLOSED — F1 is the writer; the 08-22 retraction rested on a dead log (ffcb6a6)
+- **TRDD-5RXBI65T,FB84YUGT:** Whodunit CLOSED — F1; retire FB84YUGT's phantom gate (0dd419c)
+- Add TRDD-79LXF6PJ — USER directive to retire the daemon handoff (approval-tier 3) (29464d5)
+- **memory:** Record the compaction rearchitecture on its owning wikimem page (4764444)
+- Add TRDD-437UHNFS — drain thin recall surfaces before installing the memgrep gates (52db5ec)
+- **memory:** 2026-08-25 fleet-freeze incident lesson on the compaction page (961b28f)
+- **rules:** Universal-kanban aligned to 3-pillars 3.0.0 — 22 board columns, 27 legal values (janitor#286) (69f93aa)
+- **TRDD-437UHNFS:** Correct the card's blast-radius claim — no heartbeat lint line exists (edc7725)
+- **rules,skills:** Fit the context-floor and skill-token caps — detail moved to references (ecf5dfb)
 
 ### Features
 
 - **security:** Gitignore-coverage detector (TRDD-6WM4BFKF) + fix a discarded awaiting_user (e607e95)
 - **oauth:** The login nudge reaches a HUMAN — notify channel + proactive window (TRDD-GZXTSJSR P1) (cf9fb7a)
+- **memory:** Memgrep is the ONLY write path to a wikimem page ([#6](https://github.com/Emasoft/ai-maestro-janitor/issues/6)) (9e32c1e)
+- **memory:** The atom budget queues to a chore instead of refusing the write (TRDD-VOWAUVE5) (5ac80f1)
+- **autofix:** Repair a TRDD's frontmatter prelude, and nothing else ([#12](https://github.com/Emasoft/ai-maestro-janitor/issues/12)) (6ac8e7c)
+- **clear:** Payload is the llm-ext summary, preceded by the active skills (TRDD-79LXF6PJ) (155833b)
+- **clear:** Context-pressure trigger — the backstop that disabling auto-compact removed (84e5d66)
+- **memgrep:** Hard-gate memory metadata — 10 keyphrases, 15 page phrases, real desc, no dupes (3461ef6)
+- **clear:** The janitor DETECTS that auto-compact is off and takes ownership (3bb40bf)
 
 ### Miscellaneous Tasks
 
 - Refresh the stale wikimem index; record LFSWY0C6's five-day recurrence (62d72d0)
 - Bump version to 3.4.0 (e6b3fde)
+- Bump version to 3.4.0 (97a2008)
 
 ### Performance
 
@@ -175,6 +224,17 @@ All notable changes to this project will be documented in this file.
 - **bench:** Mask contiguous credential shapes at corpus assembly (8284944)
 - **bench:** Per-class regression floors for the five fixed rules + correct my own recall claim (TRDD-VAWIKRK2) (76ad2f8)
 - **terminal:** Assert detachment by causality, not by clock — category C (TRDD-7NSRD8OV) (4b53cdb)
+- **keepalive:** Raise the daemon-closure bound to 65 — the C3 safeguard stages 5 modules (5c1cda7)
+- **terminal:** Pin that a BLINDED typing probe defers (TRDD-D2DD5GO8) (82c9440)
+- Assert the WHOLE paste command, not a substring that mentions the phase (697ac4a)
+- **memgrep:** Bring cli fixtures up to the new metadata gates (10/6 remaining) (a7ea94c)
+- **memgrep:** Cli fixtures 139->141 passing (4 left) (b4638b1)
+- **memgrep:** Last 4 cli fixtures green — 363/363 (e647a37)
+- **coverage:** Classify the 4 metadata-gate lint codes as orphaned pending the enrich chore (TRDD-437UHNFS) (e945c68)
+- **coverage:** Bump the conscious-decision count 32 -> 36 for the metadata-gate rows (9b3689b)
+- **wikimem-bench:** Bring the lint bench fixtures up to the metadata gates (75155bd)
+- **wikimem-bench:** The regenerated baseline/cases pair — missed from 75155bdb (a885156)
+- **wikimem-syntax:** Clean fixtures brought up to the metadata gates (3d9f874)
 ## [3.3.26] — 2026-08-21
 
 ### Bug Fixes

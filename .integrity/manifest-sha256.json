@@ -1,7 +1,7 @@
 {
   "files": {
     "CLAUDE.md": "3c02e04bf7abb0e5e1f7fa04701fe060c21db1de3c86fa5ed88a9e0934851c36",
-    "README.md": "7390dbfdce3c2fc67859062e0e181621604be30c62832dc2b823e6ec0ad69b91",
+    "README.md": "954543514da21e1464f872aca83aa165af652949b52f1a97ab84c09773fd5bbd",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -14,9 +14,10 @@
     "rules/references/commit-discipline-full.md": "d17ea0fae800b0147ed2dffc83af1c8889656f72fc0c7b1611e8b7281184f282",
     "rules/references/markdown-memory-recall-full.md": "935339adb33d72fe03ec3568be4a5170d4adec77f55646aa46f9721eb7cf4052",
     "rules/references/prrd-design-rules-full.md": "74a5e9762fc12e2e568567631084556299de8bd7a318185cb830b60d296937c9",
-    "rules/references/trdd-design-tasks-full.md": "035bb276717d57cd559028f0132f42b340b8e84caa25a03d40cd86ddafb38af9",
-    "rules/trdd-design-tasks.md": "c02f28230242c217caf9926f77c040da4aae2654915aed75b0b296fd35c6b5a7",
-    "rules/universal-kanban.md": "3790df6dd2d90d7058e0633e7f2240ad34bc2996ef6cf01081fe8066100752be",
+    "rules/references/trdd-design-tasks-full.md": "d737aabd74cb5035824d57a8dcdf8dfe61cf1def56c56e47656f9eacfb538626",
+    "rules/references/universal-kanban-3p300-columns.md": "e25d267a2e99063edec84baf814688957c139377da0123b7620eb59e745ddcbf",
+    "rules/trdd-design-tasks.md": "430118b8ecb2f63160ac20e23fc0a1b38518242da2ec150d6d52463af7ca147c",
+    "rules/universal-kanban.md": "3d06038b92b7d3c9360f4964c043d9e8e989cb906b16937eb78aa5af9ef8ac7d",
     "rules/use-safe-delete.md": "00915f7b4fde48f61a170d31fa68423be71ba40c798ca38a0f970cfab9a0cadb",
     "skills/janitor-actions-up/SKILL.md": "1010955f79ef5b64946f3e01a0a4f5feae9f1412f8616bbc9cce7b1bc72728b3",
     "skills/janitor-arm/SKILL.md": "9a38114fbe3ad160901374d252749428811526c8eb1dfa1eeeee4c069f985c72",
@@ -54,9 +55,9 @@
     "skills/janitor-memory-record-recent/SKILL.md": "5aacdcf747a750f43ae867b52de330f1021aaa4e5ac94b7d3e66163a752d7ffe",
     "skills/janitor-memory-repair/SKILL.md": "03d9c26a37116cd097733d708fdbcd3db802d89902b4904502b5d71ccda34d40",
     "skills/janitor-memory-retro-lesson/SKILL.md": "966b3ff31ef86a091287dc71510e41950485aafa121b1a5a2331ffcf3f39351a",
-    "skills/janitor-memory-split/SKILL.md": "ad15e2df1321fa611df9d5b8f426de097ba8757389342152f9352e729adf1502",
-    "skills/janitor-memory-update/SKILL.md": "16f43dd27d644dfd2ffcaee3c26c2908b160a5d5bab136aab42e7a5df1c534aa",
-    "skills/janitor-memory-write/SKILL.md": "4750d44ca285e8d27811249eacddddc96201106661f212801ed87facad7ee1f4",
+    "skills/janitor-memory-split/SKILL.md": "bdf70ead4acaf38b20a47867d88c626a87c29eea5de06b27371ee4dc2ba6ff4f",
+    "skills/janitor-memory-update/SKILL.md": "c90439486ac097cb491c9b4c297542ae3196acea975052f4eace384222777275",
+    "skills/janitor-memory-write/SKILL.md": "14970e189d9321b636fd653a3dea58450f8d33c4bef90bf82d7fd70cacc3a122",
     "skills/janitor-plugin-install/SKILL.md": "c2dd0ca1f552304431da60b568673e7dc931e9f82dc1f122d87743894c153795",
     "skills/janitor-plugin-uninstall/SKILL.md": "e71a76093a0b64ba21a1805eabcba794a225ee7275c5e4886ef9a13b1286ad6b",
     "skills/janitor-plugin-upgrade/SKILL.md": "3ddb5c4d1ec6b8e19e9a7dfc0735a2729d50352c99ec398eab39cd050d16c303",
@@ -75,7 +76,7 @@
     "skills/janitor-support-work-ticket/SKILL.md": "d2cce87d5e431d4d6a1a0b06b4b47cb700e2b65a27a1e5488f4d92fb66214d01",
     "skills/janitor-token-attribution/SKILL.md": "537ef47e2ac619dbaac260463ade7b198beb08df6170f142e20a765390e5a820",
     "skills/janitor-token-report/SKILL.md": "b47e2d95dfbd386d4b41af373324c12082b9a0094f2a09cd999bfa76565f5847",
-    "skills/janitor-write-handoff/SKILL.md": "a05615443d6067c87b3b9d46e508878d5f23b72b4606c34e365318acac8461e6"
+    "skills/janitor-write-handoff/SKILL.md": "3b2e79606bc5981cd56acb4541a7ea24ad037cef63d566992577c1257885c8fa"
   },
   "version": 1
 }
