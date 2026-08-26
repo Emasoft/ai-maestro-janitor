@@ -69,6 +69,26 @@ def split_brain(canonical: dict) -> None:
     if beacon is None:
         print("beacon-absent (no live-identity.json — cannot cross-check bookkeeping)")
         return
+
+    # THE FALSE-POSITIVE THIS CLOSES, and it would have fired routinely.
+    # rotator.py:882-893 is explicit: the beacon is stamped only from a context
+    # that can READ the primary credential, and the sole automatic one is
+    # SessionStart — once per session. The daemon's own tick stamp is a
+    # guaranteed no-op, because headless it skips the primary read by design.
+    # So after a legitimate rotation state.json names the NEW account while the
+    # beacon still names the OLD one, until the next session starts. Comparing
+    # them then would report SPLITBRAIN for a system behaving exactly as
+    # designed — and a detector that cries wolf on the normal path is worse than
+    # no detector, because the one true firing is discarded with the rest.
+    #
+    # A beacon written BEFORE the state it is being compared against is not an
+    # observation of that state. That is could-not-compare, not disagreement.
+    ts = beacon.get("ts")
+    state_mtime = os.path.getmtime(os.path.expanduser(CANONICAL))
+    if not isinstance(ts, (int, float)) or state_mtime > ts:
+        print("beacon-stale (last observation predates the current state — cannot cross-check)")
+        return
+
     if beacon.get("email") != canonical.get("live_email") or beacon.get("fp") != canonical.get("live_fp"):
         print(
             f"SPLITBRAIN state says {canonical.get('live_email')!r}/{str(canonical.get('live_fp'))[:8]} "

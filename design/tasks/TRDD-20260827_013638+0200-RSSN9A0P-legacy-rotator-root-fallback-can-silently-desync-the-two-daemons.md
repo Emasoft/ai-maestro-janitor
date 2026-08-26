@@ -312,6 +312,30 @@ a heartbeat cadence that reads a `security` item is exactly what produced hundre
 wants to use the login keychain" dialogs with no Always-Allow button in July (memory:
 `macos-keychain`). A detector that locks the owner out of their machine is not a detector.
 
+### ⚠ HOW OFTEN THIS CHECK ACTUALLY ANSWERS — state it before anyone relies on it
+
+**Right now, on this host, it ABSTAINS.** Live output: `beacon-stale (last observation predates
+the current state — cannot cross-check)`. That is correct behaviour, and it is also most of the
+time.
+
+`rotator.py:882-893` is explicit: the beacon is stamped only from a context that can READ the
+primary credential, and the only automatic one is **SessionStart — once per session**. The
+daemon's own tick stamp is a guaranteed no-op (headless, skips the primary read by design).
+`state.json`, meanwhile, is rewritten by every tick. So the beacon is older than the state almost
+always, and a beacon written BEFORE the state it is compared against is not an observation of that
+state — it is could-not-compare.
+
+Suppressing that is not a weakness, it is the whole trichotomy: after a legitimate rotation the
+beacon names the OLD account while state names the NEW one, so an unqualified comparison would
+report SPLITBRAIN for a system behaving exactly as designed. **A detector that cries wolf on the
+normal path is worse than none, because the one true firing gets discarded with the rest.**
+
+But the honest consequence is that this check has a **narrow window** — it answers only when a
+session start has stamped the beacon more recently than the last state write. It is a real check
+with real coverage gaps, not the state-vs-reality guarantee the peer asked about. Closing the gap
+means stamping the beacon on every rotation (event-driven, in the rotator's own switch path), not
+reading the keychain on a cadence. That is janitor work, not detector work, and it is not tonight's.
+
 Verified by neuter, not by argument: beacon repointed at a disagreeing identity ⇒
 `SPLITBRAIN state says 'ipazia…'/f61bb0c7 but last observed live was 'other@example.com'/deadbeef`.
 It runs BEFORE the legacy-absent early return on purpose — retiring the legacy root is the goal,
