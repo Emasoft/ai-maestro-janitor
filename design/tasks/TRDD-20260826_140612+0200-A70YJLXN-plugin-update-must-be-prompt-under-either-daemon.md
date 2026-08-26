@@ -1,9 +1,11 @@
 ---
 trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
-column: todo
+column: blocked
+pre-block-column: todo
+blocked-by: [peer-decision-absorbed-version-update-lane]
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T15:05:00+0200
+updated: 2026-08-26T20:45:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -193,10 +195,47 @@ So the fix is one of:
 
 ## Acceptance
 
-- [ ] A decision among the three above, recorded here
+- [ ] A decision among the three above, recorded here.
+
+      **NARROWED 2026-08-26 by the USER, in their own words this session** — not by my
+      inference, which matters because I would otherwise have been choosing among three
+      options one of which the owner had already excluded:
+
+      > "is the janitor daemon (both this from the plugin and the one from ai-maestro when the
+      > ai-maestro server is running) automatically updating the janitor plugin if a new version
+      > is detected? **No matter what daemon of the two is running, the ai-maestro plugin must be
+      > updated as soon a new version is detected on the marketplace.**"
+
+      "As soon as detected", and explicitly indifferent to WHICH daemon is running. That is
+      exactly option 3's negation: **relaxing the directive to accept Claude Code's cadence is
+      OFF the table**, and so is any answer whose guarantee is a 4 h elapsed-time floor. It also
+      names *detection* as the trigger, which is precisely what option 4 makes the predicate
+      consult. Remaining live: **1, 2, or 4 — all three cross-project, all three the peer's
+      call.** Nothing here is the owner's any more except a veto.
 - [ ] Whichever path is chosen, a measurement showing publish→installed latency under the SERVER
       that meets the directive — not a design argument that it should
-- [ ] The janitor's own path re-verified unchanged (it already meets the directive; a change on
+- [x] **RE-VERIFIED 2026-08-26 20:45, on the live host.** The janitor's own path is unchanged
+      and behaving exactly as designed under absorption:
+      - the flag mechanism is intact — `global_state._version_update_request_path()` /
+        `request_version_update()` / `version_update_requested_present()` /
+        `clear_version_update_request()`, canonical path
+        `~/.claude/janitor-control/version-update-requested.flag` (control_dir, dual-read against
+        the pre-control-dir location). **That absolute path is what option 4's predicate needs**,
+        so it is written here rather than left as "the flag my detector raises".
+      - `version-update` IS currently absorbed (server-liveness `absorbed_chores` lists it among
+        nine), and our `version-update.last-run.ts` reads **2026-07-25** — frozen, which for an
+        absorbed chore is the CORRECT observation and not a dead lane. Re-stated because this
+        exact stamp has already misled one reader on this host.
+      - no flag file present right now, i.e. nothing pending — consistent with the peer's
+        clear-before-run consumption.
+- [x] The asymmetry is documented where a reader will hit it: CLAUDE.md's working-rules section
+      carries it inline (the "Known side effect … **Not a tamper signal, and on this host not
+      transient either**" paragraph), naming the frozen `version-update.last-run.ts`, why an
+      absorbed chore freezes it, and the `daemon.log` grep that names the refusing predicate. A
+      reader hits it at the point they are told to upgrade locally, which is where the confusion
+      actually starts — not in a reference page they would have to already suspect.
+- [x] ~~The janitor's own path re-verified unchanged~~ (superseded by the box above; it already
+      meets the directive; a change on
       the server side must not regress it)
 - [ ] The asymmetry documented where a reader will hit it — a frozen `version-update.last-run.ts`
       must not be readable as either "healthy" or "broken" without saying which mechanism owns it
