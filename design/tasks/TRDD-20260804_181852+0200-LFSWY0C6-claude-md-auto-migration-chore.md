@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-26T11:55:00+0200
+updated: 2026-08-26T19:15:53+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -76,6 +76,44 @@ stays human/agent-initiated — while removing the reason the request never gets
 **NOT BUILT HERE.** It touches the PostCompact/SessionStart hook path, and this card's own
 premise (that the deliverable is a semantic migration chore) would change if the owner accepts
 that the recurring symptom is a moment problem. That is a re-scope, not a patch.
+
+### ⏵ 2026-08-26 19:15 — BEFORE anyone decides that re-scope: the cost premise is UNVERIFIED, and this repo contradicts itself about it
+
+The whole "moment problem" rests on one claim — that rewriting `CLAUDE.md` **mid-session** is
+expensive. Two texts in this tree disagree about that, both quoted verbatim:
+
+| | says | where |
+|---|---|---|
+| **A** | *"**Editing a file does NOT invalidate the conversation cache.** The cache is over the transcript prefix, not over files on disk. Edit-heavy sessions are among the cheapest."* | `~/.claude/rules/token-economy-agents-and-scenarios.md:22` — presented as a MEASURED result that disproved the opposite hypothesis |
+| **B** | *"a careless write can burn a 5h token budget"* · *"Refresh at a cache-cheap moment (fresh session, post-compaction, pre-commit)"* | `scripts/detectors/project-map-drift.py:12,17,99,174`; same wording in `repomap_generate.py:50` |
+
+They can both be true only if `CLAUDE.md` is **special** — re-injected into the prompt every
+turn rather than sitting in the cached transcript prefix like an ordinary file. That is a single
+empirical question with a yes/no answer, and **nobody has recorded measuring it.**
+
+**Why this must be settled BEFORE the re-scope, not after:**
+
+- If `CLAUDE.md` is NOT re-injected per turn (claim A generalises), then a mid-session refresh is
+  cheap, the "correct refusal with no path to a cheap moment" **does not exist**, and the days of
+  index staleness have some other cause. The re-scope would be building a delivery mechanism for
+  a problem that is not there — and the fix is simply "refresh it whenever you notice".
+- If it IS re-injected (claim B), the moment problem is real and the re-scope is right.
+
+Note what happened while writing this: the obvious next step was to just run
+`claudemd_slim.py index` and clear the staleness. **I did not, deliberately** — running it would
+have been acting on precisely the premise under question, and if it turned out cheap I would have
+learned nothing (a cheap run proves nothing about the expensive case), while if it turned out
+expensive I would have paid for the answer with the session the card exists to protect.
+
+**Measured today, so the urgency is smaller than the card implies:** the index is missing exactly
+**one** entry, and it is `MEMORY` — the harness's own `MEMORY.md` stub, which does not belong in
+a wikimem index at all. So the STALE verdict is very likely a digest recompute over a corpus
+whose *listed content* has barely moved, not 20 absent pages. Whoever settles the cost question
+should check whether `index` even changes the fence body, because a rewrite that only bumps
+`digest=` is a different cost/benefit argument than one that adds real entries.
+
+**This is the same shape as the two other cards closed tonight** (TRDD-FB84YUGT, TRDD-JKJHV19B):
+a decision about what to build, resting on a measurement nobody took.
 
 ## ⛔ 2026-08-22 — THE FIVE-DAY EVIDENCE IS WRONG. **The nudge was never reachable.**
 
