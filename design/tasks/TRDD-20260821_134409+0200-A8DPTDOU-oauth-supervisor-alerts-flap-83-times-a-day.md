@@ -142,6 +142,16 @@ producer, but the fix must NOT be exported to their key, and their key must not 
 this card's vocabulary decision. The one genuinely shared residue is the *wording* — "no
 alternate is healthy" reads as credential health when it means model headroom.
 
+**The transferable lesson, and it sharpens this card's own gate.** ai-maestro-c7's follow-up
+(their `c126d8f7`) pressed one level down: their `best === null` is ambiguous *in general* —
+the candidate loop `continue`s on unknown usage — so the same sentinel means both "measured: no
+headroom" and "could not measure". It happened not to matter there (per-beat uncached probe,
+`networkUp` required, credentials fresh), but the SHAPE is exactly this card's open acceptance
+box: **absence of a failing signal is not evidence of the positive fact.** A CLEARED gated on "the
+probe stopped failing" and a wall verdict gated on "no candidate reported headroom" are the same
+mistake wearing different clothes. Whichever alert vocabulary this card settles on must be able to
+say *unknown* as a third value, not fold it into the negative.
+
 ## Notes
 
 Found incidentally while checking whether TRDD-HC7CQT10's observation gate could be closed
