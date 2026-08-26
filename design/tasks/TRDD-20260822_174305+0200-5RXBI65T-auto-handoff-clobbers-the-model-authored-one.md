@@ -1,9 +1,11 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: dev
+column: blocked
+pre-block-column: dev
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-23T11:08:19+0200
+updated: 2026-08-26T07:29:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -20,6 +22,27 @@ implementation-commits: []
 # `.janitor/state/agent-handoff.md` has TWO writers and no coordination
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+### ⚠ 2026-08-26 — the fix is in the REPO and on NO MACHINE. Closure is gated on 3.4.0.
+
+Measured, not inferred. Every cached version carries ZERO occurrences of `handoff_files`:
+
+```
+~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/{3.3.16 … 3.3.26}
+  grep -c handoff_files skills/janitor-write-handoff/SKILL.md  →  0   (all eleven)
+```
+
+And the proof it is not academic: `.janitor/state/agent-handoff.md` — the OLD shared,
+unkeyed path this card exists to retire — was written **during this session**, by the
+installed 3.3.26 skill, which still instructs `Write` to that fixed path.
+
+So the keyed-name fix ships only in **3.4.0**, which is itself blocked on the GitHub
+push-protection decision. Until that publishes AND is installed, the clobber this card
+describes is still live on this machine, and acceptance box 1 cannot honestly be ticked.
+
+**Do not close this card on the repo state.** Checking the repo would have said "fixed" —
+the installed path is the one that runs (`~/.claude/rules/cli-verify-on-path.md`, the same
+lesson in a different costume). Re-verify with the grep above after 3.4.0 installs.
 
 **Design DECIDED, implementation not started — `column: dev` since 2026-08-23.** Filed 2026-08-22
 after what was believed to be an incident: a rich handoff this session had just authored, silently
