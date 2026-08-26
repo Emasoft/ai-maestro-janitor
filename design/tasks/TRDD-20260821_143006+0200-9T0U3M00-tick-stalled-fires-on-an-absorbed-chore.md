@@ -1,9 +1,11 @@
 ---
 trdd-id: 9T0U3M00
 title: The tick-stalled alert fires on an absorbed chore and reports healthy server-side execution as rotation being OFF
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [3.4.0-publish-push-protection]
 created: 2026-08-21T14:30:06+0200
-updated: 2026-08-22T11:47:21+0200
+updated: 2026-08-26T08:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -14,11 +16,28 @@ approval-tier: 0
 labels: [oauth-rotator, alerts, chore-coordination, false-positive]
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [0a009277, ed4242f0]
 relevant-rules: []
 ---
 
 # `tick-stalled` had no idea the chore could be somebody else's
+
+## ⏵ 2026-08-26 — column corrected, and the backtracking field filled
+
+`testing` → `blocked` on the 3.4.0 publish. 6 of 7 acceptance boxes are ticked and the 7th is
+the card's own **"UNOBSERVABLE ON THIS HOST UNTIL THE PUBLISH"** box — so nothing was being
+tested and nothing could be. The false alert is still in `session-start.log` exactly as the card
+predicts; that is the un-upgraded installed plugin, NOT a failed fix.
+
+`implementation-commits:` was EMPTY while the fix had shipped and been tested — filled with
+`0a009277` and `ed4242f0`, recovered from `git log --grep`. That field is the whole backtracking
+path from a future bug to the TRDD that introduced it, so an empty one on completed work
+silently breaks the chain the moment it is needed.
+
+**This card is the same defect class I re-derived from scratch today on TRDD-SR7887LF** — a
+stale stamp on an ABSORBED chore producing a confident, specific, wrong "it is dead" claim about
+a safety-critical subsystem. It was already written down here, and on the wikimem page
+`janitor-daemon-handover-unowned-chores`. Recall on the SYMPTOM before measuring stamps.
 
 ## The bug
 
