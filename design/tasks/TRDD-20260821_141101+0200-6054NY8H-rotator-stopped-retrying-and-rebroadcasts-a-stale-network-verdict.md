@@ -34,9 +34,9 @@ Measured just now, first-hand, read-only, no browser:
 
 ```
 $ bash ~/.claude/account-rotator/lifetime-status.sh          # exit 0
-emanuele.sabetta@gmail.com   27.4 d   refresh-capable (auto)   ok
-fmuaddib@gmail.com           27.3 d   refresh-capable (auto)   ok
-ipazia.emasoft@gmail.com     27.4 d   refresh-capable (auto)   ok
+ema***   27.4 d   refresh-capable (auto)   ok
+fmu***           27.3 d   refresh-capable (auto)   ok
+ipa***     27.4 d   refresh-capable (auto)   ok
 ✓ All accounts healthy; cookie vs OAuth lifetimes are staggered — nothing to do.
 ```
 
@@ -349,7 +349,7 @@ waiting on. Found only by enumerating every column instead of the ones I expecte
   human-only and the `RENEW_COOKIE` leg — the one path that mints fresh tokens with NO human — is
   gone.
 - `rotation-stuck.json` (25.7 h): `all-accounts-maxed`,
-  `fmuaddib@gmail.com:refresh-failed; ipazia.emasoft@gmail.com:refresh-failed`.
+  `fmu***:refresh-failed; ipa***:refresh-failed`.
 - `active-alerts.json` — ⚠ **the "6 minutes old" I wrote here was the FILE's mtime, not the
   message's age; its `firstSeenAt` was 3.6 h earlier. See the retraction below before quoting any
   number from it.** Verbatim, as a stored snapshot: `STUCK: no alternate is healthy — but the live

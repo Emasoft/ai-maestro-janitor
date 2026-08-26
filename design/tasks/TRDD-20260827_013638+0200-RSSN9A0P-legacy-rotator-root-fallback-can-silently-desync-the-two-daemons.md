@@ -137,9 +137,9 @@ Cookie-DB census corrected by the peer — **FOUR, not three**, verified here wi
 ```
 $ find ~/.claude ~/ai-maestro -name Cookies -type f          # 4
 ~/.claude/account-rotator/reauth-chrome/Default/Cookies                    ← the one I missed
-~/.claude/account-rotator/profiles/chrome-profile-fmuaddib@gmail.com/Default/Cookies
-~/.claude/account-rotator/profiles/chrome-profile-ipazia.emasoft@gmail.com/Default/Cookies
-~/.claude/account-rotator/profiles/chrome-profile-emanuele.sabetta@gmail.com/Default/Cookies
+~/.claude/account-rotator/profiles/chrome-profile-fmu***/Default/Cookies
+~/.claude/account-rotator/profiles/chrome-profile-ipa***/Default/Cookies
+~/.claude/account-rotator/profiles/chrome-profile-ema***/Default/Cookies
 ```
 
 My earlier search carried `-path '*chrome-profile*'`, so it could not have found the reauth
@@ -159,8 +159,8 @@ The legacy file **exists and is stale**:
 
 | root | `live_email` | slots | age |
 |---|---|---|---|
-| canonical | `ipazia.emasoft@gmail.com` | **3** | current |
-| legacy `~/.claude/account-rotator/state.json` | `fmuaddib@gmail.com` | **2** | 2026-05-30 |
+| canonical | `ipa***` | **3** | current |
+| legacy `~/.claude/account-rotator/state.json` | `fmu***` | **2** | 2026-05-30 |
 
 Dormant today because canonical wins. It arms the moment the janitor's DATA dir disappears — which
 `janitor-footprint.md` **documents** (not measured here — say "documented as", do not assert the
@@ -191,7 +191,7 @@ believed. Retire it deliberately when he is back.
 
 ```
 CANARY roots-compared
-DESYNC live 'ipazia.emasoft@gmail.com' vs 'fmuaddib@gmail.com'; slots 3 vs 2   # exit 0
+DESYNC live 'ipa***' vs 'fmu***'; slots 3 vs 2   # exit 0
 ```
 
 The first version of this field was a `python3 -c "…"` one-liner and it was wrong twice:
