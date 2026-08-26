@@ -119,7 +119,7 @@ only generic procedure (use `<repo-root>`, `$HOME`, `<email>`, the CPV repo by
 name, never literal paths or secrets).
 
 
-^ATOM-SQZO-66VW [keywords: the_test_gate_blocks_a_publish_at_random tests_fail_only_in_the_full_suite_and_pass_alone detector_exits_0_with_empty_stdout which_of_the_four_load-flake_categories_is_this assert_something_in_empty_string raw_TimeoutExpired_in_a_test the_suite_flakes_under_xdist publish_gate_red_but_tests_pass_isolated, ocd: 2026-08-21, lmd: 2026-08-21]
+^ATOM-SQZO-66VW [keywords: the_test_gate_blocks_a_publish_at_random tests_fail_only_in_the_full_suite_and_pass_alone detector_exits_0_with_empty_stdout which_of_the_four_load-flake_categories_is_this assert_something_in_empty_string raw_TimeoutExpired_in_a_test the_suite_flakes_under_xdist publish_gate_red_but_tests_pass_isolated tell_the_four_flake_categories_apart_by_the_failure_text conftest_timeout-scale_knob_never_reaches_a_minimal_child_env a_production_helper_bypasses_state.run_subprocess elapsed_less_than_N_assertion_needs_a_causal_redesign the_tests_own_subprocess_run_timeout_cannot_be_scaled, ocd: 2026-08-21, lmd: 2026-08-21]
 
 The pytest gate flakes under load in FOUR distinct ways, and each needs a DIFFERENT fix — collapsing them is why TRDD-7NSRD8OV was misdiagnosed three times before it converged.
 
@@ -163,7 +163,7 @@ reads the liveness file from `_REAL_ENV["HOME"]` directly. A probe that fails si
 degrades to "no other actor", i.e. it blames the suite. [^4]
 
 
-^ATOM-UHO6-Q99D [desc:"gate 4 timing out has TWO causes with one symptom — a worker-pool HANG (retry) and a genuinely SLOW run (raise the cap); time a standalone run to tell them apart", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck retry_did_not_clear_the_timeout, type: project, ocd: 2026-07-28, lmd: 2026-07-30]
+^ATOM-UHO6-Q99D [desc:"gate 4 timing out has TWO causes with one symptom — a worker-pool HANG (retry) and a genuinely SLOW run (raise the cap); time a standalone run to tell them apart", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck retry_did_not_clear_the_timeout time_a_standalone_cpv-remote-validate_run_to_tell_causes_apart worker-pool_startup_race_blocks_on_a_lock_forever BrokenProcessPool_never_raised_when_workers_fail_to_spawn the_discriminator_is_completion_not_duration a_genuine_hang_now_takes_900s_to_catch _CPV_TIMEOUT_SEC_replaced_three_unstated_numbers, type: project, ocd: 2026-07-28, lmd: 2026-07-30]
 
 Gate 4 (`stage_validate`, remote CPV) times out for **two different reasons that print the same
 line**, and the remedies are opposites. Decide which one you have BEFORE acting, with one cheap
@@ -187,7 +187,7 @@ The discriminator is COMPLETION, not duration — a hang never finishes, so a st
 satisfiable at all. [^5] [^7] [^10]
 
 
-^ATOM-0GXI-QA1C [desc:"the tree is frozen for the whole publish — an edit mid-run fails it and the message blames the tests", keywords: publish_exited_3_but_every_test_passed REAL-STATE_WRITE_GUARD_FAILED a_test_escaped_isolation_but_no_test_failed working_tree_is_dirty_commit_or_stash_first publish_keeps_failing_while_I_edit, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+^ATOM-0GXI-QA1C [desc:"the tree is frozen for the whole publish — an edit mid-run fails it and the message blames the tests", keywords: publish_exited_3_but_every_test_passed REAL-STATE_WRITE_GUARD_FAILED a_test_escaped_isolation_but_no_test_failed working_tree_is_dirty_commit_or_stash_first publish_keeps_failing_while_I_edit the_tree_is_frozen_for_the_whole_publish_run editing_a_source_file_mid-publish_kills_the_gate source-tree_changed_line_names_the_exact_path plugin-data_changed_line_is_tolerated_as_the_live_daemon commit_everything_before_starting_a_publish keep_hands_off_the_tree_until_exit_is_printed cost_two_publish_runs_before_this_was_understood, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
 
 The publish pipeline treats the working tree as FROZEN for its whole run, and enforces that in two
 places: gate 1 refuses a dirty tree, and the test gate's REAL-STATE WRITE GUARD fails the run (rc=3,
@@ -205,7 +205,7 @@ source. Both surface on the same symptom query, and that is intended: read the g
 vs `[plugin-data]` prefix to tell which one you are looking at. [^8]
 
 
-^ATOM-FGXY-NBTB [desc:"CPV's pin is written LITERALLY in both workflows and kept equal to .cpv-version by a test — an SSOT indirection there is a MAJOR that blocks the publish", keywords: publish_blocked_by_a_MAJOR_about_a_non-resolvable_CPV_ref workflow_pins_a_non-resolvable_ref can_I_read_the_CPV_version_from_a_file_at_runtime where_is_the_CPV_tag_pinned bumping_the_CPV_version, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-FGXY-NBTB [desc:"CPV's pin is written LITERALLY in both workflows and kept equal to .cpv-version by a test — an SSOT indirection there is a MAJOR that blocks the publish", keywords: publish_blocked_by_a_MAJOR_about_a_non-resolvable_CPV_ref workflow_pins_a_non-resolvable_ref can_I_read_the_CPV_version_from_a_file_at_runtime where_is_the_CPV_tag_pinned bumping_the_CPV_version the_cpv_tag_is_written_literally_in_both_workflows test_cpv_pin_ssot.py_gate_fails_until_they_match edit_.cpv-version_then_update_every_workflow_call_site drift_cannot_reach_the_remote_because_of_the_ssot_test publish_blocked_by_a_MAJOR_cpv_ref_severity ci.yml_and_release.yml_both_pin_the_cpv_tag no_runtime_indirection_for_the_cpv_version, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **The CPV tag is written LITERALLY in both workflows** (`ci.yml` once, `release.yml` twice)
 and kept equal to `.cpv-version` by `tests/test_cpv_pin_ssot.py`, which `publish.py` runs as

@@ -1,6 +1,6 @@
 ---
 name: window-burn-rate-alarm-contract
-description: "when does the janitor's burn alarm actually fire / why did window-burn-rate alarm about an account I am not using / why does one 7d reading alarm every day for a week / how does the burn line say which account it is about / where do per-model weekly windows like Fable come from / why is the usage-probe cache full of dead files"
+description: "when does the janitor's burn alarm actually fire / why did window-burn-rate alarm about an account I am not using / why does one 7d reading alarm every day for a week / how does the burn line say which account it is about / where do per-model weekly windows like Fable come from / why is the usage-probe cache full of dead files / a usage percentage looks wrong for my own session / how old is the usage number I am being shown / two tools disagree about my usage percentage / does the usage-probe cache ever get cleaned / is a stale probe entry ever served to a reader / why did the alarm stay silent when it should have fired / did a payload-shape change accidentally mute a real burn / why did the same 7d window alarm seven days in a row / where do per-model weekly burn windows come from / burn ratio threshold default 1.5 / what is the token-quietness invariant for this alarm"
 ocd: 2026-08-01
 lmd: 2026-08-01
 metadata:
@@ -12,7 +12,7 @@ metadata:
 # window-burn-rate-alarm-contract
 
 
-^ATOM-9I2M-VE2F [desc:"the four gates a burn trip must pass, and why each exists: not-idle, above min_util, ratio >= bar, and a key that identifies ONE window instance", keywords: when_does_window-burn-rate_actually_fire why_did_the_burn_alarm_stay_silent why_did_one_reading_alarm_every_day_for_a_week burn_alarm_fired_about_an_account_I_am_not_using which_account_is_this_burn_line_about live_versus_alternate_account_in_a_drift_line, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-9I2M-VE2F [desc:"the four gates a burn trip must pass, and why each exists: not-idle, above min_util, ratio >= bar, and a key that identifies ONE window instance", keywords: when_does_window-burn-rate_actually_fire why_did_the_burn_alarm_stay_silent why_did_one_reading_alarm_every_day_for_a_week burn_alarm_fired_about_an_account_I_am_not_using which_account_is_this_burn_line_about live_versus_alternate_account_in_a_drift_line a_burn_trip_must_pass_four_gates the_account_is_not_proven_idle_gate util_pct_must_be_above_min_util the_key_identifies_one_window_instance_by_reset_epoch model-scoped_windows_like_7d_fable_evaluated_on_the_same_terms only_a_definite_no_session_suppresses_the_alarm, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **A burn trip must pass four gates** (`token_burn.evaluate_trips`), and three of them exist because
 the alarm was wrong without them (2026-08-01, issue #160):
@@ -34,7 +34,7 @@ the TOKEN-QUIETNESS invariant — surface only in the CULPRIT project's own sess
 any of this. Attribution is the sibling atom below.
 
 
-^ATOM-TS67-OTS6 [desc:"a usage figure must name the account it measured and the sample it came from — an unlabelled number is read as being about the reader's own session", keywords: which_account_is_this_burn_line_about the_janitor_reported_a_percentage_that_is_wrong_for_me live_versus_alternate_account_label how_old_is_the_usage_number_I_am_being_shown two_tools_disagree_about_my_usage_percentage, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-TS67-OTS6 [desc:"a usage figure must name the account it measured and the sample it came from — an unlabelled number is read as being about the reader's own session", keywords: which_account_is_this_burn_line_about the_janitor_reported_a_percentage_that_is_wrong_for_me live_versus_alternate_account_label how_old_is_the_usage_number_I_am_being_shown two_tools_disagree_about_my_usage_percentage every_emitted_usage_figure_carries_its_subject_and_sample_age a_bare_number_is_silently_completed_with_the_readers_own_account three_correct_numbers_three_different_subjects api_oauth_usage_is_rate-limited_served_from_one_throttled_cache sample_age_makes_two_readings_joinable_against_a_history unknown_liveness_prints_no_marker_rather_than_guess a_cross-agent_debugging_session_was_wasted_on_a_wrong_subject, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **Every emitted usage figure carries its SUBJECT and its SAMPLE AGE.** Burn lines print `(live)` or
 `(alternate)`, threaded from `rotator_usage._probe`, which knows `live_email` from the rotator state
@@ -54,7 +54,7 @@ minutes old, and two tools polling at different moments get the SAME one. The ag
 readings joinable against a usage history instead of assumed simultaneous.
 
 
-^ATOM-MO6J-F77J [desc:"the usage-probe cache is keyed on the ACCESS TOKEN, which rotates — so entries strand and must be retired on a bar above both re-use horizons", keywords: why_is_the_usage-probe_directory_full_of_files dozens_of_probe_json_files_for_a_few_accounts does_the_usage_cache_ever_get_cleaned is_a_stale_probe_entry_ever_served usage_probe_cache_key, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-MO6J-F77J [desc:"the usage-probe cache is keyed on the ACCESS TOKEN, which rotates — so entries strand and must be retired on a bar above both re-use horizons", keywords: why_is_the_usage-probe_directory_full_of_files dozens_of_probe_json_files_for_a_few_accounts does_the_usage_cache_ever_get_cleaned is_a_stale_probe_entry_ever_served usage_probe_cache_key the_probe_cache_key_is_a_digest_of_the_access_token access_tokens_rotate_every_8_hours_and_strand_old_entries dead_entries_are_unreachable_never_served_by_a_lookup prune_retired_deletes_entries_past_a_24h_bar the_bar_must_stay_above_both_re-use_horizons a_prune_that_ate_a_live_entry_would_defeat_the_throttle 48_entries_for_3_accounts_only_2_still_usable, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **The probe cache key is a digest of the ACCESS TOKEN, and access tokens rotate** (~8h per account
 observed), so every rotation mints a new key and strands the previous entry forever. Measured

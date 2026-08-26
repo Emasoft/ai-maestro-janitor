@@ -1,6 +1,6 @@
 ---
 name: janitor-tool-call-cost-law
-description: "why did the re-arm/arm cost so many tokens / is the dynamic cadence actually saving anything or is it wasting more than it saves / how much does one tool call cost / the heartbeat keeps re-arming itself / why did one ordinary turn cost 500k cache_creation tokens / a cache break I cannot explain / an msg[N] block-changed fingerprint blames the wrong message"
+description: "why did the re-arm/arm cost so many tokens / is the dynamic cadence actually saving anything or is it wasting more than it saves / how much does one tool call cost / the heartbeat keeps re-arming itself / why did one ordinary turn cost 500k cache_creation tokens / a cache break I cannot explain / an msg[N] block-changed fingerprint blames the wrong message / should I disarm the janitor to save tokens / does disarming save money or does it backfire / is a config change to the cron actually free / why does a cadence tier flap between fast and slow / what does turn_cost equal in terms of tool calls / how many tool calls does janitor-arm actually cost / a cache_creation spike appeared out of nowhere / distrust an absolute-index cache-break diff / why did one turn cost 500k cache_creation tokens / is there a re-arm cooldown"
 ocd: 2026-07-14
 lmd: 2026-08-16
 metadata:
@@ -10,7 +10,7 @@ metadata:
 publish-globally: false
 ---
 
-^tool-call-cost-law [desc: every_tool_round_trip_rereads_the_whole_context_and_is_billed_for_it, keywords: how_much_does_one_tool_call_cost_in_a_claude_code_turn cost_equals_tool_calls_times_context_times_0.1 why_is_a_six_step_skill_expensive, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^tool-call-cost-law [desc: every_tool_round_trip_rereads_the_whole_context_and_is_billed_for_it, keywords: how_much_does_one_tool_call_cost_in_a_claude_code_turn cost_equals_tool_calls_times_context_times_0.1 why_is_a_six_step_skill_expensive every_tool_round-trip_re-reads_the_whole_context dead_linear_at_52k_per_call_on_a_520k_context a_skills_step_count_is_its_price_tag fold_shell_steps_into_one_script_to_cut_re-reads cache_read-driven_so_only_the_0.1x_price_enters_it a_quiet_heartbeat_fire_is_one_tool_call turn_cost_formula_tool_calls_times_context_times_0.1 how_much_does_one_tool_call_cost cost_is_driven_by_tool-call_count_not_work_per_call, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Every tool round-trip re-reads the ENTIRE conversation at the 0.1× cache-read rate.** So the
 cost of a turn is driven by its TOOL-CALL COUNT, not by how much work each call does:
 
@@ -30,7 +30,7 @@ The practical consequence: **a skill's step count is its price tag.** Folding fo
 one script is not cosmetic — it removes three full context re-reads. This is why `/janitor-arm` runs
 `arm_prepare.py` + `arm_record.py` instead of six inline bash blocks (TRDD-DLI76AUC).
 
-^cadence-actuation-is-billed [desc: the_dynamic_cadence_control_loop_runs_through_the_model_so_its_actuation_is_billed, keywords: dynamic_cadence_re-arms_and_that_costs_a_full_model_turn dispatch_cannot_call_CronCreate_only_the_model_can optimizer_whose_adjustments_cost_more_than_they_save, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^cadence-actuation-is-billed [desc: the_dynamic_cadence_control_loop_runs_through_the_model_so_its_actuation_is_billed, keywords: dynamic_cadence_re-arms_and_that_costs_a_full_model_turn dispatch_cannot_call_CronCreate_only_the_model_can optimizer_whose_adjustments_cost_more_than_they_save is_the_dynamic_cadence_actually_saving_anything payback_time_equals_arm_tool_calls_over_fires_saved_per_hour demoting_the_cadence_needs_30_to_45_minutes_to_break_even the_context_size_cancels_out_of_the_payback_threshold no_re-arm_cooldown_causes_flapping_between_tiers observed_a_tier_flap_in_25_minutes_saving_nothing heartbeat_cadence_demote_fires_defaults_to_two why_did_the_re-arm_cost_so_many_tokens a_tier_change_is_a_full_claude_turn_not_a_config_write, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **The dynamic cadence's control loop runs through the MODEL, so its actuation is billed at model
 rates.** `dispatch.py` CANNOT call `CronCreate` — only the model can — so a tier change is not a
 config write, it is a **full Claude turn**: the dispatcher emits `[janitor-renew]`, the session runs
@@ -53,7 +53,7 @@ janitor commits a demotion ~4.5× sooner than it can pay for it, and any activit
 ~620k weighted, saving nothing. There is **no re-arm cooldown** anywhere. Raising the hysteresis to
 match the payback is the open fix (deferred, not yet approved — see TRDD-DLI76AUC §Deferred).
 
-^arming-is-not-the-cost [desc: killing_the_churn_never_means_disarming_the_cron_always_exists, keywords: do_not_disarm_to_save_tokens_the_heartbeat_is_a_cache_keepalive a_renew_is_delete_plus_create_the_janitor_stays_armed_throughout always_on_always_armed, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^arming-is-not-the-cost [desc: killing_the_churn_never_means_disarming_the_cron_always_exists, keywords: do_not_disarm_to_save_tokens_the_heartbeat_is_a_cache_keepalive a_renew_is_delete_plus_create_the_janitor_stays_armed_throughout always_on_always_armed should_I_disarm_the_janitor_to_save_tokens disarming_backfires_and_forces_full-price_rebuilds the_cron_never_ceases_to_exist_only_its_period_changes killing_the_churn_never_means_disarming what_churns_is_how_often_the_period_is_rewritten a_renew_is_delete_then_create_never_a_gap_in_arming disarming_kills_the_cache_keep-alive_and_forces_full-price_rebuilds a_local-scope_note_records_a_session_that_made_this_mistake disarming_is_the_recurring_misdiagnosis, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Killing the churn NEVER means disarming.** A renew is a `CronDelete` immediately followed by a
 `CronCreate` — the cron never ceases to exist and the janitor is armed throughout. What churns is
 how often the cron's PERIOD is rewritten, not whether it exists. Disarming to save tokens is the
@@ -64,7 +64,7 @@ publish that name to every cloner. Downward references exist for precisely this 
 
 
 
-^ATOM-E98O-SQZG [desc: "A large cache_creation on an ordinary turn is usually client-side: one measured break came from cache_control moving off the previous last message, not from any edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved why_did_one_turn_cost_500k_tokens prompt_cache_orphaned, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
+^ATOM-E98O-SQZG [desc: "A large cache_creation on an ordinary turn is usually client-side: one measured break came from cache_control moving off the previous last message, not from any edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved why_did_one_turn_cost_500k_tokens prompt_cache_orphaned two_calls_51_seconds_apart_diverged_by_535k_tokens cache_control_ephemeral_ttl_annotation_disappeared the_marker_rides_the_currently-last_message client-side_claude_code_behaviour_not_a_plugin_or_hook rule_out_cold_start_compaction_growth_before_blaming_edits editing_an_injected_instruction_file_mid-session_costs_150k the_causal_step_is_supported_not_proven, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
 
 **A large `cache_creation` on an ordinary turn is usually NOT something you did.** Measured on this
 repo's own traces 2026-08-13 (report under `reports/ij94o8yd/`): two consecutive calls 51 s apart
@@ -82,7 +82,7 @@ mid-session IS avoidable and costs ~150k, but it is EPISODIC — it shows up in 
 only when rules were actually edited — and it is not the dominant term.
 
 
-^ATOM-UND7-X0OB [desc: "Distrust an msg[N] cache-break fingerprint: absolute-index diffing reports a change on ordinary conversation growth — corroborate by sha before acting", keywords: msg_index_N_block_changed unclassified_cache_break cache_break_fingerprint_is_wrong usertext_block_changed_at_pos classifier_blames_the_wrong_message, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
+^ATOM-UND7-X0OB [desc: "Distrust an msg[N] cache-break fingerprint: absolute-index diffing reports a change on ordinary conversation growth — corroborate by sha before acting", keywords: msg_index_N_block_changed unclassified_cache_break cache_break_fingerprint_is_wrong usertext_block_changed_at_pos classifier_blames_the_wrong_message distrust_an_msgN_block-changed_fingerprint_before_acting messages363_reappears_unchanged_at_messages364 the_array_simply_grew_not_a_real_cache_break diffing_the_same_absolute_index_on_a_growing_array corroborate_by_sha_at_shifted_indices_before_believing_it 786_changes_found_across_59_sessions same_sha_after_the_array_grew_by_one, type: reference, ocd: 2026-08-16, lmd: 2026-08-16]
 
 **Distrust an `msg[N] <block> changed` cache-break fingerprint before acting on it.** Scanning this
 machine's retained traces for `messages[363]` found 786 "changes" across 59 sessions. Checking one
@@ -104,7 +104,7 @@ Corroborate by sha at shifted indices before believing the actor string names th
 ## Superseded
 
 
-^ATOM-Q6AN-1PDO [desc: "Diagnosing a big cache_creation spike: an msg[N] fingerprint is often an index-shift artifact, and one real break came from cache_control moving, not from edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved msg_index_N_block_changed unclassified_cache_break why_did_one_turn_cost_500k_tokens prompt_cache_orphaned, type: reference, ocd: 2026-08-16, lmd: 2026-08-16, status: superseded, superseded-by: ATOM-E98O-SQZG]
+^ATOM-Q6AN-1PDO [desc: "Diagnosing a big cache_creation spike: an msg[N] fingerprint is often an index-shift artifact, and one real break came from cache_control moving, not from edited text", keywords: cache_break_rebuilt_the_whole_prefix huge_cache_creation_on_an_ordinary_turn cache_control_moved msg_index_N_block_changed unclassified_cache_break why_did_one_turn_cost_500k_tokens prompt_cache_orphaned archived_superseded_snapshot_of_the_cache_break_diagnosis old_combined_atom_before_the_split_into_two see_the_non-superseded_atoms_for_the_live_facts reconstructed_from_agentlensPros_cas_store historical_record_of_the_original_combined_diagnosis, type: reference, ocd: 2026-08-16, lmd: 2026-08-16, status: superseded, superseded-by: ATOM-E98O-SQZG]
 
 **A large `cache_creation` on an ordinary turn is usually NOT something you did.** Measured on
 this repo's own traces 2026-08-13 (report under `reports/ij94o8yd/`), reconstructing real request

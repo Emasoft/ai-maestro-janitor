@@ -129,7 +129,7 @@ fires rather than trusting its docstring):
   below: the suite launches the daemon through `uv run`, so the handle it holds is the
   LAUNCHER; signalling that handle orphans the real child. Kill the process GROUP.
 
-^control-dir-ignores-the-isolation-lever [desc: fixed_path_defeats_env_isolation, keywords: test wrote the live control plane JANITOR_GLOBAL_STATE_DIR did not move it kill-switch leaked from a test autouse _isolate_control_dir fixture, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
+^control-dir-ignores-the-isolation-lever [desc: fixed_path_defeats_env_isolation, keywords: a_test_wrote_the_live_control_plane JANITOR_GLOBAL_STATE_DIR_did_not_move_it a_kill-switch_leaked_from_a_test autouse__isolate_control_dir_fixture control_dir_is_a_literal_fixed_path_with_no_ladder does_JANITOR_GLOBAL_STATE_DIR_cover_the_control_dir a_leaked_kill-switch.flag_disarms_the_whole_fleet three_test_files_were_writing_the_live_control_plane why_does_control_dir_ignore_env_isolation do_not_simplify_the_autouse_fixture_to_per-file_setenv the_established_isolation_lever_silently_misses_this_flag control_dir_can_be_hardcoded_by_a_foreign_reader, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
 `control_dir()` (the `~/.claude/janitor-control/` control plane, TRDD-QK7M2B0X) is
 deliberately a LITERAL fixed path with no resolution ladder — that is its whole purpose, so
 a foreign reader like the ai-maestro server can hardcode it. The consequence for tests is
@@ -141,7 +141,7 @@ fixture in `tests/conftest.py`** — autouse, not per-file `setenv`, because the
 is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file. [^4]
 
 
-^ATOM-ODTM-LOI0 [desc:"the suite spawns REAL daemon processes that can outlive it — identify an escapee by its sandbox env, never by its argv, which names the repo script the real daemon also runs", keywords: found_a_daemon_py_running_from_a_temp_directory is_this_the_real_janitor_daemon_or_a_test_leftover orphaned_daemon_from_the_test_suite daemon_process_alive_for_days_with_no_cpu janitor_test_session_temp_home ps_shows_two_daemons_but_daemon_pid_is_absent daemon_ignored_sigterm_and_needed_sigkill, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-ODTM-LOI0 [desc:"the suite spawns REAL daemon processes that can outlive it — identify an escapee by its sandbox env, never by its argv, which names the repo script the real daemon also runs", keywords: found_a_daemon_py_running_from_a_temp_directory is_this_the_real_janitor_daemon_or_a_test_leftover orphaned_daemon_from_the_test_suite daemon_process_alive_for_days_with_no_cpu janitor_test_session_temp_home ps_shows_two_daemons_but_daemon_pid_is_absent daemon_ignored_sigterm_and_needed_sigkill argv_cannot_tell_a_test_daemon_from_production JANITOR_TEST_SANDBOX_DENY_names_forbidden_real_dirs production_daemon_pid_is_in_global-state_daemon.pid an_escapee_holds_an_fd_on_an_unlinked_flock identify_an_escapee_by_its_sandbox_env_not_argv, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 **The suite spawns REAL daemons, so a process-table audit can find one long after the run.**
 An escapee's argv is `<python> …/scripts/daemon.py` — the SAME repo script the production
@@ -159,7 +159,7 @@ is contained, not dangerous. It is still worth killing: it holds an fd on an unl
 and it makes every later process-table audit ambiguous.
 
 
-^ATOM-5STX-ZL36 [desc:"the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed is_this_orphan_evidence_my_fix_failed compare_the_orphan_start_time_to_the_fix_commit_date, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
+^ATOM-5STX-ZL36 [desc:"the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed is_this_orphan_evidence_my_fix_failed compare_the_orphan_start_time_to_the_fix_commit_date 2_days_18_hours_alive_at_0.13s_cpu_total a_leak_is_silent_absence_of_symptoms_is_not_absence_of_leaks terminate-and-assume_cleanup_does_not_clear_a_leak parked_in_a_sleep_which_is_why_nothing_noticed_it ppid_1_process-group_leader_long_gone sandbox_HOME_already_deleted_but_process_still_alive is_this_orphan_process_a_sign_my_fix_didnt_work, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 Measured instance (2026-07-30 → 2026-08-02): one escapee still alive **2 d 18 h** after its
 sandbox HOME had been deleted, at **0.13 s of CPU total** and 4 MB RSS — parked in a sleep,

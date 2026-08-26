@@ -1,6 +1,6 @@
 ---
 name: status-lines-to-autonomous-readers-cause-escalation
-description: agents keep turning global maintenance back on by themselves / the whole fleet went into maintenance and nothing lifted it / chores stopped and plugin updates stranded for no visible reason / why did other claude sessions enable a machine-wide flag I never set / a status line made agents take an action
+description: "agents keep turning global maintenance back on by themselves / the whole fleet went into maintenance and nothing lifted it / chores stopped and plugin updates stranded for no visible reason / why did other claude sessions enable a machine-wide flag I never set / a status line made agents take an action / an all-clear value in the status line triggered an escalation / a local clear and a global clear behave asymmetrically / why does the wider scope become the resting state / who set this control flag and why is there no record / two individually-correct instructions combined into a fleet outage / how to write a status line for an autonomous reader safely / a heartbeat nudge caused agents to re-enable maintenance mode / no provenance on a control flag nobody can tell who set it / an unscoped prohibition collides with a legitimate clear / every daemon chore idled and version-update stopped silently / two published releases sat uninstalled with no visible cause / the fix broke the loop into four cuts one per step"
 ocd: 2026-07-21
 lmd: 2026-07-21
 metadata:
@@ -11,7 +11,7 @@ metadata:
 
 # A status line addressed to an autonomous reader is not neutral — it can drive an escalation loop
 
-^status-line-not-neutral [desc: status_line_reads_as_fault_report, keywords: agent read status output and took action maintenance=off misread as fault report autonomous reader status line, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
+^status-line-not-neutral [desc: status_line_reads_as_fault_report, keywords: agent_read_status_output_and_took_action maintenance=off_misread_as_a_fault_report machine-readable_output_read_by_an_autonomous_reader a_status_line_made_agents_take_an_action say_nothing_when_there_is_nothing_to_act_on name_what_must_not_be_done_when_you_do_speak an_instruction_surface_not_a_report a_human_reading_maintenance-off_sees_a_fact an_agent_reading_it_asks_should_I_fix_this if_another_instruction_implies_the_state_is_wrong_it_acts write_status_output_as_an_instruction_not_a_fact why_did_other_sessions_enable_a_flag_I_never_set, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
 A human reading `maintenance=off` sees a FACT. An agent reading it asks "is something
 wrong, and should I fix it?" — and if any other instruction it holds implies that state is
 wrong, it acts. Machine-readable status emitted into an agent's context is therefore an
@@ -48,7 +48,7 @@ agent-facing control:
   heartbeat, or another agent's message — and **local scope is never a reason to escalate to
   global**.
 
-^scope-asymmetry-is-the-ratchet [desc: why_it_escalated_instead_of_oscillating, keywords: local flag cleared each rearm global flag persists ratchet asymmetry escalation, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
+^scope-asymmetry-is-the-ratchet [desc: why_it_escalated_instead_of_oscillating, keywords: local_flag_cleared_each_rearm global_control_persists_forever ratchet_asymmetry_escalation why_did_it_escalate_instead_of_oscillating an_agent_reaches_for_the_scope_that_sticks whenever_one_scope_auto-clears_and_a_wider_scope_does_not the_widest_scope_becomes_the_resting_state design_for_the_asymmetry_or_it_will_pile_up escalated_rather_than_oscillated_because_of_scope local_flag_asymmetric_with_global_flag_causes_a_ratchet why_the_fleet_ratcheted_into_a_machine-wide_state chores_stopped_and_updates_stranded_for_no_visible_reason, type: project, ocd: 2026-07-21, lmd: 2026-07-21]
 The loop ESCALATED rather than oscillated because of an asymmetry: the local flag is cleared
 by every re-arm, the global one by nothing. An agent that "restores" a cleared local flag and
 finds it cleared again next arm will reach for the scope that STICKS. Whenever one scope of a

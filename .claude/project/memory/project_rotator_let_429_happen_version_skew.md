@@ -1,6 +1,6 @@
 ---
 name: project_rotator_let_429_happen_version_skew
-description: "the oauth rotator let a 429 happen instead of rotating / had to rotate manually again / proactive rotation didn't fire / rotator log says 'all paid accounts maxed' but an account is actually fresh / rotation deadlocked"
+description: "the oauth rotator let a 429 happen instead of rotating / had to rotate manually again / proactive rotation didn't fire / rotator log says 'all paid accounts maxed' but an account is actually fresh / rotation deadlocked / a model-scoped wall did not trigger rotation / agents hung on a fable-only limit / total continuity failure across the fleet / oauth-health reports every slot as latched refresh no / a server-owned agent did not recover from a wedge / model fallback did not fire when it should have / why does the janitor stay put instead of rotating on a scoped wall / the candidate loop deadlocked with an empty selection / an alternate account slot token expired and looked maxed / a handoff to a dark receiver is a silent no-op / read oauth-health live never trust a stale summary / did I have to rotate accounts manually again"
 ocd: 2026-06-11
 lmd: 2026-06-13
 metadata:
@@ -74,7 +74,7 @@ incident record behind its 429 lesson) and `[[project_janitor_cc_changelog_curre
 (the rate-limit MENU that freezes the session on 429 — why rotation must be proactive).
 
 
-^ATOM-PH7Z-4FY8 [desc:"2026-08-15 Fable-wall continuity failure: why nothing rotated or fell back, and the scoped rotation trigger that fixed the janitor half", keywords: fable_exhausted_no_rotation model_scoped_window_rotation_trigger agents_hung_on_fable scoped-only_wall_stay_put rotate_to_account_with_fable_headroom server_owned_handoff_dark model_fallback_did_not_fire, type: project, ocd: 2026-08-15, lmd: 2026-08-15]
+^ATOM-PH7Z-4FY8 [desc:"2026-08-15 Fable-wall continuity failure: why nothing rotated or fell back, and the scoped rotation trigger that fixed the janitor half", keywords: fable_exhausted_no_rotation model_scoped_window_rotation_trigger agents_hung_on_fable scoped-only_wall_stay_put rotate_to_account_with_fable_headroom server_owned_handoff_dark model_fallback_did_not_fire cmd_auto_had_no_rotation_trigger_for_a_model-scoped_wall fixed_in_commit_f185e521 a_scoped-only_wall_rotates_only_onto_a_scoped-clear_target every_hung_agent_was_server_owned_so_the_janitor_stood_down oauth-health_from_a_non-daemon_cli_reports_a_fail-closed_latch, type: project, ocd: 2026-08-15, lmd: 2026-08-15]
 
 2026-08-15 Fable-wall incident (owner: "total continuity failure"). Three stacked causes, only one a janitor code gap:
 (1) `cmd_auto` had NO rotation trigger for a MODEL-scoped wall — Fable spent while 5h/7d fine read as "within limits". Fixed in `f185e521`: it reuses `token_burn.model_fallback_verdict` (scoped>=90, account<=90, `ROTATOR_SCOPED_SWITCH_AT`/`ROTATOR_SCOPED_ACCOUNT_HEADROOM`); a scoped-only wall rotates ONLY onto a scoped-clear target (preserve Fable), and with none it STAYS PUT — tiers 1b/degraded are skipped because they would trade one Fable wall for the same wall — leaving `/model opus` to the model-fallback detector.

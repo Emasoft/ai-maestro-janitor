@@ -1,6 +1,6 @@
 ---
 name: janitor-per-project-channeling
-description: "can a session/agent see or be told about another project's findings — fleet summary line leaked other repos' drift into every session / where do findings about a repo with no open session go / cross-project notification data exfiltration"
+description: "can a session/agent see or be told about another project's findings — fleet summary line leaked other repos' drift into every session / where do findings about a repo with no open session go / cross-project notification data exfiltration / an automatic surface leaked another project's data / agents keep turning global maintenance back on by themselves / why did I see a finding for a repo I have no session in / can a heartbeat drift line mention another repo / does window-burn-rate alarm outside its own project / fleet-wide aggregates in a per-session line are forbidden / what commands are allowed to be machine-wide / why is the context-advisory default 80 percent not 85 / token telemetry per-project channeling invariant / a fleet aggregate leaked cross-project counts into a session / agents must never act on another project's workdir or git / the daemon may gather fleet-wide but never broadcast fleet-wide / can other agents' repo problems leak into my session"
 ocd: 2026-07-17
 lmd: 2026-07-17
 metadata:
@@ -37,7 +37,7 @@ See also [[janitor-daemon-bulk-lane]] — the other v0.50.0-era daemon invariant
 serialization, a sibling concern, not governed by this one).
 
 
-^ATOM-IGW8-NJLC [desc:"Per-project channeling ALSO applies to token telemetry: window-burn-rate alarms only inside the culprit project, and the 80% context-advisory default sits one runway band below the 85% enforcement", keywords: token_telemetry_per_project_only window_burn_rate_culprit_project_only context_advisory_default_80_percent one_runway_band_below_enforcement, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-IGW8-NJLC [desc:"Per-project channeling ALSO applies to token telemetry: window-burn-rate alarms only inside the culprit project, and the 80% context-advisory default sits one runway band below the 85% enforcement", keywords: token_telemetry_per_project_only window_burn_rate_culprit_project_only context_advisory_default_80_percent one_runway_band_below_enforcement does_per-project_channeling_apply_to_token_telemetry_too unattributable_burn_trips_stay_silent_everywhere why_is_the_advisory_band_below_the_enforcement_band CC_harness_covers_the_mid_band fleet-wide_views_exist_only_behind_explicit_human_commands per-project_channeling_invariant_TRDD-X92VBFNF does_token_telemetry_leak_across_projects_too findings_about_a_repo_with_no_open_session_go_to_the_human, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 - **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
   carries ONLY the firing project's data — never another project's findings, names, or

@@ -1,6 +1,6 @@
 ---
 name: memory-chore-candidate-gating
-description: "the consolidate chore spawned an agent that abstained / a memory chore burned 295k tokens to reject one candidate / should I add a similarity threshold to the librarian's aggregation clusters / the librarian keeps surfacing notes that only share keywords / is the consolidate false-positive rate worth fixing upstream / why is there a Jaccard gate on conflict but not consolidate / will the same rejected candidate be dispatched again"
+description: "the consolidate chore spawned an agent that abstained / a memory chore burned 295k tokens to reject one candidate / should I add a similarity threshold to the librarian's aggregation clusters / the librarian keeps surfacing notes that only share keywords / is the consolidate false-positive rate worth fixing upstream / why is there a Jaccard gate on conflict but not consolidate / will the same rejected candidate be dispatched again / a memory chore dispatches an agent that abstains repeatedly / harvest re-fires on an unchanged corpus every cadence / 200k tokens burned to discover nothing was due / a marker never self-clears for a curated wiki page / is_curated_wiki_page misparsed flow-style frontmatter / a guard exists but does not suppress the re-dispatch / why did the precheck not fire when it should have / two parsers for one metadata format disagree with each other / should the janitor add a suppression gate for aggregation / a keyword-similarity gate cannot separate true from false merges"
 ocd: 2026-08-02
 lmd: 2026-08-02
 metadata:
@@ -12,7 +12,7 @@ metadata:
 # memory-chore-candidate-gating
 
 
-^ATOM-BAJX-BGNF [desc:"MEASURED: a keyword-similarity gate cannot work for consolidate — the true and false classes overlap, so no threshold separates them", keywords: should_I_add_a_similarity_threshold_to_aggregation_clusters jaccard_gate_on_conflict_but_not_consolidate librarian_surfaces_notes_that_only_share_keywords tried_to_reuse_the_conflict_gate_for_consolidate, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-BAJX-BGNF [desc:"MEASURED: a keyword-similarity gate cannot work for consolidate — the true and false classes overlap, so no threshold separates them", keywords: should_I_add_a_similarity_threshold_to_aggregation_clusters jaccard_gate_on_conflict_but_not_consolidate librarian_surfaces_notes_that_only_share_keywords tried_to_reuse_the_conflict_gate_for_consolidate a_keyword-similarity_gate_cannot_work_for_consolidate true_and_false_classes_overlap_no_threshold_separates_them measured_2026-08-02_on_190_notes_across_three_scopes a_0.15_gate_keeps_only_1_of_4_true_families a_threshold_destroys_genuine_merge_candidates_silently see_the_sibling_atom_for_why_the_statistic_differs debugging-methodology_scored_below_two_noise_clusters even_a_0.10_gate_keeps_only_2_of_4_true_families, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 **Do NOT port the conflict path's Jaccard gate to aggregation/consolidate.** It looks like
 the obvious reuse — the conflict path already carries `_MIN_TOKEN_JACCARD = 0.15` for the
@@ -34,7 +34,7 @@ destroys them SILENTLY (an un-surfaced candidate leaves no trace).
 See the sibling atom for WHY the same statistic works on conflict and cannot work here.
 
 
-^ATOM-TZAW-LB9U [desc:"the abstention cost is already bounded by the corpus-fingerprint gate, not by the refusal ledger — verify the gate before proposing any fix", keywords: a_memory_chore_burned_hundreds_of_k_tokens_to_abstain will_the_same_rejected_candidate_be_dispatched_again is_the_consolidate_false_positive_rate_worth_fixing consolidate_has_work_returned_false which_gate_stops_re_dispatch, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-TZAW-LB9U [desc:"the abstention cost is already bounded by the corpus-fingerprint gate, not by the refusal ledger — verify the gate before proposing any fix", keywords: a_memory_chore_burned_hundreds_of_k_tokens_to_abstain will_the_same_rejected_candidate_be_dispatched_again is_the_consolidate_false_positive_rate_worth_fixing consolidate_has_work_returned_false which_gate_stops_re_dispatch an_abstention_is_expensive_but_not_recurring bounded_by_the_corpus-fingerprint_gate_not_the_refusal_ledger cost_is_one-time_per_corpus_state_and_self-limiting the_refusal_ledger_only_covers_repair_and_conflict check_which_gate_bounds_a_wasteful_chore_before_fixing_it consolidate_writes_refusals_but_nothing_reads_them_back the_7-day_recheck_window_before_the_same_candidate_returns, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 **An abstention is expensive (~295k subagent tokens, measured) but it is NOT recurring**, and
 the mechanism that bounds it is `consolidate_has_work`'s **corpus-fingerprint** gate, not the
@@ -56,7 +56,7 @@ whether that gate is firing. Here the answer was "it already is", and the only c
 was to change nothing.
 
 
-^ATOM-035X-O02P [desc:"why the same Jaccard statistic separates conflict PAIRS but not aggregation FAMILIES — same statistic, different population", keywords: why_does_the_jaccard_gate_work_on_conflict_but_not_consolidate pair_versus_cluster_similarity a_topic_family_has_low_internal_similarity_by_nature reusing_a_threshold_across_a_different_population, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-035X-O02P [desc:"why the same Jaccard statistic separates conflict PAIRS but not aggregation FAMILIES — same statistic, different population", keywords: why_does_the_jaccard_gate_work_on_conflict_but_not_consolidate pair_versus_cluster_similarity a_topic_family_has_low_internal_similarity_by_nature reusing_a_threshold_across_a_different_population conflict_judges_a_pair_aggregation_judges_a_topic_family a_threshold_is_calibrated_against_a_population_not_a_metric two_same-subject_pages_may_share_no_words_at_all why_the_same_statistic_separates_pairs_but_not_families true_duplicate_scored_0.286_against_noise_0.108 aggregation_members_are_supposed_to_differ_from_each_other its_docstring_had_already_reached_this_conclusion the_measurement_confirms_it_empirically, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 **Why the same statistic works on conflict and cannot work here.** Conflict judges a PAIR:
 on the calibration corpus a true duplicate scored **0.286** against noise **≤0.108** — a
@@ -77,7 +77,7 @@ atom confirms it empirically, so the next reader does not re-derive it by shippi
 and discovering the loss only when a real merge never surfaces.
 
 
-^ATOM-83MU-YJHL [desc:"the abstaining-chore burn was not a missing gate — is_curated_wiki_page misparsed FLOW-STYLE metadata, so harvest saw every curated overview stub as RAW forever", keywords: memory_chore_dispatches_an_agent_that_abstains harvest_re-fires_on_an_unchanged_corpus 200k_tokens_to_discover_nothing_is_due marker_never_self-clears flow-style_metadata_frontmatter is_curated_wiki_page_returns_False_on_a_curated_page, type: project, ocd: 2026-08-07, lmd: 2026-08-07]
+^ATOM-83MU-YJHL [desc:"the abstaining-chore burn was not a missing gate — is_curated_wiki_page misparsed FLOW-STYLE metadata, so harvest saw every curated overview stub as RAW forever", keywords: memory_chore_dispatches_an_agent_that_abstains harvest_re-fires_on_an_unchanged_corpus 200k_tokens_to_discover_nothing_is_due marker_never_self-clears flow-style_metadata_frontmatter is_curated_wiki_page_returns_False_on_a_curated_page the_gate_was_fine_its_input_was_wrong scans_frontmatter_line-by-line_and_misses_keys_inside_braces nothing_can_ever_mirror_an_already-curated_page blast_radius_is_every_project_not_one_file when_a_guard_does_not_suppress_suspect_its_input_first fixed_2026-08-07_commit_4bbe7b3e, type: project, ocd: 2026-08-07, lmd: 2026-08-07]
 
 **The gate was fine; its INPUT was wrong.** `atomize_has_work`/`harvest_has_work` shipped
 2026-07-08 and are present in every cached version — so "add a suppression gate" was the wrong

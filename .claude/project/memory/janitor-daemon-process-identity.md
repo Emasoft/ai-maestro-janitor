@@ -1,6 +1,6 @@
 ---
 name: janitor-daemon-process-identity
-description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters / which TREE the daemon runs from — a staged import closure, not the plugin cache / a daemon chore silently does nothing and logs done in 0s / tests pass but the feature is dead on the daemon / never subprocess an unstaged path, log deduped chore failures"
+description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters / which TREE the daemon runs from — a staged import closure, not the plugin cache / a daemon chore silently does nothing and logs done in 0s / tests pass but the feature is dead on the daemon / never subprocess an unstaged path, log deduped chore failures / 6 daemon kills in 7 minutes with zero exceptions logged / why does uv run mint a new interpreter every spawn / grep found zero lines in daemon.log — is the daemon really silent / where does the global daemon write its log file / what does the s: tag mean on a janitor log line / is this log line the daemon or a per-session shim / a healthy cached version was quarantined as crash-looping / how to tell daemon lines from session-shim lines in the log / quarantine.json says crash-loop but there is no traceback / uv python find returns the wrong interpreter path / the daemon restarts ping-pong between two cached versions"
 ocd: 2026-08-06
 lmd: 2026-08-20
 metadata:
@@ -13,7 +13,7 @@ publish-globally: false
 # janitor-daemon-process-identity
 
 
-^ATOM-QA40-F1ZL [desc:"The daemon's binary IDENTITY is what macOS TCC grants against — uv run --script mints an ephemeral shim per spawn, so use uv's MANAGED CPython (path never moves)", keywords: iTerm_Automation_grant_will_not_stick TCC_grant_keeps_reverting_to_off which_python_runs_the_daemon uv_run_mints_a_new_interpreter_every_spawn osascript_denied_from_the_daemon, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
+^ATOM-QA40-F1ZL [desc:"The daemon's binary IDENTITY is what macOS TCC grants against — uv run --script mints an ephemeral shim per spawn, so use uv's MANAGED CPython (path never moves)", keywords: iTerm_Automation_grant_will_not_stick TCC_grant_keeps_reverting_to_off which_python_runs_the_daemon uv_run_mints_a_new_interpreter_every_spawn osascript_denied_from_the_daemon TCC_persists_a_grant_against_a_binary_path uv_run_--script_uses_an_ephemeral_shim managed_python_never_moves how_to_make_a_TCC_grant_stick_for_a_daemon uv_python_find_--system_--managed-python resolve_interpreter_cwd-dependent_bug keepalive_install.sh_resolve_interpreter, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
 
 macOS TCC persists an Automation grant against the **binary path** of the responsible
 process. `uv run --script` execs an EPHEMERAL `~/.cache/uv/builds-v0/.tmpXXXX/bin/python`
@@ -32,7 +32,7 @@ plain interpreter runs it unchanged — `uv run` was only ever a launcher conven
 is now the LAST resort in both ladders. Fixed in `75332ba0`. [^2]
 
 
-^ATOM-Q378-2PTL [desc:"The restart gate evicted the janitor's OWN version-less daemons every fire; the guard must sit in the PURE core AND in daemon_needs_restart, whose fallback bypasses it", keywords: daemon_SIGTERMed_on_every_heartbeat_fire keepalive_daemon_killed_and_respawned_in_a_loop 6_kills_in_7_minutes_with_zero_exceptions daemon_restart_ping_pong_between_two_cached_versions, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
+^ATOM-Q378-2PTL [desc:"The restart gate evicted the janitor's OWN version-less daemons every fire; the guard must sit in the PURE core AND in daemon_needs_restart, whose fallback bypasses it", keywords: daemon_SIGTERMed_on_every_heartbeat_fire keepalive_daemon_killed_and_respawned_in_a_loop 6_kills_in_7_minutes_with_zero_exceptions daemon_restart_ping_pong_between_two_cached_versions the_daemon_never_stays_up_between_heartbeats version-less_daemon_paths_extractor_returns_None restart_decision_evicts_the_janitors_own_daemon _restart_decision_and_daemon_needs_restart_guard_placement quarantine_read_failure_fallback_bypasses_the_pure_core keepalive_entry_and_staged_daemon.py_recognised_as_ours why_does_the_daemon_keep_getting_killed_and_relaunched fixed_in_commit_75332ba0, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
 
 `_restart_decision` decides "replace the running daemon?" by extracting a
 `/ai-maestro-janitor/<semver>/` segment from its argv. The janitor's OWN daemons run from
@@ -51,7 +51,7 @@ version in EITHER roll direction — consulting the quarantine only for the RUNN
 let two caches ping-pong forever. Fixed in `75332ba0`; see [[janitor-fleet-control-plane]].
 
 
-^ATOM-S4LG-GJB5 [desc:"The crash-loop breaker counts spawn ATTEMPTS, never exit cause — so orderly SIGTERM churn manufactures a false crash-loop quarantine of a healthy version (janitor#216, OPEN)", keywords: healthy_version_quarantined_as_crash-loop quarantine.json_says_crash-loop_but_the_log_has_no_traceback cached_version_is_quarantined_trying_an_older_version C4_rollback_fired_on_a_version_that_never_crashed, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
+^ATOM-S4LG-GJB5 [desc:"The crash-loop breaker counts spawn ATTEMPTS, never exit cause — so orderly SIGTERM churn manufactures a false crash-loop quarantine of a healthy version (janitor#216, OPEN)", keywords: healthy_version_quarantined_as_crash-loop quarantine.json_says_crash-loop_but_the_log_has_no_traceback cached_version_is_quarantined_trying_an_older_version C4_rollback_fired_on_a_version_that_never_crashed crash_loop_breaker_counts_attempts_not_cause janitor#216_open_issue orderly_SIGTERM_churn_manufactures_a_false_quarantine version_ping-pong_between_a_quarantined_and_an_older_cache do_not_trust_a_crash-loop_quarantine_entry_alone read_the_daemon_log_before_rolling_back a_version_never_crashed_but_got_quarantined_anyway 14_graceful_signal_15_exits_and_0_exceptions, type: reference, ocd: 2026-08-06, lmd: 2026-08-06]
 
 `_crash_loop_active()` counts spawn ATTEMPTS inside a window and never inspects WHY the
 previous process exited. So the eviction loop above — orderly SIGTERM, orderly respawn, not
@@ -69,7 +69,7 @@ pressure drops sharply, but the breaker's exit-cause blindness is untouched. Do 
 `crash-loop` quarantine entry as evidence a version crashed; read the daemon log first. [^1]
 
 
-^ATOM-KCGJ-99K2 [desc: "the daemon runs from a STAGED import closure in the DATA dir, so a chore that reaches an unstaged repo path silently no-ops forever", keywords: daemon_runs_from_staged_copy_not_the_cache chore_logs_done_in_0s_and_writes_nothing daemon_subprocess_path_does_not_exist keepalive_stage_import_closure why_does_my_daemon_task_silently_no-op DATA_scripts_dir_missing_modules tests_pass_but_the_daemon_does_nothing, type: reference, ocd: 2026-08-20, lmd: 2026-08-20]
+^ATOM-KCGJ-99K2 [desc: "the daemon runs from a STAGED import closure in the DATA dir, so a chore that reaches an unstaged repo path silently no-ops forever", keywords: daemon_runs_from_staged_copy_not_the_cache chore_logs_done_in_0s_and_writes_nothing daemon_subprocess_path_does_not_exist keepalive_stage_import_closure why_does_my_daemon_task_silently_no-op DATA_scripts_dir_missing_modules tests_pass_but_the_daemon_does_nothing never_subprocess_an_unstaged_repo_path put_daemon_work_in_an_imported_module_not_a_subprocess AST-walking_the_import_closure_of_daemon.py keepalive_stage._SUBDIRS_lib_and_oauth_rotator log_deduped_chore_failures_instead_of_swallowing_them, type: reference, ocd: 2026-08-20, lmd: 2026-08-20]
 
 The daemon does NOT run from the plugin cache — it runs from a STAGED copy in the plugin DATA dir (`<DATA>/scripts/`) containing `daemon.py` plus its TRANSITIVE IMPORT CLOSURE and nothing else. `keepalive_stage._SUBDIRS` is `("lib", "oauth_rotator")`, and the closure is computed by AST-walking the imports of `daemon_keepalive_entry.py` + `daemon.py`. Measured 2026-08-20: DATA/scripts held 45 lib modules where the repo has 321, and no `gh_issues_monitor/` at all.
 
@@ -88,7 +88,7 @@ The practical consequence: a daemon chore that reaches a repo path by FILENAME �
 - [[janitor-fleet-control-plane]] — where the quarantine + daemon state live.
 
 
-^ATOM-C0XG-WBGJ [desc:"the global daemon logs to global-state/daemon.log (JANITOR_LOG_DIR), never a project tree, and its [s:] tag is its SPAWNER's session id — not a session-shim marker", keywords: grep_found_zero_lines_in_daemon.log where_does_the_global_daemon_write_its_log is_this_line_the_daemon_or_a_per-session_shim s:_tag_in_janitor_logs JANITOR_LOG_DIR project_.janitor/logs/daemon.log_is_not_the_daemon chore-coordination_lines_missing, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
+^ATOM-C0XG-WBGJ [desc:"the global daemon logs to global-state/daemon.log (JANITOR_LOG_DIR), never a project tree, and its [s:] tag is its SPAWNER's session id — not a session-shim marker", keywords: grep_found_zero_lines_in_daemon.log where_does_the_global_daemon_write_its_log is_this_line_the_daemon_or_a_per-session_shim s:_tag_in_janitor_logs JANITOR_LOG_DIR project_.janitor/logs/daemon.log_is_not_the_daemon chore-coordination_lines_missing global-state/daemon.log_is_the_real_daemon_log per-session_detector_shims_write_the_project_log absence_of_a_log_line_is_not_proof_of_absence lsof_on_the_daemon_pid_cannot_settle_it lines_appended_and_closed_per_write_no_open_handle, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
 
 **The global daemon does not log into any project tree.** `daemon.py:2169` runs
 `os.environ.setdefault("JANITOR_LOG_DIR", str(gs.global_state_dir()))`, and `state.log_dir()`
@@ -103,7 +103,7 @@ lines, including a live yield of all five server-claimed chores. `lsof -p <daemo
 settle it either — `log_line` opens, appends and closes per line, so no handle is ever held. [^3]
 
 
-^ATOM-KNJC-DMC1 [desc:"the [s:8hex] tag on a janitor log line is its writer's SPAWNING session, not a session-shim marker — the detached daemon inherits CLAUDE_CODE_SESSION_ID", keywords: what_does_the_s:_prefix_in_a_janitor_log_line_mean is_an_s-tagged_line_a_session_shim how_to_tell_daemon_lines_from_shim_lines CLAUDE_CODE_SESSION_ID_inherited_by_the_daemon session_id_in_daemon.log, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
+^ATOM-KNJC-DMC1 [desc:"the [s:8hex] tag on a janitor log line is its writer's SPAWNING session, not a session-shim marker — the detached daemon inherits CLAUDE_CODE_SESSION_ID", keywords: what_does_the_s:_prefix_in_a_janitor_log_line_mean is_an_s-tagged_line_a_session_shim how_to_tell_daemon_lines_from_shim_lines CLAUDE_CODE_SESSION_ID_inherited_by_the_daemon session_id_in_daemon.log the_s:_tag_identifies_the_writers_spawner_not_a_shim a_detached_daemon_inherits_the_spawning_sessions_env_var attribute_a_log_line_by_file_path_not_by_tag compare_a_tag_against_the_daemon_logs_own_tag_set the_same_session_id_can_tag_both_daemon_and_shim_lines daemon_pid_30605_lines_all_tagged_the_spawning_session shim_session_id_appears_zero_times_in_the_daemon_log, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
 
 **`[s:<8hex>]` identifies the writer's SPAWNER, not a session shim.** `state.log_line` prefixes
 it whenever `CLAUDE_CODE_SESSION_ID` is set, and a detached daemon INHERITS that variable from

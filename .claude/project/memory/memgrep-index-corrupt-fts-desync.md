@@ -1,6 +1,6 @@
 ---
 name: memgrep-index-corrupt-fts-desync
-description: "memgrep reindex fails with 'database disk image is malformed' / 'Content in the virtual table is corrupt' — recall broke / the memory search index is corrupt / did a killed agent or a missing WAL tear the sqlite db"
+description: "memgrep reindex fails with 'database disk image is malformed' / 'Content in the virtual table is corrupt' — recall broke / the memory search index is corrupt / did a killed agent or a missing WAL tear the sqlite db / why did integrity_check say ok but the index is still corrupt / recall returns every result twice / duplicate rows in memory search results / a schema migration desynced the fts5 index from its content table / how do I fix or recover a corrupt memgrep index / I added a column to the index and every row still reads the default / the migration ran but changed nothing / an ADD COLUMN migration stayed NULL forever / is memgrep index.db safe to delete by hand / why does memgrep report SQLITE_BUSY under concurrent writers / did a killed process tear the memgrep database / index.db is a derived cache is it safe to rebuild / one file has two index keys because of path spelling"
 ocd: 2026-07-14
 lmd: 2026-07-14
 metadata:
@@ -9,7 +9,7 @@ metadata:
   tier: component
 ---
 
-^memgrep-corrupt-is-fts-desync-not-a-torn-write [desc: memgrep_corrupt_index_is_an_fts5_desync_not_file_damage, keywords: memgrep reindex database disk image is malformed content in the virtual table is corrupt sqlite corruption WAL journal_mode torn write killed agent rate limit recall broken index.db, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^memgrep-corrupt-is-fts-desync-not-a-torn-write [desc: memgrep_corrupt_index_is_an_fts5_desync_not_file_damage, keywords: memgrep_reindex_database_disk_image_is_malformed content_in_the_virtual_table_is_corrupt sqlite_corruption_WAL_journal_mode torn_write_killed_agent_rate_limit recall_broken_index.db an_external-content_fts5_index_desynced_from_its_content_table the_sqlite_file_is_almost_certainly_fine journal_mode_WAL_synchronous_normal_verified WAL_is_already_crash-safe_against_a_killed_process only_an_os_or_power_crash_can_tear_a_wal_db do_not_go_hunting_for_a_durability_bug_here an_agent_killed_by_the_rate_limit_is_not_a_sufficient_explanation, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 When `memgrep reindex` dies with **`database disk image is malformed` / `Content in the virtual table
 is corrupt`**, the SQLite FILE is almost certainly FINE. That second string is FTS5's
 `SQLITE_CORRUPT_VTAB` — an **external-content FTS5 index that has desynced from its content table**.
@@ -18,7 +18,7 @@ The pages were never torn. Do **not** go hunting for a durability bug: memgrep s
 process being **killed** (only an OS/power crash can tear it) — so "an agent was killed by the rate
 limit" is **not** a sufficient explanation, and enabling WAL "harder" fixes nothing. [^1]
 
-^ATOM-MGDX-WHYD [desc:"a schema migration that DROP+CREATEs an FTS5 virtual table empties the index while the content table keeps every row, so the next reindex writes negative postings and SQLITE_CORRUPT_VTAB is raised deterministically", keywords: why_does_the_index_desync_after_a_schema_migration ALTER_cannot_add_an_FTS5_column DROP_CREATE_empties_the_virtual_table negative_postings_SQLITE_CORRUPT_VTAB manufactured_not_a_race, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^ATOM-MGDX-WHYD [desc:"a schema migration that DROP+CREATEs an FTS5 virtual table empties the index while the content table keeps every row, so the next reindex writes negative postings and SQLITE_CORRUPT_VTAB is raised deterministically", keywords: why_does_the_index_desync_after_a_schema_migration ALTER_cannot_add_an_FTS5_column DROP_CREATE_empties_the_virtual_table negative_postings_SQLITE_CORRUPT_VTAB manufactured_not_a_race the_content_table_keeps_every_row_while_the_index_is_empty clearing_the_files_ledger_does_not_repopulate_the_fts_index external-content_shadow_delete_trusts_the_delete_without_checking the_upgrade_path_manufactured_the_corruption_deterministically fixed_2026-07-14_in_scripts_memgrep_src_index.rs a_schema_migration_cannot_alter_an_fts5_column_set desync_after_a_schema_migration_manufactured_deterministically, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Why it desyncs (the real bug, fixed 2026-07-14 in `scripts/memgrep/src/index.rs`).** A schema
 migration cannot `ALTER` an FTS5 column set, so it must `DROP` + re-`CREATE` the virtual table — which
 leaves the index **EMPTY while the content table keeps every row**. Clearing the `files` LEDGER does
@@ -29,7 +29,7 @@ contain; with `content=`, FTS5 **trusts** that delete rather than checking it, w
 and the next statement raises `SQLITE_CORRUPT_VTAB`. **The upgrade path manufactured the corruption,
 deterministically — it was never a race.**
 
-^ATOM-MGDX-BLND [desc:"every cheap SQLite health signal (integrity_check, row count, bare integrity-check) is blind to an FTS5 external-content desync — only the rank=1 form compares index against content", keywords: why_didnt_integrity_check_catch_the_corruption pragma_integrity_check_says_ok_but_index_is_corrupt count_from_notes_fts_reads_content_table_not_index bare_integrity_check_only_checks_internal_consistency rank_1_is_the_only_check_that_sees_it, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^ATOM-MGDX-BLND [desc:"every cheap SQLite health signal (integrity_check, row count, bare integrity-check) is blind to an FTS5 external-content desync — only the rank=1 form compares index against content", keywords: why_didnt_integrity_check_catch_the_corruption pragma_integrity_check_says_ok_but_index_is_corrupt count_from_notes_fts_reads_content_table_not_index bare_integrity_check_only_checks_internal_consistency rank_1_is_the_only_check_that_sees_it every_cheap_sqlite_health_signal_is_blind_to_this an_emptied_index_still_reports_every_row_in_the_count insert_into_t_t_rank_values_integrity-check_1 an_empty_index_is_perfectly_self-consistent_and_passes only_rank_1_compares_the_index_against_its_content_table why_didnt_the_health_check_catch_this pragma_integrity_check_excludes_the_whole_desync_family, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Why nobody caught it: every cheap signal is BLIND to this.**
 - `PRAGMA integrity_check` → **`ok`** (the file's pages really are fine).
 - `SELECT count(*) FROM notes_fts` → the **FULL row count**, because with `content=` the count reads the
@@ -39,7 +39,7 @@ deterministically — it was never a race.**
 - **Only `INSERT INTO t(t, rank) VALUES('integrity-check', 1)` compares the index against its content
   table.** That is the one check that sees it, and it is the one nobody was running.
 
-^ATOM-MGDX-HOWA [desc:"how to apply: rebuild an emptied FTS5 index with INSERT INTO t(t) VALUES('rebuild'), verify with rank=1, delete -wal/-shm together with index.db, and watch for SQLITE_BUSY under concurrent writers", keywords: how_do_I_fix_or_recover_a_corrupt_memgrep_index rebuild_the_virtual_table_primitive delete_index_db_by_hand_safely wal_shm_must_be_deleted_together sqlite_busy_concurrent_writers, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^ATOM-MGDX-HOWA [desc:"how to apply: rebuild an emptied FTS5 index with INSERT INTO t(t) VALUES('rebuild'), verify with rank=1, delete -wal/-shm together with index.db, and watch for SQLITE_BUSY under concurrent writers", keywords: how_do_I_fix_or_recover_a_corrupt_memgrep_index rebuild_the_virtual_table_primitive delete_index_db_by_hand_safely wal_shm_must_be_deleted_together sqlite_busy_concurrent_writers insert_into_t_t_values_rebuild_is_the_sanctioned_fix index.db_is_a_derived_cache_never_a_memory_store open_now_self-heals_rebuild_then_nuke_and_recreate deleting_by_hand_without_wal_shm_causes_real_corruption no_busy_timeout_set_so_writers_can_fail_with_sqlite_busy any_drop_create_of_such_a_table_must_be_followed_by_rebuild autorecall_hook_fires_on_every_prompt_and_can_contend, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **How to apply.**
 - Repopulating an external-content FTS is `INSERT INTO t(t) VALUES('rebuild')` — the sanctioned
   primitive. Any DROP+CREATE of such a table MUST be followed by it.
@@ -55,7 +55,7 @@ deterministically — it was never a race.**
 See also [[feedback_memory_system_is_more_than_memgrep]].
 
 
-^ATOM-SJ2Q-5XV2 [desc:"an ADD COLUMN migration must clear the change-detection ledger, or the incremental reindex skips every unchanged file and the column stays NULL forever", keywords: I_added_a_column_to_the_index_and_every_row_still_reads_the_default the_migration_ran_but_changed_nothing ALTER_TABLE_ADD_COLUMN_stayed_NULL_forever reindex_skipped_every_file_because_nothing_changed_on_disk my_migration_test_passes_but_the_migration_does_not_work schema_version_says_already_migrated, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
+^ATOM-SJ2Q-5XV2 [desc:"an ADD COLUMN migration must clear the change-detection ledger, or the incremental reindex skips every unchanged file and the column stays NULL forever", keywords: I_added_a_column_to_the_index_and_every_row_still_reads_the_default the_migration_ran_but_changed_nothing ALTER_TABLE_ADD_COLUMN_stayed_NULL_forever reindex_skipped_every_file_because_nothing_changed_on_disk my_migration_test_passes_but_the_migration_does_not_work schema_version_says_already_migrated the_second_way_a_migration_fails_silently_never_crashes only_a_re-parse_can_fill_a_new_column delete_from_files_clears_the_change-detection_ledger assert_summary.changed_equals_1_not_just_value_present a_shipped_schema_version_is_immutable_forever migrate_v5_and_migrate_v6_both_clear_the_ledger, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
 
 **The second way a memgrep index migration fails silently** (the first was the v5
 FTS desync above — that one at least CRASHED).
@@ -80,7 +80,7 @@ amended step N forever, which is why v5 exists (v4 was extended after shipping)
 and why the retirement columns became v6.
 
 
-^ATOM-IWOE-VF59 [desc:"one file can hold two index keys because path is the caller's spelling — after a ledger reset the old spelling's rows become permanent duplicates", keywords: recall_returns_every_result_twice duplicate_rows_in_memory_search_results the_same_atom_appears_twice_in_recall top_10_only_shows_5_real_results index_has_more_memory_rows_than_files_on_disk memgrep_index_looks_fresh_but_is_duplicated, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
+^ATOM-IWOE-VF59 [desc:"one file can hold two index keys because path is the caller's spelling — after a ledger reset the old spelling's rows become permanent duplicates", keywords: recall_returns_every_result_twice duplicate_rows_in_memory_search_results the_same_atom_appears_twice_in_recall top_10_only_shows_5_real_results index_has_more_memory_rows_than_files_on_disk memgrep_index_looks_fresh_but_is_duplicated 70_memories_rows_for_35_files_measured_live memories.path_is_the_callers_spelling_not_a_canonical_identity a_ledger_reset_leaves_the_old_spellings_rows_permanent is_fresh_compares_the_ledger_not_content_integrity freshness_is_not_integrity_and_neither_implies_the_other fixed_by_pruning_content_rows_not_by_canonicalizing_the_path, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
 
 Found live: **70 `memories` rows for 35 files** in this repo's PROJECT scope, so
 every index-backed recall returned every element TWICE — halving `--top N` and
