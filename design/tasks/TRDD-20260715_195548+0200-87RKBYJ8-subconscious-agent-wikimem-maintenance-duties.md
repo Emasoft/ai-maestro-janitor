@@ -4,7 +4,7 @@ title: Subconscious agent — full per-changed-page wikimem maintenance duties s
 column: todo
 blocked-by: []
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-26T12:05:00+0200
+updated: 2026-08-26T18:05:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -176,6 +176,32 @@ frontmatter was already right (`column: todo`, `blocked-by: []`); the prose was 
 instruction is *"do not implement [the remaining rows] under this id either — split them out the
 same way when their turn comes."* So pulling this card can only ever produce ANOTHER split, never
 an implementation. The remaining un-split gap rows are 11, 13, 14, 15, 15b-rename, 16-17, 18.
+
+### ⏵ 2026-08-26 18:05 — SECOND SPLIT DONE. The remaining rows are now CARDS, not prose.
+
+The rows this card had been carrying as a gap list are split out, in the parent's own priority
+order, exactly as its rule requires (never implemented under this id):
+
+| duty | card | column |
+|---|---|---|
+| 16-17 link integrity — prune / resolve / KEEP | **TRDD-JKJHV19B** | `todo` — the next increment |
+| 14 move an off-topic atom to its right page | TRDD-QDYQLM5V | `backburner` |
+| 13 split atoms that mix multiple arguments | TRDD-LASH4SLW | `backburner` |
+| 18 link atoms to their governing TRDDs | TRDD-7GCALSTP | `backburner` |
+| 11 one page carries a shared atom, others cite | TRDD-E7D4QPH1 | `backburner` |
+| 15 create the page an orphan topic needs | TRDD-VIFQ1LKI | `backburner`, `blocked-by: QDYQLM5V` |
+
+Row **15b** is NOT split here — it is already owned by TRDD-NM4TPCQ9. Rows 19, 20, 21 are covered
+or terminal per the 2026-08-02 re-audit.
+
+**Why now, and stated plainly:** this card was read at 12:05 today, its instruction ("pulling it
+produces another SPLIT") was recorded, and then nothing was split for six hours while the session
+reported itself blocked. It was not blocked — the split needs no decision from anyone. The
+kanban rule's exact failure: filing a card *about* work is not the work, and a card that records
+its own next action and does not take it is stalled rather than parked.
+
+**This card is now a pure ledger.** Every row is either terminal, split, or owned elsewhere. It
+should be pulled only to reconcile the duty list against the tree, never to build.
 
 Left in `todo` rather than moved to `backburner` because the next increment is genuinely
 available work — but anyone pulling it should expect to author a child TRDD, not to write code.
