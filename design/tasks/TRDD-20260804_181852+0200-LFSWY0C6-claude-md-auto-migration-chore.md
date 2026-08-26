@@ -3,7 +3,7 @@ trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
 column: todo
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-22T11:35:20+0200
+updated: 2026-08-26T11:55:00+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -32,6 +32,50 @@ eht: []
   memory-maintenance scheduler (`scripts/detectors/memory-maintenance.py` + a
   `[janitor-memory-claudemd]` marker routed to `janitor-memory-subconscious-agent`), reusing
   the EXISTING `claudemd_slim` primitives rather than writing new ones.
+
+## ⏵ 2026-08-26 — MEASURED: the SEMANTIC half has nothing to migrate; only the index is stale
+
+`uv run scripts/claudemd_slim.py check` today returns exactly ONE line:
+
+```text
+claudemd-slim: wikimem index is STALE vs the corpus (run scripts/claudemd_slim.py index)
+```
+
+No narrative violation. So the chore this card specifies — automatic migration of excess
+CLAUDE.md narrative into wikimem — **would have zero work to do in this repo right now.** That
+does not make `PRRD G8.1` satisfied (it demands the mechanism, not an empty queue), but it does
+mean the card's urgency comes entirely from the INDEX half, which the 2026-08-22 block already
+established is mechanical and was a gating bug rather than an ignored advisory.
+
+### The real defect is a MOMENT problem, and it is the same shape as TRDD-FB84YUGT
+
+The nudge tells the reader to refresh *"at a cache-cheap moment (fresh session,
+post-compaction, pre-commit)"* — and **nothing anywhere detects whether now is one.** Grepped:
+`cache-cheap` appears four times in the tree and every one is PROSE inside a message
+(`project-map-drift.py:99,174`, `repomap_generate.py:50`, its own docstring). So:
+
+1. A session meets the advisory at an arbitrary moment.
+2. It correctly declines — mid-session the rewrite busts the cached prefix for this session and
+   every forked subagent, which the module docstring says can burn a 5 h budget.
+3. Nothing carries the request to the moment when the cost is already sunk.
+4. Five days later the index is still stale, and it reads as "advisories get ignored".
+
+**That is not an ignored advisory; it is a correct refusal with no path to the moment it would
+be free.** Structurally identical to TRDD-FB84YUGT's `declined_field_busy`: right every single
+time it fires, and permanently stalling because rightness never expires into escalation. Worth
+noting the pair, because the two cards were reaching for opposite fixes (that one wanted a
+detector that already existed; this one wants a chore whose queue is empty) while sharing one
+actual defect.
+
+**The cheap, constraint-respecting fix is to fire the existing nudge AT a cache-cheap moment**
+rather than to build an autofix or a semantic chore: post-compact and SessionStart are already
+hook points that run when the prefix is cold anyway. That honours every prohibition this card
+records — the janitor still never rewrites CLAUDE.md itself, no detector autofixes, the write
+stays human/agent-initiated — while removing the reason the request never gets acted on.
+
+**NOT BUILT HERE.** It touches the PostCompact/SessionStart hook path, and this card's own
+premise (that the deliverable is a semantic migration chore) would change if the owner accepts
+that the recurring symptom is a moment problem. That is a re-scope, not a patch.
 
 ## ⛔ 2026-08-22 — THE FIVE-DAY EVIDENCE IS WRONG. **The nudge was never reachable.**
 
