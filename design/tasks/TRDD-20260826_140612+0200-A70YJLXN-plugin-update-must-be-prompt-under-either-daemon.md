@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T14:06:12+0200
+updated: 2026-08-26T14:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -24,7 +24,13 @@ plugin must be updated as soon as a new version is detected on the marketplace."
 
 Today that holds for one of the two. Measured, not inferred.
 
-## The two paths are not equivalent
+> ⛔ **THE NEXT TWO SECTIONS ARE SUPERSEDED — read '2026-08-26 14:20 — TWO CORRECTIONS'
+> below FIRST.** The mechanism table is WRONG (the server does run the update) and the
+> latency table is WRONG (bad instrument). Kept unedited because the corrections only make
+> sense against what they correct, and because the wrong reading was reached by quoting the
+> right source about the adjacent chore — which is the reusable part.
+
+## The two paths are not equivalent  ⛔ SUPERSEDED
 
 | running actor | mechanism | trigger |
 |---|---|---|
@@ -43,7 +49,7 @@ from the janitor side: `version-update` is in `absorbed_chores`, so the janitor 
 stands down and its `version-update.last-run.ts` freezes (2026-07-25 here — CORRECT for an
 absorbed chore, per `janitor-daemon-handover-unowned-chores`).
 
-## Measured rollout latency on the passive path
+## Measured rollout latency on the passive path  ⛔ SUPERSEDED — bad instrument
 
 Publish time from the GitHub release vs the local cache directory's mtime:
 
@@ -62,7 +68,53 @@ exact figures are not — a cleaner measurement would read the install registry'
 **Current state is NOT stale:** marketplace latest `3.3.26` = cached `3.3.26`, verified today.
 This card is about the guarantee, not about a live regression.
 
+## ⛔ 2026-08-26 14:20 — TWO CORRECTIONS, both mine. The mechanism claim above is WRONG.
+
+**1. The server DOES run the update.** `services/auto-update-service.ts:727-753` calls
+`ChangePlugin(..., action: 'update', scope: 'user', ...)` on the janitor plugin. I quoted their
+source accurately and about the WRONG CHORE: the "nothing left to iterate" comment is step 3
+(`user-plugins-update`, whose loop left WITH its claim), while `version-update` is step 2 and is
+alive. Two adjacent chores in one function. Refuted by ai-maestro-bf (their TRDD-FFHZM7XV), and
+the claim/work pairing is therefore SATISFIED — option 2 (un-claim) is off the table.
+
+**2. My 36 h figure was wrong, and my own stated caveat was the reason.** Cache-dir mtime is an
+upper bound on arrival, not a creation stamp; the mtimes I tabulated were misattributed across
+versions entirely. The real instrument is the install registry:
+
+```
+~/.claude/plugins/installed_plugins.json → the scope:"user" record
+  version 3.3.26   lastUpdated 2026-08-21T00:31:07.623Z
+  3.3.26 published                        2026-08-21T00:23:45Z
+  ── LATENCY 7 min 22 s ──
+```
+
+**That instrument is positive-controlled, which matters because the peer believes no such
+instrument exists.** Their `lastRunSummary` trail reports `updated` on 40 of 40 janitor rows
+because `already-current` is reachable only when `ChangePlugin` FAILS — so `updated` means "the
+command ran", not "a version moved". The install registry does NOT have that defect, and here is
+the control: 50 of 75 user-scope records carry a `lastUpdated` ≥30 days old, and the janitor's own
+is frozen at 08-21 while ~40 update attempts ran through 08-26. **If the field were rewritten on
+every no-op it would be uniformly recent. It is not — it moves only on a real version change.**
+
+## What actually survives, and it is still the directive
+
+The guarantee concern stands, on different grounds than I gave: `ABSORBED_DUTY_INTERVAL_MS` is
+**4 h**, polled every 15 min, and `absorbedDutyIsOverdue` decides purely on ELAPSED TIME. So the
+worst case publish→attempt is ~4 h — cadence, not detection. The observed 7 m 22 s is one lucky
+tick, not the guarantee.
+
+**The peer proposed a third option, cheaper than either of mine, and I think it is right:** make
+a pending `version-update-requested.flag` — the signal MY detector already raises, which they
+already consume clear-before-run but never consult to DECIDE — make the lane overdue. One
+disjunction in one pure function; the 15-min poller already exists; worst case 4 h → ≤15 min. No
+porting, no second writer on `claude plugin update`, my lane stays down.
+
+Superseding the options list above: **(1) port it — unnecessary. (2) un-claim — wrong, the work
+exists. (3) relax the directive — still the owner's. (4) NEW: consume the detection flag in the
+overdue predicate — the cheap correct fix, theirs to make.**
+
 ## Why this matters right now
+
 
 3.4.0 is the next publish (blocked on the owner's GH013 decision). Under the current server it
 would reach the 16 sessions on Claude Code's cadence rather than on detection — which is the
