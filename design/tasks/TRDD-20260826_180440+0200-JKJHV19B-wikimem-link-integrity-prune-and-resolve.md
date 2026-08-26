@@ -3,7 +3,7 @@ trdd-id: JKJHV19B
 title: Wikimem link integrity — prune stale and duplicate links, resolve dangling ones
 column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T18:04:40+0200
+updated: 2026-08-26T19:00:00+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -65,10 +65,56 @@ link names is one the corpus should hold.
 
 So the missing piece is the DECISION procedure and its candidate query, not the machinery.
 
+## ⏵ 2026-08-26 19:00 — CANDIDATE QUERY BUILT AND RUN; 10 defects FIXED; the rest is judgment
+
+Acceptance box 1 is done, and it produced a taxonomy rather than a list — which is the point,
+because a flat "98 dangling links" would have been 73% noise.
+
+**Raw query over all three scope roots: 262 pages, 884 resolving page links, 98 non-resolving.**
+Classified:
+
+| class | n | verdict |
+|---|---|---|
+| 1 · PROSE *about* links — `[[wikilink]]`, `[[link]]`, `[[links]]` | **72** | NOT defects. Pages discussing the wiki syntax, e.g. "wire both ends of a `[[wikilink]]`" |
+| 2 · `.md` extension, target exists (`[[foo.md]]` vs page `foo`) | **9** | mechanical — **FIXED** |
+| 3 · separator mismatch (`-` vs `_`), target exists | **1** | mechanical — **FIXED** |
+| 4 · genuinely missing subject | **19** refs / 12 names | the judgment call this card is for |
+
+**Class 1 is the finding that matters for the eventual implementation.** Three quarters of a
+naive dangling-link report is prose that merely spells a wikilink. A pass that "resolves dangling
+links" without this filter would have rewritten or deleted 72 pieces of correct writing — and it
+would have looked like it was doing its job. The candidate query MUST exclude prose-mention
+targets, and the exclusion list is short and stable (`wikilink(s)`, `wikilinked`, `link(s)`,
+`wikimem`, `name`, `page`).
+
+**Classes 2 and 3 are fixed** — 10 links, each provably safe because the target page exists under
+a trivially different spelling. Done through `memgrep edit --replace-all` per page; LOCAL scope
+now lints 0, USER 2 (pre-existing `atom-oversized`, unrelated).
+
+**Class 4 — the 12 distinct missing subjects, for whoever implements the pass:**
+`who-verifies-and-closes-work` · `project-ai-maestro-janitor-oauth-rotator` ·
+`reference_memory_system_integration` · `universal-plugins-ignore-aimaestro-instruction-set` ·
+`what-ai-maestro-is` · `security-act-dont-ask` · `removal-blast-radius` ·
+`agent-claims-the-api-was-never-delivered` · `claim-verification` ·
+`governance-ssot-is-the-governance-rules-branch` · plus `B` and `Note`, which are junk from a
+table or template and are the only two that should simply be PRUNED.
+
+Ten of these are exactly the deliberate forward-references the protocol sanctions ("a `[[name]]`
+that doesn't match yet marks something worth writing later"), so KEEP is the likely verdict for
+most — which is why this card demands KEEP be expressible.
+
+### A duplicate page found while fixing, worth its own attention
+
+`feedback_memory_dual_test_evaluation.md` exists in **BOTH** LOCAL and USER scope with different
+content — a genuine cross-scope duplicate, i.e. duty 10/11 territory (TRDD-E7D4QPH1). Found only
+because the fix failed on the USER copy and succeeded on the LOCAL one. Not touched here beyond
+the link fix; recorded so E7D4QPH1 starts with a real instance instead of a hypothetical.
+
 ## Acceptance
 
-- [ ] A candidate query that lists, per page: duplicated links, links to non-existent pages, and
-      links whose target exists but no longer covers the subject
+- [x] A candidate query that lists, per page: duplicated links, links to non-existent pages, and
+      links whose target exists but no longer covers the subject. **Built and run** — see the
+      taxonomy above; the load-bearing part is excluding prose-mention targets (72 of 98)
 - [ ] The PRUNE/CREATE decision is made per link with a recorded reason, and a deliberate
       forward-reference is a THIRD outcome (KEEP) — a pass that cannot express KEEP is wrong by
       construction
