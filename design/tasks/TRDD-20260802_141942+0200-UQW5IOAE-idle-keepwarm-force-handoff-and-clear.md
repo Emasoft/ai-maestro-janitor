@@ -3,13 +3,13 @@ trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
 column: todo
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-26T08:14:00+0200
+updated: 2026-08-26T11:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 blocked-by: []
-implementation-commits: [d2a5204, 67802e0]
+implementation-commits: [d2a5204, 67802e0, 5ecf47f2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
@@ -25,6 +25,14 @@ yet. Confirmed no soak artifact anywhere under `reports/`.
 disabled external-clear lever (`ec.enabled()` → early return) is only reason 1 of the three
 INDEPENDENT reasons the card itself records; building shadow mode is ordinary unblocked work
 that does not need the 3.4.0 publish, even though a live soak eventually will.
+
+**⏵ 2026-08-26 — reason (3) is DONE; (1) and (2) are the OWNER's trade.** The audit channel is
+built and tested (`5ecf47f2` — the watcher's verdict lines are kept, not sent to `/dev/null`).
+No shadow data exists yet and none will until someone decides to run the disabled path in
+dry-run per beat, which costs a fleet walk plus a watcher spawn WHILE THE FEATURE IS OFF —
+precisely the cost `run_once`'s "ships inert" early-return exists to avoid. That is a trade,
+not a patch, so it is not an agent's call. **NEXT ACTION on this card is a human decision, not
+code.**
 
 Everything the card already warns about stands unchanged — in particular **do NOT close this on
 the 2026-08-14 triage row**; the advisor's DO-NOT-SHIP verdict landed the same day and rewrote
@@ -297,6 +305,31 @@ into a pane it does not own)?
       > month would conclude "shadow mode has been running and found nothing", which is the
       > opposite of the truth — nothing has been running, and nothing is being found because
       > nothing is being recorded.
+      >
+      > **⏵ 2026-08-26 — REASON (3) IS FIXED. The channel now exists.** The daemon lane's
+      > `subprocess.Popen(…, stdout=DEVNULL, stderr=DEVNULL)` in
+      > `scripts/lib/cold_cache_clear_task.py` now appends to the component's own
+      > `cold-cache-clear.log`, so every `VERDICT FIRE/HOLD … why=…`, `NO_SUMMARY`,
+      > `HANDOFF_NOT_CONCISE` and `CLEAR_CHAIN_SPAWNED` line the watcher already printed is
+      > kept instead of discarded. This was the half the box itself called "the cheap half and
+      > unambiguously right", and the TRDD-VOWAUVE5 ordering lesson quoted below is exactly why
+      > it went first: build the channel, THEN let the criterion depend on it.
+      >
+      > A file handle, not a pipe — the child is detached and nobody survives to drain a pipe, so
+      > a full buffer would block it forever. `PYTHONUNBUFFERED=1` so a killed child still leaves
+      > its lines. The SessionStart lane never had this hole (blocking, and it logs its own
+      > verdict via `state.log_line`), so this was the single call site.
+      >
+      > Guarded by `test_the_watchers_verdict_lines_are_kept_not_discarded`, which is
+      > neuter-proven: restoring `DEVNULL` fails exactly that test and no other (measured
+      > 2026-08-26 — 1 failed, 8 passed).
+      >
+      > **REASONS (1) AND (2) ARE UNCHANGED, so no shadow data is being produced yet.**
+      > `run_once()` still returns at `if not ec.enabled()` before the fleet scan, and
+      > `external_handoff_clear.py` still prints `DISABLED` before computing a verdict unless
+      > `--dry-run` is passed. The N-day clock therefore still cannot start — what changed is
+      > that it now CAN be started by a decision, instead of being blocked on a channel that did
+      > not exist.
       >
       > **NOT BUILT HERE, because it is a trade rather than a patch.** Shadow data requires
       > walking the fleet and spawning a watcher per candidate on every beat WHILE THE FEATURE
