@@ -117,7 +117,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=0f03bf6a311c generated=2026-08-21T11:26:39+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=3921b1f0317a generated=2026-08-26T19:25:02+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -153,7 +153,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
 - [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
 - [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
-- [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment — why did terminal/TTY detection report wrong (…
+- [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
@@ -171,7 +171,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
 - [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
 - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
-- [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on '.gitignore missing coverage for .claude/' — why it can't be satis…
+- [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
 - [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
 - [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
 - [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
