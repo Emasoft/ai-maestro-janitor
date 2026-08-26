@@ -3,13 +3,13 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-26T12:20:00+0200
+updated: 2026-08-26T13:05:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
 severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
-implementation-commits: [eb9faa1]
+implementation-commits: [eb9faa1, e65ced5f]
 blocked-by: []
 relevant-rules: []
 ---
@@ -126,6 +126,59 @@ The third — an auth-free canonical probe (ai-maestro#100) — is the real fix 
 **NEXT ACTION on F11: hand the measurement to ai-maestro and ask whether their server recovers
 these 20 roots. If it does, widen the exclusion. If it does not, the janitor's injections are
 the only thing keeping them alive and R42 needs an amendment, not an enforcement.**
+
+### ✅ 2026-08-26 — ANSWERED: **NO.** Do NOT widen the exclusion. All four claims re-verified here.
+
+`ai-maestro-bf` answered from their logs and registry. I re-read each claim first-hand rather
+than accept it — all four hold:
+
+1. **0 of the 11 named recipients are in their registry.** `~/.aimaestro/agents/registry.json`
+   holds 13 entries; the intersection with my injected roots is EMPTY. Their nine legacy
+   `~/Code/*` entries are SVG/media projects (SKIA-BUILD-ARM64, SVG_PROCESSING, SVG-MATRIX,
+   SVG-BBOX, SMART_MEDIA_MANAGER, SKILL_FACTORY, TEXT2PATH, SVG_FBF_PROJECT), plus `default`,
+   plus three real ones under `~/agents/` (haephestos, testbot, frank). None overlap.
+2. **Their server sees these sessions on a lane that actuates nothing** —
+   `lib/fleet-liveness-watchdog.ts:290`, verbatim: `janitor-armed non-agent session(s) stale
+   (>15min without a transcript write; detect-only, no actuation lane)`.
+3. **`AIM_FLEET_RECOVERY_FIRE=1` IS set** on the live server process — confirmed by reading pid
+   55636's environment, not a config file. So "their flag is off" is NOT the explanation; their
+   actuator is armed and its population is empty.
+4. **`instance_is_server_owned` returning False here is CORRECT, not a bug.** Their
+   `CreateAgent`/`DeleteAgent` guards refuse workdirs outside `~/agents/`, so a `~/Code/*`
+   Claude is not a server-owned agent BY THEIR OWN DEFINITION — not merely unrecognised. My
+   third signal was giving the right answer for the right reason.
+
+**So the 187 rearms are load-bearing**: they have been the only thing restoring those
+heartbeats for 15 days, and enforcing R42 as written would strand the population. This is the
+amendment branch, not the enforcement branch. Their session states for the record that the
+server does not today recover any of the 20 roots and has no lane that could. R42 is governance
+and goes to the OWNER — neither of us can amend it.
+
+Also settled: my `tagged` signal 401s because the daemon holds no `AID_AUTH`, which is real —
+but even WITH auth it would return the same answer, since those roots are not in the registry to
+be listed. So F6 is a genuine defect and NOT the cause of F11.
+
+### ⛔ The offered fix would have disarmed the guardian fleet-wide — caught before accepting
+
+They offered to have the server write `aimaestro-agent-roots.json` from the registry, to give me
+a deterministic exclusion. **Declined as specified, because the registry's 13th entry is named
+`default` with `workingDirectory: "/"`.**
+
+My cache branch tested `root.startswith(wd.rstrip("/") + "/")`. With `wd = "/"` that collapses
+to `root.startswith("/")` — TRUE for every absolute path on the machine. Every session would
+have read `server_owned`, whose recovery action is `None`, so **every janitor recovery would
+have stopped, everywhere, silently.** Silently is the whole danger: hands-off is the safe
+direction for any ONE instance, so no alarm distinguishes "correctly excluded" from "disarmed".
+
+Fixed regardless of whether that cache is ever written (`e65ced5f`): the cache is authored by
+another process, so it is untrusted input, and a degenerate entry is now DROPPED rather than
+widened — it can only ever have meant "everything", which is not a claim a workdir may make.
+Neuter-proven; also pins that `/a/foo` must not own `/a/foobar` by string prefix.
+
+**The lesson is about the shape of the exchange, not the bug.** Their offer was correct in
+intent, generous, and would have been actively harmful — and it was only caught because the
+answer arrived with the registry named, so I could read the file instead of the summary of it.
+A conclusion ("I can give you a cache") is not checkable; the artifact it came from is.
 
 ## ⏵ DIRECTION RECEIVED — ai-maestro#68 answered (2026-07-16), the ground shifted under 3 findings
 
