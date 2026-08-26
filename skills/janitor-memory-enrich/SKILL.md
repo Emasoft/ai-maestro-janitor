@@ -58,9 +58,16 @@ changes `ocd`, never merges/splits/deletes.
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute path —
-   your cwd as a spawned agent is not the project root). Exit 2, an unreadable result, or a
-   chore name other than `enrich`: STOP and report that. Never read the legacy
+   your cwd as a spawned agent is not the project root). Never read the legacy
    `memory-maint-pending.json` slot. A USER-named scope is the one exception.
+
+   Three outcomes, and the middle one is easy to get wrong:
+
+   | result | do |
+   |---|---|
+   | a `(intervention, scope, root)` naming `enrich` | proceed to step 3 |
+   | **`no claimable dispatch` (exit 0)** | **STOP and report exactly that.** It is a NORMAL, correct outcome — no marker is pending — not an error and not a licence to pick a scope. Verified 2026-08-26 on a live host: the claim script exits **0**, so a check that keys only on a non-zero exit reads this as success and walks on with no scope. |
+   | exit 2, unreadable output, or a chore name other than `enrich` | STOP and report that |
 
 3. **Candidate set — from the CLI, never your own counting.**
 
