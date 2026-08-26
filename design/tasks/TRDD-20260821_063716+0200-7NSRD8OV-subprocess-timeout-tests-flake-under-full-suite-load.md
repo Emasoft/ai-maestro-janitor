@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-22T10:55:29+0200
+updated: 2026-08-26T08:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -218,8 +218,8 @@ delete unasked), so this is reported, not acted on.
 **NEXT ACTION on the residual, in this order:**
 1. ~~Ask the USER about the 99 % disk~~ — **DONE, discharged above.** 207 GB free; the
    disk-pressure hypothesis is dead and must not be re-raised as a cause.
-2. **FIX THE HARVEST BLOCK FIRST** (see the ⛔ box below) — it cannot run on this host and
-   fails silently, so any run harvested with it collects nothing while reporting success.
+2. ~~**FIX THE HARVEST BLOCK FIRST**~~ — **DONE 2026-08-26**, re-verified on this host (bfs
+   4.1.1, exit 0, and a widened-window control proving it can still find dirs). See the ✅ box.
 3. Then get a run that actually FAILS and read the failing case's `.janitor/logs/*.log` plus
    the new `subprocess.log`. It will name which of (a)/(b)/(c) it was. Note the 2026-08-22
    soak did NOT reproduce: 95.7 s at `-n 28`, and its only two failures were deterministic
@@ -250,7 +250,29 @@ done
 An EMPTY harvest on a green run is the expected result and means nothing failed open — it was
 proven working at 13:51 (below), so do not read silence as a broken harvest.
 
-> ### ⛔ THE HARVEST BLOCK ABOVE IS BROKEN ON THIS HOST — measured 2026-08-22, and this is the
+> ### ✅ RESOLVED 2026-08-26 — the block above was FIXED; the ⛔ warning below is now HISTORY
+>
+> Next action 2 ("FIX THE HARVEST BLOCK FIRST") is **already done** — the block above carries the
+> portable `CUT` and passes `-newermt "$CUT"`. Re-verified on this host today, and deliberately
+> in two steps, because this card's whole subject is a diagnostic whose failure looks like its
+> healthy output:
+>
+> ```
+> find --version                            → bfs 4.1.1        (the picky implementation)
+> CUT=2026-08-26T07:37:11 · find … -newermt "$CUT"   → exit 0, no stderr, 0 dirs
+> WIDE=2026-08-25T08:07:20 · same find               → 6 dirs   ← proves 0 meant "nothing recent"
+> ```
+>
+> The second run is the point. A bare `0` from the first is exactly the ambiguous result the box
+> below warns about, and only the widened window distinguishes "harvest works, nothing to find"
+> from "harvest is broken again". **Any future reader reporting an empty harvest must run the
+> widened control too** — otherwise they are re-making the original mistake with a fixed tool.
+>
+> Left unfixed and still true: the block's `--- exit=$? ---` reporting reads the exit of the LAST
+> command in a pipeline, not `find`. It is why the original breakage printed `exit=0` while
+> erroring. Anyone editing this block should branch on `find`'s own status, not a pipeline's.
+>
+> ### ⛔ (HISTORICAL — fixed above) THE HARVEST BLOCK ABOVE IS BROKEN ON THIS HOST — measured 2026-08-22, and this is the
 > > most important line on this card
 >
 > Running it verbatim produced `bfs: error: Invalid timestamp` and harvested **nothing**. Two
