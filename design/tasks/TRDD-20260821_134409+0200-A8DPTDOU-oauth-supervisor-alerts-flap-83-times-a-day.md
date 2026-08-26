@@ -3,7 +3,7 @@ trdd-id: A8DPTDOU
 title: OAuth-supervisor alerts flap 83 times a day because two keys describe one condition
 column: backburner
 created: 2026-08-21T13:44:09+0200
-updated: 2026-08-26T10:05:00+0200
+updated: 2026-08-26T10:45:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -123,6 +123,24 @@ Add to acceptance:
       of a successful mint (a fresh token with a future expiry), never merely a probe that
       stopped failing; a test drives "probe quiet, nothing minted" and asserts the alert
       STAYS onset
+
+## ⏵ 2026-08-26 10:45 — the peer's `all-maxed` is NOT this card, and must not be mirrored
+
+Line 1 of the measured table above pairs `rotator-stuck:all-maxed` with
+`reauth-needed:refresh-dead` as "one condition under two keys". For the **ai-maestro server's**
+producer that pairing is WRONG, verified first-hand in their source: `tick.ts:1285` sets
+`stuck = 'all-maxed'` on `scopedWall && best === null` — *no alternate has headroom on the model
+in use*. That is a **model-window** verdict; `reauth-needed:*` is a **credential** verdict. Their
+own code comment names the remedy as the `/model` fallback lane, not rotation.
+
+So the 10:01:16 alert that fired minutes after all three credentials were re-minted was correct,
+not stale: credentials fresh AND no Fable headroom anywhere are both true at once. ai-maestro-c7
+retracted their "confirmed onset defect" (`236e1f95`).
+
+**Consequence for this card:** the identical-text defect is still real for the janitor-side
+producer, but the fix must NOT be exported to their key, and their key must not be folded into
+this card's vocabulary decision. The one genuinely shared residue is the *wording* — "no
+alternate is healthy" reads as credential health when it means model headroom.
 
 ## Notes
 
