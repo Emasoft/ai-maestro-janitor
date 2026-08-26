@@ -44,10 +44,20 @@ or silently discard their edits):
   5. ATOMIC REPLACE — tmp file in the SAME directory + `os.replace`: readers
      (including a mid-turn Claude) see the old or the new file, never a torn
      one.
-  6. NEVER FROM THE HEARTBEAT — CLAUDE.md sits in the cached prompt prefix;
-     rewriting it mid-session busts the context cache (TRDD-e247a349 §5). The
-     `project-map-drift` detector only NUDGES; a human/agent runs this script
-     at a cache-cheap moment (fresh session, post-compaction, pre-commit).
+  6. NEVER FROM THE HEARTBEAT — but for CO-OWNERSHIP, not for cache cost.
+     CLAUDE.md is co-owned by the human and the session's Claude, and a
+     background writer racing their edits is the corruption class this guard
+     exists for. The `project-map-drift` detector only NUDGES; a human/agent
+     runs this script, and may run it AT ANY TIME.
+
+     The old text here also claimed a mid-session rewrite "busts the context
+     cache (TRDD-e247a349 §5)", and told the reader to wait for a cache-cheap
+     moment. MEASURED FALSE 2026-08-26 (TRDD-LFSWY0C6): across 307 turns that
+     immediately followed a CLAUDE.md Edit/Write, max cache_creation was
+     65,923 tokens and the median 1,525 — versus 598,351 max across the other
+     108,303 turns. The catastrophic rewrite is real but never follows a
+     CLAUDE.md edit. Kept as a correction rather than deleted, because the
+     false claim is what made agents defer the refresh for days.
 
 Freshness is two-tier, cheapest first: the repo-change `digest=` (git HEAD +
 porcelain-status hash) is compared BEFORE any extraction; only a digest

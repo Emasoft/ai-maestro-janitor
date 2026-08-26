@@ -7,14 +7,30 @@
 The maintainer half of the auto project map (TRDD-e247a349 §3). This detector
 deliberately does the CHEAP DETECTION ONLY — it NEVER writes CLAUDE.md:
 
-  - CLAUDE.md sits in the cached prompt prefix; rewriting it mid-session busts
-    the context cache for the WHOLE context and every forked subagent
-    (TRDD-e247a349 §5 — a careless write can burn a 5h token budget).
   - CLAUDE.md is co-owned by the human and the session's Claude. A background
     writer racing their edits is exactly the corruption class the user fears.
     The WRITE therefore stays human/agent-initiated (`repomap_generate.py`,
-    which carries the lock + lost-update guard + byte-preservation invariant)
-    at a cache-cheap moment (fresh session / post-compaction / pre-commit).
+    which carries the lock + lost-update guard + byte-preservation invariant).
+
+    THIS reason is the whole reason, and it is unaffected by the correction
+    below — do not read that correction as licence for the heartbeat to write
+    CLAUDE.md. Two independent grounds used to be given; one of them was
+    false, and the surviving one still forbids the write on its own.
+
+  - CORRECTED 2026-08-26 (TRDD-LFSWY0C6): this file used to give a SECOND
+    ground — that rewriting CLAUDE.md mid-session busts the context cache for
+    the whole window and every forked subagent, "a careless write can burn a
+    5h token budget". MEASURED FALSE, over the recorded per-turn `usage` in
+    this project's own session transcripts: of 307 turns immediately following
+    a CLAUDE.md Edit/Write, the worst `cache_creation_input_tokens` was 65,923
+    and the median 1,525 — against 598,351 max / 1,104 median across the other
+    108,303 turns. Full-prefix rewrites are real and DO occur here (11.4x
+    write/read at the extreme); they simply never follow a CLAUDE.md edit.
+
+    Recording it rather than deleting it, because the false claim had a COST:
+    it told every agent that read it to defer the refresh, so the index sat
+    stale for days and the deferral was then misread as "advisories get
+    ignored" — a second wrong diagnosis built on the first.
 
 TWO INDEPENDENT HALVES, and keeping them independent is load-bearing:
 
@@ -96,8 +112,9 @@ def _slim_contract_nudge(root: Path, text: str) -> None:
         "[project-map-drift] CLAUDE.md breaks the slim contract: "
         + "; ".join(p.split(" (")[0] for p in problems[:3])
         + ". Refresh the index with `uv run scripts/claudemd_slim.py index` or migrate "
-        "narrative into wikimem pages via /janitor-project-cld-md-optimizer — at a cache-cheap "
-        "moment; the janitor never rewrites CLAUDE.md itself.",
+        "narrative into wikimem pages via /janitor-project-cld-md-optimizer. Safe to run NOW "
+        "— a CLAUDE.md edit does not bust the context cache (measured, TRDD-LFSWY0C6); the "
+        "janitor never rewrites CLAUDE.md itself because it is co-owned with you.",
     )
     if line is not None:
         print(line)
@@ -171,9 +188,9 @@ def main() -> int:
         seen,
         f"stale@{current}",
         "[project-map-drift] The CLAUDE.md project map is STALE (repo changed since "
-        f"digest {recorded}). Refresh at a cache-cheap moment (fresh session, post-"
-        "compaction, or pre-commit) with: uv run scripts/repomap_generate.py "
-        "— the janitor never rewrites CLAUDE.md itself (cache + co-ownership safety).",
+        f"digest {recorded}). Safe to refresh NOW with: uv run scripts/repomap_generate.py "
+        "— a CLAUDE.md edit does not bust the context cache (measured, TRDD-LFSWY0C6). The "
+        "janitor never rewrites CLAUDE.md itself because it is co-owned with you.",
     )
     if line is not None:
         print(line)
