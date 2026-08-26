@@ -1,6 +1,6 @@
 ---
 name: claude-code-continuity-engineering
-description: "claude stalled overnight / fleet stopped working in my absence / session stuck in a retry loop after a 429 / janitor kept injecting commands or compacting at random / how do we keep unattended Claude Code sessions ALWAYS working — the continuity-engineering topic HUB linking every layer of the never-stall stack"
+description: "claude stalled overnight / fleet stopped working in my absence / session stuck in a retry loop after a 429 / janitor kept injecting commands or compacting at random / how do we keep unattended Claude Code sessions ALWAYS working — the continuity-engineering topic HUB linking every layer of the never-stall stack / how does account rotation prevent 429 stalls / window-asymmetric rotation thresholds 7d vs 5h / how to unstick a frozen retrying session / why does typing text into a blocked session flood the input buffer / janitor backstop versus harness auto-compact competing / nudging an idle armed session to keep working / keep-going-off sentinel to mute nudges / stale-hook ghosts mimic an unfixed bug after a shipped fix / does a shipped fix apply without reloading hooks / per-project channeling so a burn alarm reaches only its own project / ai-maestro server chore must match janitor chore outcome parity / prevention versus recovery two-layer stall fix / TRDD-P7WU40G9 overnight stall incident record"
 ocd: 2026-07-18
 lmd: 2026-07-18
 metadata:

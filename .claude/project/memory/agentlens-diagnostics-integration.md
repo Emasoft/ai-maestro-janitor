@@ -1,6 +1,6 @@
 ---
 name: agentlens-diagnostics-integration
-description: "should I switch a janitor detector to agentlensPro's window budget / does agentlensPro report account window utilization% / why is agentlensPro's window budget null / capacitySource none / how do I add an agentlensPro probe to a detector / where is the agentlens_probe integration / prefer agentlensPro over the home-grown token estimates"
+description: "should I switch a janitor detector to agentlensPro's window budget / does agentlensPro report account window utilization% / why is agentlensPro's window budget null / capacitySource none / how do I add an agentlensPro probe to a detector / where is the agentlens_probe integration / prefer agentlensPro over the home-grown token estimates / what does agentlensPro actually measure OTEL vs oauth usage / why is window-burn-rate detector split between enrich and cross-check / what does investigate_burn's cause or verdict field mean / FORK_STORM FAT_SESSION_REWRITES culprit attribution / does agentlensPro suppress the local token-usage-anomaly alarm / is the agentlensPro probe fail-open if the CLI binary is missing / heartbeat_burn_status_command heartbeat_investigate_burn_command config gate / two accounts show contradicting burn numbers 94% vs 5.9% / who is authoritative for window utilization percent / TTL-regime cadence probe shares the same integration shape"
 ocd: 2026-07-12
 lmd: 2026-07-12
 metadata:
