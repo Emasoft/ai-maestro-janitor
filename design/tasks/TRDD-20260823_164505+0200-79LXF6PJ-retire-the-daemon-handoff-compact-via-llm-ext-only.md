@@ -16,7 +16,7 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: []
-implementation-commits: []
+implementation-commits: [155833b3]
 ---
 
 # Retire the daemon-composed handoff; compact only via the llm-externalizer

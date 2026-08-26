@@ -3,7 +3,7 @@ trdd-id: 3UX67NT5
 title: implementation-commits is empty or missing on most cards that have shipped code
 column: backburner
 created: 2026-08-26T08:32:00+0200
-updated: 2026-08-26T18:20:00+0200
+updated: 2026-08-26T18:35:00+0200
 current-owner: janitor-main-session
 task-type: docs
 project-id: ai-maestro-janitor
@@ -85,9 +85,39 @@ gap list)` cites THREE cards in one subject. Reading its file list settled it �
 87RKBYJ8 governs ("make the existing ones enforce these rules"). Kept. A subject-only rule would
 have had to guess, and a body-grep would have taken all three.
 
-**Remaining:** the sweep said "12+ cards"; six are done here and the rest were not re-enumerated
-today. The next pass should re-run the sweep rather than trust that number — it was a count, not
-a list.
+### The sweep RE-RUN, and "12+" was wrong in both directions
+
+Enumerated rather than counted: **28** non-terminal cards have an empty field AND at least one
+subject-matched commit — more than "12+". But filtering to commits that are actually CODE
+(`feat|fix|perf|refactor`) leaves **7**, because the other 21 match only `docs(` commits, which
+this field must never hold.
+
+So the real backlog was never 12. It was 6 already done, plus these 7 — and 21 cards that
+correctly have an empty field and should be left alone. **A sweep that counts subject matches
+overstates the work by 3x; the code-commit filter is what makes the number mean something.**
+
+| card | filled |
+|---|---|
+| 7NSRD8OV | 16 SHAs — a genuinely heavily-worked card (`fix(TRDD-7NSRD8OV): …` throughout) |
+| 6WM4BFKF | `e607e95a` |
+| 9ZPU69UC | `1d5a3b16` |
+| HC7CQT10 | `4515ca18` |
+| 6054NY8H | `2d30dd7b` |
+| 79LXF6PJ | `155833b3` |
+| **JPL0JU86** | **NONE — candidate REJECTED** |
+
+**The rejection is the one worth reading.** `7b2c64eb feat(board): shipped-unreleased rung +
+JPL0JU86's fix is undone by a live mechanism` is a `feat(` commit naming JPL0JU86 in its SUBJECT
+— so it survives every filter this card recommends. Its file list refutes it: it touched
+`scripts/detectors/trdd-state-reconciliation.py`, `scripts/lib/trdd_common.py` and their tests,
+i.e. board machinery, and it merely REPORTS that JPL0JU86's fix was undone. Writing it in would
+have pointed the backtracking chain at code that has nothing to do with the card's subject.
+
+**That closes the loop on this card's own thesis.** Subject-matching is necessary and not
+sufficient; the file list is the arbiter, and only for the handful the filters let through.
+
+**Remaining:** the 21 docs-only cards need no action. This card can go terminal once someone
+confirms that reading.
 
 ## Acceptance
 
