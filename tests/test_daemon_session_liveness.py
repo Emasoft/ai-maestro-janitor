@@ -541,3 +541,124 @@ def test_awaiting_user_unknown_idle_never_esc_dismisses(tmp_path, monkeypatch) -
     assert fired == [], "an unknown idle reading must never license an ESC"
     ledger = proj / ".janitor" / "state" / "findings-ledger.ndjsonl"
     assert not ledger.exists()
+
+
+def test_an_unchanged_decline_audits_once_but_escalates_once_past_the_threshold(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-FB84YUGT: a correct decline that becomes a permanent stall must reach the human.
+
+    The 2026-08-23 incident: a `declined_field_busy` held this project silent for 10.3 h and
+    left exactly ONE audit row. That row was the DESIGNED behaviour (`_decline`'s F9 dedupe
+    records a steady state once, not 720 times a day) — so the bug was never a missing
+    detector, it was that the same cooldown removed the only surface that could notice the
+    DURATION.
+
+    The two requirements therefore pull in opposite directions, and that is the whole point:
+    asserting only the single audit row passes on the pre-fix code, and asserting only the
+    escalation passes on an implementation that has regressed F9 into per-beat spam. A test
+    that checks one of them certifies a broken guardian, so both are asserted here.
+    """
+    import types
+
+    import fleet_inject
+
+    clock = {"t": 1_000_000}
+    fleet = [_inst("cron_dead", "/p/proj-stall", {"tmux_pane": "%9"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    # Rebind only the daemon's own `time` reference — patching `time.time` itself would
+    # move the clock for every other library in the process.
+    monkeypatch.setattr(
+        daemon, "time",
+        types.SimpleNamespace(
+            time=lambda: float(clock["t"]), sleep=lambda _s: None, monotonic=lambda: float(clock["t"])
+        ),
+    )
+    # A field the janitor did not type => the decline under test, on every beat.
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("half a sen"))
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+
+    # Six beats spanning 5000 s — each gap clears the 900 s cooldown, and the span crosses
+    # the 3600 s escalation threshold with beats on both sides of it.
+    for _ in range(6):
+        daemon.task_session_liveness()
+        clock["t"] += 1000
+
+    st_path = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-stall")
+    st = json.loads(st_path.read_text(encoding="utf-8"))
+    assert st["last_audit"] == "declined_field_busy:rearm"
+    assert st["escalated"] is True
+
+    audit = tmp_path / "recovery-audit.ndjson"
+    rows = [
+        json.loads(ln)
+        for ln in audit.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ] if audit.exists() else []
+    stall_rows = [r for r in rows if r.get("project_root") == "/p/proj-stall"]
+    assert len(stall_rows) == 1, f"F9 dedupe regressed — {len(stall_rows)} audit rows: {stall_rows}"
+
+    assert len(findings) == 1, f"expected exactly one escalation, got {len(findings)}: {findings}"
+    f = findings[0]
+    assert f["code"] == "FLEET-DECLINE-STALL"
+    assert f["sev"] == "HIGH"
+    assert str(f["project_dir"]) == "/p/proj-stall"
+    # The remedy is one keystroke by a human who does not know they are the blocker, so the
+    # message has to name WHAT is blocking — `declined_field_busy` alone tells them nothing.
+    assert "input field" in f["msg"], f["msg"]
+    assert "unchanged for" in f["msg"], f["msg"]
+
+
+def test_a_decline_that_changes_shape_restarts_its_own_stall_clock(tmp_path, monkeypatch) -> None:
+    """The duration is measured from when the SIGNATURE appeared, not from first contact.
+
+    A decline that flips shape is a different situation and gets a fresh clock; the inverse
+    mistake — re-stamping `sig_since` on an UNCHANGED decline — is the one that silently
+    defeats the whole escalation, because a permanent stall would then stay permanently one
+    beat old and never cross the threshold. Both directions are pinned here.
+    """
+    import types
+
+    import fleet_inject
+
+    clock = {"t": 2_000_000}
+    fleet = [_inst("cron_dead", "/p/proj-flip", {"tmux_pane": "%9"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(
+        daemon, "time",
+        types.SimpleNamespace(
+            time=lambda: float(clock["t"]), sleep=lambda _s: None, monotonic=lambda: float(clock["t"])
+        ),
+    )
+    findings: list = []
+    monkeypatch.setattr(daemon.findings_ledger, "record", lambda **kw: findings.append(kw))
+    monkeypatch.setattr(fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _pane("busy"))
+
+    st_path = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-flip")
+    daemon.task_session_liveness()
+    first_since = json.loads(st_path.read_text(encoding="utf-8"))["sig_since"]
+
+    # UNCHANGED across four more beats: the clock must NOT restart. Four, not three —
+    # 4 × 1000 s clears the 3600 s threshold, and three would sit just under it. That
+    # off-by-one is worth pinning in a comment: a version of this test that stopped at
+    # 3000 s passed the "no restart" half while silently proving nothing about escalation.
+    for _ in range(4):
+        clock["t"] += 1000
+        daemon.task_session_liveness()
+    st = json.loads(st_path.read_text(encoding="utf-8"))
+    assert st["sig_since"] == first_since, "an unchanged decline must not restart its own clock"
+    assert len(findings) == 1  # crossed 3600 s during those beats
+
+    # CHANGED shape: the pane goes away entirely, so the decline flips from
+    # `declined_field_busy` to `unreachable`. Fresh clock, and the escalation re-armed
+    # rather than left suppressed by the previous one — otherwise a session that stalls
+    # for a second, different reason would never be reported again.
+    clock["t"] += 1000
+    fleet[0].terminal.clear()
+    daemon.task_session_liveness()
+    st2 = json.loads(st_path.read_text(encoding="utf-8"))
+    assert st2["last_audit"] != st["last_audit"], "the decline should have changed shape"
+    assert st2["sig_since"] > first_since, "a changed decline must get a fresh clock"
+    assert st2["escalated"] is False, "a changed decline must re-arm the escalation"
+    assert len(findings) == 1, "the re-armed escalation must wait for the threshold again"

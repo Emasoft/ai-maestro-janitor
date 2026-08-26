@@ -114,6 +114,41 @@ _INTERVAL_KEEPALIVE_SELF_HEAL = _env_interval(
 )  # 10 min — how often the OS-spawned daemon checks the cache for a newer version to
 #  re-stage + exit-for-respawn. Cheap (one dir list + one filecmp); only acts on a real change.
 
+_STALL_ESCALATE_S = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_DECLINE_STALL_ESCALATE", 3600
+)  # 1 h — how long an UNCHANGED decline may persist before it is escalated to the human
+#  exactly ONCE (TRDD-FB84YUGT). The decline itself is correct on every beat; what changes
+#  with time is its MEANING — on beat 1 it reads "a human is mid-sentence, wait", and at
+#  hour six it reads "this session has been unable to run any chore since midnight and the
+#  only actor who can clear it does not know". Nothing spanned those two readings, because
+#  the F9 cooldown that (correctly) suppresses the audit spam also removed the only surface
+#  that could have noticed the duration. Measured 2026-08-23: a `declined_field_busy` held
+#  this project silent for 10.3 h and left exactly one audit row — which was the DESIGNED
+#  behaviour, not a second bug, and is why the fix here is a notification and not a detector.
+
+# What a human can actually DO about each decline — the whole point of escalating is that
+# the remedy belongs to them. Keep every entry imperative and specific: `declined_field_busy`
+# as a bare outcome string told nobody anything, and its remedy is a single keystroke by a
+# person who has no idea they are the blocker.
+_DECLINE_REMEDY = {
+    "declined_field_busy": (
+        "un-submitted text the janitor did not type is sitting in that session's input "
+        "field, so no cron fire can land there — submit or clear that line to unblock it"
+    ),
+    "own_queued_command_unsubmittable": (
+        "the janitor's own queued command is in that session's input field and will not "
+        "submit — press Enter in that session, or clear the line"
+    ),
+    "unreachable": (
+        "that session has no injection channel (neither tmux nor iTerm), so recovery "
+        "cannot reach it — relaunch it from a tmux or iTerm pane if it is wedged"
+    ),
+    "declined_unwired": (
+        "its diagnosis has no recovery rung wired, so nothing will be attempted "
+        "automatically"
+    ),
+}
+
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
 _INTERVAL_MARKETPLACE_REFRESH = _env_interval(
@@ -1396,10 +1431,61 @@ def task_session_liveness(fleet: list | None = None) -> None:
             signature is unchanged, so a STEADY unreachable state is recorded once, not
             once per cooldown window."""
             sig = f"{outcome}:{rung or '-'}"
-            _write_recovery_state(
-                _sf, {**_st, "last_ts": now, "identity": _identity, "last_audit": sig}
+            changed = _st.get("last_audit") != sig
+            # WHEN this signature first appeared — the field the duration is measured from.
+            # Reset it whenever the signature CHANGES (a decline that flips shape is a fresh
+            # situation and deserves a fresh clock) and carry it forward untouched otherwise.
+            # Re-stamping it on an unchanged decline is the one mistake that silently defeats
+            # the whole escalation: a permanent stall would stay permanently one beat old.
+            sig_since = now if changed else state.coerce_int(
+                str(_st.get("sig_since", now)), now,
+                detector_name="session-liveness", var_name="sig_since",
             )
-            if _st.get("last_audit") != sig:
+            escalated = False if changed else bool(_st.get("escalated"))
+
+            # ESCALATE ONCE past the threshold. This is deliberately NOT an audit row: the
+            # F9 dedupe above is correct and must keep holding the ledger to one row per
+            # steady state, so the duration signal needs its own surface. The two pull in
+            # opposite directions on purpose — one row AND one escalation.
+            if not escalated and now - sig_since >= _STALL_ESCALATE_S:
+                try:
+                    hours = (now - sig_since) / 3600.0
+                    remedy = _DECLINE_REMEDY.get(
+                        outcome, "no automatic recovery is possible in this state"
+                    )
+                    findings_ledger.record(
+                        sev="HIGH",
+                        code="FLEET-DECLINE-STALL",  # <=24 chars: findings_ledger._clean cap
+                        src="daemon",
+                        msg=(
+                            f"recovery has been declined unchanged for {hours:.1f}h "
+                            f"({_inst.diagnosis}/{outcome}) — {remedy}"
+                        ),
+                        project_dir=_inst.project_root,
+                    )
+                    state.log_line(
+                        "daemon",
+                        f"session-liveness: ESCALATING {os.path.basename(_inst.project_root)} "
+                        f"— {outcome} unchanged for {hours:.1f}h; a human must clear it",
+                    )
+                except Exception:  # noqa: BLE001 -- escalation is a side-channel, never fatal
+                    pass
+                # Set the flag even if the record above threw: a notification path that
+                # retries every beat on a persistent fault is the F9 spam this guards.
+                escalated = True
+
+            _write_recovery_state(
+                _sf,
+                {
+                    **_st,
+                    "last_ts": now,
+                    "identity": _identity,
+                    "last_audit": sig,
+                    "sig_since": sig_since,
+                    "escalated": escalated,
+                },
+            )
+            if changed:
                 _audit(_inst, outcome, rung, channel)
 
         decision = fr.gate(last_ts=st.get("last_ts"), attempts=attempts, now=now)

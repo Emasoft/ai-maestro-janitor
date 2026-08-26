@@ -1,9 +1,9 @@
 ---
 trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
-column: todo
+column: testing
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-26T11:45:00+0200
+updated: 2026-08-26T20:15:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -137,15 +137,34 @@ duration threshold on an unchanged decline.
 
 ## Acceptance (revised 2026-08-26 — the original asked for detection that already exists)
 
-- [ ] A decline whose `(outcome, rung)` signature is unchanged for more than N hours raises a
+- [x] A decline whose `(outcome, rung)` signature is unchanged for more than N hours raises a
       human-visible finding naming the project, the diagnosis, and the elapsed time — it must
-      NOT re-audit every beat (that is the F9 regression `_decline` exists to prevent)
-- [ ] `declined_field_busy` specifically says WHAT is blocking, since the remedy is one
-      keystroke by a human who does not know they are the blocker
-- [ ] A test driving an unchanged decline across N beats asserts exactly ONE audit row AND one
+      NOT re-audit every beat (that is the F9 regression `_decline` exists to prevent).
+      **SHIPPED**: `_decline` now carries `sig_since` (when the signature appeared) and
+      `escalated` (a once-flag, the same shape the crash-loop path already uses). Past
+      `_STALL_ESCALATE_S` it records `FLEET-DECLINE-STALL` at HIGH into the findings ledger —
+      a SEPARATE surface from the audit, deliberately, because the F9 dedupe is correct and
+      must keep holding the ledger to one row.
+- [x] `declined_field_busy` specifically says WHAT is blocking, since the remedy is one
+      keystroke by a human who does not know they are the blocker. **SHIPPED** as
+      `_DECLINE_REMEDY`, an imperative line per outcome ("un-submitted text the janitor did
+      not type is sitting in that session's input field … submit or clear that line"). The
+      pane text itself is never quoted — it is a human's half-written sentence, and the
+      finding goes to a ledger.
+- [x] A test driving an unchanged decline across N beats asserts exactly ONE audit row AND one
       escalation past the threshold — the two requirements pull in opposite directions, so a
-      test that only checks one of them passes on a broken implementation
-- [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+      test that only checks one of them passes on a broken implementation.
+      **SHIPPED**, plus a second test pinning that an unchanged decline does NOT restart its
+      own clock (the inverse mistake, which would leave a permanent stall permanently one beat
+      old) and that a decline which CHANGES shape gets a fresh clock and a re-armed escalation.
+
+      **NEUTER-PROVEN**, because a test asserting a notification is exactly the kind that can
+      pass while notifying nothing: with the threshold raised out of reach
+      (`CLAUDE_PLUGIN_OPTION_DAEMON_DECLINE_STALL_ESCALATE=999999`) **both** new tests redden.
+      Also caught in the writing: the first draft ran 3 beats × 1000 s = 3000 s and sat just
+      *under* the 3600 s threshold — it passed its "no restart" half while proving nothing at
+      all about escalation. Pinned in a comment at the call site.
+- [x] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
 
 ### Original STATE (2026-08-23 — retained; its measurement is superseded by the above)
 
