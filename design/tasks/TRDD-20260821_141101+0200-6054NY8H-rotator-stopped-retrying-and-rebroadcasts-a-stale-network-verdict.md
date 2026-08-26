@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: human_review
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-26T20:27:06+0200
+updated: 2026-08-26T20:46:56+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -227,6 +227,52 @@ Nothing here changes the two remedies (`/janitor-refresh-cc-logins`, or re-armin
 which the owner disabled 2026-08-07) — both remain USER decisions, and re-arming reverses a
 deliberate call. What changed is that the clock is now short enough that the choice cannot keep
 waiting for a quiet moment.
+
+### ⏵ 2026-08-26 20:45 — THE ASK ON THE OWNER IS SMALLER THAN THIS CARD SAYS
+
+The peer's `tick.ts:228` already emits, as its own reason string: *"the OAuth rung is dead, but a
+live claude.ai cookie can still mint these with NO human; **check the cookie layer before
+re-logging in**"*. That sent me back to our own skill, and it is right — this card (and my report
+to the owner) named `/janitor-refresh-cc-logins` as though it were one indivisible human re-login.
+**It is five steps, and steps 3 and 4 are separable.**
+
+- **Step 3** = the human re-login per account (`open-login.sh`), which saves COOKIES only.
+- **Step 4** = minting OAuth tokens FROM cookies already on disk, via a CDP-attach capture:
+
+  ```bash
+  ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
+  env -u CLAUDE_PLUGIN_DATA bash "$ROT/check-login.sh" <email>      # are the saved cookies still good?
+  env -u CLAUDE_PLUGIN_DATA CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1 \
+      python3 "$ROT/rotator.py" tick                                 # _bootstrap_seeded_slots → mint
+  env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" list           # verify slots hold refresh tokens
+  ```
+
+**Our exact situation is step 4's precondition**: cookies LIVE until 08-30, refresh tokens dead.
+So step 4 alone may restore all three slots with **no re-login at all** — which is precisely what
+the deadline is a deadline ON. After 08-30 the cookies are gone and only the full step-3 REAUTH
+remains.
+
+Caveats, stated so nobody runs it blind: each capture opens a REAL Chrome window per account
+(flashes, then closes). `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` authorizes that for THAT user-initiated
+run only — the unattended daemon keeps auto-bootstrap OFF and per-slot capped (TRDD-5OJX3SCF), and
+the owner's 2026-08-07 call was about the DAEMON opening surprise windows, not about a command the
+owner types. So this is a smaller decision than re-arming `reauth-repair`, not the same one.
+
+**Not run here.** Credential-affecting and browser-launching; the owner's to type. What changed is
+that the ask shrank from "re-login three accounts" to "run one command, after a one-line check
+that the cookies are still good".
+
+### THE FINDING, separate from the deadline — because the deadline expires and this recurs
+
+The peer's editorial point, taken: **the column that means *escalated to the user* is the one a
+status summary omits.** This card carried a hard deadline in `human_review` for four days while
+every board report enumerated `dev|testing|ai_review`. A deadline expires; that shape does not.
+Recorded as `ATOM-IEUR-NTPU` (USER scope) with its measurement half — read `column:` per file,
+never `grep -h '^column:' *.md | uniq -c`, which counts prose inside card bodies.
+
+The peer checked their own tooling on the strength of it and does NOT have this failure
+(`trdd-doctor.ts` enumerates `human_review` in `PAST_DEV`) — but found the same SHAPE in a
+different filter (`PENDING_COLUMNS = {proposal, superseded}`), which is the transferable half.
 
 ## ⏰ RE-MEASURED 2026-08-22 11:2x — the clock was 8.4 days
 
