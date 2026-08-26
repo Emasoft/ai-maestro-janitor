@@ -51,9 +51,34 @@ currently observes `now - last-fire >> cadence`. That detector is the deliverabl
 worth more than this card: the same blindness covers every "the next heartbeat will handle it"
 guarantee, and `heartbeat-fires.log` already carries the data it needs.
 
-**NEXT ACTION:** build the stall detector against `heartbeat-fires.log` (per-session last-fire
-vs cadence). It must survive the thing it watches — a detector reached only FROM a fire cannot
-report that fires stopped, so it needs a caller that is not the heartbeat (the daemon).
+**4. DO NOT BUILD A STALL DETECTOR — one already exists, and the card's premise is false.**
+The card says "nothing currently notices that `now - last-fire >> cadence`". Verified otherwise:
+`daemon.task_session_liveness` → `fleet_scan` → `session_liveness.diagnose_instance` is exactly
+that guardian. It keys on `transcript_stale` (`fleet_scan.py:1004`) with `STALE_S = 15 * 60`,
+and its own docstring states the mechanism this card rediscovered — *"a healthy session's
+transcript advances on EVERY heartbeat"*, written because *"the cron is the very thing that died
+in the 20-hour freeze"*. A 10.3 h gap is 41× the threshold. It also already satisfies the
+derived constraint: it runs from the DAEMON, not from a fire.
+
+I had proposed building it before checking. That would have been a duplicate of a subsystem
+built for this exact failure — the card's "nothing notices" line is the kind of claim that has
+to be verified precisely because it licenses new construction.
+
+**So the real question is not "what should detect this" but "why did the existing guardian not
+rescue the session on 2026-08-23".** `daemon.log` was rotated (it only reaches back to 08-25),
+so that window is not directly observable; what IS observable is below, and it is a lead.
+
+**5. A separate defect found while checking: `session-liveness.last-run.ts` reads 2026-07-25 —
+31 days stale — while the task demonstrably runs every ~2 minutes** (`daemon.log`, today:
+`task 'session-liveness' starting` / `done in 12s`, repeatedly), with `failcount = 0` and the
+chore ABSENT from the yielded-to-server list. A cadence stamp that says "dead for a month"
+about a task that is running is a diagnostic that lies in the dangerous direction, and this
+project's own CLAUDE.md teaches reading these stamps to judge chore health. Filed separately —
+it is not this card's subject, and it may or may not be why the guardian was silent on 08-23.
+
+**NEXT ACTION:** find out why the guardian did not rescue on 08-23 (start from the stamp defect
+in 5, and from whether `FLEET_RECOVERY_ENABLED` / `SESSION_LIVENESS_ENABLED` were set then).
+Do NOT start by writing new detection.
 
 ### Original STATE (2026-08-23 — retained; its measurement is superseded by the above)
 
