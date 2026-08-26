@@ -211,3 +211,47 @@ def test_it_is_registered_on_the_daemon_task_table() -> None:
     src = _DAEMON.read_text(encoding="utf-8")
     assert 'Task("cold-cache-clear"' in src, "the beat must be in the daemon's task table"
     assert d._INTERVAL_COLD_CACHE_CLEAR > 0
+
+
+def test_the_watchers_verdict_lines_are_kept_not_discarded(monkeypatch, tmp_path: Path) -> None:
+    """TRDD-UQW5IOAE: the beat spawned the watcher with `stdout=DEVNULL`, so every
+    `VERDICT FIRE/HOLD … why=…` line — the ONLY audit trail this feature is judged on — was
+    thrown away, in the ENABLED case too. The shadow-mode acceptance box was therefore waiting
+    on a channel that did not exist, and a later reader would have concluded "shadow mode ran
+    and found nothing" when nothing had been recorded at all.
+
+    Self-proving: the fake writes through the handle the beat actually passed, so restoring
+    DEVNULL makes the marker vanish from the log and this test RED.
+    """
+    d = _daemon()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(logs))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", "1")
+    d.state.log_dir.cache_clear()
+
+    real_popen = d.subprocess.Popen
+
+    def cap(*a, **k):
+        argv = list(a[0]) if a else []
+        if any(str(x).endswith("external_handoff_clear.py") for x in argv):
+            # Stand in for the real watcher: write the line it would print.
+            k["stdout"].write("VERDICT HOLD why=transcript-advancing\n")
+            k["stdout"].flush()
+
+            class _Stub:
+                pid = 99999
+
+            return _Stub()
+        return real_popen(*a, **k)
+
+    monkeypatch.setattr(d.subprocess, "Popen", cap)
+    monkeypatch.setattr(
+        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(_project(tmp_path))]
+    )
+
+    d.task_cold_cache_clear()
+    d.state.log_dir.cache_clear()
+
+    written = (logs / "cold-cache-clear.log").read_text(encoding="utf-8")
+    assert "VERDICT HOLD why=transcript-advancing" in written

@@ -96,17 +96,43 @@ def run_once() -> int:
         sd = Path(root) / ".janitor" / "state"
         if not sd.is_dir() or cold_cache_compact.clear_in_cooldown(sd, now=now):
             continue
+        # KEEP THE WATCHER'S STDOUT (TRDD-UQW5IOAE). It prints exactly the audit line this
+        # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus NO_SUMMARY /
+        # HANDOFF_NOT_CONCISE / CLEAR_CHAIN_SPAWNED — and DEVNULL threw every one of them away,
+        # in the ENABLED case too. That is why "shadow mode has been running and found nothing"
+        # would have been the opposite of the truth: nothing was recorded, so nothing could be
+        # found. The SessionStart lane never had this hole (it is blocking and logs its own
+        # verdict via state.log_line), so this was the one call site.
+        #
+        # Appending to the component's own log file, NOT a pipe: the child is detached and
+        # nobody survives to read a pipe — a full pipe buffer would simply block it forever.
+        # PYTHONUNBUFFERED so a killed child still leaves its lines behind rather than losing a
+        # block-buffered tail.
+        #
+        # ponytail: the child holds this fd across a rotation, so a long-lived watcher keeps
+        # writing to <log>.1 after the rename. Harmless at this lifetime (one clear chain);
+        # revisit only if the watcher ever becomes long-running.
+        # Log the header BEFORE the spawn, not after: it puts the "evaluating <root>" line
+        # ahead of the watcher's own lines in the same file (they interleave otherwise), and
+        # a beat that dies mid-spawn still says which root it was on.
+        state.log_line(_COMPONENT, f"cold-cache-clear: evaluating {root}")
         try:
-            subprocess.Popen(  # noqa: S603 - fixed argv, feature-detected script
-                [sys.executable, str(watcher), "--project-root", root],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                env={**os.environ, "CLAUDE_PROJECT_DIR": root},
-            )
+            log_dir = state.log_dir()
+            # Explicit, not inherited from log_line's init_state() side effect — an open() that
+            # raises here lands in the except below and SKIPS THE SPAWN, turning an audit-trail
+            # improvement into a silent no-op of the whole feature. Measured: it did exactly
+            # that to test_it_reads_the_real_project_root_field on the first draft.
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / f"{_COMPONENT}.log").open("a", encoding="utf-8") as sink:
+                subprocess.Popen(  # noqa: S603 - fixed argv, feature-detected script
+                    [sys.executable, str(watcher), "--project-root", root],
+                    stdout=sink,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    env={**os.environ, "CLAUDE_PROJECT_DIR": root, "PYTHONUNBUFFERED": "1"},
+                )
         except Exception as exc:  # noqa: BLE001 - one bad spawn must not stop the beat
             state.log_line(_COMPONENT, f"cold-cache-clear: spawn failed for {root}: {exc}")
             continue
-        state.log_line(_COMPONENT, f"cold-cache-clear: evaluating {root}")
         return 0  # one per beat — see the module docstring
     return 0
