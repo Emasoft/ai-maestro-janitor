@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T14:20:00+0200
+updated: 2026-08-26T14:45:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -113,7 +113,46 @@ Superseding the options list above: **(1) port it — unnecessary. (2) un-claim 
 exists. (3) relax the directive — still the owner's. (4) NEW: consume the detection flag in the
 overdue predicate — the cheap correct fix, theirs to make.**
 
+## ⏵ 2026-08-26 14:45 — NEITHER LANE INSTALLED 3.3.26. Proven from both sides.
+
+The 7 m 22 s belongs to a third actor. ai-maestro-bf's absorbed ticks BRACKET the install rather
+than containing it (`00:40:02+0200` and `04:41:39+0200`, install at `02:31:07+0200`), so their
+lane did not do it. Mine could not have: `version-update.last-run.ts` reads 2026-07-25T21:01Z —
+**26 days before the install** — because the chore is absorbed and my lane correctly stands down.
+
+Two independent instruments, one conclusion: **PROVEN neither lane installed it. NOT PROVEN which
+actor did.** Claude Code's own auto-update is the only other candidate either of us knows of
+(`ai-maestro-plugins` carries `autoUpdate: true`), and that remains an INFERENCE — I looked for
+positive evidence in `~/.claude/logs` for that window and there is none to be had.
+
+### This reframes option 4, and the peer's reframing is better than my case for it
+
+"4 h is too slow" is NOT the argument, because the usual path is ~7 minutes and belongs to
+neither of us. **The argument is that the fast path fails SILENTLY and the backstop does not
+notice.** TRDD-FXPV7L4D measured exactly that shape: 10 marketplaces unrefreshed for 11–155 days
+while the lane printed "Refreshed every registered marketplace". When the harness stops, what
+remains is a 4 h floor gated on elapsed time, never on detection — with my flag already crossing
+the boundary unread.
+
+So option 4 is **a detection-driven backstop under an unreliable fast path**, not a speed-up.
+
+### The design is three actors, and none is sufficient alone
+
+| actor | latency | fails when |
+|---|---|---|
+| harness auto-update | ~7 min observed (n=1) | **silently** — the FXPV7L4D class |
+| absorbed lane + flag trigger (option 4) | ≤15 min | no armed janitor session on the host raises the flag |
+| absorbed lane cadence | ≤4 h | never — the only unconditional floor |
+
+The middle row's failure mode is mine: my detector raises `version-update-requested.flag` from a
+per-SESSION heartbeat, so a host with no armed session never makes the lane overdue early and
+falls back to the 4 h floor. Correct behaviour, worth knowing rather than discovering.
+
+**Nothing implemented on either side** — the change touches a shared chore contract, so it waits
+on the owner.
+
 ## Why this matters right now
+
 
 
 3.4.0 is the next publish (blocked on the owner's GH013 decision). Under the current server it
