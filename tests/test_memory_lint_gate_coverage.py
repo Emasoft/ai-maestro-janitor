@@ -108,12 +108,19 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # `enrich` chore that does not exist yet. These rows flip to "enrich" when that chore
     # lands — do not point them at `repair`, whose defect predicate deliberately knows
     # nothing about keyphrase counts (a repair dispatch aimed at these is a provable no-op).
-    "atom-keywords-too-few": None,
-    "atom-keywords-duplicated": None,
-    "page-description-too-few-phrases": None,
-    "page-description-duplicated-phrases": None,
+    # Covered — enrich_has_work asks memgrep lint for exactly these four slugs
+    # (TRDD-437UHNFS). They were orphaned only between 3461ef6d (the gates landing) and
+    # the enrich chore; the gate and its arbiter are the same linter, so the mapping
+    # cannot drift the way a Python twin of the counting rules would have.
+    "atom-keywords-too-few": "enrich",
+    "atom-keywords-duplicated": "enrich",
+    "page-description-too-few-phrases": "enrich",
+    "page-description-duplicated-phrases": "enrich",
     "lesson-uncited": None,
-    "atom-no-keywords": None,
+    # An atom with NO keywords is the limiting case of the same defect enrich fixes, so
+    # it gets the same owner rather than staying orphaned — zero occurrences in the live
+    # corpus today, which is exactly why it would otherwise go unnoticed forever.
+    "atom-no-keywords": "enrich",
     "atom-no-lmd": None,
     "atom-no-ocd": None,
     "atom-bad-ocd": None,
@@ -149,6 +156,7 @@ _CODE_COVERAGE: dict[str, str | None] = {
 
 _ALL_INTERVENTIONS = (
     "split", "repair", "atomize", "harvest", "retro-lesson", "consolidate", "conflict",
+    "enrich",
 )
 
 
@@ -231,10 +239,16 @@ def test_page_no_notes_section_is_both_flagged_and_dispatchable(tmp_path):
 
 @needs_memgrep
 def test_atom_no_keywords_is_flagged_but_dispatched_by_nothing(tmp_path):
-    """ORPHANED, proven live — the issue's own "fix this first" pick: 'the finding
-    that means this memory is permanently unfindable is one that no scheduled chore
-    can act on.' A fixture carrying ONLY this defect (everything else well-formed) is
-    flagged by the real linter yet leaves every content_has_work gate False."""
+    """COVERED by `enrich`, proven live (TRDD-437UHNFS).
+
+    This test asserted the OPPOSITE until 2026-08-26, and — as with `atom-oversized`
+    below — the inversion IS the point. It was janitor#200's own "fix this first" pick:
+    'the finding that means this memory is permanently unfindable is one that no
+    scheduled chore can act on.' The enrich chore is what finally acts on it, and this
+    test is the proof that the claim in `_CODE_COVERAGE` is a live dispatch rather than
+    a table entry — a fixture carrying ONLY this defect must wake `enrich` and NOTHING
+    else. 'nothing else' is load-bearing: two chores dispatching on one defect is how
+    they starve each other."""
     page = tmp_path / "no-keywords.md"
     page.write_text(
         "---\nname: no-keywords\ndescription: \"a page whose atom has no keywords\"\n"
@@ -248,10 +262,11 @@ def test_atom_no_keywords_is_flagged_but_dispatched_by_nothing(tmp_path):
     assert "atom-no-keywords" in codes, f"fixture must reproduce the code: {codes}"
 
     results = _content_has_work_everywhere(tmp_path)
-    dispatching = [iv for iv, has_work in results.items() if has_work]
-    assert not dispatching, (
-        f"atom-no-keywords is documented ORPHANED, but {dispatching} would dispatch on this "
-        "fixture — either the classification is stale or a gate now covers it; update _CODE_COVERAGE"
+    dispatching = sorted(iv for iv, has_work in results.items() if has_work)
+    assert dispatching == ["enrich"], (
+        f"atom-no-keywords is documented COVERED by enrich, but {dispatching} dispatched — "
+        "empty means enrich's gate went silent (check MEMGREP_BIN actually knows the slug); "
+        "more than enrich means two chores now fight over one defect. Update _CODE_COVERAGE."
     )
 
 

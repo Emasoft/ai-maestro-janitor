@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-frequency
-description: Show or change how often the wikimem editorial passes run (consolidate, split, conflict, repair, harvest, atomize, retro-lesson) and the split max-size. No args lists every setting. Global, machine-wide. Use when the user asks how often memory pages are merged, split, repaired, harvested, atomized, retro-lesson-backfilled, or conflict-checked, or asks to change / enable / disable a wikimem editorial-pass cadence.
+description: Show or change how often the wikimem editorial passes run (consolidate, split, conflict, repair, harvest, atomize, retro-lesson, enrich) and the split max-size. No args lists every setting. Global, machine-wide. Use when the user asks how often memory pages are merged, split, repaired, harvested, atomized, retro-lesson-backfilled, enriched, or conflict-checked, or asks to change / enable / disable a wikimem editorial-pass cadence.
 ---
 
 # Janitor memory-frequency
@@ -18,12 +18,12 @@ disable a pass.
 ## When to use
 
 - The user asks how often memory pages are consolidated / split / conflict-checked / repaired /
-  harvested / atomized / retro-lesson-backfilled.
+  harvested / atomized / retro-lesson-backfilled / enriched.
 - The user asks to enable, disable, or change one of those cadences, or the split max-size.
 
 ## Instructions
 
-`<pass>` is one of: `consolidate` · `split` · `conflict` · `repair` · `harvest` · `atomize` · `retro-lesson`.
+`<pass>` is one of: `consolidate` · `split` · `conflict` · `repair` · `harvest` · `atomize` · `retro-lesson` · `enrich`.
 
 | Invocation | Effect |
 |---|---|

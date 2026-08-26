@@ -26,6 +26,7 @@ CHORE_SKILLS = [
     "janitor-memory-harvest",
     "janitor-memory-split",
     "janitor-memory-retro-lesson",
+    "janitor-memory-enrich",
 ]
 
 

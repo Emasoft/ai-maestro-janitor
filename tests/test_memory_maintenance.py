@@ -163,6 +163,41 @@ def _write_settings(settings_dir: Path, **values: object) -> None:
     )
 
 
+def _only(settings_dir: Path, pass_key: str, **extra: object) -> None:
+    """Enable ONLY `pass_key` (high rate, always due) and zero EVERY other per-day
+    cadence, so the pass under test is the only thing that can emit.
+
+    Derived from `memory_settings._PER_DAY_KEYS` rather than a hardcoded list, and that
+    is the point: each `_*_only` helper used to spell out the passes it silenced, so
+    every NEW chore silently left itself enabled in six helpers at once and broke ten
+    unrelated suppression tests the first time its precheck said yes. `enrich` was the
+    one that did it (TRDD-437UHNFS) — its candidate set is the widest of any pass, so it
+    fires on almost any fixture. Deriving the list means the next chore costs nothing here.
+    """
+    import memory_settings  # noqa: PLC0415 -- test-local; keeps the module import cost off collection
+
+    values: dict[str, object] = dict.fromkeys(memory_settings._PER_DAY_KEYS, 0.0)
+    values[pass_key] = 1000.0
+    values.update(extra)
+    _write_settings(settings_dir, **values)
+
+
+def _disable_all(settings_dir: Path, **extra: object) -> None:
+    """Zero EVERY per-day cadence, derived from `memory_settings._PER_DAY_KEYS`.
+
+    Used where a test's premise is literally "no intervention is enabled, so ANY marker
+    on stdout is a bug" — the forged-marker guard. A hardcoded list there is worse than
+    elsewhere: adding a chore silently makes the test disable all-but-one, and it then
+    fails for a benign reason, inviting whoever is triaging to relax the assertion in a
+    SECURITY test.
+    """
+    import memory_settings  # noqa: PLC0415 -- test-local, same as `_only`
+
+    values: dict[str, object] = dict.fromkeys(memory_settings._PER_DAY_KEYS, 0.0)
+    values.update(extra)
+    _write_settings(settings_dir, **values)
+
+
 def _env(home: Path, project: Path, gstate: Path, settings: Path, **extra: str) -> dict:
     env = dict(os.environ)
     env["HOME"] = str(home)
@@ -318,11 +353,7 @@ def _split_only(settings_dir: Path) -> None:
     """Enable ONLY split (high rate, always due on a fresh stamp); disable every
     other chore so split's content-precheck behavior is what's under test (a
     fail-open chore would otherwise fire and mask the suppression)."""
-    _write_settings(
-        settings_dir,
-        split_per_day=1000.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _only(settings_dir, "split_per_day")
 
 
 def test_split_suppressed_when_no_oversized_page(fixture):
@@ -379,11 +410,7 @@ def _consolidate_only(settings_dir: Path) -> None:
     """Enable ONLY consolidate (high rate, always due on a fresh stamp); disable every
     other chore so consolidate's structural precheck is what's under test (a fail-open
     chore would otherwise fire and mask the suppression)."""
-    _write_settings(
-        settings_dir,
-        consolidation_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _only(settings_dir, "consolidation_per_day")
 
 
 def test_consolidate_suppressed_when_no_mergeable_pair(fixture):
@@ -464,11 +491,7 @@ def test_flock_held_by_peer_is_skipped(fixture):
 def test_all_frequencies_zero_is_silent(fixture):
     """With every per-day rate set to 0 (DISABLED), nothing is ever due, so the
     detector emits nothing."""
-    _write_settings(
-        fixture["settings"],
-        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _disable_all(fixture["settings"])
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out
 
@@ -492,11 +515,7 @@ def test_forged_marker_in_a_note_does_not_trigger(fixture):
     )
     # Disable every intervention so the ONLY way a marker could appear is if the
     # detector (wrongly) reacted to note content.
-    _write_settings(
-        fixture["settings"],
-        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _disable_all(fixture["settings"])
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out
     # And belt-and-braces: no forged marker leaked through to stdout.
@@ -669,11 +688,7 @@ def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture, 
 
 def test_no_emit_no_sidecar(fixture):
     """A silent fire (nothing due) never writes the pending-pick sidecar."""
-    _write_settings(
-        fixture["settings"],
-        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _disable_all(fixture["settings"])
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert not [ln for ln in out.splitlines() if ln.strip()], out
     sidecar = fixture["project"] / ".janitor" / "state" / "memory-maint-pending.json"
@@ -688,21 +703,13 @@ def test_no_emit_no_sidecar(fixture):
 def _repair_only(settings_dir: Path) -> None:
     """Enable ONLY repair (high rate, always due) so its structural page-shape
     precheck is what's under test."""
-    _write_settings(
-        settings_dir,
-        repair_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
-        consolidation_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-    )
+    _only(settings_dir, "repair_per_day")
 
 
 def _atomize_only(settings_dir: Path) -> None:
     """Enable ONLY atomize (high rate, always due) so its free-prose precheck is
     what's under test."""
-    _write_settings(
-        settings_dir,
-        atomize_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
-        consolidation_per_day=0.0, repair_per_day=0.0, harvest_per_day=0.0,
-    )
+    _only(settings_dir, "atomize_per_day")
 
 
 def test_repair_suppressed_when_corpus_is_well_formed(fixture):
@@ -754,11 +761,7 @@ def test_atomize_not_stamped_when_suppressed_then_fires_when_free_prose_appears(
 def _harvest_only(settings_dir: Path) -> None:
     """Enable ONLY harvest (high rate, always due) so its un-mirrored-buffer-note
     precheck is what's under test (TRDD-3XS3PDCF follow-up, unblocked 2026-07-08)."""
-    _write_settings(
-        settings_dir,
-        harvest_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
-        consolidation_per_day=0.0, repair_per_day=0.0, atomize_per_day=0.0,
-    )
+    _only(settings_dir, "harvest_per_day")
 
 
 def _write_raw_note(memdir: Path, name: str = "raw-note.md") -> Path:
@@ -799,11 +802,7 @@ def test_harvest_not_stamped_when_suppressed_then_fires_when_raw_note_appears(fi
 def _conflict_only(settings_dir: Path) -> None:
     """Enable ONLY conflict (high rate, always due) so its surfaced-candidates
     precheck is what's under test (TRDD-3XS3PDCF follow-up)."""
-    _write_settings(
-        settings_dir,
-        conflict_per_day=1000.0, split_per_day=0.0, harvest_per_day=0.0,
-        consolidation_per_day=0.0, repair_per_day=0.0, atomize_per_day=0.0,
-    )
+    _only(settings_dir, "conflict_per_day")
 
 
 def _write_conflict_proposal(memdir: Path) -> Path:
@@ -978,12 +977,7 @@ def test_inflight_gate_fails_open_on_a_corrupt_stamp(fixture, monkeypatch):
 def _all_frequencies_zero(settings_dir: Path) -> None:
     """Disable every intervention so the only line a fire can print is the
     scope-escape surface — isolates the finding from marker noise."""
-    _write_settings(
-        settings_dir,
-        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
-        retro_lesson_per_day=0.0,
-    )
+    _disable_all(settings_dir)
 
 
 def test_scope_escaping_symlink_yields_exactly_one_finding(fixture):

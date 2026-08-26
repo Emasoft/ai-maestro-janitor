@@ -1183,6 +1183,106 @@ def harvest_has_work(
     return False
 
 
+_ENRICH_SLUGS = frozenset({
+    "atom-keywords-too-few",
+    "atom-keywords-duplicated",
+    "atom-no-keywords",  # the limiting case of too-few — same defect, same owner
+    "page-description-too-few-phrases",
+    "page-description-duplicated-phrases",
+})
+
+_ENRICH_FINDING_RE = re.compile(r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[(?P<slug>[a-z-]+)\]")
+
+
+def enrich_pages(root: Path) -> list[tuple[str, str]]:
+    """Pages under `root` whose RECALL SURFACE is too thin or duplicated, as
+    `(abs-path, slug)` — asked of `memgrep lint` itself, never re-derived here.
+
+    Same reasoning as `oversized_atom_pages`, and for the same reason it must not be
+    re-litigated per chore: the thresholds AND the parsing live in Rust
+    (`memory.rs::atom-keywords-too-few` / `page-description-too-few-phrases`, with
+    env-tunable minimums), and so does the normalization that decides when two
+    keyphrases count as duplicates. A Python twin of a rule the linter already owns is
+    not a second opinion, it is a second source of truth — the janitor#227 shape, where
+    a gate and its arbiter disagree and the chore dispatches an agent that finds nothing,
+    forever. Note this is the OPPOSITE of what janitor#227 is usually quoted for: the
+    "lint and precheck disagree BY DESIGN" clause covers precheck-only rules lint does
+    not know about. Here the defect IS a lint rule, so deferring to lint is the only
+    non-looping design available.
+
+    NO CANDIDATES when memgrep is missing or fails — fail CLOSED, deliberately, exactly
+    as `oversized_atom_pages` does: a dispatched agent would have no linter either, so it
+    could neither confirm the defect nor verify its own fix.
+
+    ⚠ THE BINARY MUST BE ONE THAT KNOWS THESE RULES. They shipped after the currently
+    installed build, so during the backlog drain (TRDD-437UHNFS) `find_memgrep()` resolves
+    PATH to a binary containing ZERO of these slugs and this function correctly returns []
+    for every page. That is not a bug here and must not be "fixed" by counting in Python —
+    it is why the 1188-error backlog is drained by an EAGER batch run with
+    `MEMGREP_BIN=<repo>/scripts/memgrep/target/release/memgrep`, and why this chore is the
+    POST-install steady-state guard rather than the thing that drains.
+    """
+    try:
+        import user_mem_lib  # noqa: PLC0415 -- optional; a lib import must not break the gate
+
+        binary = user_mem_lib.find_memgrep()
+    except Exception:  # noqa: BLE001
+        binary = None
+    if not binary:
+        return []
+    try:
+        proc = subprocess.run(  # noqa: S603 - resolved binary + one path, no shell
+            [binary, "lint", str(root)],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out: list[tuple[str, str]] = []
+    for ln in (proc.stdout or "").splitlines():
+        m = _ENRICH_FINDING_RE.match(ln)
+        if m and m.group("slug") in _ENRICH_SLUGS:
+            out.append((m.group("path"), m.group("slug")))
+    return out
+
+
+def enrich_has_work(
+    root: Path,
+    *,
+    scope: str | None = None,
+    now: int | None = None,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
+    """True iff some page in `root` has a thin or duplicated recall surface that the
+    enrich pass could still fix (TRDD-437UHNFS).
+
+    TERMINATION, which is the whole design question for this chore: the gate and the
+    arbiter are THE SAME CODE — both are `memgrep lint`. So a page the agent actually
+    fixed cannot re-flag on the next pass, and a page it cannot satisfy goes on the
+    refusal ledger and stops being a candidate until its own bytes change. Those are the
+    only two exits, and both are monotone; there is no third state in which this loops.
+
+    NON-INTERFERENCE with the other chores: the enrich pass writes ONLY `keywords:` props
+    and the page-level `description:`. It must never touch an atom's `desc:` — that field
+    has a 200-char cap enforced elsewhere (`memory_edit_verify.py`), so padding it would
+    hand `repair` a defect to undo and the two chores would ping-pong on the same page.
+
+    UNCHANGED-CORPUS gate (#140) is the cheap fast path, as everywhere else. `scope` is
+    required to read the refusal ledger; without it the filter is skipped, never inverted.
+    """
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
+    for path, _slug in enrich_pages(root):
+        if scope is None:
+            return True  # cannot read the ledger ⇒ never suppress
+        if not memory_refusals.is_refused("enrich", scope, root, [Path(path)], now=now):
+            return True
+    return False
+
+
 def content_has_work(
     intervention: str,
     root: Path,
@@ -1265,6 +1365,17 @@ def content_has_work(
         # filter — without it the gate keeps its old bullet-count behavior (#131).
         # UNCHANGED-CORPUS gate (#140) is the additional, cheaper fast path.
         return conflict_has_work(
+            root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
+    if intervention == "enrich":
+        # LINT-OWNED gate (TRDD-437UHNFS): thin/duplicated keyphrases and page
+        # descriptions are rules memgrep already owns, so the gate ASKS it rather than
+        # counting here — gate and arbiter identical, which is what makes the chore
+        # terminate. `scope` unlocks the per-page refusal filter for a page that cannot
+        # be honestly enriched (a stub with genuinely one subject). Fails CLOSED when
+        # memgrep is missing, unlike the fail-OPEN default around it — an agent without
+        # the linter could not verify its own fix either.
+        return enrich_has_work(
             root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
         )
     # Unknown chores: fail-open by default.

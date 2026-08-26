@@ -144,10 +144,44 @@ def consolidate_candidates(
     return out
 
 
+def enrich_candidates(
+    root: Path, *, scope: str, now: int | None, max_bytes: int
+) -> list[tuple[str, str]]:
+    """Every page `memgrep lint` flags with a thin/duplicated recall surface, MINUS pages
+    the refusal ledger already covers — the same set `enrich_has_work` collapses to a bool.
+
+    Unlike its siblings this one does NOT walk pages and apply a text predicate: the
+    defect is a LINT RULE, so the candidate list comes from the linter in one subprocess
+    (see `enrich_pages`). That is what keeps the scheduler's gate and this list identical
+    — the SSOT guarantee the other candidate functions get from sharing `*_defect`.
+
+    Consequence worth naming: when memgrep is missing this returns EMPTY, not
+    everything. The scheduler's gate fails CLOSED here too, so the two still agree — an
+    empty list from a missing linter is the honest answer, and the loud problem (no
+    memgrep) surfaces elsewhere.
+
+    One page can carry several findings; they are merged into ONE row per page with the
+    slugs joined, because the agent fixes a page, not a finding.
+    """
+    by_page: dict[str, list[str]] = {}
+    for path, slug in memory_content_precheck.enrich_pages(root):
+        by_page.setdefault(path, [])
+        if slug not in by_page[path]:
+            by_page[path].append(slug)
+    out: list[tuple[str, str]] = []
+    for path, slugs in by_page.items():
+        p = Path(path)
+        if memory_refusals.is_refused("enrich", scope, root, [p], now=now):
+            continue
+        out.append((_rel(root, p), "+".join(sorted(slugs))))
+    return sorted(out)
+
+
 _INTERVENTIONS = {
     "repair": repair_candidates,
     "atomize": atomize_candidates,
     "consolidate": consolidate_candidates,
+    "enrich": enrich_candidates,
 }
 
 

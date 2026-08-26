@@ -9,7 +9,7 @@ DETECT → SCHEDULE → EXECUTE → VERIFY). The DETECT layer (`memory-librarian
 SURFACES reorg candidates; this detector decides WHEN an editorial pass is due,
 deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron turn
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
-only EMITS one of seven bare markers:
+only EMITS one of eight bare markers:
 
     [janitor-memory-split]        → dispatch a background Sonnet agent: /janitor-memory-split
     [janitor-memory-repair]       → dispatch a background Sonnet agent: /janitor-memory-repair
@@ -18,6 +18,7 @@ only EMITS one of seven bare markers:
     [janitor-memory-retro-lesson] → dispatch a background Sonnet agent: /janitor-memory-retro-lesson
     [janitor-memory-consolidate]  → dispatch a background Sonnet agent: /janitor-memory-consolidate
     [janitor-memory-conflict]     → dispatch a background Sonnet agent: /janitor-memory-conflict
+    [janitor-memory-enrich]       → dispatch a background Sonnet agent: /janitor-memory-enrich
 
 The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
 spawn agents — the "a python detector cannot spawn agents, only the main loop can"
@@ -103,7 +104,10 @@ import state  # noqa: E402
 # retro-lesson (backfill lesson form onto already-superseded atoms, TRDD-J3ZH3RSI —
 # after the structural passes so a page is well-formed before its history is
 # converted, before the costly merges), then consolidate (merge), then conflict
-# (the costly fact-verify).
+# (the costly fact-verify), and LAST enrich (recall-surface backfill, TRDD-437UHNFS).
+# enrich is deliberately last: its candidate set is the widest of any pass (every page
+# below the keyphrase/description floor qualifies), so anywhere earlier it would
+# out-rank and starve the structural passes that must run on a page first.
 _MARKERS: list[tuple[str, str]] = [
     ("split", "[janitor-memory-split]"),
     ("repair", "[janitor-memory-repair]"),
@@ -112,6 +116,7 @@ _MARKERS: list[tuple[str, str]] = [
     ("retro-lesson", "[janitor-memory-retro-lesson]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
+    ("enrich", "[janitor-memory-enrich]"),
 ]
 
 # The scopes the editor may act on, most-specific first (matches memory-librarian's
