@@ -3,7 +3,7 @@ trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
 column: human_review
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-26T20:46:56+0200
+updated: 2026-08-26T20:52:50+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -218,10 +218,41 @@ waiting on. Found only by enumerating every column instead of the ones I expecte
 **That last line matters and is NEW since 08-22.** Two distinct problems were being read as one:
 
 1. **The 3-day credential clock** — real, unchanged, and the only irreversible one.
-2. **Fable's model window at 100%** — live, and NOT a credential problem. It is why the rotator
-   reports stuck while the account itself is healthy. Worth knowing that the standing advisor rule
-   routes work to `fable-advisor:advisor`, so a spent Fable window degrades that path while the
-   account-wide windows still read fine.
+2. **Fable's model window at 100%** — ⛔ **RETRACTED 2026-08-26 20:52, see below.**
+
+> ### ⛔ RETRACTION 2026-08-26 20:52 — I quoted a FROZEN alert string as a live measurement
+>
+> The "Fable window is spent (100%), so the remedy is to move agents OFF Fable" text above is
+> **quoted from `active-alerts.json`, and it is a stored snapshot, not a reading.** Its
+> `firstSeenAt` is **3.6 h before I read it**, while the FILE's mtime was 6 minutes — delivery
+> bookkeeping rewrites the file without recomputing the message. I checked the file's age and
+> treated it as the claim's age.
+>
+> **Neither half survives measurement:**
+> - **No usage probe carries a Fable window at all.** All 16 probes have `seven_day_fable: null`;
+>   the only model-scoped window present is `nimbus_quill` at **0.0%**. So the 100% figure is not
+>   substantiable from the probes right now.
+> - **The remedy it names is empty on this host.** The ai-maestro peer measured the registry:
+>   **0 of 13 registered agents are Fable-backed**, so "move agents OFF Fable" has nothing to
+>   move. I had relayed it to them as "the lever available today"; it is available in principle
+>   and empty in practice here.
+>
+> **What survives:** the FRAME — window-spent and credential-dead are different failures, and
+> the rotator can report STUCK while the account itself is healthy. That distinction is sound and
+> is why the alert exists. What does not survive is treating its numbers as current.
+>
+> **Unresolved and deliberately not guessed:** what IS consuming that window, if anything. The
+> peer named the `fable-advisor` plugin as the obvious candidate and explicitly declined to assert
+> it unmeasured. I note only what my own agent roster states first-hand — `fable-advisor:advisor`
+> is described as running on Fable 5 — which makes it *consistent* with the candidate and proves
+> nothing about consumption. If that window ever is spent, the consequence is narrow and worth
+> separating from the deadline: it removes the advisor review step this project's rules mandate,
+> it does not end unattended operation.
+>
+> Recorded as `ATOM-QP4H-ZY1H`. This is the sibling of `ATOM-W30O-YTBD` (the append-only ledger
+> trap) written earlier **in this same session** — there an entry never expires; here the entry is
+> rewritten while its payload is not. I wrote the first lesson and then made its exact mistake
+> against a different file three hours later.
 
 Nothing here changes the two remedies (`/janitor-refresh-cc-logins`, or re-arming `reauth-repair`
 which the owner disabled 2026-08-07) — both remain USER decisions, and re-arming reverses a
