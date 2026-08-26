@@ -3,7 +3,7 @@ trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
 column: testing
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-26T20:15:00+0200
+updated: 2026-08-26T18:44:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high

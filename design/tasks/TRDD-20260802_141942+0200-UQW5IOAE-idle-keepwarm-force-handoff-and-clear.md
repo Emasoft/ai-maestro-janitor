@@ -315,7 +315,7 @@ into a pane it does not own)?
       > unambiguously right", and the TRDD-VOWAUVE5 ordering lesson quoted below is exactly why
       > it went first: build the channel, THEN let the criterion depend on it.
       >
-      > **⏵ 2026-08-26 21:00 — REASON (1) IS FIXED TOO. Shadow mode now actually runs, so the
+      > **⏵ 2026-08-26 18:56 — REASON (1) IS FIXED TOO. Shadow mode now actually runs, so the
       > N-day clock starts on the next beat.** Reason (2) needed nothing: the watcher already
       > supports `--dry-run` and already returns before the clear chain on it — the flag simply
       > had no caller. So the whole remaining gap was one early `return 0`.

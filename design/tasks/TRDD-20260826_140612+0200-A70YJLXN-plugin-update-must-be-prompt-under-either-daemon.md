@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: todo
 blocked-by: [peer-decision-absorbed-version-update-lane]
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T20:45:00+0200
+updated: 2026-08-26T18:49:24+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -214,7 +214,7 @@ So the fix is one of:
       call.** Nothing here is the owner's any more except a veto.
 - [ ] Whichever path is chosen, a measurement showing publish→installed latency under the SERVER
       that meets the directive — not a design argument that it should
-- [x] **RE-VERIFIED 2026-08-26 20:45, on the live host.** The janitor's own path is unchanged
+- [x] **RE-VERIFIED 2026-08-26 18:49, on the live host.** The janitor's own path is unchanged
       and behaving exactly as designed under absorption:
       - the flag mechanism is intact — `global_state._version_update_request_path()` /
         `request_version_update()` / `version_update_requested_present()` /

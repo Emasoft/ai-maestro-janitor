@@ -3,7 +3,7 @@ trdd-id: JKJHV19B
 title: Wikimem link integrity — prune stale and duplicate links, resolve dangling ones
 column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T19:40:00+0200
+updated: 2026-08-26T18:36:27+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -109,7 +109,7 @@ content — a genuine cross-scope duplicate, i.e. duty 10/11 territory (TRDD-E7D
 because the fix failed on the USER copy and succeeded on the LOCAL one. Not touched here beyond
 the link fix; recorded so E7D4QPH1 starts with a real instance instead of a hypothetical.
 
-## ⏵ 2026-08-26 19:40 — THE DECISION MADE PER LINK; box 1's list was 50% false, all one direction
+## ⏵ 2026-08-26 18:36 — THE DECISION MADE PER LINK; box 1's list was 50% false, all one direction
 
 Every one of the 12 was checked against the corpus rather than trusted. **Six were not defects at
 all**, and the reason each was false is a distinct blind spot in the box-1 query — so the finding

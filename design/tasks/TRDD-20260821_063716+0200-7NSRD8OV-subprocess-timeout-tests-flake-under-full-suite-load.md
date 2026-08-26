@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: testing
 blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-26T20:35:00+0200
+updated: 2026-08-26T18:47:29+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -18,7 +18,7 @@ eht: []
 
 # Subprocess-timeout tests flake under full-suite load
 
-## ⏵ 2026-08-26 20:35 — `testing` → `blocked`. Nobody was testing it, and both gates are the owner's
+## ⏵ 2026-08-26 18:47 — `testing` → `blocked`. Nobody was testing it, and both gates are the owner's
 
 The column said `testing` for five days while nothing tested it. The card's own two open
 questions are both explicitly deferred to a human — *"it is a USER call, because forcing 80+
