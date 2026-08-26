@@ -211,10 +211,32 @@ def diagnose(facts: Facts) -> list[Finding]:
         if s.cannot_self_renew_age_s is not None and s.cannot_self_renew_age_s > COOKIE_LEG_ALERT_S:
             out.append(Finding(
                 "cookie-leg-stuck",
+                # CHECK THE COOKIE LAYER FIRST — this alert is named `cookie-leg-stuck` and
+                # used to send the reader straight past the cookie to a full re-login. When a
+                # live claude.ai session cookie still exists, `/janitor-refresh-cc-logins`
+                # step 4 alone (the CDP-attach capture, `rotator.py tick` with
+                # AUTO_BOOTSTRAP=1) mints a fresh refresh-bearing slot FROM that cookie — no
+                # re-authentication at all. Only when the cookie is gone too does the full
+                # step-3 re-login become necessary, and by then the cheap path has expired
+                # with the cookie. So the order matters and the old wording inverted it.
+                #
+                # It also said "only a human can renew it", which is imprecise in the way
+                # that costs the most: a human must TYPE something, but they do not have to
+                # re-authenticate. Measured 2026-08-26 (TRDD-6054NY8H) with three dead
+                # refresh tokens and cookies still valid — exactly the case where the old
+                # sentence sent the owner to the expensive remedy.
+                #
+                # The ai-maestro side emits the same instruction in its own words
+                # (`tick.ts:228`), so a reader who meets both systems now gets ONE story
+                # instead of two.
                 f"{s.email} has needed a one-time login for "
                 f"{s.cannot_self_renew_age_s / 3600.0:.1f}h (> {COOKIE_LEG_ALERT_S / 3600.0:.0f}h) "
-                f"— its refresh path is dead and only a human can renew it; run "
-                f"/janitor-refresh-cc-logins before the fleet runs out of accounts.",
+                f"— its refresh path is dead. CHECK THE COOKIE LAYER FIRST: if this account "
+                f"still has a live claude.ai session cookie it can mint a fresh token with NO "
+                f"re-login (check-login.sh, then rotator.py tick with "
+                f"CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1). Only if the cookie is gone too does a full "
+                f"/janitor-refresh-cc-logins re-login apply — and the cookie path expires with "
+                f"the cookie, so check it before the fleet runs out of accounts.",
             ))
     return out
 
