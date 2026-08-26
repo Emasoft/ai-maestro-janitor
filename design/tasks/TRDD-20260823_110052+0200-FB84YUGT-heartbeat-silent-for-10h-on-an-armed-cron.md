@@ -3,7 +3,7 @@ trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
 column: todo
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-23T11:08:27+0200
+updated: 2026-08-26T07:44:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -20,6 +20,42 @@ implementation-commits: []
 # The heartbeat went silent for 10h20m on an armed cron, and nothing noticed
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+### ⏵ 2026-08-26 — INVESTIGATED. Hypothesis 2 wins, and the measurement below is WRONG.
+
+The logs on disk did separate them. Three findings, in order of how much they change the card:
+
+**1. There were 24 fires on 2026-08-23, not 10 — and TWO gaps, not one.** Read the whole day
+instead of `grep -c` + `head -3`/`tail -3`:
+
+```
+gap 10.3 h   00:35:42 → 10:55:32
+gap  5.4 h   11:02:32 → 16:25:42     ← never noticed; the original probe could not see it
+```
+
+The card spends a long paragraph correctly warning that an elided probe misleads, and was
+itself written from one. The `tail -3` adjacency argument held for the 10 h gap, so the
+headline conclusion survives — but the second gap was invisible to it, and a second occurrence
+is exactly the evidence that decides between the hypotheses.
+
+**2. HYPOTHESIS 2 — the cron was ALIVE and could not fire.** Session `fdde8723` fires on BOTH
+sides of BOTH gaps. A `CronCreate` job is session-scoped and in-memory: if it had died, that
+session could not fire again without a re-arm, and the card's own record says the 10:55 fire
+arrived *only after a human typed into the session*. A dead cron cannot be resurrected by human
+input; a SUPPRESSED one fires the moment the REPL can take a turn — which is precisely what the
+human's keystroke enabled. Under H1 the cron would have to have died and been re-armed twice in
+one day, with no arm record for either.
+
+**3. So the fix is NOT re-arming — it is noticing the suppression.** Nothing on the machine
+currently observes `now - last-fire >> cadence`. That detector is the deliverable, and it is
+worth more than this card: the same blindness covers every "the next heartbeat will handle it"
+guarantee, and `heartbeat-fires.log` already carries the data it needs.
+
+**NEXT ACTION:** build the stall detector against `heartbeat-fires.log` (per-session last-fire
+vs cadence). It must survive the thing it watches — a detector reached only FROM a fire cannot
+report that fires stopped, so it needs a caller that is not the heartbeat (the daemon).
+
+### Original STATE (2026-08-23 — retained; its measurement is superseded by the above)
 
 **Not started.** Filed 2026-08-23 as a by-product of TRDD-5RXBI65T's forensics — surfaced while
 settling a different question, so it has evidence but no investigation behind it yet.
