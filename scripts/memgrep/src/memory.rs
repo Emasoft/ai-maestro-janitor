@@ -2922,8 +2922,14 @@ fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Opti
 )]
 struct NewPageArgs {
     /// Destination `.md` path. REFUSED if it already exists — a new page never clobbers an old one.
+    ///
+    /// DEPRECATED and slated for REMOVAL (owner, 2026-08-27): a path is an internal implementation
+    /// detail that may change between versions or be relocated via the `WIKIMEM_*_SCOPE_PATH` env
+    /// vars, so no verb should require callers to know one. Omit it and the destination is derived
+    /// as `<scope root>/<name>.md` from `--scope` (default `local`). Still honoured when passed, so
+    /// existing callers keep working during the migration.
     #[arg(long = "path")]
-    path: PathBuf,
+    path: Option<PathBuf>,
     /// Wiki tier: `hub` (one functionality's overview, carries `globs:`), `aspect` (a shared rule),
     /// or `component` (one element's page).
     #[arg(long = "tier")]
@@ -3010,7 +3016,18 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     // PUBLICATION scope (TRDD-RY0IJBJI). Validated up-front, before anything is written: an
     // unrecognised value must never silently fall through to "unpublished", because the failure is
     // invisible (a page the author believed was published simply is not).
-    let publish_globally: Option<bool> = match a.scope.as_deref().map(str::trim) {
+    //
+    // DEFAULT `local` (owner, 2026-08-27) — the SAFE default by construction: LOCAL is
+    // machine-private and never pushed, so a caller who forgets the flag cannot accidentally
+    // publish a page or commit one into a shared repo. Applies only when `--path` was ALSO omitted;
+    // an explicit path keeps the historical "leave the field to reconciliation" behaviour so this
+    // does not retroactively re-scope existing callers.
+    let scope_str = match (a.scope.as_deref().map(str::trim), a.path.is_some()) {
+        (Some(s), _) => Some(s),
+        (None, false) => Some("local"),
+        (None, true) => None,
+    };
+    let publish_globally: Option<bool> = match scope_str {
         None => None,
         Some("public-project") => Some(true),
         Some("private-project") => Some(false),
@@ -3024,12 +3041,32 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
              `publish-globally: true` AND creates the USER-root symlink in the same write."
         ),
     };
+    // DERIVE the destination when no `--path` was given: `<scope root>/<name>.md`. This is the
+    // shape the verb is migrating TO — callers name WHAT they want, never WHERE it goes, so the
+    // roots stay free to move (via WIKIMEM_*_SCOPE_PATH) without touching a single call site.
+    let user_supplied_path = a.path.is_some();
+    let path: PathBuf = match a.path.clone() {
+        Some(p) => p,
+        None => {
+            let root = match scope_str {
+                Some("public-project") | Some("private-project") => resolve_project_mem_root(),
+                Some("user") => resolve_user_mem_root(),
+                _ => resolve_local_mem_root(),
+            };
+            root.join(format!("{name}.md"))
+        }
+    };
     // A publication scope makes a claim about WHERE the page lives; refuse the combination that
     // cannot be honoured rather than writing a field the path makes meaningless. `scope_layer`
     // wants an existing path, so ask about the PARENT — the page itself does not exist yet.
-    if publish_globally.is_some() {
-        let parent_ok = a
-            .path
+    //
+    // Gated on `user_supplied_path`, NOT on whether a scope was given: a DERIVED path was built
+    // FROM the scope root, so it agrees by construction, and its parent may not exist yet (nothing
+    // to canonicalize). Only an EXPLICIT path can contradict the scope, so only that combination is
+    // worth checking — and it must be checked, because it is the one way to claim `public-project`
+    // for a page that will never be in PROJECT scope.
+    if publish_globally.is_some() && user_supplied_path {
+        let parent_ok = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .and_then(|p| p.canonicalize().ok())
@@ -3038,9 +3075,9 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
             anyhow::bail!(
                 "--scope {} is a PROJECT-scope claim, but --path {} is not inside a PROJECT memory \
                  root (`<git-root>/.claude/project/memory/`).\nPublishing is a property of PROJECT \
-                 pages only — put the page in the project root, or drop --scope.",
+                 pages only — omit --path and let --scope place the page, or drop --scope.",
                 a.scope.as_deref().unwrap_or(""),
-                a.path.display()
+                path.display()
             );
         }
     }
@@ -3048,11 +3085,11 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     // derived from the PARENT dir — TRDD-7YHT3FNK Phase 1. The lock is held from before the
     // existence check through the write, so two concurrent `new-page` calls for the same path
     // can never both pass the check and race the create.
-    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.path))?;
-    if a.path.exists() {
-        anyhow::bail!("{} already exists — new-page never overwrites an existing page", a.path.display());
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&path))?;
+    if path.exists() {
+        anyhow::bail!("{} already exists — new-page never overwrites an existing page", path.display());
     }
-    if let Some(parent) = a.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
 
@@ -3097,9 +3134,9 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     fm.push_str(&format!("# {name}\n\n"));
     fm.push_str("## Notes and lessons learned\n");
 
-    atomic_write_page(&a.path, &fm)?;
-    reindex_owning_scope(&a.path, false)?;
-    println!("wrote {}", rel(&a.path));
+    atomic_write_page(&path, &fm)?;
+    reindex_owning_scope(&path, false)?;
+    println!("wrote {}", rel(&path));
     Ok(())
 }
 
@@ -4740,7 +4777,106 @@ const SCOPE_USER: ScopeLayer = ScopeLayer { name: "USER", rank: 2 };
 /// (PLURAL) is the per-project LOCAL root while `.claude/project/` (SINGULAR) is the in-repo,
 /// git-tracked PROJECT root. They differ by one character and mean opposite things about privacy,
 /// so USER is tested first and the plural form before the singular.
+/// The DEFAULT scope-path templates — the same grammar the `WIKIMEM_*_SCOPE_PATH` overrides use,
+/// so the shipped defaults and a user's override go through ONE expander and can never disagree
+/// about what `~/` or `{project_slug}` means. Written here as the documentation of that grammar.
+///
+/// USER carries NO placeholder on purpose: it is the one scope that does not vary with the project
+/// recording the memory (owner, 2026-08-27).
+const DEFAULT_LOCAL_SCOPE_TEMPLATE: &str = "~/.claude/projects/{project_slug}/memory";
+const DEFAULT_PROJECT_SCOPE_TEMPLATE: &str = "{project_root}/.claude/project/memory";
+const DEFAULT_USER_SCOPE_TEMPLATE: &str =
+    "~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory";
+
+/// The env var that RELOCATES a scope root, or `None` when unset/empty.
+///
+/// OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI follow-up): a memory path is an INTERNAL
+/// IMPLEMENTATION DETAIL that may change between versions or be relocated by the user, so these
+/// three overrides are the supported way to move a scope. `WIKIMEM_LOCAL_SCOPE_PATH` /
+/// `WIKIMEM_PROJECT_SCOPE_PATH` / `WIKIMEM_USER_SCOPE_PATH`; absent, the historical defaults stand.
+fn scope_root_override(layer: ScopeLayer) -> Option<PathBuf> {
+    let key = match layer.name {
+        "LOCAL" => "WIKIMEM_LOCAL_SCOPE_PATH",
+        "PROJECT" => "WIKIMEM_PROJECT_SCOPE_PATH",
+        _ => "WIKIMEM_USER_SCOPE_PATH",
+    };
+    let raw = std::env::var(key).ok().filter(|v| !v.is_empty())?;
+    Some(expand_scope_template(&raw, layer))
+}
+
+/// The project directory these placeholders resolve against — `$CLAUDE_PROJECT_DIR`, else cwd.
+fn scope_project_dir() -> String {
+    std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+/// Claude's project slug — the project dir with every non-alphanumeric byte replaced by `-`.
+/// Mirrors `memory_scopes.py::project_slug`; the two MUST agree or Python and Rust would resolve
+/// the same LOCAL scope to different directories.
+fn scope_project_slug() -> String {
+    scope_project_dir()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// Expand a scope-path TEMPLATE into a concrete path.
+///
+/// OWNER DIRECTIVE 2026-08-27: these values are written relative to the home folder and carry
+/// symbols standing for the parts that vary per project, because a scope path is configuration a
+/// human writes once and must stay correct across every project on the machine.
+///
+/// | token | becomes |
+/// |---|---|
+/// | leading `~/` | `$HOME` |
+/// | `{project_root}` | `$CLAUDE_PROJECT_DIR` (else cwd) |
+/// | `{project_slug}` | that path with non-alphanumerics → `-` (Claude's own slug) |
+///
+/// USER scope is the stated EXCEPTION: it does not vary with the project that is recording the
+/// memory, so a project placeholder there is a category error. Rather than expand it into a
+/// per-project USER root — which would silently shard the one global store into many, the failure
+/// being invisible until a memory "disappeared" — the placeholder is left UNEXPANDED, so the path
+/// is visibly wrong (it still contains `{project_slug}`) instead of quietly plausible.
+fn expand_scope_template(raw: &str, layer: ScopeLayer) -> PathBuf {
+    let mut s = raw.to_string();
+    if layer != SCOPE_USER {
+        s = s
+            .replace("{project_root}", &scope_project_dir())
+            .replace("{project_slug}", &scope_project_slug());
+    }
+    if let Some(rest) = s.strip_prefix("~/") {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(s)
+}
+
 fn scope_layer(path: &Path) -> Option<ScopeLayer> {
+    // THE OVERRIDES MUST BE CONSULTED FIRST, and this is load-bearing rather than cosmetic. Every
+    // check below matches a HARDCODED substring (`/.claude/project/memory`), so a relocated root
+    // would classify as `None` — and `None` is not a loud failure here: `publish_globally_state`
+    // returns early on it, so a user who moved their PROJECT root would silently lose
+    // publish-globally reconciliation entirely, with no error anywhere. Ordered first so a custom
+    // path wins over a default that happens to appear elsewhere in the same string.
+    for layer in [SCOPE_LOCAL, SCOPE_PROJECT, SCOPE_USER] {
+        if let Some(root) = scope_root_override(layer) {
+            // Compare canonically where possible so `..`/symlink spellings of the same dir agree;
+            // fall back to a literal prefix test when the path does not exist yet (a page being
+            // CREATED has no canonical form until it is written).
+            let hit = match (path.canonicalize(), root.canonicalize()) {
+                (Ok(p), Ok(r)) => p.starts_with(&r),
+                _ => path.starts_with(&root),
+            };
+            if hit {
+                return Some(layer);
+            }
+        }
+    }
     let s = path.to_string_lossy().replace('\\', "/");
     if s.contains("/.claude/plugins/data/") && s.contains("/memory") {
         return Some(SCOPE_USER); // the canonical USER store, inside the plugin DATA dir
@@ -4998,20 +5134,35 @@ fn apply_publish_globally_fix(text: &str, state: &PublishGloballyState, issue: P
 /// whichever plugin owns the CURRENT turn, not the janitor specifically — see that function's own
 /// doc comment for why). `$MEMGREP_USER_MEM_ROOT` is a test-only override, mirroring
 /// `$JANITOR_GLOBAL_STATE_DIR` in `write_gate.rs`, so tests never touch a real `~/.claude`.
+/// The LOCAL scope root — `~/.claude/projects/<slug>/memory`, where `<slug>` is the project dir
+/// with every non-alphanumeric byte replaced by `-` (the same slug rule `memory_scopes.py` uses).
+/// Overridable by `WIKIMEM_LOCAL_SCOPE_PATH`.
+fn resolve_local_mem_root() -> PathBuf {
+    scope_root_override(SCOPE_LOCAL)
+        .unwrap_or_else(|| expand_scope_template(DEFAULT_LOCAL_SCOPE_TEMPLATE, SCOPE_LOCAL))
+}
+
+/// The PROJECT scope root — `<project>/.claude/project/memory`. Overridable by
+/// `WIKIMEM_PROJECT_SCOPE_PATH`. NOTE the SINGULAR `project`: the plural `.claude/projects/` is the
+/// machine-private LOCAL root, they differ by one character, and they mean opposite things about
+/// privacy — PROJECT is git-tracked and PUSHED.
+fn resolve_project_mem_root() -> PathBuf {
+    scope_root_override(SCOPE_PROJECT)
+        .unwrap_or_else(|| expand_scope_template(DEFAULT_PROJECT_SCOPE_TEMPLATE, SCOPE_PROJECT))
+}
+
 fn resolve_user_mem_root() -> PathBuf {
+    // `WIKIMEM_USER_SCOPE_PATH` is the documented override; `MEMGREP_USER_MEM_ROOT` predates it and
+    // is kept as the TEST hook the existing suite sets. Checked first so those tests keep working.
     if let Ok(over) = std::env::var("MEMGREP_USER_MEM_ROOT")
         && !over.is_empty()
     {
         return PathBuf::from(over);
     }
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/"));
-    home.join(".claude")
-        .join("plugins")
-        .join("data")
-        .join("ai-maestro-janitor-ai-maestro-plugins")
-        .join("memory")
+    if let Some(over) = scope_root_override(SCOPE_USER) {
+        return over;
+    }
+    expand_scope_template(DEFAULT_USER_SCOPE_TEMPLATE, SCOPE_USER)
 }
 
 /// True iff `link_path` is a symlink that resolves to exactly `target_abs`. Fail-safe: a missing
@@ -11146,6 +11297,103 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // Conformant: true+symlinked, false+unsymlinked.
         assert_eq!(classify_publish_globally(true, true, true), None);
         assert_eq!(classify_publish_globally(true, false, false), None);
+    }
+
+    /// The scope-path TEMPLATE grammar (owner, 2026-08-27): values are written relative to `~/` and
+    /// carry symbols for the parts that vary per project.
+    ///
+    /// The last assertion is the one worth having: USER scope does NOT vary with the project
+    /// recording the memory, so a `{project_slug}` there is a category error. Expanding it would
+    /// silently SHARD the single global store into one root per project — and the failure would be
+    /// invisible until somebody noticed a memory had "disappeared". Leaving it unexpanded makes the
+    /// path visibly wrong instead of quietly plausible.
+    #[test]
+    fn scope_templates_expand_home_and_project_symbols_but_never_project_ones_for_user() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("CLAUDE_PROJECT_DIR", "/tmp/My Proj");
+        }
+        let home = std::env::var("HOME").unwrap_or_default();
+
+        let local = expand_scope_template("~/.claude/projects/{project_slug}/memory", SCOPE_LOCAL);
+        let project = expand_scope_template("{project_root}/.claude/project/memory", SCOPE_PROJECT);
+        let user_ok = expand_scope_template(DEFAULT_USER_SCOPE_TEMPLATE, SCOPE_USER);
+        let user_misused = expand_scope_template("~/store/{project_slug}", SCOPE_USER);
+
+        unsafe {
+            std::env::remove_var("CLAUDE_PROJECT_DIR");
+        }
+
+        assert_eq!(local, PathBuf::from(&home).join(".claude/projects/-tmp-My-Proj/memory"),
+            "`~/` becomes $HOME and `{{project_slug}}` becomes the non-alphanumeric-to-dash slug — \
+             note the SPACE in the project dir becomes a dash, matching Claude's own slug rule");
+        assert_eq!(project, PathBuf::from("/tmp/My Proj/.claude/project/memory"),
+            "`{{project_root}}` is substituted VERBATIM, spaces and all — it is a path, not a slug");
+        assert!(user_ok.starts_with(&home), "the USER default still resolves under $HOME");
+        assert!(
+            user_misused.to_string_lossy().contains("{project_slug}"),
+            "a project placeholder in USER scope stays UNEXPANDED so the misconfiguration is \
+             visible, rather than sharding the one global store per project — got: {user_misused:?}"
+        );
+    }
+
+    /// OWNER DIRECTIVE 2026-08-27: a memory path is an INTERNAL DETAIL that may be relocated, so a
+    /// caller must never have to know one — `--path` is optional and the destination is derived
+    /// from `--scope` against the (env-overridable) scope roots.
+    ///
+    /// This also pins the hazard that makes the env vars load-bearing rather than cosmetic:
+    /// `scope_layer` classifies by HARDCODED substring, so a relocated root would classify as
+    /// `None` — and `None` is silent, because `publish_globally_state` returns early on it. A user
+    /// who moved their PROJECT root would simply stop getting reconciliation, with no error. The
+    /// override must therefore win INSIDE `scope_layer`, which is what the second half asserts.
+    #[test]
+    fn scope_derives_the_path_and_the_env_override_relocates_the_root() {
+        let home = edit_test_tmpdir("scope-derive-project");
+        let user_root = edit_test_tmpdir("scope-derive-user");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&user_root).unwrap();
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &home);
+        }
+
+        // The relocated root must classify as PROJECT — the whole point of the override.
+        let layer = scope_layer(&home);
+        let desc: String = (1..=20).map(|i| format!("phrase number {i} here")).collect::<Vec<_>>().join(" / ");
+        let res = cmd_new_page_cli(&[
+            "--tier".into(), "component".into(),
+            "--name".into(), "derived".into(),
+            "--description".into(), desc,
+            "--type".into(), "reference".into(),
+            "--scope".into(), "public-project".into(),
+        ]);
+        let landed = home.join("derived.md");
+        let text = std::fs::read_to_string(&landed).unwrap_or_default();
+        let link_resolves = user_root
+            .join("derived.md")
+            .canonicalize()
+            .ok()
+            .zip(landed.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(
+            layer,
+            Some(SCOPE_PROJECT),
+            "WIKIMEM_PROJECT_SCOPE_PATH must win inside scope_layer — otherwise a relocated root \
+             classifies as None and publish-globally reconciliation silently stops"
+        );
+        assert!(res.is_ok(), "new-page with no --path failed: {res:?}");
+        assert!(landed.exists() || !text.is_empty(), "page must land at <scope root>/<name>.md");
+        assert!(text.contains("publish-globally: true"), "got: {text}");
+        assert!(link_resolves, "the symlink must still be created in the same write");
     }
 
     /// OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI): creating a page at `--scope public-project` must
