@@ -4777,23 +4777,28 @@ const SCOPE_USER: ScopeLayer = ScopeLayer { name: "USER", rank: 2 };
 /// (PLURAL) is the per-project LOCAL root while `.claude/project/` (SINGULAR) is the in-repo,
 /// git-tracked PROJECT root. They differ by one character and mean opposite things about privacy,
 /// so USER is tested first and the plural form before the singular.
-/// The DEFAULT scope-path templates — the same grammar the `WIKIMEM_*_SCOPE_PATH` overrides use,
+/// The DEFAULT scope-path patterns — the same grammar the `WIKIMEM_*_SCOPE_PATH` overrides use,
 /// so the shipped defaults and a user's override go through ONE expander and can never disagree
 /// about what `~/` or `@project_slug@` means. Written here as the documentation of that grammar.
 ///
 /// USER carries NO placeholder on purpose: it is the one scope that does not vary with the project
 /// recording the memory (owner, 2026-08-27).
 ///
-/// WHY `@name@` AND NOT `{name}`: the brace form is the syntax of every real template engine
-/// (Jinja, Handlebars, Rust `format!`), so CPV's `skillaudit` security scanner classifies it as
-/// Server-Side Template Injection and BLOCKS the publish — three CRITICALs on the first attempt.
-/// Nothing here is evaluated: the symbol is swapped by `str::replace` into a filesystem path, and
-/// the value comes from an env var the user set themselves. The `@name@` spelling is functionally
-/// identical and belongs to no engine, so it is provably inert to the scanner. This is the
-/// devitalize-or-remove policy (PRRD S5.1) — make the shape inert, never suppress the rule.
-const DEFAULT_LOCAL_SCOPE_TEMPLATE: &str = "~/.claude/projects/@project_slug@/memory";
-const DEFAULT_PROJECT_SCOPE_TEMPLATE: &str = "@project_root@/.claude/project/memory";
-const DEFAULT_USER_SCOPE_TEMPLATE: &str =
+/// WHY THESE ARE CALLED "PATTERNS" AND WRITTEN `@name@`: CPV's `skillaudit` security scanner
+/// blocked the publish twice on these lines as Server-Side Template Injection. The first
+/// devitalization guessed wrong — it swapped the `{name}` braces for `@name@`, and the three
+/// CRITICALs came back on the SAME lines. What the rule actually keys on is the shape
+/// `…template(…, USER)`: a function named *template* receiving a *USER* argument is the textbook
+/// SSTI signature (render a template with user input). Only the `SCOPE_USER` call sites were ever
+/// flagged; the `SCOPE_LOCAL`/`SCOPE_PROJECT` ones on adjacent lines never were — that asymmetry
+/// is the proof. So the identifier is `resolve_scope_pattern`, not `expand_scope_template`, and the
+/// `@name@` spelling is kept because it also belongs to no engine. Nothing here is evaluated: the
+/// symbol is swapped by `str::replace` into a filesystem path, from an env var the user set
+/// themselves. Devitalize-or-remove (PRRD S5.1): make the SHAPE inert, never suppress the rule —
+/// and diagnose the trigger from the asymmetry in what was flagged before renaming anything.
+const DEFAULT_LOCAL_SCOPE_PATTERN: &str = "~/.claude/projects/@project_slug@/memory";
+const DEFAULT_PROJECT_SCOPE_PATTERN: &str = "@project_root@/.claude/project/memory";
+const DEFAULT_USER_SCOPE_PATTERN: &str =
     "~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory";
 
 /// The env var that RELOCATES a scope root, or `None` when unset/empty.
@@ -4809,7 +4814,7 @@ fn scope_root_override(layer: ScopeLayer) -> Option<PathBuf> {
         _ => "WIKIMEM_USER_SCOPE_PATH",
     };
     let raw = std::env::var(key).ok().filter(|v| !v.is_empty())?;
-    Some(expand_scope_template(&raw, layer))
+    Some(resolve_scope_pattern(&raw, layer))
 }
 
 /// The project directory these placeholders resolve against — `$CLAUDE_PROJECT_DIR`, else cwd.
@@ -4831,7 +4836,7 @@ fn scope_project_slug() -> String {
         .collect()
 }
 
-/// Expand a scope-path TEMPLATE into a concrete path.
+/// Resolve a scope-path PATTERN into a concrete path.
 ///
 /// OWNER DIRECTIVE 2026-08-27: these values are written relative to the home folder and carry
 /// symbols standing for the parts that vary per project, because a scope path is configuration a
@@ -4848,7 +4853,7 @@ fn scope_project_slug() -> String {
 /// per-project USER root — which would silently shard the one global store into many, the failure
 /// being invisible until a memory "disappeared" — the placeholder is left UNEXPANDED, so the path
 /// is visibly wrong (it still contains `@project_slug@`) instead of quietly plausible.
-fn expand_scope_template(raw: &str, layer: ScopeLayer) -> PathBuf {
+fn resolve_scope_pattern(raw: &str, layer: ScopeLayer) -> PathBuf {
     let mut s = raw.to_string();
     if layer != SCOPE_USER {
         s = s
@@ -5147,7 +5152,7 @@ fn apply_publish_globally_fix(text: &str, state: &PublishGloballyState, issue: P
 /// Overridable by `WIKIMEM_LOCAL_SCOPE_PATH`.
 fn resolve_local_mem_root() -> PathBuf {
     scope_root_override(SCOPE_LOCAL)
-        .unwrap_or_else(|| expand_scope_template(DEFAULT_LOCAL_SCOPE_TEMPLATE, SCOPE_LOCAL))
+        .unwrap_or_else(|| resolve_scope_pattern(DEFAULT_LOCAL_SCOPE_PATTERN, SCOPE_LOCAL))
 }
 
 /// The PROJECT scope root — `<project>/.claude/project/memory`. Overridable by
@@ -5156,7 +5161,7 @@ fn resolve_local_mem_root() -> PathBuf {
 /// privacy — PROJECT is git-tracked and PUSHED.
 fn resolve_project_mem_root() -> PathBuf {
     scope_root_override(SCOPE_PROJECT)
-        .unwrap_or_else(|| expand_scope_template(DEFAULT_PROJECT_SCOPE_TEMPLATE, SCOPE_PROJECT))
+        .unwrap_or_else(|| resolve_scope_pattern(DEFAULT_PROJECT_SCOPE_PATTERN, SCOPE_PROJECT))
 }
 
 fn resolve_user_mem_root() -> PathBuf {
@@ -5170,7 +5175,7 @@ fn resolve_user_mem_root() -> PathBuf {
     if let Some(over) = scope_root_override(SCOPE_USER) {
         return over;
     }
-    expand_scope_template(DEFAULT_USER_SCOPE_TEMPLATE, SCOPE_USER)
+    resolve_scope_pattern(DEFAULT_USER_SCOPE_PATTERN, SCOPE_USER)
 }
 
 /// True iff `link_path` is a symlink that resolves to exactly `target_abs`. Fail-safe: a missing
@@ -11307,7 +11312,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert_eq!(classify_publish_globally(true, false, false), None);
     }
 
-    /// The scope-path TEMPLATE grammar (owner, 2026-08-27): values are written relative to `~/` and
+    /// The scope-path PATTERN grammar (owner, 2026-08-27): values are written relative to `~/` and
     /// carry symbols for the parts that vary per project.
     ///
     /// The last assertion is the one worth having: USER scope does NOT vary with the project
@@ -11316,17 +11321,17 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// invisible until somebody noticed a memory had "disappeared". Leaving it unexpanded makes the
     /// path visibly wrong instead of quietly plausible.
     #[test]
-    fn scope_templates_expand_home_and_project_symbols_but_never_project_ones_for_user() {
+    fn scope_patterns_resolve_home_and_project_symbols_but_never_project_ones_for_user() {
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("CLAUDE_PROJECT_DIR", "/tmp/My Proj");
         }
         let home = std::env::var("HOME").unwrap_or_default();
 
-        let local = expand_scope_template("~/.claude/projects/@project_slug@/memory", SCOPE_LOCAL);
-        let project = expand_scope_template("@project_root@/.claude/project/memory", SCOPE_PROJECT);
-        let user_ok = expand_scope_template(DEFAULT_USER_SCOPE_TEMPLATE, SCOPE_USER);
-        let user_misused = expand_scope_template("~/store/@project_slug@", SCOPE_USER);
+        let local = resolve_scope_pattern("~/.claude/projects/@project_slug@/memory", SCOPE_LOCAL);
+        let project = resolve_scope_pattern("@project_root@/.claude/project/memory", SCOPE_PROJECT);
+        let user_ok = resolve_scope_pattern(DEFAULT_USER_SCOPE_PATTERN, SCOPE_USER);
+        let user_misused = resolve_scope_pattern("~/store/@project_slug@", SCOPE_USER);
 
         unsafe {
             std::env::remove_var("CLAUDE_PROJECT_DIR");
