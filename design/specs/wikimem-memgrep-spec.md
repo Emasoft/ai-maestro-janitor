@@ -1007,6 +1007,21 @@ Their flags, which WM-CLI-10 holds them to:
   `--name` because the FILE name and the `name:` slug are different identities — wikilinks resolve
   through `name:`, so conflating them would break `[[link]]` resolution for every page whose file
   is named differently from its slug.
+- `new-page --scope <local|private-project|public-project|user>` — PUBLICATION reach, and
+  deliberately NOT `--type` (that is the CONTENT class `user|feedback|project|reference`, which is
+  independent of where a page lives: a PROJECT page may legitimately be `type: reference`).
+  `public-project` emits `publish-globally: true` into the frontmatter BEFORE the bytes reach
+  `atomic_write_page`, so that call's reconciliation creates the USER-root symlink in the SAME
+  write — the field and the link can never be born apart (TRDD-RY0IJBJI). `private-project` emits
+  `false`; `local` and `user` emit nothing, the field being a PROJECT-scope concept. Omitted, the
+  field is left to reconciliation, which defaults a PROJECT page to `false`. A PROJECT-scope value
+  is REFUSED when `--path` does not land inside a PROJECT memory root, rather than writing a field
+  the path makes meaningless.
+  **PLANNED (owner, 2026-08-27): `--path` is to be REMOVED from this verb entirely.** A path is an
+  internal implementation detail that may change between versions or be relocated by the user, so
+  no memgrep verb should require one: the destination is to be derived from `--scope` (defaulting
+  to `local`) against the three scope roots, overridable by `WIKIMEM_LOCAL_SCOPE_PATH` /
+  `WIKIMEM_PROJECT_SCOPE_PATH` / `WIKIMEM_USER_SCOPE_PATH` and falling back to today's defaults.
 
 `WM-CLI-04` **add-lesson-supersedes** — `add-lesson --supersedes --atom <id>` `MUST` embed the
 atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>`; the optional

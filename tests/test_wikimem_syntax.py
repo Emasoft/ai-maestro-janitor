@@ -50,19 +50,27 @@ def _make_cross_scope_fixture(tmp_path: Path) -> tuple[Path, Path]:
     (rank 1), `.claude/projects/<slug>/memory` = LOCAL (rank 0). PROJECT -> LOCAL is
     downward, so a real `memgrep lint` over these two dirs fires
     `link-downward-cross-scope` — no other rule this minimal fixture could trip.
+
+    THE DESCRIPTIONS ARE DELIBERATE FILLER, and must stay long. `page-description-too-few-phrases`
+    requires 15 `/`-separated phrases, so the original one-liners ("a machine-private fact") made
+    this fixture trip a SECOND error — which broke the caller's whole point, that
+    `link-downward-cross-scope` is the ONLY error present. Filler is right here and wrong in a real
+    page: the rule exists so a real page is findable, and this file is never recalled by anyone.
+    NOTE this stayed green for a while purely because the memgrep binary on PATH predated the rule;
+    a stale binary hides fixture drift, so re-run the suite after `cargo install`.
     """
     project_dir = tmp_path / "repo" / ".claude" / "project" / "memory"
     local_dir = tmp_path / "home" / ".claude" / "projects" / "someslug" / "memory"
     project_dir.mkdir(parents=True)
     local_dir.mkdir(parents=True)
     (local_dir / "target.md").write_text(
-        '---\nname: target\ndescription: "a machine-private fact"\nocd: 2026-06-01\n'
+        '---\nname: target\ndescription: "target symptom phrasing 1 / target symptom phrasing 2 / target symptom phrasing 3 / target symptom phrasing 4 / target symptom phrasing 5 / target symptom phrasing 6 / target symptom phrasing 7 / target symptom phrasing 8 / target symptom phrasing 9 / target symptom phrasing 10 / target symptom phrasing 11 / target symptom phrasing 12 / target symptom phrasing 13 / target symptom phrasing 14 / target symptom phrasing 15 / target symptom phrasing 16"\nocd: 2026-06-01\n'
         "lmd: 2026-06-01\nmetadata:\n  node_type: memory\n---\n"
         "A machine-private fact.\n\n## Notes and lessons learned\n",
         encoding="utf-8",
     )
     (project_dir / "holder.md").write_text(
-        '---\nname: holder\ndescription: "links down, illegally"\nocd: 2026-06-01\n'
+        '---\nname: holder\ndescription: "holder symptom phrasing 1 / holder symptom phrasing 2 / holder symptom phrasing 3 / holder symptom phrasing 4 / holder symptom phrasing 5 / holder symptom phrasing 6 / holder symptom phrasing 7 / holder symptom phrasing 8 / holder symptom phrasing 9 / holder symptom phrasing 10 / holder symptom phrasing 11 / holder symptom phrasing 12 / holder symptom phrasing 13 / holder symptom phrasing 14 / holder symptom phrasing 15 / holder symptom phrasing 16"\nocd: 2026-06-01\n'
         "lmd: 2026-06-01\nmetadata:\n  node_type: memory\n---\n"
         "See [[target]] for details.\n\n## Notes and lessons learned\n",
         encoding="utf-8",
