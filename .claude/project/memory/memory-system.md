@@ -2,7 +2,7 @@
 name: memory-system
 description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update / memgrep refused my write because the atom is too big / can I raise the atom budget knob / add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached / does memgrep ever refuse a write outright"
 ocd: 2026-06-13
-lmd: 2026-08-26
+lmd: 2026-08-27
 metadata:
   node_type: memory
   type: project
@@ -327,6 +327,50 @@ The atom budget (`MEMGREP_ATOM_MAX_CHARS`, default 1500) is a NOTIFICATION, not 
 
 NO memory chore ever runs on PROJECT scope by default, and this is the mechanism behind "the lint number never moves". `memory-maintenance._scopes_in_play` (`:135`) drops PROJECT from the eligible roots unless `memory_settings.get("edit_project_scope")` is on — and it defaults `False` (`memory_settings.py:61`). The rationale is sound and is NOT a bug: PROJECT memory is in-repo and unpushable outside `publish.py`, so an agent editing it would create commits nothing can push. MEASURED 2026-08-26: of 67 `memgrep lint` findings across all three roots, **54 (81%) were PROJECT-scope** — 29 `publish-globally-missing` and 25 `atom-after-footer` on 10 pages — i.e. structurally unreachable by every chore, no matter how correct the per-chore candidacy predicate is. This is the missing half of janitor#276's note that *"a completed pass could not move the number, so the same line repeated forever"*: #276 correctly fixed the PROMOTION (a severity regex matching ERROR inside the clause negating it) and left the immovability as background. The immovability is the scope gate. Consequence for anyone diagnosing a chore: the scope gate runs BEFORE the candidacy predicate, so confirm the target root is in the eligible set before reading the predicate that judges it — see [[git-index-lock-orphan-recovery]] for the same "correct mechanism that never reaches its case" shape in a different subsystem, and TRDD-AO8MPK5D for a card that named the predicate as the cause and had to be corrected. [^8]
 
+
+
+
+^ATOM-OHWM-HR13 [desc: "Never gate a memory-precheck defect check on an optional scope/path discriminator — it would be the first None-path in that module that SUPPRESSES a finding (fail-CLOSED in a fail-OPEN module)", keywords: scope=None_suppresses_a_finding gate_a_precheck_check_on_scope_label fail-closed_None_default_in_memory_precheck repair_has_work_scope_optional add_a_scope-gated_defect_check, ocd: 2026-08-27, lmd: 2026-08-27]
+
+Passing the SCOPE LABEL into `memory_content_precheck` predicates looks like the clean way to add
+a scope-specific check — both real callers already hold the label, so no path→scope re-derivation
+is needed. It is a trap.
+
+`scope` is OPTIONAL (`repair_has_work(root, *, scope: str | None = None, ...)`), and that function
+goes out of its way to fail OPEN on it: `if scope is None: return True  # cannot read the ledger ⇒
+never suppress` (~`:840`). Every uncertain path in the module is deliberately fail-OPEN, including
+an unreadable page (`return True  # FAIL-OPEN (libs audit L-11)`).
+
+DO NOT add a check whose condition is `scope == "PROJECT"`, BECAUSE when `scope is None` it
+silently skips — making it the FIRST None-path in the module that SUPPRESSES a real finding, and
+at runtime that is indistinguishable from a clean corpus. DO make the discriminator REQUIRED if a
+scope-specific check is genuinely warranted (which also removes the optional-parameter smell), or
+put the rule in `memgrep lint` where the arbiter already owns path- and filesystem-dependent
+questions.
+
+
+^ATOM-GLCB-AN5U [desc: "publish-globally is NOT a repair-gate defect and must never be added to repair_defect — memgrep decides it from FILESYSTEM state, so page text cannot split the two missing-cases", keywords: publish-globally-missing_never_drains lint_count_stuck_at_29 add_publish-globally_to_repair_defect widen_repair_defect_signature gate_and_arbiter_parity_publish-globally repair_chore_does_not_fix_publish-globally, ocd: 2026-08-27, lmd: 2026-08-27]
+
+`memgrep lint` reports `publish-globally-missing` on PROJECT pages, and `repair_defect` (the
+single-source repair-candidacy predicate) deliberately has NO check for it. The gap is CORRECT —
+rejected 2026-08-27 (TRDD-AO8MPK5D, `efad7a99`), recorded in `memory_content_precheck.py` beside
+the janitor#260 rejection. Three independent reasons:
+
+1. **Text cannot decide it even WITH the path.** `publish_globally_state` (`memory.rs:4878`) reads
+   FILESYSTEM state — whether a USER-root symlink resolves to this page — splitting "field
+   missing" into `MissingDefaultFalse` (no symlink → `false`) vs `MissingSymlinkImpliesTrue`
+   (symlink present → `true`, evidence of intent). A text+path predicate cannot tell them apart,
+   so it hands the agent a 50/50 guess whose wrong branch SILENTLY UN-PUBLISHES a page somebody
+   deliberately published.
+2. **It runs in the SAFE direction.** janitor#227 loops because it is gate-LOUD/arbiter-CLEAR;
+   this is gate-SILENT/lint-loud, so it never dispatches and never loops.
+3. **It self-heals.** `atomic_write_page` (`memory.rs:2526`) is the sole write choke point and
+   normalizes before AND after every write, unconditionally.
+
+Before adding ANY scope-gated check here, read `ATOM-OHWM-HR13` — the tidiest-looking variant is
+fail-CLOSED. STALENESS SIGNAL: the count GROWING across releases means pages are being written
+OUTSIDE the choke point; re-open only on that.
+
 ## See also
 
 - [[claude-md-canonical-form]] — CLAUDE.md is the index over this corpus; what may live in it, and the migration contract.
@@ -392,6 +436,65 @@ no-op for any non-user-mem prompt; never crashes the session.
 
 The wikimem editor runs SEVEN chores since TRDD-J3ZH3RSI (commit 009af29): split, repair, atomize, harvest, RETRO-LESSON, consolidate, conflict — retro-lesson backfills the lesson form (DO NOT X, BECAUSE why, DO Y instead) onto atoms that were superseded BEFORE the update-invariant existed. Its precheck signature is an atom marker with `status:superseded` but NO `superseded-by:` pointer (the exact pair `add-lesson --supersedes --retire-atom` stamps together); cadence key `retro_lesson_per_day`, default 1/day (ON, conservative cap — owner directive 2026-08-11 superseded the earlier 0=OFF default) like every pass. Two load-bearing rules: the WHY comes ONLY from the commit/TRDD provenance chain — unsourceable ⇒ FLAG for a human, never invented — and the skill must complete the `superseded-by:` pointer itself via the repair-op txn, because memgrep's `--retire-atom` is idempotent-SKIPPED when a `status:` prop already exists (precisely the retro case); without that step the precheck re-fires on the same atom forever. [^7]
 
+
+## Superseded
+
+
+^ATOM-31W8-NR3A [desc: "publish-globally is NOT a repair-gate defect and must never be added to repair_defect — memgrep decides it from FILESYSTEM state, so page text cannot split the two missing-cases", keywords: publish-globally-missing_never_drains lint_count_stuck_at_29 add_publish-globally_to_repair_defect widen_repair_defect_signature gate_and_arbiter_parity_publish-globally repair_chore_does_not_fix_publish-globally, ocd: 2026-08-27, lmd: 2026-08-27, status: superseded, superseded-by: ATOM-GLCB-AN5U]
+
+`memgrep lint` reports `publish-globally-missing` on PROJECT pages, and `repair_defect` (the
+single-source repair-candidacy predicate) deliberately has NO check for it. That gap is CORRECT —
+re-litigated and rejected 2026-08-27 (TRDD-AO8MPK5D, `efad7a99`); rejection recorded in
+`memory_content_precheck.py` beside the janitor#260 one. Three independent reasons:
+
+1. **Text cannot decide it even WITH the path.** `publish_globally_state` (`memory.rs:4878`) reads
+   FILESYSTEM state — whether a USER-root symlink resolves to this page — and splits "field
+   missing" into `MissingDefaultFalse` (no symlink → `false`) vs `MissingSymlinkImpliesTrue`
+   (symlink present → `true`, evidence of intent). A text+path predicate cannot tell them apart,
+   so it hands the agent a 50/50 guess whose wrong branch SILENTLY UN-PUBLISHES a page somebody
+   deliberately published.
+2. **The disagreement runs in the SAFE direction.** janitor#227 loops because it is gate-LOUD and
+   arbiter-CLEAR; this is gate-SILENT and lint-loud, so it can never dispatch and never loops.
+   Coverage shortfall, not the #227 class.
+3. **It self-heals.** `atomic_write_page` (`memory.rs:2526`) is the SOLE write choke point and runs
+   `normalize_page_until_clean` before AND after every write, unconditionally.
+
+STALENESS SIGNAL: the count GROWING across releases means pages are being written OUTSIDE the
+choke point (raw Edit-tool writes to PROJECT memory) — a bigger bug than the field. Re-open only
+on that evidence. See [[ATOM on the scope=None fail-CLOSED trap]] before adding ANY scope-gated
+check here.
+
+^ATOM-MWID-C4CR [desc: "publish-globally is NOT a repair-gate defect and must never be added to repair_defect — memgrep decides it from FILESYSTEM state, so text cannot split the two missing-cases", keywords: publish-globally-missing_never_drains lint_count_stuck_at_29 add_publish-globally_to_repair_defect widen_repair_defect_signature gate_and_arbiter_parity_publish-globally repair_chore_does_not_fix_publish-globally pass_scope_label_to_a_precheck_predicate memory_chore_predicate_takes_no_path, ocd: 2026-08-27, lmd: 2026-08-27, status: superseded, superseded-by: ATOM-31W8-NR3A]
+
+`memgrep lint` reports `publish-globally-missing` on PROJECT pages, and `repair_defect` (the
+single-source repair-candidacy predicate) deliberately has NO check for it. That gap is CORRECT
+and was re-litigated and rejected on 2026-08-27 (TRDD-AO8MPK5D, commit `efad7a99`); the rejection
+is recorded in `memory_content_precheck.py` beside the janitor#260 one.
+
+Three independent reasons, and the first is the one people miss:
+
+1. **Text cannot decide it even WITH the path.** `publish_globally_state` (`memory.rs:4878`) reads
+   FILESYSTEM state — whether a USER-root symlink resolves to this page — and splits "field
+   missing" into `MissingDefaultFalse` (no symlink → write `false`) vs `MissingSymlinkImpliesTrue`
+   (symlink present → write `true`, the symlink being evidence of intent). A text+path predicate
+   cannot tell them apart, so it hands the agent a 50/50 guess whose wrong branch SILENTLY
+   UN-PUBLISHES a page somebody deliberately published.
+2. **The disagreement runs in the SAFE direction.** janitor#227 loops because it is gate-LOUD and
+   arbiter-CLEAR. This is gate-SILENT and lint-loud: it can never cause a dispatch, so it can
+   never loop or burn a token. Coverage shortfall, not the #227 class — do not reason about the
+   two as the same bug.
+3. **It self-heals.** `atomic_write_page` (`memory.rs:2526`) is the SOLE write choke point and runs
+   `normalize_page_until_clean` before AND after every write, unconditionally. The flagged pages
+   are simply pages nothing has written since the field was introduced.
+
+The variant that looks cleanest is the worst: gating the check on a `scope=None` default would make
+it the FIRST None-path in that module that SUPPRESSES a finding, where `repair_has_work` (~`:840`)
+explicitly does the opposite (`if scope is None: return True`). Fail-OPEN is the house posture; a
+scope-gated skip is fail-CLOSED and looks identical to a clean corpus.
+
+STALENESS SIGNAL: the `publish-globally-missing` count GROWING across releases rather than
+shrinking means pages are being written OUTSIDE the choke point (raw Edit-tool writes to PROJECT
+memory) — a much bigger bug than the field. Re-open this only on that evidence.
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0001, status:valid, keywords:"memgrep_links_to_from_inverted verify_directional_flags_asymmetric_fixture one_sided_link_defect", ocd:2026-06-13, lmd:2026-06-13] `memgrep links --to NOTE` returns NOTE's
