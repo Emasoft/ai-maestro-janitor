@@ -40,6 +40,19 @@ it back. Rotator-slot items (CLI-written) are stable; ONLY the app-owned live it
   exist — evaluate whether the tick can run beacon/mirror-first and touch the app item only when
   those disagree or age out.
 
+**PARKED `review-after: 2026-10-12` (2026-08-27).** `trdd-drift` had been flagging this at 42d
+idle every sweep. The idleness is correct, not neglect: the WRITE-side sibling (TRDD-EQJPPZ2L)
+shipped a self-healing half-open breaker, so a flap now darkens rotation for ≤ one 600s cooldown
+instead of forever — which removes the urgency without removing the bug. A SNOOZE, not a mute; it
+expires by itself.
+
+**What the date is actually waiting for:** a fresh live observation. Every leg of the candidate
+design below says "verify live before designing", and the mechanism is a macOS/Claude-Code
+interaction that an app or OS update may change underneath us — so designing against the
+2026-07-11 observation without re-verifying would be building on a stale measurement. If the
+breaker has not tripped by the review date, the question to ask then is whether this is still a
+bug worth fixing or one the mitigation has made academic.
+
 **Candidate design (verify each leg):** (a) detect the flap cheaply (item mod-date/fingerprint
 change since last tick) and mark the app item "hot — skip direct read this tick"; (b) prefer
 beacon/mirror for identity; (c) surface a ONE-TIME advisory (once per flap, deduped) telling the

@@ -87,28 +87,13 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **No frontmatter at all** → add the full block: `name` (= filename stem),
   `description` (the page's topic as a SYMPTOM/question — derived from the body),
   `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}`.
-- **`publish-globally` — DO NOT ADD IT BY HAND. Not a repair defect; not yours to fix.**
-  The write path already owns it: `atomic_write_page` (`memgrep/src/memory.rs`) is the SOLE
-  choke point every write verb funnels through, and it runs `normalize_page_until_clean`
-  both BEFORE and AFTER every single write, unconditionally. So any page you touch through
-  a verb comes back with the field correct, and a page you do NOT touch does not need it —
-  a missing field and `false` mean the same thing (not published). Hand-adding it is doing
-  the write path's job in the one way its design forbids.
-  Two traps, both of which have already been written down wrong here:
-  - **`metadata.type` is NOT the discriminator.** This line used to say "add it when
-    `type: project`". That is wrong: `type` is the CONTENT class
-    (`user|feedback|project|reference`) and is independent of which ROOT a page lives in —
-    a page under `.claude/project/memory/` may legitimately carry `type: reference`.
-    memgrep decides from the PATH (`scope_layer(page_abs) == SCOPE_PROJECT`).
-  - **"Missing" is not one case, and text cannot tell them apart.** memgrep splits it on
-    whether a USER-root SYMLINK exists: no field + no symlink is `MissingDefaultFalse`
-    (→ `false`), but no field + a symlink already there is `MissingSymlinkImpliesTrue`
-    (→ `true`, the symlink being evidence of intent). You cannot see the symlink from the
-    page text, so a hand-fix guesses — and guessing `false` over an existing symlink
-    silently un-publishes a page somebody deliberately published.
-  If you believe a page's `publish-globally` VALUE is editorially wrong (`false` that
-  should be `true`), that is a real finding — but it is an editorial call for a human, so
-  record it as a refusal with that reason. Never flip it yourself.
+- **`publish-globally` — DO NOT ADD OR FLIP IT BY HAND. Not a repair defect; not yours.**
+  The write path owns it: every write verb funnels through `atomic_write_page`, which
+  normalizes before AND after each write, so any page you touch comes back correct. Never
+  key it on `metadata.type` (that is the CONTENT class; memgrep decides from the PATH), and
+  never guess the value from page text alone (an existing symlink changes the right answer).
+  A VALUE you believe is editorially wrong is a real finding — record it as a refusal.
+  Full reasoning + the measurements: [repair-background](references/repair-background.md).
 - **Missing `ocd`/`lmd`** → `lmd` = today (`date +%F`); `ocd` = the page's earliest
   known date (an existing `lmd`, else today). Never lower an existing `ocd`.
 - **Nested `metadata.ocd` / `metadata.lmd`** → MOVE them to the TOP level (the
