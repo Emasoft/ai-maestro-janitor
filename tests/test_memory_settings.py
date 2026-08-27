@@ -45,7 +45,11 @@ def test_defaults_on_fresh_store():
     assert ms.get("split_per_day") == 1
     assert ms.get("split_max_bytes") == 36000
     assert ms.get("conflict_per_day") == 1
-    assert ms.get("edit_project_scope") is False
+    # Flipped True by owner directive 2026-08-27: librarians must reach PROJECT scope too. The old
+    # False meant 100% of PROJECT-scope recall-surface defects were unreachable by ANY chore — the
+    # gate's "PROJECT memory is unpushable outside publish.py" rationale is still true and simply
+    # never implied the pages should go unmaintained; librarian commits ride the next publish.
+    assert ms.get("edit_project_scope") is True
 
 
 def test_set_and_get_roundtrip():

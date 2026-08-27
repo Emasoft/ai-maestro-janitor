@@ -58,7 +58,15 @@ DEFAULTS: dict = {
     "atomize_per_day": 1,           # ATOMIZE pass — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
     "retro_lesson_per_day": 1,      # RETRO-LESSON pass (TRDD-J3ZH3RSI) — ON by default, capped 1/day (owner directive 2026-08-11); tune via /janitor-memory-frequency
     "enrich_per_day": 1,            # ENRICH pass (TRDD-437UHNFS) — thin/duplicated recall surfaces; steady-state GUARD only, the backlog is drained by an eager batch run
-    "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
+    # OWNER DIRECTIVE 2026-08-27: librarians must fix memories at LOCAL **and PROJECT** scope, in
+    # background, across every instance on this machine. Default flipped True.
+    #
+    # The old rationale ("PROJECT memory is in-repo and unpushable outside publish.py") is still
+    # TRUE and is no longer a reason to stay off: a librarian editing PROJECT memory produces
+    # commits it cannot push, and that is FINE — they ride the next `publish.py` like every other
+    # in-repo change. Being unable to push is not the same as being unable to work, and the cost of
+    # the gate was that 100% of PROJECT-scope recall-surface defects were unreachable by any chore.
+    "edit_project_scope": True,
     "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }
 
