@@ -1,8 +1,8 @@
 ---
 name: project_janitor_publish_blocked_cpv_fps
-description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get"
+description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get / publish blocked again after fixing every reported finding / the cpv gate reveals a new demoted nit on every attempt / how to find which fragment trips skillaudit / leave one fragment out / run the scanner over the whole page not the reported lines / separate is the third devitalize verb / push cannot contain secrets GH013 blocked the publish / a redaction placeholder was flagged as a secret / redacting in a new commit does not unblock push protection / the tag push was refused but it was not the tag ruleset / allow-secret url vs rewrite history is the owner decision"
 ocd: 2026-06-11
-lmd: 2026-07-16
+lmd: 2026-08-27
 metadata:
   node_type: memory
   type: project
@@ -109,6 +109,43 @@ STATE §1.[^2]
 See also [[reference_cpv_dotclaude_gitignore_fp]] — a narrower CPV `--strict` FP (the
 `.claude/` MINOR from PROJECT memory living there) that shares this page's broader
 publish-gate FP history.
+
+
+^ATOM-LY8E-GCPP [desc: "the CPV strict gate surfaces demoted NITs ONE AT A TIME, skillaudit keys on CO-OCCURRENCE across a line, and SEPARATE (a paragraph break) is the third sanctioned verb after devitalize/remove", keywords: publish_blocked_again_after_fixing_every_reported_finding cpv_gate_reveals_a_new_demoted_nit_on_every_attempt exit_4_nit_block how_to_find_which_fragment_trips_skillaudit leave_one_fragment_out run_the_scanner_over_the_whole_page separate_is_the_third_devitalize_verb cpv_probe_skillaudit_local_scanner skillaudit_fires_on_co-occurrence_not_a_token five_publish_attempts, ocd: 2026-08-27, lmd: 2026-08-27]
+
+Measured 2026-08-27 across five `publish.py` attempts: every run cleared the lines the previous
+report named and then blocked on a line that report never listed, because a line fires only once
+its neighbours are clean — the gate surfaces blockers one at a time. So the only trustworthy
+pre-publish check is the real scanner over EVERY line of every touched file
+(`scripts_dev/cpv_probe_skillaudit.py`, pointed at the cached `cpv_skillaudit_native`), not the
+handful of lines a report named. Skillaudit's A2A_CROSS_AGENT_INJECT and CMD_INJECTION key on
+CO-OCCURRENCE across a whole line, not on any single token: pairwise bisection proved
+`inject_until_sent` + "ai-maestro agent channel" fired together while each was clean alone, and
+four word-swaps on one sentence all still fired. Leave-one-fragment-out names the load-bearing
+fragment in a single pass. When no word swap clears a sentence, use SEPARATE — the pipeline's
+third sanctioned verb (65078efa: devitalize-OR-remove-OR-separate, never exempt): a paragraph
+break before the load-bearing sentence cleared esc:56 with zero words changed. Never rename a
+real symbol the page must cite (`inject_until_sent` is a function); change the co-occurring
+prose instead. The `.cpv-audit-consent.json` registry was considered and rejected per 65078efa.
+
+
+^ATOM-56GA-U5T8 [desc: "GitHub push protection refused main AND the tags over a REDACTION PLACEHOLDER (sk_****_****9999) that matches the Stripe pattern — a HEAD-only redaction cannot unblock because every pushed commit is s", keywords: push_cannot_contain_secrets GH013_push_protection_blocked_the_publish redaction_placeholder_flagged_as_a_secret sk_placeholder_matches_the_stripe_pattern redacting_in_a_new_commit_does_not_unblock_push_protection push_protection_scans_every_commit_in_the_push tag_push_refused_but_not_the_tag_ruleset test_fixture_flagged_as_a_leaked_secret allow-secret_url_vs_rewrite_history_is_the_owner_decision unpushed_commit_means_no_leak_exists, ocd: 2026-08-27, lmd: 2026-08-27]
+
+Publish attempt 5 (2026-08-27) passed every local gate and was refused at `git push --atomic` on
+main AND both tags: GH013 "Push cannot contain secrets". The tag refusals were NOT the
+`baseline-tag-protect` ruleset (a round was lost chasing it) — tags carry the same commits, so
+they fail for main's reason. The flagged string was the bench's own redaction OUTPUT,
+`sk_****_****9999` (assemble_corpus.py rewrites `sk_live_…` to it), which matches GitHub's Stripe
+pattern: a placeholder can itself be scanner-shaped. It sat in 9690e5fd, a commit never pushed
+(`git branch -r --contains` was empty), so no leak existed and the decision was calm. Redacting
+the line in a NEW commit does not unblock: push protection scans EVERY commit in the push, and
+the old commit still carries the string. The choice is therefore binary and owner-only — the
+allow-secret URL (a repo security setting, visible bypass) or rewriting the commit (RULE 0.6).
+While classifying it, `gh api …/secret-scanning/alerts` showed a second, older, already-public
+finding: alert #1, a synthetic `tskey-auth-abc…` inside the test that proves the Tailscale
+detector fires — open since 2026-06-04; close as `used_in_tests`. Durable fix, separate TRDD: a
+placeholder no scanner matches (`sk_REDACTED_TEST`) and the other canonical fake shapes taught
+to the bench's hygiene gate. Filed: TRDD-X4LJFTB4.
 
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0001, status:valid, keywords:"publish_blocked_claim_superseded cpv_major_fp_era_over dont_carry_blocked_forward", ocd:2026-06-11, lmd:2026-06-12] SUPERSEDED original note: "the publish is
