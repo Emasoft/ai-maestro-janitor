@@ -4819,9 +4819,15 @@ fn scope_root_override(layer: ScopeLayer) -> Option<PathBuf> {
 
 /// The project directory these placeholders resolve against — `$CLAUDE_PROJECT_DIR`, else cwd.
 fn scope_project_dir() -> String {
-    std::env::var("CLAUDE_PROJECT_DIR")
+    // `MEMGREP_PROJECT_DIR` is a TEST-ONLY override, the same idiom as `MEMGREP_USER_MEM_ROOT`:
+    // a test must never `set_var` a Claude-reserved name like `CLAUDE_PROJECT_DIR` — CPV's
+    // persistence scanner flags that as cross-plugin env poisoning (MAJOR, blocked publish #3),
+    // and it is right to: a reserved var written by one plugin's process is read by every other.
+    // Production code only ever READS the reserved var; the memgrep-owned one is what tests set.
+    std::env::var("MEMGREP_PROJECT_DIR")
         .ok()
         .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|v| !v.is_empty()))
         .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
         .unwrap_or_default()
 }
@@ -11324,7 +11330,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn scope_patterns_resolve_home_and_project_symbols_but_never_project_ones_for_user() {
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("CLAUDE_PROJECT_DIR", "/tmp/My Proj");
+            std::env::set_var("MEMGREP_PROJECT_DIR", "/tmp/My Proj");
         }
         let home = std::env::var("HOME").unwrap_or_default();
 
@@ -11334,7 +11340,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let user_misused = resolve_scope_pattern("~/store/@project_slug@", SCOPE_USER);
 
         unsafe {
-            std::env::remove_var("CLAUDE_PROJECT_DIR");
+            std::env::remove_var("MEMGREP_PROJECT_DIR");
         }
 
         assert_eq!(local, PathBuf::from(&home).join(".claude/projects/-tmp-My-Proj/memory"),
