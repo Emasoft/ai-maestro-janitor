@@ -1,9 +1,9 @@
 ---
 trdd-id: AO8MPK5D
 title: The repair chore is told to fix publish-globally-missing but its gate cannot see it
-column: todo
+column: complete
 created: 2026-08-26T22:19:00+0200
-updated: 2026-08-26T22:34:30+0200
+updated: 2026-08-27T13:37:28+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -14,13 +14,63 @@ min-approval-requirement: none
 labels: [wikimem, memory-maintenance, repair, lint]
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [efad7a99]
 relevant-rules: []
 ---
 
 # The repair chore is told to fix `publish-globally-missing` but its gate cannot see it
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+## ✅ CLOSED 2026-08-27 — Option 2, and the card UNDERSTATED its own case. Commit `efad7a99`.
+
+**Decision: do NOT widen `repair_defect`. Ever.** Fable-5 advisor consulted; all four of its
+load-bearing claims re-verified in source before acting. The rejection is now recorded in
+`memory_content_precheck.py` beside the existing janitor#260 rejection, so the next reader meets
+it where they would look rather than re-deriving it from this card.
+
+**The card's "two honest options" framing was too generous to option 1.** It listed the risk as a
+smell ("two behaviours from one predicate"). The real blocker is that **text cannot decide this
+even WITH the path**: `publish_globally_state` reads FILESYSTEM state — whether a USER-root
+symlink resolves to the page — and splits "field missing" into TWO issues on it,
+`MissingDefaultFalse` → `false` versus `MissingSymlinkImpliesTrue` → `true`. A text+path predicate
+cannot tell them apart, so it would hand the agent a 50/50 guess whose wrong branch **silently
+un-publishes a page somebody deliberately published**. Option 1 was never merely inelegant; it was
+incorrect, and it would have bought the *appearance* of gate/arbiter parity for a rule family the
+gate structurally cannot own — worse than the honest gap, because the next reader stops looking.
+
+**The third option I invented (pass the scope LABEL, not the path) is the worst of the three, and
+for a reason neither the card nor I saw.** It reads cleanest — both callers already hold the
+label, no path→scope re-derivation. But `scope` is optional on `repair_has_work`, and that
+function goes out of its way to fail OPEN on it: `if scope is None: return True  # cannot read the
+ledger ⇒ never suppress` (`:840`). A scope-gated defect check would be **the first None-path in
+the module that SUPPRESSES a real finding** — fail-CLOSED, in a module whose stated posture is
+fail-OPEN, and indistinguishable at runtime from a clean corpus.
+
+**Found while fixing it — a LIVE defect this card never noticed, six lines above the unreachable
+one.** The skill's "No frontmatter at all" bullet told the agent to add the field *"when
+`type: project`"*. That is the exact wrong-discriminator mistake this card correctly warned
+against for the predicate — already shipped, in prose, in the instruction an agent actually
+follows. `metadata.type` is the CONTENT class and is independent of the ROOT a page lives under.
+Both bullets are now one bullet that says the write path owns the field, names both traps
+(`type` is not the discriminator; "missing" is two cases text cannot split), and routes a genuine
+editorial disagreement about the VALUE to a refusal instead of a hand-flip.
+
+**Still true and still load-bearing:** no hand-edit of the 29 pages happened or should happen, and
+`edit_project_scope` was NOT turned on — that remains a USER decision about what agents may write
+into a git-tracked, pushed store. Nothing here changes observable behaviour today; it is
+latent-correctness plus a live prose fix. Verified: ruff clean, mypy clean (492 files), 178 tests
+pass.
+
+**The lesson worth more than the fix,** and the reason the SECOND CORRECTION below matters: this
+card was RIGHT that the discriminator trap existed and RIGHT to refuse the one-liner, but it went
+looking for the trap only in Python and never grepped the skill prose that instructs the agent.
+A predicate and the English telling an agent what to do are the same rule in two languages; check
+both, or fix one and ship the other.
+
+---
+
+*Original STATE below, superseded by the decision above.*
 
 **The obvious fix reintroduces the exact bug the code it touches exists to prevent. Read the
 "why it cannot be closed the obvious way" section before writing anything.**
