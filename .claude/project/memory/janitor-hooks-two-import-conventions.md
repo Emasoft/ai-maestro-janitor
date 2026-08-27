@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   originSessionId: c8a95d7e-048f-4c47-ae33-1dfacbcab3b1
+publish-globally: false
 ---
 
 # This codebase has TWO import conventions — a hook must put BOTH dirs on sys.path

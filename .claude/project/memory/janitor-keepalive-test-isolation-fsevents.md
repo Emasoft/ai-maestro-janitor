@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 # L0 keepalive — call-time state resolution, test isolation, and bounded restage (the fseventsd-runaway class)

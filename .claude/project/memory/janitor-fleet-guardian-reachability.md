@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: fleet
+publish-globally: false
 ---
 
 ## Governed by

@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: aspect
   functionality: harness-backend-mode
+publish-globally: false
 ---
 
 # janitor-two-runtime-backends

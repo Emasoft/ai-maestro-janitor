@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: gh-reply-monitor
+publish-globally: false
 ---
 
 # janitor-gh-reply-monitor

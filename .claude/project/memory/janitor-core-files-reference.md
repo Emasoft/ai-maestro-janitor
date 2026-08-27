@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: component
   functionality: core-files-reference
+publish-globally: false
 ---
 
 # janitor-core-files-reference

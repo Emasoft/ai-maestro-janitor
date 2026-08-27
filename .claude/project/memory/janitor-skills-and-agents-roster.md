@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: skills-and-agents-roster
+publish-globally: false
 ---
 
 # janitor-skills-and-agents-roster

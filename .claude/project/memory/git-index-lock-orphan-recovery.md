@@ -2,7 +2,7 @@
 name: git-index-lock-orphan-recovery
 description: "git hangs forever on .git/index.lock / a commit is refused with live-git but no git is running / the stale-lock detector never removes anything / index.lock left behind by a killed commit / my guard reads UNKNOWN under parallel test load / os.kill(pid,0) says alive but the process is a corpse"
 ocd: 2026-08-26
-lmd: 2026-08-26
+lmd: 2026-08-27
 metadata:
   node_type: memory
   type: project
@@ -13,7 +13,7 @@ publish-globally: false
 # git-index-lock-orphan-recovery
 
 
-^ATOM-KJG1-030H [desc: "orphaned index.lock recovery: prevention covers the reader, recovery covers the dead writer; every guard fails closed", keywords: git_hangs_forever_on_index.lock a_killed_commit_left_a_lock_behind every_git_write_stalls_and_nothing_times_out who_removes_a_stale_.git/index.lock GIT_OPTIONAL_LOCKS stale-index-lock_detector, ocd: 2026-08-26, lmd: 2026-08-26]
+^ATOM-KJG1-030H [desc: "orphaned index.lock recovery: prevention covers the reader, recovery covers the dead writer; every guard fails closed", keywords: git_hangs_forever_on_index.lock a_killed_commit_left_a_lock_behind every_git_write_stalls_and_nothing_times_out who_removes_a_stale_.git/index.lock GIT_OPTIONAL_LOCKS stale-index-lock_detector stale_lock_after_a_crashed_git_process index.lock_left_by_a_dead_writer how_to_safely_remove_a_git_lock_file guard_must_fail_closed_on_a_live_writer, ocd: 2026-08-26, lmd: 2026-08-26]
 
 A killed `git commit` leaves `.git/index.lock` behind with nobody to release it, and every later git write then stalls INDEFINITELY (it blocked a live session for hours on 2026-08-14). Prevention was already in place and cannot cover this: `GIT_OPTIONAL_LOCKS=0` on every read-only call site — enforced by an AST drift guard, because `git status`/`git diff` write the lock for an optional stat-cache write-back even on a pure read — stops a detector STEALING the lock, but nothing stops a WRITER dying mid-write. The recovery half is `scripts/lib/git_utils.clear_stale_index_lock` plus the `stale-index-lock` heartbeat detector that calls it (registered in the dispatch cadence table and `_ADVISORY_DETECTORS`). All of its guards are FAIL-CLOSED, because the only real danger is removing a lock a live process still holds — which means every bug in this subsystem shows up as a REFUSAL TO RECOVER, never as a wrongly-removed lock. Landed dc1af1ed (janitor#245), then fixed four times: 440e859c, 7894e6e2, 8e4a5413 (TRDD-TUWUB0SG), 1a4ea9e6. [^1] [^2]
 

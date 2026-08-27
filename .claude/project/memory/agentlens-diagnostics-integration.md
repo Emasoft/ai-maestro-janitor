@@ -11,6 +11,7 @@ metadata:
     - "scripts/lib/agentlens_probe.py"
     - "scripts/detectors/window-burn-rate.py"
     - "scripts/detectors/token-usage-anomaly.py"
+publish-globally: false
 ---
 
 # agentlensPro diagnostics integration

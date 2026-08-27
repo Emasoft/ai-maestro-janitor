@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 A self-update mechanism **cannot accelerate its own first deployment.** When the

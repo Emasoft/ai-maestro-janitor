@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: aspect
+publish-globally: false
 ---
 
 # A status line addressed to an autonomous reader is not neutral — it can drive an escalation loop

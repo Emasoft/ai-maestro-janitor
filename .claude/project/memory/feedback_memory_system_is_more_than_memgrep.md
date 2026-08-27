@@ -8,6 +8,7 @@ metadata:
   type: feedback
   tier: component
   functionality: janitor
+publish-globally: false
 ---
 
 The AI-Maestro **memory system is NOT just memgrep.** memgrep is only the SEARCH

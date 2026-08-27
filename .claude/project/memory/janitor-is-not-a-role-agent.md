@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   tier: component
   type: project
+publish-globally: false
 ---
 
 **The janitor is not an agent and has no role.** It is the ONE **user-scope**

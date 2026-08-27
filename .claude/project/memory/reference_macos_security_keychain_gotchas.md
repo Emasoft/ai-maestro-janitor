@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: component
   functionality: oauth-rotator
+publish-globally: false
 ---
 
 Two non-obvious `security` (macOS keychain CLI) behaviors that silently corrupt a stored

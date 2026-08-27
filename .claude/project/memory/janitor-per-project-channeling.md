@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: aspect
+publish-globally: false
 ---
 
 **THE INVARIANT (USER directive 2026-07-17, TRDD-X92VBFNF):** an AUTOMATIC surface

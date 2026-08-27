@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: component
   functionality: oauth-rotator
+publish-globally: false
 ---
 
 **Symptom:** the OAuth rotator's browser capture works up to the consent page (CDP-attach

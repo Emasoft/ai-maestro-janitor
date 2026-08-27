@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: aspect
+publish-globally: false
 ---
 
 **ARM / DISARM is the ONLY switch. Do not add a second one.** As of v1.0.0 the janitor is

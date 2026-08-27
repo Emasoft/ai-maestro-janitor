@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 ^memgrep-corrupt-is-fts-desync-not-a-torn-write [desc: memgrep_corrupt_index_is_an_fts5_desync_not_file_damage, keywords: memgrep_reindex_database_disk_image_is_malformed content_in_the_virtual_table_is_corrupt sqlite_corruption_WAL_journal_mode torn_write_killed_agent_rate_limit recall_broken_index.db an_external-content_fts5_index_desynced_from_its_content_table the_sqlite_file_is_almost_certainly_fine journal_mode_WAL_synchronous_normal_verified WAL_is_already_crash-safe_against_a_killed_process only_an_os_or_power_crash_can_tear_a_wal_db do_not_go_hunting_for_a_durability_bug_here an_agent_killed_by_the_rate_limit_is_not_a_sufficient_explanation, type: project, ocd: 2026-07-14, lmd: 2026-07-14]

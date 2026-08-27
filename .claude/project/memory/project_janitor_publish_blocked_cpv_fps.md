@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: publish
+publish-globally: false
 ---
 
 **RESOLVED 2026-06-11 — the publish is UNBLOCKED: v0.7.0 + v0.7.1 SHIPPED with the

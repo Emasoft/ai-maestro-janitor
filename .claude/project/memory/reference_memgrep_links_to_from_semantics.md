@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: component
   functionality: janitor
+publish-globally: false
 ---
 
 memgrep `links` flags read relative to the NAMED note, not the link arrow

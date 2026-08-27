@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: publish
+publish-globally: false
 ---
 
 CPV `--strict` emits **`[MINOR] .gitignore missing coverage for: Claude Code cache

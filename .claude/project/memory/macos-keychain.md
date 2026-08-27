@@ -8,6 +8,7 @@ metadata:
   type: reference
   tier: aspect
   functionality: keychain-safety
+publish-globally: false
 ---
 
 The macOS keychain (`/usr/bin/security` CLI + the `Security.framework` under it) is the

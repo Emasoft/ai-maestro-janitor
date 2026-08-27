@@ -7,6 +7,7 @@ metadata:
   node_type: memory
   type: project
   tier: component
+publish-globally: false
 ---
 
 **The daemon's due-loop is single-threaded; since v0.50.0 (TRDD-H7NVKSAX) the BULK tasks

@@ -9,6 +9,7 @@ metadata:
   tier: hub
   functionality: ai-maestro-janitor-overview
   globs: ["scripts/**", "skills/**", "agents/**", "hooks/**", "rules/**"]
+publish-globally: false
 ---
 **ai-maestro-janitor** is a Claude Code plugin that keeps a developer machine tidy and
 secure without being asked. Its organising idea is that the expensive failures on a dev

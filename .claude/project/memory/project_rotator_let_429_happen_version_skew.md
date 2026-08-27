@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: oauth-rotator
+publish-globally: false
 ---
 
 When the rotator **lets a 429 land instead of rotating** (the user has to rotate

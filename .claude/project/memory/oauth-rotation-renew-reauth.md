@@ -8,6 +8,7 @@ metadata:
   type: project
   tier: component
   functionality: oauth-rotator
+publish-globally: false
 ---
 
 The janitor OAuth account rotator (TRDD-32acd15f; redesign TRDD-dfc0959a) keeps an
