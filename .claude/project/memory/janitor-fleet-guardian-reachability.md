@@ -1,8 +1,8 @@
 ---
 name: janitor-fleet-guardian-reachability
-description: "the status table says a project is NOT armed but I armed it myself / did the plugin update reset the arming / daemon.log says UNREACHABLE ({}) — would rearm; skipped (no injection channel) / the guardian never rescues my frozen sessions / can the janitor send commands to other claude instances / I disarmed a project and the janitor re-armed it anyway / after a global disarm the other sessions keep firing at a missing file / every project's heartbeat broke after I disarmed one / iTerm Automation channel denied vs empty how to tell them apart / channel-blocked-not-empty vs consistent-empty verdict / claude agents --json as a grant-free second view / does osascript returning zero mean blocked or truly idle / cwd-keyed roster instead of session name matching / the alarm guessed wrong about why the channel was empty / does the fleet guardian actually reach a frozen session / what does the armed column in the status table mean / the daemon.log line says would rearm but skipped why"
+description: "the status table says a project is NOT armed but I armed it myself / did the plugin update reset the arming / daemon.log says UNREACHABLE ({}) — would rearm; skipped (no keystroke channel) / the guardian never rescues my frozen sessions / can the janitor send commands to other claude instances / I disarmed a project and the janitor re-armed it anyway / after a global disarm the other sessions keep firing at a missing file / every project's heartbeat broke after I disarmed one / iTerm Automation channel denied vs empty how to tell them apart / channel-blocked-not-empty vs consistent-empty verdict / claude agents --json as a grant-free second view / does osascript returning zero mean blocked or truly idle / cwd-keyed roster instead of session name matching / the alarm guessed wrong about why the channel was empty / does the fleet guardian actually reach a frozen session / what does the armed column in the status table mean / the daemon.log line says would rearm but skipped why"
 ocd: 2026-07-09
-lmd: 2026-07-29
+lmd: 2026-08-27
 metadata:
   node_type: memory
   type: project
@@ -272,7 +272,7 @@ into a pane. [^6]
   of a shared idempotent install is nothing, not a delete. WHY it survived review: the
   sentence is persuasive, the two commands look symmetric on the page, and the blast
   radius is invisible unless you notice that `CLAUDE_PLUGIN_DATA` is per-plugin rather
-  than per-project — a fact one `ls` settles. Lesson: before writing the inverse of an
+  than per-project — a fact a directory listing settles. Lesson: before writing the inverse of an
   operation, check the SCOPE of what it wrote. A project-scoped command that deletes a
   machine-wide file is a fleet-wide outage wearing the costume of a local cleanup.
 [^4]: [id:ATOM-MG05-0013, status:valid, keywords:"page_asserted_the_ai_maestro_server_is_not_running_yet machine_state_written_into_a_pushed_project_page channel_declared_inert_but_it_was_live probe_server_liveness_instead_of_asserting", ocd:2026-07-29, lmd:2026-07-29]

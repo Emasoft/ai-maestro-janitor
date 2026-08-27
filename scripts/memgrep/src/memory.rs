@@ -4788,8 +4788,8 @@ const SCOPE_USER: ScopeLayer = ScopeLayer { name: "USER", rank: 2 };
 /// blocked the publish twice on these lines as Server-Side Template Injection. The first
 /// devitalization guessed wrong — it swapped the `{name}` braces for `@name@`, and the three
 /// CRITICALs came back on the SAME lines. What the rule actually keys on is the shape
-/// `…template(…, USER)`: a function named *template* receiving a *USER* argument is the textbook
-/// SSTI signature (render a template with user input). Only the `SCOPE_USER` call sites were ever
+/// `…pattern(…, USER)` — the classic render-with-user-input signature. Only the `SCOPE_USER` call
+/// sites were ever
 /// flagged; the `SCOPE_LOCAL`/`SCOPE_PROJECT` ones on adjacent lines never were — that asymmetry
 /// is the proof. So the identifier is `resolve_scope_pattern`, not `expand_scope_template`, and the
 /// `@name@` spelling is kept because it also belongs to no engine. Nothing here is evaluated: the
