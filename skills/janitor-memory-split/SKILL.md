@@ -63,7 +63,8 @@ is present, `memory_txn_cli.py begin` exits non-zero — that is your hard stop.
 **Do not compute a scope path.** The claim below PRINTS the absolute root; deriving one
 by hand is how an agent ends up working a scope it was not assigned. LOCAL and USER are
 mutated and applied through the txn; PROJECT is in-repo and pushed only by `publish.py`,
-so PROJECT split is **OFF by default** (`edit_project_scope`) — when enabled you
+so PROJECT split is governed by `edit_project_scope` — **ON by default since 2026-08-27**
+(owner directive: librarians must reach PROJECT scope; a host may set it off) — when on you
 stage+commit into the PROJECT root and it rides the next publish, never pushed by you.
 
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything:

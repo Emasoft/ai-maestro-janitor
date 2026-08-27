@@ -46,7 +46,9 @@ nothing):
        (the janitor's **hard-coded** data dir — NOT `${CLAUDE_PLUGIN_DATA}`, which
        resolves to the running plugin at heartbeat time).
      - PROJECT: `$(git rev-parse --show-toplevel)/.claude/project/memory` — **ONLY
-       if `memory_settings.get("edit_project_scope")` is True** (default False).
+       if `memory_settings.get("edit_project_scope")` is True** (default True since
+       2026-08-27 — owner directive that librarians must reach PROJECT scope; read the
+       live value, a host may have set it off).
    - **Default to LOCAL + USER only.** PROJECT memory is in-repo and the pre-push
      hook blocks every pusher except `publish.py`; a standalone conflict commit
      there would drift from origin. If PROJECT is opted-in, you may STAGE+commit the

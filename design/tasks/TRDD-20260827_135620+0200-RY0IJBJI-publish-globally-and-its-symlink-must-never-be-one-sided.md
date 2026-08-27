@@ -1,9 +1,11 @@
 ---
 trdd-id: RY0IJBJI
 title: publish-globally and its USER-root symlink must never be one-sided and the linter must reconcile them
-column: complete
+column: blocked
+pre-block-column: complete
+blocked-by: [X4LJFTB4]
 created: 2026-08-27T13:56:20+0200
-updated: 2026-08-27T14:12:00+0200
+updated: 2026-08-27T16:09:03+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -21,6 +23,14 @@ relevant-rules: []
 # `publish-globally` and its symlink must never be one-sided
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+## ⏸ 2026-08-27 16:10 — CODE-COMPLETE, NOT YET DEPLOYED: publish 3.4.0 blocked at the push
+
+Everything below is committed locally and passed every gate on publish attempt 5 (CPV `--strict`
+0/0/0/0, lint, typecheck, full suite). GitHub refused the push on push-protection over two
+SYNTHETIC test fixtures — an owner decision, filed as **TRDD-X4LJFTB4**. No instance on this
+machine runs the new memgrep or the `edit_project_scope` flip until 3.4.0 lands. Nothing more to
+do on THIS card; it completes the moment X4LJFTB4 is resolved and the same publish re-runs.
 
 ## ✅ IMPLEMENTED 2026-08-27 — all four rules enforced, plus the create-time guarantee
 

@@ -3,7 +3,7 @@ trdd-id: VJL1YTCG
 title: The wikimem CLI must be topic/atom verb pairs with no paths and maintenance must leave the main agent
 column: todo
 created: 2026-08-27T14:31:01+0200
-updated: 2026-08-27T14:31:01+0200
+updated: 2026-08-27T16:09:03+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -22,8 +22,18 @@ relevant-rules: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-**Owner directive, 2026-08-27, in two parts. Part A (paths + env vars) is PARTLY DONE. Parts B
-and C are NOT STARTED.** This card exists so the full shape is recorded before any more of it is
+**Owner directive, 2026-08-27, in two parts. Part A (paths + env vars) is DONE except the
+final `--path` removal — shipped in `2e801dff` (+ `282a39c6`/`864652f0` renames the scanner
+forced). Parts B and C are NOT STARTED.** All of it is committed locally and green through every
+publish gate, but NOT deployed: 3.4.0 is blocked at the push by TRDD-X4LJFTB4 (owner decision).
+
+**Part A additions since the first STATE:** the three env vars take `~/`-relative TEMPLATES with
+`@project_root@` / `@project_slug@` symbols (the owner's "wildcards for the project root and
+slug"); USER scope deliberately leaves a project symbol UNEXPANDED so a misconfiguration is
+visible rather than silently sharding the global store. The spelling is `@name@`, not `{name}`,
+and the identifier is `resolve_scope_pattern`, not `…template` — both because CPV's scanner
+read the obvious spellings as Server-Side Template Injection and blocked the publish; see the
+comment above `DEFAULT_LOCAL_SCOPE_PATTERN` for the incident and the wrong first guess. This card exists so the full shape is recorded before any more of it is
 built — the pieces below are individually small and collectively a CLI-surface migration.
 
 ### The governing principle (Part A) — a PATH IS AN INTERNAL DETAIL
