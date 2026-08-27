@@ -32,6 +32,12 @@ SYNTHETIC test fixtures — an owner decision, filed as **TRDD-X4LJFTB4**. No in
 machine runs the new memgrep or the `edit_project_scope` flip until 3.4.0 lands. Nothing more to
 do on THIS card; it completes the moment X4LJFTB4 is resolved and the same publish re-runs.
 
+**On leaving `complete`:** terminal columns are frozen, and this card had been marked `complete`
+before the push failed. The reading taken: `complete` here meant "deployed", and it was not —
+the mark was premature, not a finished card being reopened. So this is a correction of an untrue
+column, the case the kanban rule explicitly prefers over a lying one, and `pre-block-column:
+complete` records where it returns.
+
 ## ✅ IMPLEMENTED 2026-08-27 — all four rules enforced, plus the create-time guarantee
 
 Owner directive escalated mid-card ("implement the code immediately … autofix this always, no
