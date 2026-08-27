@@ -2,7 +2,7 @@
 name: janitor-skills-and-agents-roster
 description: "why did janitor-pause disappear / arm disarm is the only switch / what skills does the janitor ship / janitor-compact-context soft vs hard / janitor-reload-skills vs janitor-reload-plugins / what are the two janitor agents / janitor-memory-subconscious-agent vs janitor-security-agent / where do janitor tests and TRDDs live / why was maintenance mode removed / can I pause the janitor temporarily / a host had keep-going-off set for 14 days silently / why does a global stop delete the cron instead of silencing it / what does janitor-write-handoff do / how do I reload just non-plugin skills / why were the issues-watch on off skills deleted / how many janitor agents are there and what model do they use / what happened to janitor-maintenance-mode"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-08-27
 metadata:
   node_type: memory
   type: project
@@ -65,7 +65,7 @@ actuates NOTHING** — it replaced the TRDD-ZCODD6YS two-rung throttle (cadence 
 LOCAL maintenance), reverted by the same "never self-disable" ruling.
 
 
-^ATOM-5VTX-06LU [desc:"Skills part 3: the two heartbeat modes (FULL/STOP) and why a global stop deletes the cron instead of merely silencing it", keywords: two_heartbeat_modes_full_stop global_stop_truly_stops_the_heartbeat_free cron_fire_rereads_618k_cached_tokens the_keep-going_nudge_is_unconditional_never_disable a_host_had_keep-going-off_set_for_14_days_silently one_remaining_skip_is_time-bounded_after_a_resume_cue crons_armed_before_this_shipped_dont_self-disarm janitor-memory-record-recent_active_wikimem_harvest supply-chain-watcher_dependabot-doctor_credential-window-audit why_did_janitor-pause_disappear what_happened_to_janitor-maintenance-mode a_host_was_found_carrying_keep-going-off_for_14_days de-duplicator_after_a_janitor-resume_cue_not_a_mute, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-5VTX-06LU [desc:"Skills part 3: the two heartbeat modes (FULL/STOP) and why a global stop deletes the cron instead of merely silencing it", keywords: two_heartbeat_modes_full_stop global_stop_truly_stops_the_heartbeat_free cron_fire_rereads_618k_cached_tokens the_keep-going_nudge_is_unconditional_and_has_no_off_switch a_host_had_keep-going-off_set_for_14_days_silently one_remaining_skip_is_time-bounded_after_a_resume_cue crons_armed_before_this_shipped_dont_self-disarm janitor-memory-record-recent_active_wikimem_harvest supply-chain-watcher_dependabot-doctor_credential-window-audit why_did_janitor-pause_disappear what_happened_to_janitor-maintenance-mode a_host_was_found_carrying_keep-going-off_for_14_days de-duplicator_after_a_janitor-resume_cue_not_a_mute, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 **The never-stop continue-nudge is UNCONDITIONAL** — `dispatch._phase_keep_going_nudge()`
 fires on EVERY heartbeat, takes no mode, and has one wording. Its opt-in flag, its
@@ -86,7 +86,7 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 DELETED on 2026-08-02 by owner order — both features are always-on chores, so the `-on` pair
 
 
-^ATOM-AW27-24YV [desc:"Skills part 4: the unconditional keep-going nudge, and the skill roster (memory-record-recent, supply-chain-watcher, dependabot-doctor, credential-window-audit, github-workflow-doctor/create, fork-pr-", keywords: keep_going_nudge_unconditional_never_disable janitor-memory-record-recent_supply-chain-watcher_dependabot-doctor deleted_issues-watch_skills_2026-08-02 why_were_the_issues-watch_on_off_skills_deleted both_features_are_always-on_chores_now the_off_pair_was_the_per-feature_silent_disable janitor-compact-context_soft_enqueue_by_default what_does_janitor-write-handoff_do soft_default_vs_hard_esc-interrupt janitor-write-handoff_writes_agent-handoff.md pre-compact-handoff.py_is_the_always-on_zero-cost_complement fork-pr-cache-audit_github-workflow-doctor_and_create, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-AW27-24YV [desc:"Skills part 4: the unconditional keep-going nudge, and the skill roster (memory-record-recent, supply-chain-watcher, dependabot-doctor, credential-window-audit, github-workflow-doctor/create, fork-pr-", keywords: keep_going_nudge_unconditional_no_off_switch_exists janitor-memory-record-recent_supply-chain-watcher_dependabot-doctor deleted_issues-watch_skills_2026-08-02 why_were_the_issues-watch_on_off_skills_deleted both_features_are_always-on_chores_now the_off_pair_was_a_per-feature_silent_kill janitor-compact-context_soft_enqueue_by_default what_does_janitor-write-handoff_do soft_default_vs_hard_esc-interrupt janitor-write-handoff_writes_agent-handoff.md pre-compact-handoff.py_is_the_always-on_zero-cost_complement fork-pr-cache-audit_github-workflow-doctor_and_create, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 had nothing to enable and the `-off` pair was exactly the per-feature silent disable the
 2026-07-31 directive removed; arm/disarm is the only switch, plus the two config knobs),

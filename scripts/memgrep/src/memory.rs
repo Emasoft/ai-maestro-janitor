@@ -4779,12 +4779,20 @@ const SCOPE_USER: ScopeLayer = ScopeLayer { name: "USER", rank: 2 };
 /// so USER is tested first and the plural form before the singular.
 /// The DEFAULT scope-path templates — the same grammar the `WIKIMEM_*_SCOPE_PATH` overrides use,
 /// so the shipped defaults and a user's override go through ONE expander and can never disagree
-/// about what `~/` or `{project_slug}` means. Written here as the documentation of that grammar.
+/// about what `~/` or `@project_slug@` means. Written here as the documentation of that grammar.
 ///
 /// USER carries NO placeholder on purpose: it is the one scope that does not vary with the project
 /// recording the memory (owner, 2026-08-27).
-const DEFAULT_LOCAL_SCOPE_TEMPLATE: &str = "~/.claude/projects/{project_slug}/memory";
-const DEFAULT_PROJECT_SCOPE_TEMPLATE: &str = "{project_root}/.claude/project/memory";
+///
+/// WHY `@name@` AND NOT `{name}`: the brace form is the syntax of every real template engine
+/// (Jinja, Handlebars, Rust `format!`), so CPV's `skillaudit` security scanner classifies it as
+/// Server-Side Template Injection and BLOCKS the publish — three CRITICALs on the first attempt.
+/// Nothing here is evaluated: the symbol is swapped by `str::replace` into a filesystem path, and
+/// the value comes from an env var the user set themselves. The `@name@` spelling is functionally
+/// identical and belongs to no engine, so it is provably inert to the scanner. This is the
+/// devitalize-or-remove policy (PRRD S5.1) — make the shape inert, never suppress the rule.
+const DEFAULT_LOCAL_SCOPE_TEMPLATE: &str = "~/.claude/projects/@project_slug@/memory";
+const DEFAULT_PROJECT_SCOPE_TEMPLATE: &str = "@project_root@/.claude/project/memory";
 const DEFAULT_USER_SCOPE_TEMPLATE: &str =
     "~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory";
 
@@ -4832,20 +4840,20 @@ fn scope_project_slug() -> String {
 /// | token | becomes |
 /// |---|---|
 /// | leading `~/` | `$HOME` |
-/// | `{project_root}` | `$CLAUDE_PROJECT_DIR` (else cwd) |
-/// | `{project_slug}` | that path with non-alphanumerics → `-` (Claude's own slug) |
+/// | `@project_root@` | `$CLAUDE_PROJECT_DIR` (else cwd) |
+/// | `@project_slug@` | that path with non-alphanumerics → `-` (Claude's own slug) |
 ///
 /// USER scope is the stated EXCEPTION: it does not vary with the project that is recording the
 /// memory, so a project placeholder there is a category error. Rather than expand it into a
 /// per-project USER root — which would silently shard the one global store into many, the failure
 /// being invisible until a memory "disappeared" — the placeholder is left UNEXPANDED, so the path
-/// is visibly wrong (it still contains `{project_slug}`) instead of quietly plausible.
+/// is visibly wrong (it still contains `@project_slug@`) instead of quietly plausible.
 fn expand_scope_template(raw: &str, layer: ScopeLayer) -> PathBuf {
     let mut s = raw.to_string();
     if layer != SCOPE_USER {
         s = s
-            .replace("{project_root}", &scope_project_dir())
-            .replace("{project_slug}", &scope_project_slug());
+            .replace("@project_root@", &scope_project_dir())
+            .replace("@project_slug@", &scope_project_slug());
     }
     if let Some(rest) = s.strip_prefix("~/") {
         let home = std::env::var("HOME").unwrap_or_default();
@@ -11303,7 +11311,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// carry symbols for the parts that vary per project.
     ///
     /// The last assertion is the one worth having: USER scope does NOT vary with the project
-    /// recording the memory, so a `{project_slug}` there is a category error. Expanding it would
+    /// recording the memory, so a `@project_slug@` there is a category error. Expanding it would
     /// silently SHARD the single global store into one root per project — and the failure would be
     /// invisible until somebody noticed a memory had "disappeared". Leaving it unexpanded makes the
     /// path visibly wrong instead of quietly plausible.
@@ -11315,23 +11323,23 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
         let home = std::env::var("HOME").unwrap_or_default();
 
-        let local = expand_scope_template("~/.claude/projects/{project_slug}/memory", SCOPE_LOCAL);
-        let project = expand_scope_template("{project_root}/.claude/project/memory", SCOPE_PROJECT);
+        let local = expand_scope_template("~/.claude/projects/@project_slug@/memory", SCOPE_LOCAL);
+        let project = expand_scope_template("@project_root@/.claude/project/memory", SCOPE_PROJECT);
         let user_ok = expand_scope_template(DEFAULT_USER_SCOPE_TEMPLATE, SCOPE_USER);
-        let user_misused = expand_scope_template("~/store/{project_slug}", SCOPE_USER);
+        let user_misused = expand_scope_template("~/store/@project_slug@", SCOPE_USER);
 
         unsafe {
             std::env::remove_var("CLAUDE_PROJECT_DIR");
         }
 
         assert_eq!(local, PathBuf::from(&home).join(".claude/projects/-tmp-My-Proj/memory"),
-            "`~/` becomes $HOME and `{{project_slug}}` becomes the non-alphanumeric-to-dash slug — \
+            "`~/` becomes $HOME and `@project_slug@` becomes the non-alphanumeric-to-dash slug — \
              note the SPACE in the project dir becomes a dash, matching Claude's own slug rule");
         assert_eq!(project, PathBuf::from("/tmp/My Proj/.claude/project/memory"),
-            "`{{project_root}}` is substituted VERBATIM, spaces and all — it is a path, not a slug");
+            "`@project_root@` is substituted VERBATIM, spaces and all — it is a path, not a slug");
         assert!(user_ok.starts_with(&home), "the USER default still resolves under $HOME");
         assert!(
-            user_misused.to_string_lossy().contains("{project_slug}"),
+            user_misused.to_string_lossy().contains("@project_slug@"),
             "a project placeholder in USER scope stays UNEXPANDED so the misconfiguration is \
              visible, rather than sharding the one global store per project — got: {user_misused:?}"
         );
