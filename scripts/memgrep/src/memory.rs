@@ -2476,9 +2476,9 @@ fn normalize_page_until_clean(dest: &Path) -> Result<u32> {
         };
         let issue = match classify_publish_globally(state.has_field, state.is_true, state.has_symlink) {
             None => return Ok(pass), // this detect pass found nothing — converged
-            // Terminal, never auto-fixed — this detect pass still counts as convergence, not a
-            // remaining problem for the cap below to complain about.
-            Some(PublishGloballyIssue::ConflictFalseWithSymlink) => return Ok(pass),
+            // ConflictFalseWithSymlink used to bail out here as terminal. Owner directive
+            // 2026-08-27 (TRDD-RY0IJBJI): every state autofixes, no exceptions — it now flows
+            // through `apply_publish_globally_fix` like the rest and converges on the next pass.
             Some(issue) => issue,
         };
         let fixed = apply_publish_globally_fix(&text, &state, issue);
@@ -2527,6 +2527,11 @@ fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
     normalize_page_until_clean(dest)?;
     write_page_bytes(dest, content)?;
     normalize_page_until_clean(dest)?;
+    // Junk-symlink sweep (TRDD-RY0IJBJI). Deliberately OUTSIDE the per-page loop above: a stray
+    // link has NO corresponding PROJECT page, so no amount of per-page normalization can ever
+    // reach it — only a sweep of the USER root can. Best-effort and cheap (one readdir of a small
+    // directory); its count is intentionally discarded so a junk link can never fail a real write.
+    let _ = reconcile_user_symlink_root();
     Ok(())
 }
 
@@ -2939,6 +2944,18 @@ struct NewPageArgs {
     /// Optional `metadata.functionality` line (a hub's one-functionality summary).
     #[arg(long = "functionality")]
     functionality: Option<String>,
+    /// PUBLICATION scope: `local` | `private-project` | `public-project` | `user`.
+    ///
+    /// This is NOT `--type` (that is the CONTENT class: user/feedback/project/reference, and it is
+    /// independent of where a page lives — a PROJECT page may legitimately be `type: reference`).
+    /// This is about REACH, and `public-project` is the reason it exists: it sets
+    /// `publish-globally: true`, and because every write funnels through `atomic_write_page`'s
+    /// reconciliation, the USER-root symlink is created in that SAME write — the field and the link
+    /// can never be born apart (owner directive 2026-08-27, TRDD-RY0IJBJI).
+    ///
+    /// Omitted, the field is left to reconciliation, which defaults a PROJECT page to `false`.
+    #[arg(long = "scope")]
+    scope: Option<String>,
 }
 
 /// `memgrep new-page --path P --tier T --name N --description "…" --type …` — scaffold a VALID page:
@@ -2990,6 +3007,43 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     if page_type.is_empty() {
         anyhow::bail!("--type must not be empty (metadata.type: user|feedback|project|reference)");
     }
+    // PUBLICATION scope (TRDD-RY0IJBJI). Validated up-front, before anything is written: an
+    // unrecognised value must never silently fall through to "unpublished", because the failure is
+    // invisible (a page the author believed was published simply is not).
+    let publish_globally: Option<bool> = match a.scope.as_deref().map(str::trim) {
+        None => None,
+        Some("public-project") => Some(true),
+        Some("private-project") => Some(false),
+        // A LOCAL or USER page is not publishable and must carry no field: `publish-globally` is a
+        // PROJECT-scope concept (memgrep keys it on the path), and a USER page is already in USER
+        // scope while a LOCAL page is machine-private by definition.
+        Some("local") | Some("user") => None,
+        Some(other) => anyhow::bail!(
+            "--scope must be one of local|private-project|public-project|user (got `{other}`).\n\
+             This is PUBLICATION reach, not `--type` (the content class). `public-project` sets \
+             `publish-globally: true` AND creates the USER-root symlink in the same write."
+        ),
+    };
+    // A publication scope makes a claim about WHERE the page lives; refuse the combination that
+    // cannot be honoured rather than writing a field the path makes meaningless. `scope_layer`
+    // wants an existing path, so ask about the PARENT — the page itself does not exist yet.
+    if publish_globally.is_some() {
+        let parent_ok = a
+            .path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .and_then(|p| p.canonicalize().ok())
+            .is_some_and(|p| scope_layer(&p) == Some(SCOPE_PROJECT));
+        if !parent_ok {
+            anyhow::bail!(
+                "--scope {} is a PROJECT-scope claim, but --path {} is not inside a PROJECT memory \
+                 root (`<git-root>/.claude/project/memory/`).\nPublishing is a property of PROJECT \
+                 pages only — put the page in the project root, or drop --scope.",
+                a.scope.as_deref().unwrap_or(""),
+                a.path.display()
+            );
+        }
+    }
     // The target does not exist yet (that's the whole point of new-page), so its scope root is
     // derived from the PARENT dir — TRDD-7YHT3FNK Phase 1. The lock is held from before the
     // existence check through the write, so two concurrent `new-page` calls for the same path
@@ -3014,6 +3068,12 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     ));
     fm.push_str(&format!("ocd: {today}\n"));
     fm.push_str(&format!("lmd: {today}\n"));
+    // Emitted BEFORE the write, so `publish-globally: true` is present the moment
+    // `atomic_write_page` runs — that is what makes its reconciliation create the USER-root symlink
+    // in the SAME call, rather than leaving the page one-sided until something later writes it.
+    if let Some(pg) = publish_globally {
+        fm.push_str(&format!("publish-globally: {pg}\n"));
+    }
     fm.push_str("metadata:\n");
     fm.push_str("  node_type: memory\n");
     fm.push_str(&format!("  type: {page_type}\n"));
@@ -4830,7 +4890,8 @@ impl PublishGloballyIssue {
                 Severity::Error,
                 "publish-globally-conflict",
                 "`publish-globally: false` but a USER-scope symlink to this page still exists — \
-                 conflicting state, never auto-resolved (drop the symlink or flip the flag by hand)",
+                 the symlink is evidence of publish intent, so reconciliation flips the flag to \
+                 `true` (it never deletes a link another project may already depend on)",
             ),
         }
     }
@@ -4913,7 +4974,21 @@ fn apply_publish_globally_fix(text: &str, state: &PublishGloballyState, issue: P
             let _ = create_user_symlink(&state.link_path, &state.page_abs);
             text.to_string()
         }
-        PublishGloballyIssue::ConflictFalseWithSymlink => text.to_string(), // never reached; see doc comment
+        // OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI): "autofix this always, no exceptions."
+        // This arm used to be unreachable — the state was declared terminal and left for a human,
+        // because dropping the symlink and flipping the flag are both defensible. The owner's rule
+        // settles it in the direction their other two rules already point: a symlink is EVIDENCE OF
+        // PUBLISH INTENT (that is exactly why `MissingSymlinkImpliesTrue` writes `true`), so the
+        // symlink wins and the flag follows it. Uniform with that arm, and it never deletes a link
+        // another project may already depend on.
+        //
+        // The cost is real and was flagged before this shipped: a page whose author explicitly wrote
+        // `false` gets flipped to `true` if a symlink exists. That is only reachable when something
+        // ALREADY created a symlink for a page marked `false` — itself a bug — so this converges a
+        // corrupt state rather than overriding a healthy expressed preference.
+        PublishGloballyIssue::ConflictFalseWithSymlink => {
+            set_frontmatter_field(text, "publish-globally", "true").unwrap_or_else(|| text.to_string())
+        }
     }
 }
 
@@ -4977,6 +5052,89 @@ fn create_user_symlink(_link_path: &Path, _target_abs: &Path) -> std::io::Result
     Ok(())
 }
 
+/// Delete every JUNK symlink sitting in the USER memory root, returning how many were removed.
+///
+/// OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI): "symlinks to local scoped wikimem pages or user
+/// scoped wikimem pages must be immediately deleted." A symlink in the USER root is the publish
+/// mechanism for a PROJECT page and means nothing else, so anything else wearing that shape is
+/// junk by construction. Three kinds are removed:
+///
+///   * DANGLING — the target no longer exists (its project was deleted or the page was renamed);
+///   * MIS-SCOPED — the target resolves to a LOCAL- or USER-scope page, which is never publishable
+///     (a USER page is already in USER scope; a LOCAL page is machine-private by definition);
+///   * SELF-REFERENTIAL — the link resolves to something inside the USER root itself.
+///
+/// SAFETY: this removes the LINK ONLY, never the target — `remove_file` on a symlink unlinks the
+/// link itself on every supported platform, and the mis-scoped branch is reached only AFTER
+/// `canonicalize` proved the target exists somewhere we deliberately refuse to publish from.
+/// A real page is never touched. Best-effort throughout: an unreadable root or an undeletable entry
+/// is skipped rather than failing a caller whose actual job was to write ONE page.
+fn reconcile_user_symlink_root() -> u32 {
+    let root = resolve_user_mem_root();
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return 0; // no USER root on this host yet — nothing to reconcile
+    };
+    let root_abs = root.canonicalize().ok();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // `symlink_metadata` does NOT follow the link — this is what distinguishes a symlink from
+        // a real page. A real page must never be considered for deletion here.
+        match std::fs::symlink_metadata(&path) {
+            Ok(md) if md.file_type().is_symlink() => {}
+            _ => continue,
+        }
+        let junk = match path.canonicalize() {
+            Err(_) => true, // dangling — the target is gone
+            Ok(target) => {
+                let inside_user_root = root_abs.as_ref().is_some_and(|r| target.starts_with(r));
+                inside_user_root || scope_layer(&target) != Some(SCOPE_PROJECT)
+            }
+        };
+        if junk && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Set a TOP-LEVEL frontmatter `key` to `value`, REPLACING the existing line when the key is
+/// already present and inserting it otherwise. Returns `None` when `text` has no frontmatter block.
+///
+/// Only a key at column 0 is replaced — a nested `  key:` under some parent (e.g. `metadata.type`)
+/// is a DIFFERENT field and must never be clobbered by a top-level set. Same one-field-only
+/// discipline as `insert_frontmatter_field`: every other byte is preserved verbatim.
+fn set_frontmatter_field(text: &str, key: &str, value: &str) -> Option<String> {
+    let raw_lines: Vec<&str> = text.lines().collect();
+    if raw_lines.first().map(|l| l.trim_end()) != Some("---") {
+        return None;
+    }
+    let mut close_idx = None;
+    for (i, l) in raw_lines.iter().enumerate().skip(1) {
+        let t = l.trim_end();
+        if t == "---" || t == "..." {
+            close_idx = Some(i);
+            break;
+        }
+    }
+    let close_idx = close_idx?;
+    let prefix = format!("{key}:");
+    // Search ONLY inside the frontmatter block; a `key:` line in the BODY is prose, not metadata.
+    let existing = (1..close_idx).find(|&i| raw_lines[i].starts_with(&prefix));
+    match existing {
+        None => insert_frontmatter_field(text, key, value),
+        Some(i) => {
+            let mut new_lines: Vec<String> = raw_lines.iter().map(|s| s.to_string()).collect();
+            new_lines[i] = format!("{key}: {value}");
+            let mut out = new_lines.join("\n");
+            if text.ends_with('\n') {
+                out.push('\n');
+            }
+            Some(out)
+        }
+    }
+}
+
 /// Insert `key: value` as a new line at the END of `text`'s YAML frontmatter block (immediately
 /// before the closing `---`/`...`), returning the new text — or `None` when `text` has no
 /// frontmatter block at all (nothing safe to insert into). Preserves every other byte of the file
@@ -5024,6 +5182,24 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
         .filter(|p| !(p.is_file() && is_index_file(p)))
         .cloned()
         .collect();
+    // ENFORCE-AND-AUTOFIX, not just report (owner directive 2026-08-27, TRDD-RY0IJBJI: "make
+    // memgrep enforce this and autofix this always, no exceptions"). Reconciliation used to be
+    // reachable ONLY from the write path, so a page nobody wrote kept a one-sided
+    // `publish-globally`/symlink state indefinitely and lint merely re-named it every sweep — the
+    // invariant was maintained by traffic rather than enforced. Lint is the only verb that visits
+    // unwritten pages, so it is where "always" has to live.
+    //
+    // Ordered BEFORE violation collection so the pass reports what REMAINS, not what it just fixed
+    // — a lint that named findings it had already repaired would train the reader to ignore it.
+    // Best-effort per page: a read-only checkout still lints, it just cannot fix (the errors are
+    // swallowed by `normalize_page_until_clean`'s own callers-can't-fail contract below).
+    // NOTE the argument to `collect_md`: `paths` here are usually DIRECTORIES (linting a scope
+    // root), so iterating them directly and testing `is_file()` would normalize nothing in the
+    // common case. It must be the EXPANDED page list, the same one the violation pass walks below.
+    let _ = reconcile_user_symlink_root();
+    for p in collect_md(&paths, hidden) {
+        let _ = normalize_page_until_clean(&p);
+    }
     // Every named path was a non-page ⟹ nothing to lint. Returning early is load-bearing: an EMPTY
     // slice makes `collect_md` default to `["."]`, so falling through would silently lint the whole
     // current directory instead of the file the caller named.
@@ -10972,10 +11148,78 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert_eq!(classify_publish_globally(true, false, false), None);
     }
 
-    // ── `memgrep lint`: read-only reporting, never mutates ───────────────────────────────────
+    /// OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI): creating a page at `--scope public-project` must
+    /// produce the frontmatter flag AND the USER-root symlink "AUTOMATICALLY AT THE SAME TIME".
+    ///
+    /// The "same time" is not a coincidence of ordering — it is structural. `new-page` emits
+    /// `publish-globally: true` into the frontmatter BEFORE handing the bytes to
+    /// `atomic_write_page`, whose reconciliation then sees `TrueNoSymlink` and creates the link
+    /// inside that same call. There is no window in which the page exists published-but-unlinked.
+    #[test]
+    fn new_page_public_project_creates_the_flag_and_the_symlink_in_one_write() {
+        let scope = edit_test_tmpdir("newpage-public");
+        let memdir = scope.join(".claude/project/memory");
+        std::fs::create_dir_all(&memdir).unwrap();
+        let page = memdir.join("p.md");
+        let user_root = edit_test_tmpdir("newpage-public-user");
+        std::fs::create_dir_all(&user_root).unwrap();
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let desc: String = (1..=20).map(|i| format!("phrase number {i} here")).collect::<Vec<_>>().join(" / ");
+        let res = cmd_new_page_cli(&[
+            "--path".into(), page.display().to_string(),
+            "--tier".into(), "component".into(),
+            "--name".into(), "p".into(),
+            "--description".into(), desc,
+            "--type".into(), "reference".into(), // deliberately NOT `project` — scope != type
+            "--scope".into(), "public-project".into(),
+        ]);
+
+        let text = std::fs::read_to_string(&page).unwrap_or_default();
+        let link_resolves = user_root
+            .join("p.md")
+            .canonicalize()
+            .ok()
+            .zip(page.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert!(res.is_ok(), "new-page --scope public-project failed: {res:?}");
+        assert!(
+            text.contains("publish-globally: true"),
+            "the flag must be written by --scope public-project — got: {text}"
+        );
+        assert!(
+            link_resolves,
+            "…and the USER-root symlink must exist ALREADY, created by the same write — never \
+             deferred to some later reconciliation"
+        );
+        assert!(
+            text.contains("type: reference"),
+            "publication scope must not overwrite the CONTENT class — got: {text}"
+        );
+    }
+
+    // ── `memgrep lint`: ENFORCES and AUTOFIXES, then reports what REMAINS ────────────────────
+    //
+    // CONTRACT CHANGED 2026-08-27 by owner directive (TRDD-RY0IJBJI): "make memgrep enforce this
+    // and autofix this always, no exceptions". These three tests previously asserted the opposite
+    // — that lint is a pure reporter that never writes. That was the whole defect: reconciliation
+    // was reachable only from the write path, so a page nobody wrote kept a one-sided
+    // `publish-globally`/symlink state forever while lint re-named it every sweep. Lint is the only
+    // verb that visits unwritten pages, so "always" has to live here. Each test now proves the
+    // state is REPAIRED and the finding consequently ABSENT.
 
     #[test]
-    fn lint_reports_missing_field_as_warn_and_never_writes_to_disk() {
+    fn lint_missing_field_is_autofixed_and_therefore_not_reported() {
         let (scope, page) = pubglobal_project_page("lint-missing", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("lint-missing-user");
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
@@ -10993,15 +11237,26 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
 
-        assert_eq!(before, after, "lint must never mutate the page");
-        assert!(!user_root.join("p.md").exists(), "lint must never create the symlink either");
-        let hit = v.iter().find(|(.., c)| *c == "publish-globally-missing");
-        assert!(hit.is_some(), "expected a publish-globally-missing finding; got: {v:?}");
-        assert_eq!(hit.unwrap().0, Severity::Warn);
+        assert!(
+            !before.contains("publish-globally:"),
+            "precondition: the page started with no field at all — got: {before}"
+        );
+        assert!(
+            after.contains("publish-globally: false"),
+            "lint reconciles the missing field to `false` (no symlink ⇒ no evidence of intent) — got: {after}"
+        );
+        assert!(
+            !user_root.join("p.md").exists(),
+            "…and does NOT publish it: defaulting to false must never create a symlink"
+        );
+        assert!(
+            !v.iter().any(|(.., c)| *c == "publish-globally-missing"),
+            "the finding must be ABSENT — lint fixed it before reporting; got: {v:?}"
+        );
     }
 
     #[test]
-    fn lint_reports_true_without_symlink_as_error() {
+    fn lint_true_without_symlink_is_autofixed_by_creating_the_symlink() {
         let (scope, page) = pubglobal_project_page("lint-true-nosym", PUBGLOBAL_PAGE_TRUE);
         let user_root = edit_test_tmpdir("lint-true-nosym-user");
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
@@ -11010,6 +11265,12 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
 
         let v = lint_paths(std::slice::from_ref(&page), false);
+        let link_now_resolves = user_root
+            .join("p.md")
+            .canonicalize()
+            .ok()
+            .zip(page.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
 
         unsafe {
             std::env::remove_var("MEMGREP_USER_MEM_ROOT");
@@ -11017,13 +11278,19 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
 
-        let hit = v.iter().find(|(.., c)| *c == "publish-globally-not-symlinked");
-        assert!(hit.is_some(), "expected a publish-globally-not-symlinked finding; got: {v:?}");
-        assert_eq!(hit.unwrap().0, Severity::Error);
+        assert!(
+            link_now_resolves,
+            "lint creates the missing symlink so the page is actually reachable from USER recall \
+             as its `true` already claimed"
+        );
+        assert!(
+            !v.iter().any(|(.., c)| *c == "publish-globally-not-symlinked"),
+            "the finding must be ABSENT — lint fixed it before reporting; got: {v:?}"
+        );
     }
 
     #[test]
-    fn lint_reports_false_with_symlink_as_a_conflict_error_and_leaves_it_alone() {
+    fn lint_false_with_symlink_conflict_is_autofixed_by_flipping_the_flag() {
         let (scope, page) = pubglobal_project_page("lint-conflict", PUBGLOBAL_PAGE_FALSE);
         let user_root = edit_test_tmpdir("lint-conflict-user");
         pubglobal_make_symlink(&user_root, &page);
@@ -11033,6 +11300,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
 
         let v = lint_paths(std::slice::from_ref(&page), false);
+        let after = std::fs::read_to_string(&page).unwrap();
         let link_survives = user_root.join("p.md").symlink_metadata().is_ok();
 
         unsafe {
@@ -11041,10 +11309,20 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
 
-        let hit = v.iter().find(|(.., c)| *c == "publish-globally-conflict");
-        assert!(hit.is_some(), "expected a publish-globally-conflict finding; got: {v:?}");
-        assert_eq!(hit.unwrap().0, Severity::Error);
-        assert!(link_survives, "lint must never delete the conflicting symlink");
+        assert!(
+            after.contains("publish-globally: true") && !after.contains("publish-globally: false"),
+            "the flag is reconciled UP to the symlink's evidence of intent, replacing the old \
+             `false` line rather than duplicating the key — got: {after}"
+        );
+        assert!(
+            link_survives,
+            "the symlink is STILL never deleted — this half of the old contract survives, because \
+             another project may already link to this page"
+        );
+        assert!(
+            !v.iter().any(|(.., c)| *c == "publish-globally-conflict"),
+            "the finding must be ABSENT — lint resolved it before reporting; got: {v:?}"
+        );
     }
 
     // ── `normalize_page_until_clean`: the four fixes ─────────────────────────────────────────
@@ -11125,7 +11403,13 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     }
 
     #[test]
-    fn normalize_never_auto_resolves_the_false_plus_symlink_conflict() {
+    /// OWNER DIRECTIVE 2026-08-27 (TRDD-RY0IJBJI) REPLACED THIS TEST'S CONTRACT. It used to assert
+    /// that `false` + symlink was terminal — detected in ONE pass, page untouched, link kept. The
+    /// owner's rule is that the two halves may never disagree and reconciliation is unconditional,
+    /// so the conflict now RESOLVES: the symlink is evidence of publish intent, so the flag follows
+    /// it to `true`. The link is still never deleted (another project may already depend on it) —
+    /// that half of the old contract survives and is still asserted below.
+    fn normalize_resolves_the_false_plus_symlink_conflict_by_flipping_the_flag_to_true() {
         let (scope, page) = pubglobal_project_page("norm-conflict", PUBGLOBAL_PAGE_FALSE);
         let user_root = edit_test_tmpdir("norm-conflict-user");
         pubglobal_make_symlink(&user_root, &page);
@@ -11145,9 +11429,20 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
 
-        assert_eq!(passes, 1, "the conflict is detected and left alone in a SINGLE pass — never iterated on");
-        assert_eq!(before, after, "a conflict page is never rewritten");
-        assert!(link_survives, "a conflict's symlink is never deleted either");
+        assert_eq!(passes, 2, "one fixing pass (flip the flag) + one confirming pass");
+        assert!(
+            before.contains("publish-globally: false"),
+            "precondition: the page started out explicitly false — got: {before}"
+        );
+        assert!(
+            after.contains("publish-globally: true"),
+            "the flag is reconciled UP to the symlink's evidence of intent — got: {after}"
+        );
+        assert!(
+            !after.contains("publish-globally: false"),
+            "the old `false` line is REPLACED, never left behind as a duplicate key — got: {after}"
+        );
+        assert!(link_survives, "the symlink is still never deleted — another project may depend on it");
     }
 
     // ── idempotency: no mtime churn on an already-normal page ───────────────────────────────
