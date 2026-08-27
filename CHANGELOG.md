@@ -2,7 +2,134 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.4.0] — 2026-08-26
+## [3.4.0] — 2026-08-27
+
+### Bug Fixes
+
+- **rules:** Keep the shipped-rules corpus under the context floor cap (1be465c)
+- **oauth-rotator:** Slot_capture_browser had no PEP-723 header — capture could never run (41ccc80)
+- **cold-cache-clear:** Keep the watcher's verdict lines instead of discarding them (TRDD-UQW5IOAE) (5ecf47f)
+- **harness:** A degenerate cached workdir must never own the whole machine (TRDD-AM8JD9SG) (e65ced5)
+- **daemon:** Escalate a decline that has been unchanged for an hour (TRDD-FB84YUGT) (feddf82)
+- **trdd:** Five cards carried timestamps I invented, all in the future (ddd2ea2)
+- **project-map-drift:** The deferral advice rested on a measured-false cost claim (e7f7742)
+- **rotator:** Cookie-leg-stuck sent the owner past the cookie to a full re-login (12a8fc1)
+- **librarian:** An atom link is not a missing page (TRDD-JKJHV19B) (60cd201)
+- **TRDD-6054NY8H:** The deadline was void — measured, and it cost the owner a false alarm (85469ec)
+- **TRDD-6054NY8H:** My own probe regex was fail-open, and I quoted a 7.5h-latched alert as current (99ab082)
+- **TRDD-RSSN9A0P:** SPLITBRAIN would have cried wolf on the normal path — now abstains, and says so (f0eeb32)
+- **TRDD-AO8MPK5D:** Publish-globally is the write path's job, and the skill was naming the wrong discriminator (efad7a9)
+- Repair skill exceeded the 5000-token cap; correct an overstated memory claim (3742bee)
+- Document --scope in the spec, and widen a fixture the stale binary had been shielding (7c0bcfb)
+- Devitalize five CPV false positives that blocked the publish (282a39c)
+- The SSTI trigger was the identifier, not the braces — rename template→pattern (864652f)
+- Tests must never write a Claude-reserved env var — MEMGREP_PROJECT_DIR test override (a03ab21)
+- Clear the last demoted NITs blocking publish — separate, reword, and diagnose by leave-one-out (28ff1b5)
+
+### Documentation
+
+- Add TRDD-MF10XF87 (janitor-reload false fires) and raise TRDD-A8DPTDOU to a false-recovery defect (eade2d7)
+- **TRDD-437UHNFS:** The enrich chore cannot drain its own backlog — measured (9e5ffe2)
+- **TRDD-MF10XF87:** Reproduced the reload false-fire — and it is worse than reported (c6de3f1)
+- **TRDD-437UHNFS:** PROJECT drained, card to blocked pending an owner call (49a1b2e)
+- **TRDD-5RXBI65T:** The handoff fix is in the repo and on NO machine (111350b)
+- **TRDD-1QJIZFFW:** Box 2 is unreachable until 3.4.0 installs — dev to blocked (428c3a5)
+- **board:** Two testing cards were not being tested — per-card judgment, not a sweep (36b9bc4)
+- **TRDD-FB84YUGT:** Investigated — hypothesis 2 wins, and the card's measurement was wrong (a5fff1c)
+- **TRDD-FB84YUGT:** The stall detector already exists — do not build it; file TRDD-SR7887LF (4406359)
+- **TRDD-SR7887LF:** Corrected — probably not a defect, and the corpus already said so (21cacbf)
+- **TRDD-79LXF6PJ:** 'Not started' was wrong — both concrete asks already landed (4800426)
+- **TRDD-7NSRD8OV:** Harvest block already fixed — discharge next-action 2, verified in two steps (1816679)
+- **TRDD-UQW5IOAE:** Testing -> todo — there is no soak to be in the middle of (db90106)
+- **TRDD-9T0U3M00:** Testing -> blocked, and fill the empty implementation-commits (de0cd2a)
+- **board:** Last two testing cards re-columned — the testing column is now empty (742d6aa)
+- File TRDD-3UX67NT5 — implementation-commits empty on 12+ cards, and do NOT script the fix (b9afcb0)
+- **janitor-memory-enrich:** Name the 'no claimable dispatch' outcome explicitly (3417047)
+- **TRDD-A8DPTDOU:** Root cause was a missing dependency, not the alert layer (4e141dd)
+- **memory:** Lesson — read the peer's board first; pin the contract to the shared DATA (a01b549)
+- **memory:** Grep-first is now a BILATERAL protocol, not a private habit (a9a83b9)
+- **A8DPTDOU:** The peer's all-maxed is a model-window verdict, not a credential one (87d2a8b)
+- **A8DPTDOU:** Unknown is a third value, not the negative (3defbb2)
+- **UQW5IOAE:** Reason (3) closed, (1) and (2) are the owner's trade (7cbc92f)
+- **FB84YUGT:** The guardian was not silent on 08-23 — it declined, correctly (db254d8)
+- **LFSWY0C6:** The semantic queue is empty; the defect is a MOMENT problem (750d082)
+- 87RKBYJ8's four children are all terminal; file TRDD-63WVIWB4 (2d4d251)
+- **AM8JD9SG:** F11 is firing 275 times and its mitigation covers 0 of 20 roots (9c094ec)
+- **56d24c02:** Daemon gate satisfied, but F7's precondition is now measurably unmet (2aa54c7)
+- **AM8JD9SG:** F11 answered NO — the rearms are load-bearing, and the offered fix was a fleet-wide disarm (d9f938a)
+- **AM8JD9SG:** F12 — esc_nudge blast radius measured; my own flag was overstated (3aa531b)
+- Add TRDD-A70YJLXN — plugin update is prompt under one daemon, eventual under the other (28fc739)
+- **A70YJLXN:** Correct both of my claims — the server DOES update, and my 36h was a bad instrument (9eae04e)
+- **A70YJLXN:** Neither lane installed 3.3.26 — proven from both sides; option 4 reframed (0c1a966)
+- **A70YJLXN:** The two silent failures are silent differently — only one is ours to see (ad55632)
+- **MF10XF87:** RETRACT the reproduction — the probe was broken, the detector was right (314dfae)
+- **MF10XF87:** A DECLINED reload marker still advances the ack — staleness goes silent (7ecb1dd)
+- **87RKBYJ8:** Split the remaining six duty rows into their own TRDDs (8db40ee)
+- **3UX67NT5:** Fill implementation-commits on six cards, per-card and by reading (040e337)
+- **3UX67NT5:** Re-run the sweep — 28 candidates, 7 real, 1 rejected on its file list (fd1b43b)
+- **3UX67NT5:** Box 2 was already built — and its residual gap is the JPL0JU86 case (a13e46a)
+- **JKJHV19B:** Candidate query built and run — 10 link defects fixed, 72 were prose (14ddbdb)
+- **JKJHV19B:** Box 2 decided — half of box 1's dangling list was not dangling (143eab7)
+- **JKJHV19B:** Amend box 4 — the fixture from the duty text passes on a broken pass (e522554)
+- **7NSRD8OV:** Testing -> blocked; the column claimed work nobody was doing (93ef66b)
+- **A70YJLXN:** The USER already excluded option 3; two janitor-side boxes verified (6724801)
+- Add TRDD-KHM8XOYN — enumerate exec-from-agent-writable-input sites (d2b3c16)
+- **KHM8XOYN:** Enumeration done — and it corrected this card's own two guesses (f14649b)
+- **LFSWY0C6:** The re-scope rests on a cost premise this repo contradicts (da94bf3)
+- **LFSWY0C6:** MEASURED — a mid-session CLAUDE.md edit does not bust the cache (9c980d2)
+- **56d24c02:** Todo -> blocked — this column was an invitation to arm a kill (0fc2d3c)
+- **56d24c02:** The kill path has no input-field guard — the FB84YUGT incident becomes a kill (d17c998)
+- **AM8JD9SG:** Close F11 as answered-and-escalated; narrow F7 to its real population (01a7854)
+- **QDYQLM5V:** A second fixture — and it wants the OPPOSITE verdict to the first (7211f20)
+- **memory:** Record the measured triage of a 71-finding lint run (fe42ef5)
+- **memory:** The burn alarm is DEFAULT OFF by owner directive — not a dead detector (6f9c005)
+- **AR9IUGIJ:** Its 68 dead-symbol findings are a line-wrap artifact, not rot (8e4a42d)
+- **memory:** A recent HIGH in the findings ledger is not evidence it is still live (78ca606)
+- **6054NY8H:** Clock is 3.15 days — and this card's own deliverable never reached the user (de96038)
+- **6054NY8H:** The ask on the owner is smaller than this card said (1c3e40d)
+- **memory:** Mtime freshness is not content freshness (ATOM-QP4H-ZY1H) (baeabcf)
+- **6054NY8H:** RETRACT the Fable claim — I quoted a frozen alert string as a measurement (9d7819e)
+- **6054NY8H:** The retraction sat BELOW the claim it retracts (e720c54)
+- **JPL0JU86:** A second population the same mechanism would serve, priced (05797a7)
+- **arm,FB84YUGT,KHM8XOYN:** Armed is not firing; close the exec enumeration (3b58d64)
+- **memory:** The orphaned index.lock subsystem had no memory note (afc279c)
+- **memory:** Why a nudge on a QUIET subsystem is higher signal, not lower (5320656)
+- Add TRDD-AO8MPK5D — the repair gate cannot see publish-globally-missing (bb83422)
+- **AO8MPK5D:** The operative cause is the SCOPE gate, not the predicate (0e5c83b)
+- **memory:** No chore runs on PROJECT scope — the missing half of janitor#276 (e55dfc1)
+- **memory,AO8MPK5D:** The PROJECT-gate finding was not new — LFSWY0C6 had it (3605eeb)
+- **TRDD-6054NY8H:** The probe grammar is two-valued, so it cannot express could-not-run (b3929fc)
+- Add TRDD-RSSN9A0P — the two daemons DO share one credential store; one silent fallback can desync them (30c27b7)
+- **TRDD-RSSN9A0P:** Cookie vault settled janitor-private, with a derivable staleness marker (5e097db)
+- Redact the owner's account addresses from tonight's two cards (103a7e4)
+- **TRDD-AO8MPK5D:** Close as complete — option 2, rejection recorded in code (efad7a99) (256f62a)
+- Park W8KDPT2M and V5RXQ4NB with review-after, clearing two trdd-drift false positives (d7f4a67)
+- **memory:** Record why publish-globally must never enter repair_defect (TRDD-AO8MPK5D) (a0ce357)
+
+### Features
+
+- **memory:** Add the enrich chore — recall-surface backfill (TRDD-437UHNFS) (6fa8b6c)
+- **cold-cache-clear:** Shadow mode, so the disabled lane finally records verdicts (TRDD-UQW5IOAE) (707b554)
+- **TRDD-RSSN9A0P:** A real probe for the root-desync, and honest strength on the sharing claim (c0faf1a)
+- **TRDD-RSSN9A0P:** The probe as a real script, and the delete-trap this card was creating (1f46dab)
+- **TRDD-RSSN9A0P:** Withdraw the marker I specified on a false premise; add SPLITBRAIN (dae73b5)
+- **TRDD-RY0IJBJI:** Publish-globally and its symlink are one fact — memgrep now enforces it always (3343250)
+- Scope paths are ~/-relative templates with project symbols; new-page derives its path (2e801df)
+- Librarians reach PROJECT scope too — edit_project_scope defaults True (fad61da)
+
+### Miscellaneous Tasks
+
+- **memory:** Widen the recall surface on 3 PROJECT pages (TRDD-437UHNFS probe) (ac9b56d)
+- **memory:** Widen the recall surface on 16 more PROJECT pages (TRDD-437UHNFS) (4612f82)
+- **memory:** Enrich 10 PROJECT pages — atoms + descriptions (TRDD-437UHNFS) (0e833a2)
+- **memory:** PROJECT scope drained — 256 recall-surface errors to 0 (TRDD-437UHNFS) (7f601fb)
+- **CLAUDE.md:** Refresh the wikimem index — stale since 2026-08-21 (320a87c)
+- **memory:** Reconcile 29 PROJECT pages and top up eight atoms' recall keywords (e6e2c9f)
+
+### Testing
+
+- **harness:** Pin the prefix SHAPE at root_under_agents_home; no guard needed there (73e73fc)
+## [3.4.0] — 2026-08-27
 
 ### Bug Fixes
 
@@ -210,6 +337,7 @@ All notable changes to this project will be documented in this file.
 - Refresh the stale wikimem index; record LFSWY0C6's five-day recurrence (62d72d0)
 - Bump version to 3.4.0 (e6b3fde)
 - Bump version to 3.4.0 (97a2008)
+- Bump version to 3.4.0 (e67f376)
 
 ### Performance
 
