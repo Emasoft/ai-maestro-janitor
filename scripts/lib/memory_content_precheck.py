@@ -689,6 +689,46 @@ def _footer_heading_line(text: str) -> int | None:
 # arbiter cannot disagree. Tracked as the endgame on janitor#260.
 
 
+# REJECTED, and recorded so it is not re-attempted (TRDD-AO8MPK5D, decided 2026-08-27).
+#
+# `memgrep lint` emits `publish-globally-missing` (29 PROJECT pages at the time of writing) and
+# the repair skill's checklist used to claim that defect. This predicate has no check for it, so
+# such a page is invisible to the gate AND absent from the candidate list. That looks like the
+# janitor#227 parity hole, and the obvious fix is to widen the signature — `repair_defect(text,
+# path=None)` or `(text, scope=None)` — and mirror memgrep's PROJECT test. Do not. Three reasons,
+# each independently sufficient:
+#
+# 1. TEXT CANNOT DECIDE IT, EVEN WITH THE PATH. `publish_globally_state` (memory.rs:4878) reads
+#    FILESYSTEM state — `has_symlink = symlink_resolves_to(user_root/<file>, page_abs)` — and
+#    splits "field missing" into TWO issues on it: `MissingDefaultFalse` (no symlink → write
+#    `false`) vs `MissingSymlinkImpliesTrue` (symlink present → write `true`). A predicate that
+#    sees only text+path cannot tell those apart, so it would flag a page and hand the agent a
+#    50/50 guess whose wrong branch silently UN-PUBLISHES a deliberately published page. Adding
+#    it would buy the APPEARANCE of gate/arbiter parity for a rule family the gate structurally
+#    cannot own — worse than the honest gap, because the next reader would stop looking.
+#
+# 2. THE DISAGREEMENT RUNS IN THE SAFE DIRECTION. janitor#227 loops because it is gate-LOUD and
+#    arbiter-CLEAR: dispatch fires, the agent finds nothing, it re-dispatches forever. This one is
+#    gate-SILENT and lint-loud, so it can never cause a dispatch and therefore can never loop or
+#    burn a token. It is a coverage shortfall, not the #227 class. Do not reason about it as if
+#    the two were the same bug wearing different hats.
+#
+# 3. IT SELF-HEALS, BY DESIGN. `atomic_write_page` (memory.rs:2526) is the SOLE choke point every
+#    memgrep write verb funnels through, and it runs `normalize_page_until_clean` before AND after
+#    every write, unconditionally (owner directive — no opt-in flag). The flagged pages are simply
+#    pages nothing has written since the field was introduced; each fixes itself on its next write.
+#
+# And the shape that looks cleanest is the one that breaks a deliberate invariant: gating on a
+# `scope=None` default would make this the FIRST None-path in this module that SUPPRESSES a real
+# finding. `repair_has_work` (~:840) goes out of its way the other way — `if scope is None: return
+# True  # cannot read the ledger ⇒ never suppress`. Fail-OPEN is the house posture; a scope-gated
+# skip would be fail-CLOSED and would look identical to a clean corpus.
+#
+# EARLY SIGNAL THAT THIS DECISION WENT STALE: the `publish-globally-missing` count GROWING across
+# releases rather than shrinking. That would mean pages are being written OUTSIDE the choke point
+# (raw Edit-tool writes to PROJECT memory), which is a much bigger bug than the field itself.
+
+
 def repair_defect(text: str) -> str:
     """The SINGLE-SOURCE repair-candidacy predicate (janitor#227): return the SHORT,
     stable reason slug for the FIRST structurally-detectable defect this page exhibits
