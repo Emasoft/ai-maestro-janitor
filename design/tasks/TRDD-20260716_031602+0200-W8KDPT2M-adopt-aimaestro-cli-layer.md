@@ -2,8 +2,9 @@
 trdd-id: W8KDPT2M
 title: Adopt the AI Maestro control-monitor-task CLI layer for all fleet operations
 column: backburner
+review-after: 2026-10-26
 created: 2026-07-16T03:16:02+0200
-updated: 2026-07-16T03:16:02+0200
+updated: 2026-08-27T13:37:28+0200
 current-owner: janitor-session
 task-type: infra
 scope: project
@@ -32,6 +33,19 @@ that is its IND design point).
 **Why backburner:** cross-project integration epic — needs the CLI layer verified deployed +
 stable on this machine, an inventory of janitor call-sites, and a per-call-site mapping table
 BEFORE any code. Not blocking anything the janitor does today.
+
+**PARKED `review-after: 2026-10-26` (2026-08-27).** `trdd-drift` had been flagging this at 42d
+idle every sweep. The idleness is real and correct — the epic's own first precondition (CLI
+layer verified deployed + stable here) is not something this card can advance on its own — so
+the nag was a false positive of the kind that trains a reader to ignore the detector. This is a
+SNOOZE, not a mute: it expires by itself.
+
+**Its real gate is TRDD-AM8JD9SG** (`ai-maestro harness preparedness audit`, currently `todo`) —
+that audit is what establishes whether the CLI layer is deployed and stable on this machine,
+which is precondition #1 above. If AM8JD9SG lands before the review date, pull this card then
+rather than waiting out the snooze. If the date expires with AM8JD9SG still unstarted, the
+decision to make is whether an XL cross-project epic with no local consumer should stay on the
+board at all.
 
 ## NEXT ACTION
 1. Inventory: grep the janitor for every fleet/AMP/server touchpoint; produce the call-site →

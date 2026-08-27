@@ -2,8 +2,9 @@
 trdd-id: V5RXQ4NB
 title: Rotator keychain READ re-prompts — the app resets the credentials item partition list on every token refresh
 column: backburner
+review-after: 2026-10-12
 created: 2026-07-16T03:16:02+0200
-updated: 2026-07-16T03:16:02+0200
+updated: 2026-08-27T13:37:28+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
