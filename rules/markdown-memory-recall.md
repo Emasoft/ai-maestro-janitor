@@ -138,10 +138,10 @@ reason not to hand-author). Full field grammar + supersession: the FULL REFERENC
 near-synonym or hedge beside a wrong fact — safe: verbs SUPERSEDE, never overwrite. The real
 failure is a known-false fact nobody corrected.
 
-Never hand-author wikimem markdown — use the write verbs (`new-page`/`add-atom`/`add-lesson`/
-`migrate`/`edit`); correct a wrong fact with `add-lesson --supersedes`, SAME id. Run `memgrep
-validate <page> && memgrep lint <page>` after EVERY edit. Verb flags, supersession/travel, and
-why collaboration is safe: the FULL REFERENCE above.
+Never hand-author wikimem markdown — use the write verbs (`new-mem-{topic,atom}
+update-mem-{topic,atom[--lesson]} migrate-mem-atom {delete,merge,split,reference}-mem-{topic,atom}`);
+fix a fact with `update-mem-atom --lesson --supersedes`, SAME id. Run `memgrep validate <page> &&
+memgrep lint <page>` after EVERY edit. Detail: the reference above.
 
 **CONCURRENT EDITING.** Write verbs are scope-LOCKED + CAS-guarded; edit pages ONLY via memgrep
 verbs or the Edit tool, never raw shell. On a "changed since enqueued" refusal: re-read,

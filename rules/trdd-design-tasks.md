@@ -79,7 +79,7 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
 6. **`column:` is the state machine.** v2 moved pipeline state here from v1's `status:` (not
    retired — specs carry `status: normative`): the residue is a **VALUE, never the field
    NAME** — never key on the name, `column:` wins, a missing field gets no synthesized value,
-   one pipeline claim per card. The 17-column vocabulary lives in `universal-kanban.md`; the
+   one pipeline claim per card. The 22-column vocabulary lives in `universal-kanban.md`; the
    terminal branch follows `release-via: publish|deploy|none`; `blocked` applies whenever
    `blocked-by:` is non-empty (record `pre-block-column:`, restore when cleared).
 7. **BUMP `updated:` on every edit that CHANGES WHAT THE TRDD ASSERTS** — not just column

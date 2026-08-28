@@ -1,9 +1,9 @@
 ---
 trdd-id: JKJHV19B
 title: Wikimem link integrity — prune stale and duplicate links, resolve dangling ones
-column: todo
+column: backburner
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T22:15:44+0200
+updated: 2026-08-28T06:49:44+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -253,3 +253,21 @@ rule this duty enforces retroactively. Measured 2026-08-26: a peer agent that ha
 own loaded context still wired one end, and `memgrep lint` caught it — evidence that the automated
 half is the reliable half here, and the reason this card should lean on lint's finding set rather
 than on a fresh scanner.
+
+## ⏵ 2026-08-28 — `todo` → `backburner`, with the precondition stated
+
+Re-verified the shipped half FIRST-HAND rather than trusting this card's own claim:
+`_note_slugs` (`scripts/detectors/memory-librarian.py:1364`) does index body-atom anchors AND
+lesson `id:`s, fence-aware, exactly as recorded — and 86 librarian tests pass. So the four live
+false findings this card was really about are gone.
+
+**Why backburner and not todo:** `todo` asserts ready-to-start work. The remaining boxes 3-4 are
+the refusal-ledger pass, and this card's own measurement says the corpus has **zero** candidates
+for it — building a transaction-core pass now would be machinery with no input. That is a
+deliberate park, not a stall.
+
+**PRECONDITION to un-park (the stated one `trdd-drift` honours):** `memgrep links --broken` over
+all three scope roots reports a dangling link that is NOT (a) an `[[ATOM-…]]` whose atom exists,
+(b) the `TRDD-id` prose placeholder, or (c) a forward reference this card already decided to KEEP.
+The first genuine candidate is the signal to start; until then there is nothing to arbitrate.
+

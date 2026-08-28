@@ -1,9 +1,9 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: todo
+column: approval
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-26T11:20:00+0200
+updated: 2026-08-28T07:33:30+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -436,3 +436,22 @@ genuinely open, and is listed rather than quietly closed.
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → todo by janitor-main-session. A WORK column
   asserts active work; nobody was working this (idle 10d). 0/5 acceptance, `blocked-by: []`, no
   external wait — just unstarted. No scope or acceptance changed.
+
+## ⏵ 2026-08-28 — `todo` → `approval`, because the card says so about itself
+
+The card states plainly: *"That is a trade, not a patch, so it is not an agent's call. NEXT ACTION
+on this card is a human decision, not code."* A card whose only remaining step belongs to a human
+does not belong in `todo` — `todo` asserts ready-to-start WORK, and there is none to start.
+`approval` is the 3.0.0 column for exactly this: waiting on an approver, not on an implementer.
+
+**The decision awaiting the owner**, stated so it can be answered without re-reading the card:
+running the disabled path in dry-run per beat, to gather the shadow data that would justify
+enabling it, costs a fleet walk plus a watcher spawn ON EVERY BEAT **while the feature is off** —
+which is precisely the cost `run_once`'s ships-inert early return exists to avoid. So the choice is
+"pay a permanent measurement cost to earn evidence" versus "leave it inert and unmeasured". Reason
+(3) is already DONE (`5ecf47f2`, the audit channel is built and tested); (1) and (2) are the trade.
+
+**Do NOT close this on the 2026-08-14 triage row** — the advisor's DO-NOT-SHIP verdict landed the
+same day and rewrote the acceptance boxes rather than ticking them. That warning predates me and
+still stands.
+

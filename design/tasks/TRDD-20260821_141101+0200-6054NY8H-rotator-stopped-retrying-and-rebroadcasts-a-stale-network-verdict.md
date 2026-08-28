@@ -1,9 +1,10 @@
 ---
 trdd-id: 6054NY8H
 title: The OAuth rotator stopped retrying and re-broadcasts a stale verdict - component ownership unresolved
-column: todo
+column: blocked
 created: 2026-08-21T14:11:01+0200
-updated: 2026-08-27T01:29:25+0200
+updated: 2026-08-28T07:27:03+0200
+blocked-by: [ai-maestro#152]
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -531,3 +532,64 @@ being frozen at one value for 6 h 40 m is the whole finding, and it is invisible
 compare occurrences instead of reading the newest line.
 
 ## Approval log
+
+## ⏵ 2026-08-28 — mechanism RE-VERIFIED in source; the fix is a DESIGN decision, not a patch
+
+Read `scripts/oauth_rotator/rotator.py:2290-2311` directly. The card's account is exact:
+`meta["refresh_failures"] += 1` fires on EVERY failed exchange, and the comment beside it states
+the cause is "purely diagnostic and must NEVER change the escalation counter". So a run of
+transient `network` failures escalates a slot to the human REAUTH nudge identically to a run of
+genuine revocations — which is what produced slot #2's 775 failures on a live credential.
+
+**Why I did NOT patch it in this pass, deliberately.** Making `network` not count is a
+CREDENTIAL-PATH design change with a fail-safe argument on BOTH sides:
+- counting it is fail-SAFE toward noticing a dead credential (never hide a revocation behind a
+  mis-classified cause — which is exactly why that comment exists);
+- not counting it is fail-SAFE toward not burning a live account on a Cloudflare block.
+
+The right shape is probably neither/both: keep ONE counter for "consecutive failures" but gate the
+ESCALATION (not the count) on a re-test of the cited cause — which is what acceptance box 1 asks
+for and what box 2's bounded backoff then resumes from. That is an architectural call on
+credential machinery, and this card already carries SIX corrections from passes that moved faster
+than the evidence. Advisor consult first (`~/.claude/rules/advisor-rules.md`), then implement.
+
+**NEXT ACTION:** consult `fable-advisor:advisor` on the counter-vs-escalation split above, then
+implement boxes 1-3 together (re-test before re-broadcast · self-resuming bounded backoff · a test
+that latches, clears the cause, and asserts recovery). Do NOT split them: a re-test without a
+resume path just moves the latch.
+
+## ⏵ 2026-08-28 — ADVISOR CONSULTED; my proposal was REJECTED; filed upstream as ai-maestro#152
+
+Fable 5 advisor verdict, with both load-bearing claims re-verified by me first-hand before acting.
+
+**It rejected my tentative shape.** I proposed "re-test the cited cause at escalation time".
+Wrong: escalation is not an event, it is `cascade.classify` reading persisted state — deliberately
+PURE, no network, and required to work offline. A live probe inside it breaks both properties.
+And the only probe that discriminates IS a refresh exchange, which the keepalive already runs every
+eligible tick. **The exchange is the re-test; the fix is to PERSIST its verdict**, not to re-run it.
+
+**The design that survives review:**
+1. add `credential_failures` — consecutive judged-dead, reset only on success (ADDITIVE; do not
+   touch `refresh_failures` semantics);
+2. gate escalation on it, falling back to `refresh_failures` when absent (legacy state then fails
+   TOWARD escalation — the safe direction);
+3. `network` FREEZES the escalation counter but still increments the total — NOT reset, because
+   `dead, dead, network, dead…` under reset would never escalate a genuinely dead token;
+4. a cause-blind CEILING (~100 consecutive total failures while network-up) — **verified hole:**
+   `rotator.py:1420` returns `network` for ANY HTTPError that is not 403 and not 400/401 with
+   `invalid_grant`, and `:1423` does the same for URLError/TimeoutError, so a reshaped error body
+   would classify a dead credential as `network` forever and cause-gating alone would hide it.
+   Offline ⇒ network-up false ⇒ ceiling inert ⇒ degrades safely;
+5. the alert carries BOTH counters + last-attempt age (`last_refresh_failure` keeps only the LAST
+   cause, so 774 network + 1 dead currently reads as all-dead).
+
+**WHY THIS CARD IS NOW `blocked`, not `todo`.** The advisor's biggest catch is OWNERSHIP, and I
+verified it: `aim-server/alert:` appears NOWHERE in this repo, so ai-maestro's server owns this
+chore and writes the shared state file. Changing the semantics here alone is split-brain over a
+shared file and fixes nothing while the server owns it. Filed as **ai-maestro#152** with the full
+design; the janitor half follows once ownership is settled.
+
+**Risk to check FIRST if this is ever implemented:** if an at-threshold slot is SKIPPED before the
+keepalive attempts a refresh, no new attempts occur, the new counter never moves, and the whole
+design is inert. Cheapest signal: watch one `>=max` slot's counter across two ticks.
+

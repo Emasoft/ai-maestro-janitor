@@ -931,31 +931,61 @@ USER scope), not scattered into a case page.
 
 <!-- @spec:memgrep-verbs v1 — authoritative; the conformance test extracts the block below verbatim -->
 ```text
-index
-reindex
-validate
-links
-lint
-fact
 recall
+recall-mem-topic
+recall-mem-atom
 find
-find-claude-mem-ref
+overview
 atom
 atom-page
-overview
-add-atom
-new-page
+fact
+links
+find-claude-mem-ref
+find-trdd
+new-mem-topic
+new-mem-atom
 add-lesson
-migrate
-edit
+update-mem-topic
+update-mem-atom
+delete-mem-topic
+delete-mem-atom
+merge-mem-topic
+merge-mem-atom
+split-mem-topic
+split-mem-atom
+reference-mem-topic
+reference-mem-atom
+migrate-mem-atom
+lint
+validate
+index
+reindex
 ```
+
+`WM-CLI-14` **legacy-renames** — `new-page`→`new-mem-topic`, `add-atom`→`new-mem-atom`,
+`edit`→`update-mem-topic`, `migrate`→`migrate-mem-atom`. A legacy spelling still dispatches
+(`dispatch_key()` in main.rs resolves it onto the replacement BEFORE the match statement runs) and
+prints a one-time stderr deprecation notice — stderr, never stdout, because a caller script that
+parses stdout (an atom id out of `add-atom`'s output, say) must not have that output corrupted by
+the notice. `add-lesson` is NOT one of these: nothing in `dispatch_key()` maps it away, so it
+stays a first-class, non-deprecated verb (WM-CLI-16 folds its behaviour into `update-mem-atom
+--lesson` as an ALTERNATE invocation, not a replacement — both remain live).
+`recall-mem-topic`/`recall-mem-atom` are likewise NOT legacy — they are non-deprecated named
+spellings of `recall`'s two hops (WM-CLI-15), never warned about.
 
 `WM-CLI-02` **read-verbs** — `recall` (rank by symptom), `find` (keyword DSL: `+must`,
 `-exclude`, `"exact phrase"`, wildcards; `--only-notes` searches the lessons), `fact`, `atom`,
-`atom-page`, `links`, `overview`, `find-claude-mem-ref`. Reads are free of side effects.
+`atom-page`, `links`, `overview`, `find-claude-mem-ref`, `find-trdd`. Reads are free of side
+effects.
 `recall` and `find` carry the layered-output surface — `--output basic|medium|full` (default
 `basic`), `--with-keywords`, `--with-notes`/`--no-notes` — and `recall <ATOM-ID>` is the exact
 second hop. See WM-RCL-06/07/08, which own the contract.
+
+`WM-CLI-15` **recall-hop-spellings** — `recall-mem-topic` and `recall-mem-atom` are the SAME code
+path as `recall` (one `main.rs` match arm, three patterns), not legacy aliases: they let a caller
+SAY which hop it means instead of relying on the shape of the query to imply it.
+`recall-mem-topic <QUERY>` is hop 1 (rank PAGES by a symptom phrase); `recall-mem-atom <ID>` is
+hop 2 (print ONE atom in full). Both accept every flag `recall` does.
 
 `WM-CLI-02a` **superseded-excluded-by-default** — `recall` and `find` `MUST` omit atoms marked
 `status:superseded` from their results unless `--include-superseded` is passed. A superseded atom
@@ -963,10 +993,34 @@ is retained deliberately (the correction protocol demotes, never deletes — WM-
 something that is NO LONGER TRUE; surfacing it beside live atoms is how a reader acts on a fact
 the corpus already retracted. The flag exists for auditing the retraction history itself.
 
-`WM-CLI-03` **write-verbs-synthesise-syntax** — `new-page` (valid frontmatter + mandatory Notes
-section; refuses to overwrite), `add-atom` (`--desc` stored QUOTED ≤200 chars; id/dates/syntax
-synthesised so a malformed atom is impossible), `add-lesson` (anchors `[^N]` from the atom
-body; DO-NOT/BECAUSE/DO on stdin).
+`WM-CLI-03` **write-verbs-synthesise-syntax** — `new-mem-topic` (was `new-page`; valid frontmatter
++ mandatory Notes section; refuses to overwrite), `new-mem-atom` (was `add-atom`; `--desc` stored
+QUOTED ≤200 chars; id/dates/syntax synthesised so a malformed atom is impossible), `add-lesson`
+(anchors `[^N]` from the atom body; DO-NOT/BECAUSE/DO on stdin).
+
+`WM-CLI-17` **trdd-backlink-is-optional-and-warned** (TRDD-YMDE95LT) — an atom `MAY` carry a
+`trdd:` block-prop naming the TRDD that produced it, in the canonical `TRDD-XXXXXXXX` spelling.
+`new-mem-atom --trdd` and `update-mem-atom --trdd` accept it in any sanctioned spelling
+(`TRDD-XXXXXXXX`, `#XXXXXXXX`, bare 8 base36 chars, any case) and `MUST` canonicalise before
+storing; an unparseable citation `MUST` be refused rather than stored, because a backlink to a
+card that cannot exist sends the reader hunting for a file that was never there. Its ABSENCE
+`MUST` warn on stderr and `MUST NOT` fail the write: the corpus predates the field, so a gate
+would refuse every write on every page until a mass migration ran, and adoption is designed to
+ACCRETE (each new atom carries one; `update-mem-atom --trdd` back-fills an old one).
+`update-mem-atom` `MUST` preserve an existing backlink when the flag is omitted, and
+`split-mem-atom` `MUST` copy the source atom's backlink onto the new half — both halves came out
+of the same decision, and dropping it would un-source half the corpus every time a chore
+decomposed an oversized atom. `find-trdd <TRDD-ID> [PATHS]` is the reverse hop (WM-CLI-18).
+
+`WM-CLI-18` **find-trdd** (TRDD-YMDE95LT) — `memgrep find-trdd <TRDD-ID> [PATHS]` lists every atom
+whose `trdd:` cites that card, one `<page-rel-path>#<atom-id>\t<stored-citation>` per line, sorted
+and deduped. Matching canonicalises BOTH sides, so the spelling the writer happened to use cannot
+change the answer. It is a LIVE walk with no index fast path — the query is occasional, and an
+`atoms.trdd` column would cost a schema version whose migration clears the file ledger and forces
+a full re-parse of every corpus on the machine. Its purpose is the first hop of the
+`commit-discipline.md` provenance chain, traversed BACKWARD: given a decision, which facts did it
+put into the corpus — so a superseding card can enumerate the atoms still asserting the old
+answer instead of recalling by symptom and hoping they surface.
 
 `WM-CLI-11` **write-concurrency-gate** (TRDD-7YHT3FNK) — EVERY write verb `MUST` hold the
 scope's write lock for the whole read→modify→write, and `MUST` accept an optional
@@ -980,61 +1034,160 @@ concurrent writers serialise rather than fail. When `--base-sha256` is supplied 
 page's hash differs at lock-acquisition time, the verb `MUST` write nothing and fail with
 EXACTLY: `The content of the wikimem file changed since your command was enqueued. Please reread
 the file first.` Verbs invoked WITHOUT the flag are still lost-update-safe, because their read
-now happens under the lock. `migrate` locks BOTH scopes, ordered by lock path, so two migrations
-in opposite directions cannot deadlock.
+now happens under the lock. `migrate-mem-atom` locks BOTH scopes, ordered by lock path, so two
+migrations in opposite directions cannot deadlock.
 
-`WM-CLI-12` **edit-is-the-replace-primitive** (TRDD-7YHT3FNK) — `memgrep edit --page <PAGE>
---old-file <F1> --new-file <F2>` is the sanctioned replace-X-with-Y primitive for a live page: raw bytes,
-plain substring, NEVER a regex. It `MUST` apply only when the old text matches the page exactly
-and UNIQUELY. Zero matches, or a `--base-sha256` mismatch, `MUST` produce the WM-CLI-11 refusal
-verbatim and write nothing; more than one match `MUST` be refused naming the count unless
-`--replace-all` opts in explicitly. It exists so an agent can edit a page WITHOUT reading the
-whole page into context — which is why it, and not raw shell, is the scriptable path.
+`WM-CLI-12` **update-mem-topic-is-the-replace-primitive** (TRDD-7YHT3FNK) — `memgrep
+update-mem-topic --page <PAGE> --old-file <F1> --new-file <F2>` (was `edit`) is the sanctioned
+replace-X-with-Y primitive for a live page: raw bytes, plain substring, NEVER a regex. It `MUST`
+apply only when the old text matches the page exactly and UNIQUELY. Zero matches, or a
+`--base-sha256` mismatch, `MUST` produce the WM-CLI-11 refusal verbatim and write nothing; more
+than one match `MUST` be refused naming the count unless `--replace-all` opts in explicitly. It
+exists so an agent can edit a page WITHOUT reading the whole page into context — which is why it,
+and not raw shell, is the scriptable path.
 
 Their flags, which WM-CLI-10 holds them to:
 
-- `add-atom --page <PAGE> --keywords <LIST>` — both MANDATORY, and each for a reason the verb
-  exists to enforce. `--page` must ALREADY exist (the verb appends; it never creates a page, so a
-  typo cannot silently mint an orphan). `--keywords` is the RECALL SURFACE: a comma-separated
-  key-phrase list whose internal spaces become `_`, i.e. the verb applies WM-ATOM's phrase grammar
-  for the author. Omitting it is unrepresentable because an atom with no keywords is
-  unfindable (WM-RCL-01) — a write that succeeds into invisibility is the worst outcome available.
-  Optional: `--desc`, `--type`, `--hidden`.
-- `add-lesson --page <PAGE> --keywords <LIST>` — same two mandatory flags, same reasons: a lesson
-  is recalled by symptom exactly as an atom is.
-- `new-page --path <PATH> --tier <T> --name --description --type`, plus `--globs` (a `hub`'s file
-  ownership, per WM-WIKI) and `--functionality` (the hub's subject). `--path` is separate from
-  `--name` because the FILE name and the `name:` slug are different identities — wikilinks resolve
-  through `name:`, so conflating them would break `[[link]]` resolution for every page whose file
-  is named differently from its slug.
-- `new-page --scope <local|private-project|public-project|user>` — PUBLICATION reach, and
+- `new-mem-atom --page <PAGE> --keywords <LIST>` (was `add-atom`) — both MANDATORY, and each for a
+  reason the verb exists to enforce. `--page` must ALREADY exist (the verb appends; it never
+  creates a page, so a typo cannot silently mint an orphan). `--keywords` is the RECALL SURFACE: a
+  comma-separated key-phrase list whose internal spaces become `_`, i.e. the verb applies
+  WM-ATOM's phrase grammar for the author. Omitting it is unrepresentable because an atom with no
+  keywords is unfindable (WM-RCL-01) — a write that succeeds into invisibility is the worst
+  outcome available. Optional: `--desc`, `--type`, `--trdd`, `--hidden`.
+- `update-mem-atom --lesson --atom <ID>` (WM-CLI-16) — folds `add-lesson`'s behaviour into
+  `update-mem-atom` as an ALTERNATE mode: body-on-stdin becomes the DO-NOT/BECAUSE/DO lesson text,
+  `--atom` names the atom it corrects/annotates, and `--supersedes` (bare, no value in this mode)
+  / `--retire-atom` take on their `add-lesson` meaning. `--atom` is required with `--lesson` and
+  illegal without it (plain atom-authoring mode already has its own target via `--supersedes
+  <ID>`, WM-CLI-13). `add-lesson` itself stays live and unchanged — this is a second way to reach
+  the same effect, not a deprecation.
+- `add-lesson --page <PAGE> --atom <ID> --keywords <LIST>` — three mandatory flags: a lesson is
+  recalled by symptom exactly as an atom is, and it MUST name the atom it anchors onto.
+- `new-mem-topic --tier <T> --name --description --type` (was `new-page`), plus `--globs` (a
+  `hub`'s file ownership, per WM-WIKI) and `--functionality` (the hub's subject). **There is no path flag** —
+  the destination is always `<scope root>/<name>.md`, so the FILE name and the `name:` slug are now
+  necessarily the same string. That is a deliberate narrowing, not an oversight: the
+  two used to be separable, and wikilinks still resolve through `name:`, so keeping them equal by
+  construction removes the class of page whose file is named differently from its slug rather than
+  leaving `[[link]]` resolution to depend on an author's care.
+- `new-mem-topic --scope <local|private-project|public-project|user>` — PUBLICATION reach, and
   deliberately NOT `--type` (that is the CONTENT class `user|feedback|project|reference`, which is
   independent of where a page lives: a PROJECT page may legitimately be `type: reference`).
   `public-project` emits `publish-globally: true` into the frontmatter BEFORE the bytes reach
   `atomic_write_page`, so that call's reconciliation creates the USER-root symlink in the SAME
   write — the field and the link can never be born apart (TRDD-RY0IJBJI). `private-project` emits
   `false`; `local` and `user` emit nothing, the field being a PROJECT-scope concept. Omitted, the
-  field is left to reconciliation, which defaults a PROJECT page to `false`. A PROJECT-scope value
-  is REFUSED when `--path` does not land inside a PROJECT memory root, rather than writing a field
-  the path makes meaningless.
-  **PLANNED (owner, 2026-08-27): `--path` is to be REMOVED from this verb entirely.** A path is an
-  internal implementation detail that may change between versions or be relocated by the user, so
-  no memgrep verb should require one: the destination is to be derived from `--scope` (defaulting
-  to `local`) against the three scope roots, overridable by `WIKIMEM_LOCAL_SCOPE_PATH` /
+  field is left to reconciliation, which defaults a PROJECT page to `false`.
+  **DONE (owner directive 2026-08-27; removed 2026-08-28): the path flag is GONE from this verb.**
+  (Written without the literal flag token on purpose: `test_the_spec_names_no_flag_that_does_not_exist`
+  scans this span for `--`-prefixed tokens and cannot tell a denial from a promise, and it is right
+  not to try — a spec that spells a dead flag invites someone to "restore" it.) A
+  path is an internal implementation detail that may change between versions or be relocated by the
+  user, so no memgrep verb requires one: the destination is derived from `--scope` (defaulting to
+  `local`) against the three scope roots, overridable by `WIKIMEM_LOCAL_SCOPE_PATH` /
   `WIKIMEM_PROJECT_SCOPE_PATH` / `WIKIMEM_USER_SCOPE_PATH` and falling back to today's defaults.
+  The removal also deleted the check that REFUSED a PROJECT-scope value whose explicitly-supplied
+  path fell outside a PROJECT memory root: a derived path is built FROM the scope root, so it agrees
+  by construction
+  and the contradiction can no longer be expressed. That is the point of the change — not one
+  fewer flag, but one fewer way for a caller to state something impossible.
 
 `WM-CLI-04` **add-lesson-supersedes** — `add-lesson --supersedes --atom <id>` `MUST` embed the
 atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>`; the optional
 `--retire-atom` sets the atom marker `status: superseded, superseded-by:<lesson-id>`
 (idempotent). Default correction is in-place same-id (WM-LES-05), never a duplicate.
 
-`WM-CLI-13` **add-atom-supersedes** — `add-atom --supersedes <ID>` `MUST`, in one transaction: mark
-the target atom `status: superseded, superseded-by:<new-atom-id>`, move its marker + body verbatim
-below the page's `## Superseded` heading (creating it, before `## Notes and lessons learned`, when
-absent), then insert the new atom (the caller's body/keywords) at the normal `add-atom` position.
-Refuses a target that already carries `status:` (chain by superseding its successor, never
-re-superseding directly). This is the WM-LES-09 lesson-free path — `add-lesson --supersedes`
-(WM-CLI-04) stays the path for a supersession that records a mistake.
+`WM-CLI-13` **new-mem-atom-supersedes** — `new-mem-atom --supersedes <ID>` (was `add-atom
+--supersedes`) `MUST`, in one transaction: mark the target atom `status: superseded,
+superseded-by:<new-atom-id>`, move its marker + body verbatim below the page's `## Superseded`
+heading (creating it, before `## Notes and lessons learned`, when absent), then insert the new
+atom (the caller's body/keywords) at the normal `new-mem-atom` position. Refuses a target that
+already carries `status:` (chain by superseding its successor, never re-superseding directly).
+This is the WM-LES-09 lesson-free path — `add-lesson --supersedes` (WM-CLI-04) stays the path for
+a supersession that records a mistake.
+
+`WM-CLI-17` **update-mem-atom** — `memgrep update-mem-atom --page <PAGE> --atom <ID>` rewrites ONE
+atom's body/`desc`/`keywords` in place: the id, `ocd`, and `type` are untouched, and every `[^N]`
+reference into the atom stays valid because the marker never moves or renumbers. The new body
+comes from stdin; `--desc`/`--keywords` are each optional and, when omitted, the current value is
+kept unchanged (this is a targeted rewrite, not `new-mem-atom`'s all-fields-required authoring).
+`--dry-run` prints the rewritten marker + body and writes nothing — the preview every mutating
+verb below also carries, because a corpus-mutating command that changes structure (not just one
+field) earns a look-before-you-leap.
+
+`WM-CLI-18` **delete-mem-topic** — `memgrep delete-mem-topic --page <PAGE> --force` retires a page
+to `.trashcan/`; it `MUST NOT` ever unlink the file (RULE 0 — knowledge is relocated, never
+destroyed). `--force` is REQUIRED even outside the referrer case: deleting knowledge is not a
+routine operation, so the flag alone is the deliberateness gate. When another page's `## See
+also`/wikilink refers to the target, the command REFUSES unless `--force` is also overriding that
+refusal (the same flag serves both gates — requiring two different flags would let a caller
+satisfy one without ever seeing the other's warning). `--dry-run` previews the destination path
+and any referrer warnings without writing.
+
+`WM-CLI-19` **delete-mem-atom** — `memgrep delete-mem-atom --page <PAGE> --atom <ID>` removes one
+atom and renumbers the `[^N]` footnotes that follow it, keeping the corpus's numbering contiguous.
+Exactly one of `--with-lessons` (also delete the `[^N]:` definitions the atom references) or
+`--keep-lessons` (strip only the now-gone in-body refs, keeping the definitions — for a lesson
+SHARED with another atom on the same page) applies when the atom owns lessons; `--dry-run` prints
+the plan and mutates nothing.
+
+`WM-CLI-20` **merge-mem-topic / merge-mem-atom** — `memgrep merge-mem-topic --from <PAGE> --into
+<PAGE>` folds every atom + lesson of `--from` into `--into`, renumbering footnotes to labels free
+on the destination, then tombstones the source page (never deletes it — WM-LES-06 applied to a
+whole page). `memgrep merge-mem-atom --page <PAGE> --atom <ID> --into <ID>` does the same at atom
+granularity:
+both atoms live on the SAME page, `--atom` is folded away (marker + body removed after the fold),
+`--into` survives and keeps its id/`ocd`/`desc`/`type` while gaining the merged body/keywords.
+Both carry `--dry-run` (compute and print the merge without writing) and a `--base-sha256` guard
+checked against the destination page's (`--into`) current bytes.
+
+`WM-CLI-21` **split-mem-topic / split-mem-atom** — `memgrep split-mem-topic --page <PAGE> --atoms
+<IDS> --into <NEW_PAGE> --name <NAME> --description <DESC>` moves a comma-separated set of atoms
+(with their `[^N]` lessons) OFF `--page` onto a brand-new `--into` page (refused if it already
+exists — never overwrites), wiring the `## See also` link both ways per THE LINK LAW. `--atoms`
+takes any of the three id spellings (WM-CLI-09), comma-separated. `memgrep split-mem-atom --page
+<PAGE> --atom <ID> --at <WHERE> --desc <DESC>` instead splits ONE over-long atom in place into two
+atoms
+on the SAME page: `--at` is either a literal substring found in the atom's body (the second atom
+starts at the first body line containing it) or an absolute 1-based file line number; `[^N]`
+references divide by which half's prose cites them. `--desc` for the new second atom is required;
+`--keywords`/`--type` for the new second atom default to the original atom's own values when
+omitted. Both carry `--dry-run`.
+
+`WM-CLI-21a` **topic-split-retunes-both-halves** (TRDD-3AKSYZRV) — a split by TOPIC, unlike a
+split by SIZE, leaves the FIRST half holding a recall surface written to serve BOTH subjects, so
+`split-mem-atom` `MUST` accept `--orig-keywords` and `--orig-desc` re-tuning the ORIGINAL atom, and
+`MUST` hold them to the same floors as the new half's. They are applied to the original marker IN
+PLACE and `MUST NOT` rebuild it: a rebuild resets `ocd` to today and drops every prop the builder
+does not know (`status:`, `superseded-by:`, `claude_mem_ref:`). The original marker's `lmd` bumps
+on every split — its body just lost half its content. Omit both for a size-only decomposition,
+where the two halves are still the same subject.
+
+`WM-CLI-21b` **split-reassigns-the-trailing-lesson-anchors** (TRDD-3AKSYZRV) — `add-lesson` appends
+its `[^N]` to the END of an atom's LAST body line, so a trailing anchor records nothing about which
+sentence it belongs to. On a split, that line becomes the SECOND half's last line, which would hand
+EVERY pre-existing lesson to the new atom — including one whose `supersedes:` prop names the id the
+FIRST half keeps. So `split-mem-atom` `MUST` move the trailing anchor run to the first half by
+default, and `MUST` accept `--lessons-to-new <LABELS>` naming the ones that belong to the new topic.
+A ref sitting MID-PROSE `MUST NOT` be moved: an author placed it beside the claim it annotates, so
+it travels with that prose. A split whose new half would be left with nothing but anchors `MUST` be
+refused.
+
+`WM-CLI-22` **reference-mem-topic / reference-mem-atom** — `memgrep reference-mem-topic --page
+<PAGE> --to <PAGE>` wikilinks two pages' `## See also` sections in BOTH directions in one edit —
+THE LINK LAW (WM-WIKI), so a caller can never wire only one end. `memgrep reference-mem-atom
+--page <PAGE> --atom <ID> --to <PAGE>` instead adds an inline `[[wikilink]]` inside one atom's
+body, wiring the reciprocal
+link onto the target page's `## See also`. Both carry `--dry-run` (report what would change
+without writing) and the WM-CLI-11 `--base-sha256` guard, checked against `--page`'s bytes.
+
+`WM-CLI-23` **verb-free-note-search** (`--find`) — `memgrep --find '<query>' [PATHS]` runs the
+`find` verb's keyword DSL (WM-CLI-07: `+must`, `-exclude`, `"exact phrase"`, wildcards) WITHOUT
+naming a verb at all, mirroring `--where`'s verb-free boolean-query surface (WM-BASE). It is
+intercepted before clap parses argv — the same mechanism `--where` uses — so, like `--where`, it
+does not appear as a `Commands:`/`Options:` entry the way a normal flag does; run `memgrep --find`
+with no query to see its own usage hint.
 
 `WM-CLI-05` **index-sidecar** — the corpus is indexed into a SQLite sidecar (`.memgrep/`);
 `index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher
@@ -1070,7 +1223,7 @@ default), and the cost model is WM-BENCH-04.
 `WM-CLI-08` **write-verb-placement-and-uniqueness** — the rules that make a synthesised write
 land correctly:
 
-- an `add-atom` block is inserted immediately BEFORE the `## Notes and lessons learned` heading
+- a `new-mem-atom` block is inserted immediately BEFORE the `## Notes and lessons learned` heading
   when present, else at EOF. Not cosmetic: the atom parser terminates a body at the next heading,
   so appending at EOF past that heading would put the new atom's body inside the lessons section
   and truncate it to nothing;
@@ -1078,8 +1231,8 @@ land correctly:
   recall walks the scope and WM-ATOM-06 requires corpus-unique ids;
 - a new footnote label is allocated as `max(existing numeric labels) + 1` over BOTH the parsed
   tree AND a raw scan — see WM-ATOM-08 for why the parsed maximum alone is a collision;
-- `new-page` REFUSES an unknown `--tier`, an empty `--name`/`--description`/`--type` after trim,
-  or an existing destination; it creates parent directories.
+- `new-mem-topic` REFUSES an unknown `--tier`, an empty `--name`/`--description`/`--type` after
+  trim, or an existing destination; it creates parent directories.
 
 `WM-CLI-09` **atom-ids-are-accepted-in-three-spellings, and ambiguity is REPORTED** — `atom` /
 `atom-page` accept `^marker`, the canonical `ATOM-XXXX-XXXX`, or the bare 8-char payload,
@@ -1286,9 +1439,19 @@ hit" would reject every unrelated edit.
 
 ## WM-MIG — the migrate contract
 
-`WM-MIG-01` **move-atom-plus-baggage** — `memgrep migrate <atom> --from A --to B` moves the
-atom, its lessons, and the references they use — NEVER a hand-move (which drops lessons and
-collides footnote numbers).
+`WM-MIG-01` **move-atom-plus-baggage** — `memgrep migrate-mem-atom <atom> --from A --to B` (was
+`migrate`) moves the atom, its lessons, and the references they use — NEVER a hand-move (which
+drops lessons and collides footnote numbers).
+
+`WM-MIG-01a` **relocation-leaves-a-pointer-not-a-hole** (TRDD-O7PQT5JA) — `--leave-link` makes
+the migration a RELOCATION: the source page gains `- [[dest]]` under its `## See also` and the
+destination gains `- [[source]]`, BOTH in the same write, per THE LINK LAW (one end alone is a
+`link-one-sided` violation). The memory protocol never deletes knowledge, only relocates it, so a
+moved fact whose old page says nothing is unfindable to everyone who knew where it used to live.
+OFF by default, because `migrate-mem-atom` also serves plain scope moves where no link is wanted.
+It `MUST` be REFUSED — before any lock or read, so the refusal costs nothing — when the link would
+run DOWN the LOCAL → PROJECT → USER order, since `link-downward-cross-scope` would flag that edge
+the moment it landed; an unrecognised scope on either side fails OPEN (not proof of a violation).
 
 `WM-MIG-02` **keep-shared-refs** — a footnote used ONLY by the migrating atom MOVES; a footnote
 also cited by another atom on the source STAYS on the source AND is COPIED (renumbered) to the

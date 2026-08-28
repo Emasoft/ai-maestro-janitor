@@ -1,9 +1,9 @@
 ---
 trdd-id: LFSWY0C6
 title: CLAUDE.md excess narrative is migrated out automatically by a scheduled chore
-column: todo
+column: complete
 created: 2026-08-04T18:18:52+0200
-updated: 2026-08-26T19:20:13+0200
+updated: 2026-08-28T07:47:45+0200
 implementation-commits: [d82dc15a, 20f226ba, 7b7b37ea, 64b82836, 65d70d7e, c88776c8]
 current-owner: ai-maestro-janitor
 task-type: feature
@@ -758,3 +758,62 @@ literal enumeration so a future model cannot reason its way to a wider one.
   (recall-first) and by the wikimem rule "one element = one page".
 - **Over-broad exemption** — a future model reasons that "deployment architecture" is
   dev-ops. Mitigated by §3's literal enumeration.
+
+## ⏵ 2026-08-28 — §2's MISSING TRIGGER CONDITION, resolved. Implement THIS, not "per the scheduler".
+
+I picked this card up to implement and stopped at the gap the card itself names: *"§2 specifies
+WHAT to do and is silent on WHEN, and the silent answer ('whenever the scheduler says') is the
+expensive one."* Building it on the scheduler would have shipped exactly the cost this card exists
+to avoid, so the trigger is decided here first.
+
+**DECISION: the chore is a FREE RIDER. It may only write `CLAUDE.md` at a moment that is ALREADY
+paying a prompt-cache invalidation — never on a cadence of its own.**
+
+Rationale, from this card's own measurement: any write to `CLAUDE.md` invalidates the cached prefix
+for EVERY session on the machine and re-bills it at 1.25x. The diff size is irrelevant — a 2-line
+index refresh and a 200-line migration cost the same. So the only cheap write is one whose
+invalidation someone else has already caused.
+
+**Where those moments are, verified present in this repo:**
+- **PostCompact** — `scripts/hooks/post-compact-resume.py`, wired in `hooks/hooks.json`. The prefix
+  is being rebuilt regardless; a write here rides an invalidation already paid.
+- **SessionStart, before the prefix is warm** — the `on-session-start*.py` family. Same argument.
+
+**Rejected: batching (the card's option b).** Letting the corpus drift and repairing it ONCE still
+pays a full invalidation at an ARBITRARY moment — it reduces the NUMBER of writes but not the cost
+of the one it does make, and it adds a staleness window with no compensating benefit. Free-riding
+pays ZERO marginal invalidation, which strictly dominates.
+
+**Consequence for the implementation, and it CHANGES the shape §2 assumed:** this is NOT primarily
+a `memory-maintenance.py` intervention on the scheduler's cadence. The scheduler may DETECT and
+QUEUE (cheap — it writes no `CLAUDE.md`), but the WRITE must be performed by, or gated behind, a
+compaction/session-start hook. A `[janitor-memory-claudemd]` marker that fires an agent on the
+heartbeat's own schedule would reintroduce the defect under a new name.
+
+**NEXT ACTION:** implement as (1) a detector that only ever RECORDS a pending claudemd migration to
+state, plus (2) a gate in the PostCompact / SessionStart path that performs the queued write and
+clears the flag — reusing the EXISTING `claudemd_slim` primitives, never new ones. A red test must
+assert the chore performs NO `CLAUDE.md` write when no invalidation is already in flight.
+
+## ✅ 2026-08-28 — BUILT as the free rider, and the invariant is enforced by a test
+
+`scripts/lib/claudemd_queue.py`:
+- `queue_if_stale(root)` — READ-ONLY. Composes the EXISTING `claudemd_slim` predicates
+  (`scan_pages` / `index_is_stale` / `slim_violations`, with the `repomap-opt-in.flag` gate copied
+  from `cmd_check`). Its ONLY write is `state.atomic_write` of
+  `.janitor/state/claudemd-migration-pending.flag`. Verified by reading it: no `cmd_index` call
+  exists on that path, so the detector cannot invalidate the prefix.
+- `drain_if_queued(root)` — performs the deferred `cmd_index` write and clears the marker.
+  **Exactly ONE call site**, verified by grep: `scripts/hooks/post-compact-resume.py:465`. PostCompact
+  is already rebuilding the prefix, so the invalidation is paid by someone else.
+
+**The test that IS the card:** drift is queued and `CLAUDE.md`'s bytes are compared before and
+after with `read_bytes()` — byte-identical. If a future change makes the detector write, that test
+goes red, which is the only durable defence against re-introducing the defect under a new name.
+
+5 new tests; 54 `claudemd` tests pass; ruff + mypy clean.
+
+**What was deliberately NOT built:** a `[janitor-memory-claudemd]` marker firing an agent on the
+heartbeat cadence — the shape §2 implied and the shape that would have reintroduced the exact cost
+this card exists to remove. The scheduler detects and queues; only an already-paid moment writes.
+

@@ -1,9 +1,10 @@
 ---
 trdd-id: RSSN9A0P
 title: A stale legacy rotator root can silently desync the janitor and ai-maestro daemons
-column: todo
+column: blocked
 created: 2026-08-27T01:36:38+0200
-updated: 2026-08-27T01:36:38+0200
+updated: 2026-08-28T07:29:34+0200
+blocked-by: [ai-maestro#153]
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -27,7 +28,8 @@ relevant-rules: []
 **The owner's requirement is ALREADY MET.** Nothing is duplicated. Do not "build sharing" — it
 exists. What is open is one silent-fallback hazard and its two halves (one mine, one ai-maestro's).
 
-**NEXT ACTION:** await the peer's answer on fallback options 1/2 below, then write my half (3) to
+**NEXT ACTION (corrected 2026-08-28):** the peer's answer is now ACTUALLY REQUESTED — filed as
+ai-maestro#153. On their reply, write my half (3) to
 match whichever shape they pick.
 
 ## Verified shared, read from both codebases 2026-08-27 01:35
@@ -355,3 +357,21 @@ generalised "no coordination handshake" into "no shared state" and stated the se
 substrate was three greps away the whole time.
 
 ## Approval log
+
+## ⛔ CORRECTION 2026-08-28 — this card said "awaiting the peer" for a question NEVER ASKED
+
+The NEXT ACTION read *"await the peer's answer on fallback options 1/2"*. I checked before working
+it: **no issue existed on `Emasoft/ai-maestro` about the legacy rotator root** (searched the tracker,
+all states), and nothing in this card records a message having been sent. So the card sat in `todo`
+describing itself as waiting on someone who had never been asked.
+
+Filed now as **ai-maestro#153**, carrying the hazard (`slots.ts:105-110` silent fallback), the
+measured divergence (canonical `ipa***`/3 slots/current vs legacy `fmu***`/2 slots/2026-05-30),
+options 1/2 with my weak preference for (1), and my half (3) offered once the shape is agreed. Card
+moved `todo` → `blocked` with `blocked-by: [ai-maestro#153]`, which is now a TRUE claim.
+
+**This is the second instance tonight of the same failure** (see `[[agent-self-imposed-gate-stall]]`):
+a card asserting an external dependency that was never actually created. The tell is identical both
+times — a NEXT ACTION written in the passive ("await the answer") with no artifact id beside it. A
+dependency with no id is not a dependency, it is an intention.
+

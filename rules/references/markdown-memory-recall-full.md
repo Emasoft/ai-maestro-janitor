@@ -584,10 +584,14 @@ grep, a `[^N]` lesson with metadata but no body that `find --only-notes` can't s
 long to be one fact. So **do not hand-author wikimem markdown**: the memgrep write verbs
 synthesise valid syntax by construction.
 
-- new page → `memgrep new-page --path P --tier hub|aspect|component --name N --description "…" --type …`
-- new fact → `memgrep add-atom --page P --keywords "symptom phrases" --desc "quoted ≤200-char prose"` (body on stdin)
-- new lesson → `memgrep add-lesson --page P --atom ID --keywords "…"` (DO-NOT/BECAUSE/DO on stdin)
-- move an atom → `memgrep migrate <atom> --from A --to B` (NEVER hand-move — it drops lessons and collides footnote numbers)
+- new page → `memgrep new-mem-topic --tier hub|aspect|component --name N --description "…" --type … [--scope local|private-project|public-project|user]` (was: `new-page`; there is NO `--path` — the file lands at `<scope root>/<name>.md`)
+- new fact → `memgrep new-mem-atom --page P --keywords "symptom phrases" --desc "quoted ≤200-char prose"` (body on stdin; was: `add-atom`)
+- new lesson → `memgrep update-mem-atom --page P --lesson --atom ID --keywords "…"` (DO-NOT/BECAUSE/DO on stdin; was: `add-lesson`)
+- move an atom → `memgrep migrate-mem-atom <atom> --from A --to B` (NEVER hand-move — it drops lessons and collides footnote numbers; was: `migrate`)
+- delete a page/atom → `memgrep delete-mem-topic --page P` / `memgrep delete-mem-atom --page P --atom ID` (moves to `.trashcan/`, never unlinks — RULE 0)
+- merge duplicates → `memgrep merge-mem-topic --from A --into B` / `memgrep merge-mem-atom --page P --atom ID --into ID2`
+- split an over-long page/atom → `memgrep split-mem-topic --page P --atoms … --into NEW --name … --description …` / `memgrep split-mem-atom --page P --atom ID --at … --desc …`
+- link two pages/atoms → `memgrep reference-mem-topic --page P --to Q` / `memgrep reference-mem-atom --page P --atom ID --to Q` (wires the bidirectional `[[wikilink]]`)
 
 ### The wiki is COLLABORATIVE — authorship confers NO ownership
 
@@ -608,11 +612,12 @@ standing because whoever measured the truth assumed the page belonged to someone
 protects a page is `memgrep validate` + `lint`, never authorship.
 
 **Correcting a wrong fact is a SUPERSESSION, never a delete or an overwrite.** Run
-`memgrep add-lesson --supersedes --atom <id>` FIRST — it embeds the atom's current body verbatim
-as `SUPERSEDED BODY: <old>` (the never-delete rule, enforced) and records the WHY as a dated
-lesson — THEN clean the atom's body to the new truth, keeping the SAME id (a `-v2` duplicate is
-the anti-pattern). An atom's dated superseded-lessons ARE its changelog and TRAVEL with it on a
-`migrate`. Only a pure typo / formatting slip is edited in place.
+`memgrep update-mem-atom --lesson --supersedes --atom <id>` FIRST (was: `add-lesson --supersedes`) —
+it embeds the atom's current body verbatim as `SUPERSEDED BODY: <old>` (the never-delete rule,
+enforced) and records the WHY as a dated lesson — THEN clean the atom's body to the new truth,
+keeping the SAME id (a `-v2` duplicate is the anti-pattern). An atom's dated superseded-lessons
+ARE its changelog and TRAVEL with it on a `migrate-mem-atom`. Only a pure typo / formatting slip
+is edited in place.
 
 **After EVERY edit, prove it:** `memgrep validate <page> && memgrep lint <page>`. `lint` is
 deterministic + FP-free — it catches an unquoted desc, a body-less lesson, an oversized atom, a
@@ -623,11 +628,12 @@ non-zero exit is a defect to fix NOW, before moving on.
 
 The write verbs are scope-LOCKED and use `--base-sha256` compare-and-swap: a verb refuses to
 land if the page changed since you last read it, rather than silently clobbering a concurrent
-agent's edit. `memgrep edit` itself is an exact-unique-match replace — it fails loudly on a
-stale or ambiguous match instead of guessing. Edit wikimem pages ONLY through the memgrep verbs
-or the Edit tool — never raw shell (`sed`/`echo >>`/etc.), which bypasses both the lock and the
-syntax guarantees the verbs exist to provide. On a "changed since enqueued" refusal: re-read the
-page, recompute your edit against the new content, and retry — never force past the refusal.
+agent's edit. `memgrep update-mem-topic` (was: `edit`) itself is an exact-unique-match replace —
+it fails loudly on a stale or ambiguous match instead of guessing. Edit wikimem pages ONLY
+through the memgrep verbs or the Edit tool — never raw shell (`sed`/`echo >>`/etc.), which
+bypasses both the lock and the syntax guarantees the verbs exist to provide. On a "changed since
+enqueued" refusal: re-read the page, recompute your edit against the new content, and retry —
+never force past the refusal.
 
 ## THE RECALL LAW — illustration + the two corollaries (moved out of the rule, 2026-07-26)
 

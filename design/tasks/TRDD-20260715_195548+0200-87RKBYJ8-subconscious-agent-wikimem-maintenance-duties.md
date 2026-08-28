@@ -1,10 +1,10 @@
 ---
 trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
-column: todo
+column: backburner
 blocked-by: []
 created: 2026-07-15T19:55:48+0200
-updated: 2026-08-26T18:05:00+0200
+updated: 2026-08-28T07:53:08+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -284,3 +284,34 @@ issues, not fixing anything.
   lists only up-to-date atoms (by `desc`) with superseded excluded unless requested.
 
 ## Notes and lessons learned
+
+## ⏵ 2026-08-28 — SPLIT PERFORMED (the card's own instruction), `todo` → `backburner`
+
+The resume note said pulling this card means SPLITTING the three ❌ NET-NEW duties, one card each,
+never implementing several features under one id. Done:
+
+| duty | new card |
+|---|---|
+| 13 — split a multi-topic ATOM (topic-count, NOT size) | **TRDD-3AKSYZRV** |
+| 14 — relocate an off-topic atom (move rule spec'd, no executor) | **TRDD-O7PQT5JA** |
+| 18 — TRDD backlinks per atom | **TRDD-YMDE95LT** |
+
+Each carries `parent-trdd: 87RKBYJ8`, depth-1, empty `npt`/`eht`, and the distinction that keeps it
+from being confused with adjacent shipped work — notably that duty 13 is NOT the over-budget
+decomposition from TRDD-VOWAUVE5 (that fires on SIZE; this fires on TWO TOPICS at any size, and
+lowering the size threshold would be the wrong fix).
+
+**Why `backburner` and not `complete`:** the ❌ NET-NEW rows are now owned elsewhere, but the 🟡
+PARTIALS (3, 4, 5, 11, 15, 15b, 16-17, 20) remain half-built duties on this spec, and step 4
+(publish) is gated on the repo's publish blocker rather than on work. So this stays the SPEC card
+with real residue — not finished, and not ready-to-pick-up either.
+
+**PRECONDITION to un-park:** one of the 🟡 partials becomes the next increment (or the publish
+blocker clears, releasing step 4). Splitting it further follows the same rule as above.
+
+**Carrying forward the card's own lesson, because it applies to the whole board:** this card read
+`column: todo` with `blocked-by: []` for three weeks while its prose said it was blocked on four
+children. `blocked-by:` is the field the drain rule keys on; prose is invisible to it. Two other
+cards were caught in the same shape tonight (6054NY8H, RSSN9A0P — both "awaiting" answers nobody
+had been asked for).
+

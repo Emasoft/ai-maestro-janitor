@@ -1,9 +1,9 @@
 ---
 trdd-id: VJL1YTCG
 title: The wikimem CLI must be topic/atom verb pairs with no paths and maintenance must leave the main agent
-column: todo
+column: dev
 created: 2026-08-27T14:31:01+0200
-updated: 2026-08-27T16:09:03+0200
+updated: 2026-08-28T06:10:43+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high

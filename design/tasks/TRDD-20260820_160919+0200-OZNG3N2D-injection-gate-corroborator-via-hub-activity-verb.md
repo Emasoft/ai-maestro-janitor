@@ -3,7 +3,7 @@ trdd-id: OZNG3N2D
 title: Injection gate corroborator — consume the hub's aimaestro-session activity verb as a second presence signal
 column: backburner
 created: 2026-08-20T16:09:19+0200
-updated: 2026-08-20T19:00:00+0200
+updated: 2026-08-28T11:40:00+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: high
@@ -59,11 +59,44 @@ would resolve them. This card is the answer to both, which raises its priority a
 3. Tests: NULL⇒None pin; backend-absent⇒None; the two-sample advancement rule if the
    transcript epoch is used at all.
 
+## ⏵ PRECONDITION — measured 2026-08-28, and it is why this card stays `backburner`
+
+It sat in `backburner` with no stated reason, while its own text above argues for raising its
+priority. That contradiction is now resolved with a measurement rather than a guess:
+
+```
+$ ~/.local/bin/aimaestro-session.sh activity dummy ; echo $?
+Error: HTTP 401 — Authentication required. … strict routes need AIMAESTRO_SUDO_TOKEN (user) or AID_AUTH (agent).
+1
+$ env | grep -c 'AID_AUTH\|AIMAESTRO_SUDO_TOKEN'
+0
+```
+
+**The verb is installed and the janitor cannot call it.** Neither credential is in a janitor
+session's environment, so the corroborator would return `None` on every invocation on this host —
+and `None + None` still defers, which is exactly today's behaviour. Building it now ships
+machinery that never reaches its case: the same shape as F11's `instance_is_server_owned`
+mitigation, which was correct, load-bearing by its docstring, and covered 0 of 20 real instances.
+**Do not build the corroborator until the credential question is answered**, or it will pass
+review, pass its tests, and change nothing.
+
+One thing DID check out: the verb exits **1** on the 401, so a caller can tell failure from an
+answer. That is not the CLI-exit-0 hazard F2/F8 describe. (Measured carefully — a first reading
+showed `exit=0`, which was `head`'s status through a pipe, not the verb's.)
+
+**PRECONDITION TO CLEAR BEFORE PULLING THIS:** establish how a janitor hook/daemon context is
+meant to obtain `AID_AUTH` for a read-only presence query — or get an auth-free presence route.
+That is ai-maestro's side; it is the same missing-credential root as janitor F6/F11 and
+ai-maestro#100, so it should ride that thread rather than open a fourth one. When it is answered,
+F3 and F4 on TRDD-AM8JD9SG unblock with it.
+
 ## Acceptance
 
 - [ ] Blind HID + hub says user-present ⇒ defer (as today)
 - [ ] Blind HID + hub affirmatively idle ⇒ inject permitted
 - [ ] `in_turn` NULL or backend absent ⇒ behaves exactly as today (defer)
 - [ ] pytest, ruff, mypy, pyright clean
+- [ ] **PRECONDITION (see above):** a janitor context can actually CALL the hub verb — today it
+      401s with no credential in env, so every acceptance box above would pass vacuously
 
 ## Approval log

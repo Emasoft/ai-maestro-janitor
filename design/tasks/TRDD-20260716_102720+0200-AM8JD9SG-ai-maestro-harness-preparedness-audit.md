@@ -3,7 +3,7 @@ trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
 column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-26T19:38:16+0200
+updated: 2026-08-28T11:20:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -255,8 +255,10 @@ The global switches (`fleet_stop` disarm/pause) and `/reload-plugins` fleet-wide
   until the principal ships: cross-agent recovery stays refuse+alert** (capability ratified, no
   credential yet). Relayed on ai-maestro#68; awaiting their F6 design issue for key-registration +
   verb requirements to mirror here.
-- **F9** — janitor-side timeout-budget fix (make the ai-maestro self-trigger send detached), still
-  design-needed, independent of the above.
+- ~~**F9** — janitor-side timeout-budget fix (make the ai-maestro self-trigger send detached),
+  still design-needed~~ — **CLOSED 2026-08-28.** The detached send had already shipped; the real
+  residue was a timeout-nesting inversion on the `pre-tool-context-usage` hook path. See
+  "F9 RESIDUE FIXED" below.
 
 ## ⏵ DAEMON-MIGRATION ARCHITECTURE — coordination in flight (janitor#100, 2026-07-16)
 
@@ -539,3 +541,77 @@ injecting into panes the janitor does not own. It changes only the SEVERITY of t
       explicit statement of why the rate-limit/wedge evidence is sufficient on its own
 - [ ] Whatever R42 amendment covers the rearm rung states its position on ESC separately —
       different capability, different justification, and only one of them types a command
+
+## ⏵ 2026-08-28 — F9's budget mismatch MEASURED, exact numbers (do not re-derive)
+
+Read from source rather than restated, so the next pass starts from figures:
+
+| bound | value | where |
+|---|---|---|
+| PreToolUse registered timeouts | **3 s** (`pre-tool-wikimem-write-path`, `-pkg-guard`, `-publish-lock`, `-agent-generator-guard`) and **5 s** (`pre-tool-context-usage`, `pre-tool-token-budget`) | `hooks/hooks.json` |
+| inner user-quiet wait | **8.0 s** | `terminal_trigger.py:158` `_USER_QUIET_S` (production passes 8.0 — see the comments at `:603` and `:729`) |
+| CLI subprocess cap | **10 s**, twice | `terminal_trigger.py:479` and `:1305` |
+
+So the hook's own budget (3-5 s) is **smaller than a single one of its inner waits**, and roughly a
+third of the 8 + 10 s worst case. The harness kills the hook before the inner logic can finish, on
+EVERY slow path — which is why "raise the 8 s cap" is inert: the 8 s is not what is being enforced.
+
+**This is the same class as the iTerm probe fixed today**, and the owner's framing applies directly:
+under 20+ parallel agents these paths measure CONTENTION, not failure. A 3 s budget on a path that
+can legitimately wait 8 s is not a timeout, it is a guarantee of one.
+
+**The fix stays as the card classified it** — make the ai-maestro self-trigger send DETACHED like
+the tmux path so the hook returns immediately and `_mark_compacted` becomes deterministic. Raising
+any single number just moves which bound fires first. NOT started here deliberately: it is
+multi-file surgery on the self-trigger path and this pass had no room to finish it cleanly.
+
+### ⏵ CORRECTION 2026-08-28 — the paragraph directly above is WRONG, and the real residue is elsewhere
+
+**The detached send is ALREADY SHIPPED.** Read first-hand at `scripts/lib/terminal_trigger.py:1490-1519`:
+`_try_ai_maestro_send` runs ONE synchronous `list --json` (5 s cap) and then fires the per-command
+POSTs through `_fire_detached_steps`. The `[x] F9` line in the checklist above was right; the
+"NOT started" note was written from the card's older prose instead of from the source. Nothing is
+owed on the detached-send half — **do not "fix" it again.**
+
+**The residue is a LAYERING inversion on ONE hook path**, and it is measurable in three reads:
+
+| bound | value | where |
+|---|---|---|
+| registered hook budget | **5 s** | `hooks/hooks.json` — `pre-tool-context-usage.py` |
+| its subprocess cap on `compact_trigger.py` | **8 s** | `scripts/hooks/pre-tool-context-usage.py:402` |
+| presence-gate wait inside `send_self_command` | up to **~10 s** (`_PRESENCE_WAIT_DEFAULT_S`, polled) | `scripts/lib/terminal_trigger.py:1687-1695` |
+| ai-maestro resolution before any send | **5 s** | `scripts/lib/terminal_trigger.py:1496` |
+
+**The presence-gate row above is WRONG — struck out deliberately, not deleted.** `compact_trigger.py`
+already passes `respect_user_presence=False`, so that gate is SKIPPED on this path and its ~10 s
+never applies. I wrote that row from the callee without checking the caller. The rows that stand
+are the registered budget, the subprocess cap, and the ai-maestro resolution.
+
+**Every remaining inner bound was still LARGER than the one containing it** — 5 s resolution inside
+an 8 s subprocess inside a 5 s registration — so on any slow path the harness killed the hook before
+`compact_trigger` could answer, the `COMPACT_FIRED` the enforcement DENY keys on never arrived, and
+the guard silently did nothing at the exact moment it was supposed to act.
+
+### ⏵ F9 RESIDUE FIXED 2026-08-28 — 2.0 s resolve < 4 s subprocess < 5 s registration
+
+The ORDERING is the fix, not the values.
+
+- `terminal_trigger.send_self_command(..., aimaestro_resolve_timeout_s=…)` threads a caller-chosen
+  cap down to the ONE synchronous step left on the ai-maestro path (the `list --json` that finds
+  this agent's tmux session; everything after it was already detached). The module default stays
+  **5.0** (`DEFAULT_AIMAESTRO_RESOLVE_TIMEOUT_S`) — **deliberately NOT retuned globally**, because
+  cron/CLI/daemon callers can legitimately wait. Only a caller under a hard deadline lowers it.
+- `compact_trigger.py --resolve-timeout SECONDS` exposes it.
+- `pre-tool-context-usage.py` passes `--resolve-timeout 2.0` and drops its subprocess cap 8 → 4.
+
+Expiring early is safe BY CONSTRUCTION: the resolution is best-effort and a timeout degrades to the
+local tmux/iTerm keystroke path, exactly like a missing CLI or a down server — and the guard
+re-fires on the next tool call.
+
+**Guardrail so it cannot regress:** `test_every_inner_timeout_nests_inside_this_hooks_registered_budget`
+DERIVES the registered budget from `hooks.json` and both inner caps from the hook's own source, then
+asserts the strict nesting — so raising the registration legitimately raises the ceiling, while
+raising an inner bound alone fails. It also asserts each regex matched something, because a vacuous
+check here would be indistinguishable from a passing one. 48 passed on the terminal/compact suites;
+ruff + mypy clean.
+
