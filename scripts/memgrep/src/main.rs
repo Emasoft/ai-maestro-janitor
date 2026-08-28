@@ -9,6 +9,13 @@
 
 mod index;
 mod md;
+// The topic/atom verb families (TRDD-VJL1YTCG Part B). Each lives in its OWN module rather than
+// in `memory.rs` for a mechanical reason: that file is ~12k lines, so two agents editing it
+// collide on staleness checks and neither can land. One family per file keeps them independent.
+mod mem_delete;
+mod mem_merge;
+mod mem_reference;
+mod mem_split;
 mod memory;
 mod predicate;
 mod query_dsl;
@@ -48,14 +55,9 @@ const MEMGREP_VERSION: &str = concat!(
     name = "memgrep",
     version = MEMGREP_VERSION,
     about = "markdown-AST-aware grep + wikimem memory toolkit",
-    after_help = "Memory verbs (dispatched before grep parsing — run `memgrep <verb> --help`):\n  \
-        add-atom add-lesson atom atom-page fact find find-claude-mem-ref index links lint migrate \
-        new-page overview recall reindex validate\nTo grep for one of those words as a literal \
-        pattern instead, use `memgrep -e <word> ...`.\n\nMemory model: MEMORY.md belongs to the \
-        Claude Code harness and is NOT deprecated — it and this wiki corpus are two systems that \
-        COEXIST. memgrep indexes and searches the wiki (`memgrep overview`/`recall`/`find`); the \
-        janitor maintains exactly one bridge line in MEMORY.md pointing at the wiki's \
-        <project>-overview.md, and touches nothing else in that file."
+    // Built from VERB_TABLE, never pasted — see the comment on that table for the drift this
+    // closes (a working `edit` verb that no help screen mentioned).
+    after_help = after_help()
 )]
 struct Cli {
     /// Regex to match (omit when querying by structure alone, e.g. just `--heading`).
@@ -398,11 +400,182 @@ fn json_str(s: &str) -> String {
 // this list — otherwise a genuine typo OF "help" (`hlep`, distance 2, standard Levenshtein has
 // no transposition operation) has no "help" entry to be suggested against and is silently
 // missed, which is the exact failure mode this feature exists to close.
-const VERBS: &[&str] = &[
-    "help", "index", "reindex", "validate", "links", "lint", "fact", "recall", "find",
-    "find-claude-mem-ref", "atom", "atom-page", "overview", "add-atom", "new-page",
-    "add-lesson", "migrate", "edit",
+//
+// `(verb, group, one-line description)`. THE single source for BOTH the typo hint AND the
+// `--help` verb table (TRDD-FDUOQFYS). Those used to be two hand-maintained lists, and they
+// DRIFTED exactly as you would expect: `edit` — the sanctioned replace-X-with-Y primitive that
+// every hand-edit is supposed to route through — was in the dispatch match and in this list, and
+// missing from the help text, so a fully working verb was undiscoverable for anyone who read
+// `memgrep --help`. One list cannot drift against itself; keep it that way. A verb added to the
+// dispatch match and forgotten here still degrades gracefully (no typo hint, no help row) rather
+// than breaking, so the ONLY maintenance rule is: add the row when you add the arm.
+//
+// GROUPS are display-only, and the empty group hides a row from the table ("help" is a clap
+// builtin — it belongs in the typo list but not in a list of MEMORY verbs).
+//
+// COLUMN 4 is the LEGACY NAME this verb replaces, or "" when there is none (TRDD-VJL1YTCG Part B,
+// USER 2026-08-27: the surface must name WHAT it operates on — a topic (a page) or an atom (a fact
+// inside one) — because `add-atom`/`new-page`/`edit` name the IMPLEMENTATION and leave the reader
+// guessing which object they touch).
+//
+// The legacy name keeps WORKING for one release, because there is no type-checker for a verb name
+// inside a markdown instruction: the census found the old names hard-coded in the write-path deny
+// hook, the always-loaded recall rule, ~12 skills, the spec, and 24 argv literals in cli.rs. A hard
+// cutover breaks all of them at once, silently, at runtime. `dispatch_key()` maps BOTH spellings
+// onto the same arm, so a rename costs nobody a broken command.
+const VERB_TABLE: &[(&str, &str, &str, &str)] = &[
+    ("help", "", "", ""),
+    // `add-lesson` is DEPRECATED but still dispatched, and it is deliberately NOT expressed as a
+    // legacy alias in the 4th column. That column makes `dispatch_key` REWRITE the typed word onto
+    // the replacement's arm — and the replacement is a MODE (`update-mem-atom --lesson`), not a
+    // verb, so a rewrite would land the legacy argv on `update-mem-atom` WITHOUT `--lesson` and
+    // silently rewrite the atom's BODY with the lesson text instead of appending a footnote.
+    // Silent wrong output is worse than a hard error, so it keeps its own arm (and its own
+    // `cmd_add_lesson_cli`), and the arm warns.
+    //
+    // It is listed here with an EMPTY group — hidden from the help table (a deprecated spelling
+    // should not clutter the verb list) but still present for the typo hint, and still covered by
+    // the no-arm guardrail. Its replacement is documented on `update-mem-atom`'s own row.
+    ("add-lesson", "", "", ""),
+    // ---- READ / SEARCH — never mutate anything ----
+    ("recall", "read", "rank pages by a SYMPTOM phrase, or print ONE atom in full by its id", ""),
+    ("recall-mem-topic", "read", "alias of `recall` — rank PAGES by a symptom phrase (hop 1)", ""),
+    ("recall-mem-atom", "read", "alias of `recall <ATOM-ID>` — print ONE atom in full (hop 2)", ""),
+    ("find", "read", "note-level search with the +mandatory / -exclude / wildcard / \"phrase\" DSL", ""),
+    ("overview", "read", "print the project's <name>-overview.md entry-point page — START HERE", ""),
+    ("atom", "read", "print one atom's full record, including its resolved [^N] lessons", ""),
+    ("atom-page", "read", "print the path of the page that currently holds an atom id", ""),
+    ("fact", "read", "query the one-fact-per-line memory lines", ""),
+    ("links", "read", "report the cross-file [[wikilink]] graph (--to / --from)", ""),
+    ("find-claude-mem-ref", "read", "list atoms harvested FROM a Claude-memory buffer (provenance)", ""),
+    ("find-trdd", "read", "list atoms produced BY a given TRDD (provenance, in reverse)", ""),
+    // ---- WRITE — the sanctioned authoring surface; never hand-edit a page instead ----
+    ("new-mem-topic", "write", "scaffold a new PAGE with valid frontmatter (refuses to overwrite)", "new-page"),
+    ("new-mem-atom", "write", "append one new ATOM (a fact) to a page; body on stdin", "add-atom"),
+    ("update-mem-topic", "write", "replace exact text in a page — locked, CAS-guarded, refuses on ambiguity", "edit"),
+    // A lesson lives HERE, not on new-mem-atom (USER, 2026-08-27): it records that an EXISTING
+    // atom's fact was superseded by an updated version — that is an update to knowledge, not the
+    // authoring of a new fact. `--supersedes` embeds the old body; `--retire-atom` retires it.
+    ("update-mem-atom", "write", "rewrite ONE atom in place; --lesson records a [^N] correction instead", ""),
+    ("delete-mem-topic", "write", "retire a PAGE to .trashcan/ (never unlinks; refuses if linked-to)", ""),
+    ("delete-mem-atom", "write", "remove one atom and renumber its [^N] footnotes", ""),
+    ("merge-mem-topic", "write", "fold one page into another, tombstoning the source", ""),
+    ("merge-mem-atom", "write", "fold one atom into another on the same page", ""),
+    ("split-mem-topic", "write", "move atoms out to a NEW page; lessons travel, links wired both ways", ""),
+    ("split-mem-atom", "write", "split one over-long atom into two, dividing its lessons", ""),
+    ("reference-mem-topic", "write", "wikilink two pages — BOTH directions, in one edit (link law)", ""),
+    ("reference-mem-atom", "write", "wikilink from inside an atom, wiring the reciprocal end too", ""),
+    ("migrate-mem-atom", "write", "move an atom AND its lessons/refs to another page, renumbering", "migrate"),
+    // ---- MAINTAIN ----
+    ("lint", "maintain", "note-integrity check — AND AUTOFIXES: this verb WRITES (see below)", ""),
+    ("validate", "maintain", "validate one page's structure without the corpus-wide checks", ""),
+    ("index", "maintain", "build the SQLite query index (--markdown regenerates memory-index.md)", ""),
+    ("reindex", "maintain", "refresh the SQLite sidecar after pages changed outside the verbs", ""),
 ];
+
+/// Just the verb NAMES — the typo-suggestion surface. Derived, never hand-kept.
+fn verb_names() -> impl Iterator<Item = &'static str> {
+    // BOTH spellings: a typo of a legacy name must still be suggestable while that name works.
+    VERB_TABLE
+        .iter()
+        .flat_map(|(name, _, _, legacy)| {
+            std::iter::once(*name).chain((!legacy.is_empty()).then_some(*legacy))
+        })
+}
+
+/// Resolve whatever the caller typed onto the ONE key the dispatch match uses.
+///
+/// Returns `None` for a word that is not a verb at all (it is then a grep pattern, unchanged).
+/// A LEGACY name resolves to its replacement and warns ONCE on stderr — stderr, never stdout,
+/// because callers parse stdout (`cli.rs` reads an atom id straight out of `add-atom`'s output),
+/// so a deprecation note on stdout would corrupt the very scripts the alias exists to protect.
+fn dispatch_key(typed: &str) -> Option<&'static str> {
+    for (name, _, _, legacy) in VERB_TABLE {
+        if typed == *name {
+            return Some(*name);
+        }
+        if !legacy.is_empty() && typed == *legacy {
+            eprintln!(
+                "memgrep: `{legacy}` is deprecated — use `{name}`. \
+                 The old name still works this release; update your scripts and skills."
+            );
+            return Some(*name);
+        }
+    }
+    None
+}
+
+/// The `--help` trailer, BUILT from `VERB_TABLE` so the two can never disagree.
+///
+/// Returns `String` because clap's derive passes this attribute straight to
+/// `Command::after_help`, which accepts anything `IntoResettable<StyledStr>` — a plain `String`
+/// qualifies, so the table can be computed instead of pasted.
+fn after_help() -> String {
+    let mut out = String::from(
+        "MEMORY VERBS — dispatched BEFORE grep parsing, so they are not clap subcommands.\n\
+         Run `memgrep <verb> --help` for that verb's own flags and examples.\n",
+    );
+    for (label, heading) in [
+        ("read", "\n  READ / SEARCH (never mutate)\n"),
+        ("write", "\n  WRITE (the sanctioned authoring surface — never hand-edit a page)\n"),
+        ("maintain", "\n  MAINTAIN\n"),
+    ] {
+        out.push_str(heading);
+        for (name, _g, desc, legacy) in VERB_TABLE.iter().filter(|(_, g, _, _)| *g == label) {
+            out.push_str(&format!("    {name:<21} {desc}\n"));
+            // Name the legacy spelling on its own line so someone grepping the help for the verb
+            // they already know (`add-atom`) still lands on its replacement.
+            if !legacy.is_empty() {
+                out.push_str(&format!("    {:<21} (was: {legacy} — still works this release)\n", ""));
+            }
+        }
+    }
+    out.push_str(
+        "\nEXAMPLES\n  \
+         # 1. Where am I? Print the wiki's entry-point page.\n  \
+         memgrep overview .claude/project/memory\n\n  \
+         # 2. Recall is TWO HOPS. Hop 1 — rank pages by the SYMPTOM, in the user's words:\n  \
+         memgrep recall \"publish blocked by push protection\" .claude/project/memory\n  \
+         # Hop 2 — take ONE id from that listing and read it in full, with its lessons:\n  \
+         memgrep recall ATOM-56GA-U5T8 .claude/project/memory\n\n  \
+         # 3. Plain grep, markdown-aware — headings only, skipping code blocks.\n  \
+         memgrep --heading --no-code \"branch protection\" design/\n\n  \
+         # 4. Grep for a word that is ALSO a verb name — -e forces pattern, not dispatch.\n  \
+         memgrep -e lint scripts/\n\n  \
+         # 5. Record a NEW fact (body on stdin; keywords are the RECALL SURFACE).\n  \
+         memgrep new-mem-atom --page .claude/project/memory/deploys.md \\\n    \
+         --desc \"the staging deploy needs the VPN because the registry is private\" \\\n    \
+         --keywords \"deploy hangs, staging push times out, registry unreachable, …\" <<'EOF'\n  \
+         The staging deploy pulls from a VPN-only registry …\n  \
+         EOF\n\n  \
+         # 6. A fact turned out WRONG. That is an UPDATE to an existing atom, so the lesson\n  \
+         #    lives on update-mem-atom: --supersedes embeds the old body as the correction record.\n  \
+         memgrep update-mem-atom --page .claude/project/memory/deploys.md --atom ATOM-XXXX-XXXX \\\n    \
+         --lesson --supersedes --keywords \"deploy fails on vpn, wrong root cause, …\" <<'EOF'\n  \
+         DO NOT blame the VPN, BECAUSE the registry moved to a public host. DO check its URL.\n  \
+         EOF\n",
+    );
+    out.push_str(
+        "\nGOTCHAS THE FLAGS DO NOT SHOUT LOUDLY ENOUGH\n  \
+         * `lint` MUTATES. It reconciles publish-globally/symlink state and autofixes as it goes,\n    \
+         so running it IS a maintenance action, not a read-only check.\n  \
+         * `--min-severity` gates the EXIT CODE, not the report — lower findings still PRINT.\n  \
+         * `--keywords` on any write verb wants AT LEAST 10 (MEMGREP_MIN_KEYWORDS); each comma item is ONE\n    \
+         phrase and its internal spaces become `_`.\n  \
+         * `edit` takes --old-file/--new-file PATHS, not inline strings, and refuses when the old\n    \
+         text matches more than once unless you pass --replace-all.\n  \
+         * `--base-sha256` on a write verb is a compare-and-swap guard: pass the hash of the page\n    \
+         as you last read it and the write is refused if anyone changed it meanwhile.\n",
+    );
+    out.push_str(
+        "\nMEMORY MODEL\n  \
+         MEMORY.md belongs to the Claude Code harness and is NOT deprecated — it and this wiki\n  \
+         corpus are two systems that COEXIST. memgrep indexes and searches the wiki; the janitor\n  \
+         maintains exactly one bridge line in MEMORY.md pointing at the wiki's\n  \
+         <project>-overview.md, and touches nothing else in that file.\n",
+    );
+    out
+}
 
 /// Iterative DP Levenshtein distance — O(len(a)*len(b)), fine for verb-name-length strings.
 fn levenshtein(a: &str, b: &str) -> usize {
@@ -447,7 +620,12 @@ fn main() -> Result<()> {
     // "find-claude-mem-ref" / "atom" / "atom-page" / "add-atom" / "new-page" / "add-lesson" as the
     // first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();
-    match raw.get(1).map(|s| s.as_str()) {
+    // Resolve the typed word onto its canonical arm FIRST, so a legacy spelling and its
+    // replacement are literally the same match arm below (and a legacy name warns exactly once).
+    // A non-verb word resolves to None and falls through to the grep path untouched.
+    let typed = raw.get(1).map(|s| s.as_str());
+    let resolved = typed.and_then(dispatch_key).or(typed);
+    match resolved {
         // `help` as a bare first word (janitor#127): the discovery convention every other CLI
         // (git/cargo/npm) honors. Without this, `memgrep help` SUCCEEDS as a literal grep for the
         // word "help" — exit 0, plausible-looking output — which reads as "no subcommands exist"
@@ -466,23 +644,60 @@ fn main() -> Result<()> {
         Some("links") => return memory::cmd_links_cli(&raw[2..]),
         Some("lint") => return memory::cmd_lint_cli(&raw[2..]),
         Some("fact") => return memory::cmd_fact_cli(&raw[2..]),
-        Some("recall") => return memory::cmd_recall_cli(&raw[2..]),
+        // `recall` serves BOTH hops (a symptom phrase ranks pages; an ATOM-ID prints that one atom
+        // in full), which is the single most misunderstood thing in this CLI. The topic/atom
+        // spellings exist so a caller can SAY which hop it means; they are the same code path.
+        Some("recall") | Some("recall-mem-topic") | Some("recall-mem-atom") => {
+            return memory::cmd_recall_cli(&raw[2..]);
+        }
         Some("find") => return memory::cmd_find_cli(&raw[2..]),
         Some("find-claude-mem-ref") => return memory::cmd_find_claude_mem_ref_cli(&raw[2..]),
+        Some("find-trdd") => return memory::cmd_find_trdd_cli(&raw[2..]),
         Some("atom") => return memory::cmd_atom_cli(&raw[2..]),
         Some("atom-page") => return memory::cmd_atom_page_cli(&raw[2..]),
         Some("overview") => return memory::cmd_overview_cli(&raw[2..]),
         // WRITE verbs (TRDD-R02HTRUD) — the parser's own crate SYNTHESISES the element so a
         // malformed atom/page/lesson is impossible; content + keywords in, valid syntax out.
-        Some("add-atom") => return memory::cmd_add_atom_cli(&raw[2..]),
-        Some("new-page") => return memory::cmd_new_page_cli(&raw[2..]),
-        Some("add-lesson") => return memory::cmd_add_lesson_cli(&raw[2..]),
+        Some("new-mem-atom") => return memory::cmd_add_atom_cli(&raw[2..]),
+        Some("new-mem-topic") => return memory::cmd_new_page_cli(&raw[2..]),
+        Some("add-lesson") => {
+            // Warned HERE rather than by `dispatch_key`'s legacy column, for the reason on this
+            // verb's VERB_TABLE row: rewriting it onto `new-mem-atom` would silently author an
+            // atom instead of a lesson. stderr, never stdout — callers parse the id off stdout.
+            eprintln!(
+                "memgrep: `add-lesson` is deprecated — use `update-mem-atom --lesson`. \
+                 The old name still works this release; update your scripts and skills."
+            );
+            return memory::cmd_add_lesson_cli(&raw[2..]);
+        }
         // MOVE verb (TRDD-VJCMZ2OP) — relocate an atom + its baggage between pages, renumbering
         // footnotes and validating BOTH pages, so the move can never corrupt either.
-        Some("migrate") => return memory::cmd_migrate_cli(&raw[2..]),
+        Some("migrate-mem-atom") => return memory::cmd_migrate_cli(&raw[2..]),
         // EDIT verb (TRDD-7YHT3FNK Phase 2) — the sanctioned replace-X-with-Y primitive: locked,
         // CAS-checked, refuses on ambiguity (multiple matches) or staleness (zero matches / bad hash).
-        Some("edit") => return memory::cmd_edit_cli(&raw[2..]),
+        Some("update-mem-topic") => return memory::cmd_edit_cli(&raw[2..]),
+        // The ATOM counterpart of update-mem-topic: rewrite ONE atom's body/props in place,
+        // keeping its id (so every citation pointing at it still resolves) and its [^N] refs.
+        Some("update-mem-atom") => return memory::cmd_update_atom_cli(&raw[2..]),
+        // REFERENCE verbs (TRDD-VJL1YTCG Part B) — wikilink two elements. Both ends are wired in
+        // ONE edit: the LINK LAW is bidirectional, so a verb that wrote only the near end would
+        // manufacture exactly the one-sided-link violation `lint` grades the corpus on.
+        Some("reference-mem-topic") => return mem_reference::cmd_reference_topic_cli(&raw[2..]),
+        Some("reference-mem-atom") => return mem_reference::cmd_reference_atom_cli(&raw[2..]),
+        // DELETE verbs — RULE 0 applies: `delete-mem-topic` never unlinks, it retires the page
+        // into `.trashcan/` and prints the restoring `mv`. It also refuses while another page
+        // still links to it, because the alternative is a dangling [[wikilink]] — corpus damage
+        // that outlives the page it pointed at.
+        Some("delete-mem-topic") => return mem_delete::cmd_delete_topic_cli(&raw[2..]),
+        Some("delete-mem-atom") => return mem_delete::cmd_delete_atom_cli(&raw[2..]),
+        // MERGE / SPLIT — both RESHAPE the corpus, so both refuse rather than improvise: an atom
+        // id is cited from other pages, so a collision is an error, never a silent rename; and a
+        // moved atom's [^N] lessons travel WITH it, because a lesson stranded on the old page is
+        // knowledge lost with nothing to report it.
+        Some("merge-mem-topic") => return mem_merge::cmd_merge_topic_cli(&raw[2..]),
+        Some("merge-mem-atom") => return mem_merge::cmd_merge_atom_cli(&raw[2..]),
+        Some("split-mem-topic") => return mem_split::cmd_split_topic_cli(&raw[2..]),
+        Some("split-mem-atom") => return mem_split::cmd_split_atom_cli(&raw[2..]),
         // Not a known verb (janitor#127 item 2): if it is shaped like ONE and close enough that a
         // typo is the likely explanation (`hlep`, `recal`, `validte` from the issue — all distance
         // <= 2), warn to STDERR before silently falling through to a literal grep. Grep-first
@@ -490,9 +705,8 @@ fn main() -> Result<()> {
         // changes the exit code — it only tells a human/agent who typed a near-miss why a
         // plausible-looking successful result is not the verb they meant.
         Some(first) if looks_like_verb_identifier(first) => {
-            if let Some((closest, _)) = VERBS
-                .iter()
-                .map(|v| (*v, levenshtein(first, v)))
+            if let Some((closest, _)) = verb_names()
+                .map(|v| (v, levenshtein(first, v)))
                 .filter(|(_, d)| *d >= 1 && *d <= 2)
                 .min_by_key(|(_, d)| *d)
             {
@@ -503,6 +717,59 @@ fn main() -> Result<()> {
             }
         }
         _ => {}
+    }
+
+    // FAIL LOUD on a verb that is in VERB_TABLE but has no dispatch arm.
+    //
+    // Reaching here means the match above returned for nothing, so without this the word would be
+    // grepped as a literal PATTERN — `memgrep recall-mem-topic --help` printed the TOP-LEVEL help
+    // and exited 0, which reads as "that verb exists and this is its help". A missing arm is a
+    // build mistake in this file; it must not present as a successful search. Measured, not
+    // hypothesised: this fired on `recall-mem-topic` the first time the table listed it.
+    if let (Some(t), Some(known)) = (typed, typed.and_then(dispatch_key)) {
+        eprintln!(
+            "memgrep: `{t}` is a known verb ({known}) with no dispatch arm — this is a bug in \
+             memgrep, not in your command. It was NOT run as a search."
+        );
+        std::process::exit(70); // EX_SOFTWARE — an internal inconsistency, not user error
+    }
+
+    // `--find '<query>'` — the note-level shortcut DSL (`+mandatory -exclude wild* "phrase"`) with
+    // NO VERB, mirroring how `--where` already gives the SQL-like DSL a verb-free home. USER
+    // directive: "the main memgrep functionality (grepping/recalling) should require no verb".
+    //
+    // Intercepted HERE, before `Cli::parse()`, and delegated to `cmd_find_cli` with the query as
+    // its leading positional. That is why every one of find's own flags (`--top`, `--sort`,
+    // `--only-notes`, `--since`, …) works verb-free for free: we hand over the REST of argv
+    // untouched instead of re-declaring a subset on `Cli` that would then drift.
+    //
+    // Why a FLAG and not "guess from the query's shape": the default grep matches LINES while find
+    // matches NOTES, and the two languages overlap ambiguously. `foo*` is a VALID REGEX today
+    // (`fo` + zero-or-more `o`) and means something else entirely in the shortcut DSL (`fo` + `o` +
+    // any run), so auto-detecting would silently reinterpret patterns that work now — same syntax,
+    // different answers, with no error. `+a +b` is also incoherent line-by-line: requiring both on
+    // ONE line returns almost nothing. An explicit flag keeps a bare `memgrep 'regex'` meaning
+    // exactly what it has always meant.
+    if let Some(pos) = raw.iter().position(|a| a == "--find" || a.starts_with("--find=")) {
+        let arg = &raw[pos];
+        let (query, rest_from) = match arg.strip_prefix("--find=") {
+            // `--find=<query>`: the value is glued on, so the tail resumes after this token.
+            Some(q) => (q.to_string(), pos + 1),
+            // `--find <query>`: the value is the NEXT token, which must exist.
+            None => match raw.get(pos + 1) {
+                Some(q) => (q.clone(), pos + 2),
+                None => {
+                    eprintln!("memgrep: --find needs a query, e.g. --find '+oauth -test'");
+                    std::process::exit(2);
+                }
+            },
+        };
+        // Query first (find's leading positional), then everything else in argv order, minus the
+        // program name and the --find token itself.
+        let mut passthrough: Vec<String> = vec![query];
+        passthrough.extend(raw[1..pos].iter().cloned());
+        passthrough.extend(raw[rest_from..].iter().cloned());
+        return memory::cmd_find_cli(&passthrough);
     }
 
     let cli = Cli::parse();

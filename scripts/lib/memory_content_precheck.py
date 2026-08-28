@@ -180,6 +180,84 @@ def oversized_atom_pages(root: Path) -> list[tuple[str, int]]:
     return out
 
 
+_MULTI_TOPIC_MARKER_RE = re.compile(r"^\^(\S+)\s+\[")
+
+
+def multi_topic_atom_candidates(root: Path) -> list[tuple[str, str]]:
+    """`(root-relative page path, atom id)` for every atom under `root` that is
+    PLAUSIBLY multi-topic — a TRIAGE list for a human/agent to look at, never an
+    assertion that the atom actually holds two topics. Deciding that is a judgement
+    call (what counts as "one subject" is contextual), and judgement belongs to the
+    agent that reads the atom, not to this predicate. This is exactly why it is not a
+    `memgrep lint` rule: a lint rule that fires on a merely-plausible signal has a
+    majority-KEEP outcome (most flagged atoms are fine on inspection), so it would fire
+    on every lint run forever with nothing to converge on — the same failure class this
+    module's other `_has_work` gates are built to avoid.
+
+    WHY NOT a keyword-based signal (same reasoning `consolidate_has_work` already
+    records for its own subject-overlap gate): two disjoint keyword clusters are the
+    NORMAL shape of a well-authored single-topic atom — `keywords:` is deliberately a
+    set of non-synonymous alternative phrasings a future searcher might arrive with,
+    not a bag-of-words summary of the atom's single subject. A keyword-cluster proxy
+    would therefore both over-fire (a well-written atom with two search angles) and
+    under-fire (two topics that happen to share vocabulary), so it is worse than
+    useless here.
+
+    The predicate used instead is purely STRUCTURAL and asserts nothing about subject
+    count: an atom is a candidate iff (a) its body has at least 2 non-blank lines — the
+    same floor `split_atom_build` enforces, since an atom with one body line cannot be
+    split at all — AND (b) that body contains an internal blank line, i.e. it has at
+    least 2 paragraphs. A paragraph break is the one cheap, honest signal that an atom's
+    author already treated it as more than one unit of thought.
+
+    MEASURED SELECTIVITY (2026-08-28, this repo's PROJECT corpus,
+    `.claude/project/memory`): of 159 atoms, 127 pass the >=2-body-line floor alone,
+    and 78 of those also have an internal paragraph break. Requiring the paragraph
+    break roughly halves the sweep at no loss of honesty — both conditions are purely
+    structural; neither one claims the atom holds two topics.
+
+    An atom's body runs from its `^id [props]` marker line to the next such marker
+    line, the next line whose `lstrip()` starts with `#`, or EOF — trailing blank
+    lines are trimmed before the body is tested. An unreadable page is skipped: this
+    is an enumeration for triage, not a safety gate, so an I/O error must not
+    fabricate a candidate.
+    """
+    out: list[tuple[str, str]] = []
+    for page in _candidate_pages(root):
+        try:
+            lines = page.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue  # unreadable page — triage list only, never fabricate a candidate
+        marks = [
+            (i, m.group(1))
+            for i, ln in enumerate(lines)
+            if (m := _MULTI_TOPIC_MARKER_RE.match(ln))
+        ]
+        for idx, (start, atom_id) in enumerate(marks):
+            limit = marks[idx + 1][0] if idx + 1 < len(marks) else len(lines)
+            end = limit
+            for j in range(start + 1, limit):
+                if lines[j].lstrip().startswith("#"):
+                    end = j
+                    break
+            body = lines[start + 1 : end]
+            while body and not body[-1].strip():
+                body.pop()
+            if sum(1 for ln in body if ln.strip()) < 2:
+                continue
+            seen_content = False
+            has_para_break = False
+            for i, ln in enumerate(body):
+                if ln.strip():
+                    seen_content = True
+                elif seen_content and any(x.strip() for x in body[i + 1 :]):
+                    has_para_break = True
+                    break
+            if has_para_break:
+                out.append((str(page.relative_to(root)), atom_id))
+    return sorted(out)
+
+
 def split_has_work(
     root: Path,
     *,

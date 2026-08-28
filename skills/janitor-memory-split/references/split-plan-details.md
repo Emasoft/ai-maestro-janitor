@@ -126,18 +126,22 @@ of truth. That is the janitor#227 shape — a gate dispatching work its arbiter 
 re-dispatches an agent forever — and it has already been paid for once in this codebase.
 
 **Decomposition preserves every fact; it only changes how many atoms carry them.** Never
-shorten the prose to fit the budget, and never edit the page directly: write the new atoms
-through `memgrep add-atom` so the parser synthesises each element and a malformed atom is
-impossible by construction.
+shorten the prose to fit the budget, and never edit the page directly. For a plain two-way
+split, `memgrep split-mem-atom` does it in one call — it divides the atom's `[^N]` refs by
+which half's prose cites them and leaves the first atom's marker untouched, so there is
+nothing to retire. For a split into 3+ pieces, write the new atoms through `memgrep
+new-mem-atom` (was: `add-atom`) so the parser synthesises each element and a malformed atom
+is impossible by construction.
 
 **Give each new atom its own `keywords:`, drawn from the SYMPTOM phrases a future session
 will search with** — not from the words the prose happens to use. Recall ranks on
 `description + title + keywords`, never the body, so an atom nobody can recall is worse than
 an oversized one: splitting a findable atom into three unfindable ones is a net loss.
 
-**Retire the original with `add-lesson --supersedes` (same atom id)** when it stated
-something now spread across the new atoms. Never overwrite it — supersession is what keeps
-the old statement readable as dated history instead of deleting knowledge.
+**On the `new-mem-atom` path, retire the original with `memgrep update-mem-atom --lesson --atom
+<id> --supersedes` (same atom id)** when it stated something now spread across the new atoms.
+Never overwrite it — supersession is what keeps the old statement readable as dated history
+instead of deleting knowledge. (Not needed on the `split-mem-atom` path — see above.)
 
 **No transaction, deliberately.** The memgrep write verbs are already scope-locked and
 CAS-guarded, so they carry the same crash-safety `memory_txn_cli` provides for hand-staged
@@ -150,3 +154,80 @@ was originally built to prevent.
 **The `## Superseded` carve-out applies exactly as it does to the write gate**: a body below
 that delimiter is protocol-frozen history. Leave it alone even when it is over budget —
 rewriting retired facts destroys the record they exist to be.
+
+## Splitting an atom that holds two topics
+
+The size decomposition above fires on `MEMGREP_ATOM_MAX_CHARS`. This one fires on an atom
+holding TWO SUBJECTS **at any size**, and the two are independent properties: do NOT implement
+this by lowering the size threshold — that would make the size rule fire on well-formed long
+atoms while still missing every short two-topic one (TRDD-3AKSYZRV).
+
+**The candidate list is a TRIAGE surface, never an assertion.** Its predicate is purely
+structural — an atom whose body has ≥2 non-blank lines AND an internal paragraph break — which
+says only that the author already treated the atom as more than one unit of thought. Deciding
+that those units are two SUBJECTS is a judgement, which is exactly why this is an agent duty and
+not a `memgrep lint` rule: a rule whose majority honest outcome is KEEP fires forever and never
+converges. Measured on this repo's PROJECT corpus: 159 atoms, 127 pass the ≥2-line floor alone,
+78 also have a paragraph break.
+
+Read the named atom in full, then answer one question: **does it state two distinct facts a
+future `recall` would want to find separately?**
+
+### YES — split it by topic
+
+```bash
+memgrep split-mem-atom --page "$PAGE" --atom "$ATOM" \
+  --at "<literal substring where the second topic starts>" \
+  --desc "<the second topic's own triage sentence>" \
+  --keywords "<the second topic's own phrases>" \
+  --orig-keywords "<the first topic's own phrases>" \
+  --orig-desc "<the first topic's own triage sentence>" \
+  [--lessons-to-new <comma-separated footnote labels>]
+```
+
+`--orig-keywords` / `--orig-desc` are **mandatory here and absent from a size split**, and the
+asymmetry is the whole point. The original atom's `keywords:` were written to serve BOTH
+subjects, so leaving them alone hands the first half a recall surface half of which describes
+the fact that just moved out — and `recall` ranks on keywords alone, so the first atom keeps
+answering queries about the topic that left. Both halves are held to the same keyword floor: a
+topic split that leaves one side with two keyphrases has traded one unfindable atom for two.
+
+`--lessons-to-new` names ONLY the footnote labels whose lesson belongs to the new topic. By
+default every trailing `[^N]` anchor follows the ORIGINAL atom, because `add-lesson` parks its
+anchor on whatever the atom's last body line happens to be — which is the second half's last
+line after a split, and which says nothing about which topic the lesson corrects. A lesson
+written with `--supersedes` also names the ORIGINAL id in its own props, so the default keeps
+the two consistent. A ref sitting mid-prose is never moved: an author placed it beside the claim
+it annotates.
+
+### NO — record the judgement, and treat that as a successful pass
+
+```bash
+uv run --script "$PLUGIN/scripts/memory_refusal_cli.py" record \
+  --intervention split-topic --scope "$SCOPE" --root "$SCOPE_ROOT" \
+  --page "$PAGE" --reason "<one line: why this atom is one topic, not two>"
+```
+
+Recording it is what makes the chore TERMINATE — without it the same atom is re-judged every
+pass forever, which is the failure mode a permissive candidate list would otherwise create. The
+refusal is keyed on the PAGE (page-granular, matching the ledger every other chore here uses)
+and re-validated against the page's CONTENT, so editing the page revives its candidates
+automatically and no expiry bookkeeping is needed.
+
+## Exit / retry / rollback contract (step 6)
+
+- **SUCCESS** = `commit` exits 0 (`verify_split` passed and the swap applied). Surface one line:
+  `[memory-split] split <source-slug> → overview + N sub-page(s) in <scope>.` PROJECT scope (if
+  explicitly enabled) stages into the in-repo root, NOT pushed — note "PROJECT staged; rides the
+  next publish.py".
+- **verify FAIL or a precondition error** (stale snapshot, lock contention, vanished source): the
+  txn is already aborted (live tree untouched). Read the printed reasons, FIX the staged plan,
+  and retry the whole begin→edit→commit cycle. **Bounded to ≤3 attempts.** After 3 failures:
+  ensure the txn is aborted (`memory_txn_cli.py abort "$SCOPE_ROOT" "$TXN"`), MUTATE NOTHING, and
+  surface: `[memory-split] FAILED <source-slug> after 3 attempts: <reason> — page left intact;
+  review manually.`
+- **Lock contention / stale-hash loser** (a concurrent `janitor-memory-write` touched a source
+  between begin and commit): a normal abstain, not a failure — skip and let the next heartbeat
+  retry on fresh content.
+- **Idempotency:** the completed txn-id is the idempotency key; staging dir + journal are cleaned
+  on success. A re-run finds the page now under the cap and does nothing.

@@ -240,6 +240,38 @@ pub fn acquire(_scope_root: &Path) -> Result<WriteGuard> {
     anyhow::bail!("the write-concurrency gate requires a POSIX flock — unsupported on this platform")
 }
 
+/// Lock the scope(s) of TWO pages for a write that touches both — `migrate`, `merge-mem-topic`,
+/// `split-mem-topic`, `reference-mem-*` — in a FIXED global order, so two concurrent operations
+/// naming the same pair in OPPOSITE order can never deadlock (A waits on B's lock while B waits on
+/// A's). The order is the lock PATH, which is a deterministic function of the scope root, so every
+/// caller on the machine agrees on it without coordinating.
+///
+/// Returns `(guard_a, guard_b)` where `guard_b` is `None` when both pages share one scope — one
+/// lock covers both, and acquiring the same flock twice from one process would self-deadlock.
+/// Hold both guards for the whole read-compute-write span, exactly as with `acquire`.
+///
+/// This used to exist as FOUR near-verbatim copies (one per two-page verb, each written by a
+/// different agent to the same spec), which is the shape a subtle ordering change would silently
+/// miss in three of. One helper, one comparison, one place to reason about it.
+pub fn acquire_two(a: &Path, b: &Path) -> Result<(WriteGuard, Option<WriteGuard>)> {
+    let sa = scope_root_for(a);
+    let sb = scope_root_for(b);
+    if sa == sb {
+        return Ok((acquire(&sa)?, None));
+    }
+    // `<=` rather than `<` is deliberate belt-and-braces: the branches are symmetric, so a tie
+    // (impossible here — distinct roots have distinct lock paths) would still take exactly one.
+    if lock_path_for(&sa) <= lock_path_for(&sb) {
+        let ga = acquire(&sa)?;
+        let gb = acquire(&sb)?;
+        Ok((ga, Some(gb)))
+    } else {
+        let gb = acquire(&sb)?;
+        let ga = acquire(&sa)?;
+        Ok((ga, Some(gb)))
+    }
+}
+
 impl Drop for WriteGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
@@ -548,5 +580,75 @@ mod tests {
 
         assert!(err.to_string().to_lowercase().contains("timed out"));
         assert!(elapsed < Duration::from_secs(3), "must not wildly overshoot the 1s timeout");
+    }
+
+    /// The property `acquire_two` exists for: two writers naming the SAME pair of scopes in
+    /// OPPOSITE argument order must never deadlock. Without the fixed ordering, thread A holds
+    /// scope1 and waits on scope2 while thread B holds scope2 and waits on scope1 — forever.
+    /// Bounded by the lock timeout, so a genuine deadlock fails the test loudly rather than
+    /// hanging the whole suite.
+    #[test]
+    fn acquire_two_opposite_order_never_deadlocks() {
+        let _env = env_lock();
+        let state_dir = tmpdir("state-two");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "4");
+        }
+        // Two DISTINCT scope roots, each shaped like a real memory dir so scope_root_for
+        // resolves to it rather than to a parent.
+        let s1 = tmpdir("two-a").join("memory");
+        let s2 = tmpdir("two-b").join("memory");
+        std::fs::create_dir_all(&s1).unwrap();
+        std::fs::create_dir_all(&s2).unwrap();
+        let p1 = s1.join("page.md");
+        let p2 = s2.join("page.md");
+
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let spawn = |a: PathBuf, b: PathBuf, done: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+            std::thread::spawn(move || {
+                // Hold the pair briefly so the two threads genuinely overlap.
+                for _ in 0..5 {
+                    let (_ga, _gb) = acquire_two(&a, &b).expect("acquire_two must not deadlock");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            })
+        };
+        let t1 = spawn(p1.clone(), p2.clone(), done.clone()); // (s1, s2)
+        let t2 = spawn(p2.clone(), p1.clone(), done.clone()); // (s2, s1) — the OPPOSITE order
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(s1.parent().unwrap());
+        let _ = std::fs::remove_dir_all(s2.parent().unwrap());
+
+        assert_eq!(done.load(std::sync::atomic::Ordering::SeqCst), 2, "both threads must finish");
+    }
+
+    /// Same scope twice must yield ONE guard — a second flock on the same file from the same
+    /// process would self-deadlock.
+    #[test]
+    fn acquire_two_same_scope_takes_one_lock() {
+        let _env = env_lock();
+        let state_dir = tmpdir("state-two-same");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+        let s = tmpdir("two-same").join("memory");
+        std::fs::create_dir_all(&s).unwrap();
+        let (_ga, gb) = acquire_two(&s.join("a.md"), &s.join("b.md")).unwrap();
+        let second_is_none = gb.is_none();
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(s.parent().unwrap());
+        assert!(second_is_none, "same scope must not be locked twice");
     }
 }

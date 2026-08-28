@@ -48,6 +48,22 @@ fn run(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Like `run` but sets an extra env var on the child. `new-page` derives its destination from
+/// `WIKIMEM_LOCAL_SCOPE_PATH` (the scope root) joined with `--name` — there is no `--path` flag
+/// any more — so pointing the scope root at the test's own temp dir keeps the derived path
+/// byte-identical to what the old explicit `--path` produced, and every downstream assertion on
+/// that path keeps working unchanged.
+fn run_env(args: &[&str], env_key: &str, env_val: &str) -> String {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .env(env_key, env_val)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(out.status.success(), "memgrep exited non-zero for {args:?}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// Run memgrep and return stdout WHATEVER the exit code. For verbs whose non-zero exit is a
 /// RESULT rather than an error — `lint` exits non-zero precisely when it finds violations, so
 /// `run` (which asserts success) can never inspect the findings it is meant to test.
@@ -120,6 +136,21 @@ fn run_fail(args: &[&str]) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
     let out = Command::new(bin)
         .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(
+        !out.status.success(),
+        "memgrep should have failed for {args:?}"
+    );
+}
+
+/// Like `run_fail` but sets an extra env var on the child — the `--path`-free `new-page`
+/// counterpart to `run_fail` (see `run_env` for why the env var stands in for the old flag).
+fn run_fail_env(args: &[&str], env_key: &str, env_val: &str) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .env(env_key, env_val)
         .output()
         .expect("failed to run memgrep");
     assert!(
@@ -277,8 +308,14 @@ fn version_stamp_names_the_commit_this_binary_was_actually_built_from() {
 fn bare_help_word_shows_the_verb_list_not_a_grep_of_the_word_help() {
     let (stdout, _stderr, code) = run_full(&["help"]);
     assert_eq!(code, 0);
+    // Case-insensitive on PURPOSE. What this test defends is that the verb-list trailer is
+    // PRESENT (the janitor#127 contract), not how it is capitalised — it pinned the literal
+    // "Memory verbs" and went red when the trailer was retitled "MEMORY VERBS" during the
+    // TRDD-FDUOQFYS help rewrite, even though the trailer was right there. A guard that fails on
+    // a heading's letter-case trains its reader to edit the assertion, which is how a real
+    // regression eventually gets waved through.
     assert!(
-        stdout.contains("Memory verbs"),
+        stdout.to_lowercase().contains("memory verbs"),
         "expected the verb-list trailer in help output, got: {stdout:?}"
     );
     assert!(
@@ -2983,19 +3020,21 @@ fn run_stdin_fail(args: &[&str], input: &str) {
 fn new_page_scaffolds_a_valid_parseable_page() {
     let d = TempDir::new("newpage");
     let page = d.join("comp.md");
-    let out = run(&[
-        "new-page",
-        "--path",
-        page.to_str().unwrap(),
-        "--tier",
-        "component",
-        "--name",
-        "comp",
-        "--description",
-        FIXTURE_PAGE_DESC,
-        "--type",
-        "reference",
-    ]);
+    let out = run_env(
+        &[
+            "new-page",
+            "--tier",
+            "component",
+            "--name",
+            "comp",
+            "--description",
+            FIXTURE_PAGE_DESC,
+            "--type",
+            "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     assert!(out.contains("comp.md"), "new-page prints the path: {out}");
     let text = std::fs::read_to_string(&page).unwrap();
     // Frontmatter recall surface + the mandatory landing zone are present.
@@ -3004,20 +3043,28 @@ fn new_page_scaffolds_a_valid_parseable_page() {
     assert!(text.contains("## Notes and lessons learned"));
     assert!(text.contains("node_type: memory") && text.contains("tier: component"));
     // A second new-page onto the same path is refused — never clobber an existing page.
-    run_fail(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "comp", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_fail_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "comp", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
 }
 
 #[test]
 fn add_atom_round_trips_through_the_parser_and_index() {
     let d = TempDir::new("addatom");
     let page = d.join("p.md");
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     // add-atom: body from stdin, a multi-word phrase keyword, a desc + type. The stored marker is
     // asserted LITERALLY below against exactly these 3 keyphrases, so this call opts out of the
     // >=10-keyphrase floor (MEMGREP_MIN_KEYWORDS=0) rather than splicing extra phrases into a
@@ -3066,10 +3113,14 @@ fn add_atom_refuses_a_missing_page_and_empty_body() {
     );
     // Existing page but empty stdin body → refuse.
     let page = d.join("p.md");
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     run_stdin_fail(
         &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "a,b"],
         "   \n  ",
@@ -3084,10 +3135,14 @@ fn add_atom_refuses_a_missing_page_and_empty_body() {
 fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
     let d = TempDir::new("addatom-supersedes");
     let page = d.join("p.md");
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     let old_out = run_stdin(
         &[
             "add-atom", "--page", page.to_str().unwrap(), "--keywords",
@@ -3148,10 +3203,14 @@ fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
 fn add_atom_supersedes_chains_across_multiple_generations() {
     let d = TempDir::new("addatom-supersedes-chain");
     let page = d.join("p.md");
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     // >=10-keyphrase floor (MEMGREP_MIN_KEYWORDS, default 10): every fixture below carries a full
     // keyphrase list plausibly belonging to its subject, not filler — a future author copying a
     // fixture copies a compliant one.
@@ -3201,10 +3260,14 @@ fn add_atom_supersedes_chains_across_multiple_generations() {
 fn add_lesson_anchors_from_an_atom_and_round_trips() {
     let d = TempDir::new("addlesson");
     let page = d.join("p.md");
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     let atom_out = run_stdin(
         &[
             "add-atom", "--page", page.to_str().unwrap(), "--keywords",
@@ -3419,11 +3482,15 @@ fn add_lesson_warns_when_keywords_share_no_word_with_the_page_description() {
          the tray keeps reporting empty / printer offline after sleep / spooler queue stuck / \
          the driver refuses to install / duplex module grinds / toner low warning will not clear / \
          where is the jam sensor / printouts come out blank / the lid latch keeps popping open";
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", GAP_PAGE_DESC,
-        "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", GAP_PAGE_DESC,
+            "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     let atom_out = run_stdin(
         &[
             "add-atom", "--page", page.to_str().unwrap(), "--keywords",
@@ -3492,11 +3559,15 @@ fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
          which limit applies before it gives up / it was read off the wrong constant / \
          a plaintext secret in a config file / why does the keychain dialog open / \
          how many attempts does it make / what does the default fall back to";
-    run(&[
-        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
-        "--name", "p", "--description", COVERED_PAGE_DESC,
-        "--type", "reference",
-    ]);
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", COVERED_PAGE_DESC,
+            "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
     let atom_out = run_stdin(
         &[
             "add-atom", "--page", page.to_str().unwrap(), "--keywords",
@@ -3527,5 +3598,94 @@ fn add_lesson_stays_silent_when_keywords_are_covered_by_the_description() {
     assert!(
         !err.contains("share no word"),
         "a fully-covered keyword set must not trigger the warning:\nstderr={err}"
+    );
+}
+
+/// The TRDD provenance backlink, end to end (TRDD-YMDE95LT): stamp it on write, read it back with
+/// `find-trdd`, back-fill it onto an atom that lacks one, and WARN — never fail — on absence.
+///
+/// The warn-not-error half is the part worth an integration test rather than a unit test: it is a
+/// deliberate design constraint (~276 atoms predate the field, so a gate would refuse every write
+/// until a mass migration ran), and the only way to prove it is to watch a real invocation with no
+/// `--trdd` still exit 0 and still write the atom.
+#[test]
+fn trdd_backlink_is_stamped_queryable_backfillable_and_optional() {
+    let d = TempDir::new("trdd-backlink");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+
+    // 1. WRITE with a backlink, in the casual `#XXXXXXXX` spelling — it must be canonicalised.
+    let sourced = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+            "--trdd", "#M7BZ4X1Q",
+        ],
+        "The widget hangs because the render loop never yields.",
+    );
+    let sourced_id = sourced.split_whitespace().next().expect("printed id").to_string();
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        text.contains(&format!("^{sourced_id} [")) && text.contains("trdd: TRDD-M7BZ4X1Q, ocd:"),
+        "the backlink is stored canonically, in its canonical position before the dates:\n{text}"
+    );
+
+    // 2. WRITE without one: exit 0, atom written, warning on stderr. All three matter — a warning
+    //    that also aborted the write would be the gate this design rejected.
+    let (unsourced, err, code) = run_stdin_full(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        "The panel repaints on every keystroke.",
+    );
+    assert_eq!(code, 0, "a missing backlink must not fail the write: stderr={err}");
+    let unsourced_id = unsourced.split_whitespace().next().expect("printed id").to_string();
+    assert!(err.contains("--trdd"), "absence warns and names the flag: {err}");
+    assert!(
+        std::fs::read_to_string(&page).unwrap().contains(&format!("^{unsourced_id} [")),
+        "the atom is written anyway"
+    );
+
+    // 3. QUERY: the decision lists the atom it produced, and only that one.
+    let hits = run(&["find-trdd", "m7bz4x1q", d.as_str()]);
+    assert!(hits.contains(&sourced_id), "find-trdd resolves a bare-8 query: {hits}");
+    assert!(!hits.contains(&unsourced_id), "an unsourced atom is not attributed: {hits}");
+    assert!(
+        run(&["find-trdd", "TRDD-ZZZZ9999", d.as_str()]).trim().is_empty(),
+        "an unrelated card produces no hits"
+    );
+
+    // 4. BACK-FILL onto the atom that had none — the path by which the existing corpus gains
+    //    coverage without a flag day.
+    run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(),
+            "--atom", &unsourced_id, "--trdd", "TRDD-M7BZ4X1Q",
+        ],
+        "The panel repaints on every keystroke.",
+    );
+    let after = run(&["find-trdd", "TRDD-M7BZ4X1Q", d.as_str()]);
+    assert!(
+        after.contains(&sourced_id) && after.contains(&unsourced_id),
+        "the back-filled atom now answers to the card too: {after}"
+    );
+
+    // 5. An unparseable citation is REFUSED rather than stored — a backlink to a card that cannot
+    //    exist sends the next reader hunting for a file that was never there.
+    run_stdin_fail(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+            "--trdd", "not-an-id",
+        ],
+        "Some fact.",
     );
 }

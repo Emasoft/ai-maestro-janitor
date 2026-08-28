@@ -53,14 +53,15 @@ steps 1 & 3 (hubs also carry `--globs`; a hub or component may carry
 `## Notes and lessons learned` section, and REFUSES to clobber an existing page:
 
 ```bash
-memgrep new-page --path "$MEMDIR/wikimem/<name>.md" \
+memgrep new-mem-topic \
   --tier hub|aspect|component --name <name> \
+  --scope local|private-project|public-project|user \
   --description "<the symptom words a future search will carry>" \
   --type project|user|feedback|reference \
   [--functionality <fn>] [--globs "src/frontend/**,..."]   # --globs: hubs only
 ```
 
-**Add one atom per durable body fact** (`memgrep add-atom`, the fact on stdin).
+**Add one atom per durable body fact** (`memgrep new-mem-atom` (was: `add-atom`), the fact on stdin).
 `--keywords` is the atom's RECALL SURFACE — comma-separated key-phrases carrying
 the SYMPTOM / the question a future session will search with, NOT the answer's
 jargon. `--desc` is REQUIRED: a ≤200-char PROSE summary of the body (memgrep LISTS
@@ -69,7 +70,7 @@ atom worth reading; a missing/weak desc makes the atom invisible-at-a-glance). A
 real summary, never a slug:
 
 ```bash
-printf '%s' "<the durable fact, in full>" | memgrep add-atom \
+printf '%s' "<the durable fact, in full>" | memgrep new-mem-atom \
   --page "$MEMDIR/wikimem/<name>.md" \
   --keywords "<symptom phrase A>, <symptom phrase B>" \
   --desc "<≤200-char prose summary of this fact>" [--type <t>]
@@ -78,20 +79,20 @@ printf '%s' "<the durable fact, in full>" | memgrep add-atom \
 Full page schema, tier semantics, and atom grammar (to READ, never to hand-write):
 [atom-authoring.md](atom-authoring.md).
 
-The frontmatter `new-page` writes carries `name`, `description` (symptom-indexed),
+The frontmatter `new-mem-topic` writes carries `name`, `description` (symptom-indexed),
 `ocd`, `lmd`, `metadata.{node_type: memory, type, tier}` (+ `functionality`; +
 `globs` on hubs). **A PROJECT-scope page also needs `publish-globally: true|false`**
-(default `false` — publishing beyond this project is opt-in, never assumed); `new-page`
+(default `false` — publishing beyond this project is opt-in, never assumed); `new-mem-topic`
 does not set it; memgrep normalizes it in on the next write it makes, and you may state it explicitly, then
 flip it to `true` only for pages describing this project's public surface (`markdown-memory-recall.md`
 §`publish-globally:`). The tier's edge sections — `## Applies to` on hub/aspect
 (radiating), `## Governed by` on component (receiving); `## See also` optional on
 any tier — you add in step 5 when you WIRE the context. The standing
-`## Notes and lessons learned` section is always present (`new-page` emits it even
+`## Notes and lessons learned` section is always present (`new-mem-topic` emits it even
 when empty).
 
 **THE LESSON FORM.** A lesson is a first-class atom — a GUARDRAIL, not a story. Add
-it with `memgrep add-lesson` (the DO-NOT/BECAUSE/DO text on stdin), anchored to the
+it with `memgrep update-mem-atom --lesson` (was: `add-lesson`; the DO-NOT/BECAUSE/DO text on stdin), anchored to the
 atom it annotates; the tool emits the canonical
 `[^N]: [id:…, status:valid, keywords:…, ocd:…, lmd:…] <text>` and wires the atom's
 `[^N]` reference — you never type that grammar. The JUDGMENT is yours: `--keywords`
@@ -102,7 +103,7 @@ the exit. Full grammar + WHY: [wikimem-model.md — THE LESSON
 FORM](wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
 
 ```bash
-printf '%s' "DO NOT <X>, BECAUSE <why>. DO <Y> instead." | memgrep add-lesson \
+printf '%s' "DO NOT <X>, BECAUSE <why>. DO <Y> instead." | memgrep update-mem-atom --lesson \
   --page "$MEMDIR/wikimem/<name>.md" --atom <atom-id> \
   --keywords "<recall phrase>" [--desc "<≤200-char context>"]
 ```

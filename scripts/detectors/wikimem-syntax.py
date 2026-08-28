@@ -22,10 +22,21 @@ Only ERROR is surfaced (a broken or invisible element). The hundreds of WARN/INF
 Scope: the SAME three memory roots recall reads — LOCAL (this project's), PROJECT (this repo's),
 USER (the user's own global) — in ONE invocation, because atom-id uniqueness is corpus-wide and a
 per-scope run cannot see a cross-scope collision. These are all the USER's own memory; no other
-project's data is touched, so the per-project channeling invariant holds. READ-ONLY: it never
-mutates a page (RULE 0 + separation of powers — the janitor surfaces, an agent fixes via
-/janitor-memory-update, EXCEPT `link-downward-cross-scope`: no editor chore re-homes a page
-across scopes, so that rule's remedy is a scope decision the agent makes itself — janitor#138).
+project's data is touched, so the per-project channeling invariant holds.
+
+MUTATION WARNING — this detector is NO LONGER read-only, and its own docstring claimed otherwise
+until 2026-08-27. It shells out to `memgrep lint`, and since TRDD-RY0IJBJI that verb AUTOFIXES
+(reconciling publish-globally/symlink state) on every invocation. So a heartbeat fire — every ~5
+minutes, in every armed session on this machine — performs a corpus WRITE as a side effect. That
+contradicts the separation of powers this file was built on (the janitor SURFACES, an agent
+FIXES), and it is the crux of TRDD-VJL1YTCG Part C, which is where the real fix belongs: either
+this detector stops calling the mutating verb, or `lint` grows a read-only mode for non-librarian
+callers. Until Part C lands, do not cite this file as an example of a read-only detector.
+
+What it still does NOT do itself: it never edits a page in its OWN code (RULE 0) — an agent fixes
+findings via /janitor-memory-update, EXCEPT `link-downward-cross-scope`: no editor chore re-homes
+a page across scopes, so that rule's remedy is a scope decision the agent makes itself
+(janitor#138).
 Fail-open: any error → silent exit 0, never breaks the heartbeat.
 Per-set content-hash dedupe: re-emits only when the set of ERRORs CHANGES (bounded — fix the
 corpus and it converges to silence).

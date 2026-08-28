@@ -77,10 +77,12 @@ Spec: `WM-LES-09` (supersession is not a lesson), `WM-LES-10` (every substantive
 change supersedes). §1 and §3 below MUST apply this same invariant when replacing
 content.
 
-> **TOOLING NOTE (2026-08-04):** no verb yet performs a lesson-free supersession —
-> `add-lesson --supersedes` requires a lesson. Until **TRDD-3PWQK8NM** lands, do
-> the move by hand-editing ONLY if you cannot avoid it, and never fabricate a
-> lesson to satisfy the tool.
+> **TOOLING NOTE (updated — TRDD-3PWQK8NM has landed):** for the **Supersede only, no
+> lesson** row, use `memgrep new-mem-atom --supersedes <old-atom-id>` — a plain
+> (non-`--lesson`) atom write that marks the old atom `status: superseded` and
+> relocates it verbatim under `## Superseded`, no fabricated lesson required. For the
+> **Supersede + lesson** row, use `memgrep update-mem-atom --lesson --atom <old-atom-id>
+> --supersedes` (see below).
 
 ## 0. Find the page
 
@@ -110,8 +112,9 @@ There is no "their page". There is no permission to seek. `contributors:` is a r
 has helped, never a gate on who may.
 
 **Why this is SAFE, and why hesitating is the actually-risky move:** the write verbs make
-correction NON-DESTRUCTIVE by construction. `add-lesson --supersedes` embeds the atom's
-verbatim prior body as a trailing `SUPERSEDED BODY:` and keeps the SAME atom id, so the old
+correction NON-DESTRUCTIVE by construction. `update-mem-atom --lesson --supersedes` (was:
+`add-lesson --supersedes`) embeds the atom's verbatim prior body as a trailing
+`SUPERSEDED BODY:` and keeps the SAME atom id, so the old
 fact becomes that atom's dated changelog instead of disappearing. **No memory is ever lost —
 only versioned.** A superseded fact stays readable, attributable and greppable forever;
 sometimes it carries a lesson explaining why it was wrong, sometimes it is simply the previous
@@ -143,7 +146,7 @@ the page is about — the one-component-one-page invariant means it goes HERE, n
 in a new page):
 
 1. Add the decision to the body, in the right section. **A genuinely NEW,
-   additive fact** is authored with `memgrep add-atom --page <page> --keywords
+   additive fact** is authored with `memgrep new-mem-atom --page <page> --keywords
    "<symptom>" --desc "<≤200-char summary>"` (the fact on stdin) — memgrep
    synthesises the `^id [keywords:…]` grammar, so never hand-write the atom marker.
    **Both flags are hard-gated (owner, 2026-08-23): at least 10 keyphrases and a

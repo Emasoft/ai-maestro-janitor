@@ -32,24 +32,45 @@ SKILL = REPO / "scripts" / "memgrep" / "SKILL.md"
 
 # The wikimem verbs, from main.rs's hand-rolled dispatch (it pre-empts clap, so `--help` has no
 # `Commands:` section to enumerate — hence the literal list, which the first test pins to source).
+# `new-page`/`add-atom`/`edit`/`migrate` are LEGACY spellings now: `dispatch_key()` resolves them
+# onto their replacement (`new-mem-topic`/`new-mem-atom`/`update-mem-topic`/`migrate-mem-atom`)
+# BEFORE the match statement ever runs, so the literal `Some("add-atom")` pattern no longer exists
+# in source — only the canonical name does. `add-lesson` is NOT in that table (no replacement
+# resolves it away) and still dispatches on its own literal arm, so it stays a first-class verb
+# here, not a legacy alias.
 VERBS = (
-    "index",
-    "reindex",
-    "validate",
-    "links",
-    "lint",
-    "fact",
+    # ---- READ / SEARCH ----
     "recall",
+    "recall-mem-topic",
+    "recall-mem-atom",
     "find",
-    "find-claude-mem-ref",
+    "overview",
     "atom",
     "atom-page",
-    "overview",
-    "add-atom",
-    "new-page",
+    "fact",
+    "links",
+    "find-claude-mem-ref",
+    "find-trdd",
+    # ---- WRITE ----
+    "new-mem-topic",
+    "new-mem-atom",
     "add-lesson",
-    "migrate",
-    "edit",
+    "update-mem-topic",
+    "update-mem-atom",
+    "delete-mem-topic",
+    "delete-mem-atom",
+    "merge-mem-topic",
+    "merge-mem-atom",
+    "split-mem-topic",
+    "split-mem-atom",
+    "reference-mem-topic",
+    "reference-mem-atom",
+    "migrate-mem-atom",
+    # ---- MAINTAIN ----
+    "lint",
+    "validate",
+    "index",
+    "reindex",
 )
 
 # Flags the spec deliberately does not describe, each with the reason it is exempt. An allowlist
@@ -59,6 +80,11 @@ EXEMPT: dict[str, str] = {
     "--help": "clap builtin, not a wikimem behaviour",
     "--version": "clap builtin, not a wikimem behaviour",
     "--hidden": ("generic walker knob shared with the grep half: descend into dotfiles. It changes WHICH files are visited, never what any wikimem rule means"),
+    "--find": (
+        "the verb-free note-search shortcut (`memgrep --find '<query>'`) is hand-parsed BEFORE "
+        "clap ever sees argv (same trick as the top-level `--where`), so it never appears in any "
+        "`--help` output `_flags_of()` can scan — real, but invisible to this test's flag scanner"
+    ),
 }
 
 # Dispatch-table entries that are NOT wikimem verbs — the same "clap builtin, not a wikimem
@@ -161,7 +187,11 @@ def test_dispatch_list_matches_the_verbs_this_test_checks() -> None:
     table, or every other assertion here is scoped to a stale list and passes by checking
     nothing."""
     dispatch = (REPO / "scripts" / "memgrep" / "src" / "main.rs").read_text(encoding="utf-8")
-    in_source = set(re.findall(r'Some\("([a-z][a-z0-9-]*)"\)\s*=>', dispatch))
+    # `\||=>` (not just `=>`): a shared arm like `Some("recall") | Some("recall-mem-topic") |
+    # Some("recall-mem-atom") => {` only has `=>` after the LAST alternative — anchoring on `=>`
+    # alone silently drops every alternative before it, which is a false negative this test would
+    # otherwise not catch (measured: it made `recall`/`recall-mem-topic` invisible to this check).
+    in_source = set(re.findall(r'Some\("([a-z][a-z0-9-]*)"\)\s*(?:\||=>)', dispatch))
     expected = set(VERBS) | set(DISPATCH_EXEMPT_VERBS)
     assert in_source == expected, f"main.rs's dispatch and this test's VERBS+DISPATCH_EXEMPT_VERBS have diverged — only in source: {sorted(in_source - expected)}; only in test: {sorted(expected - in_source)}"
 

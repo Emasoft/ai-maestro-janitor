@@ -17,8 +17,11 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 |---|---|
 | `recall "SYMPTOM" <memdir>` | rank notes AND body **ATOMS** by symptom match, best first → one lean TAB row each: `<lmd>⇥<locator>⇥<description>` (locator = the bare atom id for an atom, the path for a page). A TRIAGE list — no bodies, no lessons. Query the QUESTION's words, not the answer's |
 | `recall <ATOM-ID> <memdir>` | the **second hop**: exact-id lookup returning that ONE atom in full (body + its `[^N]` lessons + see-also). This is what makes the lean listing cheap — scan ids, then pay for exactly one atom. A whitespace-free query that matches no atom id falls through to an ordinary symptom search |
+| `recall-mem-topic "SYMPTOM" <memdir>` | non-deprecated named spelling of `recall`'s hop 1 (same code path) — say the hop instead of relying on the query's shape to imply it |
+| `recall-mem-atom <ATOM-ID> <memdir>` | non-deprecated named spelling of `recall`'s hop 2 (same code path) |
 | `find "<query>" <memdir>` | note-level `+`/`-`/wildcard/phrase keyword search (see below); `--only-notes` searches the lessons instead of pages |
 | `find-claude-mem-ref <buffer.md> <wikidir>` | list every wiki ATOM harvested FROM a Claude-memory buffer file → `path#atom-id\t<source-hash>` (the harvest provenance back-reference; see Atoms below) |
+| `find-trdd <TRDD-ID> <wikidir>` | the reverse provenance hop: list every ATOM whose `trdd:` cites that card → `path#atom-id\t<stored-citation>`. `TRDD-M7BZ4X1Q`, `#M7BZ4X1Q` and the bare 8 chars all resolve. Use it when a decision CHANGES — it enumerates the atoms still asserting the old answer, instead of recalling by symptom and hoping they surface |
 | `index <memdir>` / `reindex <memdir>` | build the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental — re-parses only changed files); `--full` rebuilds from scratch. Indexes pages, `[^N]` lessons, AND body atoms |
 | `index --markdown <memdir>` | the legacy doc-generator → `memory-index.md` (per-note title+summary+tags+TOC+backlinks); add `--write` to write the file instead of stdout |
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
@@ -28,11 +31,21 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 | `atom <ID> <memdir>` | print ONE atom's full record (content + resolved `[^N]` footnotes) by id — the same record `recall <ATOM-ID>` returns, callable directly when the id is already known |
 | `atom-page <ID> <memdir>` | print the path of the wikimem page that CURRENTLY holds an atom id (an atom can move via `migrate`) |
 | `overview <memdir>` | print the `<project>-overview.md` navigation entry page |
-| `add-atom --page P --keywords K [--desc D] [--supersedes ID]` (body on stdin) | author a memory ATOM into an existing page — id/dates/syntax synthesised, so a malformed atom is impossible. The sanctioned way to add a fact; never hand-author the `^id [...]` marker. `--supersedes ID` is the LESSON-FREE correction path (WM-LES-09): the named atom is retired (`status: superseded, superseded-by:<new-id>`) and moved verbatim below `## Superseded` in the same transaction — use it for a clean update where nothing went wrong; use `add-lesson --supersedes` instead when the correction DOES record a mistake |
-| `new-page --path P --tier hub\|aspect\|component --name N --description D --type PAGE_TYPE` | scaffold a new wikimem page with valid frontmatter + the mandatory `## Notes and lessons learned` section (refuses to overwrite) |
+| `new-mem-atom --page P --keywords K [--desc D] [--supersedes ID]` (body on stdin; was `add-atom`) | author a memory ATOM into an existing page — id/dates/syntax synthesised, so a malformed atom is impossible. The sanctioned way to add a fact; never hand-author the `^id [...]` marker. `--supersedes ID` is the LESSON-FREE correction path (WM-LES-09): the named atom is retired (`status: superseded, superseded-by:<new-id>`) and moved verbatim below `## Superseded` in the same transaction — use it for a clean update where nothing went wrong; use `add-lesson --supersedes` instead when the correction DOES record a mistake |
+| `update-mem-atom --lesson --page P --atom A --keywords K` (DO-NOT/BECAUSE/DO on stdin) | `--lesson` folds `add-lesson` into `update-mem-atom` as an alternate mode — `--atom` names what it corrects/annotates, `--supersedes`/`--retire-atom` take on their `add-lesson` meaning. `add-lesson` itself stays live |
+| `new-mem-topic --tier hub\|aspect\|component --name N --description D --type PAGE_TYPE [--scope S]` (was `new-page`) | scaffold a new wikimem page with valid frontmatter + the mandatory `## Notes and lessons learned` section (refuses to overwrite). **No `--path`** — the destination is `<scope root>/<name>.md`, so relocating a root via `WIKIMEM_*_SCOPE_PATH` needs no call-site change |
 | `add-lesson --page P --atom A --keywords K [--desc D] [--supersedes]` (DO-NOT/BECAUSE/DO on stdin) | author a `[^N]` lesson anchored to an atom's body; `--supersedes` embeds that atom's CURRENT verbatim body as a trailing `SUPERSEDED BODY:` block — the correction protocol, never a delete/overwrite |
-| `migrate --from F --to T <ATOM> [--base-sha256 H]` | move an atom AND its baggage (lessons, refs) between pages, renumbering footnotes; CAS-guarded against a stale read of `--from` |
-| `edit --page P --old-file O --new-file N [--base-sha256 H]` | the sanctioned replace-X-with-Y primitive for a page's existing text — locked, CAS-checked, refuses on ambiguity or staleness. The ONE sanctioned edit path for prose already on a page; never hand-edit wikimem markdown |
+| `update-mem-topic --page P --old-file O --new-file N [--base-sha256 H]` (was `edit`) | the sanctioned replace-X-with-Y primitive for a page's existing text — locked, CAS-checked, refuses on ambiguity or staleness. The ONE sanctioned edit path for prose already on a page; never hand-edit wikimem markdown |
+| `update-mem-atom --page P --atom A [--desc D] [--keywords K] [--dry-run]` (new body on stdin) | rewrite ONE atom's body/desc/keywords in place — id, `ocd`, `type` untouched, `[^N]` refs stay valid. Omitted `--desc`/`--keywords` keep the current value |
+| `delete-mem-topic --page P --force [--dry-run]` | retire a PAGE to `.trashcan/` — NEVER unlinks (RULE 0). `--force` is mandatory and also overrides the inbound-wikilink refusal |
+| `delete-mem-atom --page P --atom A [--with-lessons\|--keep-lessons] [--dry-run]` | remove one atom, renumbering the `[^N]` footnotes that follow it; `--with-lessons` also deletes its lesson definitions, `--keep-lessons` keeps definitions shared with another atom |
+| `merge-mem-topic --from F --into I [--dry-run]` | fold every atom + lesson of `--from` into `--into`, tombstoning the source page (never deleted) |
+| `merge-mem-atom --page P --atom A --into I [--dry-run]` | fold atom `A` into atom `I` on the SAME page — `I` survives, keeps its id/`ocd`/`desc`/`type` |
+| `split-mem-topic --page P --atoms A,B --into NEW --name N --description D [--dry-run]` | move atoms (with their lessons) OFF `P` onto a brand-new page, wiring `## See also` both ways |
+| `split-mem-atom --page P --atom A --at WHERE --desc D [--keywords K] [--dry-run]` | split ONE over-long atom into two on the same page — `--at` is a body substring or a 1-based line number |
+| `reference-mem-topic --page P --to T [--dry-run]` | wikilink two pages' `## See also` sections in BOTH directions in one edit — THE LINK LAW |
+| `reference-mem-atom --page P --atom A --to T [--dry-run]` | add an inline `[[wikilink]]` inside one atom's body, wiring the reciprocal link on `--to`'s `## See also` |
+| `migrate-mem-atom --from F --to T <ATOM> [--base-sha256 H]` (was `migrate`) | move an atom AND its baggage (lessons, refs) between pages, renumbering footnotes; CAS-guarded against a stale read of `--from`. Add **`--leave-link`** when this is a RELOCATION (the fact belongs on another page): it wires `## See also` BOTH ways so the source keeps a pointer instead of a hole — refused when the link would run DOWN the LOCAL→PROJECT→USER order |
 
 ### Validating the index — run this BEFORE `reindex`, not after
 
@@ -94,8 +107,12 @@ see also: <the [^N] # See also footnotes — each links out to a related memory>
 (`--no-notes` keeps the body, drops the grouped footnotes.) The harvest stamps two more block-props as
 provenance — `claude_mem_ref: <buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — and
 `find-claude-mem-ref` lists the atoms that reference a given buffer file (with their stored hashes) so a
-re-harvest touches only NEW or CHANGED memories. Authoring a fact as an atom (with its own history +
-relations as inline references):
+re-harvest touches only NEW or CHANGED memories. A third provenance prop, `trdd: TRDD-XXXXXXXX`, names
+the DECISION the fact came out of — pass `--trdd` whenever a card exists (its absence only warns, since
+most of the corpus predates the field), and `update-mem-atom --trdd` back-fills an older atom. It is what
+lets a chore demote an obsolete fact to a dated lesson by READING the rationale off `memory → TRDD →
+implementation-commits: → git show` instead of inventing one. Authoring a fact as an atom (with its own
+history + relations as inline references):
 
 ```markdown
 ^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
@@ -117,6 +134,7 @@ memgrep find "+rotator +keychain -widget" <memdir>               # AND two terms
 memgrep find '+"old approach" retry' <memdir>                    # mandatory phrase + optional ranker
 memgrep find "+max_retries" <memdir> --only-notes                # search ONLY the lessons-learned
 memgrep find-claude-mem-ref feedback_oauth.md <memdir>           # atoms harvested from a buffer file
+memgrep find-trdd TRDD-M7BZ4X1Q <memdir>                         # atoms produced BY a decision (provenance, in reverse)
 memgrep reindex <memdir>                                         # refresh the SQLite query index (pages+lessons+atoms)
 memgrep index --markdown --write <memdir>                        # regenerate memory-index.md
 memgrep lint <memdir>                                            # structural integrity gate (prints ERROR/WARN/INFO; exit≠0 on ERROR)

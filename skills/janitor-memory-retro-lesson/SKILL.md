@@ -42,10 +42,11 @@ already in lesson form; only body ATOM markers count.
    (`FLAGGED: unsourceable WHY — needs a human`) and move on. A fabricated WHY is a
    hallucinated guardrail — strictly worse than none.
 2. **No knowledge lost.** The superseded body is embedded VERBATIM in the lesson
-   (`add-lesson --supersedes` does this for you — run it before touching the atom body).
+   (`memgrep update-mem-atom --lesson --supersedes`, was `add-lesson --supersedes` —
+   does this for you — run it before touching the atom body).
    Nothing is deleted, ever.
 3. **Never edit a live page by hand.** The conversion uses memgrep's own atomic write
-   verb (`add-lesson`); the pointer completion rides the `memory_txn_cli --op repair`
+   verb (`update-mem-atom --lesson`); the pointer completion rides the `memory_txn_cli --op repair`
    transaction (staged copy → verify → atomic commit). `resume` the scope first.
 4. **Bounded.** ONE page per pass (all its candidate atoms, capped at
    **5 conversions/run**). The next heartbeat handles the next page — recursion iterates
@@ -74,7 +75,7 @@ already in lesson form; only body ATOM markers count.
       future session would search with (underscore_joined; a comma splits FIELDS):
 
       ```bash
-      printf '%s' "$LESSON_TEXT" | memgrep add-lesson --page <page> --atom <ATOM-ID> \
+      printf '%s' "$LESSON_TEXT" | memgrep update-mem-atom --lesson --page <page> --atom <ATOM-ID> \
         --keywords "<symptom_phrase, another_phrase>" --supersedes --retire-atom
       ```
 
@@ -82,7 +83,7 @@ already in lesson form; only body ATOM markers count.
    c. **Complete the pointer** — ⚠ the load-bearing gotcha: `--retire-atom` is
       idempotent-skipped when the marker ALREADY carries a `status:` prop (memory.rs,
       "skip if a `status:` prop is already present") — which is precisely the retro
-      case. So `add-lesson` created the lesson but did NOT stamp `superseded-by:`.
+      case. So `update-mem-atom --lesson` created the lesson but did NOT stamp `superseded-by:`.
       Through `memory_txn_cli begin <scope> repair <page>`: append
       `, superseded-by:<lesson-id>` inside the atom's props bracket on the STAGED copy
       (touch nothing else), then `commit --op repair`. The verify gate proves no loss;

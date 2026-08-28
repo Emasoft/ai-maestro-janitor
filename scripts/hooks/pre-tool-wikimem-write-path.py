@@ -57,14 +57,21 @@ _REASON = """This is a wikimem memory page, and memgrep is the only write path t
 Use the write verb that matches the intent — each SYNTHESISES the element, so a malformed
 atom/page/lesson is impossible by construction, and each validates + reindexes as it writes:
 
-  memgrep new-page    <path>  --title ... --description ...   # a new page
-  memgrep add-atom    --page <path> --keywords ...            # a new fact
-  memgrep add-lesson  --page <path> --atom <id> --keywords ...# a [^N] lesson
-  memgrep edit        --page <path> ...                       # CAS replace of existing text
-  memgrep migrate     --page <path> ...                       # move a body verbatim
+  memgrep new-mem-topic     --scope local --name N --tier component --type reference --description "..."
+  memgrep new-mem-atom      --page <path> --desc "..." --keywords "..."  # a new fact (body on stdin)
+  memgrep update-mem-atom   --page <path> --lesson --atom <id> --keywords "..."  # a [^N] lesson
+  memgrep update-mem-topic  --page <path> --old-file F1 --new-file F2   # CAS replace of exact text
+  memgrep update-mem-atom   --page <path> --atom <id>                   # rewrite ONE atom, id kept
+  memgrep migrate-mem-atom  <atom> --from <page> --to <page>            # move an atom + its lessons
 
-Correct a WRONG fact with `add-lesson --supersedes` (same atom id) — never by overwriting it.
-Then: `memgrep validate <page> && memgrep lint <page>`.
+Also available: `delete-mem-topic`/`delete-mem-atom` (remove, never bypassing the recall
+guarantees), `merge-mem-topic`/`merge-mem-atom` (fold duplicates together), `split-mem-topic`/
+`split-mem-atom` (break up an over-long page or atom), and `reference-mem-topic`/
+`reference-mem-atom` (wire a bidirectional `[[wikilink]]`) — reach for whichever matches the
+edit you actually intend, instead of hand-authoring it.
+
+Correct a WRONG fact with `update-mem-atom --lesson --supersedes` (same atom id) — never by
+overwriting it. Then: `memgrep validate <page> && memgrep lint <page>`.
 
 Editing the file directly bypasses the parser, the CAS staleness guard, and the scope lock, so
 the corpus loses the guarantees the memory system is built on. Nothing here forbids the CONTENT

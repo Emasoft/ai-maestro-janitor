@@ -1131,7 +1131,7 @@ pub fn build_link_sets(paths: &[PathBuf], hidden: bool, keys: &[(LinkDir, String
     sets
 }
 
-fn rel(p: &Path) -> String {
+pub(crate) fn rel(p: &Path) -> String {
     p.display().to_string()
 }
 
@@ -1140,7 +1140,12 @@ fn rel(p: &Path) -> String {
 #[derive(Parser)]
 #[command(
     name = "memgrep index",
-    about = "build the persistent SQLite query index (or, with --markdown, regenerate memory-index.md)"
+    about = "build the persistent SQLite query index (or, with --markdown, regenerate memory-index.md)",
+    after_help = "EXAMPLES:\n\
+        \x20 # refresh the fast index before a batch of recall/find calls\n\
+        \x20 memgrep index .claude/project/memory\n\
+        \x20 # regenerate the human-readable memory-index.md doc instead\n\
+        \x20 memgrep index --markdown --write .claude/project/memory\n"
 )]
 struct IndexArgs {
     paths: Vec<PathBuf>,
@@ -1195,7 +1200,10 @@ fn do_reindex(paths: &[PathBuf], hidden: bool, full: bool) -> Result<()> {
 #[derive(Parser)]
 #[command(
     name = "memgrep overview",
-    about = "print the project's <name>-overview.md entry-point wiki page"
+    about = "print the project's <name>-overview.md entry-point wiki page",
+    after_help = "EXAMPLES:\n\
+        \x20 # the navigation entry point — read this first when starting a session\n\
+        \x20 memgrep overview .claude/project/memory\n"
 )]
 struct OverviewArgs {
     /// The memory dir to search (default `.`).
@@ -1314,7 +1322,18 @@ fn cmd_index_markdown(a: &IndexArgs) -> Result<()> {
 // ─────────────────────────── `memgrep links` ───────────────────────────
 
 #[derive(Parser)]
-#[command(name = "memgrep links", about = "report the cross-file link graph")]
+#[command(
+    name = "memgrep links",
+    about = "report the cross-file link graph",
+    after_help = "EXAMPLES:\n\
+        \x20 # NOTE's OUT-links — the pages NOTE points at\n\
+        \x20 memgrep links --to memory-system .claude/project/memory\n\
+        \x20 # NOTE's BACKLINKS — who points BACK at NOTE (reads inverted to most people — verify!)\n\
+        \x20 memgrep links --from memory-system .claude/project/memory\n\
+        \x20 # corpus-wide hygiene: dangling targets, and pages nothing links to\n\
+        \x20 memgrep links --broken .claude/project/memory\n\
+        \x20 memgrep links --orphans .claude/project/memory\n"
+)]
 struct LinksArgs {
     paths: Vec<PathBuf>,
     /// Only links whose target file does not exist.
@@ -1571,6 +1590,12 @@ pub struct Atom {
     pub lmd: Option<String>,
     pub claude_mem_ref: Option<String>,
     pub claude_mem_hash: Option<String>,
+    /// The TRDD that produced this fact, canonical `TRDD-XXXXXXXX` (TRDD-YMDE95LT). OPTIONAL: the
+    /// corpus predates the field, so `None` is the common case and never an error — a chore that
+    /// wants to demote this atom to a dated lesson uses it to source the RATIONALE from the
+    /// decision record (`memory → TRDD → implementation-commits: → git show`) instead of inventing
+    /// one, and simply cannot do that when the backlink is absent.
+    pub trdd: Option<String>,
     /// A one-line summary of the atom — the LISTING triage surface. Two forms coexist in the corpus
     /// (TRDD-AP2X9A0H): the NEW required form is a `"…"`-quoted ≤200-char PROSE summary (stored with
     /// its delimiting quotes stripped, whitespace-normalised); the LEGACY form (TRDD-056384eb) is a
@@ -1593,6 +1618,47 @@ pub struct Atom {
 /// First element of a block-prop's value array — for the single-valued keys (type/ocd/lmd/claude_*/desc).
 fn first_val(m: &BTreeMap<String, Vec<String>>, key: &str) -> Option<String> {
     m.get(key).and_then(|v| v.first()).cloned()
+}
+
+/// The canonical `TRDD-XXXXXXXX` spelling of a TRDD citation, or an error naming what was wrong.
+///
+/// Accepts every spelling the TRDD rules sanction — `TRDD-M7BZ4X1Q`, the casual `#M7BZ4X1Q`, and the
+/// bare `m7bz4x1q` — because a caller pasting from a filename, a commit subject, or chat should not
+/// have to know which one this flag wants. Canonicalising on the way IN is what makes the stored
+/// value greppable (`grep -rn "TRDD-M7BZ4X1Q" .` finds the memory and the code that implemented it
+/// in one search), and what lets [`trdd_matches`] compare two citations without re-parsing.
+///
+/// The id is 8-char uppercase base36 per `~/.claude/rules/trdd-design-tasks.md`. A shape that is
+/// not that is REFUSED rather than stored: a backlink to a TRDD that cannot exist is worse than no
+/// backlink, because the chore that follows it reports a broken provenance chain instead of an
+/// absent one, and someone then goes looking for the file.
+pub(crate) fn normalize_trdd_id(raw: &str) -> Result<String> {
+    let payload = raw
+        .trim()
+        .trim_start_matches('#')
+        .trim_start_matches("TRDD-")
+        .trim_start_matches("trdd-")
+        .to_ascii_uppercase();
+    if payload.len() != 8 || !payload.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
+        anyhow::bail!(
+            "`{raw}` is not a TRDD id — expected 8 base36 chars (A-Z0-9), optionally written \
+             `TRDD-XXXXXXXX` or `#XXXXXXXX`. Take it from the card's `trdd-id:` field."
+        );
+    }
+    Ok(format!("TRDD-{payload}"))
+}
+
+/// True iff a stored `trdd:` block-prop cites the queried TRDD. Both sides canonicalise first, so a
+/// query of `m7bz4x1q` finds an atom stamped `TRDD-M7BZ4X1Q` — the alternative (exact string match)
+/// makes the answer depend on which spelling the writer happened to use, and a provenance query
+/// that silently returns nothing is indistinguishable from "no atoms came from that decision".
+fn trdd_matches(stored: &str, query: &str) -> bool {
+    match (normalize_trdd_id(stored), normalize_trdd_id(query)) {
+        (Ok(a), Ok(b)) => a == b,
+        // A malformed stored value can still be matched literally, so an atom carrying a typo is
+        // findable by that typo rather than invisible to every query.
+        _ => stored.trim().eq_ignore_ascii_case(query.trim()),
+    }
 }
 
 /// Truncate `s` to at most `max` CHARACTERS (not bytes) — guards the `desc` 200-char cap on multibyte
@@ -1667,6 +1733,7 @@ fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> At
         lmd: first_val(&p, "lmd"),
         claude_mem_ref: first_val(&p, "claude_mem_ref"),
         claude_mem_hash: first_val(&p, "claude_mem_hash"),
+        trdd: first_val(&p, "trdd"),
         // `desc` may be the legacy single-token slug OR the new quoted ≤200-char prose
         // (TRDD-AP2X9A0H) — parse_block_props stripped the delimiting quotes, so both arrive as the
         // value ARRAY; joining restores the prose (whitespace-normalised). NOT `first_val`: that
@@ -1759,7 +1826,11 @@ pub fn resolve_atoms_public(path: &Path) -> Vec<Atom> {
 #[derive(Parser)]
 #[command(
     name = "memgrep find-claude-mem-ref",
-    about = "list wiki ATOMS harvested FROM a given Claude-memory buffer file (provenance back-reference)"
+    about = "list wiki ATOMS harvested FROM a given Claude-memory buffer file (provenance back-reference)",
+    after_help = "EXAMPLES:\n\
+        \x20 # has this harness MEMORY.md buffer note already been harvested into the wiki?\n\
+        \x20 memgrep find-claude-mem-ref feedback_x.md .claude/project/memory\n\
+        \x20 # no output => not yet harvested; a printed hash MISMATCH => the source changed, re-harvest\n"
 )]
 struct FindClaudeMemRefArgs {
     /// The source Claude-memory `.md` buffer file (a harness MEMORY.md-system note) whose derived
@@ -1844,6 +1915,77 @@ pub fn cmd_find_claude_mem_ref_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────────────── `memgrep find-trdd` (TRDD-YMDE95LT) ───────────────────
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep find-trdd",
+    about = "list wiki ATOMS produced by a given TRDD (the provenance backlink, in reverse)",
+    after_help = "EXAMPLES:\n\
+        \x20 # which facts did this decision put into the corpus?\n\
+        \x20 memgrep find-trdd TRDD-M7BZ4X1Q .claude/project/memory\n\
+        \x20 # the casual and bare spellings resolve to the same card\n\
+        \x20 memgrep find-trdd m7bz4x1q .claude/project/memory\n\
+        \x20 # no output => no atom cites it: either the card produced no fact, or the backlink was never stamped\n"
+)]
+struct FindTrddArgs {
+    /// The TRDD to look up — `TRDD-XXXXXXXX`, `#XXXXXXXX`, or the bare 8 chars.
+    trdd: String,
+    /// Wiki dir(s) / file(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// Every ATOM whose `trdd:` block-prop cites `query`, as `(page-path, atom-id, stored-citation)`,
+/// sorted + deduped.
+///
+/// A LIVE walk, with no index fast path — deliberately, unlike `claude_mem_ref_hits`. That one is
+/// called once per buffer note by the harvest (a hot loop over the whole corpus); this one answers
+/// a human-or-chore question about ONE card, occasionally. Adding an `atoms.trdd` column to buy it
+/// speed would cost a new schema version whose migration CLEARS the file ledger, forcing a full
+/// re-parse of every corpus on the machine — a large, certain cost for a saving nobody has
+/// measured a need for. Add the column when a profile says to.
+fn trdd_hits(query: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String, String)> {
+    let mut hits = Vec::new();
+    for p in collect_md(paths, hidden) {
+        for atom in resolve_atoms(&p) {
+            if let Some(t) = &atom.trdd
+                && trdd_matches(t, query)
+            {
+                hits.push((p.clone(), atom.id, t.clone()));
+            }
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// `memgrep find-trdd <trdd-id> <wikidir>` — the PROVENANCE query in the direction the maintenance
+/// chores need it (TRDD-YMDE95LT).
+///
+/// `commit-discipline.md` describes a chain — memory → TRDD → `implementation-commits:` →
+/// `git show <sha>` — that a chore walks FORWARD from one atom to learn why its fact was true. This
+/// command walks the FIRST hop BACKWARD: given a decision, which facts did it put into the corpus?
+/// That is what makes a superseding decision actionable — the card that changes the answer can list
+/// every atom still asserting the old one, instead of someone recalling by symptom and hoping the
+/// stale pages surface. Prints `<wiki-page-rel-path>#<atom-id>\t<stored-trdd>` per match.
+/// Read-only; markdown is data, never executed.
+pub fn cmd_find_trdd_cli(args: &[String]) -> Result<()> {
+    let a = FindTrddArgs::parse_from(
+        std::iter::once("find-trdd".to_string()).chain(args.iter().cloned()),
+    );
+    // Validate the QUERY too, so a typo reports itself instead of returning a confident empty list
+    // that reads as "this decision produced no memory".
+    let canon = normalize_trdd_id(&a.trdd)?;
+    for (path, atom_id, stored) in trdd_hits(&canon, &a.paths, a.hidden) {
+        println!("{}#{}\t{}", rel(&path), atom_id, stored);
+    }
+    Ok(())
+}
+
 // ─────────────── `memgrep atom` / `memgrep atom-page` (TRDD-0NGYP3IG) ───────────────
 //
 // The two atom-id RESOLUTION modes: id → owning-page PATH (the navigation primitive — page path +
@@ -1875,7 +2017,7 @@ fn atom_id_canonical8(s: &str) -> Option<String> {
 /// Does a STORED atom/lesson id answer to the QUERIED one? Exact match first (legacy `^marker`
 /// names resolve only this way); else both sides must canonicalise to the SAME 8-char payload —
 /// which is what makes `234PU35Q` reach a lesson stored as `id:ATOM-234P-U35Q`.
-fn atom_id_matches(stored: &str, query: &str) -> bool {
+pub(crate) fn atom_id_matches(stored: &str, query: &str) -> bool {
     if stored == query {
         return true;
     }
@@ -1973,7 +2115,12 @@ fn atom_id_unique_hit(id: &str, paths: &[PathBuf], hidden: bool) -> Result<AtomI
 #[derive(Parser)]
 #[command(
     name = "memgrep atom-page",
-    about = "print the path of the wikimem page that currently contains an atom id (navigation: page path + id = the address)"
+    about = "print the path of the wikimem page that currently contains an atom id (navigation: page path + id = the address)",
+    after_help = "EXAMPLES:\n\
+        \x20 # which page owns this atom right now? (atoms move — never hardcode the page)\n\
+        \x20 memgrep atom-page ATOM-234P-U35Q .claude/project/memory\n\
+        \x20 # the bare 8-char payload works too, case-insensitive\n\
+        \x20 memgrep atom-page 234pu35q .claude/project/memory\n"
 )]
 struct AtomPageArgs {
     /// The atom id: a `^marker` name (`^` optional), an `ATOM-XXXX-XXXX` id, or its bare
@@ -2000,7 +2147,12 @@ pub fn cmd_atom_page_cli(args: &[String]) -> Result<()> {
 #[derive(Parser)]
 #[command(
     name = "memgrep atom",
-    about = "print one atom's full record (content + its resolved [^N] footnotes) by atom id"
+    about = "print one atom's full record (content + its resolved [^N] footnotes) by atom id",
+    after_help = "EXAMPLES:\n\
+        \x20 # the recall SECOND HOP: read one atom's full record without opening the page\n\
+        \x20 memgrep atom ATOM-234P-U35Q .claude/project/memory\n\
+        \x20 # content only — skip resolving its lessons\n\
+        \x20 memgrep atom ATOM-234P-U35Q .claude/project/memory --no-notes\n"
 )]
 struct AtomArgs {
     /// The atom id: a `^marker` name (`^` optional), an `ATOM-XXXX-XXXX` id, or its bare
@@ -2052,7 +2204,7 @@ pub fn cmd_atom_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-// ─────────── `memgrep add-atom` / `new-page` / `add-lesson` — the WRITE verbs (TRDD-R02HTRUD) ───────────
+// ─────────── `memgrep new-mem-atom` / `new-mem-topic` / `update-mem-atom --lesson` — the WRITE verbs (TRDD-R02HTRUD) ───────────
 //
 // The read side (`recall`/`find`/`atom`) proved that a wikimem element is worthless the instant its
 // machine-parsed syntax is wrong: a `⟦…⟧`-bracketed atom, a keyword-less lesson, an atom whose id
@@ -2068,7 +2220,7 @@ pub fn cmd_atom_cli(args: &[String]) -> Result<()> {
 /// Today's date as `YYYY-MM-DD` — the atom/lesson `ocd`/`lmd` shape (date only, no time). Derived
 /// from `now_iso_utc()` (`YYYY-MM-DDTHH:MM:SSZ`), whose leading 10 chars are the ASCII date, so the
 /// slice never lands mid-UTF-8. Shares the crate's dependency-free civil-date math (no chrono).
-fn today_date() -> String {
+pub(crate) fn today_date() -> String {
     now_iso_utc()[..10].to_string()
 }
 
@@ -2115,7 +2267,7 @@ fn atom_id_candidate(state: &mut u64) -> String {
 /// whole id space — body atoms AND `[^N]` lessons — over the FRESH index when one exists and a live
 /// disk walk otherwise, exactly the correctness policy every id query in this crate follows). With a
 /// 36^8 space a collision is astronomically unlikely; the bounded loop fails loud rather than spin.
-fn generate_unique_atom_id(paths: &[PathBuf], hidden: bool) -> Result<String> {
+pub(crate) fn generate_unique_atom_id(paths: &[PathBuf], hidden: bool) -> Result<String> {
     let mut state = seed_id_state();
     for _ in 0..100_000 {
         let cand = atom_id_candidate(&mut state);
@@ -2132,7 +2284,7 @@ fn generate_unique_atom_id(paths: &[PathBuf], hidden: bool) -> Result<String> {
 /// is also what makes the emitter the parser's exact inverse, since `parse_block_props` splits the
 /// emitted `keywords:` value on WHITESPACE. Empty items are dropped. Empty result ⇒ the caller bails
 /// (keywords are the RECALL SURFACE — an element without them is unfindable, i.e. does not exist).
-fn normalize_keywords(raw: &str) -> Vec<String> {
+pub(crate) fn normalize_keywords(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|k| k.split_whitespace().collect::<Vec<_>>().join("_"))
         .filter(|k| !k.is_empty())
@@ -2203,11 +2355,12 @@ fn render_block_props(pairs: &[(&str, String)]) -> String {
 /// the caller never writes raw props — so the shape is provably parseable (round-trip test proves
 /// the inverse). `desc` is quoted-and-sanitised; `keywords` are space-joined; `type` is a bare
 /// single token (the enum values are single words); dates are today's `YYYY-MM-DD`.
-fn build_atom_marker(
+pub(crate) fn build_atom_marker(
     id: &str,
     keywords: &[String],
     desc: Option<&str>,
     atom_type: Option<&str>,
+    trdd: Option<&str>,
     today: &str,
 ) -> String {
     let mut props: Vec<(&str, String)> = Vec::new();
@@ -2220,6 +2373,12 @@ fn build_atom_marker(
         // the value into an array (only its first element is read by `first_val`).
         props.push(("type", t.split_whitespace().collect::<Vec<_>>().join("_")));
     }
+    // The TRDD backlink sits with the other identity fields, ABOVE the dates: `ocd`/`lmd` are the
+    // atom's own lifecycle, `trdd` is where the fact came from. Single-token by construction
+    // (`normalize_trdd_id` produced it), so it can never break the comma-delimited prop list.
+    if let Some(t) = trdd.map(str::trim).filter(|t| !t.is_empty()) {
+        props.push(("trdd", t.to_string()));
+    }
     props.push(("ocd", today.to_string()));
     props.push(("lmd", today.to_string()));
     format!("^{id} [{}]", render_block_props(&props))
@@ -2231,7 +2390,7 @@ fn build_atom_marker(
 /// insertion boundary: `add-atom` places a new atom BEFORE it (so the atom's body — which the parser
 /// ends at the next heading — never bleeds into the lessons section), and `add-lesson` appends its
 /// footnote def AFTER it (inside the section).
-fn notes_section_line(text: &str) -> Option<usize> {
+pub(crate) fn notes_section_line(text: &str) -> Option<usize> {
     let mut fence: Option<Fence> = None;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
@@ -2267,7 +2426,7 @@ fn notes_section_line(text: &str) -> Option<usize> {
 /// because it was written from the issue BODY, whose two examples were both `## Governed by`;
 /// the fourth was named in a comment. The rule is not "the link law's two sections" but "ANY
 /// trailing footer that precedes Notes", and `See also` is the lateral-link member of that set.
-fn footer_section_line(text: &str) -> Option<usize> {
+pub(crate) fn footer_section_line(text: &str) -> Option<usize> {
     let mut fence: Option<Fence> = None;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
@@ -2393,7 +2552,7 @@ fn superseded_heading_line(text: &str) -> Option<usize> {
 /// a page with invalid UTF-8 passes the CAS cleanly and is mangled on the way out. Losing
 /// knowledge silently is precisely what the write gate exists to prevent, so the correct
 /// behaviour is to REFUSE the page and say why — fail fast, never a lossy round-trip.
-fn read_page_for_write(page: &Path) -> Result<String> {
+pub(crate) fn read_page_for_write(page: &Path) -> Result<String> {
     let meta = std::fs::metadata(page)
         .with_context(|| format!("stat {}", page.display()))?;
     if !meta.is_file() {
@@ -2523,7 +2682,7 @@ fn normalize_page_until_clean(dest: &Path) -> Result<u32> {
 /// checkpoints (before-call-1, after-call-1/before-call-2, …, after-call-N): each call's BEFORE
 /// loop finds the PRIOR call's AFTER loop already left the page clean and converges on iteration 1
 /// with zero writes, exactly the "no mtime churn on an already-normal page" contract.
-fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
+pub(crate) fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
     normalize_page_until_clean(dest)?;
     write_page_bytes(dest, content)?;
     normalize_page_until_clean(dest)?;
@@ -2559,7 +2718,7 @@ fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
 /// a page. Inserting one here would make an `edit` that replaces a single word also rewrite the
 /// frontmatter, and it would give `page-no-lmd` a second owner in a different layer from the
 /// linter that already reports it. Two mechanisms for one defect is how they drift apart.
-fn bump_page_lmd(content: &str, today: &str) -> String {
+pub(crate) fn bump_page_lmd(content: &str, today: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     if lines.first().map(|l| l.trim_end()) != Some("---") {
         return content.to_string(); // no frontmatter — nothing this function may claim to maintain
@@ -2595,7 +2754,7 @@ fn bump_page_lmd(content: &str, today: &str) -> String {
 /// resolve the new element from the FRESH index immediately. Incremental (`full=false`) — only the
 /// touched file is re-parsed. Best-effort in spirit but surfaced: a reindex failure is returned so
 /// the caller reports it (the live-walk fallback keeps recall correct regardless).
-fn reindex_owning_scope(page: &Path, hidden: bool) -> Result<()> {
+pub(crate) fn reindex_owning_scope(page: &Path, hidden: bool) -> Result<()> {
     let root = owning_scope_root(page);
     let files = collect_md(std::slice::from_ref(&root), hidden);
     crate::index::reindex(&root, &files, false)?;
@@ -2639,25 +2798,35 @@ fn owning_scope_root(page: &Path) -> PathBuf {
 /// Read the FULL body from stdin (the content of a new atom / lesson). Trailing whitespace is
 /// trimmed; an empty body is rejected (a memory element with a marker + keywords but no content is
 /// pointless and the fail-fast is friendlier than a silently empty atom).
-fn read_body_from_stdin() -> Result<String> {
+pub(crate) fn read_body_from_stdin() -> Result<String> {
     use std::io::Read;
     let mut body = String::new();
     std::io::stdin().read_to_string(&mut body)?;
     let body = body.trim_end().to_string();
     if body.trim().is_empty() {
-        anyhow::bail!("empty body on stdin — pipe the atom's content, e.g. `echo 'the fact' | memgrep add-atom …`");
+        anyhow::bail!("empty body on stdin — pipe the atom's content, e.g. `echo 'the fact' | memgrep new-mem-atom …`");
     }
     Ok(body)
 }
 
 #[derive(Parser)]
 #[command(
-    name = "memgrep add-atom",
-    about = "author a memory ATOM into a page (content from stdin; id/dates/syntax synthesised so a malformed atom is impossible)"
+    name = "memgrep new-mem-atom",
+    about = "author a memory ATOM into a page (content from stdin; id/dates/syntax synthesised so a malformed atom is impossible)",
+    after_help = "EXAMPLES:\n\
+        \x20 # author a new fact — body on stdin, at least 10 comma-separated recall keywords\n\
+        \x20 echo \"the cooldown is 300s because min_context is the real guard\" | \\\n  \
+        \x20   memgrep new-mem-atom --page .claude/project/memory/rotator.md \\\n    \
+        \x20   --keywords \"cooldown,300s,min_context,rate limit,rotation delay,token bucket,backoff,retry wait,throttle,slow down\" \\\n    \
+        \x20   --desc \"the 300s cooldown is driven by min_context, not a fixed timer\"\n\
+        \x20 # replace an atom cleanly (no lesson) — its old body is relocated under ## Superseded\n\
+        \x20 echo \"new body text\" | memgrep new-mem-atom --page p.md --keywords \"a,b,c,d,e,f,g,h,i,j\" --supersedes ATOM-234P-U35Q\n\
+        \x20 # guard against a page mutated since you last read it\n\
+        \x20 echo \"…\" | memgrep new-mem-atom --page p.md --keywords \"…\" --base-sha256 $(sha256sum p.md | cut -d' ' -f1)\n"
 )]
 struct AddAtomArgs {
     /// The wikimem page (`.md`) to append the atom to — it must already exist (create one with
-    /// `memgrep new-page`). The atom is inserted before the trailing footer section — the
+    /// `memgrep new-mem-topic`). The atom is inserted before the trailing footer section — the
     /// EARLIEST of `## Applies to` / `## Governed by` / `## See also` / `## Notes and lessons learned` — when
     /// present, else at EOF.
     #[arg(long = "page")]
@@ -2681,6 +2850,15 @@ struct AddAtomArgs {
     /// Optional atom `type` (a single-word class, e.g. `reference` / `feedback` / `project`).
     #[arg(long = "type")]
     atom_type: Option<String>,
+    /// The TRDD this fact came out of (`TRDD-M7BZ4X1Q`, `#M7BZ4X1Q`, or the bare 8 chars) — the
+    /// PROVENANCE backlink (TRDD-YMDE95LT). Optional, and its absence only WARNs: ~276 atoms
+    /// predate the field, so erroring would block every write until a mass migration ran. Pass it
+    /// whenever a decision record exists: the maintenance chores demote an obsolete fact to a dated
+    /// lesson by reading the rationale off `memory → TRDD → implementation-commits: → git show`,
+    /// and an atom with no first hop leaves them a choice between inventing a reason and leaving a
+    /// known-stale fact standing.
+    #[arg(long = "trdd")]
+    trdd: Option<String>,
     /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
     #[arg(long = "hidden")]
     hidden: bool,
@@ -2697,13 +2875,14 @@ struct AddAtomArgs {
     /// page's canonical `## Superseded` heading (created before `## Notes and lessons learned`
     /// when the page has none yet), then this new atom is inserted at the normal `add-atom`
     /// position carrying the CURRENT truth. The old body is never dropped — only relocated
-    /// (WM-LES-06). For a supersession that DOES record a mistake, use `add-lesson --supersedes`
-    /// instead — that path anchors a `[^N]` guardrail; this one does not.
+    /// (WM-LES-06). For a supersession that DOES record a mistake — a lesson correcting an
+    /// EXISTING atom's fact — use `update-mem-atom --lesson --supersedes` instead: a lesson is a
+    /// correction, so it belongs with the verb that rewrites the atom, not this one.
     #[arg(long = "supersedes")]
     supersedes: Option<String>,
 }
 
-/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …] [--supersedes ID] [--base-sha256
+/// `memgrep new-mem-atom --page P --keywords "…" [--desc …] [--type …] [--supersedes ID] [--base-sha256
 /// …]` (body on stdin). Synthesise a corpus-unique id + today's dates, emit the exact `^id
 /// [desc:"…", keywords: …, type: …, ocd:…, lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the
 /// page (before the earliest footer section — `## Applies to` / `## Governed by` / `## Notes and
@@ -2717,8 +2896,9 @@ struct AddAtomArgs {
 /// interleave a mutation of this page while this command runs.
 pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     let a = AddAtomArgs::parse_from(
-        std::iter::once("add-atom".to_string()).chain(args.iter().cloned()),
+        std::iter::once("memgrep new-mem-atom".to_string()).chain(args.iter().cloned()),
     );
+
     let keywords = normalize_keywords(&a.keywords);
     if keywords.is_empty() {
         anyhow::bail!(
@@ -2728,6 +2908,10 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     }
     check_keyword_floor(&keywords, "atom")?;
     check_desc(a.desc.as_deref(), "atom")?;
+    // Normalise BEFORE stdin is consumed and before the write lock is taken: a malformed citation
+    // should cost the caller an error message, not a half-run transaction.
+    let trdd = a.trdd.as_deref().map(normalize_trdd_id).transpose()?;
+    warn_missing_trdd(trdd.as_deref());
     let body = read_body_from_stdin()?;
     check_new_body_budget(&body, atom_max_chars(), "atom")?;
 
@@ -2737,7 +2921,7 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     }
     let text = read_page_for_write(&a.page).with_context(|| {
         format!(
-            "cannot add an atom to {} — create the page first with `memgrep new-page`",
+            "cannot add an atom to {} — create the page first with `memgrep new-mem-topic`",
             a.page.display()
         )
     })?;
@@ -2753,7 +2937,8 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     let id = generate_unique_atom_id(&[scope_root], a.hidden)?;
 
     let today = today_date();
-    let marker = build_atom_marker(&id, &keywords, a.desc.as_deref(), a.atom_type.as_deref(), &today);
+    let marker =
+        build_atom_marker(&id, &keywords, a.desc.as_deref(), a.atom_type.as_deref(), trdd.as_deref(), &today);
 
     // `--supersedes`: relocate the target atom's CURRENT block below `## Superseded` FIRST, on the
     // text we already have — so the boundary computed just below (which now also excludes the
@@ -2897,7 +3082,7 @@ fn insert_atom_block(text: &str, marker: &str, body: &str) -> String {
 /// ordinary footer heading OR the page's `## Superseded` delimiter — so the NEW atom lands in the
 /// live section above the retired content it replaces, never inside/after it. `boundary` is a
 /// 0-based line index into `text`; `None` means "no boundary — append at EOF".
-fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Option<usize>) -> String {
+pub(crate) fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Option<usize>) -> String {
     let mut atom_lines: Vec<String> = vec![String::new(), marker.to_string(), String::new()];
     atom_lines.extend(body.lines().map(str::to_string));
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
@@ -2917,19 +3102,36 @@ fn insert_atom_block_before(text: &str, marker: &str, body: &str, boundary: Opti
 
 #[derive(Parser)]
 #[command(
-    name = "memgrep new-page",
-    about = "scaffold a new wikimem page with valid frontmatter + the mandatory notes section (refuses to overwrite)"
+    name = "memgrep new-mem-topic",
+    about = "scaffold a new wikimem page with valid frontmatter + the mandatory notes section (refuses to overwrite)",
+    after_help = "EXAMPLES:\n\
+        \x20 # a LOCAL component page (--scope defaults to `local`: machine-private, never pushed)\n\
+        \x20 memgrep new-mem-topic --tier component \\\n    \
+        \x20   --name new-thing --description \"how does new-thing work\" --type reference\n\
+        \x20 # a PROJECT page, tracked and pushed, reachable only from this project\n\
+        \x20 memgrep new-mem-topic --tier component --scope private-project \\\n    \
+        \x20   --name shared-fix --description \"the fix for X\" --type reference\n\
+        \x20 # reachable from EVERY project via the USER-root symlink, created in the same write\n\
+        \x20 memgrep new-mem-topic --tier component --scope public-project \\\n    \
+        \x20   --name shared-fix --description \"the fix for X\" --type reference\n\
+        \x20 # a HUB page owning a set of files (globs)\n\
+        \x20 memgrep new-mem-topic --tier hub --scope private-project \\\n    \
+        \x20   --name rotator-hub --description \"how does oauth rotation work\" --type reference --globs \"scripts/rotator/**\"\n\
+        \x20 # THERE IS NO --path: the destination is <scope root>/<name>.md, so a relocated root\n\
+        \x20 # (WIKIMEM_LOCAL_SCOPE_PATH / _PROJECT_ / _USER_) needs no call-site change.\n"
 )]
 struct NewPageArgs {
-    /// Destination `.md` path. REFUSED if it already exists — a new page never clobbers an old one.
-    ///
-    /// DEPRECATED and slated for REMOVAL (owner, 2026-08-27): a path is an internal implementation
-    /// detail that may change between versions or be relocated via the `WIKIMEM_*_SCOPE_PATH` env
-    /// vars, so no verb should require callers to know one. Omit it and the destination is derived
-    /// as `<scope root>/<name>.md` from `--scope` (default `local`). Still honoured when passed, so
-    /// existing callers keep working during the migration.
-    #[arg(long = "path")]
-    path: Option<PathBuf>,
+    // `--path` was REMOVED here (owner directive 2026-08-27, TRDD-VJL1YTCG Part A). A path is an
+    // internal implementation detail that may change between versions or be relocated via the
+    // `WIKIMEM_*_SCOPE_PATH` env vars, so no verb may require a caller to know one: callers say
+    // WHAT they want and WHICH SCOPE, memgrep decides WHERE. The destination is always
+    // `<scope root>/<name>.md`, derived from `--scope` (default `local`).
+    //
+    // Removing it also deleted two branches that existed only to police an explicit path — the
+    // `--scope` default was conditional on `--path` being absent, and a whole error path caught a
+    // `public-project` claim aimed outside a PROJECT root. A derived path agrees with its scope BY
+    // CONSTRUCTION, so neither case can arise any more. That is the real prize: not one fewer flag,
+    // but a class of contradiction that no longer has a way to be expressed.
     /// Wiki tier: `hub` (one functionality's overview, carries `globs:`), `aspect` (a shared rule),
     /// or `component` (one element's page).
     #[arg(long = "tier")]
@@ -2964,14 +3166,14 @@ struct NewPageArgs {
     scope: Option<String>,
 }
 
-/// `memgrep new-page --path P --tier T --name N --description "…" --type …` — scaffold a VALID page:
+/// `memgrep new-mem-topic --path P --tier T --name N --description "…" --type …` — scaffold a VALID page:
 /// frontmatter (name, description, ocd=lmd=today, metadata.{node_type, type, tier[, functionality][,
 /// globs]}) + a `# <name>` heading + the mandatory `## Notes and lessons learned` landing zone.
 /// Refuses to overwrite. Writes atomically, reindexes. The generated page passes the syntax linter
 /// with zero findings by construction.
 pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     let a = NewPageArgs::parse_from(
-        std::iter::once("new-page".to_string()).chain(args.iter().cloned()),
+        std::iter::once("memgrep new-mem-topic".to_string()).chain(args.iter().cloned()),
     );
     let tier = a.tier.trim();
     if !matches!(tier, "hub" | "aspect" | "component") {
@@ -3019,14 +3221,10 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     //
     // DEFAULT `local` (owner, 2026-08-27) — the SAFE default by construction: LOCAL is
     // machine-private and never pushed, so a caller who forgets the flag cannot accidentally
-    // publish a page or commit one into a shared repo. Applies only when `--path` was ALSO omitted;
-    // an explicit path keeps the historical "leave the field to reconciliation" behaviour so this
-    // does not retroactively re-scope existing callers.
-    let scope_str = match (a.scope.as_deref().map(str::trim), a.path.is_some()) {
-        (Some(s), _) => Some(s),
-        (None, false) => Some("local"),
-        (None, true) => None,
-    };
+    // publish a page or commit one into a shared repo. Now UNCONDITIONAL: the default used to
+    // apply only when `--path` was also omitted, so that an explicit path kept the historical
+    // "leave the field to reconciliation" behaviour. With `--path` gone there is no second case.
+    let scope_str = Some(a.scope.as_deref().map(str::trim).unwrap_or("local"));
     let publish_globally: Option<bool> = match scope_str {
         None => None,
         Some("public-project") => Some(true),
@@ -3041,46 +3239,22 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
              `publish-globally: true` AND creates the USER-root symlink in the same write."
         ),
     };
-    // DERIVE the destination when no `--path` was given: `<scope root>/<name>.md`. This is the
-    // shape the verb is migrating TO — callers name WHAT they want, never WHERE it goes, so the
-    // roots stay free to move (via WIKIMEM_*_SCOPE_PATH) without touching a single call site.
-    let user_supplied_path = a.path.is_some();
-    let path: PathBuf = match a.path.clone() {
-        Some(p) => p,
-        None => {
-            let root = match scope_str {
-                Some("public-project") | Some("private-project") => resolve_project_mem_root(),
-                Some("user") => resolve_user_mem_root(),
-                _ => resolve_local_mem_root(),
-            };
-            root.join(format!("{name}.md"))
-        }
-    };
-    // A publication scope makes a claim about WHERE the page lives; refuse the combination that
-    // cannot be honoured rather than writing a field the path makes meaningless. `scope_layer`
-    // wants an existing path, so ask about the PARENT — the page itself does not exist yet.
+    // DERIVE the destination, always: `<scope root>/<name>.md`. Callers name WHAT they want and
+    // WHICH SCOPE, never WHERE it goes, so the roots stay free to move (via WIKIMEM_*_SCOPE_PATH)
+    // without touching a single call site — which is the whole point of removing `--path`.
     //
-    // Gated on `user_supplied_path`, NOT on whether a scope was given: a DERIVED path was built
-    // FROM the scope root, so it agrees by construction, and its parent may not exist yet (nothing
-    // to canonicalize). Only an EXPLICIT path can contradict the scope, so only that combination is
-    // worth checking — and it must be checked, because it is the one way to claim `public-project`
-    // for a page that will never be in PROJECT scope.
-    if publish_globally.is_some() && user_supplied_path {
-        let parent_ok = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .and_then(|p| p.canonicalize().ok())
-            .is_some_and(|p| scope_layer(&p) == Some(SCOPE_PROJECT));
-        if !parent_ok {
-            anyhow::bail!(
-                "--scope {} is a PROJECT-scope claim, but --path {} is not inside a PROJECT memory \
-                 root (`<git-root>/.claude/project/memory/`).\nPublishing is a property of PROJECT \
-                 pages only — omit --path and let --scope place the page, or drop --scope.",
-                a.scope.as_deref().unwrap_or(""),
-                path.display()
-            );
-        }
-    }
+    // The scope-vs-location contradiction check that used to follow is GONE with it: it existed
+    // solely to catch a `public-project` claim whose explicit path pointed outside a PROJECT root.
+    // A derived path is built FROM the scope root, so it agrees by construction and the check could
+    // only ever have been dead code here.
+    let path: PathBuf = {
+        let root = match scope_str {
+            Some("public-project") | Some("private-project") => resolve_project_mem_root(),
+            Some("user") => resolve_user_mem_root(),
+            _ => resolve_local_mem_root(),
+        };
+        root.join(format!("{name}.md"))
+    };
     // The target does not exist yet (that's the whole point of new-page), so its scope root is
     // derived from the PARENT dir — TRDD-7YHT3FNK Phase 1. The lock is held from before the
     // existence check through the write, so two concurrent `new-page` calls for the same path
@@ -3144,7 +3318,7 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
 /// none. Considers BOTH `[^N]:` definitions and `[^N]` references (a label is taken if either uses
 /// it). Non-numeric labels are ignored for the counter (the corpus numbers its lessons); this only
 /// ever ALLOCATES a fresh number, so it can never collide with an existing label of any shape.
-fn next_footnote_label(text: &str) -> u32 {
+pub(crate) fn next_footnote_label(text: &str) -> u32 {
     let ctx = md::build_context(text, text.lines().count());
     let mut max = 0u32;
     for d in &ctx.footnote_defs {
@@ -3169,8 +3343,18 @@ fn next_footnote_label(text: &str) -> u32 {
 
 #[derive(Parser)]
 #[command(
-    name = "memgrep add-lesson",
-    about = "author a [^N] lesson (DO-NOT/BECAUSE/DO on stdin) and anchor it from an atom's body"
+    name = "memgrep update-mem-atom --lesson",
+    about = "DEPRECATED (use `update-mem-atom --lesson`) — author a [^N] lesson (DO-NOT/BECAUSE/DO on stdin) and anchor it from an atom's body",
+    after_help = "EXAMPLES:\n\
+        \x20 # record a mistake against an existing atom — both --page and --atom are required\n\
+        \x20 echo \"DO NOT retry on 429 without a cooldown, BECAUSE it re-triggers the same limit. DO wait min_context seconds instead.\" | \\\n  \
+        \x20   memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --lesson \\\n    \
+        \x20   --keywords \"429 retry loop,rate limit retrigger,cooldown skipped,rotator backoff,throttle bypass,retry storm,slot exhaustion,oauth 429,rate limited again,cooldown ignored\"\n\
+        \x20 # correct a WRONG fact — --supersedes embeds the atom's CURRENT body as history\n\
+        \x20 # BEFORE you edit the atom to the new truth; --retire-atom also marks it superseded\n\
+        \x20 echo \"DO NOT assume the old value, BECAUSE it changed. DO read the new value.\" | \\\n  \
+        \x20   memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --lesson --keywords \"wrong assumption,corrected fact,stale info,supersede atom,retire atom,fix outdated note,wrong cooldown value,corrected timer,updated fact,replace old truth\" \\\n    \
+        \x20   --supersedes --retire-atom\n"
 )]
 struct AddLessonArgs {
     /// The page carrying the target atom AND receiving the new lesson.
@@ -3217,13 +3401,40 @@ struct AddLessonArgs {
 /// reindexes. Prints `<lesson-id>\t^N\t<page>`.
 pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     let a = AddLessonArgs::parse_from(
-        std::iter::once("add-lesson".to_string()).chain(args.iter().cloned()),
+        std::iter::once("memgrep update-mem-atom --lesson".to_string()).chain(args.iter().cloned()),
     );
-    let keywords = normalize_keywords(&a.keywords);
+    add_lesson_impl(
+        &a.page,
+        &a.atom,
+        &a.keywords,
+        a.desc.as_deref(),
+        a.supersedes,
+        a.retire_atom,
+        a.hidden,
+        a.base_sha256.as_deref(),
+    )
+}
+
+/// The shared body of `add-lesson` / `add-atom --lesson` (folded into one grammar, USER decision —
+/// kept as a single function so the two entry points can never drift apart). Parameters mirror
+/// `AddLessonArgs` field-for-field; see `cmd_add_lesson_cli`'s own doc comment above for the exact
+/// behaviour (allocate `[^N]` + a fresh atom id, anchor it on `atom`'s body, optionally embed the
+/// pre-correction body under `--supersedes`/retire the atom under `--retire-atom`).
+#[allow(clippy::too_many_arguments)]
+fn add_lesson_impl(
+    page: &Path,
+    atom: &str,
+    keywords_raw: &str,
+    desc: Option<&str>,
+    supersedes: bool,
+    retire_atom: bool,
+    hidden: bool,
+    base_sha256: Option<&str>,
+) -> Result<()> {
+    let keywords = normalize_keywords(keywords_raw);
     if keywords.is_empty() {
         anyhow::bail!(
-            "no keywords parsed from `{}` — a lesson's keywords are its RECALL SURFACE (mandatory)",
-            a.keywords
+            "no keywords parsed from `{keywords_raw}` — a lesson's keywords are its RECALL SURFACE (mandatory)"
         );
     }
     check_keyword_floor(&keywords, "lesson")?;
@@ -3234,11 +3445,11 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // Budget-gate the COLLAPSED text (what actually lands on the page), not the raw paste.
     check_new_body_budget(&lesson_text, atom_max_chars(), "lesson")?;
 
-    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
-    if let Some(base) = a.base_sha256.as_deref() {
-        write_gate::check_base(&a.page, base)?;
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(page))?;
+    if let Some(base) = base_sha256 {
+        write_gate::check_base(page, base)?;
     }
-    let text = read_page_for_write(&a.page)?;
+    let text = read_page_for_write(page)?;
 
     // WRITE→RECALL GAP CHECK (TRDD-2OUMEVDS): `recall` ranks EXCLUSIVELY on
     // `description`+`title`+`tags` — never the lesson keywords. Measured for real on 2026-08-14:
@@ -3267,21 +3478,21 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
             "\u{26a0} add-lesson: keyword(s) {} share no word with {}'s `description:` \
             (currently: \"{}\"). `recall` ranks on description+title+tags ONLY, so a lesson \
             reachable solely through these keywords is UNFINDABLE by symptom search — extend \
-            `description:` to cover them (e.g. `memgrep edit` the frontmatter), or expect this \
+            `description:` to cover them (e.g. `memgrep update-mem-topic` the frontmatter), or expect this \
             lesson to surface only via `memgrep find`/an exact atom-id lookup.",
             uncovered.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "),
-            rel(&a.page),
+            rel(page),
             page_description,
         );
     }
 
     // Resolve the target atom to its body extent ON THIS PAGE. `atom` accepts the `^name` sigil form.
-    let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
+    let query = atom.strip_prefix('^').unwrap_or(atom);
     let atom_query_matches = |id: &str| atom_id_matches(id, query);
     let (marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
         .ok_or_else(|| anyhow::anyhow!(
             "no BODY atom answering to `{}` on {} — add-lesson anchors a lesson from an existing atom's body{}",
-            a.atom, a.page.display(), unclosed_fence_hint(&text)
+            atom, page.display(), unclosed_fence_hint(&text)
         ))?;
 
     // SUPERSESSION (TRDD-DOJ2LE1G): embed the atom's CURRENT verbatim body as `SUPERSEDED BODY: …`
@@ -3289,19 +3500,18 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // changelog), honouring the never-delete rule. Read the body NOW, before any follow-up edit
     // cleans the atom to the new truth. `[^N]` anchors of PRIOR lessons are pointers, not content,
     // so they are stripped from the captured body.
-    if a.supersedes {
+    if supersedes {
         let old_body = atom_verbatim_body(&text, marker_idx, body_last_idx);
         let old_body = if old_body.is_empty() { "(empty)".to_string() } else { old_body };
         lesson_text.push_str(&format!(" SUPERSEDED BODY: {old_body}"));
     }
 
-    let scope_root = a
-        .page
+    let scope_root = page
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let lesson_id = generate_unique_atom_id(&[scope_root], a.hidden)?;
+    let lesson_id = generate_unique_atom_id(&[scope_root], hidden)?;
     let label = next_footnote_label(&text);
     let today = today_date();
 
@@ -3313,10 +3523,10 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
         ("id", lesson_id.clone()),
         ("status", "valid".to_string()),
     ];
-    if a.supersedes {
+    if supersedes {
         props.push(("supersedes", query.to_string()));
     }
-    if let Some(d) = a.desc.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+    if let Some(d) = desc.map(str::trim).filter(|d| !d.is_empty()) {
         props.push(("desc", format!("\"{}\"", sanitize_quoted_value(d))));
     }
     // `keywords` stays QUOTED here (see `render_block_props`): the lesson parser opens a new key on
@@ -3341,7 +3551,7 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     //     skip if a `status:` prop is already present. `end` is one-past the props `]`, so `end - 1`
     //     is the `]`'s byte index — inject just before it. Fields are Copy/owned (no live borrow into
     //     the line), so the following mutable `insert_str` is sound.
-    if a.retire_atom
+    if retire_atom
         && let Some((_s, end, _id, props_raw)) = first_block_property_marker(&lines[marker_idx])
         && !props_raw.contains("status:")
     {
@@ -3397,9 +3607,248 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     out.push('\n');
     let out = bump_page_lmd(&out, &today);
 
+    atomic_write_page(page, &out)?;
+    reindex_owning_scope(page, hidden)?;
+    println!("{lesson_id}\t^{label}\t{}", rel(page));
+    Ok(())
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep update-mem-atom",
+    about = "rewrite ONE existing atom's body and/or desc/keywords in place (id preserved; [^N] refs untouched); or, with --lesson, record a [^N] correction against it",
+    after_help = "EXAMPLES:\n\
+        \x20 # replace the body only — desc/keywords/type/ocd stay exactly as they were\n\
+        \x20 echo \"the cooldown is 300s because min_context is the real guard\" | \\\n  \
+        \x20   memgrep update-mem-atom --page .claude/project/memory/rotator.md --atom ATOM-234P-U35Q\n\
+        \x20 # also replace desc and keywords in the same call\n\
+        \x20 echo \"new body text\" | memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q \\\n    \
+        \x20   --desc \"the corrected one-line summary\" \\\n    \
+        \x20   --keywords \"a,b,c,d,e,f,g,h,i,j\"\n\
+        \x20 # preview the rewrite without touching the page\n\
+        \x20 echo \"new body\" | memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --dry-run\n\
+        \x20 # --lesson: a lesson is a CORRECTION, so it lives on update-mem-atom, not new-mem-atom —\n\
+        \x20 # DO-NOT/BECAUSE/DO on stdin, anchored onto --atom's body\n\
+        \x20 echo \"DO NOT retry on 429 without a cooldown, BECAUSE it re-triggers the limit. DO wait instead.\" | \\\n  \
+        \x20   memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --lesson \\\n    \
+        \x20   --keywords \"429 retry loop,rate limit retrigger,cooldown skipped,rotator backoff,throttle bypass,retry storm,slot exhaustion,oauth 429,rate limited again,cooldown ignored\"\n\
+        \x20 # --lesson --supersedes: also embed the atom's CURRENT body as history + retire it\n\
+        \x20 echo \"DO NOT assume the old value, BECAUSE it changed. DO read the new value.\" | \\\n  \
+        \x20   memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --lesson --supersedes --retire-atom \\\n    \
+        \x20   --keywords \"wrong assumption,corrected fact,stale info,supersede atom,retire atom,fix outdated note,wrong cooldown value,corrected timer,updated fact,replace old truth\"\n"
+)]
+struct UpdateAtomArgs {
+    /// The wikimem page (`.md`) the atom lives on.
+    #[arg(long = "page")]
+    page: PathBuf,
+    /// The atom to rewrite: `^name`, its canonical `ATOM-XXXX-XXXX`, or the bare 8-char payload.
+    /// Under `--lesson`, this is the atom the lesson corrects/annotates instead.
+    #[arg(long = "atom")]
+    atom: String,
+    /// Replace the atom's `desc:` (the `recall` triage line). Omit to keep the current one.
+    /// Under `--lesson`, this is the lesson's own optional one-line `desc:` instead.
+    #[arg(long = "desc")]
+    desc: Option<String>,
+    /// Replace the atom's `keywords:` (comma-separated phrases, same grammar as `add-atom`).
+    /// Omit to keep the current ones. Under `--lesson`, this is the lesson's RECALL SURFACE and
+    /// is REQUIRED — a lesson with no keywords is unrecallable.
+    #[arg(long = "keywords")]
+    keywords: Option<String>,
+    /// Set (or correct) the atom's `trdd:` provenance backlink — the BACK-FILL path for the ~276
+    /// atoms written before the field existed (TRDD-YMDE95LT). Omit to preserve whatever the atom
+    /// already carries; this verb never drops it.
+    #[arg(long = "trdd")]
+    trdd: Option<String>,
+    /// Compare-and-swap staleness guard — see `memgrep update-mem-topic --help`.
+    #[arg(long = "base-sha256")]
+    base_sha256: Option<String>,
+    /// Print the rewritten marker + body and write nothing. Ignored under `--lesson`.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+    /// Also descend into hidden files/dirs when reindexing the scope (default off).
+    #[arg(long = "hidden")]
+    hidden: bool,
+    /// Author a `[^N]` lesson instead of rewriting the atom (USER decision, 2026-08-27: a lesson
+    /// is a CORRECTION — recorded when `--atom`'s fact is superseded by an updated version — so
+    /// it belongs with update-mem-atom, not new-mem-atom, which only ever creates fresh facts). Body
+    /// on stdin becomes the DO-NOT/BECAUSE/DO lesson text, anchored onto `--atom`'s body.
+    /// `--atom` is already required by this verb, so lesson mode needs no extra required-arg
+    /// plumbing — that is the point of the move. `--desc`/`--keywords`/`--supersedes`/
+    /// `--retire-atom` all take on their `add-lesson` meaning; `--dry-run` is ignored.
+    #[arg(long = "lesson")]
+    lesson: bool,
+    /// With `--lesson`: this lesson CORRECTS `--atom` — embed its CURRENT verbatim body as a
+    /// trailing `SUPERSEDED BODY: …` so the correction is non-destructive (the old fact becomes
+    /// the atom's dated changelog, never deleted). Illegal without `--lesson`.
+    #[arg(long = "supersedes")]
+    supersedes: bool,
+    /// With `--lesson --supersedes`: also RETIRE the corrected atom (`status: superseded` +
+    /// `superseded-by:<this-lesson-id>`). Illegal without `--supersedes`.
+    #[arg(long = "retire-atom", requires = "supersedes")]
+    retire_atom: bool,
+}
+
+/// `memgrep update-mem-atom --page P --atom A [--desc …] [--keywords …] [--base-sha256 H] [--dry-run]`
+/// (new body on stdin, ALWAYS replaces the current one). Rewrites the atom's marker + body IN
+/// PLACE: the atom's `id` (and any field this call doesn't touch — `type`, `ocd`, `status`,
+/// `superseded-by`, …) is preserved verbatim; only `desc`/`keywords` change when given, and
+/// `lmd` is always stamped to today (a body/prop rewrite is a real content change, not the
+/// mechanical class `bump_page_lmd` excludes). The atom's `[^N]` lesson anchors are untouched —
+/// this verb only ever replaces the marker line and the body span `locate_atom_body_matching`
+/// finds, never the footnote definitions a lesson anchored into that body.
+///
+/// With `--lesson`, delegates to `add_lesson_impl` instead: allocate the next `[^N]` label + a
+/// fresh corpus-unique `ATOM-…` id, emit the ONE canonical lesson form under the notes section,
+/// and anchor `[^N]` onto `--atom`'s body. A lesson IS a correction, so this is where it lives —
+/// not on `new-mem-atom`, which only ever creates fresh facts.
+pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
+    let a = UpdateAtomArgs::parse_from(
+        std::iter::once("memgrep update-mem-atom".to_string()).chain(args.iter().cloned()),
+    );
+    if a.lesson {
+        let keywords = a.keywords.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("--lesson requires --keywords (a lesson with none is unrecallable)")
+        })?;
+        return add_lesson_impl(
+            &a.page,
+            &a.atom,
+            keywords,
+            a.desc.as_deref(),
+            a.supersedes,
+            a.retire_atom,
+            a.hidden,
+            a.base_sha256.as_deref(),
+        );
+    }
+    if a.supersedes {
+        anyhow::bail!("--supersedes only applies together with --lesson");
+    }
+    if let Some(d) = a.desc.as_deref() {
+        check_desc(Some(d), "atom")?;
+    }
+    let new_keywords = match a.keywords.as_deref() {
+        Some(raw) => {
+            let kw = normalize_keywords(raw);
+            if kw.is_empty() {
+                anyhow::bail!("no keywords parsed from `{raw}`");
+            }
+            check_keyword_floor(&kw, "atom")?;
+            Some(kw)
+        }
+        None => None,
+    };
+    let body = read_body_from_stdin()?;
+
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
+    if let Some(base) = a.base_sha256.as_deref() {
+        write_gate::check_base(&a.page, base)?;
+    }
+    let text = read_page_for_write(&a.page)?;
+
+    let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
+    let atom_query_matches = |id: &str| atom_id_matches(id, query);
+    let (marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no BODY atom answering to `{}` on {} — update-mem-atom rewrites an EXISTING atom{}",
+                a.atom,
+                a.page.display(),
+                unclosed_fence_hint(&text)
+            )
+        })?;
+
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let (_s, _end, id, props_raw) = first_block_property_marker(&lines[marker_idx]).ok_or_else(|| {
+        anyhow::anyhow!("atom `{}` on {} has no parseable marker line", a.atom, a.page.display())
+    })?;
+    let props = parse_block_props(&props_raw);
+
+    // Rebuild the props in the corpus's canonical order (`build_atom_marker`'s order): desc,
+    // keywords, type, ocd, lmd — then any OTHER field the marker already carried (status,
+    // superseded-by, claude_mem_ref, …), preserved verbatim so this verb can never silently drop
+    // a field it doesn't know about. `keywords` is mandatory on a body atom (`check_keyword_floor`
+    // enforces it at write time) so a marker missing it is malformed, not merely bare.
+    let today = today_date();
+    let mut out_props: Vec<(String, String)> = Vec::new();
+    // PRESERVE with `joined_val`, NEVER `first_val`. `parse_block_props` stores each prop as a
+    // Vec of whitespace-separated TOKENS, so `first_val` yields only the FIRST one: preserving an
+    // untouched `desc: "the fact that will be split out"` through it silently rewrote the atom's
+    // desc to `"the"`, and preserving an untouched `keywords:` would have cut a 10-phrase recall
+    // surface down to ONE — the atom stays present and looks fine while becoming unfindable, which
+    // is the worst shape a memory bug can take. Measured end-to-end (unit tests passed because
+    // they always passed --desc/--keywords and so never exercised the preserve path). The
+    // unknown-field loop below already joins; these two must match it.
+    let joined_val = |key: &str| props.get(key).map(|v| v.join(" "));
+    let desc_val = a
+        .desc
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(sanitize_quoted_value)
+        .map(|d| format!("\"{d}\""))
+        // Re-quote the PRESERVED value too: `parse_block_props` strips the quotes when it
+        // tokenises, so joining the tokens back yields BARE text. Emitting that unquoted produced
+        // `desc: a multi word description, keywords: …` — the comma inside an unquoted value then
+        // reads as the next prop, so the marker no longer round-trips. Both branches must quote.
+        .or_else(|| joined_val("desc").map(|d| format!("\"{d}\"")));
+    if let Some(d) = desc_val {
+        out_props.push(("desc".to_string(), d));
+    }
+    let keywords_val = new_keywords
+        .map(|k| k.join(" "))
+        .or_else(|| joined_val("keywords"))
+        .ok_or_else(|| anyhow::anyhow!("atom `{}` has no `keywords:` prop to preserve", a.atom))?;
+    out_props.push(("keywords".to_string(), keywords_val));
+    let trdd_val = match a.trdd.as_deref() {
+        Some(raw) => Some(normalize_trdd_id(raw)?),
+        None => first_val(&props, "trdd"),
+    };
+    if let Some(t) = first_val(&props, "type") {
+        out_props.push(("type".to_string(), t));
+    }
+    // `--trdd` SETS the backlink (the back-fill path); absent, whatever the marker already carried
+    // is re-emitted here rather than falling through to the unknown-field tail — the field has a
+    // canonical position (`build_atom_marker`'s), and an update should not silently relocate it.
+    if let Some(t) = trdd_val {
+        out_props.push(("trdd".to_string(), t));
+    }
+    if let Some(o) = first_val(&props, "ocd") {
+        out_props.push(("ocd".to_string(), o));
+    }
+    out_props.push(("lmd".to_string(), today.clone()));
+    for (k, v) in &props {
+        if matches!(k.as_str(), "desc" | "keywords" | "type" | "trdd" | "ocd" | "lmd") {
+            continue;
+        }
+        out_props.push((k.clone(), v.join(" ")));
+    }
+    let out_props_ref: Vec<(&str, String)> =
+        out_props.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let marker = format!("^{id} [{}]", render_block_props(&out_props_ref));
+
+    if a.dry_run {
+        println!(
+            "dry-run: would rewrite atom `{}` on {} — marker: {marker}",
+            a.atom,
+            rel(&a.page)
+        );
+        return Ok(());
+    }
+
+    lines[marker_idx] = marker;
+    // `marker_idx + 1 ..= body_last_idx` is the atom's CURRENT body span (possibly empty, when
+    // `body_last_idx == marker_idx` — an inclusive range with start > end is a valid empty range
+    // in Rust, so `splice` inserts the new body right after the marker without removing anything).
+    let new_body_lines: Vec<String> = body.lines().map(str::to_string).collect();
+    lines.splice(marker_idx + 1..=body_last_idx, new_body_lines);
+
+    let mut out = lines.join("\n");
+    out.push('\n');
+    let out = bump_page_lmd(&out, &today);
+
     atomic_write_page(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
-    println!("{lesson_id}\t^{label}\t{}", rel(&a.page));
+    println!("{}\tupdated atom `{}`", rel(&a.page), a.atom);
     Ok(())
 }
 
@@ -3556,7 +4005,7 @@ fn unclosed_fence_hint(text: &str) -> String {
 /// `locate_atom_body` generalised to any id-matcher (so `add-lesson` can accept the canonical-8 /
 /// `^name` spellings via `atom_id_matches`). Returns `(marker_line_idx, last_nonblank_body_line_idx)`
 /// for the FIRST body atom whose id satisfies `is_match`, or None.
-fn locate_atom_body_matching(
+pub(crate) fn locate_atom_body_matching(
     text: &str,
     is_match: &dyn Fn(&str) -> bool,
 ) -> Option<(usize, usize)> {
@@ -3662,7 +4111,7 @@ fn atom_segment_end(lines: &[&str], marker_idx: usize) -> usize {
 /// correctness (a dangling reference or an unreferenced definition). `migrate` uses it BOTH as a
 /// pre-flight gate on the two pages and as a post-build proof that the move introduced no dangling
 /// footnote — the guard against the "migrating across a malformed page corrupts both" failure.
-fn footnote_integrity_violations(text: &str) -> Vec<String> {
+pub(crate) fn footnote_integrity_violations(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(text, lines.len());
     let mut refs: BTreeSet<String> = BTreeSet::new();
@@ -3702,7 +4151,7 @@ fn footnote_integrity_violations(text: &str) -> Vec<String> {
 /// Rewrite every `[^label]` token (reference AND definition marker — the `:` after a def is outside
 /// the match, so it survives) to `[^map[label]]` when the label is in `map`, else leave it. Used by
 /// `migrate` to renumber the moved footnotes to labels that are free on the destination page.
-fn rewrite_footnote_labels(text: &str, map: &BTreeMap<String, String>) -> String {
+pub(crate) fn rewrite_footnote_labels(text: &str, map: &BTreeMap<String, String>) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\]").expect("static regex"));
     re.replace_all(text, |caps: &regex::Captures| match map.get(&caps[1]) {
@@ -3715,7 +4164,7 @@ fn rewrite_footnote_labels(text: &str, map: &BTreeMap<String, String>) -> String
 /// Append each `[^N]:` definition line in `defs` under the page's `## Notes and lessons learned`
 /// section (creating it at EOF when absent), mirroring `add-lesson`'s placement. Returns the new page
 /// text (always ending in one newline). Used by `migrate` to land the moved lessons on the dest.
-fn append_footnote_defs(text: &str, defs: &[String]) -> String {
+pub(crate) fn append_footnote_defs(text: &str, defs: &[String]) -> String {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     match notes_section_line(text) {
         Some(hidx) => {
@@ -3760,8 +4209,13 @@ fn append_footnote_defs(text: &str, defs: &[String]) -> String {
 
 #[derive(Parser)]
 #[command(
-    name = "memgrep migrate",
-    about = "move an atom AND its baggage (lessons, refs) between wikimem pages, renumbering footnotes"
+    name = "memgrep migrate-mem-atom",
+    about = "move an atom AND its baggage (lessons, refs) between wikimem pages, renumbering footnotes",
+    after_help = "EXAMPLES:\n\
+        \x20 # move an atom (and its lessons) to the page that actually owns the subject\n\
+        \x20 memgrep migrate-mem-atom ATOM-234P-U35Q --from .claude/project/memory/misc.md --to .claude/project/memory/rotator.md\n\
+        \x20 # guard against the --from page having changed since you last read it\n\
+        \x20 memgrep migrate-mem-atom ATOM-234P-U35Q --from misc.md --to rotator.md --base-sha256 $(sha256sum misc.md | cut -d' ' -f1)\n"
 )]
 struct MigrateArgs {
     /// The atom to move: `^name`, its canonical `ATOM-XXXX-XXXX`, or the bare 8-char payload.
@@ -3781,6 +4235,12 @@ struct MigrateArgs {
     /// unconditionally (still lock-serialized on both scopes).
     #[arg(long = "base-sha256")]
     base_sha256: Option<String>,
+    /// Leave a bidirectional `- [[page]]` link between --from and --to after the move. The memory
+    /// protocol never DELETES knowledge, it RELOCATES it — a moved fact whose old page says
+    /// nothing about where it went is unfindable by anyone who knew it lived there. Off by
+    /// default because `migrate` also serves plain scope moves where a link is not wanted.
+    #[arg(long = "leave-link")]
+    leave_link: bool,
 }
 
 /// The pure result of a migration: the two rewritten page texts + the moved/shared footnote counts.
@@ -3961,7 +4421,7 @@ fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<Migrate
     })
 }
 
-/// `memgrep migrate <atom> --from A --to B` — move an atom and all its baggage between wikimem pages.
+/// `memgrep migrate-mem-atom <atom> --from A --to B` — move an atom and all its baggage between wikimem pages.
 ///
 /// Contract (TRDD-VJCMZ2OP): (1) the atom + its `[^N]` lessons/refs travel; (2) a footnote used by
 /// ANOTHER atom on A STAYS on A (its other user still resolves) but is COPIED to B so the moved atom
@@ -3972,33 +4432,41 @@ fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<Migrate
 /// writes leaves a recoverable DUPLICATE, never a loss.
 pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
     let a = MigrateArgs::parse_from(
-        std::iter::once("migrate".to_string()).chain(args.iter().cloned()),
+        std::iter::once("memgrep migrate-mem-atom".to_string()).chain(args.iter().cloned()),
     );
     if a.from == a.to {
         anyhow::bail!("--from and --to are the same page — nothing to migrate");
     }
 
-    // Lock BOTH scopes (a migration mutates two pages, possibly in different scopes). Acquire in
-    // a FIXED order (sorted by lock path) regardless of --from/--to argument order, so two
-    // concurrent migrations that name the same pair of scopes in opposite --from/--to order can
-    // never deadlock against each other.
-    let from_scope = write_gate::scope_root_for(&a.from);
-    let to_scope = write_gate::scope_root_for(&a.to);
-    let (_g1, _g2) = if from_scope == to_scope {
-        (Some(write_gate::acquire(&from_scope)?), None)
-    } else {
-        let from_lock = write_gate::lock_path_for(&from_scope);
-        let to_lock = write_gate::lock_path_for(&to_scope);
-        if from_lock <= to_lock {
-            let g1 = write_gate::acquire(&from_scope)?;
-            let g2 = write_gate::acquire(&to_scope)?;
-            (Some(g1), Some(g2))
-        } else {
-            let g2 = write_gate::acquire(&to_scope)?;
-            let g1 = write_gate::acquire(&from_scope)?;
-            (Some(g1), Some(g2))
-        }
-    };
+    // `--leave-link` refusal check FIRST, before any lock or read, so a refusal costs nothing —
+    // `link-downward-cross-scope` would flag the exact edge the moment it landed anyway. Fail-open
+    // when either side's scope is unrecognised (a test fixture, a relocated root): an unmapped
+    // path is not proof of a violation.
+    if a.leave_link
+        && let (Some(from_s), Some(to_s)) = (
+            a.from.canonicalize().ok().and_then(|p| scope_layer(&p)),
+            a.to.canonicalize().ok().and_then(|p| scope_layer(&p)),
+        )
+        && to_s.rank < from_s.rank
+    {
+        anyhow::bail!(
+            "--leave-link would link DOWN from {} page `{}` to {} page `{}` — {}. Migrate \
+             without --leave-link and record the pointer on the {} page some other way.",
+            from_s.name,
+            rel(&a.from),
+            to_s.name,
+            rel(&a.to),
+            downward_reason(to_s),
+            from_s.name
+        );
+    }
+
+    // Lock BOTH scopes (a migration mutates two pages, possibly in different scopes) in a FIXED
+    // order so two concurrent migrations naming the same pair in opposite --from/--to order never
+    // deadlock. This was the ORIGINAL of the algorithm; the merge/split/reference verbs each
+    // re-typed it, so it now lives once in `write_gate::acquire_two` (tested there for the
+    // opposite-order case) and every two-page verb calls that.
+    let (_g1, _g2) = write_gate::acquire_two(&a.from, &a.to)?;
 
     if let Some(base) = a.base_sha256.as_deref() {
         write_gate::check_base(&a.from, base)?;
@@ -4011,11 +4479,25 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
 
     let r = migrate_compute(&from_text, &to_text, &a.atom)?;
 
+    // `--leave-link`: wire BOTH ends in this same write, per THE LINK LAW — a verb that links only
+    // one side leaves a `link-one-sided` violation behind it. The downward-scope case was already
+    // refused above, before any lock was taken.
+    let (dest_text, source_text) = if a.leave_link {
+        let from_name = crate::mem_split::page_link_name(&a.from, &from_text);
+        let to_name = crate::mem_split::page_link_name(&a.to, &to_text);
+        (
+            crate::mem_split::ensure_see_also_link(&r.dest_text, &from_name),
+            crate::mem_split::ensure_see_also_link(&r.source_text, &to_name),
+        )
+    } else {
+        (r.dest_text, r.source_text)
+    };
+
     // BOTH pages bump: a migration is a CONTENT change on each side — one page loses an atom and
     // its lessons, the other gains them. This is not the mechanical class `bump_page_lmd` excludes.
     let today = today_date();
-    let dest_text = bump_page_lmd(&r.dest_text, &today);
-    let source_text = bump_page_lmd(&r.source_text, &today);
+    let dest_text = bump_page_lmd(&dest_text, &today);
+    let source_text = bump_page_lmd(&source_text, &today);
 
     // Write B FIRST, then A (contract 5): a crash between leaves a recoverable duplicate, never a loss.
     atomic_write_page(&a.to, &dest_text)?;
@@ -4035,8 +4517,21 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
 
 #[derive(Parser)]
 #[command(
-    name = "memgrep edit",
-    about = "the sanctioned replace-X-with-Y primitive for a wikimem page (locked, CAS-checked, refuses on ambiguity or staleness)"
+    name = "memgrep update-mem-topic",
+    about = "the sanctioned replace-X-with-Y primitive for a wikimem page (locked, CAS-checked, refuses on ambiguity or staleness)",
+    after_help = "EXAMPLES:\n\
+        \x20 # OLD/NEW text are FILE PATHS, never inline strings — write them via a heredoc first\n\
+        \x20 cat > /tmp/old.txt <<'EOF'\n\
+        \x20 the cooldown is 60s\n\
+        \x20 EOF\n\
+        \x20 cat > /tmp/new.txt <<'EOF'\n\
+        \x20 the cooldown is 300s\n\
+        \x20 EOF\n\
+        \x20 memgrep update-mem-topic --page .claude/project/memory/rotator.md --old-file /tmp/old.txt --new-file /tmp/new.txt\n\
+        \x20 # the old text occurs more than once — opt in explicitly instead of narrowing the anchor\n\
+        \x20 memgrep update-mem-topic --page p.md --old-file /tmp/old.txt --new-file /tmp/new.txt --replace-all\n\
+        \x20 # guard against a page mutated since you last read it\n\
+        \x20 memgrep update-mem-topic --page p.md --old-file /tmp/old.txt --new-file /tmp/new.txt --base-sha256 $(sha256sum p.md | cut -d' ' -f1)\n"
 )]
 struct EditArgs {
     /// The wikimem page (`.md`) to edit — must already exist.
@@ -4066,7 +4561,7 @@ struct EditArgs {
     hidden: bool,
 }
 
-/// `memgrep edit --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]
+/// `memgrep update-mem-topic --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]
 /// [--hidden]` — the sanctioned replace-X-with-Y primitive (TRDD-7YHT3FNK Phase 2). Holds the
 /// page's scope write-lock (same lock formula as every other write verb / a Python
 /// wikimem-editor transaction) from before the CAS check through the write, so no other writer
@@ -4086,7 +4581,7 @@ struct EditArgs {
 /// mode: the text IS still there, just not unique) so a ham-fisted replace can never silently
 /// touch the wrong occurrence.
 pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
-    let a = EditArgs::parse_from(std::iter::once("edit".to_string()).chain(args.iter().cloned()));
+    let a = EditArgs::parse_from(std::iter::once("memgrep update-mem-topic".to_string()).chain(args.iter().cloned()));
 
     let old = std::fs::read_to_string(&a.old_file)
         .with_context(|| format!("read --old-file {}", a.old_file.display()))?;
@@ -4472,7 +4967,7 @@ pub fn duplicate_phrases(phrases: &[String]) -> Vec<String> {
 /// the two-hop design. So an atom with no description, or a stub one, forces the reader to open
 /// the page just to discover the hit is irrelevant, and the cheap triage hop stops being cheap.
 /// Refusing here costs the author one sentence they already have in their head.
-fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
+pub(crate) fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
     let d = desc.map(str::trim).unwrap_or("");
     if d.is_empty() {
         anyhow::bail!(
@@ -4493,9 +4988,28 @@ fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// WARN — never error — when an atom is written with no `--trdd` provenance backlink
+/// (TRDD-YMDE95LT).
+///
+/// Deliberately not a gate. The corpus already holds ~276 atoms with no backlink, so a hard failure
+/// would refuse every write on every page until a mass migration ran — the field would then be
+/// "adopted" by whoever had the least work to do, which is nobody. A warning lets it ACCRETE: each
+/// new atom carries one, each `update-mem-atom --trdd` back-fills one, and the coverage the chores
+/// need arrives without a flag day.
+fn warn_missing_trdd(trdd: Option<&str>) {
+    if trdd.is_none() {
+        eprintln!(
+            "warning: this atom carries no `--trdd` backlink, so nothing records WHICH decision \
+             produced it. Written anyway. A later chore demoting this fact must then either invent \
+             a rationale or leave a known-stale fact standing — pass `--trdd TRDD-XXXXXXXX` when a \
+             card exists, or back-fill it later with `memgrep update-mem-atom --trdd`."
+        );
+    }
+}
+
 /// Enforce `min_keywords()`. Refuses with the count it got, the count it needs, and — the part
 /// that makes it actionable rather than annoying — WHAT KIND of phrase is missing.
-fn check_keyword_floor(keywords: &[String], what: &str) -> Result<()> {
+pub(crate) fn check_keyword_floor(keywords: &[String], what: &str) -> Result<()> {
     let dupes = duplicate_phrases(keywords);
     if !dupes.is_empty() {
         anyhow::bail!(
@@ -4625,7 +5139,16 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
 #[derive(Parser)]
 #[command(
     name = "memgrep lint",
-    about = "deterministic, FP-free note-integrity check (footnotes, the bidirectional link law, required fields)"
+    about = "deterministic, FP-free note-integrity check (footnotes, the bidirectional link law, required fields)",
+    after_help = "EXAMPLES:\n\
+        \x20 # NOTE: lint WRITES — it always autofixes `publish-globally`/symlink drift on every\n\
+        \x20 # page it visits, before it reports anything (owner directive, TRDD-RY0IJBJI)\n\
+        \x20 memgrep lint .claude/project/memory\n\
+        \x20 # --min-severity gates the EXIT CODE only — findings below it still PRINT, they just\n\
+        \x20 # don't fail the command; use this in a pre-commit hook that should ignore NITs\n\
+        \x20 memgrep lint .claude/project/memory --min-severity warn\n\
+        \x20 # grep the exit-gating class straight out of the always-full report\n\
+        \x20 memgrep lint .claude/project/memory | grep '^ERROR'\n"
 )]
 struct LintArgs {
     /// Memory dir(s) / file(s) to lint (default: current dir).
@@ -6263,7 +6786,16 @@ enum DateField {
 #[derive(Parser)]
 #[command(
     name = "memgrep recall",
-    about = "rank memory notes by a symptom/question phrase"
+    about = "rank memory notes by a symptom/question phrase",
+    after_help = "EXAMPLES:\n\
+        \x20 # HOP 1: a symptom phrase — ranks PAGES on description+title+tags, prints a lean\n\
+        \x20 # triage row per hit (`<lmd>⇥<id-or-path>⇥<description>`), NOT the answer itself\n\
+        \x20 memgrep recall \"oauth rotator let a 429 happen\" .claude/project/memory\n\
+        \x20 # HOP 2: take ONE id from hop 1's triage row and recall THAT atom in full — this is\n\
+        \x20 # the step that actually answers the question; skipping it is the #1 misuse of recall\n\
+        \x20 memgrep recall ATOM-234P-U35Q .claude/project/memory\n\
+        \x20 # widen a hop-1 listing before picking: full body + notes + keyword surface\n\
+        \x20 memgrep recall \"cooldown timer\" .claude/project/memory --output full --with-keywords\n"
 )]
 struct RecallArgs {
     /// The symptom / question phrase (quote it): the words you HAVE, not the answer's jargon.
@@ -7296,7 +7828,14 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
 #[derive(Parser)]
 #[command(
     name = "memgrep find",
-    about = "note-level search with the +/- (mandatory/exclude) / wildcard / phrase query DSL"
+    about = "note-level search with the +/- (mandatory/exclude) / wildcard / phrase query DSL",
+    after_help = "EXAMPLES:\n\
+        \x20 # mandatory `+` term, excluded `-` term, an optional ranking term — quote the whole query\n\
+        \x20 memgrep find \"+rotator -deprecated cooldown\" .claude/project/memory\n\
+        \x20 # wildcard (a `*` run) and a verbatim quoted phrase, still one shell-quoted query string\n\
+        \x20 memgrep find '+rate_limit* \"min_context seconds\"' .claude/project/memory\n\
+        \x20 # search ONLY the resolved [^N] lessons text, not the pages themselves\n\
+        \x20 memgrep find \"+429 +retry\" .claude/project/memory --only-notes\n"
 )]
 struct FindArgs {
     /// The query: whitespace-separated terms. `+TERM` mandatory, `-TERM` exclude, bare TERM optional
@@ -7661,7 +8200,17 @@ pub fn cmd_find_cli(args: &[String]) -> Result<()> {
 // ─────────────────────────── `memgrep fact` ───────────────────────────
 
 #[derive(Parser)]
-#[command(name = "memgrep fact", about = "query one-fact-per-line memory lines")]
+#[command(
+    name = "memgrep fact",
+    about = "query one-fact-per-line memory lines",
+    after_help = "EXAMPLES:\n\
+        \x20 # a regex over the fact text, filtered by category hashtag and component\n\
+        \x20 memgrep fact \"cooldown\" .claude/project/memory --cat bug --comp rotator\n\
+        \x20 # every fact in a date window, no pattern (pattern is optional)\n\
+        \x20 memgrep fact --since 2026-08-01 --until 2026-08-15 .claude/project/memory\n\
+        \x20 # filter by session id, and pull in each matched file's [^N] lessons too\n\
+        \x20 memgrep fact --session abc123 .claude/project/memory --with-notes\n"
+)]
 struct FactArgs {
     /// Optional regex over the fact text (after `::`).
     pattern: Option<String>,
@@ -8668,6 +9217,60 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             !nn.contains("notes:") && !nn.contains("lessons learned:") && !nn.contains("see also:"),
             "--no-notes drops every section group:\n{nn}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn normalize_trdd_id_accepts_every_sanctioned_spelling_and_refuses_the_rest() {
+        // The three spellings the TRDD rules sanction all canonicalise to one stored form, so a
+        // caller pasting from a filename, a commit subject, or chat never has to know which one
+        // this flag wants.
+        for raw in ["TRDD-M7BZ4X1Q", "#M7BZ4X1Q", "M7BZ4X1Q", "m7bz4x1q", "trdd-m7bz4x1q", "  M7BZ4X1Q  "] {
+            assert_eq!(normalize_trdd_id(raw).unwrap(), "TRDD-M7BZ4X1Q", "spelling: {raw}");
+        }
+        // Refused, not stored: a backlink to a card that cannot exist sends the next reader looking
+        // for a file, which is worse than an honestly absent backlink.
+        for bad in ["", "M7BZ4X1", "M7BZ4X1QQ", "M7BZ-4X1Q", "m7bz4x1q!", "TRDD-"] {
+            assert!(normalize_trdd_id(bad).is_err(), "must refuse: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn trdd_matches_across_spellings_and_falls_back_literally_on_a_malformed_store() {
+        assert!(trdd_matches("TRDD-M7BZ4X1Q", "m7bz4x1q"));
+        assert!(trdd_matches("M7BZ4X1Q", "#M7BZ4X1Q"));
+        assert!(!trdd_matches("TRDD-M7BZ4X1Q", "TRDD-AAAA1111"));
+        // A stored typo stays findable BY that typo rather than becoming invisible to every query.
+        assert!(trdd_matches("TRDD-NOTANID", "trdd-notanid"));
+        assert!(!trdd_matches("TRDD-NOTANID", "TRDD-M7BZ4X1Q"));
+    }
+
+    #[test]
+    fn find_trdd_lists_every_atom_a_decision_produced_across_pages() {
+        // The reverse provenance hop (TRDD-YMDE95LT): given a card, which facts did it put into
+        // the corpus? Spans pages, ignores atoms citing another card, and ignores atoms with no
+        // backlink at all (the majority of the existing corpus).
+        let dir = std::env::temp_dir().join(format!("memgrep_trdd_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("oauth-rotation.md"),
+            "---\nname: oauth-rotation\nmetadata:\n  node_type: memory\n  tier: hub\n---\nThe rotator drains the live account first.\n^rotate-drain [keywords: rotator drain, trdd: TRDD-M7BZ4X1Q, ocd: 2026-08-01, lmd: 2026-08-01]\nCreds live in the keychain.\n^keychain [keywords: keychain creds, trdd: TRDD-AAAA1111, ocd: 2026-08-01, lmd: 2026-08-01]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("oauth-resume.md"),
+            // The bare 8-char spelling is stored here on purpose: matching must canonicalise both
+            // sides, or the answer depends on which spelling the writer happened to use.
+            "---\nname: oauth-resume\nmetadata:\n  node_type: memory\n  tier: component\n---\nResume picks up after a 429.\n^resume-429 [keywords: resume rate-limit, trdd: M7BZ4X1Q, ocd: 2026-08-01, lmd: 2026-08-01]\nNo backlink on this one.\n^unsourced [keywords: no provenance, ocd: 2026-08-01, lmd: 2026-08-01]\n",
+        )
+        .unwrap();
+
+        let hits = trdd_hits("TRDD-M7BZ4X1Q", std::slice::from_ref(&dir), false);
+        let ids: Vec<&str> = hits.iter().map(|(_, id, _)| id.as_str()).collect();
+        // Sorted by page path first (`oauth-resume.md` < `oauth-rotation.md`), then by atom id.
+        assert_eq!(ids, vec!["resume-429", "rotate-drain"], "both spellings resolve, others excluded: {hits:?}");
+        assert!(trdd_hits("TRDD-ZZZZ9999", std::slice::from_ref(&dir), false).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -10109,6 +10712,139 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         );
     }
 
+    /// THE ORDERING CONTRACT, no failure injection needed: `migrate_compute` alone already proves
+    /// that applying ONLY the destination write (the crash-after-B state `cmd_migrate_cli` can
+    /// leave behind) keeps the atom on BOTH the computed dest text and the untouched original
+    /// source — a recoverable duplicate, never a loss.
+    #[test]
+    fn migrate_compute_dest_alone_leaves_atom_on_both_pages_never_a_loss() {
+        let from = page("from", "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n");
+        let to = page("to", "body.\n\n## Notes and lessons learned\n");
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        assert!(r.dest_text.contains("^foo"), "dest carries the atom: {}", r.dest_text);
+        assert!(from.contains("^foo"), "the untouched original source still carries it too");
+    }
+
+    /// `--leave-link` wires BOTH ends of the move in one call — a `- [[to]]` link on the source
+    /// page and a `- [[from]]` link back on the destination — per THE LINK LAW (every link is
+    /// bidirectional).
+    #[test]
+    fn migrate_leave_link_wires_both_ends_of_the_move() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-leavelink-both");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+        let scope = edit_test_tmpdir("leavelink-both");
+        let from = scope.join("from.md");
+        let to = scope.join("to.md");
+        std::fs::write(&from, page("from", "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n")).unwrap();
+        std::fs::write(&to, page("to", "body.\n\n## Notes and lessons learned\n")).unwrap();
+
+        let res = cmd_migrate_cli(&[
+            "foo".to_string(),
+            "--from".to_string(),
+            from.to_str().unwrap().to_string(),
+            "--to".to_string(),
+            to.to_str().unwrap().to_string(),
+            "--leave-link".to_string(),
+        ]);
+        let source_text = std::fs::read_to_string(&from).unwrap();
+        let dest_text = std::fs::read_to_string(&to).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "migrate with --leave-link must succeed: {res:?}");
+        assert!(source_text.contains("- [[to]]"), "source must link to dest: {source_text}");
+        assert!(dest_text.contains("- [[from]]"), "dest must link back to source: {dest_text}");
+    }
+
+    /// Without `--leave-link` the default is unchanged: neither page gains a `See also` link.
+    #[test]
+    fn migrate_without_leave_link_adds_no_link_by_default() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-leavelink-off");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+        let scope = edit_test_tmpdir("leavelink-off");
+        let from = scope.join("from.md");
+        let to = scope.join("to.md");
+        std::fs::write(&from, page("from", "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n")).unwrap();
+        std::fs::write(&to, page("to", "body.\n\n## Notes and lessons learned\n")).unwrap();
+
+        let res = cmd_migrate_cli(&[
+            "foo".to_string(),
+            "--from".to_string(),
+            from.to_str().unwrap().to_string(),
+            "--to".to_string(),
+            to.to_str().unwrap().to_string(),
+        ]);
+        let source_text = std::fs::read_to_string(&from).unwrap();
+        let dest_text = std::fs::read_to_string(&to).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "plain migrate must still succeed: {res:?}");
+        assert!(!source_text.contains("[[to]]"), "no link added to source by default: {source_text}");
+        assert!(!dest_text.contains("[[from]]"), "no link added to dest by default: {dest_text}");
+    }
+
+    /// A downward cross-scope `--leave-link` (PROJECT source → LOCAL dest) is refused BEFORE any
+    /// lock or write — both pages must stay byte-identical to their pre-call bytes.
+    #[test]
+    fn migrate_leave_link_refuses_a_downward_cross_scope_link_and_writes_nothing() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-leavelink-down");
+        let project_root = edit_test_tmpdir("leavelink-down-project");
+        let local_root = edit_test_tmpdir("leavelink-down-local");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &project_root);
+            std::env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
+        }
+
+        let from = project_root.join("from.md"); // PROJECT (rank 1)
+        let to = local_root.join("to.md"); // LOCAL (rank 0) — DOWN from PROJECT
+        let from_body = page("from", "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n");
+        let to_body = page("to", "body.\n\n## Notes and lessons learned\n");
+        std::fs::write(&from, &from_body).unwrap();
+        std::fs::write(&to, &to_body).unwrap();
+
+        let res = cmd_migrate_cli(&[
+            "foo".to_string(),
+            "--from".to_string(),
+            from.to_str().unwrap().to_string(),
+            "--to".to_string(),
+            to.to_str().unwrap().to_string(),
+            "--leave-link".to_string(),
+        ]);
+        let source_after = std::fs::read_to_string(&from).unwrap();
+        let dest_after = std::fs::read_to_string(&to).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            std::env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&project_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+
+        let err = res.expect_err("downward --leave-link must be refused");
+        assert!(err.to_string().contains("link DOWN"), "refusal must name the downward link: {err}");
+        assert_eq!(source_after, from_body, "source must be untouched — refused before any write");
+        assert_eq!(dest_after, to_body, "dest must be untouched — refused before any write");
+    }
+
     // ─────────────── WRITE verbs (TRDD-R02HTRUD) ───────────────
 
     #[test]
@@ -10157,20 +10893,29 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     #[test]
     fn build_atom_marker_emits_fields_in_corpus_order() {
         let kw = vec!["alpha".to_string(), "beta".to_string()];
-        // Full form: desc, keywords, type, ocd, lmd — the exact order the corpus uses.
-        let full = build_atom_marker("ATOM-AAAA-BBBB", &kw, Some("a summary"), Some("reference"), "2026-07-21");
+        // Full form: desc, keywords, type, trdd, ocd, lmd — the exact order the corpus uses.
+        let full = build_atom_marker(
+            "ATOM-AAAA-BBBB",
+            &kw,
+            Some("a summary"),
+            Some("reference"),
+            Some("TRDD-M7BZ4X1Q"),
+            "2026-07-21",
+        );
         assert_eq!(
             full,
-            "^ATOM-AAAA-BBBB [desc: \"a summary\", keywords: alpha beta, type: reference, ocd: 2026-07-21, lmd: 2026-07-21]"
+            "^ATOM-AAAA-BBBB [desc: \"a summary\", keywords: alpha beta, type: reference, trdd: TRDD-M7BZ4X1Q, ocd: 2026-07-21, lmd: 2026-07-21]"
         );
-        // Minimal form: no desc, no type — still parseable, keywords + dates only.
-        let min = build_atom_marker("ATOM-CCCC-DDDD", &kw, None, None, "2026-07-21");
+        // Minimal form: no desc, no type, no trdd — still parseable, keywords + dates only. The
+        // absent backlink must not leave an empty `trdd:` behind (TRDD-YMDE95LT: it WARNs, and a
+        // warning that also corrupted the marker would be worse than the gate it replaced).
+        let min = build_atom_marker("ATOM-CCCC-DDDD", &kw, None, None, None, "2026-07-21");
         assert_eq!(
             min,
             "^ATOM-CCCC-DDDD [keywords: alpha beta, ocd: 2026-07-21, lmd: 2026-07-21]"
         );
         // A `"` inside desc would break quote-tracking — it is replaced with `'`.
-        let q = build_atom_marker("ATOM-EEEE-FFFF", &kw, Some("say \"hi\" now"), None, "2026-07-21");
+        let q = build_atom_marker("ATOM-EEEE-FFFF", &kw, Some("say \"hi\" now"), None, None, "2026-07-21");
         assert!(q.contains("desc: \"say 'hi' now\""), "embedded quotes sanitised: {q}");
         // The opening `[` must ABUT the first key. `memory_edit_verify.py`'s lesson-address
         // stripper anchors on `\[(?:id|status|…):`, so a space after the bracket would make it
@@ -10199,7 +10944,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // that equality is the whole defect (`grep -c "lmd: $today"` measured 0 on pages whose
         // lessons all carried today).
         let kw = vec!["alpha".to_string(), "beta".to_string()];
-        let atom = build_atom_marker("ATOM-AAAA-BBBB", &kw, None, None, "2026-07-21");
+        let atom = build_atom_marker("ATOM-AAAA-BBBB", &kw, None, None, None, "2026-07-21");
         let lesson_meta = render_block_props(&[
             ("id", "ATOM-CCCC-DDDD".to_string()),
             ("status", "valid".to_string()),
@@ -10271,7 +11016,14 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // emitter is provably the inverse of `first_block_property_marker`/`make_atom`.
         let page = "---\nname: p\ndescription: \"d\"\nocd: 2026-07-21\nlmd: 2026-07-21\n---\n\n# p\n\n## Notes and lessons learned\n";
         let kw = normalize_keywords("rate limit, resume, 429");
-        let marker = build_atom_marker("ATOM-1234-5678", &kw, Some("a desc, with comma"), Some("reference"), "2026-07-21");
+        let marker = build_atom_marker(
+            "ATOM-1234-5678",
+            &kw,
+            Some("a desc, with comma"),
+            Some("reference"),
+            Some("TRDD-M7BZ4X1Q"),
+            "2026-07-21",
+        );
         let out = insert_atom_block(page, &marker, "The window already closed — mint a fresh token.");
 
         let atoms = resolve_atoms_from_text(&out);
@@ -10284,6 +11036,11 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "keywords survive the round-trip (phrase underscore-joined)"
         );
         assert_eq!(a.atom_type.as_deref(), Some("reference"));
+        assert_eq!(
+            a.trdd.as_deref(),
+            Some("TRDD-M7BZ4X1Q"),
+            "the TRDD backlink survives the emit→parse round-trip"
+        );
         assert_eq!(a.ocd.as_deref(), Some("2026-07-21"));
         assert_eq!(a.desc.as_deref(), Some("a desc, with comma"), "quoted desc with a comma survives");
         assert!(a.body.contains("mint a fresh token"), "body survives: {:?}", a.body);
@@ -11433,11 +12190,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
             std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            // `--path` is gone — the destination is derived from `--scope` against the (env-
+            // overridable) scope root, exactly like `scope_derives_the_path_and_the_env_override_
+            // relocates_the_root` above. Pointing the PROJECT root at `memdir` keeps the derived
+            // `<scope root>/<name>.md` byte-identical to the old explicit `--path`.
+            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &memdir);
         }
 
         let desc: String = (1..=20).map(|i| format!("phrase number {i} here")).collect::<Vec<_>>().join(" / ");
         let res = cmd_new_page_cli(&[
-            "--path".into(), page.display().to_string(),
             "--tier".into(), "component".into(),
             "--name".into(), "p".into(),
             "--description".into(), desc,
@@ -11455,6 +12216,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
         unsafe {
             std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);

@@ -282,6 +282,35 @@ pub fn validate_existing(root: &Path) -> Result<bool> {
     Ok(true)
 }
 
+// NOTE the placement: this struct sits ABOVE `cmd_validate_cli`'s rustdoc deliberately. Put it
+// BETWEEN the doc comment and the fn and clap adopts that rustdoc as the verb's `long_about` —
+// which renders the ```text``` block below as one mangled line in `--help`, because rustdoc
+// formatting is not help formatting. Keep the doc comment welded to the function it documents.
+#[derive(clap::Parser, Debug)]
+#[command(
+    name = "memgrep validate",
+    about = "check an EXISTING on-disk index for damage — repairs nothing, builds nothing",
+    after_help = "EXAMPLES:\n  \
+        # Is this project's index healthy? (the usual call — one root, exit 0 when fine)\n  \
+        memgrep validate .claude/project/memory\n\n  \
+        # Sweep all three memory scopes in one pass; exits non-zero if ANY root FAILs.\n  \
+        memgrep validate .claude/project/memory ~/.claude/projects/*/memory\n\n  \
+        # Default root is the current directory.\n  \
+        memgrep validate\n\n\
+        STATUS TOKENS (the leading word of each line):\n  \
+        OK     the index exists and passed every check\n  \
+        NONE   no index here yet — not an error, nothing has been built\n  \
+        STALE  behind this binary's schema — also NOT a failure: the next open/reindex\n         \
+        migrates it, and recall meanwhile falls back to a correct filesystem walk\n  \
+        FAIL   genuine damage; carries a [MEMGREP-NNN] code. ONLY this sets exit 1\n\n\
+        Use `memgrep reindex` to rebuild, `memgrep lint` to check PAGE content. This verb\n\
+        only inspects the SQLite sidecar, and it never writes."
+)]
+struct ValidateArgs {
+    /// Index root(s) to check (default: the current directory).
+    paths: Vec<PathBuf>,
+}
+
 /// `memgrep validate <dir>…` — the health probe the janitor's heartbeat runs. One machine-readable
 /// line per root, so the detector never parses prose:
 ///
@@ -301,10 +330,19 @@ pub fn validate_existing(root: &Path) -> Result<bool> {
 /// every schema bump and dispatch an unattended agent to "repair" a healthy database — the same
 /// false-ticket loop MEMGREP-010 exists to prevent on the other side of the version comparison.
 pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
-    let roots: Vec<PathBuf> = if args.is_empty() {
+    // Parsed with clap purely so `--help` WORKS. Before TRDD-FDUOQFYS this function read argv as
+    // a bare path list, so `memgrep validate --help` printed `NONE  --help` — it dutifully
+    // validated a directory literally named "--help" and reported it absent. Every other verb
+    // answered --help, so the one that did not read as a broken install rather than a missing
+    // parser. A raw-argv reader must never own a user-facing verb.
+    use clap::Parser as _;
+    let a = ValidateArgs::parse_from(
+        std::iter::once("validate".to_string()).chain(args.iter().cloned()),
+    );
+    let roots: Vec<PathBuf> = if a.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
-        args.iter().map(PathBuf::from).collect()
+        a.paths
     };
     let mut failed = 0usize;
     for root in &roots {

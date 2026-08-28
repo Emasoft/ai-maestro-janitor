@@ -21,6 +21,12 @@ consume this instead of re-deriving candidacy from `memgrep lint` or their own s
     memory_candidates_cli.py --intervention repair --scope LOCAL --root <memdir>
     memory_candidates_cli.py --intervention atomize --scope LOCAL --root <memdir>
     memory_candidates_cli.py --intervention consolidate --scope LOCAL --root <memdir> --max-bytes 40000
+    memory_candidates_cli.py --intervention split-topic --scope LOCAL --root <memdir>
+
+`split-topic` refuses at PAGE granularity on purpose, not per-atom: the ledger keys on paths, so
+judging one atom on a page retires the WHOLE page from this list until the page changes again —
+coarser than the atom it names, and it reuses the existing refusal ledger unchanged rather than
+inventing a second, atom-granular keying scheme.
 
 Prints one TAB-separated line per candidate: `<page-relative-path>\\t<reason-slug>`.
 For `consolidate` the candidate unit is a GROUP, not one page (a merge needs a PAIR to
@@ -177,11 +183,32 @@ def enrich_candidates(
     return sorted(out)
 
 
+def split_topic_candidates(
+    root: Path, *, scope: str, now: int | None, max_bytes: int
+) -> list[tuple[str, str]]:
+    """`(page#atom, "multi-topic")` for every plausibly-multi-topic atom
+    (`memory_content_precheck.multi_topic_atom_candidates`), MINUS pages a live
+    `split-topic` refusal already covers.
+
+    Refusal coverage is PAGE-granular, not atom-granular: the ledger keys on paths, so a
+    refusal recorded on the page retires every one of its atoms from this list until the
+    page's bytes change — reusing the existing per-candidate ledger unchanged rather than
+    inventing a second, atom-granular keying scheme."""
+    out: list[tuple[str, str]] = []
+    for rel, atom_id in memory_content_precheck.multi_topic_atom_candidates(root):
+        p = root / rel
+        if memory_refusals.is_refused("split-topic", scope, root, [p], now=now):
+            continue
+        out.append((f"{rel}#{atom_id}", "multi-topic"))
+    return out
+
+
 _INTERVENTIONS = {
     "repair": repair_candidates,
     "atomize": atomize_candidates,
     "consolidate": consolidate_candidates,
     "enrich": enrich_candidates,
+    "split-topic": split_topic_candidates,
 }
 
 

@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-split
-description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. When no page is over cap, decomposes ONE over-budget ATOM instead. One unit per run, one level deep. Page splits mutate only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large", "the atom is too long".
+description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. When no page is over cap, decomposes ONE over-budget ATOM, else splits ONE atom that holds two TOPICS. One unit per run, one level deep. Page splits mutate only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large", "the atom is too long".
 ---
 
 # Janitor memory — SPLIT
@@ -13,24 +13,24 @@ description: SPLIT executor — breaks ONE oversized wikimem page (over split_ma
 
 ## Overview
 
-SPLIT is the size-triggered editorial leg of the wikimem autonomous librarian. A page
-past the `split_max_bytes` cap is hard to load and navigate, so this skill turns it
-into a **concise overview page** (a map of per-sub-page summaries) plus
-**type-preserving sub-pages** holding the detail — how a Wikipedia article splits into
-sub-articles. Know the canonical wikimem model first —
-`skills/janitor-memory-write/references/wikimem-model.md` (tiers, the bidirectional
-link law, page anatomy, file→functionality globs).
+SPLIT is the DIVIDING leg of the wikimem autonomous librarian. A page past the
+`split_max_bytes` cap is hard to load and navigate, so this skill turns it into a **concise
+overview page** (a map of per-sub-page summaries) plus **type-preserving sub-pages** holding
+the detail — how a Wikipedia article splits into sub-articles. It also divides an ATOM that is
+over budget or holds two topics. Know the canonical wikimem model first —
+`skills/janitor-memory-write/references/wikimem-model.md` (tiers, the bidirectional link law,
+page anatomy, file→functionality globs).
 
 Two non-negotiable safety properties shape everything below:
 
-1. **You NEVER edit a live memory page directly.** Every mutation goes through the
+1. **You NEVER edit a live memory page directly.** Every PAGE mutation goes through the
    crash-safe, hash-guarded, flock-serialized transaction core via
    `scripts/memory_txn_cli.py`: edit COPIES in a staging dir, then `commit --op split`
    runs `verify_split` and applies atomically only on PASS. A crash mid-pass leaves a
-   journal a later heartbeat rolls forward — no duplicate pages, no data loss.
+   journal a later heartbeat rolls forward — no duplicate pages, no data loss. (An ATOM
+   split instead goes through `memgrep split-mem-atom`, which holds the same scope lock.)
 2. **No information is ever lost.** The union of the overview + every sub-page must
-   reproduce every fact and every `[^N]` lesson from the original; `verify_split`
-   proves it.
+   reproduce every fact and every `[^N]` lesson from the original; `verify_split` proves it.
 
 ## When to use
 
@@ -109,32 +109,38 @@ Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL` under
 `$SCOPE_ROOT`). Never batch multiple pages: one page per run.
 
 **Empty list ⇒ NOT done.** This chore also splits over-budget ATOMS — same job, smaller
-scale, same marker. `memgrep lint "$SCOPE_ROOT" | grep -F '[atom-oversized]'`. Nothing is
-due only if BOTH lists are empty. On a hit, follow
+scale, same marker. `memgrep lint "$SCOPE_ROOT" | grep -F '[atom-oversized]'`. On a hit,
+follow
 [split-plan-details.md#decomposing-an-over-budget-atom](references/split-plan-details.md#decomposing-an-over-budget-atom)
 and STOP there — steps 2-6 are page-seam machinery and must not run.
+
+**Both empty ⇒ STILL not done** — an atom can hold TWO TOPICS at any size, and `recall` ranks on
+its single keyword set, so a 400-char one is as unfindable as a 3000-char one:
+
+```bash
+uv run --script "$PLUGIN/scripts/memory_candidates_cli.py" --intervention split-topic --scope "$SCOPE" --root "$SCOPE_ROOT"
+```
+
+Empty ⇒ genuinely NOTHING DUE. Else take the FIRST `<page>#<atom>` and follow
+[split-plan-details.md#splitting-an-atom-that-holds-two-topics](references/split-plan-details.md#splitting-an-atom-that-holds-two-topics),
+then STOP. The list is a TRIAGE surface, never an assertion — most candidates hold one topic,
+and RECORDING that judgement is a successful pass, not an abstain.
 
 ### 2. Decide legality + splittability BEFORE opening a transaction
 
 Read `$PAGE` and apply the wikimem-model rules (the same predicate
 `is_legal_split` enforces — do it up front so you never open a txn you must abort):
 
-- **`tier: component` → do NOT fragment; SURFACE for re-tiering.** One element =
-  one page; a component is never split into multiple elements. An oversized
-  component is a **mis-tier**, not a split target — surface
-  `[memory-split] re-tier <slug>: component over the cap — too big to be one
-  element; re-tier to hub/aspect (the conflict/repair pass), then it splits.` and
-  leave it intact this pass. (The ONLY non-converging case — a tagging fix, not a
-  silent abstain.)
-- **Splittable tiers (`hub` → sub-hubs, broad `aspect` → sub-aspects) ALWAYS
-  converge — FAIL-SAFE (issue #57/#58).** An over-cap page is NEVER reported
-  "un-splittable":
-  - **≥ 2 distinct `##` content sections** (excluding the mandatory
-    `## Notes and lessons learned`) → split at those **natural seams** (step 3).
-  - **fewer than 2** — a seamless archive with no natural seam → do NOT abstain:
-    **SYNTHESIZE seams** (step 3a), so a seamless oversized page converges instead
-    of being skipped forever. `is_legal_split(meta, body, oversized=True)` returns
-    ok here.
+- **`tier: component` → do NOT fragment; SURFACE for re-tiering.** One element = one page. An
+  oversized component is a **mis-tier**, not a split target — surface `[memory-split] re-tier
+  <slug>: component over the cap — too big to be one element; re-tier to hub/aspect (the
+  conflict/repair pass), then it splits.` and leave it intact. (The ONLY non-converging case —
+  a tagging fix, not a silent abstain.)
+- **Splittable tiers (`hub`, broad `aspect`) ALWAYS converge — FAIL-SAFE (issue #57/#58).** An
+  over-cap page is NEVER reported "un-splittable": **≥ 2 `##` content sections** (excluding the
+  mandatory `## Notes and lessons learned`) → split at those **natural seams** (step 3); **fewer
+  than 2** → do NOT abstain, **SYNTHESIZE seams** (step 3a) so a seamless archive converges
+  instead of being skipped forever (`is_legal_split(meta, body, oversized=True)` returns ok).
 
 ### 3. Plan the split (decide the seams; preserve type and every fact)
 
@@ -159,24 +165,22 @@ each split voids the conflict refusals keyed to the old page names — measured 
 
 ### 4. Redirect inbound [[links]] (the connectedness gap — mandatory)
 
-When detail moves into a sub-page, any OTHER page that linked `[[source-slug]]`
-for a fact that now lives in a sub-page should repoint to it. Find every inbound link:
+When detail moves into a sub-page, any OTHER page that linked `[[source-slug]]` for a fact that
+now lives there should repoint to it. Find every inbound link:
 
 ```bash
-# memgrep matches the note NEEDLE against the BASENAME/stem only (never a path
-# substring), so pass the SLUG — a rel-path with a "/" (e.g. wikimem/page.md) can
-# NEVER match and backlinks would silently come back empty.
-memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # backlinks: pages that link to the source
+# Pass the SLUG: memgrep matches the note NEEDLE against the BASENAME/stem only, never a path
+# substring, so a rel-path with a "/" can NEVER match and backlinks come back silently empty.
+memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # pages that link to the source
 ```
 
-For each backlink really about a sub-topic, plan to rewrite `[[source-slug]]` →
-`[[the-right-sub-page-slug]]` in that holder page. The overview KEEPS the source
-slug (it is NOT retired), so a backlink about the page as a whole stays correct
-unchanged — you only redirect the ones that point at moved detail.
+Rewrite `[[source-slug]]` → `[[the-right-sub-page-slug]]` in each holder that is really about a
+sub-topic. The overview KEEPS the source slug (it is NOT retired), so a backlink about the page
+as a whole stays correct unchanged — redirect only the ones pointing at moved detail.
 
-> A split transaction has exactly ONE source (`begin` takes only `$REL`); a
-> backlink holder is redirected as an extra STAGED WRITE at its own rel-path in
-> step 5, never listed as a source. Why `len(sources) == 1` and why redirecting
+> A split txn has exactly ONE source (`begin` takes only `$REL`); a backlink holder is
+> redirected as an extra STAGED WRITE at its own rel-path in step 5, never a source.
+> Why `len(sources) == 1` and why redirecting
 > still matters even though the overview keeps the source slug (retiring
 > nothing): [split-plan-details.md#backlink-redirect-mechanics](references/split-plan-details.md#backlink-redirect-mechanics).
 
@@ -200,14 +204,11 @@ staging that is new or differs from its live copy becomes a write:
 - **Create** each sub-page as a new file under `$STAGING/` at its sub-page
   rel-path (e.g. `"$STAGING/<dir>/<source-slug>-<subtopic>.md"`).
 - **Redirect a backlink holder** by writing its rewritten content to
-  `"$STAGING/<holder-rel>"` (read the live holder, replace its `[[source-slug]]`
-  references with the right sub-page slug). The commit treats it as a write that
-  overwrites the live holder — no need to declare it a begin source.
-- Do NOT touch `MEMORY.md` — it is the harness's, the two memory systems COEXIST, and the
-  wiki's index is memgrep's. A split adds NO line there: the janitor maintains exactly ONE
-  line in that file, the bridge link to `<project>-overview.md`, and a split does not change
-  it. After the commit, the new sub-pages are picked up by `memgrep reindex`; there is no
-  human index to update.
+  `"$STAGING/<holder-rel>"`. The commit treats it as a write that overwrites the
+  live holder — no need to declare it a begin source.
+- **Do NOT touch `MEMORY.md`.** It is the harness's; the two memory systems COEXIST and
+  the wiki's index is memgrep's. A split adds NO line there and needs no index update —
+  `memgrep reindex` picks the sub-pages up after the commit.
 
 Then commit — this is the gate:
 
@@ -224,23 +225,11 @@ the txn (live tree untouched).
 
 ### 6. EXIT / retry / rollback contract
 
-- **SUCCESS** = `commit` exits 0 (`verify_split` passed and the swap applied).
-  Surface one line: `[memory-split] split <source-slug> → overview + N sub-page(s)
-  in <scope>.` PROJECT scope (if explicitly enabled) stages into the in-repo root,
-  NOT pushed — note "PROJECT staged; rides the next publish.py".
-- **verify FAIL or a precondition error** (stale snapshot, lock contention,
-  vanished source): the txn is already aborted (live tree untouched). Read the
-  printed reasons, FIX the staged plan, and retry the whole begin→edit→commit
-  cycle. **Bounded to ≤3 attempts.** After 3 failures: ensure the txn is aborted
-  (`memory_txn_cli.py abort "$SCOPE_ROOT" "$TXN"`), MUTATE NOTHING, and surface:
-  `[memory-split] FAILED <source-slug> after 3 attempts: <reason> — page left
-  intact; review manually.`
-- **Lock contention / stale-hash loser** (a concurrent `janitor-memory-write`
-  touched a source between begin and commit): a normal abstain, not a failure —
-  skip and let the next heartbeat retry on fresh content.
-- **Idempotency:** the completed txn-id is the idempotency key; staging dir +
-  journal are cleaned on success. A re-run finds the page now under the cap and
-  does nothing.
+SUCCESS = `commit` exits 0. A verify FAIL or precondition error has already aborted the txn
+(live tree untouched): fix the staged plan and retry, **bounded to ≤3 attempts**, then abort and
+surface FAILED. Lock contention is a normal abstain, not a failure. Exact surfacing lines, the
+abort command, and the idempotency rule:
+[split-plan-details.md#exit--retry--rollback-contract-step-6](references/split-plan-details.md#exit--retry--rollback-contract-step-6).
 
 ## Hard invariants (every SPLIT pass enforces)
 
@@ -254,12 +243,15 @@ aborts rather than landing a half-split page. Full statement of all five:
 
 STOP on the first outcome (one page, one level, retry ≤ 3):
 
-- [ ] NOTHING DUE — no over-cap note AND no `atom-oversized` (step 1); an empty page
-  list alone is not "nothing due".
+- [ ] NOTHING DUE — no over-cap note, no `atom-oversized`, AND no `split-topic`
+  candidate (step 1); an empty page list alone is not "nothing due".
 - [ ] ATOM DECOMPOSED — one over-budget atom rewritten as one-fact atoms (step 1).
 - [ ] RE-TIER SURFACED — an over-cap `component` (mis-tier; left intact, flagged —
   step 2). A hub/aspect is NEVER left intact: it splits at natural OR synthesized
   seams (fail-safe, step 3a).
 - [ ] SPLIT — commit exited 0 (step 5/6).
+- [ ] TOPIC SPLIT — a candidate atom really held two subjects (step 1).
+- [ ] TOPIC KEEP — it held one; refusal RECORDED, so it is not re-listed until the
+  page changes (step 1).
 - [ ] FAILED — verify error 3× (step 6).
 - [ ] DEFERRED — lock contention / stale-hash loser.

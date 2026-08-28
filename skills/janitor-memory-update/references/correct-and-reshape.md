@@ -14,13 +14,13 @@ guardrail):
 1. **Clean the fact in place.** Replace the wrong statement in the body with the
    correct one. The body is always the current truth — no "we used to think X"
    clutter inline. Two sanctioned paths (TRDD-7YHT3FNK — never raw shell, which has
-   neither lock nor staleness guard): `memgrep edit --page <page> --old-file F1
-   --new-file F2` (scope-locked, applies only on an exact unique match of the
+   neither lock nor staleness guard): `memgrep update-mem-topic --page <page> --old-file F1
+   --new-file F2` (was: `memgrep edit`; scope-locked, applies only on an exact unique match of the
    original text; on its changed-since-enqueued refusal, re-read and retry), or the
    harness Edit tool (its own old-string + changed-on-disk guards). Hand the heavier
    reshapes of §3 to the `janitor-memory-subconscious-agent`.
 2. **Demote the error to a dated lesson — the WHY is the point.** Add it with
-   `memgrep add-lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
+   `memgrep update-mem-atom --lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
    (the DO-NOT/BECAUSE/DO text on stdin) — the tool files the numbered entry under
    `## Notes and lessons learned`, anchors the corrected fact's atom to it with a
    `[^N]` footnote, and guarantees the grammar; you never hand-write it. The

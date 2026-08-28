@@ -48,7 +48,15 @@ line-exact label would make the corpus painful to extend, which is the fastest w
 people extending it. Wrong-check-fired IS caught, because the code is compared.
 
 Exit status: 0 when the run matches the baseline, 1 on any regression (a new FP, a new FN, or a
-baseline/corpus mismatch). READ-ONLY — it never edits a page.
+baseline/corpus mismatch).
+
+NOT read-only any more, and that matters for what this measures. This harness shells out to
+`memgrep lint`, and since TRDD-RY0IJBJI that verb AUTOFIXES as it goes (it reconciles
+publish-globally/symlink state). So a run MUTATES the corpus it is scoring, and a second run can
+legitimately differ from the first because the first repaired something. Point it at a COPY of a
+corpus, never at a corpus whose FP/FN numbers you intend to compare across runs. This docstring
+claimed "READ-ONLY — it never edits a page" until 2026-08-27; that was written before lint gained
+autofix and was silently false afterwards, which is the failure mode a benchmark can least afford.
 """
 
 from __future__ import annotations

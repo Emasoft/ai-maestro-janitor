@@ -217,7 +217,7 @@ calls.
 
 - [`/janitor-memory-write`](../janitor-memory-write/SKILL.md) — MEMORIZE: the
   CREATE leg (tier/shape decision, frontmatter, bidirectional link wiring). This
-  skill delegates new-page authoring to it.
+  skill delegates new-page (`memgrep new-mem-topic`) authoring to it.
 - [`/janitor-memory-update`](../janitor-memory-update/SKILL.md) — UPDATE: ADD to a
   page or CORRECT a memory (the 2-step clean-in-place + demote-to-`[^N]`-lesson
   protocol). This skill delegates ADD/correct to it.

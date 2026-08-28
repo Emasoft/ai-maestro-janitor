@@ -514,7 +514,7 @@ named note".
 
 | Operation | memgrep |
 |---|---|
-| In-place replace-X-with-Y on a page (scope-locked; exact-unique-match CAS) | `memgrep edit --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]` |
+| In-place replace-X-with-Y on a page (scope-locked; exact-unique-match CAS) | `memgrep update-mem-topic --page P --old-file F1 --new-file F2 [--base-sha256 H] [--replace-all]` (was: `memgrep edit`) |
 | Symptom recall (pages + `[^N]` lessons + body atoms, interleaved) | `memgrep recall "<symptom>" <roots…>` |
 | Atoms harvested FROM a Claude buffer note (provenance) | `memgrep find-claude-mem-ref <buffer.md> <dir>` |
 | List hub pages (then match their `globs` against the file you're editing) | `memgrep -l <dir> --where 'fm.tier "hub"' \| sort -u` |

@@ -152,6 +152,72 @@ def test_split_has_work_stale_stamp_re_arms(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# multi_topic_atom_candidates — structural triage for "split an atom that
+# carries two topics" (TRDD-3AKSYZRV, duty 13)
+# --------------------------------------------------------------------------- #
+
+def _atom_page(d: Path, name: str, text: str) -> Path:
+    """Write a page whose body is exactly `text` (no frontmatter needed — the
+    predicate only reads atom marker lines, never metadata)."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_multi_topic_candidates_single_paragraph_multi_line_is_not_a_candidate(tmp_path):
+    """A multi-line body with no blank line (one paragraph) is not flagged."""
+    _atom_page(tmp_path, "a.md", "^a1 [desc:x]\nline one\nline two\nline three\n")
+    assert mcp.multi_topic_atom_candidates(tmp_path) == []
+
+
+def test_multi_topic_candidates_two_paragraphs_is_a_candidate(tmp_path):
+    """A body with an internal blank line (two paragraphs) is flagged."""
+    _atom_page(tmp_path, "a.md", "^a1 [desc:x]\nfirst paragraph\n\nsecond paragraph\n")
+    assert mcp.multi_topic_atom_candidates(tmp_path) == [("a.md", "a1")]
+
+
+def test_multi_topic_candidates_one_body_line_is_not_a_candidate(tmp_path):
+    """An atom with a single body line cannot be split at all, so it's excluded
+    even though `split_atom_build`'s floor is the reason, not this predicate."""
+    _atom_page(tmp_path, "a.md", "^a1 [desc:x]\nonly one line\n")
+    assert mcp.multi_topic_atom_candidates(tmp_path) == []
+
+
+def test_multi_topic_candidates_heading_ends_body_without_swallowing_it(tmp_path):
+    """A `#` heading terminates the atom body — the heading line and everything
+    after it must not be treated as more of this atom's body."""
+    text = (
+        "^a1 [desc:x]\n"
+        "first paragraph\n"
+        "\n"
+        "second paragraph\n"
+        "## Notes and lessons learned\n"
+        "\n"
+        "unrelated trailing content\n"
+        "\n"
+        "more unrelated content\n"
+    )
+    _atom_page(tmp_path, "a.md", text)
+    assert mcp.multi_topic_atom_candidates(tmp_path) == [("a.md", "a1")]
+
+
+def test_multi_topic_candidates_sorted_across_two_pages(tmp_path):
+    """Results are sorted by (path, atom id) and correctly attributed across pages."""
+    _atom_page(tmp_path, "z.md", "^z1 [desc:x]\npara one\n\npara two\n")
+    _atom_page(
+        tmp_path,
+        "a.md",
+        "^b1 [desc:x]\npara one\n\npara two\n^a1 [desc:x]\npara one\n\npara two\n",
+    )
+    assert mcp.multi_topic_atom_candidates(tmp_path) == [
+        ("a.md", "a1"),
+        ("a.md", "b1"),
+        ("z.md", "z1"),
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # content_has_work — the dispatcher + the FAIL-OPEN safety rule
 # --------------------------------------------------------------------------- #
 

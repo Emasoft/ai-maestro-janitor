@@ -221,8 +221,9 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
   law + schema + dual-test method.
 - `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
 - `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) — the
-  write legs; run RECALL before both. They now author via `memgrep new-page` /
-  `add-atom` / `add-lesson` (memgrep guarantees the page/atom/lesson syntax) — so
+  write legs; run RECALL before both. They now author via `memgrep new-mem-topic`
+  (was: `new-page`) / `new-mem-atom` (was: `add-atom`) / `update-mem-atom --lesson`
+  (was: `add-lesson`) (memgrep guarantees the page/atom/lesson syntax) — so
   recall → write shares one instrument, and no wikimem `.md` is hand-written.
 - `/janitor-memory-user-search` (legacy `/search-user-mem`, still works) — searches
   the USER's PRIVATE store (agent-invisible); a separate corpus, distinct from this
