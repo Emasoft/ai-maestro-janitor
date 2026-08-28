@@ -4,8 +4,8 @@
 > [!IMPORTANT]
 > **ai-maestro-janitor rule — INERT unless the janitor is active** (`DATA` =
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`): no `DATA` ⇒ orphan — INERT,
-> and the user may delete THIS FILE only, never a memory store; `DATA/global-state/kill-switch.flag`
-> (or legacy `~/.claude/janitor-global-state/kill-switch.flag`) ⇒ deliberately stopped, INERT this
+> and the user may delete THIS FILE only, never a memory store; `~/.claude/janitor-control/kill-switch.flag`
+> (or the older `DATA/global-state/kill-switch.flag`) ⇒ deliberately stopped, INERT this
 > session; else ACTIVE.
 
 # Commit discipline — record the WHY, at commit time, in two places

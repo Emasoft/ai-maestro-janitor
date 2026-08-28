@@ -4,8 +4,8 @@
 > [!IMPORTANT]
 > **ai-maestro-janitor rule — INERT unless the janitor is active** (`DATA` =
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`): no `DATA` ⇒ orphan — INERT,
-> and the user may delete THIS FILE only, never a memory store; `DATA/global-state/kill-switch.flag`
-> (or legacy `~/.claude/janitor-global-state/kill-switch.flag`) ⇒ deliberately stopped, INERT this
+> and the user may delete THIS FILE only, never a memory store; `~/.claude/janitor-control/kill-switch.flag`
+> (or the older `DATA/global-state/kill-switch.flag`) ⇒ deliberately stopped, INERT this
 > session; else ACTIVE.
 
 # ai-maestro-janitor — what it creates on this machine
@@ -46,7 +46,7 @@ are safe to remove.
 | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory (canonical), OAuth-rotator + daemon state | **NO** — persistent state |
 | `~/.claude/ai-maestro-janitor-memory/` | the **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9). SessionStart syncs it and restores from it after a data-dir loss | **NO** — real knowledge (a memory store) |
 | `~/.claude/plugins/data/…/global-state/` | the machine-wide daemon singleton (pid / flock / locks / timestamps) — CANONICAL since TRDD-2U8AH82F | no — the daemon recreates what it needs |
-| `~/.claude/janitor-global-state/` | the LEGACY daemon-state dir — auto-migrated into the DATA dir by the daemon; kept only as a read-fallback for not-yet-updated sessions (see its README-MOVED.txt) | after every session runs a post-migration janitor, yes |
+| `~/.claude/janitor-global-state/` | the LEGACY daemon-state dir — **fully retired (TRDD-ULEGRT01)**: nothing reads or writes it any more, the resolver's read-fallback rung was dropped. The daemon still copies any leftover state into the DATA dir on first run (see its README-MOVED.txt) | yes, once that one-time copy has happened |
 
 **Rule of thumb:** any `…/memory/…` directory and the plugin **DATA** dir hold
 real state — never delete them. `.janitor/state`, `.janitor/logs`, `reports*`,
