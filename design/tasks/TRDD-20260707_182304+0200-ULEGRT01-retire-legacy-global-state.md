@@ -1,10 +1,11 @@
 ---
 trdd-id: ULEGRT01
 title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82F)
-column: dev
+column: human_review
 blocked-by: []
+eht: [TK1H3LSA]
 created: 2026-07-07T18:23:04+0200
-updated: 2026-08-28T22:09:02+0200
+updated: 2026-08-28T22:52:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
@@ -1011,8 +1012,11 @@ pass is not "done":
       `kill-switch.flag` ⇒ after the migration, `kill_switch_present()` is True). Paired with
       `test_legacy_kill_switch_is_no_longer_read`, which pins the retirement itself; neither
       passes without the other's half of the behaviour.
-- [ ] NEXT release: delete `migrate_global_state_to_data_dir()` + its call site + the DATA rung in
-      `_singleton_paths`.
+- [x] NEXT release: delete `migrate_global_state_to_data_dir()` + its call site + the DATA rung in
+      `_singleton_paths` — SPUN OUT 2026-08-28 as **TRDD-TK1H3LSA**, which also picks up the
+      dropped `_legacy_keychain_latch_path` retirement and the DATA-path gate extension. A
+      scheduled action left as an unchecked box on an otherwise-finished card is how work stops
+      being done; it needs its own card, not a footnote on this one.
 - [x] **Surface the dir removal to the USER** (RULE 0 — never auto-delete) — DONE 2026-08-28,
       folded into `/janitor-audit` step 5 rather than a new detector: this is a once-per-machine
       leftover, not recurring drift, so it should not cost a heartbeat check forever. It reports
@@ -1030,7 +1034,15 @@ pass is not "done":
       control_dir first. CLAUDE.md's only hit is inside the auto-generated wikimem index block
       (a memory page's `description:`), so it is not hand-edited. Wikimem pages corrected under
       the supersession protocol.
-- [ ] `uv run pytest` + `ruff` + `mypy` green.
+- [x] `uv run pytest` + `ruff` + `mypy` green — 2026-08-28. Full suite **15903 passed, 1 skipped**
+      in 33 min; ruff clean; mypy clean over 494 files; `cargo build` exit 0. The run surfaced ONE
+      failure, `test_shipped_rules_stay_under_the_context_floor_cap` (53760 B vs the 53700 B cap),
+      fixed in `cdc375c0`. Measured per file rather than assumed: the 10-file probe rewrite SAVED
+      12 B and the whole +61 came from one table row — **and the pre-change baseline was 53699 B,
+      one byte under the cap.** The corpus is deliberately saturated, so ANY prose growth anywhere
+      in `rules/*.md` fails this test. Budget for it before editing a shipped rule; the answer is
+      to move material to `rules/references/` (on-demand, not in the floor), never to raise the
+      cap.
 
 ## Notes and lessons learned
 
