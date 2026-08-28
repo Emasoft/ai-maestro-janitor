@@ -31,7 +31,9 @@ LABEL="com.ai-maestro-janitor.daemon"
 ENTRY="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon_keepalive_entry.py"
 # The daemon pins its own log dir to the global-state dir (daemon.py setdefault); point
 # launchd's stdout/stderr capture (resolution errors before logging starts) at the same.
-LOG_DIR="$HOME/.claude/janitor-global-state"
+# Resolved at install time by resolve_log_dir() below, NOT hardcoded here — see there.
+GS_LIB="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/lib"
+GS_DATA_DIR="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="$UNIT_DIR/$LABEL.service"
@@ -135,6 +137,26 @@ resolve_interpreter() {
   return 1
 }
 
+# The global-state dir is chosen by a 4-rung LADDER (env override → $XDG_STATE_HOME/janitor
+# → the plugin DATA dir once migrated → the legacy ~/.claude/janitor-global-state). This file
+# used to hardcode the LAST rung, which is wrong twice over: on a migrated host launchd
+# captured stdout into a directory the daemon no longer logs to, and — the reason
+# TRDD-ULEGRT01 could not close — `mkdir -p` on it RESURRECTED the legacy dir on every
+# install, so the retirement gate could never observe it go quiet. Ask the module that owns
+# the ladder rather than re-implementing it here; a second copy of a 4-rung resolution is
+# exactly the thing that drifts.
+resolve_log_dir() {
+  local argv d
+  argv="$(resolve_interpreter)" || argv=""
+  if [ -n "$argv" ]; then
+    d="$($argv -c "import sys; sys.path.insert(0, '$GS_LIB'); import global_state; print(global_state.global_state_dir())" 2>/dev/null)" &&
+      [ -n "$d" ] && printf '%s' "$d" && return 0
+  fi
+  # FALLBACK: the post-migration DATA location — never the legacy dir. Recreating legacy is
+  # the failure this resolution exists to prevent, so the fallback must not reintroduce it.
+  printf '%s' "$GS_DATA_DIR"
+}
+
 # D-α post-write baker (launchd). Rewrite the ALREADY-WRITTEN plist at $1 in place so its
 # ProgramArguments become [<abs-interp-tokens…>, <entry>, --keepalive] — giving launchd a
 # concrete absolute interpreter that needs NO PATH. This edits the RUNTIME plist, NOT the
@@ -218,6 +240,7 @@ execstart_bake_interpreter() {
 }
 
 install_macos() {
+  LOG_DIR="$(resolve_log_dir)"
   mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
   # The redirect target below is the literal LaunchAgents plist path (not a shell var) so
   # CPV's heredoc-body extractor can locate this config body; the heredoc delimiter is
@@ -266,6 +289,7 @@ EOF
 }
 
 install_linux() {
+  LOG_DIR="$(resolve_log_dir)"
   mkdir -p "$UNIT_DIR" "$LOG_DIR"
   # Same shape as the plist branch: the redirect target below is the literal unit path so
   # CPV's extractor finds this config body; the unquoted delimiter lets the shell expand

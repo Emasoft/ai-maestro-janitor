@@ -362,6 +362,90 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         assert "$HOME" not in text
 
 
+def _run_installer(fake_home: Path) -> subprocess.CompletedProcess[str]:
+    """Run the real installer against a sandboxed HOME with activation skipped.
+
+    Both global-state env overrides are POPPED, not merely unset in the parent: conftest
+    exports `JANITOR_GLOBAL_STATE_DIR` for isolation, and it is rung 1 of the very ladder
+    these tests are here to exercise — leaving it set would short-circuit the resolution
+    and make both cases below pass on a hardcoded installer.
+    """
+    env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
+    for var in ("JANITOR_GLOBAL_STATE_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
+        env.pop(var, None)
+    proc = subprocess.run(
+        ["bash", str(INSTALLER), "install"],
+        env=env, capture_output=True, text=True, timeout=_T30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc
+
+
+def _stage_global_state_lib(fake_home: Path) -> None:
+    """Put the real `global_state` (and the `state` it imports) where the installer looks.
+
+    This mirrors the shipped closure keepalive_stage.py writes; the installer resolves its
+    log dir by importing from exactly this path.
+    """
+    lib = fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/lib"
+    lib.mkdir(parents=True)
+    for name in ("global_state.py", "state.py"):
+        shutil.copy2(SCRIPTS / "lib" / name, lib / name)
+
+
+@pytest.mark.real_subprocess("bash")
+def test_installer_never_resurrects_the_legacy_global_state_dir(tmp_path: Path) -> None:
+    """With nothing staged to resolve against, the installer falls back to the DATA dir.
+
+    The installer used to hardcode `~/.claude/janitor-global-state` — the LAST rung of the
+    resolution ladder. Its `mkdir -p` therefore RE-CREATED the legacy dir on every install,
+    which is why TRDD-ULEGRT01's retirement gate could never observe it go quiet: the thing
+    being retired was being rebuilt by the retirement's own subject. The fallback must
+    resolve forward (the DATA location), never back.
+    """
+    if launchd_keepalive.current_platform() == "other":
+        pytest.skip(f"no OS keepalive on {sys.platform}")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    _run_installer(fake_home)
+    legacy = fake_home / ".claude/janitor-global-state"
+    assert not legacy.exists(), f"the installer re-created the legacy dir at {legacy}"
+    assert (fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state").is_dir()
+
+
+@pytest.mark.real_subprocess("bash")
+def test_installer_honours_the_resolved_global_state_dir(tmp_path: Path) -> None:
+    """The log dir comes from the LADDER, not from a second copy of it in shell.
+
+    A not-yet-migrated host (a legacy dir present, no migration marker) still resolves to
+    legacy — so the installer must point launchd's capture there, at the dir the daemon is
+    actually logging into. Asserting the *legacy* answer specifically is what makes this a
+    real check: a fallback-only installer would fail it, and so would one that hardcoded
+    the DATA dir "because legacy is being retired".
+    """
+    plat = launchd_keepalive.current_platform()
+    if plat == "other":
+        pytest.skip(f"no OS keepalive on {sys.platform}")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    _stage_global_state_lib(fake_home)
+    legacy = fake_home / ".claude/janitor-global-state"
+    legacy.mkdir(parents=True)  # un-migrated: present, and no migrated-from-legacy.ts
+    data_dir = fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state"
+    _run_installer(fake_home)
+    if plat == "macos":
+        plist = fake_home / "Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist"
+        data = plistlib.loads(plist.read_bytes())
+        assert data["StandardOutPath"] == str(legacy / "daemon-keepalive.out.log")
+        assert data["StandardErrorPath"] == str(legacy / "daemon-keepalive.err.log")
+    else:
+        # The systemd unit records no log path, so the ONLY observable effect of the
+        # resolution on Linux is which directory got `mkdir -p`'d. Assert the DATA dir was
+        # NOT created too: without that half, a hardcoded fallback would still pass, since
+        # the legacy dir is one this test created itself.
+        assert not data_dir.exists(), f"resolved to the DATA dir on an un-migrated host: {data_dir}"
+
+
 def _service_manager_pathdir(tmp_path: Path, *, name: str, loaded: bool) -> Path:
     """A curated PATH dir whose `launchctl`/`systemctl` is a scripted stand-in that
     answers "job loaded" (exit 0) or "job absent" (exit 1).
