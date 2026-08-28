@@ -266,6 +266,46 @@ def add(
         pass
 
 
+def spend_nudges(now: int | None = None) -> int:
+    """Charge one nudge to every non-`stopped` entry. Returns how many were charged.
+
+    THE SECOND EMIT PATH. `directive_lines()` LISTS agents and pays; the heartbeat's
+    keep-going pulse advertises the same entries as a COUNT (`dispatch._pending_agent_count`)
+    and used to pay nothing. So an entry surfaced only by that pulse could never reach the
+    `nudges >= MAX_NUDGES` eviction, and could not reach the age sweep either — that route is
+    guarded on `nudges == 0` and such an entry sits above 0. It therefore rode the full
+    7-day `MAX_AGE_S` backstop, re-advertised on every fire.
+
+    That is not merely noise, and the note `directive_lines()` attaches says why: a DIED agent
+    RE-RUNS the request that killed it, which is how janitor#75 burned tokens for a week. The
+    3-nudge cap is the mitigation standing between a corpse and a week of invitations — and on
+    this path the cap was absent exactly where the manifest keeps naming a corpse. The note
+    also promised "listed at most 3 times, then dropped", which was false here.
+
+    Reported by ai-maestro 2026-08-28 from the receiving end: five consecutive fires named one
+    pending agent (a DIED `claude-code-guide`) with `nudges` reading 2 before the first and 2
+    after the fifth.
+
+    A COUNT advertises every entry it counts, so it charges every entry — unlike
+    `directive_lines()`, which pays only for the `MAX_DIRECTIVE_AGENTS` it actually named.
+    Call it only where the line is really emitted, so a spend always corresponds to an
+    advertisement the reader saw. Fail-open 0: a manifest bug must never break a heartbeat."""
+    try:
+        t = int(now if now is not None else time.time())
+        with _locked():
+            entries = _load_unlocked(t)
+            charged = 0
+            for e in entries:
+                if not e["stopped"]:
+                    e["nudges"] += 1
+                    charged += 1
+            if charged:
+                _save_unlocked(entries)
+            return charged
+    except Exception:  # noqa: BLE001 - the heartbeat must never die on a manifest bug
+        return 0
+
+
 def remove(agent_id: str, now: int | None = None) -> None:
     """Clear a finished subagent. No-op on empty/unknown id (fail-open)."""
     try:

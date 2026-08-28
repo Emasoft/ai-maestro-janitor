@@ -1361,6 +1361,23 @@ def fire_detached_argv(
 # the CLI from the inherited env — the janitor never handles a token itself.
 
 
+# The ONLY synchronous step left on the ai-maestro send path: one `list --json` to find this
+# agent's tmux session. Everything after it is detached (AM8JD9SG F9). 5 s is right for a caller
+# that can wait — cron, a CLI run, the daemon.
+#
+# It is NOT right for a caller inside a registered HOOK budget, and that mismatch is the bug
+# AM8JD9SG's F9 residue names: `pre-tool-context-usage.py` is registered at 5 s in `hooks.json`,
+# so a 5 s resolution alone consumes its whole budget and the harness kills the hook before
+# `compact_trigger` can answer — the `COMPACT_FIRED` the enforcement DENY keys on never arrives,
+# and the context guard silently does nothing at the moment it is meant to act. Such a caller
+# passes a SMALLER `aimaestro_resolve_timeout_s`, so every inner bound nests strictly inside the
+# one containing it. Expiring early is safe by construction: the resolution is best-effort, and a
+# timeout degrades to the local tmux keystroke path exactly like a missing CLI or a down server.
+_AIMAESTRO_RESOLVE_TIMEOUT_S = 5.0
+#: Public alias so a CLI can print/derive the default without reaching into a private name.
+DEFAULT_AIMAESTRO_RESOLVE_TIMEOUT_S = _AIMAESTRO_RESOLVE_TIMEOUT_S
+
+
 def _resolve_aimaestro_cli(env: Mapping[str, str]) -> str | None:
     """Resolve the ai-maestro CLI: $AIMAESTRO_CLI → ~/.local/bin → PATH; None if absent.
 
@@ -1461,7 +1478,8 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
 
 
 def _try_ai_maestro_send(
-    commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str], delay_s: float = 0.0
+    commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str], delay_s: float = 0.0,
+    resolve_timeout_s: float = _AIMAESTRO_RESOLVE_TIMEOUT_S,
 ) -> str | None:
     """Best-effort ai-maestro send via the shipped CLI (issue #42). Returns a status
     string on success, or None to fall through to the local terminal send.
@@ -1493,7 +1511,7 @@ def _try_ai_maestro_send(
     # 1) Enumerate agents → find THIS agent's tmux session by cwd match. `list
     #    --json` returns the same agent objects the API did, so the pure matcher is
     #    reused unchanged.
-    proc = _run_aimaestro_cli(cli, ["list", "--json"], env=env, timeout=5.0)
+    proc = _run_aimaestro_cli(cli, ["list", "--json"], env=env, timeout=resolve_timeout_s)
     if proc is None or proc.returncode != 0 or not proc.stdout.strip():
         return None
     try:
@@ -1613,6 +1631,7 @@ def send_self_command(
     presence_wait_s: float | None = None,
     sleeper=time.sleep,
     abort_unless_any: Sequence[str] | None = None,
+    aimaestro_resolve_timeout_s: float = _AIMAESTRO_RESOLVE_TIMEOUT_S,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
     pane, choosing the mechanism by `state.terminal_kind()`.
@@ -1698,7 +1717,10 @@ def send_self_command(
     # unconfirmed POST) falls through to the local terminal send below; ai-maestro
     # agents run in tmux, so that fallback works too (TRDD-db169d9e R4).
     if state.in_ai_maestro_agent_env(e):
-        api = _try_ai_maestro_send(cmds, dry_run=dry_run, env=e, delay_s=delay_s)
+        api = _try_ai_maestro_send(
+            cmds, dry_run=dry_run, env=e, delay_s=delay_s,
+            resolve_timeout_s=aimaestro_resolve_timeout_s,
+        )
         if api is not None:
             return api
     kind = state.terminal_kind()

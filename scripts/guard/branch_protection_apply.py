@@ -17,19 +17,34 @@ phase (`_phase_guard_branch_protection`) on its own cadence
 (`guard_branch_protection_interval`, default 6 h). Every safety gate
 listed below lives inside this module so the dispatch wiring stays
 trivial — no coordination with the read-only branch-protection detector
-is needed; the apply is idempotent-by-name (PATCH if the ruleset already
-exists, else POST) so re-running converges instead of duplicating.
+is needed; the apply is idempotent-by-name (PUT if the ruleset already
+exists, else POST — PUT, never PATCH: GitHub's "update a ruleset"
+endpoint is PUT and a PATCH 404s on the live API, janitor#14) so
+re-running converges instead of duplicating.
 
-The ratified baseline is TWO rulesets (single source of truth in
-`branch_protection_lib.baseline_ruleset_payloads`):
-  * `baseline-history-protect` — deletion + non_fast_forward (NO
-    required_linear_history — it jams the many-agent merge workflow);
-    no bypass actors.
-  * `baseline-pr-and-checks` — pull_request (1 approval, dismiss-stale,
-    thread-resolution) + required_status_checks (strict; CI contexts
-    auto-detected at apply time); repo-admin role gets an `always`
-    bypass so a solo admin is not locked out.
-After applying both, any orphaned pre-migration `janitor-baseline`
+The ratified baseline is THREE rulesets (single source of truth in
+`branch_protection_lib.baseline_ruleset_payloads` — build payloads
+from that code, never from this prose, which has drifted before: it
+said "TWO" and "PATCH" and "1 approval" until 2026-08-27, all three
+stale):
+  * `baseline-history-protect` — deletion only (NO non_fast_forward —
+    USER Tier-3 ruling 2026-08-27 requires history rewrite/force-push
+    to be allowed in every ruleset on every repo; NO required_linear_history
+    — it jams the many-agent merge workflow); repo-admin role gets an
+    `always` bypass.
+  * `baseline-pr-and-checks` — pull_request (0 approvals — GitHub
+    forbids self-approval, so any non-zero count is unsatisfiable on a
+    solo-owner repo; dismiss-stale, thread-resolution) +
+    required_status_checks (strict; CI contexts auto-detected at apply
+    time); repo-admin role gets an `always` bypass so a solo admin is
+    not locked out.
+  * `baseline-tag-protect` — deletion + update on every tag (release
+    tags are immutable to non-admins); repo-admin role gets an `always`
+    bypass (USER ruling 2026-08-27 — with no bypass, a permitted history
+    rewrite stranded every existing tag on a commit that no longer
+    existed, with no way to move it). New-tag CREATION stays open, so
+    `publish.py` still cuts releases.
+After applying all three, any orphaned pre-migration `janitor-baseline`
 ruleset is deleted.
 
 Safety gates (any one false → no action, surface verbatim instead):
@@ -240,11 +255,11 @@ def main() -> int:
     )
     print(
         f"[guard] applied branch-protection baseline on {slug}@{default_branch} "
-        f"({summary}). Rulesets: baseline-history-protect (deletion + "
-        f"non_fast_forward), baseline-pr-and-checks "
+        f"({summary}). Rulesets: baseline-history-protect (deletion only — "
+        f"history rewrite/force-push allowed), baseline-pr-and-checks "
         f"(pull_request 1-approval/dismiss-stale/thread-resolution + "
         f"required_status_checks strict), and baseline-tag-protect "
-        f"(tag refs/tags/v*.*.* deletion + update, no bypass); {check_note}. "
+        f"(tag refs/tags/v*.*.* deletion + update, owner bypass); {check_note}. "
         f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
     )
     return 0

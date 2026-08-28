@@ -218,8 +218,9 @@ def _plan_for_repo(facts: gca.RepoFacts) -> list[str]:
             f"(preserving its other {n_kept} rule(s), conditions, and bypass actors)"
         )
     actions.append(
-        "apply the ratified baseline (baseline-history-protect [deletion + non_fast_forward, "
-        "NO linear history], baseline-pr-and-checks [PR review + required checks], "
+        "apply the ratified baseline (baseline-history-protect [deletion only — "
+        "history rewrite/force-push allowed per USER Tier-3 ruling 2026-08-27], "
+        "baseline-pr-and-checks [PR review + required checks], "
         "baseline-tag-protect) idempotent-by-name"
     )
     return actions

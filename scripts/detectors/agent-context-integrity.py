@@ -83,6 +83,9 @@ _GLOBS = (
 # A single pathological file must not burn the heartbeat budget.
 _PER_FILE_BYTE_CAP = 512 * 1024
 _MAX_FILES_DEFAULT = 400
+#: Findings printed per fire before the rest fold into "…and N more". Small because heartbeat
+#: stdout is re-charged on every turn; overridable per run — see `_max_printed`.
+_MAX_PRINTED_DEFAULT = 5
 # THERE IS DELIBERATELY NO SEVERITY FILTER. Every rule in `agent_config_patterns.RULES` is
 # reported, and that is a measured decision, not an omission.
 #
@@ -109,6 +112,30 @@ def _max_files() -> int:
         _MAX_FILES_DEFAULT,
         detector_name=_NAME,
         var_name="CLAUDE_PLUGIN_OPTION_AGENT_CONTEXT_MAX_FILES",
+    )
+
+
+def _max_printed() -> int:
+    """How many findings the heartbeat line prints before folding the rest into "…and N more".
+
+    The cap exists because heartbeat stdout is charged to EVERY turn's context, so it must stay
+    small by default — 5 is the owner's context budget, not a display preference, and that
+    default is unchanged.
+
+    It is a KNOB rather than a constant because the folded findings were otherwise unreachable
+    by any means (reported by ai-maestro, 2026-08-28, who hit it in the first five minutes of
+    trying to measure a fix's effect). On a repo whose agent-context files are all locally
+    authored, `verified_local` skips the issue-raise entirely by design (janitor#214), so the
+    ONLY surface those findings ever had was this print — "…and 11 more" named a set with no
+    way to enumerate it. A detector that reports a count it cannot show is asking to be
+    disbelieved.
+
+    Set `CLAUDE_PLUGIN_OPTION_AGENT_CONTEXT_MAX_PRINTED` high for one run to read them all."""
+    return state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_AGENT_CONTEXT_MAX_PRINTED"),
+        _MAX_PRINTED_DEFAULT,
+        detector_name=_NAME,
+        var_name="CLAUDE_PLUGIN_OPTION_AGENT_CONTEXT_MAX_PRINTED",
     )
 
 
@@ -505,7 +532,7 @@ def main() -> int:
     # gets no benefit from carrying one. Downgrade, never suppress: see `_downgrade_described_attacks`.
     findings = _downgrade_described_attacks(findings, project_root, verified_local)
 
-    cap = 5
+    cap = _max_printed()
     lines = []
     for rel, f in findings[:cap]:
         # Sanitize the PATH only, and keep our own frame outside the call. `rule_id` and

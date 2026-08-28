@@ -452,6 +452,23 @@ def is_truthy_env(name: str, default: bool) -> bool:
     return raw.lower() not in ("false", "0", "no", "off")
 
 
+def restricted_mode() -> bool:
+    """True when CC 2.1.248+ `--restricted` / `CLAUDE_CODE_RESTRICTED` is active.
+
+    Restricted mode strips the tools that run commands (Bash) and IGNORES user/project/local
+    settings files, so the heartbeat's dispatcher stub cannot run and no settings-file hook is
+    loaded: the janitor is inert. Every surface that would otherwise claim protection has to
+    say so instead.
+
+    Reads through `is_truthy_env`, so an unexpected-but-affirmative spelling (`on`, `enabled`,
+    `yes`) still counts as restricted. That direction is deliberate for a SAFETY check: guessing
+    "not restricted" makes us promise a guard that cannot fire, which is the failure this
+    function exists to prevent. Duplicating the parse per caller is how the three-way drift
+    recorded in `is_truthy_env` started — one home, one spelling of false.
+    """
+    return is_truthy_env("CLAUDE_CODE_RESTRICTED", False)
+
+
 def parse_nonneg_int(s: str) -> Optional[int]:
     """Parse a non-negative integer from a config-value string, or None.
 

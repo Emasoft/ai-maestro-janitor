@@ -24,14 +24,18 @@ identical and portable across repos that use main/master/custom):
 1. ``baseline-history-protect`` — ``bypass_actors`` grants the repo-admin
    role (``actor_id: 5``) an ``always`` bypass, per the USER's Tier-3
    ruling of 2026-08-13 allowing the OWNER to mutate history (amend,
-   rebase, force-push) on their own repos. NON-admins are still refused
-   ``deletion`` and ``non_fast_forward``, which is what makes this a
-   baseline rather than its removal. Rules: ``deletion``,
-   ``non_fast_forward``.
+   rebase, force-push) on their own repos. Rules: ``deletion`` ONLY.
+   DELIBERATELY NOT ``non_fast_forward`` — USER Tier-3 ruling 2026-08-27:
+   "history rewrite is allowed and must be allowed in all rulesets of all
+   github repos". ``non_fast_forward`` IS the block-force-push rule, i.e.
+   the rule whose entire function is to forbid a history rewrite, so it
+   cannot survive that directive; the admin bypass was a key to a lock the
+   owner has now removed outright.
    DELIBERATELY NOT ``required_linear_history`` — it forbids merge commits
    and jams the many-agent merge workflow (see the rules block below for
-   the full rationale); deletion + non_fast_forward are the genuine
-   protection, linear history is a harmful workflow opinion.
+   the full rationale); linear history is a harmful workflow opinion.
+   What remains is ``deletion``: losing a branch is not a history rewrite,
+   it is the loss of the ref you would rewrite FROM, so it stays.
 2. ``baseline-pr-and-checks`` — ``bypass_actors`` grants the repo-admin
    role (``actor_id: 5``) an ``always`` bypass so a solo admin is not
    locked out of their own repo by the self-approval requirement.
@@ -317,8 +321,8 @@ def baseline_ruleset_payloads(
         # Same reasoning that removed `required_linear_history` (janitor#14): the baseline may
         # protect against accident, never against the owner's deliberate act.
         #
-        # `deletion` + `non_fast_forward` still apply to EVERY non-admin actor, so CI, agents
-        # and outside contributors remain fully constrained — only the owner is exempt.
+        # `deletion` still applies to EVERY non-admin actor, so CI, agents and outside
+        # contributors cannot drop the default branch — only the owner is exempt.
         "bypass_actors": [
             {
                 "actor_id": _ADMIN_REPOSITORY_ROLE_ID,
@@ -328,18 +332,27 @@ def baseline_ruleset_payloads(
         ],
         "rules": [
             {"type": "deletion"},
-            {"type": "non_fast_forward"},
+            # DELIBERATELY NO non_fast_forward. USER Tier-3 ruling 2026-08-27:
+            # "history rewrite is allowed and must be allowed in all rulesets of all
+            # github repos. the janitor must ensure of that." `non_fast_forward` is
+            # GitHub's "Block force pushes" rule — the ONE rule whose entire function
+            # is to forbid a history rewrite. Keeping it while being told history
+            # rewrite must be allowed in every ruleset is not a reading anyone can
+            # defend, and the admin bypass added on 2026-08-13 does not satisfy the
+            # directive either: a bypass is a KEY TO A LOCK, and the owner has now
+            # said the lock must not be there. Do NOT re-add it, and do not "restore"
+            # it while reconciling drift — a repo that has it is the thing this
+            # baseline now REPAIRS.
+            #
             # DELIBERATELY NO required_linear_history. It forbids merge commits,
             # which forces every contributor onto rebase/squash against a default
             # branch that OTHER agents are concurrently advancing — endless rebase
             # churn that makes a many-agent repo effectively unmergeable. The AI
             # Maestro model has many agents merging each other's branches; linear
-            # history actively jams that. `deletion` + `non_fast_forward` already
-            # give the genuine safety (no branch deletion, no history rewrite);
-            # linear history is a workflow OPINION, not protection — and a harmful
-            # one here. Removed per the user's direction (the guardian must not be
-            # the thing blocking the work). The maintainer plugin's matching
-            # baseline must drop it too — tracked as a cross-repo sync.
+            # history actively jams that. Linear history is a workflow OPINION, not
+            # protection — and a harmful one here. Removed per the user's direction
+            # (the guardian must not be the thing blocking the work). The maintainer
+            # plugin's matching baseline must drop both — tracked as a cross-repo sync.
         ],
     }
     pr_and_checks: dict[str, Any] = {
@@ -424,9 +437,27 @@ def baseline_ruleset_payloads(
                 "exclude": [],
             },
         },
-        # No bypass actor: creating a NEW tag is unrestricted, so publish.py still
-        # cuts each vX.Y.Z release — zero publish-path impact, nobody needs to bypass.
-        "bypass_actors": [],
+        # The OWNER (admin role) bypasses tag-protect too. USER Tier-3 ruling
+        # 2026-08-27: "history rewrite is allowed and must be allowed in ALL rulesets
+        # of all github repos." This ruleset was the one place where it genuinely was
+        # NOT: `bypass_actors: []` meant nobody — owner included — could repoint or
+        # drop a tag, so after a permitted history rewrite every existing release tag
+        # was stranded on a commit that no longer existed, with no way to move it.
+        # A rewrite you cannot follow through on is a rewrite you are not allowed to
+        # make, so the empty list contradicted the directive in effect even though
+        # `non_fast_forward` never appeared here.
+        #
+        # `deletion` + `update` still bind EVERY non-admin actor, which is where the
+        # real threat model lives (CI, agents, outside contributors silently moving a
+        # published release tag). Creating a NEW tag stays unrestricted, so publish.py
+        # cuts each vX.Y.Z release without touching the bypass.
+        "bypass_actors": [
+            {
+                "actor_id": _ADMIN_REPOSITORY_ROLE_ID,
+                "actor_type": "RepositoryRole",
+                "bypass_mode": "always",
+            },
+        ],
         # rules: [deletion, update] (NOT non_fast_forward). `update` ("Restrict
         # updates") blocks EVERY repoint of an existing tag — including a fast-forward
         # move onto a descendant commit, the bypass that non_fast_forward-only would

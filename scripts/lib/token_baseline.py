@@ -20,8 +20,10 @@ from dataclasses import dataclass
 
 
 # cache_read is the cheap ~0.1x context re-read; output/input are full price; cache_creation
-# is a PREMIUM write — 2x at the main agent's 1-hour cache TTL (1.25x at the 5-minute TTL a
-# subagent, or a session in usage overage, gets). This proxy deliberately counts it 1x anyway:
+# is a PREMIUM write — 2x at the main agent's default 1-hour cache TTL (1.25x at the default
+# 5-minute TTL a subagent, or a session in usage overage, gets) — but these are only the
+# harness DEFAULTS: `promptCacheTtl`/`subagentPromptCacheTtl` let an org raise either TTL to
+# 1 hour, which flips that multiplier to 2x too. This proxy deliberately counts it 1x anyway:
 # every learned baseline and every empirical cap estimate below is calibrated against THIS
 # formula, so re-weighting one component would silently invalidate them all. Read the result as
 # a RELATIVE load index, not a bill — it under-counts a cache-miss turn by ~2x, which is exactly

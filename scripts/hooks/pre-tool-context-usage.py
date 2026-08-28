@@ -395,11 +395,23 @@ def _run_compact_trigger(pct: int) -> str:
         # the turn, and the ESC is the point (compact NOW, before the context wall).
         # The trigger's CLI default is soft/enqueue since TRDD-0GPQROC1, so the
         # emergency semantics must be requested explicitly.
+        # EVERY BOUND HERE NESTS INSIDE THIS HOOK'S REGISTERED BUDGET (AM8JD9SG F9). This hook is
+        # registered at 5 s in `hooks.json`; it used to wait 8 s on this subprocess, which in turn
+        # allowed a 5 s ai-maestro resolution inside it — each inner bound LARGER than the one
+        # containing it. The harness therefore killed the hook first on any slow path, the
+        # `COMPACT_FIRED` the DENY below keys on never arrived, and the guard silently did nothing
+        # at the exact moment it was supposed to act. Now: 2.0 s resolve < 4 s subprocess < 5 s
+        # registration. Do NOT raise either number without raising the registration first — that
+        # ordering IS the fix, not the specific values. Expiring early is safe by construction:
+        # the trigger degrades to the local tmux/iTerm path, and the guard re-fires next tool call.
         r = subprocess.run(
-            ["uv", "run", "--script", "--quiet", str(script), "--hard", "--directive", directive],
+            [
+                "uv", "run", "--script", "--quiet", str(script), "--hard",
+                "--resolve-timeout", "2.0", "--directive", directive,
+            ],
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=4,
         )
     except (OSError, subprocess.SubprocessError):
         return "ERROR"

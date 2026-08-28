@@ -42,8 +42,9 @@ proofs live in `scripts/claudemd_slim.py` (TRDD-H12K9JYX). You never lose conten
    already have a page; EXTEND it (update, don't duplicate). Mint a new page only when
    no existing page owns the subject.
 
-3. **Write the pages.** Use the memgrep write verbs (`new-page` / `add-atom` /
-   `add-lesson`) — never hand-author wikimem markdown. Descriptions carry the SYMPTOM a
+3. **Write the pages.** Use the memgrep write verbs (`new-mem-topic` (was: `new-page`) /
+   `new-mem-atom` (was: `add-atom`) / `update-mem-atom --lesson` (was: `add-lesson`)) —
+   never hand-author wikimem markdown. Descriptions carry the SYMPTOM a
    future session will search with, not the jargon of the content. Run
    `memgrep validate <page> && memgrep lint <page>` after each edit.
 

@@ -173,6 +173,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("settings-scope-drift", 3600, "CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL"),
     ("subagent-scope-drift", 3600, "CLAUDE_PLUGIN_OPTION_SUBAGENT_SCOPE_DRIFT_INTERVAL"),
     ("claude-md-scope-drift", 3600, "CLAUDE_PLUGIN_OPTION_CLAUDE_MD_SCOPE_DRIFT_INTERVAL"),
+    # claudemd-migration-queue (TRDD-LFSWY0C6): READ-ONLY. Detects CLAUDE.md wikimem-index
+    # drift and QUEUES the write (a marker file) — never writes CLAUDE.md itself, because
+    # any write invalidates the prompt-cache prefix for every session on the machine. The
+    # queued write drains in scripts/hooks/post-compact-resume.py, a moment that already
+    # pays the invalidation.
+    ("claudemd-migration-queue", 3600, "CLAUDE_PLUGIN_OPTION_CLAUDEMD_MIGRATION_QUEUE_INTERVAL"),
     ("cross-scope-reference-drift", 3600, "CLAUDE_PLUGIN_OPTION_CROSS_SCOPE_REFERENCE_DRIFT_INTERVAL"),
     # v0.5.1 additions — security monitoring (CI/CD + repo hardening). Both
     # are READ-ONLY: they surface findings, they never mutate the repo.
@@ -982,6 +988,20 @@ def _pending_agent_directive_lines() -> list[str]:
         return pending_agents.directive_lines()
     except Exception:  # noqa: BLE001
         return []
+
+
+def _spend_pending_agent_nudges() -> None:
+    """Charge the nudge budget for the keep-going pulse's COUNT advertisement. Fail-open.
+
+    Lazily imported like every other `pending_agents` touch here, so a missing lib degrades
+    to "no spend" instead of killing the heartbeat. See `pending_agents.spend_nudges` for why
+    the count path has to pay at all."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        pending_agents.spend_nudges()
+    except Exception:  # noqa: BLE001 - a manifest bug must never break a fire
+        pass
 
 
 def _pending_agent_count() -> int:
@@ -1830,7 +1850,11 @@ def _phase_iterm_automation_alarm() -> None:
                 "on the next fleet scan once sessions enumerate again. See TRDD-VQ4LX7ND, "
                 "TRDD-9PDH8G0W, GH issues #92, #229."
             )
-        elif probe_outcome == "timeout":
+        # `startswith`, not `==`: the scan appends " (after N attempts)" once the enumeration
+        # has been RETRIED (fleet_scan.probe_iterm_sessions, owner report 2026-08-28). An
+        # equality test here silently fell through to the denial branch the moment retries
+        # landed — i.e. the fix for false alarms would have started CAUSING the worst one.
+        elif probe_outcome.startswith("timeout"):
             # TRDD-EZ3PMQYX "What (revised)" item 2: a call site's OWN "timeout"
             # classification is stronger than the base branch's two-cause hedge — the
             # call did not error and did not simply return empty, it ran past its
@@ -2522,6 +2546,18 @@ def _phase_keep_going_nudge() -> None:
             " each is still wanted (one may be an agent you deliberately stopped)"
             " (ids in .janitor/state/pending-agents.json)"
         )
+        # Pay for the advertisement (janitor bug reported by ai-maestro 2026-08-28). This is
+        # the SECOND emit path: `directive_lines()` lists agents and spends a nudge each, but
+        # this pulse advertised the same entries as a COUNT and spent nothing — so an entry
+        # surfaced only here could never reach `nudges >= MAX_NUDGES`, and the age sweep is
+        # guarded on `nudges == 0`, which such an entry is not. It rode the 7-day backstop,
+        # re-inviting a resume on every fire. That matters because a DIED agent re-runs the
+        # request that killed it (janitor#75); the 3-nudge cap IS the mitigation.
+        #
+        # Charged AFTER the append, never inside `_pending_agent_count()`, so a spend always
+        # corresponds to a line the reader actually saw — a counter that charges for an
+        # advertisement it did not make is the same class of bug in the other direction.
+        _spend_pending_agent_nudges()
     if bits:
         note = "continue your pending task (keep-going mode) — " + "; ".join(bits)
     else:

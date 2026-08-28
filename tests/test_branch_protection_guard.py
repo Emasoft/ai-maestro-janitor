@@ -246,7 +246,7 @@ def test_standalone_omits_the_pull_request_rule(project_env: Path) -> None:
     )
     # What must NOT be lost with it: history-protect still constrains every non-owner.
     hist = bpl.baseline_ruleset_payloads("main", require_pull_request=False)[0]
-    assert {r["type"] for r in hist["rules"]} == {"deletion", "non_fast_forward"}
+    assert {r["type"] for r in hist["rules"]} == {"deletion"}
 
 
 def test_require_pull_request_for_covers_the_governance_cases(
@@ -331,8 +331,8 @@ def test_baseline_never_demands_immutable_history(project_env: Path) -> None:
     will block the development causing disasters'.
 
     Two independent ways it could creep back: the `required_linear_history` RULE, or a
-    history-protect ruleset with no bypass (which makes `non_fast_forward` absolute for the
-    owner too). Both are asserted against, in BOTH modes.
+    history-protect ruleset with no bypass (which would leave the owner unable to amend
+    their own history). Both are asserted against, in BOTH modes.
     """
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
@@ -377,8 +377,9 @@ def test_pr_checks_includes_the_checks_rule_when_contexts_exist(project_env: Pat
 
 
 def test_history_protect_ruleset_shape(project_env: Path) -> None:
-    """baseline-history-protect: 2 history rules (deletion + non_fast_forward),
-    NO bypass actors, ~DEFAULT_BRANCH magic ref. required_linear_history is
+    """baseline-history-protect: 1 history rule (deletion only — non_fast_forward was
+    REMOVED by the 2026-08-27 ruling: history rewrite must be allowed everywhere),
+    admin-role bypass, ~DEFAULT_BRANCH magic ref. required_linear_history is
     DELIBERATELY absent — it jams the many-agent merge workflow."""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
@@ -393,12 +394,15 @@ def test_history_protect_ruleset_shape(project_env: Path) -> None:
         {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
     ]
     rule_types = {r["type"] for r in hist["rules"]}
-    assert rule_types == {"deletion", "non_fast_forward"}
-    # The rules THEMSELVES must survive — the ruling exempts the owner, it does not delete
-    # the protection. Everyone who is not admin is still blocked from deleting the branch or
-    # rewriting its history.
+    assert rule_types == {"deletion"}
+    # `deletion` must survive — everyone who is not admin is still blocked from dropping
+    # the branch outright.
     assert {"type": "deletion"} in hist["rules"]
-    assert {"type": "non_fast_forward"} in hist["rules"]
+    # Regression guard: non_fast_forward (GitHub's "Block force pushes" rule) must NEVER
+    # come back. USER Tier-3 ruling 2026-08-27: history rewrite must be allowed in every
+    # ruleset of every repo — a rule whose entire function is forbidding that is exactly
+    # what this baseline now repairs, not restores.
+    assert {"type": "non_fast_forward"} not in hist["rules"]
     # Regression guard: linear history must NEVER come back — it is harmful for
     # the multi-agent model (forbids merge commits → endless rebase churn).
     assert "required_linear_history" not in rule_types
@@ -460,7 +464,7 @@ def test_pr_and_checks_embeds_detected_checks_in_context_shape(project_env: Path
 
 def test_tag_protect_ruleset_shape(project_env: Path) -> None:
     """baseline-tag-protect (3rd ratified, tri-party consensus): target=tag,
-    refs/tags/v*.*.* scope, [deletion, update] rules, NO bypass actor."""
+    refs/tags/v*.*.* scope, [deletion, update] rules, admin-role bypass."""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     tag = bpl.baseline_ruleset_payloads("main")[2]
@@ -469,8 +473,13 @@ def test_tag_protect_ruleset_shape(project_env: Path) -> None:
     assert tag["enforcement"] == "active"
     assert tag["conditions"]["ref_name"]["include"] == ["refs/tags/v*.*.*"]
     assert tag["conditions"]["ref_name"]["exclude"] == []
-    # No bypass actor — new-tag CREATION stays open so publish.py still cuts releases.
-    assert tag["bypass_actors"] == []
+    # USER Tier-3 ruling 2026-08-27: the owner must be able to repoint/drop a tag after a
+    # permitted history rewrite, or every existing release tag is stranded on a commit that
+    # no longer exists. New-tag CREATION stays open regardless, so publish.py still cuts
+    # releases without needing the bypass at all.
+    assert tag["bypass_actors"] == [
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+    ]
     # [deletion, update] — `update` blocks every repoint (incl. a fast-forward move
     # onto a descendant commit), which non_fast_forward-only would miss.
     rule_types = {r["type"] for r in tag["rules"]}

@@ -985,3 +985,50 @@ def test_respawn_prompt_cli_fails_loud_on_unrecoverable_transcript(iso) -> None:
     assert res.returncode != 0
     assert res.stdout == ""
     assert "a1" in res.stderr
+
+
+def test_the_keep_going_pulse_SPENDS_the_nudge_budget_it_advertises(iso, capsys) -> None:
+    """Drives the REAL keep-going path, not `directive_lines()` — the gap was between them.
+
+    Two emit paths advertise the same entries. `directive_lines()` LISTS agents and charges a
+    nudge each; this pulse advertises them as a COUNT and charged nothing, so an entry surfaced
+    only here could never reach `nudges >= MAX_NUDGES`. The age sweep could not catch it either
+    — that route is guarded on `nudges == 0`, and such an entry sits above 0 — so it rode the
+    full 7-day `MAX_AGE_S` backstop, re-inviting a resume on every fire.
+
+    Not cosmetic: a DIED agent RE-RUNS the request that killed it (janitor#75), and the 3-nudge
+    cap is the mitigation standing between a corpse and a week of invitations. The shared note
+    promises "listed at most MAX_NUDGES times, then dropped"; on this path that was false.
+
+    Reported by ai-maestro 2026-08-28 from the receiving end: five consecutive fires naming one
+    DIED agent with `nudges` reading 2 before the first and 2 after the fifth. Testing the two
+    paths separately is exactly what let it through, so this test drives the pulse itself."""
+    state, pa = iso["state"], iso["pa"]
+    (state.state_dir() / "resume-directive.txt").write_text("keep going\n", encoding="utf-8")
+    pa.add("fork-corpse", now=int(time.time()))
+    dispatch = _import_dispatch()
+
+    for fire in range(pa.MAX_NUDGES):
+        assert [e for e in pa.pending() if not e["stopped"]], f"evicted too early at fire {fire}"
+        dispatch._phase_keep_going_nudge()
+        capsys.readouterr()
+
+    assert [e for e in pa.pending() if not e["stopped"]] == [], (
+        "after MAX_NUDGES advertisements the entry must be gone — otherwise the cap the note "
+        "promises does not exist on this path and a corpse is re-advertised for 7 days"
+    )
+    dispatch._phase_keep_going_nudge()
+    assert "background agent(s) pending" not in capsys.readouterr().out
+
+
+def test_a_stopped_entry_is_never_charged_by_the_count_path(iso) -> None:
+    """A deliberately `TaskStop`-killed entry is excluded from the count, so it must not pay.
+
+    It is kept for audit (TRDD-PGN5XSHA) and never advertised; charging it would evict the
+    audit record via a budget it was never spending."""
+    pa = iso["pa"]
+    pa.add("fork-stopped", now=int(time.time()))
+    pa.mark_stopped("fork-stopped")
+    before = [e["nudges"] for e in pa.pending()]
+    assert pa.spend_nudges() == 0
+    assert [e["nudges"] for e in pa.pending()] == before

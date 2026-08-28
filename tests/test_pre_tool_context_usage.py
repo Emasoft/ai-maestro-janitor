@@ -414,3 +414,44 @@ def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
         assert _ctx(proc) is None, "unwritable latch must suppress the advisory, never inject"
     finally:
         state.chmod(0o700)
+
+
+def test_every_inner_timeout_nests_inside_this_hooks_registered_budget() -> None:
+    """The hook's subprocess cap and the ai-maestro resolve cap it passes must BOTH be strictly
+    smaller than its own `hooks.json` timeout (AM8JD9SG F9).
+
+    This is the one shape that made the guard silently useless: registered 5 s, subprocess cap
+    8 s, ai-maestro resolution 5 s inside that — every inner bound LARGER than the one containing
+    it, so on any slow path the harness killed the hook before `compact_trigger` could answer and
+    the `COMPACT_FIRED` the enforcement DENY keys on never arrived. Nothing errored; the guard
+    just did nothing at the moment it was meant to act, which is why only a mechanical check
+    catches it. Derived from the real files rather than pinned to today's numbers, so raising the
+    registration legitimately raises the ceiling for the others.
+    """
+    import re
+
+    hooks = json.loads((_PROJECT_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    registered = [
+        h["timeout"]
+        for matchers in hooks.get("hooks", {}).values()
+        for m in matchers
+        for h in m.get("hooks", [])
+        if "pre-tool-context-usage.py" in h.get("command", "") and "timeout" in h
+    ]
+    assert len(registered) == 1, f"expected exactly one registration, got {registered}"
+    budget = float(registered[0])
+
+    src = (_PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-context-usage.py").read_text(
+        encoding="utf-8"
+    )
+    subproc_caps = [float(m) for m in re.findall(r"\btimeout=(\d+(?:\.\d+)?)", src)]
+    assert subproc_caps, "no subprocess timeout found — the check would pass vacuously"
+    resolve_caps = [float(m) for m in re.findall(r'"--resolve-timeout",\s*"(\d+(?:\.\d+)?)"', src)]
+    assert resolve_caps, "no --resolve-timeout found — the check would pass vacuously"
+
+    for cap in subproc_caps:
+        assert cap < budget, f"subprocess timeout={cap} is not inside the {budget}s registration"
+    for cap in resolve_caps:
+        assert cap < min(subproc_caps), (
+            f"--resolve-timeout {cap} is not inside the {min(subproc_caps)}s subprocess cap"
+        )

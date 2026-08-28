@@ -1045,3 +1045,82 @@ def test_write_rate_limited_flag_matches_on_stop_failure_shape(tmp_path: Path) -
     fs.write_rate_limited_flag(str(root), now)
     assert (sdir / "rate-limited.flag").is_file()
     assert (sdir / "rate-limited-since.ts").read_text(encoding="utf-8").strip() == str(now)
+
+
+def test_iterm_probe_retries_a_transient_empty_and_reports_the_attempt_count() -> None:
+    """A host under heavy load must not be declared unreachable on ONE quiet probe.
+
+    Owner report 2026-08-28: the alarm fired `probe-failed:timeout` and told the human their
+    guardian could not reach the machine, while a manual enumeration minutes later returned 22
+    sessions on that same host with the Automation grant already granted. One 15 s probe on a box
+    running 20+ parallel agents measures CONTENTION, not permission.
+
+    The EMPTY case is the one that matters and the one a naive policy misses: the incident's probe
+    returned cleanly with zero sessions, so retrying only on `timeout` would have left the alarm
+    firing. Deadlines escalate rather than repeat, because a second identical slice under the same
+    load is the least informative thing to spend."""
+    import fleet_scan  # type: ignore[import-not-found]
+
+    calls: list[float] = []
+    slept: list[float] = []
+
+    def fake_probe(cmd, *, timeout):  # noqa: ANN001, ANN202
+        calls.append(timeout)
+        # quiet, quiet, then the sessions that were there all along
+        return ("", "ok") if len(calls) < 3 else ("/dev/ttys004|w0t0p0\n", "ok")
+
+    orig = fleet_scan._run_probe_outcome
+    fleet_scan._run_probe_outcome = fake_probe  # type: ignore[assignment]
+    try:
+        sessions, outcome, attempts = fleet_scan.probe_iterm_sessions(
+            "script", sleep=slept.append
+        )
+    finally:
+        fleet_scan._run_probe_outcome = orig  # type: ignore[assignment]
+
+    assert sessions, "the third attempt found sessions and they must be returned"
+    assert attempts == 3, "the human must be told HOW MANY times we asked"
+    assert outcome == "ok"
+    assert calls == [15.0, 30.0, 45.0], f"deadlines must ESCALATE, not repeat: {calls}"
+    assert slept == [2.0, 4.0], f"backoff must be short and bounded: {slept}"
+
+
+def test_iterm_probe_stops_at_the_first_success_so_a_healthy_host_pays_nothing() -> None:
+    """The retry must cost nothing when the first probe answers — this runs every heartbeat."""
+    import fleet_scan  # type: ignore[import-not-found]
+
+    calls: list[float] = []
+
+    def fake_probe(cmd, *, timeout):  # noqa: ANN001, ANN202
+        calls.append(timeout)
+        return "/dev/ttys004|w0t0p0\n", "ok"
+
+    orig = fleet_scan._run_probe_outcome
+    fleet_scan._run_probe_outcome = fake_probe  # type: ignore[assignment]
+    try:
+        sessions, _outcome, attempts = fleet_scan.probe_iterm_sessions(
+            "script", sleep=lambda _s: (_ for _ in ()).throw(AssertionError("must not sleep"))
+        )
+    finally:
+        fleet_scan._run_probe_outcome = orig  # type: ignore[assignment]
+
+    assert sessions and attempts == 1 and calls == [15.0]
+
+
+def test_a_genuine_denial_still_alarms_after_every_attempt_fails() -> None:
+    """Narrowing the false-alarm window must NOT weaken the alarm itself."""
+    import fleet_scan  # type: ignore[import-not-found]
+
+    def fake_probe(cmd, *, timeout):  # noqa: ANN001, ANN202
+        return "", "timeout"
+
+    orig = fleet_scan._run_probe_outcome
+    fleet_scan._run_probe_outcome = fake_probe  # type: ignore[assignment]
+    try:
+        sessions, outcome, attempts = fleet_scan.probe_iterm_sessions(
+            "script", sleep=lambda _s: None
+        )
+    finally:
+        fleet_scan._run_probe_outcome = orig  # type: ignore[assignment]
+
+    assert sessions == {} and outcome == "timeout" and attempts == 3

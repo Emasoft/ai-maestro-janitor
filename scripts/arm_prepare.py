@@ -121,6 +121,19 @@ def install_stub(plugin_root: Path, data_dir: Path) -> Path:
     return dest
 
 
+def restricted_mode_active() -> bool:
+    """CC 2.1.248+ `--restricted` (or `CLAUDE_CODE_RESTRICTED=1`) strips Bash and ignores
+    settings-file hooks. The cron this would arm fires a dispatcher stub via Bash and every
+    guard is a settings-file hook, so an armed heartbeat could never actually run — arming it
+    anyway would be a false claim of protection (a guardian silently absent is worse than one
+    that says it can't run).
+
+    Thin alias over `state.restricted_mode()`: `doctor` reports the same condition, and a
+    second hand-rolled parse here is exactly how two surfaces start disagreeing about whether
+    the janitor can run."""
+    return state.restricted_mode()
+
+
 def scope_is_user(plugin_root: Path) -> tuple[bool, str]:
     """The janitor MUST be a user-scope install: it guards OAuth, the machine-global daemon, and
     drift for the WHOLE machine. Arming a project-scope janitor would bind a machine-global
@@ -144,6 +157,15 @@ def main() -> int:
 
     plugin_root = Path(args.plugin_root) if args.plugin_root else _HERE.parent
     data_dir = Path(args.data_dir) if args.data_dir else resolve_data_dir()
+
+    if restricted_mode_active():
+        print("scope=refused")
+        print(
+            "restricted mode active (--restricted / CLAUDE_CODE_RESTRICTED) — Bash is removed "
+            "and settings-file hooks are ignored, so the heartbeat cron could never run its "
+            "dispatcher stub; arming here would be a false claim of protection"
+        )
+        return 1
 
     ok, msg = scope_is_user(plugin_root)
     if not ok:

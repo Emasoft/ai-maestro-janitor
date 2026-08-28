@@ -29,8 +29,10 @@ The first two: `target: branch`, `enforcement: active`,
 
 ### 1. `baseline-history-protect`
 
-No bypass actors — history protection applies to everyone, including
-admins.
+The repo-admin `RepositoryRole` (`actor_id: 5`) gets an `always` bypass
+(USER Tier-3 ruling 2026-08-13 — the owner must be able to rewrite
+history and force-push on their own repo). `deletion` still binds every
+non-admin actor.
 
 ```json
 {
@@ -40,13 +42,22 @@ admins.
   "conditions": {
     "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] }
   },
-  "bypass_actors": [],
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
   "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" }
+    { "type": "deletion" }
   ]
 }
 ```
+
+**No `non_fast_forward`.** USER Tier-3 ruling 2026-08-27: "history
+rewrite is allowed and must be allowed in all rulesets of all github
+repos. the janitor must ensure of that." `non_fast_forward` is GitHub's
+block-force-push rule — the one rule whose entire function is to forbid
+a history rewrite — so it is removed outright, not merely bypassed: a
+bypass is a key to a lock, and the directive says the lock must not be
+there.
 
 ### 2. `baseline-pr-and-checks`
 
@@ -93,9 +104,12 @@ The repo-admin `RepositoryRole` (`actor_id: 5`) gets an `always` bypass.
 
 ### 3. `baseline-tag-protect`
 
-`target: tag` (NOT branch). No bypass actors — release-tag immutability
-applies to everyone; creating a NEW tag is unrestricted, so `publish.py`
-still cuts each `vX.Y.Z` with no bypass.
+`target: tag` (NOT branch). The repo-admin `RepositoryRole` gets an
+`always` bypass (USER Tier-3 ruling 2026-08-27 — without it, a permitted
+history rewrite would strand every existing release tag on a commit
+that no longer exists, with no way to move it). `deletion` + `update`
+still bind every non-admin actor; creating a NEW tag stays unrestricted,
+so `publish.py` still cuts each `vX.Y.Z` with no bypass needed.
 
 ```json
 {
@@ -105,7 +119,9 @@ still cuts each `vX.Y.Z` with no bypass.
   "conditions": {
     "ref_name": { "include": ["refs/tags/v*.*.*"], "exclude": [] }
   },
-  "bypass_actors": [],
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
   "rules": [
     { "type": "deletion" },
     { "type": "update" }
@@ -137,19 +153,20 @@ A solo admin on their own repo would be locked out by
 and there is no second reviewer. Granting the repo-admin role an
 `always` bypass on the PR/checks ruleset keeps the self-merge path open
 for a one-person repo while still enforcing the PR flow for everyone
-else. History protection (`baseline-history-protect`) has NO bypass — a
-force-push or branch deletion is never acceptable, admin or not.
+else. `baseline-history-protect` and `baseline-tag-protect` also grant
+the repo-admin role an `always` bypass, per USER Tier-3 ruling 2026-08-13
+(history) and 2026-08-27 (tags) — the owner must be able to rewrite
+history and repoint release tags on their own repo.
 
-**Emergency history-scrub path (the one exception, out-of-band).** Because
-`baseline-history-protect` has `bypass_actors: []` on `non_fast_forward`, a
-legitimate history rewrite (e.g. scrubbing a leaked secret from `main`) is
-**never reachable via a push** — not even by an admin. The only sanctioned path
-is an out-of-band owner toggle: temporarily set the ruleset's `enforcement` to
-`disabled` (or `evaluate`) in **Settings → Rules → Rulesets**, perform the
-rewrite + `--force-with-lease` push, then immediately re-enable `active`. This
-is a deliberate, audited, human-only operation — documented here so a future
-agent reads "history is protected, scrubbing is owner-toggle-then-rewrite," not
-"history is permanently immutable."
+**History rewrite is a direct operation, not an out-of-band one.** USER
+Tier-3 ruling 2026-08-27: "history rewrite is allowed and must be
+allowed in all rulesets of all github repos." `non_fast_forward`
+(GitHub's block-force-push rule) is REMOVED from `baseline-history-protect`
+entirely — not merely bypassed — so a force-push / history rewrite (e.g.
+scrubbing a leaked secret from `main`) needs no `enforcement` toggle, no
+**Settings → Rules → Rulesets** dance, and no re-enable step. Do NOT
+re-add `non_fast_forward` while reconciling drift — a repo that still
+has it is the thing this baseline now REPAIRS.
 
 ## Why tag protection (baseline-tag-protect)
 
@@ -171,9 +188,11 @@ Tier-3 (release integrity), janitor#14.
   while leaving a *future* movable `vN`/`latest` alias free (`~ALL` or bare
   `v*` would freeze such an alias). Neither plugin currently ships a movable
   alias, so this is zero-friction today and future-proof.
-- **`bypass_actors: []`.** Restricting *deletions* and *updates* does NOT
-  restrict *creations* — so `publish.py` still cuts each new `vX.Y.Z` with no
-  bypass actor. Zero publish-path impact.
+- **`bypass_actors`: owner-only `always` bypass.** Restricting *deletions*
+  and *updates* does NOT restrict *creations* — so `publish.py` still cuts
+  each new `vX.Y.Z` with no bypass needed. The owner bypass exists so a
+  permitted history rewrite doesn't strand existing release tags (USER
+  Tier-3 ruling 2026-08-27); it does not affect the publish path.
 
 ## Required status checks — auto-detection
 

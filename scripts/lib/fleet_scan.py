@@ -1055,6 +1055,61 @@ def _run(cmd: list[str], *, timeout: int = 10) -> str:
         return ""
 
 
+#: Per-attempt deadlines for the iTerm enumeration, ESCALATING. A single 15 s probe was the
+#: whole retry policy until 2026-08-28, and on a host running 20+ parallel agents that is not a
+#: denial signal, it is a queue. The owner reported exactly that: the alarm fired
+#: `probe-failed:timeout` and declared the channel unreachable, while a manual enumeration
+#: minutes later returned 1 window / 22 sessions on the same host with the Automation grant
+#: already in place.
+#:
+#: The deadlines GROW rather than repeat, because the failure being retried is CONTENTION: a
+#: second 15 s slice under the same load is the least informative thing to spend. Three attempts
+#: total, worst case ~90 s of deadline plus ~6 s of backoff, and ONLY on the rare path where
+#: iTerm is up (a host with no iTerm never probes at all).
+_ITERM_PROBE_TIMEOUTS = (15.0, 30.0, 45.0)
+#: Backoff BETWEEN attempts. Deliberately short: this runs inside a heartbeat scan, and the point
+#: is to outlast a scheduling spike, not to wait out a genuine denial (which never recovers).
+_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)
+
+
+def probe_iterm_sessions(
+    script: str,
+    *,
+    timeouts: tuple[float, ...] = _ITERM_PROBE_TIMEOUTS,
+    backoff: tuple[float, ...] = _ITERM_PROBE_BACKOFF_S,
+    sleep=time.sleep,  # noqa: ANN001 -- injected so tests never actually sleep
+) -> tuple[dict[str, str], str, int]:
+    """Enumerate iTerm sessions, RETRYING a transient failure. Returns (sessions, outcome, attempts).
+
+    Retries on `timeout`, on `error`, AND on a clean-but-EMPTY result. That last case is the one
+    that matters and the one a naive retry policy would miss: the reported incident enumerated
+    ZERO sessions on a host that demonstrably had 22, so "the call succeeded and found nothing"
+    was itself the transient. Treating only timeouts as retryable would have left that alarm
+    firing.
+
+    Returns on the FIRST attempt that finds sessions — a healthy host pays exactly one probe, so
+    the retry costs nothing in the common case. The attempt COUNT is returned (and surfaced in the
+    alarm) so a human can tell "we asked once and it was quiet" from "we asked three times, with
+    growing patience, and it stayed quiet" — those are very different claims, and only the second
+    one justifies telling someone their guardian cannot reach a machine.
+
+    A genuine denial still reports as a denial: it fails all three attempts and the caller's
+    classification is unchanged. This narrows the FALSE-alarm window, it does not weaken the alarm.
+    """
+    sessions: dict[str, str] = {}
+    outcome = "ok"
+    attempts = 0
+    for i, deadline in enumerate(timeouts):
+        attempts = i + 1
+        stdout, outcome = _run_probe_outcome(["osascript", "-e", script], timeout=deadline)
+        sessions = parse_iterm_sessions(stdout)
+        if sessions:
+            return sessions, outcome, attempts
+        if i < len(backoff):
+            sleep(backoff[i])
+    return sessions, outcome, attempts
+
+
 def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str]:
     """Like ``_run``, but distinguishes HOW an empty result happened (TRDD-EZ3PMQYX,
     janitor#233): a nonzero exit or an unrunnable binary is ``"error"``, an exceeded
@@ -1189,11 +1244,14 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     # (exceeded its deadline), or "ok" (clean exit, whatever the stdout held). Only
     # meaningful when `iterm_running` — osascript is never invoked otherwise.
     osascript_outcome = "ok"
+    osascript_attempts = 0
     if iterm_running:  # only drive osascript when iTerm is already up
-        osascript_stdout, osascript_outcome = _run_probe_outcome(
-            ["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15
+        # RETRIED (owner report 2026-08-28): one 15 s probe on a host running 20+ parallel agents
+        # measures contention, not permission. See `probe_iterm_sessions` for why an empty result
+        # is retried too, and why the deadlines escalate instead of repeating.
+        iterm_by_tty, osascript_outcome, osascript_attempts = probe_iterm_sessions(
+            _ITERM_TTY_OSASCRIPT
         )
-        iterm_by_tty = parse_iterm_sessions(osascript_stdout)
     # iTerm up + zero sessions enumerated = the Apple Event was blocked (TRDD-VQ4LX7ND).
     # Record it so the heartbeat can tell the human ONCE, instead of the daemon skipping
     # every frozen iTerm instance in silence forever. Self-clears the moment the grant
@@ -1205,6 +1263,17 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     probe_outcome = "empty" if (blocked and osascript_outcome == "ok") else (
         osascript_outcome if blocked else ""
     )
+    # Carry the ATTEMPT COUNT into the recorded outcome. "we asked once and it was quiet" and "we
+    # asked three times, with growing deadlines, and it stayed quiet" are different claims, and
+    # only the second justifies telling a human their guardian cannot reach a machine.
+    #
+    # Appended rather than substituted — and every consumer was SWEPT for equality tests when
+    # this landed, which caught one: `dispatch.py` matched `probe_outcome == "timeout"` exactly
+    # and now uses `startswith`. Without that sweep this fix FOR false alarms would itself have
+    # made a retried timeout fall through to the Automation-DENIAL branch — the worst false alarm
+    # in the set, caused by the change meant to reduce them.
+    if probe_outcome and osascript_attempts > 1:
+        probe_outcome = f"{probe_outcome} (after {osascript_attempts} attempts)"
     second_view = ""
     if blocked:
         # The INDEPENDENT SECOND VIEW (TRDD-DFKEXO79, janitor#92): osascript's zero alone

@@ -51,6 +51,24 @@ _DETECTORS = (
 )
 
 
+def _check_restricted_mode() -> CheckResult:
+    """CC 2.1.248+ `--restricted` (or `CLAUDE_CODE_RESTRICTED=1`) strips Bash and ignores
+    settings-file hooks. Every janitor surface — the heartbeat dispatcher stub, every hook
+    guard, most skills — shells out or relies on a settings-file hook, so under restricted
+    mode the janitor is inert. A silently-absent guardian is worse than one that says so.
+
+    The predicate lives in `state.restricted_mode()` so this row and `arm_prepare`'s refusal
+    can never disagree about what counts as restricted."""
+    if not state.restricted_mode():
+        return ("restricted-mode", "PASS", "session is not in --restricted mode", "")
+    return (
+        "restricted-mode", "FAIL",
+        "--restricted mode active — Bash removed, settings-file hooks ignored",
+        "The heartbeat, dispatcher stub, and every hook guard cannot run this session; "
+        "relaunch without --restricted / CLAUDE_CODE_RESTRICTED to restore protection",
+    )
+
+
 def _check_state_dir_writable() -> CheckResult:
     sd = state.state_dir()
     if sd.is_dir() and os.access(sd, os.W_OK):
@@ -250,6 +268,7 @@ def main() -> int:
     state.init_state()
 
     rows: list[CheckResult] = [
+        _check_restricted_mode(),
         _check_state_dir_writable(),
         _check_log_dir_writable(),
         _check_dispatch_executable(),

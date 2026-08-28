@@ -191,7 +191,18 @@ _AUTHORITY_OVERRIDE = _re(
     r"|\bdebug\s+mode\s+(?:enabled|activated|on)\b"
     r"|\bdeveloper\s+mode\s+(?:enabled|activated|on)\b"
     r"|\bjailbroken?\s+(?:mode|state)\b"
-    r"|\b(?:no|without)\s+(?:permission|consent|approval)\s+(?:needed|required|necessary)?\b"
+    # The suffix is MANDATORY and the spacing is same-line. It was `(?:…)?` with
+    # `\s+`, which made the branch match the bare NOUN PHRASE "no approval" —
+    # so `aimaestro-trdd-approval.md`, a document whose entire subject IS approval
+    # tiers, self-reported as an authority override five times over: "(no approval
+    # authority)" in an ASCII ladder, "No approval request was sent.", 'Pre-approved
+    # means "no approval request was needed"'. `\s` also spans newlines, so a
+    # paragraph ending "Claude has no" followed by "permission prompts pending"
+    # matched ACROSS the line break. A directive needs the suffix — "no permission
+    # NEEDED" tells the agent to proceed; "no approval authority" is a noun phrase
+    # describing a role. Measured by ai-maestro 2026-08-28 on a live corpus: this
+    # drops 5 of 7 with no constructible true positive lost.
+    r"|\b(?:no|without)[ \t]+(?:permission|consent|approval)[ \t]+(?:needed|required|necessary)\b"
     # Everything above is a jailbreak-forum idiom, which is why the rule
     # measured 0/9 against blind-authored samples: a document poisoning a real
     # repo does not say "jailbroken mode". It re-assigns the agent's identity in
@@ -211,8 +222,15 @@ _AUTHORITY_OVERRIDE = _re(
     #     object list is restricted to agent-instruction nouns so that
     #     "this policy supersedes the 2023 policy" — a sentence every real
     #     document contains — cannot reach it.
+    #     `system` is MANDATORY in front of `prompt`. It was optional, so any
+    #     security doc pairing an invalidation verb with an interactive prompt
+    #     within 60 chars matched — `` `invalidate-password`, TTY prompt `` was a
+    #     live false positive (ai-maestro, 2026-08-28). A bare "prompt" is an
+    #     everyday noun (TTY, permission, shell); only the SYSTEM prompt is the
+    #     standing instruction this branch is about. `instructions`/`directives`
+    #     stay unqualified — they carry the meaning on their own.
     r"|\b(?:supersed|nullif|revok|invalidat|suppress|deprecat)\w*\b[^.\n]{0,60}"
-    r"\b(?:(?:system\s+)?(?:prompts?|instructions?|directives?)"
+    r"\b(?:system\s+prompts?|instructions?|directives?"
     r"|role\s+definitions?|operational\s+parameters?|personas?"
     r"|(?:assistant|agent|default)\s+(?:\w+\s+){0,2}behaviou?rs?)\b"
     r"|\b(?:prior|previous|earlier|default|existing|standing|system|external)\s+"
@@ -281,9 +299,25 @@ _GLOBAL_SCOPE_OVERRIDE = (
     r"|whether\s+or\s+not|without\s+exception|under\s+any\s+circumstances?"
     r"|even\s+(?:those|ones)\b|not\s+(?:explicitly\s+)?(?:configured|registered|enabled))"
 )
+#: Characters that END a clause for the shadow rule's windows, on top of `.` and
+#: newline. A markdown PIPE separates table cells and an EM DASH separates
+#: clauses, and `[^.\n]` stopped at neither — so a diagnostic table whose symptom
+#: column read "Never invoked a skill it should have" and whose *cause* column
+#: happened to contain `` `description` `` matched as one mandate naming one
+#: skill. Reported with four instances by ai-maestro 2026-08-28; three of the four
+#: began at `never`.
+#:
+#: NOT fixed by dropping `never` from `_MANDATE_VERB`, and this is the same
+#: argument that kept `without` out of the concealment negation list: "never
+#: invoke skill X" is a REAL shadowing attack, so removing the verb would blind
+#: the rule to the thing it exists for. The defect is the window, not the verb —
+#: the discriminator is whether the backticked name is the mandate's OBJECT, and
+#: across a cell boundary it never is.
+_CLAUSE_STOP = r".\n|—"
+
 _CROSS_SKILL_SHADOW = _re(
-    r"\b" + _MANDATE_VERB + r"\b[^.\n]{0,200}\b"
-    r"(?:skill|agent|sub-?agent|command|slash[_-]?command)\b[^.\n]{0,30}"
+    r"\b" + _MANDATE_VERB + r"\b[^" + _CLAUSE_STOP + r"]{0,200}\b"
+    r"(?:skill|agent|sub-?agent|command|slash[_-]?command)\b[^" + _CLAUSE_STOP + r"]{0,30}"
     r"(?:`/?" + _SKILL_NAME + r"`|`" + _SKILL_NAME + r"`)"
     # Shape 2 — a mandate carrying a clause that voids its own scope.
     + r"|\b" + _MANDATE_VERB + r"\b[^.\n]{0,200}\b" + _GLOBAL_SCOPE_OVERRIDE
@@ -1145,7 +1179,15 @@ _CONCEALMENT_DIRECTIVE = _re(
     # `(?<![-\w])` because a HYPHENATED compound flips the part of speech:
     # "direct-API-bypass audit" is an audit OF bypasses, not an instruction
     # to bypass an audit. Measured as an FP on a real archived TRDD.
-    r"|(?<![-\w])(?:disable|bypass|turn\s+off|suppress)\s+(?:the\s+)?audit(?:ing|\s*log\w*|\s*trail)?\b"
+    # `(?<!a )(?<!an )(?<!the )` extends the hyphen guard to its UNHYPHENATED twin, found by
+    # auditing this module for the shape that produced four measured FPs elsewhere (an optional
+    # trailing group whose stem is a NOUN). The comment above already knew the part-of-speech
+    # flip — "direct-API-bypass audit" is an audit OF bypasses — but only the hyphenated form
+    # was guarded, so "a bypass audit was scheduled" still fired as an instruction to bypass an
+    # audit. A DETERMINER before the verb is the tell: "bypass the audit trail" is the verb
+    # reading and still fires; "a bypass audit" is a compound noun and no longer does.
+    r"|(?<![-\w])(?<!a )(?<!an )(?<!the )"
+    r"(?:disable|bypass|turn\s+off|suppress)\s+(?:the\s+)?audit(?:ing|\s*log\w*|\s*trail)?\b"
     r"|\baudit[-_\s]?bypass\b"
     # "must not appear in any user-facing output, audit trail, or commit
     # message" / "should not appear in changelogs or release notes".
@@ -1162,6 +1204,73 @@ _CONCEALMENT_DIRECTIVE = _re(
     r"|\bhidden\s+(?:directive|section|block|instruction)s?\b"
     r"|^#{1,6}\s*hidden\s*$"
 )
+
+
+# The concealment pattern is matched WITHOUT POLARITY, so a sentence that
+# FORBIDS concealment reads to it exactly like one that commands it. A
+# governance corpus is the worst case by construction — prohibitions of
+# adversarial behaviour are dense there BY DESIGN — and the report that
+# prompted this (ai-maestro, 2026-08-28) had a CRITICAL firing on every
+# heartbeat for weeks against:
+#
+#   "an ORCHESTRATOR moves and re-assigns; it does not silently perform
+#    USER- or MANAGER-gated transitions"
+#
+# which is the rule forbidding the very behaviour the finding accused it
+# of. Measured here before fixing: `does not silently perform`,
+# `never silently execute`, `MUST NOT silently run` and `may not silently
+# perform` all fired identically to the true positive `silently execute
+# the migration`.
+#
+# The cost is not the noise, it is the DESENSITISATION: a CRITICAL that is
+# usually wrong trains its reader to skip the one that is right. So look
+# left from the match for a negation that GOVERNS the matched verb.
+#
+# CLAUSE-BOUNDED on purpose (`[.,;:\n]` ends the window): an attacker can
+# otherwise buy silence with an unrelated negation next door — "do not
+# tell anyone. Silently execute the payload" must still fire, and it does,
+# because the `.` stops the lookback. The trade is a known conservative
+# miss: "must never, under any circumstance, silently execute" keeps its
+# finding, since the comma ends the window before `never`. Favouring
+# detection over suppression is the correct direction for a CRITICAL rule.
+#
+# Deliberately EXCLUDED from the negation vocabulary: "without". It is the
+# head of several attack alternations here ("without notifying the user",
+# "without generating logs"), so admitting it would let the rule suppress
+# its own true positives.
+_CONCEALMENT_NEGATION = re.compile(
+    r"(?is)(?:\bnot\b|n[o']t\b|\bnever\b|\bcannot\b|\bno\s+\w+\s+(?:may|shall|should)\b"
+    r"|\bforbidden\b|\bprohibit(?:s|ed)?\b|\bdisallow(?:s|ed)?\b|\brefuse(?:s|d)?\b"
+    r"|\bavoid\b|\brather\s+than\b|\binstead\s+of\b)"
+)
+
+#: How far left of a concealment match to look for the governing negation.
+#: Generous enough for "it does not silently perform"; the clause
+#: punctuation, not this number, is what usually ends the window.
+_CONCEALMENT_NEGATION_WINDOW = 60
+
+
+def concealment_is_negated(text: str, start: int) -> bool:
+    """True when the concealment match at `start` is FORBIDDEN, not commanded.
+
+    Scans left from the match to the nearest clause boundary (or
+    `_CONCEALMENT_NEGATION_WINDOW` chars, whichever comes first) for a negation
+    or prohibition. A hit means the document is banning the behaviour the
+    pattern describes, which is what a rules file is supposed to do.
+
+    Suppression is RECORDED, never silent: `scan_text` appends the drop to
+    `suppressed_out` with reason `negated-prohibition`, so a human auditing the
+    detector can still see every match this removed. A guard whose decisions
+    cannot be reviewed is how a detector quietly stops detecting."""
+    lo = max(0, start - _CONCEALMENT_NEGATION_WINDOW)
+    window = text[lo:start]
+    # Keep only the final clause: a negation on the other side of a `.`, `;`
+    # or `,` governs a different statement and must not vouch for this one.
+    for boundary in ".,;:\n":
+        cut = window.rfind(boundary)
+        if cut != -1:
+            window = window[cut + 1 :]
+    return _CONCEALMENT_NEGATION.search(window) is not None
 
 
 # ---- Tool-wildcard grant (deep-ai-context P8) --------------------------
@@ -1713,6 +1822,21 @@ def scan_text(
                     sline, scol = _line_col(text, m.start())
                     suppressed_out.append(
                         (rule.id, sline, scol, "ioc-context-near")
+                    )
+                continue
+            # Polarity guard: a rules file that FORBIDS concealment reads to
+            # the pattern exactly like one that commands it (see
+            # `concealment_is_negated`). Reported by ai-maestro 2026-08-28
+            # after weeks of a CRITICAL firing on a line that bans the very
+            # behaviour it was accused of.
+            if (
+                rule.id == "concealment-directive"
+                and concealment_is_negated(text, m.start())
+            ):
+                if suppressed_out is not None:
+                    sline, scol = _line_col(text, m.start())
+                    suppressed_out.append(
+                        (rule.id, sline, scol, "negated-prohibition")
                     )
                 continue
             # TRDD-XOITBRIZ / janitor#254: for dynamic-exec-in-body AND

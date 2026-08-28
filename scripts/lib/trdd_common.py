@@ -251,19 +251,37 @@ RECONCILE_BYTES = 24576
 # including the parked ENTRY/DESIGN columns). trdd-reminder deliberately uses a
 # NARROWER set (only the WORK columns) — it keeps its own local constant.
 ACTIVE_COLUMNS = frozenset(
-    {"dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review"}
+    {
+        "dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review",
+        # The 3.0.0 additions (widened 2026-08-28, ai-maestro's measured position). Two classes,
+        # both belong: `verify_assumptions`/`plan` are ASSIGNEE-active — a card sitting there means
+        # a worker stopped, exactly what drift exists to see. `approval`/`design_ai_review`/
+        # `design_human_review` wait on an APPROVER, so drift measures approver latency instead —
+        # still in scope, because `blocked` is the only licence to sit still and an approval queue
+        # carries no `blocked-by:`, so an un-drained one reads as healthy today. The "approvals
+        # legitimately wait days" objection is already answered by the shared 14-day threshold
+        # (CLAUDE_PLUGIN_OPTION_TRDD_STALENESS_DAYS) plus `review-after:` per card — no second mute.
+        "approval", "design_ai_review", "design_human_review", "verify_assumptions", "plan",
+    }
 )
 
-# The ratified column vocabulary: 14 lifecycle + 3 exception (universal-kanban), plus the
-# `proposal`/`planned` intake pair and the terminal archive values that BRACKET the pipeline.
+# The ratified column vocabulary (3-pillars 3.0.0, USER-ratified 2026-08-23): 19 lifecycle +
+# 3 exception (universal-kanban), plus the `proposal`/`planned` intake pair and the terminal
+# archive values that BRACKET the pipeline — 27 legal `column:` values in total (3P-KAN-20).
 # Any other value in a `column:`/`status:` is NOT a pipeline state.
+#
+# `archived` is deliberately ABSENT: it names the FOLDER a terminal card is moved into, never a
+# column — every terminal column archives AS ITSELF (3P-ZON-05). Listing it here would have made
+# `column: archived` read as a legitimate pipeline state and hidden a card that lost its real
+# terminal value on the way in.
 ALL_COLUMNS = frozenset(
     {
-        "backburner", "todo", "design", "dispatch", "dev", "testing", "ai_review",
+        "backburner", "approval", "design", "design_ai_review", "design_human_review",
+        "todo", "verify_assumptions", "plan", "dispatch", "dev", "testing", "ai_review",
         "human_review", "complete", "publish", "published", "deploy", "live",
         "live_auditing",
         "blocked", "failed", "superseded",
-        "proposal", "planned", "refused", "cancelled", "completed", "archived",
+        "proposal", "planned", "refused", "cancelled", "completed",
     }
 )
 

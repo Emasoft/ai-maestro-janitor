@@ -366,3 +366,51 @@ def test_skill_falls_back_to_a_full_sweep_when_the_targeted_delete_fails(project
     assert "cronlist" in lowered.split("## 2. delete the old cron")[1].split("## 3.")[0], (
         "step 2 must actually instruct a CronList fallback, not just mention the concept elsewhere"
     )
+
+
+def test_restricted_mode_refuses_the_arm_instead_of_promising_a_heartbeat(project: Path) -> None:
+    """CC 2.1.248 `--restricted` strips Bash and ignores settings-file hooks, so an armed cron
+    could never fire its dispatcher stub — the arm must REFUSE, not report success.
+
+    Arming anyway is the dangerous outcome, not a harmless no-op: `armed.flag` would claim
+    machine-wide protection that cannot exist in that session, and nothing downstream re-checks.
+    The refusal reuses the existing `scope=refused` STOP contract so the skill needs no new
+    branch to honor it."""
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(project / "home"),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "CLAUDE_PLUGIN_DATA": str(project / "data"),
+        "JANITOR_GLOBAL_STATE_DIR": str(project / "gs"),
+        "CLAUDE_CODE_RESTRICTED": "1",
+    }
+    proc = subprocess.run(
+        [sys.executable, str(PREPARE), "--plugin-root", str(ROOT), "--data-dir", str(project / "data")],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=project,
+    )
+    assert proc.returncode != 0, "a refusal must be non-zero, or the skill arms anyway"
+    assert "scope=refused" in proc.stdout, "must reuse the STOP contract the skill already honors"
+    assert "restricted" in proc.stdout.lower()
+
+
+def test_restricted_mode_predicate_has_ONE_home_and_errs_toward_refusing() -> None:
+    """`doctor` and `arm_prepare` must decide "is this session restricted?" identically.
+
+    Two hand-rolled parses is how the three-way drift recorded in `state.is_truthy_env` began —
+    and here the two surfaces disagreeing means one of them claims protection the other says is
+    impossible. The direction also matters: an unexpected-but-affirmative spelling must read as
+    RESTRICTED, because guessing "not restricted" is what makes the janitor promise a guard that
+    cannot fire."""
+    import os
+
+    for affirmative in ("1", "true", "yes", "on", "enabled"):
+        os.environ["CLAUDE_CODE_RESTRICTED"] = affirmative
+        assert state.restricted_mode() is True, f"{affirmative!r} must read as restricted"
+    for negative in ("0", "false", "no", "off"):
+        os.environ["CLAUDE_CODE_RESTRICTED"] = negative
+        assert state.restricted_mode() is False, f"{negative!r} must not read as restricted"
+    os.environ.pop("CLAUDE_CODE_RESTRICTED", None)
+    assert state.restricted_mode() is False, "unset means a normal session"

@@ -58,11 +58,39 @@ def test_loosened_parameter_is_named_drift() -> None:
 
 
 def test_missing_rule_is_drift() -> None:
+    """USER Tier-3 ruling 2026-08-27 dropped non_fast_forward from the history baseline —
+    `deletion` is now its only rule, so that is what a live ruleset can go missing."""
     exp = next(p for p in _expected() if p["name"] == bpl.HISTORY_RULESET_NAME)
     live = _as_live(exp)
-    live["rules"] = [r for r in live["rules"] if r["type"] != "non_fast_forward"]
+    live["rules"] = [r for r in live["rules"] if r["type"] != "deletion"]
     drift = bpl.ruleset_content_drift(exp, live)
-    assert any("non_fast_forward" in d for d in drift), drift
+    assert any("deletion" in d for d in drift), drift
+
+
+def test_repo_still_on_the_pre_ruling_baseline_is_drift() -> None:
+    """TRDD-7EXBJB03 — the ENFORCEMENT half of the USER Tier-3 ruling of 2026-08-27
+    ("history rewrite ... must be allowed in all rulesets of all github repos. the
+    janitor must ensure of that").
+
+    Every fleet repo was last applied with the PRE-ruling shape, so each one still
+    carries `non_fast_forward` on the history ruleset and an EMPTY bypass list on the
+    tag ruleset. The ruling is only honoured if those repos are detected as drifted and
+    repaired — a baseline nobody notices is stale enforces the OLD rules forever.
+
+    Both halves are pinned here because they fail through DIFFERENT code paths: the
+    stale rule is an EXTRA-rule reason (the payload no longer lists it), while the tag
+    regression is a bypass_actors mismatch. A test covering only one would have let the
+    other ship silently.
+    """
+    hist = next(p for p in _expected() if p["name"] == bpl.HISTORY_RULESET_NAME)
+    old_hist = _as_live(hist)
+    old_hist["rules"].append({"type": "non_fast_forward"})
+    assert any("non_fast_forward" in d for d in bpl.ruleset_content_drift(hist, old_hist))
+
+    tag = next(p for p in _expected() if p["name"] == bpl.TAG_PROTECT_RULESET_NAME)
+    old_tag = _as_live(tag)
+    old_tag["bypass_actors"] = []
+    assert any("bypass_actors" in d for d in bpl.ruleset_content_drift(tag, old_tag))
 
 
 def test_disabled_enforcement_is_drift() -> None:
