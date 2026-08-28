@@ -3,7 +3,7 @@ trdd-id: X4LJFTB4
 title: Publish 3.4.0 is blocked at the push by GitHub push protection on two synthetic test fixtures
 column: todo
 created: 2026-08-27T16:06:31+0200
-updated: 2026-08-28T21:06:00+0200
+updated: 2026-08-28T21:40:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -83,8 +83,14 @@ every commit in the push, and `9690e5fd` would still carry the string. So the ch
    history surgery on 327 unpushed commits. **RULE 0.6: owner's exact command, owner's explicit
    approval, nothing less.** Not recommended when option 1 exists for a known-fake value.
 
-For **Blocker 2**: close alert `#1` with resolution `used_in_tests` (the accurate one). Owner
-action in the GitHub UI or `gh api … -f state=resolved -f resolution=used_in_tests`.
+For **Blocker 2**: **DONE 2026-08-28 — alert `#1` is `state=resolved`,
+`resolution=used_in_tests`**, verified by reading it back from the API, not by the write's own
+exit code. Reversible: reopen from the repo's security tab. The fixture behind it was devitalized
+first (prefix fragmented, body generated at runtime by `_fake_secrets.secret()`), and
+`test_secret_fixture_hygiene.py` gained a `tskey-(auth|api|client)-` MARKER so the class cannot be
+reintroduced — a strengthening of the gate, never a suppression. The detector tests keep their
+assertions and were re-run (106 pass): a devitalized fixture that stopped proving the detector
+fires would be a worse outcome than the alert.
 
 **Either way, ALSO do the durable fix** so this never recurs, as a normal Tier-0 change.
 **DONE 2026-08-28, in `tests/agent_context_bench/assemble_corpus.py` — uncommitted, no TRDD of its
