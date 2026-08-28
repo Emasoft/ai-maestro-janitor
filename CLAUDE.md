@@ -26,9 +26,12 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 ## Working rules (USER, 2026-08-14 — not optional)
 
 - **NEVER `git push`. Publishing and pushing to GitHub go through `scripts/publish.py`
-  ONLY** (`--patch` / `--minor` / `--major`). A pre-push hook enforces this by process
-  ancestry, so a bare push is refused — it re-runs lint, tests and CPV `--strict`
-  immediately before the push, which is the point.
+  ONLY** (`--patch` / `--minor` / `--major`). The pre-push hook is BRANCH-AWARE: a push of
+  the default branch or any tag runs the full release gate, refused by process ancestry
+  unless `publish.py` started it — it re-runs lint, tests and CPV `--strict`
+  immediately before the push, which is the point. A FEATURE-branch push is allowed without
+  the gate, but only after a passing trufflehog scan of its new commits — trufflehog missing
+  is a refusal, never a skip.
 - **FINISH every pending task and TRDD BEFORE publishing/pushing.** A publish is not a
   checkpoint for half-done work: check the board (`grep -l "^column: dev" design/tasks/*.md`)
   and the session task list first, and close or explicitly re-column what is open.
