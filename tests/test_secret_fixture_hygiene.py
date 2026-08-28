@@ -49,6 +49,10 @@ _MARKERS = [
     re.compile(r"github_pat_[A-Za-z0-9_]{16,}"),
     re.compile(r"glpat-[A-Za-z0-9_-]{15,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
+    # Tailscale auth/API/OAuth-client keys. Added after GitHub secret-scanning
+    # alert #1 fired on a contiguous `tskey-auth-…` literal in a fixture:
+    # the marker list is what stops that class from ever being re-introduced.
+    re.compile(r"tskey-(?:auth|api|client)-[A-Za-z0-9_-]{12,}"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"xox[bp]-[0-9]{8,}"),
     re.compile(r"AIza[A-Za-z0-9_-]{30,}"),

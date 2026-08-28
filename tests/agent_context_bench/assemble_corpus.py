@@ -119,7 +119,23 @@ _SECRET_MASKS = (
     # survived a push was a one-line PROSE mention, not this credential block. Nothing in
     # the bench exercises `pci_dss_patterns`/`payment_sdk_patterns`, so breaking the
     # prefix costs no measurement fidelity; it only removes a shape no grader here needs.
-    (re.compile(r"\bsk_live_[A-Za-z0-9*]{4,}"), r"sk_****_****9999"),
+    # 2026-08-28: the replacement no longer keeps ANY payment-key prefix. Every earlier
+    # attempt kept `sk_` and argued about the TAIL — first alphabetic (rejected), then
+    # digits (believed safe because it was already on origin/main). That belief did not
+    # survive contact: TRDD-X4LJFTB4 measured push protection rejecting the digit form
+    # too, on `corpus-vawikrk2-20260821.jsonl:110`. Being already-pushed is not proof a
+    # scanner accepts a shape — the ruleset changes, and the pattern set changes with it.
+    # A prefix-free replacement cannot match a prefix-anchored pattern at all, which is
+    # the only property here that does not depend on a grader's current rules.
+    (re.compile(r"\bsk_(live|test)_[A-Za-z0-9*]{4,}"), r"REDACTED-PAYMENT-KEY"),
+    # AWS's own PUBLISHED example credentials. They are documentation, not secrets — and
+    # scanners flag them anyway, which is precisely why a captured injection payload
+    # carrying them blocks a push. Masked for the same reason as the rest: the literal is
+    # filler, no bench rule keys on it.
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), r"REDACTED-AWS-KEY-ID"),
+    (re.compile(r"\bwJalrXUtnFEMI[A-Za-z0-9/+]*"), r"REDACTED-AWS-SECRET"),
+    # Tailscale auth keys — the shape behind the repo's open secret-scanning alert #1.
+    (re.compile(r"\btskey-(auth|api|client)-[A-Za-z0-9-]{6,}"), r"REDACTED-TAILSCALE-KEY"),
     (re.compile(r"(-----BEGIN\s+)(RSA|EC|OPENSSH|DSA)?(\s*PRIVATE KEY-----)"),
      r"\1\2****\3"),
     # A conn-string password that is not an obvious placeholder. The replacement is

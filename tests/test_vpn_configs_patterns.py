@@ -11,6 +11,7 @@ import sys
 # Ensure the scripts/lib package is importable regardless of cwd.
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts" / "lib"))
 
+from _fake_secrets import secret  # noqa: E402
 from vpn_configs_patterns import RULES, Finding, Rule, scan_text  # noqa: E402
 
 # ---------- Synthetic secret-shaped fixtures -----------------------------
@@ -18,6 +19,12 @@ from vpn_configs_patterns import RULES, Finding, Rule, scan_text  # noqa: E402
 # exists at rest. Runtime value is byte-identical — coverage unchanged.
 _PEM_BEGIN = "-----BEGIN " + "PRIVATE KEY-----"
 _PEM_END = "-----END " + "PRIVATE KEY-----"
+
+# Same rule for the Tailscale auth key: prefix fragmented, body generated at
+# runtime, so no contiguous `tskey-auth-<body>` literal exists at rest for a
+# scanner to match. V11's regex needs 20-50 alphanumerics after the prefix,
+# which the generated base62 body satisfies — coverage unchanged.
+_TS_AUTHKEY = secret("ts" + "key-auth-", "vpn-v11-tailscale-authkey", 26)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -371,7 +378,7 @@ def test_v11_positive_tailscale_authkey() -> None:
     """Tailscale tskey-auth- literal fires V11."""
     text = (
         "# bootstrap script\n"
-        "tailscale up --authkey=tskey-auth-kDGPZxxx1234567890abcdefghij\n"
+        f"tailscale up --authkey={_TS_AUTHKEY}\n"
     )
     findings = scan_text(text)
     assert _has(findings, "vpn-tailscale-authkey-literal"), (

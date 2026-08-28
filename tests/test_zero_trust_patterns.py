@@ -17,6 +17,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import zero_trust_patterns as ztp  # type: ignore[import-not-found]  # noqa: E402
+from _fake_secrets import secret  # noqa: E402
+
+# Tailscale auth-key fixture. The `tskey-auth-` prefix is fragmented and the
+# body is generated at runtime, so no scanner (GitHub push protection,
+# gitleaks, TruffleHog) can match a contiguous key literal at rest. The value
+# handed to the detector is byte-identical in shape to a real key, so
+# detector coverage is unchanged — see tests/README.md.
+_TS_AUTHKEY = secret("ts" + "key-auth-", "zt-p9-tailscale-authkey", 32)
 
 # ---------- Data-model sanity --------------------------------------------
 
@@ -513,7 +521,7 @@ def test_p9_reusable_true_ephemeral_true_safe() -> None:
 
 def test_p9_raw_authkey_literal_high() -> None:
     """Raw `tskey-auth-` prefix in any file → HIGH (leak)."""
-    src = "TS_AUTHKEY=tskey-auth-abc12345-def67890abcdef1234567890abcdef12\n"
+    src = f"TS_AUTHKEY={_TS_AUTHKEY}\n"
     hits = _hits("zerotrust-tailscale-authkey-reusable", src)
     assert hits
 
