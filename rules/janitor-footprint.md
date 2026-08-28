@@ -46,7 +46,7 @@ are safe to remove.
 | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory (canonical), OAuth-rotator + daemon state | **NO** — persistent state |
 | `~/.claude/ai-maestro-janitor-memory/` | the **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9). SessionStart syncs it and restores from it after a data-dir loss | **NO** — real knowledge (a memory store) |
 | `~/.claude/plugins/data/…/global-state/` | the machine-wide daemon singleton (pid / flock / locks / timestamps) — CANONICAL since TRDD-2U8AH82F | no — the daemon recreates what it needs |
-| `~/.claude/janitor-global-state/` | the LEGACY daemon-state dir — **fully retired (TRDD-ULEGRT01)**: nothing reads or writes it any more, the resolver's read-fallback rung was dropped. The daemon still copies any leftover state into the DATA dir on first run (see its README-MOVED.txt) | yes, once that one-time copy has happened |
+| `~/.claude/janitor-global-state/` | the LEGACY daemon-state dir — **RETIRED (TRDD-ULEGRT01)**: no resolver rung, no reads. The daemon copies leftovers to the DATA dir on first run (see README-MOVED.txt) | yes, once `DATA/global-state/migrated-from-legacy.ts` exists |
 
 **Rule of thumb:** any `…/memory/…` directory and the plugin **DATA** dir hold
 real state — never delete them. `.janitor/state`, `.janitor/logs`, `reports*`,
