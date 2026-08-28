@@ -78,13 +78,30 @@ def _state_dir() -> Path:
     """The keepalive log/stamp dir, resolved AT CALL TIME so JANITOR_GLOBAL_STATE_DIR (the
     isolation override every janitor global-state writer honors) is respected. A frozen
     module-level ``Path.home()`` constant made the keepalive tests write into production
-    state and corrupt the real staged closure → the fseventsd runaway (TRDD-ZNN0UK5K)."""
+    state and corrupt the real staged closure → the fseventsd runaway (TRDD-ZNN0UK5K).
+
+    The import-failure fallback falls FORWARD to the DATA dir, never back to the retired
+    era-1 ``~/.claude/janitor-global-state/`` (TRDD-ULEGRT01). A backward fallback would
+    have this one code path recreate the very directory the retirement asks the user to
+    delete — and it would do so precisely on the hosts where the import broke, i.e. the
+    ones nobody is watching. It still honors the env override for test isolation, which
+    is the whole reason this function resolves at call time."""
     if global_state is not None:
         try:
             return global_state.global_state_dir()
         except Exception:
             pass
-    return Path.home() / ".claude" / "janitor-global-state"
+    override = os.environ.get("JANITOR_GLOBAL_STATE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return (
+        Path.home()
+        / ".claude"
+        / "plugins"
+        / "data"
+        / "ai-maestro-janitor-ai-maestro-plugins"
+        / "global-state"
+    )
 
 
 def _loud(msg: str) -> None:

@@ -92,14 +92,20 @@ _WEDGE_KILL_GRACE_S = 1.0
 # TRDD-2U8AH82F: the daemon state's CANONICAL home is the plugin DATA dir (backed up,
 # preserved across plugin updates, purged only on uninstall). The old
 # ~/.claude/janitor-global-state/ was an UNOFFICIAL folder — not backed up, orphaned by
-# plugin purge. The move is a STAGED HANDOVER, not a flip: while an existing install has
-# not migrated yet, everything keeps resolving the LEGACY dir; the daemon (the single
-# writer, under its flock) performs the one-time copy and stamps this marker in the NEW
-# dir — only then does resolution flip machine-wide.
+# plugin purge. The daemon (the single writer, under its flock) performs the one-time
+# copy and stamps this marker in the NEW dir.
+#
+# TRDD-ULEGRT01 retired the LEGACY ERA (era 1): resolution no longer falls back to it and
+# no reader probes it. The marker survives the retirement because it is still what tells
+# `migrate_global_state_to_data_dir()` a host has already been handed over — see that
+# function's explicit predicate.
 _MIGRATION_MARKER = "migrated-from-legacy.ts"
 
 
 def _legacy_global_state_dir() -> Path:
+    """The RETIRED era-1 dir (TRDD-ULEGRT01). Nothing reads or writes state here any
+    more — the ONE remaining caller is `migrate_global_state_to_data_dir()`, which still
+    has to know where to copy a never-migrated host's state FROM."""
     return Path.home() / ".claude" / "janitor-global-state"
 
 
@@ -110,17 +116,16 @@ def _data_global_state_dir() -> Path:
 def global_state_dir() -> Path:
     """Return the system-wide janitor state directory.
 
-    Resolution order (TRDD-2U8AH82F):
+    Resolution order (TRDD-2U8AH82F, era-1 rung retired by TRDD-ULEGRT01):
       1. $JANITOR_GLOBAL_STATE_DIR if set (escape hatch for tests / weird hosts —
          ABSOLUTE priority, the whole test suite relies on it).
       2. $XDG_STATE_HOME/janitor/ when XDG_STATE_HOME is set (Linux default —
          already an official location, not part of the migration).
-      3. The plugin DATA dir `.../plugins/data/<janitor>/global-state/` once the
-         daemon has stamped the migration marker there, OR on a FRESH install
-         (no legacy dir to migrate).
-      4. The legacy ~/.claude/janitor-global-state/ while a not-yet-migrated
-         install still has one — reads AND writes stay consistent with a
-         possibly-older daemon until the single-writer migration flips the marker.
+      3. The plugin DATA dir `.../plugins/data/<janitor>/global-state/` — now
+         UNCONDITIONAL. There is no longer a fourth rung falling back to the legacy
+         ~/.claude/janitor-global-state/: a never-migrated host is handed over by
+         `migrate_global_state_to_data_dir()`, which is why that function keeps an
+         explicit legacy predicate instead of comparing against this resolver.
     """
     override = os.environ.get("JANITOR_GLOBAL_STATE_DIR")
     if override:
@@ -128,26 +133,7 @@ def global_state_dir() -> Path:
     xdg = os.environ.get("XDG_STATE_HOME")
     if xdg:
         return Path(xdg).expanduser().resolve() / "janitor"
-    new = _data_global_state_dir()
-    legacy = _legacy_global_state_dir()
-    if (new / _MIGRATION_MARKER).is_file() or not legacy.is_dir():
-        return new
-    return legacy
-
-
-def _legacy_read_path(name: str) -> Optional[Path]:
-    """Dual-read window (TRDD-2U8AH82F): after the migration flips resolution to the
-    DATA dir, a not-yet-updated session's OLD code may still write control flags at
-    the LEGACY path. Flag READERS therefore also probe legacy while it exists — a
-    fleet stop must never be missed because of version skew. Never active under the
-    env override (test isolation), and gone entirely once the legacy dir is retired
-    (fallback removal is the EHT follow-up, 2 releases out)."""
-    if os.environ.get("JANITOR_GLOBAL_STATE_DIR"):
-        return None
-    legacy = _legacy_global_state_dir()
-    if legacy.is_dir() and global_state_dir() != legacy:
-        return legacy / name
-    return None
+    return _data_global_state_dir()
 
 
 def init_global_state() -> Path:
@@ -204,26 +190,30 @@ def _old_global_state_path(name: str) -> Path:
 
 
 def _flag_present_dual(name: str) -> bool:
-    """Presence check across all THREE locations a control-plane flag may live during
-    the migration to control_dir(): the NEW control_dir() (canonical), the OLD
-    global_state_dir() path (a not-yet-updated session's writer), and the pre-existing
-    janitor-global-state legacy dual-read (TRDD-2U8AH82F, itself already folded into
-    old global_state_dir() resolution — checked explicitly here too because
-    `_legacy_read_path` only fires while global_state_dir() has flipped past legacy).
+    """Presence check across BOTH locations a control-plane flag may live during the
+    migration to control_dir(): the NEW control_dir() (canonical) and the OLD
+    global_state_dir() path (a not-yet-updated session's writer). The third, era-1
+    janitor-global-state probe was retired by TRDD-ULEGRT01.
     Fail-open: an unreadable directory just reads as "absent", never "blocked"."""
     if _control_path(name).is_file():
         return True
-    if _old_global_state_path(name).is_file():
-        return True
-    legacy = _legacy_read_path(name)
-    return legacy is not None and legacy.is_file()
+    return _old_global_state_path(name).is_file()
 
 
 def _flag_clear_dual(name: str) -> None:
-    """Remove a control-plane flag from ALL THREE possible locations. A clear that
-    only wipes the new path would appear to fail — the old copy still reads as SET via
-    `_flag_present_dual` — so every clear sweeps new + old + legacy. Best-effort per
-    path: one unwritable location must never stop the others from being cleared."""
+    """Remove a control-plane flag from every location it can be, INCLUDING the retired
+    era-1 dir. A clear that only wipes the new path would appear to fail — the old copy
+    still reads as SET via `_flag_present_dual` — so every clear sweeps all three.
+    Best-effort per path: one unwritable location must never stop the others.
+
+    THE CLEAR IS NOT SYMMETRIC WITH THE READ, and that asymmetry is the whole point
+    (TRDD-ULEGRT01). Retiring era-1 removed the legacy READS; removing the legacy UNLINK
+    too looks like the same edit and is a correctness regression. On an un-migrated host
+    the legacy copy is the ONLY copy: `clear_kill_switch()` would leave it, then
+    `migrate_global_state_to_data_dir()` would COPY IT FORWARD, and the STOP the user
+    just cleared comes back with no visible cause. `unlink` cannot recreate the
+    directory, so deleting from a dir we are retiring is exactly right — a clear must
+    reach every path a flag can be read from, present OR future."""
     for p in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
         try:
             p.unlink()
@@ -296,12 +286,12 @@ def _parse_flag_provenance(path: Path) -> dict:
 
 
 def read_flag_provenance(name: str) -> dict:
-    """Read one control-plane flag's provenance, checking the same THREE locations
+    """Read one control-plane flag's provenance, checking the same TWO locations
     `_flag_present_dual` checks, newest-canonical-location-first. Returns the
     unknown-defaults dict (set_at=0, by="unknown", pid=0, reason="") when the flag is
     absent everywhere — callers key on presence via the dedicated `*_present()`
     functions; this is for diagnostics/CLI display only."""
-    for candidate in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
+    for candidate in (_control_path(name), _old_global_state_path(name)):
         if candidate.is_file():
             return _parse_flag_provenance(candidate)
     return {"set_at": 0, "by": "unknown", "pid": 0, "reason": ""}
@@ -321,7 +311,7 @@ def last_run_path(task: str) -> Path:
 
 
 def read_last_run(task: str) -> int:
-    """One chore's completion epoch, taking the NEWEST across all three eras.
+    """One chore's completion epoch, taking the NEWEST across both live eras.
 
     `max()` is load-bearing, and it is the opposite of the flags' first-found read. During
     the upgrade window a 0.6x daemon still stamps `global_state_dir()` while a new one
@@ -336,7 +326,6 @@ def read_last_run(task: str) -> int:
     for p in (
         _control_path(f"{task}.last-run.ts"),
         _old_global_state_path(f"{task}.last-run.ts"),
-        _legacy_global_state_dir() / f"{task}.last-run.ts",
     ):
         try:
             if p.is_file():
@@ -379,14 +368,14 @@ def read_failcount(task: str) -> int:
 
 
 def _generation_from_flag(name: str) -> int:
-    """Generation number for one of the two reload flags, across all three
-    control-plane locations (max() wins — a stamp from ANY era/location still
+    """Generation number for one of the two reload flags, across both live
+    control-plane locations (max() wins — a stamp from EITHER era/location still
     triggers exactly one reload). Mirrors the old `_generation_from_file`'s
-    "any non-empty legacy body counts as generation 1" fallback, so a bare
-    boolean/string body from an even-older release still means "an update
+    "any non-empty body counts as generation 1" fallback, so a bare
+    boolean/string body from an older release still means "an update
     happened at an unknown time" rather than "absent"."""
     best = 0
-    for p in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
+    for p in (_control_path(name), _old_global_state_path(name)):
         if not p.is_file():
             continue
         prov = _parse_flag_provenance(p)
@@ -434,18 +423,24 @@ def migrate_global_state_to_data_dir() -> Optional[int]:
       3. stamp the migration marker (the atomic switch every `global_state_dir()`
          call resolves on) and drop a tombstone README in the legacy dir.
 
-    The legacy dir is NEVER deleted here — old-code sessions keep reading it, the
-    dual-read window covers their flag writes, and retirement is the EHT follow-up
-    two releases out. Returns the NEW flock fd (caller must keep it open for the
-    daemon's lifetime) when a migration happened; None when there was nothing to
-    do (env override, XDG host, fresh install, already migrated) or on any
-    failure (fail-open: staying on legacy is always safe)."""
+    The legacy dir is NEVER deleted here — RULE 0; the user removes it, prompted by a
+    drift line. Returns the NEW flock fd (caller must keep it open for the daemon's
+    lifetime) when a migration happened; None when there was nothing to do (env
+    override, XDG host, fresh install, already migrated) or on any failure (fail-open).
+
+    THE PREDICATE IS EXPLICIT, AND THAT IS LOAD-BEARING (TRDD-ULEGRT01). This used to
+    gate on `global_state_dir() != legacy`. Retiring the resolver's era-1 rung makes that
+    comparison PERMANENTLY true, so the migration would silently neuter itself — and a
+    never-migrated host (a lagging fleet member, anyone on an older published version)
+    would have its state neither copied forward NOR read any more, kill-switch included.
+    Ask the two real questions instead: has this host already been handed over, and is
+    there anything to hand over?"""
     if os.environ.get("JANITOR_GLOBAL_STATE_DIR") or os.environ.get("XDG_STATE_HOME"):
         return None
     legacy = _legacy_global_state_dir()
-    if global_state_dir() != legacy:
-        return None  # fresh install or already migrated — nothing to hand over
     new = _data_global_state_dir()
+    if (new / _MIGRATION_MARKER).is_file() or not legacy.is_dir():
+        return None  # already migrated, or fresh install — nothing to hand over
     try:
         new.mkdir(parents=True, exist_ok=True)
         for src in legacy.iterdir():
@@ -571,13 +566,12 @@ def _singleton_paths(name: str) -> tuple[tuple[str, Path], ...]:
     two open file descriptions in the same process, so the second open would deny us our
     own lock and the daemon would never start (ATOM-QK7M-0002).
 
-    The legacy rung comes from `_legacy_read_path`, which already encodes the whole
-    predicate: absent under an explicit `$JANITOR_GLOBAL_STATE_DIR` redirect, absent unless
-    the dir ALREADY exists, absent while it is still the resolved `global_state_dir()`.
-    Reusing it (rather than re-deriving `legacy / name`) is what stops a WRITE from
-    recreating a dir TRDD-2U8AH82F deliberately tombstoned — a resurrected legacy dir is a
-    read-fallback the migration retired, and `_legacy_read_path` would start honoring it
-    again on a host that never had one.
+    The era-1 (`~/.claude/janitor-global-state/`) rung was dropped by TRDD-ULEGRT01. The
+    era-2 `global-state` rung STAYS one more release, and that asymmetry is deliberate:
+    this is the LOCK set, not a read list. Collapsing it to control-only would leave the
+    DATA dir's `daemon.flock` UNHELD, so a pre-QK7M2B0X daemon could take it and run
+    alongside the current one — and the same edit would blind `foreign_era_daemons()`,
+    the detector built to catch exactly that.
     """
     out: list[tuple[str, Path]] = []
     seen: set[str] = set()
@@ -585,9 +579,6 @@ def _singleton_paths(name: str) -> tuple[tuple[str, Path], ...]:
         ("control", _control_path(name)),
         ("global-state", _old_global_state_path(name)),
     ]
-    legacy = _legacy_read_path(name)
-    if legacy is not None:
-        candidates.append(("legacy", legacy))
     for era, path in candidates:
         key = os.path.realpath(str(path))
         if key in seen:
@@ -704,9 +695,9 @@ def foreign_era_daemons(self_pid: Optional[int] = None) -> list[tuple[str, int]]
 
 
 def kill_switch_present() -> bool:
-    # Triple-read (TRDD-QK7M2B0X + TRDD-2U8AH82F): a fleet STOP set at control_dir()
-    # (canonical), the pre-control-dir global_state_dir() location, or the legacy
-    # janitor-global-state path must still be honored across every writer era.
+    # Dual-read (TRDD-QK7M2B0X): a fleet STOP set at control_dir() (canonical) or at the
+    # pre-control-dir global_state_dir() location must be honored across both live writer
+    # eras. The era-1 janitor-global-state probe retired with TRDD-ULEGRT01.
     return _flag_present_dual("kill-switch.flag")
 
 
@@ -721,10 +712,9 @@ def set_kill_switch(reason: str = "") -> None:
 
 
 def clear_kill_switch() -> None:
-    """Remove the kill-switch flag from every location it may live (control_dir(), the
-    pre-control-dir global_state_dir(), and the legacy dir) so the daemon can be
-    lazy-spawned again — the revive half of the disarm/arm pair. Idempotent (a missing
-    flag anywhere is fine)."""
+    """Remove the kill-switch flag from every location it may live (control_dir() and the
+    pre-control-dir global_state_dir()) so the daemon can be lazy-spawned again — the
+    revive half of the disarm/arm pair. Idempotent (a missing flag anywhere is fine)."""
     _flag_clear_dual("kill-switch.flag")
 
 
@@ -1929,9 +1919,9 @@ def reload_generation() -> int:
     """Return the reload generation (epoch the daemon last stamped after a
     plugin changed on disk), or 0 if none. NEVER mutated by a reader. Reads the
     provenance body's `set_at` (current JSON format) or the legacy
-    `<epoch>\\t<reason>` tab format (pre-provenance), across control_dir(), the
-    pre-control-dir global_state_dir() location, and the legacy dir
-    (TRDD-QK7M2B0X + TRDD-2U8AH82F) — max() wins, so a stamp from any era or
+    `<epoch>\\t<reason>` tab format (pre-provenance), across control_dir() and the
+    pre-control-dir global_state_dir() location (TRDD-QK7M2B0X; the era-1 dir
+    retired with TRDD-ULEGRT01) — max() wins, so a stamp from either era or
     location still triggers exactly one reload."""
     # Since TRDD-BEXY5KIP the SERVER-published plugins-updated signal is one more source
     # in the same max: the ai-maestro hub's absorbed fleet-plugins-update lane honours
@@ -2010,10 +2000,10 @@ def skills_reload_generation() -> int:
     """Return the standalone-skills reload generation (epoch of the last
     `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader.
     Reads the provenance body's `set_at` (current JSON format) or the legacy
-    `<epoch>\\t<reason>` tab format, across control_dir(), the pre-control-dir
-    global_state_dir() location, and the legacy dir (TRDD-QK7M2B0X +
-    TRDD-2U8AH82F) — an old-code session's global_control_cli may still stamp
-    an older location."""
+    `<epoch>\\t<reason>` tab format, across control_dir() and the pre-control-dir
+    global_state_dir() location (TRDD-QK7M2B0X; the era-1 dir retired with
+    TRDD-ULEGRT01) — an old-code session's global_control_cli may still stamp
+    the older location."""
     return _generation_from_flag("skills-reload-needed.flag")
 
 

@@ -22,11 +22,6 @@ use std::time::{Duration, Instant};
 pub const STALE_MSG: &str =
     "The content of the wikimem file changed since your command was enqueued. Please reread the file first.";
 
-/// Migration marker filename inside the plugin-DATA global-state dir — mirrors
-/// `global_state._MIGRATION_MARKER` exactly. Its presence flips resolution from the legacy dir
-/// to the DATA dir even when the legacy dir still exists (a one-time, single-writer handover).
-const MIGRATION_MARKER: &str = "migrated-from-legacy.ts";
-
 /// Default bound on how long `acquire` blocks trying to take the lock before giving up.
 /// Overridable via `MEMGREP_LOCK_TIMEOUT_S` (see `acquire`).
 const DEFAULT_LOCK_TIMEOUT_S: u64 = 10;
@@ -88,10 +83,10 @@ fn canonicalize_best_effort(page: &Path) -> PathBuf {
 ///      hatch the whole test suite (both languages) relies on.
 ///   2. `$XDG_STATE_HOME/janitor` when `XDG_STATE_HOME` is set.
 ///   3. The plugin DATA dir `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state`
-///      once the daemon has stamped `migrated-from-legacy.ts` there, OR when there is no legacy
-///      dir to migrate (fresh install).
-///   4. The legacy `~/.claude/janitor-global-state/` while a not-yet-migrated install still has
-///      one.
+///      — UNCONDITIONAL since TRDD-ULEGRT01 retired the era-1 rung.
+///
+/// The two ladders MUST stay byte-identical: if only one language drops the legacy rung, the
+/// write gate and the state it guards silently resolve to different directories.
 fn global_state_dir() -> PathBuf {
     if let Ok(over) = std::env::var("JANITOR_GLOBAL_STATE_DIR")
         && !over.is_empty()
@@ -103,17 +98,7 @@ fn global_state_dir() -> PathBuf {
     {
         return resolve_best_effort(&expand_user(&xdg)).join("janitor");
     }
-    let data = data_global_state_dir();
-    let legacy = legacy_global_state_dir();
-    if data.join(MIGRATION_MARKER).is_file() || !legacy.is_dir() {
-        data
-    } else {
-        legacy
-    }
-}
-
-fn legacy_global_state_dir() -> PathBuf {
-    home_dir().join(".claude").join("janitor-global-state")
+    data_global_state_dir()
 }
 
 fn data_global_state_dir() -> PathBuf {

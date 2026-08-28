@@ -362,17 +362,25 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         assert "$HOME" not in text
 
 
-def _run_installer(fake_home: Path) -> subprocess.CompletedProcess[str]:
+def _run_installer(
+    fake_home: Path, *, xdg_state_home: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run the real installer against a sandboxed HOME with activation skipped.
 
     Both global-state env overrides are POPPED, not merely unset in the parent: conftest
     exports `JANITOR_GLOBAL_STATE_DIR` for isolation, and it is rung 1 of the very ladder
     these tests are here to exercise — leaving it set would short-circuit the resolution
     and make both cases below pass on a hardcoded installer.
+
+    `xdg_state_home` puts rung 2 back deliberately: since TRDD-ULEGRT01 retired era-1,
+    XDG is the only rung left whose answer differs from the DATA-dir default, and so the
+    only way to tell a real ladder call from a hardcoded path.
     """
     env = {**os.environ, "HOME": str(fake_home), "KEEPALIVE_SKIP_ACTIVATION": "1"}
     for var in ("JANITOR_GLOBAL_STATE_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
         env.pop(var, None)
+    if xdg_state_home is not None:
+        env["XDG_STATE_HOME"] = str(xdg_state_home)
     proc = subprocess.run(
         ["bash", str(INSTALLER), "install"],
         env=env, capture_output=True, text=True, timeout=_T30,
@@ -417,11 +425,11 @@ def test_installer_never_resurrects_the_legacy_global_state_dir(tmp_path: Path) 
 def test_installer_honours_the_resolved_global_state_dir(tmp_path: Path) -> None:
     """The log dir comes from the LADDER, not from a second copy of it in shell.
 
-    A not-yet-migrated host (a legacy dir present, no migration marker) still resolves to
-    legacy — so the installer must point launchd's capture there, at the dir the daemon is
-    actually logging into. Asserting the *legacy* answer specifically is what makes this a
-    real check: a fallback-only installer would fail it, and so would one that hardcoded
-    the DATA dir "because legacy is being retired".
+    Asserting the *XDG* answer specifically is what makes this a real check: the
+    installer must point launchd's capture at the dir the daemon actually logs into, and
+    an installer that hardcoded the DATA dir — or fell back to one — would fail here.
+    XDG is the discriminator because TRDD-ULEGRT01 retired era-1, leaving it as the only
+    rung whose answer differs from the DATA-dir default.
     """
     plat = launchd_keepalive.current_platform()
     if plat == "other":
@@ -429,21 +437,22 @@ def test_installer_honours_the_resolved_global_state_dir(tmp_path: Path) -> None
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     _stage_global_state_lib(fake_home)
-    legacy = fake_home / ".claude/janitor-global-state"
-    legacy.mkdir(parents=True)  # un-migrated: present, and no migrated-from-legacy.ts
+    xdg = tmp_path / "xdg-state"
+    resolved = xdg / "janitor"
     data_dir = fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state"
-    _run_installer(fake_home)
+    _run_installer(fake_home, xdg_state_home=xdg)
     if plat == "macos":
         plist = fake_home / "Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist"
         data = plistlib.loads(plist.read_bytes())
-        assert data["StandardOutPath"] == str(legacy / "daemon-keepalive.out.log")
-        assert data["StandardErrorPath"] == str(legacy / "daemon-keepalive.err.log")
+        assert data["StandardOutPath"] == str(resolved / "daemon-keepalive.out.log")
+        assert data["StandardErrorPath"] == str(resolved / "daemon-keepalive.err.log")
     else:
         # The systemd unit records no log path, so the ONLY observable effect of the
         # resolution on Linux is which directory got `mkdir -p`'d. Assert the DATA dir was
         # NOT created too: without that half, a hardcoded fallback would still pass, since
-        # the legacy dir is one this test created itself.
-        assert not data_dir.exists(), f"resolved to the DATA dir on an un-migrated host: {data_dir}"
+        # the XDG dir is one this test named itself.
+        assert resolved.exists(), f"installer did not use the resolved dir: {resolved}"
+        assert not data_dir.exists(), f"resolved to the DATA dir despite XDG: {data_dir}"
 
 
 def _service_manager_pathdir(tmp_path: Path, *, name: str, loaded: bool) -> Path:

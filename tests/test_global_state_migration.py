@@ -51,12 +51,16 @@ def test_fresh_install_resolves_data_dir(tmp_path: Path, monkeypatch: pytest.Mon
     assert gs.global_state_dir() == data
 
 
-def test_pending_migration_resolves_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Existing install, marker not yet stamped → everything stays on legacy so
-    reads and writes remain consistent with a possibly-older daemon."""
-    legacy, _ = _isolate(tmp_path, monkeypatch)
+def test_unmigrated_host_still_resolves_data_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-ULEGRT01 retired era-1: a legacy dir on disk no longer pulls resolution
+    back to it, marker or no marker. The handover is the migration's job now, not the
+    resolver's — which is why `migrate_global_state_to_data_dir()` keeps an explicit
+    legacy predicate instead of comparing against this function."""
+    legacy, data = _isolate(tmp_path, monkeypatch)
     legacy.mkdir(parents=True)
-    assert gs.global_state_dir() == legacy
+    assert gs.global_state_dir() == data
 
 
 def test_marker_flips_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,8 +134,10 @@ def test_migration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_migration_aborts_without_marker_when_new_flock_is_held(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If ANYTHING already holds the NEW dir's flock, the marker must NOT flip —
-    fail-open on legacy beats a two-daemon split-brain."""
+    """If ANYTHING already holds the NEW dir's flock, the marker must NOT flip — an
+    unmigrated legacy dir left in place beats a two-daemon split-brain. Since
+    TRDD-ULEGRT01 resolution is the DATA dir either way, so the marker (not the
+    resolver) is the thing that must still say "not handed over"."""
     legacy, data = _isolate(tmp_path, monkeypatch)
     legacy.mkdir(parents=True)
     data.mkdir(parents=True)
@@ -140,32 +146,77 @@ def test_migration_aborts_without_marker_when_new_flock_is_held(
     try:
         assert gs.migrate_global_state_to_data_dir() is None
         assert not (data / gs._MIGRATION_MARKER).exists()
-        assert gs.global_state_dir() == legacy
+        assert not (legacy / "README-MOVED.txt").exists()
     finally:
         os.close(holder)
 
 
-def test_dual_read_honors_legacy_kill_switch(
+def test_legacy_kill_switch_is_no_longer_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Post-migration, a STOP written by an old-code session at the legacy path is
-    still honored (version-skew safety)."""
+    """TRDD-ULEGRT01: a flag left in the retired era-1 dir is inert. The version-skew
+    window it covered closed — every live writer is at control_dir() or the DATA dir —
+    and the migration copies a real un-handed-over STOP forward before it can be lost."""
     legacy, data = _isolate(tmp_path, monkeypatch)
     legacy.mkdir(parents=True)
     data.mkdir(parents=True)
     (data / gs._MIGRATION_MARKER).write_text("1\n", encoding="utf-8")
-    assert gs.kill_switch_present() is False
     (legacy / "kill-switch.flag").write_text("old-code stop\n", encoding="utf-8")
-    assert gs.kill_switch_present() is True
+    assert gs.kill_switch_present() is False
+
+
+def test_migration_carries_an_unhanded_over_kill_switch_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safety net that makes the test above acceptable: on a never-migrated host the
+    migration still runs (its predicate is explicit, not a `global_state_dir()`
+    comparison that era-1 retirement would have made permanently true) and copies the
+    STOP into the dir readers now use."""
+    legacy, data = _isolate(tmp_path, monkeypatch)
+    legacy.mkdir(parents=True)
+    (legacy / "kill-switch.flag").write_text("old-code stop\n", encoding="utf-8")
+    fd = gs.migrate_global_state_to_data_dir()
+    assert fd is not None, "a legacy dir with no marker MUST still be handed over"
+    try:
+        assert (data / "kill-switch.flag").is_file()
+        assert gs.kill_switch_present() is True
+    finally:
+        os.close(fd)
+
+
+def test_clear_reaches_the_retired_dir_so_migration_cannot_resurrect_a_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cleared STOP must stay cleared even though the migration copies state forward.
+
+    The regression this pins: retiring era-1 removed the legacy READS, and removing the
+    legacy UNLINK from `_flag_clear_dual` looks like the same edit. It is not. On an
+    un-migrated host the legacy copy is the ONLY copy — so a clear that skips it leaves
+    it for `migrate_global_state_to_data_dir()` to copy into the dir readers DO use, and
+    `/janitor-global-arm` is silently undone. Ordering is load-bearing: clear FIRST, then
+    migrate, which is the real sequence (arm is a user action; the migration runs on the
+    daemon's next start)."""
+    legacy, data = _isolate(tmp_path, monkeypatch)
+    legacy.mkdir(parents=True)
+    (legacy / "kill-switch.flag").write_text("stop\n", encoding="utf-8")
+    gs.clear_kill_switch()
+    fd = gs.migrate_global_state_to_data_dir()
+    try:
+        assert not (data / "kill-switch.flag").exists(), "migration resurrected a cleared STOP"
+        assert gs.kill_switch_present() is False
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def test_dual_read_generation_takes_max(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A newer generation stamp from EITHER era wins."""
-    legacy, data = _isolate(tmp_path, monkeypatch)
-    legacy.mkdir(parents=True)
+    """A newer generation stamp from EITHER live era wins — control_dir() (canonical)
+    vs the pre-control-dir global_state_dir() location an older session still writes."""
+    _, data = _isolate(tmp_path, monkeypatch)
     data.mkdir(parents=True)
-    (data / gs._MIGRATION_MARKER).write_text("1\n", encoding="utf-8")
+    control = Path(gs.control_dir())
+    control.mkdir(parents=True, exist_ok=True)
     now = int(time.time())
-    (data / "skills-reload-needed.flag").write_text(f"{now - 100}\tnew\n", encoding="utf-8")
-    (legacy / "skills-reload-needed.flag").write_text(f"{now}\told-code\n", encoding="utf-8")
+    (control / "skills-reload-needed.flag").write_text(f"{now - 100}\tnew\n", encoding="utf-8")
+    (data / "skills-reload-needed.flag").write_text(f"{now}\told-code\n", encoding="utf-8")
     assert gs.skills_reload_generation() == now
