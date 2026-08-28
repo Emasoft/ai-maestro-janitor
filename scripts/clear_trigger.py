@@ -785,16 +785,36 @@ def main() -> int:
     #    re-introduced by the deferral that makes the injector safe. `pre_submit` is the only
     #    point where "about to clear" is actually true.
 
-    # 4. Validate the handoff against the concise-but-exhaustive contract (WARN-only;
-    #    /clear still proceeds). A missing handoff on an unrecoverable /clear is worth
-    #    a loud stderr line; a bloated one defeats the point of preferring /clear.
+    # 4. Validate the handoff. ABSENCE IS FATAL; shape is WARN-only.
+    #
+    #    OWNER INVARIANT (2026-08-28, hard): "never execute the /clear unless you have
+    #    already the certainty of having the summarized context ready to be injected."
+    #
+    #    This block used to be WARN-only for BOTH cases: it printed "author a handoff BEFORE
+    #    clearing" and then cleared anyway. That is the one ordering `/clear` cannot survive —
+    #    it is unrecoverable and there is no PostClear hook, so a clear fired without a handoff
+    #    destroys the session's context with nothing on disk to restore it. The warning went to
+    #    stderr, where an unattended run has no reader. Cost a real incident: a session mid-way
+    #    through a TS→Rust migration woke blank (2026-08-28).
+    #
+    #    ABSENT → REFUSE, and refuse BEFORE any resume state or keystroke is dispatched, so the
+    #    session is left exactly as it was. SHAPE (bloated/non-concise) stays a warning: a
+    #    bloated handoff still restores the work, it just costs more context than it should —
+    #    losing the session to enforce concision would be a worse trade than the defect.
+    #    `--dry-run` is EXEMPT: it fires nothing, so there is no context to lose and refusing
+    #    would break the one mode that exists to inspect this decision safely.
     handoff = _read_handoff()
     if handoff is None:
         print(
-            "HANDOFF_MISSING no handoff file found in .janitor/state/ — /clear is "
-            "unrecoverable; author a handoff BEFORE clearing",
+            "HANDOFF_MISSING no handoff file found in .janitor/state/"
+            + ("" if args.dry_run else
+               " — REFUSING to /clear. /clear is unrecoverable and there is no PostClear hook, "
+               "so clearing now would destroy this session's context with nothing on disk to "
+               "restore it. Author a handoff first (/janitor-write-handoff), then re-run."),
             file=sys.stderr,
         )
+        if not args.dry_run:
+            return 1
     else:
         ok, reasons = check_handoff_concise(handoff)
         if not ok:

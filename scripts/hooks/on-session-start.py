@@ -255,6 +255,52 @@ def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: 
         _slog(state, "session-start", f"{scope_name} overview seed skipped: {exc}")
 
 
+def _emit_manual_clear_pointer(state, sd: Path) -> None:  # noqa: ANN001 - local module type
+    """After a MANUAL `/clear`, name the most recent handoff instead of injecting it.
+
+    A pointer, deliberately — not the body. The body belongs to the orchestrated path, which
+    knows the clear was the janitor's own doing. Here the user may genuinely have discarded the
+    work, so this must not resurrect it; it must only make its EXISTENCE impossible to miss.
+    Silence was the failure mode (2026-08-28): a mid-migration session woke blank beside an
+    11-hour-old handoff nobody was told about.
+
+    Bounded at 7 days: past that the handoff is far more likely to describe finished work than
+    an interrupted task, and a pointer to something irrelevant trains the reader to ignore the
+    line — which would cost the next real one. Never raises: a SessionStart hook that throws
+    takes the whole session's start with it.
+    """
+    try:
+        import handoff_files  # noqa: PLC0415 - scripts/lib is on sys.path only inside main()
+
+        newest = None
+        for path in handoff_files.newest_group(sd):
+            if path.is_file() and (newest is None or path.stat().st_mtime > newest.stat().st_mtime):
+                newest = path
+        if newest is None:
+            return
+        age_s = int(time.time()) - int(newest.stat().st_mtime)
+        if age_s > 7 * 86400:
+            return
+        head = ""
+        for line in newest.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                head = state.sanitize_for_drift_line(line.strip())[:160]
+                break
+        hrs = age_s / 3600.0
+        age_txt = f"{age_s // 60} min" if hrs < 1 else (
+            f"{hrs:.1f} h" if hrs < 48 else f"{age_s / 86400:.1f} d")
+        print(
+            f"[janitor-handoff] A handoff from a prior session exists — written {age_txt} ago, "
+            f"NOT injected because this looks like a manual /clear.\n"
+            f"  {newest}\n"
+            f"  opens: {head}\n"
+            "  If you cleared to reclaim context mid-task, READ IT before starting. If you "
+            "cleared to abandon that work, ignore this line — nothing was resumed."
+        )
+    except Exception:  # noqa: BLE001 - a hook must never break SessionStart
+        return
+
+
 def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module type
     """Put the handoff INTO the fresh context at `/clear`, instead of pointing at it.
 
@@ -277,8 +323,22 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
     """
     sd = state.state_dir()
     flag = sd / "resume-after-clear.flag"
-    if not flag.is_file():
-        return  # a manual /clear — nothing was queued, so nothing is owed
+    orchestrated = flag.is_file()
+    if not orchestrated:
+        # MANUAL /clear. Previously this returned silently, on the theory that the user meant
+        # the clear as a discard. That theory is WRONG for the common case and cost a real
+        # incident (2026-08-28): a session mid-way through a TS→Rust backend migration was
+        # cleared to reclaim context, woke with EMPTY context, and lost its plan — while a
+        # complete handoff written 11 h earlier sat unread in this very directory. Clearing to
+        # free context is not the same act as abandoning the work, and the janitor cannot tell
+        # them apart from the absence of a flag.
+        #
+        # So: never resurrect silently, but never stay silent either. Emit a POINTER — the
+        # handoff's path, age and opening line — and let the model decide. That keeps the
+        # original protection (no auto-resume, no full body injected into a deliberate
+        # discard) while making continuity loss impossible to suffer WITHOUT NOTICING.
+        _emit_manual_clear_pointer(state, sd)
+        return
     max_age = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
     )

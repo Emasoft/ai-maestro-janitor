@@ -455,6 +455,17 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"[post-compact-resume] compact stamp skipped ({exc})", file=sys.stderr)
 
+    # Drain any queued CLAUDE.md wikimem-index write (TRDD-LFSWY0C6): the prompt-cache
+    # prefix is being rebuilt by this compaction anyway, so the invalidation the write
+    # would cause is already paid — this is the free ride, never a cadence of its own.
+    # Its own try: a bug here must never break the resume flag below.
+    try:
+        from lib import claudemd_queue  # noqa: PLC0415 - local package, not PyPI
+
+        claudemd_queue.drain_if_queued(state.project_root())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[post-compact-resume] claudemd drain skipped ({exc})", file=sys.stderr)
+
     try:
         wrote_flag = _record_resume_directive(state)
     except Exception as exc:  # noqa: BLE001 - a hook fault must never break compaction

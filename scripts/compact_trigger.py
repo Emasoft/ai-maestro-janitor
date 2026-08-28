@@ -211,6 +211,17 @@ def main() -> int:
         action="store_true",
         help="write the directive + print the plan, but do NOT fire osascript (for tests)",
     )
+    ap.add_argument(
+        "--resolve-timeout",
+        type=float,
+        default=terminal_trigger.DEFAULT_AIMAESTRO_RESOLVE_TIMEOUT_S,
+        metavar="SECONDS",
+        help="cap on the one SYNCHRONOUS step of the ai-maestro send (the `list --json` that "
+        "finds this agent's tmux session); everything after it is detached. Lower it when the "
+        "CALLER is itself under a hard deadline — a registered hook budget — so this inner "
+        "bound nests strictly inside it instead of outliving it (AM8JD9SG F9). Expiring early "
+        "is safe: it degrades to the local tmux keystroke path.",
+    )
     args = ap.parse_args()
 
     directive = args.directive.strip()
@@ -240,6 +251,7 @@ def main() -> int:
         esc_first=esc_first,
         dry_run=args.dry_run,
         respect_user_presence=False,
+        aimaestro_resolve_timeout_s=args.resolve_timeout,
     )
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):

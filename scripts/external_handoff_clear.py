@@ -436,6 +436,42 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     if not key:
         state.log_line(_LOG, "no target transcript — filing the handoff under the unkeyed group")
     handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
+
+    # READ IT BACK BEFORE FIRING. Owner invariant (2026-08-28, hard): "never execute the
+    # /clear unless you have already the certainty of having the summarized context ready to
+    # be injected."
+    #
+    # Writing then firing is the right ORDER but not yet certainty: a write that raises does
+    # stop the fire (the exception propagates past `_fire`), but a write that SUCCEEDS at the
+    # syscall level and lands empty or truncated does not — and `/clear` is unrecoverable with
+    # no PostClear hook, so that clear destroys the session with an empty file standing in for
+    # its context. The failure is silent in the worst direction: everything reports success.
+    #
+    # So verify the artifact, not the call. Re-read what the next session will actually be
+    # given, and refuse to fire if it is not there. A skipped clear costs one bloated context
+    # until the next attempt; a fired one with no payload costs the work.
+    # NON-EMPTY is the bar, deliberately — not a size threshold. A first version required
+    # >=200 chars as "substantive"; that is an invented number, and it rejected a short but
+    # perfectly valid handoff (caught by `test_the_handoff_is_on_disk_before_the_clear_chain_is
+    # _spawned`). The invariant is "the summarized context is READY", not "large": a terse
+    # handoff still restores the work, and a guard that discards it would cause the very loss
+    # it exists to prevent, while looking like caution.
+    try:
+        written = [p for p in handoff_files.newest_group(sd)
+                   if p.is_file() and p.read_text(encoding="utf-8").strip()]
+    except OSError as exc:
+        written = []
+        state.log_line(_LOG, f"handoff read-back FAILED ({exc!r}) — refusing to clear")
+    if not written:
+        state.log_line(
+            _LOG,
+            "REFUSING to /clear: the handoff read-back found no substantive payload in "
+            f"{sd} — clearing now would destroy this session's context with nothing to "
+            "restore it. Left the session untouched.",
+        )
+        print("CLEAR_REFUSED handoff-readback-empty", file=sys.stderr)
+        return 1
+
     _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")

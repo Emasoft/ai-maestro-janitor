@@ -89,6 +89,21 @@ def _state_dir(project: Path) -> Path:
     return project / ".janitor" / "state"
 
 
+
+def _seed_handoff(project: Path) -> Path:
+    """A real `/clear` now REFUSES without a handoff (owner invariant 2026-08-28), so any test
+    exercising the non-dry path must seed one. Kept minimal and concise-contract-clean so it
+    warns about nothing and only satisfies the existence gate."""
+    sd = _state_dir(project)
+    sd.mkdir(parents=True, exist_ok=True)
+    h = sd / "agent-handoff.md"
+    h.write_text(
+        "# Handoff\n\nNEXT ACTION: continue TRDD-Z582IKIR.\nSee design/tasks/ for the card.\n",
+        encoding="utf-8",
+    )
+    return h
+
+
 # ---------- pure helpers ---------------------------------------------------
 
 def test_plan_clear_is_clear_then_bootstrap() -> None:
@@ -231,6 +246,7 @@ def test_the_chain_is_spawned_on_a_readable_channel(tmp_path: Path) -> None:
     sequence — and still writes no state up front; the child owns that now."""
     p = tmp_path / "proj"
     p.mkdir()
+    _seed_handoff(p)
     proc = _run([], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0, proc.stderr
     assert "CLEAR_CHAIN_SPAWNED" in proc.stdout
@@ -286,6 +302,7 @@ def test_a_deferred_clear_writes_NO_resume_state(tmp_path: Path) -> None:
     exactly where the cancel used to sit."""
     p = tmp_path / "proj"
     p.mkdir()
+    _seed_handoff(p)
     pane = "w0t0p0:11111111-2222-3333-4444-555555555555"
     proc = _run(
         ["--directive", "continue TRDD-Z582IKIR"],
@@ -311,6 +328,7 @@ def test_no_iterm_reports_and_still_records_state(tmp_path: Path) -> None:
     """No automatable pane: prints NO_ITERM but the resume state is still recorded."""
     p = tmp_path / "proj"
     p.mkdir()
+    _seed_handoff(p)
     proc = _run(
         ["--directive", "continue TRDD-Z582IKIR"],
         project=p,
@@ -328,6 +346,7 @@ def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
     the resume state is still recorded."""
     p = tmp_path / "proj"
     p.mkdir()
+    _seed_handoff(p)
     proc = _run(
         ["--directive", "continue TRDD-Z582IKIR"],
         project=p,

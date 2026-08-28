@@ -66,14 +66,31 @@ def test_the_flag_is_not_consumed(sd: Path) -> None:
     assert (sd / "resume-after-clear.flag").is_file(), "the heartbeat is still the actuator"
 
 
-def test_a_manual_clear_injects_nothing(sd: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """No flag = the user typed /clear themselves and meant it as a DISCARD.
+def test_a_manual_clear_points_at_the_handoff_but_injects_no_body(
+    sd: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No flag = a manual `/clear`. Name the handoff; never inject its BODY.
 
-    Injecting a stale handoff there resurrects work they deliberately threw away.
+    CONTRACT CHANGED 2026-08-28 (owner directive, after a real incident). This asserted
+    stdout == "" on the theory that a manual `/clear` means DISCARD. That theory cost a
+    session mid-way through a TS→Rust migration its entire context: it woke blank while a
+    complete handoff sat unread in this very directory. Clearing to reclaim context is not
+    the same act as abandoning the work, and absence-of-flag cannot tell them apart.
+
+    So silence is retired, but the protection it was guarding is NOT: the stale BODY must
+    still never be injected (that is what would resurrect discarded work). What is emitted is
+    a POINTER — path, age, opening line — and an explicit statement that nothing was resumed.
     """
     (sd / "agent-handoff.md").write_text("# Handoff\n\nstale work from a prior cycle", encoding="utf-8")
     _load_hook()._inject_post_clear_handoff(real_state)
-    assert capsys.readouterr().out == ""
+    out = capsys.readouterr().out
+    assert "agent-handoff.md" in out, "a manual clear must still NAME the handoff it found"
+    assert "nothing was resumed" in out, "the pointer must say plainly that nothing was resumed"
+    # The load-bearing half of the original claim, unchanged: the body stays out.
+    assert "stale work from a prior cycle" not in out, (
+        "the handoff BODY must never be injected on a manual /clear — that is what would "
+        "resurrect work the user may have deliberately discarded"
+    )
 
 
 def test_an_expired_flag_injects_nothing(sd: Path, capsys: pytest.CaptureFixture[str]) -> None:
