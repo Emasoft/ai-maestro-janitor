@@ -160,9 +160,9 @@ CANONICAL home is the plugin DATA dir
 (backed up, preserved across updates, purged only on uninstall). An existing
 install is migrated automatically: the daemon copies the legacy
 `~/.claude/janitor-global-state/` there one time under its singleton flock and
-stamps a `migrated-from-legacy.ts` marker; until that happens everything keeps
-using the legacy dir, and afterwards the legacy dir remains only as a
-tombstoned read-fallback for not-yet-updated sessions.
+stamps a `migrated-from-legacy.ts` marker. TRDD-ULEGRT01 later retired the
+legacy dir as a read location entirely — once the one-time copy has run, the
+daemon never looks at `~/.claude/janitor-global-state/` again.
 
 | State file | Purpose |
 | --- | --- |

@@ -137,14 +137,14 @@ resolve_interpreter() {
   return 1
 }
 
-# The global-state dir is chosen by a 4-rung LADDER (env override → $XDG_STATE_HOME/janitor
-# → the plugin DATA dir once migrated → the legacy ~/.claude/janitor-global-state). This file
-# used to hardcode the LAST rung, which is wrong twice over: on a migrated host launchd
-# captured stdout into a directory the daemon no longer logs to, and — the reason
-# TRDD-ULEGRT01 could not close — `mkdir -p` on it RESURRECTED the legacy dir on every
-# install, so the retirement gate could never observe it go quiet. Ask the module that owns
-# the ladder rather than re-implementing it here; a second copy of a 4-rung resolution is
-# exactly the thing that drifts.
+# The global-state dir is chosen by a 3-rung LADDER (env override → $XDG_STATE_HOME/janitor
+# → the plugin DATA dir, unconditional — the legacy ~/.claude/janitor-global-state rung was
+# retired by TRDD-ULEGRT01). This file used to hardcode the legacy path, which was wrong
+# twice over: on a migrated host launchd captured stdout into a directory the daemon no
+# longer logs to, and `mkdir -p` on it RESURRECTED the legacy dir on every install, so the
+# retirement gate could never observe it go quiet. Ask the module that owns the ladder
+# rather than re-implementing it here; a second copy of a resolution ladder is exactly the
+# thing that drifts.
 resolve_log_dir() {
   local argv d
   argv="$(resolve_interpreter)" || argv=""

@@ -19,7 +19,8 @@ Functions:
   - `attempt_auto_update(log_writer)` — best-effort `claude plugin
     marketplace update` + per-scope `claude plugin update`; True iff
     at least one scope finished successfully. Designed so both the
-    daemon (logs into ~/.claude/janitor-global-state/daemon.log) and
+    daemon (logs into daemon.log inside the resolved global-state dir — see
+    global_state_dir(); by default the plugin DATA dir) and
     the detector (logs into <project>/.janitor/logs/version-update.log)
     can supply their own write-line callable.
   - `do_auto_update_if_needed(plugin_root, log_writer)` — the wrapper

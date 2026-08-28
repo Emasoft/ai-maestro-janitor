@@ -306,7 +306,7 @@
     },
     "daemon_enabled": {
       "title": "Global janitor daemon enabled",
-      "description": "When true (default), per-session heartbeats lazy-spawn a single OS-wide daemon (scripts/daemon.py) on ~/.claude/janitor-global-state/ that owns every machine-global auto-update task \u2014 marketplace-refresh and user-plugins-update. Singleton enforced via exclusive flock so N concurrent Claude Code sessions across N projects produce ONE worker, not N (closes issue #7). When false, the daemon is never spawned AND the per-session shims for the global tasks become silent no-ops. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick).",
+      "description": "When true (default), per-session heartbeats lazy-spawn a single OS-wide daemon (scripts/daemon.py) that owns every machine-global auto-update task \u2014 marketplace-refresh and user-plugins-update \u2014 with its state under the plugin DATA dir's global-state/ subfolder. Singleton enforced via exclusive flock so N concurrent Claude Code sessions across N projects produce ONE worker, not N (closes issue #7). When false, the daemon is never spawned AND the per-session shims for the global tasks become silent no-ops. Manual kill switch: `touch ~/.claude/janitor-control/kill-switch.flag` (running daemon exits on next loop tick).",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -691,7 +691,7 @@
     },
     "pkg_manager_hook_allow_user_override": {
       "title": "Package-Manager Guard Allow User Override",
-      "description": "When false (DEFAULT), the pkg-manager-guard PreToolUse hook HARD-DENIES every detected bypass (CLI flag in Bash or weakening edit in a package-manager config file) \u2014 closes issue #8. When true, the hook downgrades 'deny' to 'ask', so each block becomes a per-call confirmation. The default is false because the article's warning (\"Claude will automatically use the CLI options to forcefully set the min age to 0 when he finds out that he cannot install or update something\") describes precisely the failure mode an ask-style prompt cannot prevent \u2014 an agent that 'just clicks yes'. Every block is logged regardless to ~/.claude/janitor-global-state/pkg-manager-guard.log.",
+      "description": "When false (DEFAULT), the pkg-manager-guard PreToolUse hook HARD-DENIES every detected bypass (CLI flag in Bash or weakening edit in a package-manager config file) \u2014 closes issue #8. When true, the hook downgrades 'deny' to 'ask', so each block becomes a per-call confirmation. The default is false because the article's warning (\"Claude will automatically use the CLI options to forcefully set the min age to 0 when he finds out that he cannot install or update something\") describes precisely the failure mode an ask-style prompt cannot prevent \u2014 an agent that 'just clicks yes'. Every block is logged regardless to pkg-manager-guard.log under the plugin DATA dir's global-state/ subfolder.",
       "type": "boolean",
       "default": false,
       "sensitive": false

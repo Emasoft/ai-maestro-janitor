@@ -295,8 +295,10 @@ identity either side gets.
 
   This is a deliberate split by AUDIENCE, and it is **not** a reversal of TRDD-2U8AH82F
   (which moved daemon state out of `~/.claude/janitor-global-state/` into the plugin DATA
-  dir). That migration was about STATE — pid, flock, heartbeat, last-run stamps,
-  injection stamps — which must survive plugin updates and be purged on uninstall, and
+  dir — TRDD-ULEGRT01 later retired that legacy dir's read-fallback entirely, so resolution
+  no longer falls back to it at all). That migration was about STATE — pid, flock, heartbeat,
+  last-run stamps, injection stamps — which must survive plugin updates and be purged on
+  uninstall, and
   which stays in `<DATA>/global-state/` under the standing "prefer `${CLAUDE_PLUGIN_DATA}`
   over a custom `~/.claude/` folder" principle. The control plane is the opposite kind of
   thing: a handful of ephemeral MODE flags whose whole purpose is to be read by software

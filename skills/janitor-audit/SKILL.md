@@ -45,7 +45,27 @@ Invokes each ai-maestro-janitor detector synchronously, aggregates output into a
 
 4. Build a single markdown report with one section per detector that produced findings, followed by a summary. Use the detector tag as the section header (e.g. `## PRs`, `## Worktrees`, `## TRDDs`, `## Task/PR mismatches`, `## Stale tasks`, `## Dirty tree`, `## Subagent reports`). For each finding, include the detector's raw line and — when applicable — a proposed remediation command the user can copy-paste.
 
-5. Present the report. DO NOT execute any remediation commands — the user must run them explicitly.
+5. **Retired legacy global-state dir (TRDD-ULEGRT01).** No detector covers this — it is a
+   once-per-machine leftover, not recurring drift, so it lives here instead of costing a
+   heartbeat check forever:
+
+   ```bash
+   LEGACY="$HOME/.claude/janitor-global-state"
+   DATA="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state"
+   if [ -d "$LEGACY" ]; then
+     if [ -f "$DATA/migrated-from-legacy.ts" ]; then echo "legacy-state: HANDED OVER, removable"
+     else echo "legacy-state: PRESENT, NOT yet handed over — do NOT suggest deleting it"; fi
+   fi
+   ```
+
+   Report a `## Legacy global state` section ONLY on `HANDED OVER`: nothing reads or writes that
+   dir any more, its state was copied into the DATA dir, and its `README-MOVED.txt` explains it —
+   so suggest `/janitor-safe-delete ~/.claude/janitor-global-state` (recoverable) and let the
+   user decide. **Never delete it yourself** (RULE 0), and stay silent on `NOT yet handed over`:
+   the daemon still has a copy to make, and telling the user to delete it first is how state gets
+   lost. Absent dir ⇒ nothing to report.
+
+6. Present the report. DO NOT execute any remediation commands — the user must run them explicitly.
 
 ## Output
 
@@ -89,4 +109,5 @@ Copy this checklist and track your progress:
 - [ ] Iterate `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/*.py` and run each one
 - [ ] Group findings by category (PRs, Worktrees, TRDDs, Task/PR mismatches, Stale tasks, Dirty tree, Subagent reports)
 - [ ] Include stderr tail for any detector that returned non-zero
+- [ ] Check the retired legacy global-state dir; report it only when it has been handed over
 - [ ] Present report with proposed remediation commands (do not execute)

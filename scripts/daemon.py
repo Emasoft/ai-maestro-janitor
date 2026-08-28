@@ -6,8 +6,10 @@
 
 Closes GitHub issue #7. Lazy-spawned by per-session heartbeats via
 lib.global_state.ensure_daemon_running(). Singleton guaranteed by exclusive
-flock on ~/.claude/janitor-global-state/daemon.flock — when N sessions race
-to spawn, only one daemon acquires the lock; the rest exit immediately.
+flock on daemon.flock inside the resolved global-state dir (env override ->
+$XDG_STATE_HOME/janitor -> the plugin DATA dir, per global_state_dir()) —
+when N sessions race to spawn, only one daemon acquires the lock; the rest
+exit immediately.
 
 Owns three classes of machine-global work that previously piled up across
 sessions (issue #7):
@@ -38,7 +40,8 @@ Lifecycle:
      flock (the kernel would do it on death anyway, but tidy is tidy).
 
 Read-only output: nothing on stdout (it's a daemon). All progress goes to
-~/.claude/janitor-global-state/daemon.log (rotated by state.rotate_log_if_big).
+daemon.log inside the resolved global-state dir (see global_state_dir();
+by default the plugin DATA dir) — rotated by state.rotate_log_if_big.
 """
 
 from __future__ import annotations
@@ -2779,8 +2782,9 @@ def main() -> int:
     # The daemon is a machine-wide singleton, but state.log_line() defaults to
     # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
     # "global" daemon's log used to scatter into a random project's .janitor/
-    # logs/ (issue #9: the per-session watchdog pointed users at
-    # ~/.claude/janitor-global-state/daemon.log, which never existed). Pin the
+    # logs/ (issue #9: the per-session watchdog pointed users at a daemon.log
+    # under the legacy ~/.claude/janitor-global-state/, which never existed —
+    # that legacy rung was later retired outright by TRDD-ULEGRT01). Pin the
     # daemon's log to the global-state dir BEFORE the first log_line() so it is
     # deterministic and the watchdog's `Inspect: <daemon.log>` path is real.
     # setdefault() lets tests/hosts override it.

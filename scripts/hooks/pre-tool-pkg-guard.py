@@ -37,9 +37,10 @@ Two classes of violation, mirroring issue #8:
   new file written from scratch with an unsafe value (no "prior state"
   loophole).
 
-Logging: every block goes to ~/.claude/janitor-global-state/pkg-manager-guard.log
-(global so users can audit blocks across all sessions; same dir as the
-daemon's audit log).
+Logging: every block goes to pkg-manager-guard.log inside the resolved
+global-state dir (see lib.global_state.global_state_dir(); by default the
+plugin DATA dir) — global so users can audit blocks across all sessions;
+same dir as the daemon's audit log.
 
 Performance: sub-100 ms p99 target — single-pass regex for Class A, one
 file read + one parse for Class B.
