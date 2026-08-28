@@ -1,10 +1,10 @@
 ---
 trdd-id: ULEGRT01
 title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82F)
-column: planned
+column: dev
 blocked-by: []
 created: 2026-07-07T18:23:04+0200
-updated: 2026-08-28T21:42:16+0200
+updated: 2026-08-28T22:09:02+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
@@ -22,10 +22,57 @@ test-requirements: [unit]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-28
 
-**⏵ STEP 0 IS DONE (2026-08-28). THE GATE WAS REWRITTEN AND IT NOW PASSES.** `§Gate` below carries
-the runnable replacement and its measured run (`step1 PASS · step2 PASS · GATE PASS: no
-non-excluded legacy write in 14d`). **The old-code-writer question is answered: none is live.**
-The card is unblocked; the next box is fixing `keepalive_install.sh:34`.
+**⏵ THE ERA-1 RETIREMENT IS IMPLEMENTED (2026-08-28).** Read §Acceptance for what landed and what
+was deliberately DROPPED; read this block only for the reasoning and the traps.
+
+**NEXT ACTION:** run `uv run pytest` (the one open box). The directly-affected modules already
+pass — `tests/test_global_state{,_migration}.py`, `test_keepalive_boot.py`,
+`test_launchd_keepalive.py`: 139 passed — as do `ruff`, `mypy` (494 files) and `cargo build`.
+
+**Scope was NARROWED to era-1 only.** `_old_global_state_path` (era-2) and
+`_legacy_keychain_latch_path` stay: the first is orthogonal to deleting the legacy dir, the second
+risks a real macOS keychain dialog to delete ~10 lines and has FOUR call sites. Two acceptance
+boxes were struck rather than ticked, because they existed only to make that dropped work safe.
+
+**Two traps this pass had to design around, both real, both verified in source:**
+1. `migrate_global_state_to_data_dir()` gated on `global_state_dir() != legacy`. Dropping rung 4
+   makes that permanently true ⇒ the migration silently neuters itself and a never-migrated host
+   loses its state, kill-switch included. It now uses an explicit `marker absent AND
+   legacy.is_dir()` predicate, pinned by a test.
+2. `_singleton_paths` is the LOCK set, not a read list. Its era-2 rung STAYS, or the DATA
+   `daemon.flock` goes unheld and `foreign_era_daemons()` goes blind.
+
+**THE CLEAR IS NOT SYMMETRIC WITH THE READ — the one defect this pass actually shipped and then
+fixed.** Retiring era-1 removed the legacy READS; removing the legacy UNLINK from
+`_flag_clear_dual` in the same edit looked identical and was a correctness regression. On an
+un-migrated host the legacy copy is the ONLY copy, so `clear_kill_switch()` (`/janitor-global-arm`)
+left it, and `migrate_global_state_to_data_dir()` then COPIED IT FORWARD into the dir readers do
+use — the STOP the user just cleared came back with no visible cause. Caught by an adversarial
+review, reproduced first-hand before believing it, fixed by restoring the legacy element in
+`_flag_clear_dual` ONLY, and pinned by
+`test_clear_reaches_the_retired_dir_so_migration_cannot_resurrect_a_stop`. **A clear must reach
+every path a flag can be read from, present OR future; `unlink` cannot recreate the directory, so
+deleting from a dir you are retiring is exactly right.** The wrong fix here would have been adding
+stop-class flags to `_MIGRATION_SKIP` — that drops a genuine un-cleared STOP.
+
+**KNOWN, BOUNDED CONSEQUENCE — write it down, do not re-discover it.** On a host that has NEVER
+migrated, a legacy `kill-switch.flag` is now IGNORED until the daemon's first run copies it
+forward. Before this card, `_legacy_read_path` honored it immediately. The migration has exactly
+one call site (`daemon.py:2838`), so the window is "until the first lazy-spawned daemon tick" —
+minutes on any host with a heartbeat — and the population is hosts that missed 2+ months of
+releases, i.e. the same population §Gate measured as empty. Accepted, not overlooked. If that
+window ever needs closing, the fix is a migration call earlier in the session path, NOT restoring
+the read fallback.
+
+**PRECISION THAT MATTERS FOR THE NEXT READER:** "no live reader of the legacy dir remains" is
+FALSE as stated. Two survive, both deliberate — `migrate_global_state_to_data_dir()` and
+`safe_storage.py::_legacy_keychain_latch_path` (dropped from scope above). Do not repeat the
+shorter claim.
+
+**Found while fixing the docs, and bigger than the retirement:** the DISARMED probe in all 10
+rule files named the era-2 DATA path and the retired era-1 path but **never the canonical
+`~/.claude/janitor-control/kill-switch.flag`** — so a janitor disarmed at the path
+`_killswitch_path()` actually writes read as ACTIVE in every rule. Fixed in the same edit.
 
 The rest of this block is the DIAGNOSIS that produced that gate. Read it for the reasoning and the
 traps, not for the status — the status is the line above.
@@ -923,38 +970,92 @@ Step 0 (rewrite the gate) is the entry point; nothing below may start before it.
       falls back FORWARD to the DATA dir, never back to legacy. Pinned by two tests that no
       single hardcoded constant can satisfy together
       (`test_installer_never_resurrects_the_legacy_global_state_dir` asserts the DATA answer with
-      nothing staged; `test_installer_honours_the_resolved_global_state_dir` asserts the LEGACY
-      answer on an un-migrated host). **The plist on THIS machine is still the old one** —
-      regenerating it is part of the USER-surfaced removal step below, not this box.
+      nothing staged; `test_installer_honours_the_resolved_global_state_dir` asserts a
+      NON-DEFAULT answer). *Amended 2026-08-28 by the era-1 retirement below:* that second test
+      used to assert the LEGACY answer on an un-migrated host, which stopped being a real
+      discriminator the moment rung 4 was removed — it now pins the `$XDG_STATE_HOME` answer, the
+      only remaining rung whose result differs from the DATA-dir default. **The plist on THIS
+      machine is still the old one** — regenerating it is part of the USER-surfaced removal step
+      below, not this box.
 - [x] **Re-scope §Scope against THREE eras** — DONE 2026-08-28. §Scope now names era 1 / 2 / 3
       apart, states that **only era 1 retires** (era 2 stays canonical for non-flag state), and
       — after a first, WRONG containment claim was caught the same day — enumerates the three
       live legacy touchpoints OUTSIDE `global_state.py` as their own step (3b).
-- [ ] **Extend the GATE to the DATA path before touching era 2.** §Gate checks LEGACY only, so the
-      QK7M2B0X half would ship ungated. Add: no stop-class flag and no `armed.flag` at
-      `<DATA>/global-state/`. Measured 2026-08-28 — control_dir holds `armed.flag` +
-      `reload-needed.flag`; DATA and legacy hold only `reload-needed.flag`; **no stop-class flag at
-      any era** — so it passes today, but it must be CODIFIED, not remembered.
-- [ ] Promote a legacy keychain latch to the canonical path in the same preflight, so retiring
-      `_legacy_keychain_latch_path()` cannot re-open the macOS prompt-flood incident. Bounded
-      either way (`set_keychain_denied` latches canonically on first denial, and EQJPPZ2L's
-      half-open cooldown caps probes at one per 600 s ⇒ worst case ≈ one prompt per machine), but
-      one file-move is cheaper than one user-visible dialog.
-- [ ] Retire the era-1 legacy read-fallback AND `_old_global_state_path` **from the six FLAG
-      tuples** (enumerated in §Scope 1+3), together with 3b's three external touchpoints —
-      one release. **`_singleton_paths` keeps its era-2 rung; see §Scope 3 for why.**
-- [ ] Add the regression the advisor named: marker absent + a legacy `kill-switch.flag` ⇒ after
-      `migrate_global_state_to_data_dir()`, `kill_switch_present()` is True. This is the test that
-      would have caught the no-op-migration defect.
+**NARROWED 2026-08-28 to ERA-1 ONLY.** Two boxes below were DROPPED with the work they existed
+to make safe, and that is why they are struck rather than ticked — a box whose subject left the
+pass is not "done":
+- ~~Extend the GATE to the DATA path before touching era 2~~ — DROPPED. It gates the
+  `_old_global_state_path` retirement, which is era-2 and no longer in this pass. Re-open it with
+  that work. (Measured 2026-08-28: control_dir holds `armed.flag` + `reload-needed.flag`; DATA and
+  legacy hold only `reload-needed.flag`; no stop-class flag at any era — it would pass today, but
+  it must be CODIFIED when era-2 moves, not remembered from here.)
+- ~~Promote a legacy keychain latch to the canonical path~~ — DROPPED with
+  `_legacy_keychain_latch_path()`, which stays. Retiring it risks a real macOS keychain dialog to
+  delete ~10 lines, and it has FOUR call sites, not the one this card once implied.
+
+- [x] **Retire the era-1 legacy read-fallback** (§Scope 1+2) — DONE 2026-08-28.
+      `_legacy_read_path()` deleted; the legacy rung dropped from `global_state_dir()`,
+      `_flag_present_dual`, `_flag_clear_dual`, `read_flag_provenance`, `read_last_run`,
+      `_generation_from_flag` and `_singleton_paths`. `_legacy_global_state_dir()` SURVIVES with
+      exactly one caller — the migration. **`_old_global_state_path` was NOT retired** (era-2,
+      dropped from this pass) and **`_singleton_paths` keeps its era-2 rung** — see §Scope 3.
+- [x] **`migrate_global_state_to_data_dir()` kept functional with an EXPLICIT predicate** —
+      DONE 2026-08-28. Now gates on `marker absent AND legacy.is_dir()`, not on
+      `global_state_dir() != legacy`, which era-1 retirement would have made permanently true.
+- [x] **§Scope 3b's external touchpoints, minus the dropped one** — DONE 2026-08-28.
+      `write_gate.rs` dropped rung 4 (the two ladders stay byte-identical; its now-unused
+      `MIGRATION_MARKER` const went with it) and `keepalive_boot.py::_state_dir` falls FORWARD to
+      the DATA dir, still honoring the env override. `safe_storage.py` untouched (dropped above).
+- [x] **The regression the advisor named** — DONE 2026-08-28:
+      `test_migration_carries_an_unhanded_over_kill_switch_forward` (marker absent + a legacy
+      `kill-switch.flag` ⇒ after the migration, `kill_switch_present()` is True). Paired with
+      `test_legacy_kill_switch_is_no_longer_read`, which pins the retirement itself; neither
+      passes without the other's half of the behaviour.
 - [ ] NEXT release: delete `migrate_global_state_to_data_dir()` + its call site + the DATA rung in
-      `_singleton_paths`, and surface the delete-the-dir drift line.
-- [ ] Surface the dir removal to the USER (RULE 0 — never auto-delete).
-- [ ] Update the consumers named in §Scope step 4 (README, CLAUDE.md, `janitor-footprint.md`, the
-      4 rules' dual-path probe, the architecture wikimem page).
+      `_singleton_paths`.
+- [x] **Surface the dir removal to the USER** (RULE 0 — never auto-delete) — DONE 2026-08-28,
+      folded into `/janitor-audit` step 5 rather than a new detector: this is a once-per-machine
+      leftover, not recurring drift, so it should not cost a heartbeat check forever. It reports
+      ONLY once `migrated-from-legacy.ts` exists, and suggests `/janitor-safe-delete` — staying
+      silent on a not-yet-handed-over host, where telling the user to delete first is how state
+      gets lost.
+- [x] **Update the consumers named in §Scope step 5** — DONE 2026-08-28. README,
+      `design/ARCHITECTURE.md`, `janitor-footprint.md`'s legacy row, both `plugin.json` option
+      descriptions, `keepalive_install.sh`'s ladder comment, and the stale log-path docstrings in
+      `daemon.py` / `version_update_lib.py` / `pre-tool-pkg-guard.py`. The dual-path probe was in
+      **10** files (7 rules + 3 references), and fixing it surfaced a SECOND defect worth more
+      than the retirement: the probe named the era-2 DATA path and the retired era-1 path, but
+      **never the canonical one** — `_killswitch_path()` writes `~/.claude/janitor-control/`, so a
+      janitor disarmed at the canonical path read as ACTIVE in every rule. All 10 now name
+      control_dir first. CLAUDE.md's only hit is inside the auto-generated wikimem index block
+      (a memory page's `description:`), so it is not hand-edited. Wikimem pages corrected under
+      the supersession protocol.
 - [ ] `uv run pytest` + `ruff` + `mypy` green.
 
 ## Notes and lessons learned
 
+- 2026-08-28 — **When you retire a READ path, audit the WRITE and DELETE paths separately.** The
+  legacy dir appeared in reads (gated behind a predicate) and in one unconditional `unlink`.
+  Deleting both in one sweep read as consistent and was wrong: a clear must reach every location
+  a flag can be read from — including one you are retiring, and including one a later migration
+  will copy FROM. Retiring reads narrows where truth is found; retiring deletes leaves stale truth
+  behind, which is the opposite. **Ask of each removed line: is this "where I look" or "where I
+  must not leave anything"?**
+- 2026-08-28 — **A retirement is the cheapest time to discover a probe was never right.** Ten rule
+  files carried a "is the janitor disarmed?" check listing the era-2 DATA path and the retired
+  era-1 path. Removing the dead branch forced reading the live one — and the canonical location
+  (`~/.claude/janitor-control/kill-switch.flag`, what `_killswitch_path()` writes) was in NEITHER.
+  A deliberate machine-wide STOP read as ACTIVE in every rule. Nothing in the era-1 work would
+  have surfaced that: it was found only because deleting one branch means justifying the ones that
+  remain. **When you delete a fallback, re-derive the whole ladder from source instead of keeping
+  "the other one" on faith — the survivor has never been checked either.**
+- 2026-08-28 — **A cleanup can disable the safety net it depends on.** `migrate_global_state_...`
+  gated on `global_state_dir() != legacy`; dropping the resolver's legacy rung makes that
+  comparison permanently true, so the migration would return None forever — and a never-migrated
+  host would have its state neither copied forward nor read again. The retirement would have
+  caused exactly the data loss it exists to prevent, silently, only on the hosts nobody watches.
+  **Before removing a code path, grep for predicates written in terms of it: a condition phrased
+  as "are we still on the old thing?" inverts to a constant the moment the old thing is gone.**
 - 2026-08-28 — **A gate can rot into a proxy that no longer tracks its referent.** This card's gate
   read "a legacy file newer than the marker" as proof an old-code writer lives. That was sound when
   written and false once QK7M2B0X shipped a legitimate new writer to the same dir. The gate did not

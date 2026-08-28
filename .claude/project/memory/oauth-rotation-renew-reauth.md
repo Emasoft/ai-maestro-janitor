@@ -249,7 +249,9 @@ human-only moments — you never invoke them. The engine SCRIPTS (`rotator.py`, 
 1. `oauth-rotator/rotator.log` — rotation DECISIONS (switch / refuse / within-limits) + the
    per-tick explicit `cascade:` plan line. Silence ≠ healthy.
 2. `oauth-rotator/state.json` — `live_email` + slot metadata.
-3. `$HOME/.claude/janitor-global-state/daemon.log` — grep `oauth-rotator-tick`; "done in 0s"
+3. `<resolved global_state_dir()>/daemon.log` (the plugin DATA dir's `global-state/daemon.log`
+   by default; `~/.claude/janitor-global-state/` is retired — TRDD-ULEGRT01) — grep
+   `oauth-rotator-tick`; "done in 0s"
    each minute = the tick fired but may have no-op'd.
 4. `daemon.pid` alive + `oauth-rotator-tick.last-run.ts` fresh = daemon healthy (rule out a
    dead daemon FIRST).

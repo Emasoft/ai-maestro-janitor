@@ -23,7 +23,8 @@ janitor's own **L0 OS-keepalive**: `keepalive_boot._LOG_DIR` and
 **evaluated at IMPORT time**. So a per-test `monkeypatch.setenv("HOME", tmp)` never
 reached them, and the keepalive tests (`test_keepalive_boot/stage/launchd/entry`,
 `test_daemon_maintenance_keepalive`) wrote their `_loud()` narration into the
-**REAL** `~/.claude/janitor-global-state/daemon-keepalive.boot.log` AND — via
+**REAL** `<global_state_dir()>/daemon-keepalive.boot.log` (then the legacy
+`~/.claude/janitor-global-state/`; retired since — TRDD-ULEGRT01) AND — via
 `verify_or_restage → _repair → restage` against ephemeral pytest tmp caches —
 **restaged the real plugin DATA closure from tmp dirs that then vanished**,
 leaving the real staged closure pointing at deleted paths. Every subsequent REAL
@@ -60,8 +61,10 @@ literally appear in the production boot log.
    when FS-event production — a process creating many *unique* paths in a loop —
    outpaces its log flush, and a near-full disk makes flushing worse. Forensics:
    snapshot `ps` to a FILE then grep the file (never `pgrep`/`ps|grep` — they
-   self-match); check `launchctl list` + `~/.claude/janitor-global-state` (daemon
-   pid/heartbeat, kill-switch, `daemon-keepalive.boot.log`); confirm claude procs'
+   self-match); check `launchctl list` + the resolved `global_state_dir()` (the
+   plugin DATA dir's `global-state/` by default; `~/.claude/janitor-global-state/`
+   is retired — TRDD-ULEGRT01) for daemon pid/heartbeat, kill-switch,
+   `daemon-keepalive.boot.log`; confirm claude procs'
    `ppid` (ppid≠1 ⇒ user's own sessions, not daemon-resurrected); and rule out a
    SECOND churn source (`.maint-staging/` empty ⇒ the memory txn is clean; append
    logs like `token-meter.jsonl` coalesce and are not the driver).
@@ -189,7 +192,9 @@ date before concluding anything.
   the constant was already computed at import, so the two never meet. Verified fix +
   proof: janitor suite `pytest tests/` = 12028 passed AND `find
   ~/.claude/janitor-global-state -newermt "25 minutes ago"` empty during the test
-  run (real state untouched).
+  run (real state untouched; that legacy dir is retired since — TRDD-ULEGRT01 —
+  the live check today is the resolved `global_state_dir()`, the DATA dir's
+  `global-state/`).
 [^2]: [id:ATOM-MG07-0011, status:valid, keywords:"self_heal_weapon_wrong_directory verify_or_restage_source_checkout refuse_illegal_destinations_at_write", ocd:2026-07-11, lmd:2026-07-11] **A self-heal is a WEAPON pointed at whatever directory it
   is handed.** `verify_or_restage(_HERE)` was written to keep the DATA stage honest; nobody asked
   what it does when `_HERE` is a source checkout, and the `_repair` else-branch even carried a

@@ -1,8 +1,8 @@
 ---
 name: janitor-architecture
-description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub / a session stayed dead after a compaction / resume-after-compact flag never consumed / why does CLAUDE_PLUGIN_ROOT get wiped on every update / where should persistent state be written / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / why must user/global-scope operations go through the daemon only / what is the runtime installed tree layout / how does the janitor decide project-scope vs user-scope for a given operation"
+description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub / a session stayed dead after a compaction / resume-after-compact flag never consumed / why does CLAUDE_PLUGIN_ROOT get wiped on every update / where should persistent state be written / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / why must user/global-scope operations go through the daemon only / what is the runtime installed tree layout / how does the janitor decide project-scope vs user-scope for a given operation / the kill-switch came back after janitor-global-arm / the janitor disarmed itself again for no reason / a cleared STOP was resurrected by the migration / which code still touches the legacy janitor-global-state dir / is the legacy janitor-global-state dir safe to delete / arm did not stick on an un-migrated host"
 ocd: 2026-06-13
-lmd: 2026-08-26
+lmd: 2026-08-28
 metadata:
   node_type: memory
   type: project
@@ -247,10 +247,13 @@ on — instead lives at the fixed `~/.claude/janitor-control/`: see
 reversal of the DATA-dir principle.[^11]
 Existing installs are migrated automatically by the daemon under its singleton
 flock (flock-moves-LAST: the NEW dir's flock is acquired before the
-`migrated-from-legacy.ts` marker flips resolution); control-flag readers
-dual-read the legacy `$HOME/.claude/janitor-global-state/` for version skew,
-and that legacy dir survives only as a tombstoned read-fallback until an EHT
-retires it (~2 releases out).
+`migrated-from-legacy.ts` marker flips resolution). **RETIRED (TRDD-ULEGRT01):**
+the legacy `$HOME/.claude/janitor-global-state/` dir is no longer a dual-read
+fallback — `global_state_dir()` is now a 3-rung ladder (env override → XDG →
+the DATA dir unconditionally) and control-flag readers span only
+`control_dir()` + `global_state_dir()`. The legacy dir survives only as
+`_legacy_global_state_dir()`, whose sole caller is the never-migrated-host
+migration path (see ^ATOM-EXPB-DEFP).
 
 **Principle (per the project owner):** prefer `${CLAUDE_PLUGIN_DATA}` over any
 new `$HOME/.claude/<custom>/` folder — the data dir is the only location
@@ -277,6 +280,11 @@ crash-loop breaker — only heals if EVERY respawn path both *consults* it and
 *feeds* it. A signal wired to one path silently covers half the failure
 surface; the keepalive and the stub must agree on which version is bad and both
 must report a crash.[^3]
+
+
+^ATOM-EXPB-DEFP [desc: "TRDD-ULEGRT01 retired the legacy global-state dir — no dual-read, no 4th ladder rung, migration gated by an explicit predicate", keywords: legacy_global-state_dir_still_read janitor-global-state_fallback kill-switch_at_legacy_path_ignored 4-rung_global_state_dir_ladder migration_self-neutered_after_retiring_rung_4 dual-read_legacy_for_version_skew TRDD-ULEGRT01 era-1_legacy_retired control-flag_readers_span_only_two_locations does_the_daemon_still_read_the_legacy_global-state_folder global_state_dir_3-rung_ladder legacy_global_state_dir_sole_caller_migration, ocd: 2026-08-28, lmd: 2026-08-28]
+
+DO NOT read control-flag readers as dual-reading the legacy `$HOME/.claude/janitor-global-state/` for version skew, or that dir as a tombstoned read-fallback pending an EHT, BECAUSE TRDD-ULEGRT01 retired era-1 legacy global-state entirely: `global_state.py::global_state_dir()` is now a 3-rung ladder (`$JANITOR_GLOBAL_STATE_DIR` env override -> `$XDG_STATE_HOME/janitor` -> the plugin DATA dir `${CLAUDE_PLUGIN_DATA}/global-state/` UNCONDITIONALLY, no 4th legacy rung), and every control-flag reader (`_flag_present_dual`, `_flag_clear_dual`, `read_flag_provenance`, `read_last_run`, `_generation_from_flag`, `_singleton_paths`) now spans only TWO locations — `control_dir()` and `global_state_dir()` — never the legacy path. DO read the legacy dir as RETIRED: `_legacy_read_path()` was deleted; only `_legacy_global_state_dir()` survives, with its sole caller `migrate_global_state_to_data_dir()` gated by the explicit predicate `(DATA/migrated-from-legacy.ts absent) AND (legacy dir exists)` — deliberately NOT a `global_state_dir() != legacy` comparison, which era-1 retirement would make permanently true and silently neuter the migration. [^15]
 
 ## See also
 
@@ -388,7 +396,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
   single-writer lock for expensive commands.
 
 
-^ATOM-MQ9L-E7LV [desc:"Filesystem & state conventions table + current state locations + the ONE SANCTIONED EXCEPTION principle box for ~/.claude/janitor-control/ (verbatim)", keywords: filesystem_state_conventions_table CLAUDE_PLUGIN_ROOT_ephemeral_CLAUDE_PLUGIN_DATA_persistent one_sanctioned_exception_janitor-control_folder global_state_dir_ladder_migration where_should_persistent_state_be_written why_is_janitor-control_not_migrated_into_the_data_dir what_does_global_state_dir_resolve_to why_must_the_control_plane_be_a_fixed_literal_path_for_the_ai-maestro_server what_lives_in_the_legacy_global_state_folder what_is_CLAUDE_PLUGIN_DATA, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-MQ9L-E7LV [desc:"Filesystem & state conventions table + current state locations + the ONE SANCTIONED EXCEPTION principle box for ~/.claude/janitor-control/ (verbatim)", keywords: filesystem_state_conventions_table CLAUDE_PLUGIN_ROOT_ephemeral_CLAUDE_PLUGIN_DATA_persistent one_sanctioned_exception_janitor-control_folder global_state_dir_ladder_migration where_should_persistent_state_be_written why_is_janitor-control_not_migrated_into_the_data_dir what_does_global_state_dir_resolve_to why_must_the_control_plane_be_a_fixed_literal_path_for_the_ai-maestro_server what_lives_in_the_legacy_global_state_folder what_is_CLAUDE_PLUGIN_DATA, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^13]
 
 ### Filesystem & state conventions (per plugins-reference.md)
 
@@ -401,7 +409,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 **Current state locations:**
 - ✅ `dispatcher-stub.py` → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (correct).
 - ✅ per-session → `$PROJECT/.janitor/state/` (correct — project-scoped).
-- ✅ **daemon global state → `${CLAUDE_PLUGIN_DATA}/global-state/`** (TRDD-2U8AH82F). `global_state.py::global_state_dir` ladder: env override → XDG → DATA dir (once the `migrated-from-legacy.ts` marker exists, or fresh install) → legacy `~/.claude/janitor-global-state/` while a pre-migration install awaits its daemon. The DAEMON performs the one-time copy under the legacy singleton flock and takes the NEW flock BEFORE stamping the marker (flock-moves-LAST — no two-daemon window); control-flag readers dual-read legacy for version skew. Legacy dir = tombstoned read-fallback; retirement is an EHT 2 releases out.
+- ✅ **daemon global state → `${CLAUDE_PLUGIN_DATA}/global-state/`** (TRDD-2U8AH82F, era-1 legacy retired by TRDD-ULEGRT01). `global_state.py::global_state_dir` ladder is now 3 rungs: env override → XDG → the DATA dir UNCONDITIONALLY — **no legacy rung**. Control-flag readers span only `control_dir()` + `global_state_dir()`, never the legacy path. Legacy `~/.claude/janitor-global-state/` is fully **RETIRED**; only `_legacy_global_state_dir()` survives, and its sole caller (`migrate_global_state_to_data_dir()`) still runs on a never-migrated host, gated by the explicit predicate `(migrated-from-legacy.ts absent) AND (legacy dir exists)` (see ^ATOM-88DL-HFDJ).
 
 > **Principle (per user):** prefer `${CLAUDE_PLUGIN_DATA}` over any new
 > `~/.claude/<custom>/` folder. The data dir is the only one guaranteed
@@ -426,7 +434,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 > stays in `<DATA>/global-state/` and the principle governs it unchanged.
 
 
-^ATOM-UZAL-KYBJ [desc:"The Runtime / installed tree ASCII diagram (verbatim) showing every on-disk path the plugin uses", keywords: runtime_installed_tree_diagram plugin_cache_data_dir_memory_mirror_legacy_global_state_layout per_project_janitor_state_files_list what_does_the_janitor_installed_tree_look_like where_is_the_plugin_cache_directory where_is_the_per_project_janitor_state_folder show_me_the_on-disk_layout_of_the_janitor what_is_the_memory_mirror_directory where_do_per-project_janitor_state_files_go what_is_the_legacy_global_state_layout, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-UZAL-KYBJ [desc:"The Runtime / installed tree ASCII diagram (verbatim) showing every on-disk path the plugin uses", keywords: runtime_installed_tree_diagram plugin_cache_data_dir_memory_mirror_legacy_global_state_layout per_project_janitor_state_files_list what_does_the_janitor_installed_tree_look_like where_is_the_plugin_cache_directory where_is_the_per_project_janitor_state_folder show_me_the_on-disk_layout_of_the_janitor what_is_the_memory_mirror_directory where_do_per-project_janitor_state_files_go what_is_the_legacy_global_state_layout, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^14]
 
 ### Runtime / installed tree
 
@@ -434,11 +442,17 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 ~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/  ephemeral plugin (scripts/skills/hooks)
 ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/ + global-state/ (canonical daemon state since TRDD-2U8AH82F)
 ~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
-~/.claude/janitor-global-state/                                       LEGACY daemon state (auto-migrated → DATA/global-state by the daemon; read-fallback only):
-    daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
-    marketplace-op.lock (NEW) · {marketplace-refresh,version-update}.last-run.ts
-    kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
-    version-update-requested.flag (release-triggered self-update request; daemon consumes clear-before-run — TRDD-Y9KM5RCJ)
+~/.claude/janitor-global-state/                                       RETIRED (TRDD-ULEGRT01) — no resolver rung, no flag READ. Three deliberate
+                                                                       exceptions: the one-time migration reads it, `_flag_clear_dual` still
+                                                                       UNLINKS there (a clear must reach every path a flag can be read from, or
+                                                                       the migration copies a cleared STOP forward), and
+                                                                       `safe_storage::_legacy_keychain_latch_path` reads the keychain latch.
+                                                                       On pre-migration hosts it once held: daemon.pid · daemon.flock ·
+                                                                       daemon.heartbeat.ts · daemon.spawn-attempt.ts · marketplace-op.lock ·
+                                                                       {marketplace-refresh,version-update}.last-run.ts · kill-switch.flag ·
+                                                                       reload-needed.flag · skills-reload-needed.flag ·
+                                                                       version-update-requested.flag. Safe to remove once
+                                                                       DATA/global-state/migrated-from-legacy.ts exists (see ^ATOM-V89R-2RUZ).
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
     resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
@@ -525,3 +539,6 @@ cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param e
   must observe or contend on goes to the fixed control dir
   ([[janitor-fleet-control-plane]]).
 [^12]: [id:ATOM-VYSD-YCS4, status:valid, desc:"the scope mismatch that stranded every unattended session on the host", keywords:"machine_global_signal_gating_a_per_session_action one_busy_pane_marked_every_pane_attended gate_scope_must_match_action_scope feature_never_fires_no_error_anywhere", ocd:2026-07-28, lmd:2026-07-28] DO NOT gate a PER-SESSION action on a MACHINE-GLOBAL signal, BECAUSE one active session then speaks for every session on the host and the other N-1 are silently starved — and the symptom reads as "the feature never fires", not as "a gate said no", so nobody looks at the gate. DO give every gate a signal at the SAME scope as the thing it gates.
+[^13]: [id: ATOM-88DL-HFDJ, status: valid, supersedes: ATOM-MQ9L-E7LV, desc: "3-rung global_state_dir ladder post-TRDD-ULEGRT01 — no legacy rung, no dual-read fallback", keywords: "legacy_global-state_dir_still_read janitor-global-state_fallback 4-rung_global_state_dir_ladder current_state_locations_bullet_stale legacy_dir_tombstoned_read-fallback_EHT TRDD-ULEGRT01 era-1_legacy_retired control-flag_readers_span_only_two_locations does_the_daemon_still_read_the_legacy_global-state_folder global_state_dir_3-rung_ladder", ocd: 2026-08-28, lmd: 2026-08-28] DO NOT read the 'Current state locations' bullet's 4-rung ladder (env override -> XDG -> DATA dir once migrated-from-legacy.ts exists or on fresh install -> legacy $HOME/.claude/janitor-global-state/ while a pre-migration install awaits its daemon) or its 'Legacy dir = tombstoned read-fallback; retirement is an EHT 2 releases out' note as current, BECAUSE TRDD-ULEGRT01 already retired the legacy rung: global_state_dir() is now env override -> XDG -> the DATA dir UNCONDITIONALLY, with no legacy fallback at all, and control-flag readers (_flag_present_dual, _flag_clear_dual, read_flag_provenance, read_last_run, _generation_from_flag, _singleton_paths) span only control_dir() + global_state_dir(). DO read the legacy dir as fully RETIRED (not tombstoned-pending-an-EHT): only _legacy_global_state_dir() survives, with its sole caller migrate_global_state_to_data_dir() gated by the explicit predicate (DATA/migrated-from-legacy.ts absent) AND (legacy dir exists), never a global_state_dir()!=legacy comparison that era-1 retirement would make permanently true. SUPERSEDED BODY: (empty)
+[^14]: [id: ATOM-V89R-2RUZ, status: valid, supersedes: ATOM-UZAL-KYBJ, desc: "installed-tree legacy global-state entry is RETIRED by TRDD-ULEGRT01, not a live read-fallback", keywords: "legacy_global-state_dir_still_read janitor-global-state_fallback installed_tree_diagram_stale legacy_dir_tombstoned_read-fallback_EHT retired-TRDD-ULEGRT01 legacy_dir_safe_to_remove control-flag_readers_span_only_two_locations does_the_daemon_still_read_the_legacy_global-state_folder global_state_dir_3-rung_ladder runtime_installed_tree_legacy_path", ocd: 2026-08-28, lmd: 2026-08-28] DO NOT read the installed-tree diagram's ~/.claude/janitor-global-state/ line as an active read-fallback the daemon still consults, BECAUSE TRDD-ULEGRT01 retired era-1 legacy global-state: nothing reads or writes that dir anymore except the one-time migration path on a never-migrated host, gated by the explicit predicate (DATA/migrated-from-legacy.ts absent) AND (legacy dir exists). DO treat the directory as fully RETIRED and safe for the user to remove once DATA/global-state/migrated-from-legacy.ts exists, not as a tombstoned read-fallback still consulted for version skew. SUPERSEDED BODY: (empty)
+[^15]: [id: ATOM-08C7-MBBL, status: valid, desc: "TRDD-ULEGRT01: era-1 is retired for READS only — the clear, the migration and the keychain latch still touch the dir", keywords: "kill-switch_came_back_after_janitor-global-arm the_janitor_disarmed_itself_again_for_no_reason cleared_STOP_resurrected_by_the_migration legacy_global-state_dir_is_still_being_written_to nothing_reads_janitor-global-state_is_wrong _flag_clear_dual_legacy_unlink migrate_global_state_to_data_dir_copied_a_cleared_flag retiring_a_read_path_silently_broke_the_clear is_the_legacy_janitor-global-state_dir_safe_to_delete which_code_still_touches_janitor-global-state _legacy_keychain_latch_path_still_reads_legacy arm_did_not_stick_on_an_un-migrated_host", ocd: 2026-08-28, lmd: 2026-08-28] DO NOT read "the legacy dir is retired" as "nothing touches it", BECAUSE three deliberate accesses survive — the one-time migration reads it, _flag_clear_dual still UNLINKS there, and safe_storage::_legacy_keychain_latch_path reads the keychain latch; the clear is load-bearing, since dropping it lets migrate_global_state_to_data_dir() copy a just-cleared kill-switch forward and silently undo /janitor-global-arm on an un-migrated host. DO audit WRITE and DELETE paths separately whenever you retire a READ path — "where I look" and "where I must not leave anything" are different questions.
