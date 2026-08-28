@@ -4,7 +4,7 @@ title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82
 column: planned
 blocked-by: []
 created: 2026-07-07T18:23:04+0200
-updated: 2026-08-28T16:09:43+0200
+updated: 2026-08-28T21:42:16+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
@@ -676,12 +676,28 @@ recollection.
    `_flag_present_dual`, the clear sweep, `read_flag_provenance`, `last_run_ts`'s max-scan,
    `_generation_from_flag`, and `_singleton_paths`' legacy rung.
 2. **ERA-1 in the ladder.** `global_state_dir()` drops rung 4 — resolution becomes env → XDG →
-   DATA dir unconditionally. Keep `migrate_global_state_to_data_dir()` one more release as a
-   no-op guard, then delete it and its `daemon.main` call site together.
-3. **ERA-2's CONTROL-FLAG fallback (`_old_global_state_path`) retires WITH era 1, in one pass** —
-   it is a QK7M2B0X transition-window read, not part of era 2's live role, and it appears in the
-   same six tuples as the legacy rung. Splitting the two passes means touching those six sites
-   twice. **This retires the flag fallback only; `global_state_dir()` itself stays.**
+   DATA dir unconditionally.
+
+   **`migrate_global_state_to_data_dir()` MUST STAY FUNCTIONAL — a "no-op guard" is
+   self-inflicting.** Corrected 2026-08-28 after a Fable-advisor review, verified in source at
+   `global_state.py:446`: the function gates on `if global_state_dir() != legacy: return None`.
+   Drop rung 4 and that condition becomes **permanently true**, so the migration silently
+   neuters itself. On a never-migrated host — a lagging fleet member, anyone on an older
+   published version — legacy state would then never be copied AND never read again, **including
+   a kill-switch**. That is exactly the worst failure mode this card exists to avoid, introduced
+   by the retirement itself. Replace the gate with an explicit predicate
+   (`marker absent AND legacy.is_dir()`) so migration still runs, and delete the function plus
+   its `daemon.main` call site a release LATER.
+
+3. **ERA-2's CONTROL-FLAG fallback (`_old_global_state_path`): retire it from the SIX FLAG
+   TUPLES ONLY — `_singleton_paths` KEEPS its era-2 rung one more release.** The original plan
+   said "same pass, they touch the same list"; that was wrong, and the difference is not
+   cosmetic. `_singleton_paths` is not a read set. Its own docstring: *"ONE list for reading,
+   writing AND locking — deliberately not three"*. Collapsing it to control-only leaves the
+   **DATA `daemon.flock` unheld**, so a pre-QK7M2B0X daemon can take it and run alongside the
+   current one — and the same edit blinds `foreign_era_daemons()` (`:684`), the detector built to
+   catch precisely that. Flag fallbacks and the singleton have different risk profiles; they
+   retire on different releases. `global_state_dir()` itself stays either way.
 3b. **The three NON-`global_state.py` touchpoints in the table above, in the SAME pass as 1+3** —
    `write_gate.rs` (drop rung 4 from the Rust clone, keeping the two ladders byte-identical),
    `safe_storage.py::_legacy_keychain_latch_path` (delete the read-only latch fallback), and
@@ -914,8 +930,24 @@ Step 0 (rewrite the gate) is the entry point; nothing below may start before it.
       apart, states that **only era 1 retires** (era 2 stays canonical for non-flag state), and
       — after a first, WRONG containment claim was caught the same day — enumerates the three
       live legacy touchpoints OUTSIDE `global_state.py` as their own step (3b).
-- [ ] Retire the 2U8AH82F legacy read-fallback AND QK7M2B0X's legacy rung in `_singleton_paths`
-      **in one pass** — they touch the same list. The six call sites are enumerated in §Scope 1+3.
+- [ ] **Extend the GATE to the DATA path before touching era 2.** §Gate checks LEGACY only, so the
+      QK7M2B0X half would ship ungated. Add: no stop-class flag and no `armed.flag` at
+      `<DATA>/global-state/`. Measured 2026-08-28 — control_dir holds `armed.flag` +
+      `reload-needed.flag`; DATA and legacy hold only `reload-needed.flag`; **no stop-class flag at
+      any era** — so it passes today, but it must be CODIFIED, not remembered.
+- [ ] Promote a legacy keychain latch to the canonical path in the same preflight, so retiring
+      `_legacy_keychain_latch_path()` cannot re-open the macOS prompt-flood incident. Bounded
+      either way (`set_keychain_denied` latches canonically on first denial, and EQJPPZ2L's
+      half-open cooldown caps probes at one per 600 s ⇒ worst case ≈ one prompt per machine), but
+      one file-move is cheaper than one user-visible dialog.
+- [ ] Retire the era-1 legacy read-fallback AND `_old_global_state_path` **from the six FLAG
+      tuples** (enumerated in §Scope 1+3), together with 3b's three external touchpoints —
+      one release. **`_singleton_paths` keeps its era-2 rung; see §Scope 3 for why.**
+- [ ] Add the regression the advisor named: marker absent + a legacy `kill-switch.flag` ⇒ after
+      `migrate_global_state_to_data_dir()`, `kill_switch_present()` is True. This is the test that
+      would have caught the no-op-migration defect.
+- [ ] NEXT release: delete `migrate_global_state_to_data_dir()` + its call site + the DATA rung in
+      `_singleton_paths`, and surface the delete-the-dir drift line.
 - [ ] Surface the dir removal to the USER (RULE 0 — never auto-delete).
 - [ ] Update the consumers named in §Scope step 4 (README, CLAUDE.md, `janitor-footprint.md`, the
       4 rules' dual-path probe, the architecture wikimem page).
@@ -987,3 +1019,23 @@ Step 0 (rewrite the gate) is the entry point; nothing below may start before it.
   sort -rn`) and triage every filename by hand — the list is short, and nothing can hide in it.
   Corollary, learned the same day: a REMEMBERED count ("the 4 rules") is itself a proxy; it was
   ten.
+- 2026-08-28 — **A RETIREMENT CAN DISABLE ITS OWN SAFETY NET, and the wreckage looks like
+  success.** Two instances, both found by advisory review and then verified in source rather
+  than taken on trust. (1) Dropping rung 4 from the ladder makes
+  `migrate_global_state_to_data_dir()`'s guard (`global_state_dir() != legacy`) permanently true,
+  so the migration returns None forever — a never-migrated host would silently stop copying AND
+  stop reading legacy state, kill-switch included. The function keeps compiling, keeps being
+  called, and does nothing. (2) `_singleton_paths` reads like a read-fallback list and is
+  actually the LOCK set ("ONE list for reading, writing AND locking — deliberately not three"),
+  so collapsing it un-holds the DATA flock and blinds the very detector that catches a
+  second daemon. DO NOT retire a fallback by deleting the rung it reads, BECAUSE the code that
+  MIGRATES off that rung, and the code that LOCKS against a stale peer, are usually written in
+  terms of the same rung — remove it and they degrade to no-ops that still typecheck and still
+  pass their tests. DO ask of every removal: *what else is expressed in terms of this, and does
+  it become vacuously true?* Then replace those with an EXPLICIT predicate before removing.
+- 2026-08-28 — **A GATE INHERITS THE SCOPE OF THE ERA IT WAS WRITTEN FOR.** §Gate was authored
+  for the 2U8AH82F (legacy) retirement and checks only the LEGACY dir. Folding the QK7M2B0X
+  (era-2) retirement into the same pass would have shipped that half **ungated** — the gate would
+  have gone green while saying nothing at all about the DATA path. It passes today only because
+  a manual `ls` confirmed it; that is not a gate. When a card's scope grows to a new era, the
+  gate does not grow with it — extend it deliberately, or split the passes.
