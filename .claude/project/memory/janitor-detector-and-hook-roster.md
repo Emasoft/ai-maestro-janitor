@@ -6,8 +6,9 @@ lmd: 2026-08-29
 metadata:
   node_type: memory
   type: reference
-  tier: component
+  tier: hub
   functionality: detector-and-hook-roster
+  globs: ["scripts/detectors/**", "scripts/hooks/**", "scripts/lib/*_patterns.py"]
 publish-globally: false
 ---
 

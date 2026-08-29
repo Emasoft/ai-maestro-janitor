@@ -2,11 +2,13 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now / 16 agents hung on the externalized compaction / the fleet froze for 40 minutes after a restart / a resume storm serialized every session behind the llm-ext lane / sessions stuck at startup on a blocking SessionStart hook / the compaction fired below the floor because the installed plugin was a stale rollout"
 ocd: 2026-07-17
-lmd: 2026-08-25
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
-  tier: component
+  tier: hub
+  functionality: proactive-compaction
+  globs: ["scripts/hooks/*compact*.py", "scripts/lib/cold_cache_compact.py", "scripts/compact_trigger.py"]
 publish-globally: false
 ---
 

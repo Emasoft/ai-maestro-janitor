@@ -2,12 +2,13 @@
 name: memory-system
 description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update / memgrep refused my write because the atom is too big / can I raise the atom budget knob / add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / widen a precheck predicate signature / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises"
 ocd: 2026-06-13
-lmd: 2026-08-27
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
-  tier: component
+  tier: hub
   functionality: janitor
+  globs: ["scripts/memgrep/**", "scripts/lib/memory_*.py", ".claude/project/memory/**"]
   originSessionId: memory-audit-draft
 publish-globally: false
 ---
