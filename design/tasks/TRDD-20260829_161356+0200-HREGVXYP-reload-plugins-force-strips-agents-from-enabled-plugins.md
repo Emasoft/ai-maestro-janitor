@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T16:19:00+0200
+updated: 2026-08-29T16:26:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -106,8 +106,14 @@ third case, where the plugin is present and only the session's registry is thin.
 ## Acceptance
 
 - [ ] The replace-vs-merge registry behaviour is measured, not assumed, and written down.
-- [ ] `janitor-heartbeat-protocol.md` distinguishes *plugin absent* from *registry thin*, with a
+- [x] `janitor-heartbeat-protocol.md` distinguishes *plugin absent* from *registry thin*, with a
       disk + `enabledPlugins` check, and does not send either case to `/reload-plugins` blindly.
+      Done 2026-08-29, and it cost NEGATIVE bytes: the shipped-rules floor went 53,696 → 53,694 B
+      (headroom 4 → 6 under the 53,700 cap, `test_rules_installer.py` green, 36 passed). The old
+      text spent most of its length explaining how to tell TWO cases apart; stating three
+      outcomes plainly was shorter than arguing for two. **A rule that grew a case does not have
+      to grow — the floor cap is a real constraint and it was satisfiable by writing better, not
+      by moving the text to `references/`.**
 - [x] The `janitor-reload-plugins` skill states the capability cost alongside the cache cost.
       Done 2026-08-29 — it also now says not to reload again to fix it, and names the two
       checks (`enabledPlugins`, the cache `agents/` dir) that tell a thin registry from a
