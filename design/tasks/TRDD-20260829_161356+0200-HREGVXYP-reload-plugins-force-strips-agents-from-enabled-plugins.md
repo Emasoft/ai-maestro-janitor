@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T16:13:56+0200
+updated: 2026-08-29T16:19:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -108,7 +108,12 @@ third case, where the plugin is present and only the session's registry is thin.
 - [ ] The replace-vs-merge registry behaviour is measured, not assumed, and written down.
 - [ ] `janitor-heartbeat-protocol.md` distinguishes *plugin absent* from *registry thin*, with a
       disk + `enabledPlugins` check, and does not send either case to `/reload-plugins` blindly.
-- [ ] The `janitor-reload-plugins` skill states the capability cost alongside the cache cost.
+- [x] The `janitor-reload-plugins` skill states the capability cost alongside the cache cost.
+      Done 2026-08-29 — it also now says not to reload again to fix it, and names the two
+      checks (`enabledPlugins`, the cache `agents/` dir) that tell a thin registry from a
+      missing install. Done AHEAD of scope item 1 deliberately: the skill asserted "nothing is
+      lost", and that is false as measured regardless of WHY the registry is replaced. A false
+      assertion in a skill an agent follows unattended does not get to wait for a root cause.
 - [ ] Regression test: a dispatch marker whose agent is unregistered but whose plugin is
       installed reports "registry thin", not "plugin unavailable".
 

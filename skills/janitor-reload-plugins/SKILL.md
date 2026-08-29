@@ -20,7 +20,30 @@ it, a plugin whose code is mid-use can refuse the reload and silently stay on th
 old cached version.
 
 Unlike compaction, **reloading plugins does NOT discard the conversation** — it
-swaps plugin code in place — so there is no resume directive and nothing is lost.
+swaps plugin code in place — so there is no resume directive.
+
+**But something else IS lost: agents from plugins the reload did not rescan.**
+MEASURED 2026-08-29 (TRDD-HREGVXYP): a reload fired for ONE updated plugin reported
+`1 plugin · 1 skill · 43 agents` and the harness then dropped **36 agent types across
+nine ENABLED plugins** — including all three this plugin dispatches to
+(`janitor-memory-subconscious-agent`, `janitor-repair-agent`,
+`janitor-security-agent`), plus `fable-advisor:advisor` and every CPV agent. The
+registry is REPLACED by what the rescanned plugin contributes, not merged into what
+was already registered.
+
+Nothing is uninstalled — `enabledPlugins` is untouched and every agent file is still
+in the plugin cache — but for the rest of the session those agents cannot be spawned.
+So a reload has TWO costs, not one: the prompt-cache invalidation the shrink logic
+below already handles, and this capability loss, which it does not. Weigh it before
+reloading a session that still has agent work to dispatch; a restart restores the
+registry.
+
+**If agents go missing after a reload, do NOT reload again to fix it** — that is the
+operation under suspicion, and `janitor-heartbeat-protocol`'s "no `ai-maestro-janitor:*`
+agents listed ⇒ the plugin is unavailable, try `/reload-plugins`" branch misreads this
+case and sends you in a circle. Check `enabledPlugins` in `settings.json` and the
+plugin cache's `agents/` dir: both intact means the install is fine and only the
+session's registry is thin.
 
 ## When to use
 
