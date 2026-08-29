@@ -1,10 +1,10 @@
 ---
 trdd-id: X4LI97IK
-title: Per-scope lock files accumulate forever in the real DATA dir and nothing names the producer
+title: scope_root_for falls back to the page's parent dir so the write lock key is unbounded
 column: backburner
 blocked-by: []
 created: 2026-08-29T20:28:57+0200
-updated: 2026-08-29T20:52:00+0200
+updated: 2026-08-29T21:18:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 5
@@ -77,8 +77,45 @@ That was the whole hypothesis this card was filed on, and it is dead.
 agent manufacturing ~165 ephemeral scope roots on an active day. That is a more interesting
 finding than the one the card started with, and it is unidentified.
 
-**Next probe:** instrument `_scope_lock_path` to log the root it hashed, then read one day of it.
-Do not guess again — this card has already burned two guesses, and each looked obvious.
+## ✅ PRODUCER IDENTIFIED — `scope_root_for`'s fallback, proven not guessed (2026-08-29)
+
+**`write_gate.rs::scope_root_for` walks up looking for a directory literally named `memory`, and
+when it finds none it FALLS BACK to the page's own parent directory.** That fallback becomes the
+lock key. So every memgrep WRITE verb aimed at a page outside a `…/memory/…` tree mints a lock
+named for *that directory* — and the key is unbounded by construction, not by accident.
+
+Proven end to end, with `JANITOR_GLOBAL_STATE_DIR` redirected so the probe added nothing to the
+real pile:
+
+```
+# one atom written to a page in a fresh tmp dir, NOT under any `memory/` ancestor
+$ JANITOR_GLOBAL_STATE_DIR=$S memgrep new-mem-atom --page $D/notmemory/probe.md …
+$ ls $S            → memory-maint-c676f3395ef29bee.lock
+$ sha256($D/notmemory)[:16] → c676f3395ef29bee        # exact match
+```
+
+It accounts for the observed shape exactly: **29 hashes match real `…/memory` scope roots; 1,099
+match nothing** — the 1,099 are fallback parents, one per directory ever written to outside a
+memory tree. It also explains the delta-0 suite: the tests do not drive the memgrep BINARY's
+write verbs against scratch paths, which is why both earlier hypotheses missed.
+
+**Note the earlier `lint` probe returned delta 0 too** — read-only, or an autofix with nothing to
+fix, takes no write lock. Only a real write verb reproduces it; a lint alone will look innocent.
+
+### Where the fix belongs
+
+In `scope_root_for`, not in a reaper and not in the lock. A page with no `memory` ancestor **is
+not in any scope**, so a per-directory lock buys no mutual exclusion anyone wants — it just names
+a file after a directory nobody will revisit. Options, in preference order:
+
+1. **No scope ⇒ no machine-wide lock.** Lock beside the page (or not at all), so the global dir
+   only ever holds real scope roots. Needs the Python side (`memory_txn._scope_lock_path`) to
+   agree, or the two languages stop excluding each other — the corruption class TRDD-7YHT3FNK
+   exists to prevent. **Change both or neither.**
+2. **One shared out-of-scope lock.** Bounded and trivially parity-safe, at the cost of
+   serialising unrelated out-of-scope writes — which are rare by definition.
+
+Option 2 is the lazy correct one unless someone shows the contention matters.
 
 **Caveat on the 97.4%, so nobody over-trusts it:** the 214 roots I probed were every
 `~/.claude/projects/<slug>/memory` (+ its `wikimem/`), the USER root, and **only THIS repo's**
@@ -106,15 +143,18 @@ conclusion survives, but the number is a floor, not a measurement.
 - **Do not "fix" the write-guard by removing its live-actor exemption.** It is correct, and the
   full-suite probe PROVED it correct — these are live-actor writes. Making it louder would only
   add noise to a verdict that was already right.
-- **Do not guess a third producer.** Two guesses, both obvious, both wrong. Instrument
-  `_scope_lock_path` and read what it logs.
+- **Do not probe with `lint` alone.** It takes no write lock, so it returns delta 0 and looks
+  innocent. Only a real WRITE verb reproduces this.
 
 ## Acceptance
 
 - [x] ~~The provenance is established (test tmp roots vs real project roots)~~ — PARTIAL: the
       TEST hypothesis is decisively dead (full suite, delta 0). 1,099/1,128 match no existing
       root. The actual producer is still unnamed and is in normal operation.
-- [ ] The producer is NAMED, by instrumenting `_scope_lock_path` — not by a third guess.
+- [x] The producer is NAMED: `scope_root_for`'s no-memory-ancestor fallback. Proven by probe,
+      not by instrumentation — reading the resolver was cheaper than logging it.
+- [ ] An out-of-scope page no longer mints a per-directory machine-wide lock, and the Rust
+      and Python sides still agree byte-for-byte (TRDD-7YHT3FNK parity).
 - [x] ~~No suite run adds a lock file to the real global-state dir~~ — already TRUE, measured:
       full suite, delta 0. Nothing to fix here.
 - [ ] Growth is bounded — the count stops tracking "scope roots ever seen".
