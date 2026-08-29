@@ -457,6 +457,44 @@ def test_context_pressure_fires_on_a_BUSY_session_the_other_triggers_cannot_reac
     assert "context limit" in v.why
 
 
+def test_context_pressure_outranks_the_min_context_floor_on_a_200k_model():
+    """The floor must not veto the survival trigger — the 200K case the other test cannot reach.
+
+    Every other context-pressure test uses 700K, which sails over `min_context`, so the ordering
+    bug was invisible to all of them: the floor is `DEFAULT_MIN_CONTEXT_TOKENS` = 300K while
+    `context_high_water` resolves from `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is UNDER 200K on
+    a 200K-window model. A session at 170K with auto-compact off — precisely what this trigger
+    exists for — was refused with "nothing worth reclaiming" and rode on into the hard
+    context-limit error. The two questions only ever disagree when the floor is the larger number,
+    and there the high-water mark has already answered "yes, this is worth reclaiming".
+    """
+    v = verdict(
+        idle_seconds=5,
+        last_turn_age_s=1,
+        seconds_to_next_fire=120,
+        cache_expired=False,
+        context_tokens=170_000,
+        min_context=ec.DEFAULT_MIN_CONTEXT_TOKENS,  # 300K — above the whole 200K window
+        context_high_water=155_000,
+    )
+    assert v.fire is True, f"the survival trigger must outrank the floor, got: {v.why}"
+    assert v.trigger == ec.TRIGGER_CONTEXT_PRESSURE
+
+    # …and the floor still vetoes when context pressure is NOT the reason: below the high-water
+    # mark there is nothing to survive, so the economy triggers face the floor as before.
+    below = verdict(
+        idle_seconds=5,
+        last_turn_age_s=1,
+        seconds_to_next_fire=120,
+        cache_expired=False,
+        context_tokens=120_000,
+        min_context=ec.DEFAULT_MIN_CONTEXT_TOKENS,
+        context_high_water=155_000,
+    )
+    assert below.fire is False
+    assert "nothing worth reclaiming" in below.why
+
+
 def test_context_pressure_is_off_when_no_high_water_is_configured():
     """0 disables it. A hardcoded default would be wrong by ~5x between a 200K and a 1M window,
     so the backstop is opt-in — and its absence must read as OFF, never as 'fire always'."""

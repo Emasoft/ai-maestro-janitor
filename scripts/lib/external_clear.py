@@ -1573,11 +1573,6 @@ def should_clear_externally(
         return ClearVerdict(
             False, why=f"no-headroom ({seconds_to_next_fire}s < {headroom_s}s to next fire)"
         )
-    if context_tokens is not None and context_tokens < min_context:
-        return ClearVerdict(
-            False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
-        )
-
     # CONTEXT PRESSURE FIRST — its alternative is not a wasted cache write, it is a session that
     # STOPS. With `autoCompactEnabled: false` the harness no longer rescues a full window; it
     # errors. Every other trigger here is an economy (avoid paying for a cold cache); this one is
@@ -1588,6 +1583,15 @@ def should_clear_externally(
     # janitor must stay out of the way. Keeping that decision in the CALLER leaves this function
     # pure and keeps the two questions separate: this one asks "is the context too big", never
     # "whose job is it".
+    #
+    # IT MUST SIT ABOVE THE `min_context` FLOOR, and "FIRST" in the paragraph above was not
+    # rhetoric — it used to be checked BELOW it and was therefore unreachable on every 200 K
+    # model. The floor is 300 K (`DEFAULT_MIN_CONTEXT_TOKENS`) while `context_high_water`
+    # resolves from `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is under 200 K there: a session at
+    # 170 K with auto-compact off — exactly the case this trigger exists for — was refused with
+    # "nothing worth reclaiming" and rode on into the hard context-limit error. The floor asks
+    # "is this big enough to be worth a clear"; a context at or above the high-water mark has
+    # already answered that, and the two can only disagree when the floor is the higher number.
     if (
         context_high_water > 0
         and context_tokens is not None
@@ -1599,6 +1603,11 @@ def should_clear_externally(
             f"context {context_tokens} >= high-water {context_high_water} and the harness no "
             "longer auto-compacts — without a clear this session stops at the context limit",
         )
+    if context_tokens is not None and context_tokens < min_context:
+        return ClearVerdict(
+            False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+        )
+
     if cache_expired is True:
         return ClearVerdict(
             True,
