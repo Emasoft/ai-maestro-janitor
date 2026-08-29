@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.4.0] — 2026-08-29
+## [3.4.1] — 2026-08-29
 
 ### Bug Fixes
 
@@ -10,12 +10,18 @@ All notable changes to this project will be documented in this file.
 - The new check-ignore call needed GIT_OPTIONAL_LOCKS=0 (caught by the repo's own guard) (8df4d7b)
 - **memgrep:** Clippy -D warnings is clean — 18 errors the build gate never reached (c7f0bfa)
 - The shell-lint gate linted 311 gitignored scripts and blocked on a backup (09cb232)
+- **tests:** The lint-gate coverage tests guarded one memgrep and exercised another (e6a629c)
+
+### Documentation
+
+- **TRDD-X4LJFTB4:** Published — ce03b9cb..62b452fd, 370 commits, 8 days unblocked (0da5922)
 
 ### Miscellaneous Tasks
 
 - Bump version to 3.4.0 (b07b955)
 - Bump version to 3.4.0 (1571c0f)
 - Bump version to 3.4.0 (6c4be7c)
+- Bump version to 3.4.0 (62b452f)
 ## [3.4.0] — 2026-08-29
 
 ### Bug Fixes

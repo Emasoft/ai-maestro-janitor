@@ -8,7 +8,7 @@
 <!-- The `version-X.Y.Z-blue` spelling is load-bearing: publish.py rewrites this exact
      shape on every release. Renaming it does not break the build — it makes the badge go
      stale silently, which is worse, because a wrong version reads as a true one. -->
-[![version](https://img.shields.io/badge/version-3.4.0-blue)](https://github.com/Emasoft/ai-maestro-janitor/releases/latest)
+[![version](https://img.shields.io/badge/version-3.4.1-blue)](https://github.com/Emasoft/ai-maestro-janitor/releases/latest)
 [![CI](https://github.com/Emasoft/ai-maestro-janitor/actions/workflows/ci.yml/badge.svg)](https://github.com/Emasoft/ai-maestro-janitor/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
