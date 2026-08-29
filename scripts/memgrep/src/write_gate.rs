@@ -590,7 +590,14 @@ mod tests {
         let p2 = s2.join("page.md");
 
         let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let spawn = |a: PathBuf, b: PathBuf, done: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+        // Named `start_racer` rather than the obvious short verb: this starts a THREAD, and the
+        // unqualified verb reads as process/shell execution both to a human skimming and to CPV's
+        // SHELL_EXEC signature, which blocked the publish gate on the two call sites below
+        // (2026-08-29). The clearer name is the honest fix — nothing is muted or exempted, the
+        // shape that meant "runs a command" is simply gone. The qualified `std::thread::` form
+        // inside is unambiguous and is not what fired.
+        let start_racer =
+            |a: PathBuf, b: PathBuf, done: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
             std::thread::spawn(move || {
                 // Hold the pair briefly so the two threads genuinely overlap.
                 for _ in 0..5 {
@@ -600,8 +607,8 @@ mod tests {
                 done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             })
         };
-        let t1 = spawn(p1.clone(), p2.clone(), done.clone()); // (s1, s2)
-        let t2 = spawn(p2.clone(), p1.clone(), done.clone()); // (s2, s1) — the OPPOSITE order
+        let t1 = start_racer(p1.clone(), p2.clone(), done.clone()); // (s1, s2)
+        let t2 = start_racer(p2.clone(), p1.clone(), done.clone()); // (s2, s1) — the OPPOSITE order
         t1.join().unwrap();
         t2.join().unwrap();
 

@@ -237,12 +237,25 @@ Each reference file below opens with its own table of contents.
 
 - [references/wikimem-model.md](references/wikimem-model.md) — the wiki model: tiers,
   the link law, EXPAND/REDUCE, page anatomy, atoms.
+  - [A wiki, not a pile — and collaborative like Wikipedia](references/wikimem-model.md#a-wiki-not-a-pile--and-collaborative-like-wikipedia)
+  - [The editorial decision flow (run this on any change worth remembering)](references/wikimem-model.md#the-editorial-decision-flow-run-this-on-any-change-worth-remembering)
+  - [EXPAND and REDUCE — radiating suns vs receiving terminals](references/wikimem-model.md#expand-and-reduce--radiating-suns-vs-receiving-terminals)
+  - [The three tiers (a page's role in the pyramid)](references/wikimem-model.md#the-three-tiers-a-pages-role-in-the-pyramid)
+  - [The edge model — EVERY link is bidirectional (the link law)](references/wikimem-model.md#the-edge-model--every-link-is-bidirectional-the-link-law)
+  - [Page anatomy](references/wikimem-model.md#page-anatomy)
+  - [Atoms — first-class body elements (block-properties)](references/wikimem-model.md#atoms--first-class-body-elements-block-properties)
 - [references/atom-authoring.md](references/atom-authoring.md) — full page schema
   (frontmatter fields, tier edge sections) and atom block-property grammar with examples.
 - [references/subject-routing.md](references/subject-routing.md) — the CASE vs
   METHODOLOGY routing decision and why it matters.
+  - [The decision](references/subject-routing.md#the-decision)
+  - [Why it matters — off-topic pollution](references/subject-routing.md#why-it-matters--off-topic-pollution)
+  - [Splitting an incident that yields both](references/subject-routing.md#splitting-an-incident-that-yields-both)
+  - [Cleaning up an existing violation](references/subject-routing.md#cleaning-up-an-existing-violation)
 - [references/write-examples.md](references/write-examples.md) — worked examples +
   the full memgrep verb reference.
+  - [Worked examples (aspect / component / user-feedback)](references/write-examples.md#worked-examples-aspect--component--user-feedback)
+  - [WRITE-the-page: full memgrep verb reference](references/write-examples.md#write-the-page-full-memgrep-verb-reference)
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
   schema + dual-test method.
 - `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step

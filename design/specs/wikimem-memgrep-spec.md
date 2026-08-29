@@ -993,8 +993,9 @@ is retained deliberately (the correction protocol demotes, never deletes — WM-
 something that is NO LONGER TRUE; surfacing it beside live atoms is how a reader acts on a fact
 the corpus already retracted. The flag exists for auditing the retraction history itself.
 
-`WM-CLI-03` **write-verbs-synthesise-syntax** — `new-mem-topic` (was `new-page`; valid frontmatter
-+ mandatory Notes section; refuses to overwrite), `new-mem-atom` (was `add-atom`; `--desc` stored
+`WM-CLI-03` **write-verbs-synthesise-syntax** — `new-mem-topic` (was `new-page`; valid
+frontmatter plus a mandatory Notes section; refuses to overwrite), `new-mem-atom`
+(was `add-atom`; `--desc` stored
 QUOTED ≤200 chars; id/dates/syntax synthesised so a malformed atom is impossible), `add-lesson`
 (anchors `[^N]` from the atom body; DO-NOT/BECAUSE/DO on stdin).
 
