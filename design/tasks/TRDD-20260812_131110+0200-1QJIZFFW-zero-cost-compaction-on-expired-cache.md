@@ -1,11 +1,10 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: blocked
-pre-block-column: dev
-blocked-by: [3.4.0-publish-push-protection]
+column: dev
+blocked-by: []
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-26T07:33:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -350,3 +349,5 @@ deliberately, because today it means nothing either way.
   llm-externalizer"), which both unblocks the card and makes it a gate on the pending release.
   The core landed in `df7d4cb3`; three acceptance boxes remain, so the column asserts WORK
   rather than `complete`.
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

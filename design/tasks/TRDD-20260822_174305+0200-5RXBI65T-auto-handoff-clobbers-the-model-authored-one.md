@@ -1,11 +1,10 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: blocked
-pre-block-column: dev
-blocked-by: [3.4.0-publish-push-protection]
+column: dev
+blocked-by: []
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-26T07:29:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -456,3 +455,8 @@ is not durable storage.** It is gitignored and has an automatic second writer. A
 survive belongs in a TRDD or the wiki. This card exists because a flake roster and a
 memorize-nudge ruling were parked there and evaporated within the hour; the gate analysis
 survived only because it had also been written into TRDD-4GQ94FNJ's own `## Gate` section.
+
+## Approval log
+
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

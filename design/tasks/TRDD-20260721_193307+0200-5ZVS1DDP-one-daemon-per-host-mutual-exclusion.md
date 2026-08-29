@@ -1,20 +1,36 @@
 ---
 trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
-column: blocked
-pre-block-column: testing
+column: todo
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-22T00:50:41+0200
+updated: 2026-08-29T22:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-blocked-by: [publish-of-AWXK0RFT]
+blocked-by: []
 eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-05
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-29
+
+**UNBLOCKED. `blocked-by: [publish-of-AWXK0RFT]` was false for 17 days — by this card's OWN
+admission.** The 2026-08-12 note below records that AWXK0RFT "was already `complete` and had been
+since 2026-08-05… the line was stale on arrival". The card noticed, wrote it down, and stayed in
+`blocked` anyway. That is the failure the pipeline rule names: a card that claims to be waiting
+tells the only view anyone reads that it is handled, so nothing ever looks at it again.
+
+**Restored to `todo`, NOT to its `pre-block-column: testing`** — a deliberate deviation from the
+usual restore. Items 1 and 2 are done and verified; item 3 (move the four movable chores to
+per-repo crons) is UNSTARTED. `testing` would assert someone is testing it right now, and nobody
+is; an untrue column is worse than an unstarted card.
+
+**NEXT ACTION:** item 3 only — its stated blocker QK7M2B0X is `complete`/released, so it is
+unblocked work. EHT KQ9WM4TZ sits in `human_review` (the OWNER's queue): it gates this card
+reaching `complete`, it does not gate doing item 3.
+
+## ⏵ STATE — 2026-08-05 (superseded by the block above; kept for the verified chain)
 
 ### 2026-08-05 evening — item 2's "SILENT SAFETY GAP … live right now" is SUPERSEDED: closed and verified durable
 

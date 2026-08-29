@@ -1,11 +1,10 @@
 ---
 trdd-id: 9T0U3M00
 title: The tick-stalled alert fires on an absorbed chore and reports healthy server-side execution as rotation being OFF
-column: blocked
-pre-block-column: testing
-blocked-by: [3.4.0-publish-push-protection]
+column: testing
+blocked-by: []
 created: 2026-08-21T14:30:06+0200
-updated: 2026-08-26T08:20:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -186,3 +185,6 @@ re-broadcasting a stale verdict) belongs to **ai-maestro**, not here; this card 
 was genuinely the janitor's.
 
 ## Approval log
+
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

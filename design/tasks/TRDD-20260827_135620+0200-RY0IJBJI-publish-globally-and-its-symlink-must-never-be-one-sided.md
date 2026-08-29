@@ -1,11 +1,10 @@
 ---
 trdd-id: RY0IJBJI
 title: publish-globally and its USER-root symlink must never be one-sided and the linter must reconcile them
-column: blocked
-pre-block-column: complete
-blocked-by: [X4LJFTB4]
+column: published
+blocked-by: []
 created: 2026-08-27T13:56:20+0200
-updated: 2026-08-27T16:09:03+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -177,3 +176,8 @@ symlink split makes the missing-field case undecidable from text. The challenge 
 that card's correction and lesson `ATOM-BLQS-A2XW` on `memory-system`), and it exposed this
 larger, real requirement underneath: the two halves are one fact, and nothing currently enforces
 that outside the write path.
+
+## Approval log
+
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

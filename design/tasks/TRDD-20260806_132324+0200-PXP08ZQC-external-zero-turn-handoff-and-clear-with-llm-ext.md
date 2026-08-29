@@ -1,11 +1,10 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: blocked
-pre-block-column: todo
-blocked-by: [3.4.0-publish-push-protection]
+column: todo
+blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-26T07:38:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -360,3 +359,5 @@ equality test now pins producer and checker together so they cannot drift apart 
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED dev → todo by janitor-main-session. A WORK column
   asserts active work; nobody was working this (idle 6d). 0/5 acceptance; NEXT ACTION is known
   and concrete (wire the watcher). No scope or acceptance changed.
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

@@ -1,11 +1,10 @@
 ---
 trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
-column: blocked
-pre-block-column: testing
-blocked-by: [3.4.0-publish-push-protection]
+column: testing
+blocked-by: []
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-26T21:47:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -307,3 +306,8 @@ third turned out to ask for something that already exists — that outcome is th
     "this session has run no chore for five hours" — and the cooldown that correctly stops the
     audit spam also removes the only surface that could notice the duration. DO put a duration
     threshold on an UNCHANGED decline, and escalate past it, without re-auditing every beat.
+
+## Approval log
+
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.

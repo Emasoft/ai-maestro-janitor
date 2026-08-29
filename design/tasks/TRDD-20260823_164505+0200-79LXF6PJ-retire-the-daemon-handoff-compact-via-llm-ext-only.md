@@ -1,11 +1,10 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: blocked
-pre-block-column: testing
-blocked-by: [3.4.0-publish-push-protection]
+column: testing
+blocked-by: []
 created: 2026-08-23T16:45:05+0200
-updated: 2026-08-26T07:58:00+0200
+updated: 2026-08-29T22:30:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -175,3 +174,8 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
     DO NOT remove the daemon's handoff composer before its replacement is live, BECAUSE the
     composer is what makes an unattended `/clear` recoverable, and `/clear` cannot be undone. DO
     ship removal and replacement in one change, with the idle-session drill as the gate.
+
+## Approval log
+
+- 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
+  3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
