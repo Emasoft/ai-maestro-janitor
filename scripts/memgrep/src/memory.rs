@@ -3166,7 +3166,9 @@ struct NewPageArgs {
     scope: Option<String>,
 }
 
-/// `memgrep new-mem-topic --path P --tier T --name N --description "…" --type …` — scaffold a VALID page:
+/// `memgrep new-mem-topic --tier T --name N --description "…" --type … [--scope S]` — scaffold a VALID page:
+/// (no `--path`: it was removed by TRDD-VJL1YTCG Part A — the destination is derived from
+/// `--scope`, defaulting to `local`, so a relocated root moves every caller at once.)
 /// frontmatter (name, description, ocd=lmd=today, metadata.{node_type, type, tier[, functionality][,
 /// globs]}) + a `# <name>` heading + the mandatory `## Notes and lessons learned` landing zone.
 /// Refuses to overwrite. Writes atomically, reindexes. The generated page passes the syntax linter

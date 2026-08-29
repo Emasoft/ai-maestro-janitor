@@ -1,9 +1,9 @@
 ---
 trdd-id: VJL1YTCG
 title: The wikimem CLI must be topic/atom verb pairs with no paths and maintenance must leave the main agent
-column: dev
+column: human_review
 created: 2026-08-27T14:31:01+0200
-updated: 2026-08-28T06:10:43+0200
+updated: 2026-08-29T07:50:49+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -22,10 +22,31 @@ relevant-rules: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-**Owner directive, 2026-08-27, in two parts. Part A (paths + env vars) is DONE except the
-final `--path` removal — shipped in `2e801dff` (+ `282a39c6`/`864652f0` renames the scanner
-forced). Parts B and C are NOT STARTED.** All of it is committed locally and green through every
-publish gate, but NOT deployed: 3.4.0 is blocked at the push by TRDD-X4LJFTB4 (owner decision).
+**⏵ ALL THREE PARTS ARE IMPLEMENTED (A, B, C — 2026-08-29).** Still committed-not-deployed: 3.4.0
+is blocked at the push by TRDD-X4LJFTB4 (owner decision), so none of it is live yet.
+
+*The rest of this block is the DESIGN RECORD. It was written when A was partial and B/C unstarted,
+and it kept saying so long after that stopped being true — costing a session a round of questions
+about work already in the tree. Read it for the reasoning; the status is the line above.*
+
+| part | state |
+|---|---|
+| **A** — no paths, `--scope` + env-var templates | **DONE.** `2e801dff` (+ `282a39c6`/`864652f0` renames the scanner forced) shipped the scope resolvers; `--path` itself was removed 2026-08-27 (`memory.rs:3124`), verified absent from `new-mem-topic --help` — the only surviving mention is the line saying it does not exist. Sweep 2026-08-29: every remaining `--path` in the tree is `cargo install --path`, an unrelated tool's flag. |
+| **B** — topic/atom verb pairs | **DONE.** The full table ships in `main.rs::VERB_TABLE` with the old spellings retained as aliases (`new-page`→`new-mem-topic`, `add-atom`→`new-mem-atom`, `edit`→`update-mem-topic`, `migrate`→`migrate-mem-atom`). **The `add-lesson` question the card said to raise was answered by the USER on 2026-08-27 and the answer is in the code:** a lesson is `update-mem-atom --lesson`, because it records that an EXISTING atom's fact was superseded — an update to knowledge, not the authoring of a new fact. `add-lesson` keeps its own deprecated arm rather than being rewritten onto the new verb, because a rewrite would land the legacy argv WITHOUT `--lesson` and silently overwrite the atom's body. |
+| **C** — maintenance invisible to the main agent | **DONE, after one wrong turn.** See below. |
+
+**Part C, and the correction that matters more than the fix.** The crux — "lint MUTATES, so whoever
+runs it performs maintenance by side effect" — was first resolved by giving `lint` a `--no-fix`
+mode and putting the `wikimem-syntax` heartbeat detector on it (`5a0227b4`). **The owner reverted
+that the same day** (`eabe1140`): executing a memgrep edit against a malformed page corrupts it and
+loses data, so fixing before AND after every wikimem edit is mandatory, and the ~5-minute autofix
+cadence is a DATA-INTEGRITY PRECONDITION for the librarians' writes — not a side effect to be
+cleaned up. `--no-fix` survives, re-scoped to debug/diagnostic use only (spec WM-LINT-09).
+
+The real fix was the other half: **Part C constrains who SEES maintenance, not whether it
+happens.** `_OTHER_ACTOR_DETECTORS` in `dispatch.py` stops the lint summary riding the urgency
+override into the main conversation, while the reconciliation continues underneath. Both halves of
+the directive now hold; suppressing the write satisfied neither.
 
 **Part A additions since the first STATE:** the three env vars take `~/`-relative TEMPLATES with
 `@project_root@` / `@project_slug@` symbols (the owner's "wildcards for the project root and
@@ -115,11 +136,20 @@ Concretely:
 
 ## NEXT ACTION
 
-1. Part C first. It is the owner's stated pain, it is the smallest change, and every day it is not
-   done the main agent keeps doing chores. Start with the lint-mutates-by-side-effect question
-   above, because it decides the shape of everything else.
-2. Then Part B, new names as primary + old as aliases for one release.
-3. Then finish Part A by removing `--path`, with the full breaking-change sweep.
+**None — all three parts are implemented (see the STATE block).** The original plan is kept below
+because its ORDERING argument turned out to be right and is worth reusing:
+
+1. ~~Part C first~~ — correct call. It was the owner's stated pain, it was the smallest change, and
+   the lint-mutates-by-side-effect question did decide the shape of everything else. It also
+   produced the one real correction of this card: `--no-fix` on the heartbeat was wrong, because
+   "invisible" is not "absent".
+2. ~~Then Part B~~ — new names primary, old as aliases for one release. Shipped that way.
+3. ~~Then finish Part A~~ — the "full breaking-change sweep" it demanded is what showed the removal
+   had already landed and that every remaining `--path` in the tree belongs to `cargo install`.
+
+**What remains is not work on this card:** the aliases (`new-page`, `add-atom`, `edit`, `migrate`,
+and the deprecated `add-lesson` arm) were promised for ONE release. Retiring them is a separate
+breaking change and needs its own card and its own sweep — do not fold it in here.
 
 ## Provenance
 
