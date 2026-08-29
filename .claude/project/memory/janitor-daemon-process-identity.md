@@ -2,7 +2,7 @@
 name: janitor-daemon-process-identity
 description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters / which TREE the daemon runs from — a staged import closure, not the plugin cache / a daemon chore silently does nothing and logs done in 0s / tests pass but the feature is dead on the daemon / never subprocess an unstaged path, log deduped chore failures / 6 daemon kills in 7 minutes with zero exceptions logged / why does uv run mint a new interpreter every spawn / grep found zero lines in daemon.log — is the daemon really silent / where does the global daemon write its log file / what does the s: tag mean on a janitor log line / is this log line the daemon or a per-session shim / a healthy cached version was quarantined as crash-looping / how to tell daemon lines from session-shim lines in the log / quarantine.json says crash-loop but there is no traceback / uv python find returns the wrong interpreter path / the daemon restarts ping-pong between two cached versions"
 ocd: 2026-08-06
-lmd: 2026-08-20
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: reference
@@ -75,19 +75,6 @@ The daemon does NOT run from the plugin cache — it runs from a STAGED copy in 
 
 The practical consequence: a daemon chore that reaches a repo path by FILENAME — a subprocess, an `open()`, a `Path(...).is_file()` guard — is looking at a tree that does not exist where the daemon actually runs. It fails the guard and returns, so the chore logs a normal-looking `done in 0s` on its cadence forever while doing nothing. Tests never catch it because tests run from the repo, where the path DOES exist. Importing the module instead is what puts it in the closure and therefore on disk beside the daemon. [^4]
 
-## Governed by
-
-- [[janitor-architecture]] — the hub this component hangs off: the daemon +
-  heartbeat two-tier design, and the Immortality (L0 keepalive) section whose
-  FIXED DATA path is exactly what makes this page's daemons version-less.
-
-## See also
-
-- [[janitor-fleet-guardian-reachability]] — the other half of the TCC story:
-  what the guardian could not reach while the grant did not stick.
-- [[janitor-fleet-control-plane]] — where the quarantine + daemon state live.
-
-
 ^ATOM-C0XG-WBGJ [desc:"the global daemon logs to global-state/daemon.log (JANITOR_LOG_DIR), never a project tree, and its [s:] tag is its SPAWNER's session id — not a session-shim marker", keywords: grep_found_zero_lines_in_daemon.log where_does_the_global_daemon_write_its_log is_this_line_the_daemon_or_a_per-session_shim s:_tag_in_janitor_logs JANITOR_LOG_DIR project_.janitor/logs/daemon.log_is_not_the_daemon chore-coordination_lines_missing global-state/daemon.log_is_the_real_daemon_log per-session_detector_shims_write_the_project_log absence_of_a_log_line_is_not_proof_of_absence lsof_on_the_daemon_pid_cannot_settle_it lines_appended_and_closed_per_write_no_open_handle, type: project, ocd: 2026-08-06, lmd: 2026-08-06]
 
 **The global daemon does not log into any project tree.** `daemon.py:2169` runs
@@ -115,6 +102,18 @@ compare its tag against the daemon log's own tag set. Measured 2026-08-06: daemo
 spawned by session `c9ae7481` and every one of its lines is tagged `[s:c9ae7481]`; a
 `task 'version-update'` line tagged `[s:643908a6]` sat in the *project* log, and that id appears
 **zero** times in the daemon's log — a shim, conclusively.
+
+## Governed by
+
+- [[janitor-architecture]] — the hub this component hangs off: the daemon +
+  heartbeat two-tier design, and the Immortality (L0 keepalive) section whose
+  FIXED DATA path is exactly what makes this page's daemons version-less.
+
+## See also
+
+- [[janitor-fleet-guardian-reachability]] — the other half of the TCC story:
+  what the guardian could not reach while the grant did not stick.
+- [[janitor-fleet-control-plane]] — where the quarantine + daemon state live.
 
 ## Notes and lessons learned
 

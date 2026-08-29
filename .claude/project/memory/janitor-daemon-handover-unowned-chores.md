@@ -2,7 +2,7 @@
 name: janitor-daemon-handover-unowned-chores
 description: "every daemon chore stamp is frozen at the same age but no flag is set / daemon.pid is MISSING and nothing respawns it / recent_spawn_count is 0 while the heartbeat fires every 5 minutes / ensure_daemon_running silently does nothing / no rotation no cache prune no memory guard no session-liveness watchdog / who runs the chores the ai-maestro server never absorbed / is the daemon dead or deliberately absent / plugin stuck four releases behind and the daemon is gone / daemon.heartbeat.ts is hours stale and the spawn-attempt stamp is days old / the daemon starts and then exits after about one second / daemon.log says stopping server-owns-host / os-keepalive activate then uninstall on every spawn / should I force the janitor daemon back up / what is claimed_chores and server_owns_every_chore / is a chore claimed or merely absorbed on paper / does a live server suppress the daemon partially or all at once / how do I tell a crashed daemon from a deliberate stand-down"
 ocd: 2026-07-29
-lmd: 2026-08-18
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
@@ -61,19 +61,6 @@ deliberately and advertised in `capabilities`.
 ^ATOM-KYRU-GT5O [desc: "Rev-8 contract: executor-declared staleness bounds (claim-bounds.json, widen-only, fail-open); github-config-audit joined the absorbed set", keywords: claimed_chore_stale_false_alarm server_cadence_differs_from_janitor_roster claim-bounds.json widen-only_declared_bound github-config-audit_yields_to_server absorbed_set_changed rev_8_contract chore_stamp_bound_table why_did_a_claimed_chore_raise_a_false_stale_alarm what_is_widen-only_enforcement did_github-config-audit_join_the_absorbed_set, type: project, ocd: 2026-08-18, lmd: 2026-08-18]
 
 Ratified 2026-08-18 (both sessions under the USER's delegation; janitor ARCHITECTURE.md §9 rev 8; server mirror docs/claimed-chores-contract.md @ eccbd02a; thread ai-maestro#126). The claimed-chore watchdog no longer trusts only the JANITOR roster cadence for a chore the SERVER executes: the executor declares its own bound in ~/.claude/janitor-control/claim-bounds.json and claimed-chore-stale reads it FAIL-OPEN, with widen-only enforcement in claimed_chore_watch.stale_threshold — a declaration can only RAISE a bound, because honouring a narrower one would let the other side's config manufacture false positives (janitor#225 mirrored). Same round: github-config-audit JOINED SERVER_ABSORBED_TASKS (janitor#274 — the server has stamped it since 2026-08-05), so it is class-2 absorbed, no longer class-4 janitor-internal; its declared 14400s bound is below the 64800s roster default and widen-only deliberately ignores it.
-
-## Governed by
-
-- [[janitor-architecture]] — the hub: the two tiers, the scope invariant, and why there is
-  both a daemon and a heartbeat. This page is the ownership-handover case under it.
-
-## See also
-
-- [[janitor-fleet-control-plane]] — the flags and locks a second chore owner must observe;
-  that page owns the coordination substrate, this one owns who executes.
-- [[janitor-daemon-bulk-lane]] — the other way chore stamps go stale: the daemon is ALIVE
-  but blocked behind a ~20 min bulk run. Same symptom, opposite cause.
-
 
 ^ATOM-FDNM-LHZ0 [desc:"the decisive tell for 'stood down' vs 'died' is the daemon's own 'stopping (server-owns-host)' log line — never the heartbeat gap, which looks identical either way", keywords: is_the_daemon_dead_or_deliberately_absent daemon_heartbeat_is_hours_stale_and_daemon_pid_is_gone spawn_attempt_stamp_is_a_week_old stopping_server_owns_host should_I_force_the_janitor_daemon_back_up daemon_starts_then_exits_after_one_second why_do_a_crash_and_a_stand-down_look_identical_from_stamps what_line_in_daemon_log_settles_it what_does_os-keepalive_activate_then_uninstall_mean does_a_crash_ever_print_a_stopping_line, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
@@ -152,6 +139,18 @@ Shipped as `d45a843a`:
 Everything fails TOWARD COVERAGE: an empty capability list, an unrecognised token, or a stale probe
 all claim nothing, so the janitor keeps every chore. A chore run twice is wasteful and lock-guarded;
 a chore run by nobody is invisible. [^4] [^5]
+
+## Governed by
+
+- [[janitor-architecture]] — the hub: the two tiers, the scope invariant, and why there is
+  both a daemon and a heartbeat. This page is the ownership-handover case under it.
+
+## See also
+
+- [[janitor-fleet-control-plane]] — the flags and locks a second chore owner must observe;
+  that page owns the coordination substrate, this one owns who executes.
+- [[janitor-daemon-bulk-lane]] — the other way chore stamps go stale: the daemon is ALIVE
+  but blocked behind a ~20 min bulk run. Same symptom, opposite cause.
 
 ## Notes and lessons learned
 

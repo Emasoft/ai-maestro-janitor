@@ -2,7 +2,7 @@
 name: janitor-fleet-guardian-reachability
 description: "the status table says a project is NOT armed but I armed it myself / did the plugin update reset the arming / daemon.log says UNREACHABLE ({}) — would rearm; skipped (no keystroke channel) / the guardian never rescues my frozen sessions / can the janitor send commands to other claude instances / I disarmed a project and the janitor re-armed it anyway / after a global disarm the other sessions keep firing at a missing file / every project's heartbeat broke after I disarmed one / iTerm Automation channel denied vs empty how to tell them apart / channel-blocked-not-empty vs consistent-empty verdict / claude agents --json as a grant-free second view / does osascript returning zero mean blocked or truly idle / cwd-keyed roster instead of session name matching / the alarm guessed wrong about why the channel was empty / does the fleet guardian actually reach a frozen session / what does the armed column in the status table mean / the daemon.log line says would rearm but skipped why"
 ocd: 2026-07-09
-lmd: 2026-08-27
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
@@ -212,11 +212,6 @@ control flag with readers and no writers is exactly this page's `armed`-column
 mislabeling, generalized: whichever scope is never auto-cleared is where remediation
 piles up.
 
-## See also
-
-- [[janitor-daemon-process-identity]] — which interpreter the daemon runs under (the TCC-grantable identity), the restart gate that evicted our own version-less daemons, and the breaker that quarantined a healthy version for it.
-
-
 ^ATOM-O1K6-F8D8 [desc:"Since v2.8.0 the guardian runs a grant-free claude-agents-json second view when osascript returns zero - the alarm states channel-blocked-not-empty vs consistent-empty instead of guessing.", keywords: denied_vs_empty_iterm_channel second_view_claude_agents_json grant_free_enumeration channel-blocked-not-empty_verdict cwd_keyed_roster_never_name alarm_states_which_way_it_discriminated osascript_returned_zero_did_it_mean_blocked_or_idle claude_agents_--json_needs_no_session_or_grant three-way_second_view_verdict iterm-automation-blocked.flag_payload does_osascript_zero_mean_the_channel_is_empty guardian_no_longer_guesses_what_zero_means, ocd: 2026-08-08, lmd: 2026-08-08]
 
 Since v2.8.0 (TRDD-DFKEXO79) the guardian no longer has to GUESS what osascript's zero
@@ -233,6 +228,10 @@ than in-session ListAgents (25 vs 18 rows, including pane-less sessions). What t
 deliberately does NOT solve: pane RESCUE — ESC injection and the TCC grant (see the atoms
 above) still own that rung; the second view proves the channel is blocked, it cannot type
 into a pane. [^6]
+
+## See also
+
+- [[janitor-daemon-process-identity]] — which interpreter the daemon runs under (the TCC-grantable identity), the restart gate that evicted our own version-less daemons, and the breaker that quarantined a healthy version for it.
 
 ## Notes and lessons learned
 

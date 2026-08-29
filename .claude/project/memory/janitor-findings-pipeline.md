@@ -2,7 +2,7 @@
 name: janitor-findings-pipeline
 description: "where do janitor findings/drift lines actually get recorded / what is the findings ledger / where does a sev>=HIGH finding get pushed to a human / what does janitor-findings show / findings-ledger.ndjsonl format / notify.py human channel gates / how does SessionStart surface unread findings / the lint count jumped and the corpus looks like it is rotting / are two findings counts even comparable / a checker printed nothing did it even run / silence cannot distinguish clean from did-not-look / a detector reported zero findings and I assumed it was clean / how many detectors ran and over what scope / stale binary reported old counts after a fix / did the memory corpus actually decay / how to compare a lint count across linter versions / memgrep --version carries the build commit / what does findings_ledger.record do / the alert file was updated minutes ago so I trusted its numbers / mtime is fresh but the message inside is stale / I quoted a stored alert message as a current measurement / I relayed a remedy that did not apply on this host"
 ocd: 2026-08-02
-lmd: 2026-08-26
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
@@ -49,15 +49,6 @@ the EARLIER measurement could see. `memgrep --version` carries the build's commi
 (janitor#164), and `git merge-base --is-ancestor` answers "was this rule even present then" in one
 command. A trend drawn across an instrument change is not a trend.
 
-## Governed by
-
-- [[janitor-architecture]] — the architecture hub.
-
-## See also
-
-- [[janitor-detector-and-hook-roster]] — the detectors that raise the findings this pipeline records.
-
-
 ^ATOM-ZFUE-H8IZ [desc:"a checker must state what it scanned and how many findings on EVERY run — silence cannot distinguish clean from did-not-look, and that ambiguity produced three wrong conclusions in one night", keywords: detector_reported_nothing_did_it_even_run silence_is_not_a_verdict empty_output_means_clean_or_means_skipped 0_findings_printed_nothing checker_must_state_coverage stale_binary_reported_old_counts a_clean_scope_was_read_as_a_skipped_root three_wrong_conclusions_from_one_empty_stream emit_the_scope_too_not_just_the_count byte-identical_stdout_between_clean_and_did-not-run version_frozen_so_nothing_surfaced_the_skew a_checker_must_state_what_it_scanned_on_every_run, type: reference, ocd: 2026-08-05, lmd: 2026-08-05]
 
 A janitor checker MUST state its coverage on every run — what it scanned and how many findings — never rely on silence to mean clean. Empty output cannot distinguish "nothing is wrong" from "I did not look", and both a human and the heartbeat consume the same stream.
@@ -67,6 +58,14 @@ Two checkers were fixed for this on 2026-08-05. `memgrep lint` gated its summary
 Cost when it goes unfixed: a clean scope was read as a skipped root, producing a bug report, then an opposite claim that findings were being hidden, then a retraction of both — three wrong conclusions from one empty stream. The corpus never changed; only the confidence with which it was described did.
 
 So a finding count is not enough on its own: emit the SCOPE too (`0 finding(s) … (1 scope(s): LOCAL)`). A bare "0 findings" still cannot prove the right corpus was scanned.
+
+## Governed by
+
+- [[janitor-architecture]] — the architecture hub.
+
+## See also
+
+- [[janitor-detector-and-hook-roster]] — the detectors that raise the findings this pipeline records.
 
 ## Notes and lessons learned
 
