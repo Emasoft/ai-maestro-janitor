@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T21:40:00+0200
+updated: 2026-08-29T21:52:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -101,12 +101,38 @@ what the rescanned plugins contribute, this one should bring its three agents ba
 - If reload is ADDITIVE and the first loss was something else, all 36 return.
 - If nothing returns, the loss is not reload-scoped at all and the card's model is wrong.
 
+### ✅ RESULT — all 36 returned, and the mechanism is now clear
+
+```
+reload #1   Reloaded:  1 plugin  ·   1 skill ·  43 agents ·  0 hooks · 0 MCP · 0 LSP
+reload #2   Reloaded: 39 plugins · 379 skills · 79 agents · 50 hooks · 1 MCP · 9 LSP
+```
+
+**The registry is REPLACED by whatever the rescan produces — the variable is HOW MANY PLUGINS
+GET RESCANNED, and that is not stable between invocations.** Reload #1 rescanned ONE plugin (the
+only one with a pending update) and replaced the whole registry with its single agent set;
+reload #2 rescanned all 39 and restored everything, the janitor's three included.
+
+**I under-reported the first loss.** The card said "36 agent types" — but reload #1 also reported
+**0 hooks, 0 MCP servers and 0 LSP servers**, against 50 / 1 / 9 now. The session had been
+running with NO plugin hooks since 16:12. Agents were merely the visible casualty because
+spawning one fails loudly; a missing hook fails silently, which is worse and went unnoticed for
+five hours. **Read every column of that line, not the one you are looking for.**
+
+Prediction 2 was closest, but "additive" is the wrong word for it: nothing merged. A full rescan
+happened to reproduce the full set.
+
+**What this does NOT settle:** why a reload rescans 1 plugin sometimes and 39 others. The
+plausible reading is that #1 took an incremental "changed plugins only" path (fired seconds
+after `perfect-skill-suggester` updated) while #2 came after the janitor itself moved
+3.3.26 → 3.4.1. That is a hypothesis, not a measurement, and this card has already had two
+confident hypotheses fail — do not write it up as fact.
+
 ## Scope
 
-1. **Establish the harness behaviour before designing around it.** Is the replace-not-merge
-   registry a `--force` effect, a bug, or intended? One controlled reload with the agent list
-   captured before and after answers it. Do not build a workaround on top of an unverified model
-   of someone else's tool.
+1. ~~**Establish the harness behaviour before designing around it.**~~ **DONE 2026-08-29 —
+   measured, see the RESULT above. Replace-not-merge is confirmed; the variable is how many
+   plugins a given reload rescans (1 vs 39), and THAT remains unexplained.**
 
    **Static inspection is a DEAD END — do not retry it (measured 2026-08-29).** The CLI at
    `~/.local/share/claude/versions/2.1.251` is a 197 MB Mach-O binary, not readable JS. `strings`
@@ -133,6 +159,9 @@ what the rescanned plugins contribute, this one should bring its three agents ba
   a recoverable session becomes a lost one. **(2026-08-29 21:40: step 1 is now being RUN — a
   deliberate, recorded measurement with predictions written down first, not a hopeful retry.
   The difference is that this one has a before-state and cannot be rationalised afterwards.)**
+- **Do not read only the agent count on the `Reloaded:` line.** The first reload also reported
+  0 hooks / 0 MCP / 0 LSP and this card recorded only the agents, so a five-hour window with NO
+  plugin hooks went unnoticed. A missing agent fails loudly; a missing hook fails silently.
 - **Do not judge plugin health with `claude plugin list`'s Status column.** Run from `/tmp`
   during this investigation it reported **every** plugin — including ones whose hooks had just
   fired in this very session — as `✘ disabled`. It answers some narrower question than "is this
@@ -140,7 +169,10 @@ what the rescanned plugins contribute, this one should bring its three agents ba
 
 ## Acceptance
 
-- [ ] The replace-vs-merge registry behaviour is measured, not assumed, and written down.
+- [x] The replace-vs-merge registry behaviour is measured, not assumed, and written down —
+      REPLACE confirmed by a before/after with predictions committed first (`fda5d5e8`).
+- [ ] Why a reload rescans 1 plugin vs 39 is explained. Still open, and explicitly NOT to be
+      written up from the plausible-sounding incremental-path guess.
 - [x] `janitor-heartbeat-protocol.md` distinguishes *plugin absent* from *registry thin*, with a
       disk + `enabledPlugins` check, and does not send either case to `/reload-plugins` blindly.
       Done 2026-08-29, and it cost NEGATIVE bytes: the shipped-rules floor went 53,696 → 53,694 B
