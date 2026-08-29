@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T16:40:00+0200
+updated: 2026-08-29T21:40:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -76,6 +76,31 @@ That rule was written to tell a missing plugin apart from a mistyped agent name.
 asking whether the error lists any `ai-maestro-janitor:*` agents — a test that cannot see this
 third case, where the plugin is present and only the session's registry is thin.
 
+## ⏵ 2026-08-29 21:40 — CONTROLLED RELOAD, before-state recorded (scope item 1)
+
+Doing the measurement the card asks for, because the cost of NOT doing it has become concrete:
+**four** memory markers (`split`, `enrich`, `repair`, `atomize`) have now been emitted this
+session and none could run. That is no longer a hypothetical registry gap, it is a chore backlog.
+
+The hypothesis worth testing: the reload that stripped the registry rescanned exactly ONE plugin
+(`perfect-skill-suggester`, the one with an update). Since then **the janitor itself went
+3.3.26 → 3.4.1**, so a reload now should rescan the janitor — and if the registry is REPLACED by
+what the rescanned plugins contribute, this one should bring its three agents back.
+
+**BEFORE-STATE, recorded now so the after is comparable:**
+
+- 43 agent types available; **zero** `ai-maestro-janitor:*` among them.
+- `enabledPlugins` — 38 true, janitor included. Cache — `ai-maestro-janitor/3.4.1/agents/` holds
+  all three `.md` files. So: install intact, registry thin (the card's own three-branch verdict).
+- Also absent: every `claude-plugins-validation:*`, `llm-externalizer:*`, `plugin-dev:*`,
+  `pr-review-toolkit:*`, `fable-advisor:advisor`, `code-simplifier`, `code-auditor-agent`.
+
+**Predictions, so the result cannot be rationalised after the fact:**
+
+- If REPLACE-by-rescanned-set is right, the janitor's 3 agents return and most others stay gone.
+- If reload is ADDITIVE and the first loss was something else, all 36 return.
+- If nothing returns, the loss is not reload-scoped at all and the card's model is wrong.
+
 ## Scope
 
 1. **Establish the harness behaviour before designing around it.** Is the replace-not-merge
@@ -105,7 +130,9 @@ third case, where the plugin is present and only the session's registry is thin.
 
 - **Do not reload again to "fix" it** until step 1 has established what a reload does to the
   registry. Repeating the operation that caused a fault, hoping for a different outcome, is how
-  a recoverable session becomes a lost one.
+  a recoverable session becomes a lost one. **(2026-08-29 21:40: step 1 is now being RUN — a
+  deliberate, recorded measurement with predictions written down first, not a hopeful retry.
+  The difference is that this one has a before-state and cannot be rationalised afterwards.)**
 - **Do not judge plugin health with `claude plugin list`'s Status column.** Run from `/tmp`
   during this investigation it reported **every** plugin — including ones whose hooks had just
   fired in this very session — as `✘ disabled`. It answers some narrower question than "is this
