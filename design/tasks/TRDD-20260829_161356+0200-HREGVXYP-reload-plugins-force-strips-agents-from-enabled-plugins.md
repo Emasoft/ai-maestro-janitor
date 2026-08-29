@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T16:33:00+0200
+updated: 2026-08-29T16:40:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -82,6 +82,14 @@ third case, where the plugin is present and only the session's registry is thin.
    registry a `--force` effect, a bug, or intended? One controlled reload with the agent list
    captured before and after answers it. Do not build a workaround on top of an unverified model
    of someone else's tool.
+
+   **Static inspection is a DEAD END — do not retry it (measured 2026-08-29).** The CLI at
+   `~/.local/share/claude/versions/2.1.251` is a 197 MB Mach-O binary, not readable JS. `strings`
+   yields 317,926 lines of minified blobs, and the `Reloaded: ` format string sits on a line of
+   its own (11 bytes, no surrounding code) — the literals are pooled away from the logic that
+   uses them, so there is no context to slice. The only method left is the controlled reload,
+   which degrades whichever session runs it; that is why this item is still open rather than
+   merely unattempted.
 2. **Give the heartbeat rule a third branch.** Distinguish *plugin missing* from *registry thin*
    with a check that can actually tell them apart — the agent files on disk plus the
    `enabledPlugins` entry — and prescribe different remedies. Today both roads lead to
