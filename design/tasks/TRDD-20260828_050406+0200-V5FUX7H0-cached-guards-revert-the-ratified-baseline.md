@@ -33,8 +33,22 @@ only fix was to publish.
 | ai-maestro-plugin | `deletion, non_fast_forward` ❌ |
 | ai-maestro-maintainer-agent | `deletion, non_fast_forward` ❌ |
 
-**NEXT ACTION: nothing, deliberately — wait and re-measure.** Convergence is now the guards' own
+**Re-measured 30 minutes later (22:05 → 23:05): NO change, 5 repos still off-baseline** — plugin,
+maintainer-agent, visual-communicator-plugin, assistant-role-agent, autonomous-agent. That is
+expected, not a new defect, and the reason is worth writing down because "nothing happened yet"
+and "the fix does not work" look identical from the outside:
+
+**The applier runs on a 6-HOUR cadence.** `dispatch.py` registers `("branch-protection", 21600,
+CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_INTERVAL)` and only then execs
+`guard/branch_protection_apply.py`. 3.4.1 landed on this machine at **19:57 local**; the
+measurements above are ~3 h later. Every one of those sessions can still be up to 6 h from its
+next branch-protection fire. **The path is right: the cron stub execs the NEWEST cached
+`dispatch.py` (3.4.1), and `_HERE / "guard" / …` resolves the guard beside it — so a fired
+heartbeat runs the corrected payload without needing any session to `/reload-plugins`.**
+
+**NEXT ACTION: nothing, deliberately — wait ~6 h and re-measure.** Convergence is the guards' own
 job: each repo corrects itself the first time an armed session running ≥3.4.0 fires its guard.
+Do NOT read a flat measurement inside that window as the fix failing.
 Re-running the fleet apply from here is still not the move, but for the OPPOSITE reason to the
 one below — it is redundant, not futile. A session still on cached 3.3.26 would re-revert its own
 repo, so the honest completion test is per-repo, not one apply:
