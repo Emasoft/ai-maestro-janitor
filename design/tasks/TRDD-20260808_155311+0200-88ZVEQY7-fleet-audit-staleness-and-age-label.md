@@ -1,11 +1,10 @@
 ---
 trdd-id: 88ZVEQY7
 title: Fleet github-config findings served 18 days stale with no age label — sweep silence must alarm
-column: blocked
+column: published
 created: 2026-08-08T15:53:11+0200
-updated: 2026-08-13T04:43:15+0200
-blocked-by: [publish-and-github-reply-gate]
-pre-block-column: todo
+updated: 2026-08-29T22:55:00+0200
+blocked-by: []
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -110,10 +109,22 @@ assertions would have silently tested the staleness path instead of the path the
       neutering `payload_is_stale` fails the gate test; probe reverted.
 - [x] Root cause of the 18-day silence identified and recorded here — and it is NOT the one the
       card asserted; see above.
-- [ ] #244 answered when it ships — queued behind the user's publish/GitHub gate.
+- [x] #244 answered when it ships — **DONE 2026-08-29**, comment `5464613123`. Posted only after
+      verifying the claim rather than asserting it: `cda30a23` is an ancestor of the `v3.4.1` tag,
+      and `age_label` / `payload_is_stale` are present in the CACHED 3.4.1
+      `scripts/lib/github_config_audit.py` — the copy peers actually run, not this working tree.
+      The reply also carries the correction that the 18-day stamp was honest (server-absorbed
+      chore, `_read_findings` prefers the freshest payload), since the peer's next reader would
+      otherwise inherit the wrong root cause from the issue thread.
 
 ## Approval log
 
+- 2026-08-29T22:55:00+0200 — blocked → published. The gate was the publish, and v3.4.0/v3.4.1
+  shipped `cda30a23`; the outward reply to janitor#244 went out as comment `5464613123`. Every
+  acceptance box is now checked. Note the shape of the 16-day stall for next time: the blocker was
+  named `publish-and-github-reply-gate`, which is not a card id — nothing could ever mark it
+  resolved, so nothing did. A blocker that is a PHRASE rather than a reference cannot clear
+  itself, and the card sits in `blocked` until a human happens to read it.
 - 2026-08-13T02:55:00+0200 — todo → blocked. Code + tests done (full suite 14,955 passed); the
   only remaining box is the outward GitHub reply, which is gated on the user's publish decision.
   Not left in `todo` claiming workable, and not marked complete while an acceptance box is open.
