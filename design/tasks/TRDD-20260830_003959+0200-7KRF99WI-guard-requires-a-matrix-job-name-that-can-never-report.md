@@ -1,9 +1,9 @@
 ---
 trdd-id: 7KRF99WI
 title: the branch-protection guard proposes a matrix job name that can never report
-column: todo
+column: testing
 created: 2026-08-30T00:39:59+0200
-updated: 2026-08-30T00:58:00+0200
+updated: 2026-08-30T01:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -120,15 +120,23 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
 
 - [ ] **SEQUENCING**: land this BEFORE TRDD-H8WRCW0I — repairing repo resolution first turns a
       silent no-op into a fleet-wide active breakage
-- [ ] a job carrying `strategy.matrix` is NEVER emitted as a bare required context — either
-      expanded to its real per-combination names, or omitted with a logged reason
-- [ ] a `name:` containing `${{ ... }}` is never emitted verbatim as a context (belt and braces:
-      it is unsatisfiable whatever the matrix logic does)
-- [ ] a test with a PR-triggered matrix workflow fixture asserts the above, and FAILS against
-      today's code — a test that passes before the fix proves nothing here
+- [x] a job carrying `strategy.matrix` is NEVER emitted as a bare required context — OMITTED,
+      not expanded (`branch_protection_lib.py`, the job loop). Expansion was rejected: the real
+      contexts depend on `include`/`exclude`, so a subtly-wrong expansion recreates this defect
+      with different strings, and an unsatisfiable required check is strictly worse than an
+      unrequired satisfiable one
+- [x] a `name:` containing `${{ ... }}` is never emitted verbatim as a context — second guard,
+      reached by a different route (a template name on a job whose `strategy` this parser did not
+      recognise)
+- [x] a test with a PR-triggered matrix workflow fixture asserts the above, and FAILS against the
+      pre-fix code — PROVEN by running both versions on one fixture rather than assuming:
+      `OLD: [{'context': 'Lint'}, {'context': 'Test matrix'}]` vs `NEW: [{'context': 'Lint'}]`.
+      Two tests added to `tests/test_branch_protection_guard.py`
 - [ ] the fix is verified against a repo that HAS a PR-triggered matrix job, not only against this
-      one, since this one does not reproduce it
-- [ ] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
+      one, since this one does not reproduce it — the peer (AMAMA) has such a repo and offered to
+      re-measure; ask before assuming safe
+- [x] `uv run pytest -q` (guard file: 56 passed) + ruff clean + mypy clean. **Full-suite run still
+      owed** — see TRDD-CI9AC02Y for the one known suite-only failure
 
 ## Notes and lessons learned
 

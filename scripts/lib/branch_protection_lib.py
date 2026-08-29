@@ -801,7 +801,32 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
         if not isinstance(jobs, dict):
             continue
         for job_id, job_cfg in jobs.items():
+            # A MATRIX job never reports under its configured name. GitHub emits one check
+            # PER COMBINATION — `Test matrix (ubuntu-latest, 3.12)` — so requiring the bare
+            # `Test matrix` demands a context that can never arrive, and
+            # `required_status_checks` is precisely the rule no one can wait out: every
+            # non-admin PR wedges forever while the admin bypass hides it from the only
+            # account likely to look (TRDD-7KRF99WI, reported by a peer whose repo has a
+            # PR-triggered matrix job; this repo has none, so it could not see its own bug).
+            #
+            # OMITTED rather than expanded, deliberately. The real contexts depend on the
+            # matrix values including `include`/`exclude` entries, so a computed expansion
+            # that is subtly wrong recreates this defect with different strings — and an
+            # unsatisfiable required check is strictly worse than an unrequired satisfiable
+            # one. Omission loses a gate on those jobs; expansion risks wedging the repo.
+            if isinstance(job_cfg, dict) and job_cfg.get("strategy", {}) and isinstance(
+                job_cfg.get("strategy"), dict
+            ) and job_cfg["strategy"].get("matrix") is not None:
+                continue
             name = (job_cfg.get("name") if isinstance(job_cfg, dict) else None) or job_id
+            # An UNINTERPOLATED expression can never be a context either, and it reaches
+            # here by a different route than the matrix check above: `name: Build (${{
+            # matrix.asset }})` on a job whose `strategy` this parser did not recognise, or
+            # any `${{ github.* }}` template. Belt and braces — the two guards catch
+            # overlapping but not identical sets, and the failure mode they prevent is
+            # identical and unrecoverable without admin.
+            if isinstance(name, str) and "${{" in name:
+                continue
             if isinstance(name, str) and name.strip():
                 contexts.add(name.strip())
     return [{"context": ctx} for ctx in sorted(contexts)]

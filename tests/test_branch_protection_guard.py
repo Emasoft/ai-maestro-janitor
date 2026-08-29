@@ -1206,3 +1206,37 @@ def test_phase_swallows_subprocess_errors(
         sys.stdout = old
     # The phase itself never prints (the spawned script does); we only
     # care that it returned without raising.
+
+
+def test_detect_required_status_checks_OMITS_a_matrix_job(project_env: Path) -> None:
+    """TRDD-7KRF99WI. A matrix job never reports under its configured name — GitHub emits one
+    check per combination — so requiring the bare name demands a context that can never arrive
+    and wedges every non-admin PR forever. The non-matrix job beside it must still be required:
+    omitting the matrix job is the fix, dropping the gate entirely is not."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "ci.yml",
+        "name: CI\non: [pull_request]\njobs:\n"
+        "  lint:\n    name: Lint\n    runs-on: ubuntu-latest\n"
+        "  test:\n    name: Test matrix\n    runs-on: ${{ matrix.os }}\n"
+        "    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest]\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [{"context": "Lint"}]
+
+
+def test_detect_required_status_checks_OMITS_an_uninterpolated_expression(
+    project_env: Path,
+) -> None:
+    """The second guard, reached by a different route than the matrix check: a `name:` carrying
+    a `${{ ... }}` template is unsatisfiable whatever the strategy block looks like. This repo's
+    own memgrep-release.yml:35 (`Build memgrep (${{ matrix.asset }})`) is that exact shape and is
+    excluded today only because that workflow is not PR-triggered — a narrow escape, not a
+    design."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "ci.yml",
+        "name: CI\non: [pull_request]\njobs:\n"
+        "  lint:\n    name: Lint\n    runs-on: ubuntu-latest\n"
+        "  build:\n    name: Build memgrep (${{ matrix.asset }})\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [{"context": "Lint"}]
