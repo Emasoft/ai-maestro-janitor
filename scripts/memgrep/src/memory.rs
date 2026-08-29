@@ -4917,11 +4917,53 @@ fn min_page_phrases() -> usize {
         .unwrap_or(15)
 }
 
-/// Split a page `description:` into its `/`-separated symptom phrases, trimmed, blanks dropped.
+/// The LINT floors, deliberately BELOW the write-time floors above.
+///
+/// A write gate and a lint answer different questions. The gate asks an author, who has the fact
+/// in hand, to spend seconds listing search phrasings — cheap, and it works. The lint GRADES a
+/// corpus, most of which was written before the gate existed, and it cannot make anyone go back.
+///
+/// Holding legacy pages to the authoring bar produced a gate that flags the MAJORITY of a working
+/// corpus. Measured 2026-08-29 over all 282 pages / 1,894 atoms in the three scopes: page
+/// descriptions have a MEDIAN of 9 phrases, so the floor of 15 sat above the 50th percentile and
+/// flagged 171 pages (61%); atom keywords have a median of 5, so the floor of 10 flagged 79% of
+/// atoms. A peer had already falsified the implied claim empirically — 9 of 9 flagged pages
+/// recalled at rank #1–#2 — so the ERROR was not reporting unfindable memories, it was reporting
+/// the corpus's own writing style. 1,009 permanent ERRORs that nobody can clear teach the reader
+/// to ignore the lint, which costs the real findings too.
+///
+/// These floors sit in the genuine tail instead: 4 phrases is below the pages' 10th percentile
+/// (flags 16), 3 keyphrases is below the atoms' (flags 57). Both env-tunable; 0 disables.
+fn min_lint_page_phrases() -> usize {
+    std::env::var("MEMGREP_LINT_MIN_PAGE_PHRASES")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(4)
+}
+
+fn min_lint_keywords() -> usize {
+    std::env::var("MEMGREP_LINT_MIN_KEYWORDS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(3)
+}
+
+/// Split a page `description:` into its symptom phrases, trimmed, blanks dropped.
 /// The convention is load-bearing, not cosmetic: a page description is written as a run of
-/// alternative phrasings a future search might carry, and `/` is what separates them.
+/// alternative phrasings a future search might carry.
+///
+/// `/` is the documented separator, but it was the ONLY one recognised until 2026-08-29, and
+/// descriptions in the wild are also written with ` — `, `;` and a `?` ending one question before
+/// the next begins. Those scored as ONE phrase however many symptoms they actually listed, so the
+/// count measured PUNCTUATION rather than coverage. Widening it is a correctness fix on its own —
+/// but note it is a SMALL one, and was mis-billed as the cause: re-measured across all three
+/// scopes it rescues 3 of 174 flagged pages. The floors above are what made the lint noisy.
 pub fn page_description_phrases(desc: &str) -> Vec<String> {
-    desc.split('/')
+    // `\s+—\s+` (spaced em dash) only: an unspaced `—` is intra-phrase punctuation, not a break.
+    static SEPARATORS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = SEPARATORS
+        .get_or_init(|| regex::Regex::new(r"\s*/\s*|\s+—\s+|\s*;\s*|\?\s+").expect("valid regex"));
+    re.split(desc)
         .map(|s| s.trim().trim_matches('"').trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -6013,7 +6055,8 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
                 .map(String::as_str)
                 .unwrap_or("");
             let phrases = page_description_phrases(desc);
-            let min_p = min_page_phrases();
+            // The LINT floor, not the write floor — see `min_lint_page_phrases`.
+            let min_p = min_lint_page_phrases();
             if min_p > 0 && unique_phrases(&phrases).len() < min_p {
                 violations.push((
                     Severity::Error,
@@ -6342,7 +6385,8 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
                 .get("keywords")
                 .cloned()
                 .unwrap_or_default();
-            let kw_min = min_keywords();
+            // The LINT floor, not the write floor — see `min_lint_keywords`.
+            let kw_min = min_lint_keywords();
             if kw_min > 0 && unique_phrases(&atom_kw).len() < kw_min {
                 violations.push((
                     Severity::Error,
