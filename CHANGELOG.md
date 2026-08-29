@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- The compiled-component gate ran clippy on 58 gitignored third-party crates (f5c6379)
+- The new check-ignore call needed GIT_OPTIONAL_LOCKS=0 (caught by the repo's own guard) (8df4d7b)
+## [3.4.0] — 2026-08-29
+
+### Bug Fixes
+
 - **memgrep:** Detect an unclosed code fence and name it in the atom-not-found refusal (janitor#279, #277) (e5d642d)
 - **bench:** Assemble per-line first — one malformed sample was swallowing its file's remainder (3457742)
 - **security:** Concealment-directive missed every attack that hides from the RECORD (TRDD-VAWIKRK2) (5f347cb)
@@ -362,6 +368,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Reconcile 29 PROJECT pages and top up eight atoms' recall keywords (e6e2c9f)
 - Bump version to 3.4.0 (776f707)
 - Checkpoint accumulated janitor infrastructure work (0a03a0d)
+- Bump version to 3.4.0 (30d05c9)
 
 ### Performance
 
