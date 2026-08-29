@@ -103,6 +103,36 @@ can never be actionable — yet it re-emits every cadence and re-queues.
 The corpus is already documenting the loop: one of the peer's nine pages is
 `reference_janitor-consolidate-reabstain-noop`.
 
+## ⏵ 2026-08-29 21:05 — a marker fired with NO claimable dispatch behind it, and it cost 199k
+
+First dispatch run after the agent registry was restored. The agent did everything right —
+claimed first, did not self-select a scope, did not fall back to the legacy slot, stopped and
+reported. The claim step returned **exit 2**:
+
+```
+no claimable memory-maintenance dispatch in <project>/.janitor/state
+(a legacy pending slot exists but is not claimable — it is not per-dispatch)
+```
+
+**Cost of that correct null: 198,961 subagent tokens, 3 tool calls, 25 s** — to reach an answer a
+sub-second CLI call already had. Same shape as the ~208k null this card already records, so it is
+not a one-off.
+
+**Two facts this adds:**
+
+1. **The emitter fires markers for which NO per-dispatch record exists.** Not "a stale record" —
+   *none*. The heartbeat emitted `[janitor-memory-atomize]` and the claim step found nothing
+   claimable at all. Whatever the emit gate measures, it is not "a claimable dispatch exists".
+2. **A legacy pending slot is sitting in `.janitor/state` that the claim step can see and must
+   refuse** (it is not per-dispatch). It cannot be consumed and it is not being cleaned up, so
+   every claim attempt pays to rediscover it.
+
+**Correction worth keeping:** four markers were reported blocked by an unspawnable agent earlier
+this session (registry thinned by a reload, TRDD-HREGVXYP). At least this one would have
+abstained anyway. **The registry gap may have cost ZERO chore throughput** — a second cause
+masking the first is exactly how a wrong fix gets shipped, so do not credit the reload bug with
+this backlog without checking each marker.
+
 ## Scope
 
 1. ~~Find why the emit-time precheck and `memory_candidates_cli.py` disagree~~ — **DROPPED,
