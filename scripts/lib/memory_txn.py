@@ -111,6 +111,12 @@ def editor_enabled() -> bool:
 # per-scope commit flock (clone of global_state.marketplace_lock)
 # --------------------------------------------------------------------------- #
 
+# The ONE lock every out-of-scope write shares (TRDD-X4LI97IK). Deliberately NOT 16 hex chars so
+# it can never collide with a real `memory-maint-<sha16>.lock`. Byte-identical with memgrep's
+# `write_gate::OUT_OF_SCOPE_LOCK_NAME` — change both or neither.
+_OUT_OF_SCOPE_LOCK_NAME = "memory-maint-out-of-scope.lock"
+
+
 def _scope_lock_path(scope_root: Path) -> Path:
     # Machine-wide (under global_state_dir) but keyed by the scope root so two
     # passes on DIFFERENT scopes can commit in parallel while two passes on the
@@ -122,7 +128,19 @@ def _scope_lock_path(scope_root: Path) -> Path:
     # published-globally symlink) forks the lock and the two languages stop
     # excluding each other — the exact corruption class this lock exists to kill.
     # Path.resolve() is non-strict, so a not-yet-created root still resolves.
-    h = hashlib.sha256(str(Path(scope_root).resolve()).encode("utf-8")).hexdigest()[:16]
+    #
+    # A root that is NOT a scope shares ONE lock (TRDD-X4LI97IK). memgrep's `scope_root_for`
+    # falls back to a page's own parent directory when the page has no `memory` ancestor, so
+    # hashing it makes the lock key unbounded — 1,128 orphan lock files on this machine against
+    # 9 real ones, +165 in one day. Python's callers only ever pass a real scope root today, but
+    # the rule is applied on BOTH sides regardless: a discriminator that lives in one language
+    # is the same cross-language divergence TRDD-7YHT3FNK exists to prevent. All three canonical
+    # roots end in `.../memory`, so the basename is the discriminator; a `WIKIMEM_*_SCOPE_PATH`
+    # relocation to another name over-serializes onto this lock, which is the safe direction.
+    root = Path(scope_root).resolve()
+    if root.name != "memory":
+        return global_state.global_state_dir() / _OUT_OF_SCOPE_LOCK_NAME
+    h = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
     return global_state.global_state_dir() / f"memory-maint-{h}.lock"
 
 

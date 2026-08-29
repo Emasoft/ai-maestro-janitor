@@ -221,8 +221,41 @@ def test_scope_lock_path_resolves_symlinks(tmp_path: Path, monkeypatch) -> None:
     lock and the two languages stop excluding each other."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
     import memory_txn
-    real = tmp_path / "real-memory"
-    real.mkdir()
+    # The dir MUST be named `memory`: since TRDD-X4LI97IK a root with any other basename is
+    # treated as out-of-scope and collapses to the shared sentinel, so a `real-memory`/
+    # `link-memory` pair would compare two sentinels and pass no matter what resolve() did —
+    # a test that agrees with itself. Naming it `memory` keeps the hash path under test.
+    real = tmp_path / "real" / "memory"
+    real.mkdir(parents=True)
     link = tmp_path / "link-memory"
     link.symlink_to(real)
     assert memory_txn._scope_lock_path(link) == memory_txn._scope_lock_path(real)
+    assert memory_txn._scope_lock_path(real).name.startswith("memory-maint-")
+    assert memory_txn._scope_lock_path(real).name != memory_txn._OUT_OF_SCOPE_LOCK_NAME
+
+
+def test_out_of_scope_roots_share_one_lock_matching_the_rust_constant(tmp_path, monkeypatch) -> None:
+    """TRDD-X4LI97IK: a root that is not a `.../memory` scope must not mint its own lock.
+
+    memgrep's `scope_root_for` falls back to a page's own parent dir when there is no `memory`
+    ancestor, which made the machine-wide lock key unbounded (1,128 orphan files). Both languages
+    now collapse those onto ONE sentinel — and the sentinel STRING is read back out of the Rust
+    source here, because a constant duplicated across two languages is exactly the drift
+    TRDD-7YHT3FNK exists to prevent, and a hand-copied literal in this test would not notice.
+    """
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    import memory_txn
+    a = tmp_path / "notmemory"
+    b = tmp_path / "somewhere-else"
+    a.mkdir()
+    b.mkdir()
+    assert memory_txn._scope_lock_path(a) == memory_txn._scope_lock_path(b)
+    assert memory_txn._scope_lock_path(a).name == memory_txn._OUT_OF_SCOPE_LOCK_NAME
+
+    rust = (Path(__file__).resolve().parents[1] / "scripts/memgrep/src/write_gate.rs").read_text(
+        encoding="utf-8"
+    )
+    assert f'OUT_OF_SCOPE_LOCK_NAME: &str = "{memory_txn._OUT_OF_SCOPE_LOCK_NAME}"' in rust, (
+        "the Rust and Python out-of-scope lock names have drifted — they must be byte-identical "
+        "or the two languages stop excluding each other on out-of-scope writes"
+    )

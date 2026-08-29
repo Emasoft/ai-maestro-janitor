@@ -26,6 +26,11 @@ pub const STALE_MSG: &str =
 /// Overridable via `MEMGREP_LOCK_TIMEOUT_S` (see `acquire`).
 const DEFAULT_LOCK_TIMEOUT_S: u64 = 10;
 
+/// The ONE lock every out-of-scope write shares (TRDD-X4LI97IK). Deliberately NOT 16 hex chars,
+/// so it can never collide with a real `memory-maint-<sha16>.lock` and is obvious in a listing.
+/// Kept byte-identical with `memory_txn._OUT_OF_SCOPE_LOCK_NAME`.
+const OUT_OF_SCOPE_LOCK_NAME: &str = "memory-maint-out-of-scope.lock";
+
 /// Poll interval while retrying a non-blocking flock attempt inside the timeout window.
 const LOCK_POLL_INTERVAL_MS: u64 = 25;
 
@@ -144,7 +149,23 @@ fn resolve_best_effort(p: &Path) -> PathBuf {
 /// trailing slash); `scope_root.display()` here renders the same way for the paths this tool
 /// resolves (both sides run on the same machine, POSIX paths, forward slashes) — so hashing the
 /// `Display` string is the byte-identical counterpart.
+///
+/// EXCEPT for a root that is not a scope at all (TRDD-X4LI97IK). `scope_root_for` falls back to
+/// the page's own parent directory when the page has no `memory` ancestor, so hashing that parent
+/// makes the lock key UNBOUNDED — one lock file per directory ever written to outside a memory
+/// tree. Measured on this machine: 1,128 such files against 9 real ones, +165 in a single day,
+/// with no reaper and nothing that attributes them. A directory nobody will revisit buys no
+/// mutual exclusion anyone wants, so every out-of-scope write shares ONE lock instead. Bounded,
+/// and parity-safe by construction: `memory_txn._scope_lock_path` applies the same rule.
+///
+/// The discriminator is the basename, because all three canonical scope roots end in `.../memory`
+/// (see `scope_root_for`). A root relocated by `WIKIMEM_*_SCOPE_PATH` to a differently-named
+/// directory therefore shares the out-of-scope lock too — that over-serializes, which is the SAFE
+/// direction: both languages still agree, so exclusion is stricter, never weaker.
 pub fn lock_path_for(scope_root: &Path) -> PathBuf {
+    if scope_root.file_name().is_none_or(|n| n != "memory") {
+        return global_state_dir().join(OUT_OF_SCOPE_LOCK_NAME);
+    }
     let s = scope_root.display().to_string();
     let mut hasher = Sha256::new();
     hasher.update(s.as_bytes());
@@ -241,12 +262,17 @@ pub fn acquire(_scope_root: &Path) -> Result<WriteGuard> {
 pub fn acquire_two(a: &Path, b: &Path) -> Result<(WriteGuard, Option<WriteGuard>)> {
     let sa = scope_root_for(a);
     let sb = scope_root_for(b);
-    if sa == sb {
+    // Compare the LOCK PATHS, not the scope roots. Since TRDD-X4LI97IK two DISTINCT roots can map
+    // to one lock (every out-of-scope root shares `OUT_OF_SCOPE_LOCK_NAME`), and taking the same
+    // flock twice from one process is a self-deadlock that only surfaces as a timeout. Equal roots
+    // still imply equal lock paths, so this is also correct for every pre-existing case.
+    let (la, lb) = (lock_path_for(&sa), lock_path_for(&sb));
+    if la == lb {
         return Ok((acquire(&sa)?, None));
     }
     // `<=` rather than `<` is deliberate belt-and-braces: the branches are symmetric, so a tie
-    // (impossible here — distinct roots have distinct lock paths) would still take exactly one.
-    if lock_path_for(&sa) <= lock_path_for(&sb) {
+    // (impossible here — the equal case returned above) would still take exactly one.
+    if la <= lb {
         let ga = acquire(&sa)?;
         let gb = acquire(&sb)?;
         Ok((ga, Some(gb)))
@@ -406,6 +432,88 @@ mod tests {
             expected_short,
             &hex_sha256("/tmp/fixed/scope/memory")[..16],
             "sanity: the two independent hash computations must agree"
+        );
+    }
+
+    /// TRDD-X4LI97IK: the lock key must be BOUNDED. `scope_root_for` falls back to a page's own
+    /// parent when there is no `memory` ancestor, so hashing that parent minted one lock file per
+    /// directory ever written to outside a memory tree (1,128 measured). Every such root now
+    /// shares ONE lock. The assertion is on the SHAPE — two unrelated roots collapsing to one
+    /// name — because that is the property that bounds the count; a test on a single root would
+    /// pass just as well with the old per-directory hashing.
+    #[test]
+    fn out_of_scope_roots_all_share_one_bounded_lock() {
+        let _env = env_lock();
+        let state_dir = tmpdir("state-oos");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let a = lock_path_for(Path::new("/tmp/whatever/notmemory"));
+        let b = lock_path_for(Path::new("/some/entirely/other/dir"));
+        let real = lock_path_for(Path::new("/tmp/fixed/scope/memory"));
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+
+        assert_eq!(a, b, "two out-of-scope roots must collapse to ONE lock file");
+        assert_eq!(
+            a.file_name().unwrap(),
+            std::ffi::OsStr::new(OUT_OF_SCOPE_LOCK_NAME),
+            "the shared lock must be the named sentinel, not a hash"
+        );
+        assert_ne!(
+            a, real,
+            "a REAL `.../memory` scope root must keep its own per-scope lock — collapsing those \
+             too would serialize every unrelated scope on the machine"
+        );
+        // The sentinel must be unmistakable in a listing and unable to alias a real key: a real
+        // one is exactly 16 hex chars between the prefix and `.lock`.
+        assert!(
+            !OUT_OF_SCOPE_LOCK_NAME
+                .trim_start_matches("memory-maint-")
+                .trim_end_matches(".lock")
+                .chars()
+                .all(|c| c.is_ascii_hexdigit()),
+            "the sentinel must not be hex-shaped, or it could collide with a real scope's key"
+        );
+    }
+
+    /// The half of TRDD-X4LI97IK that is easy to miss: once two DISTINCT roots can share a lock,
+    /// `acquire_two` comparing ROOTS instead of LOCK PATHS would take the same flock twice from
+    /// one process and hang until `MEMGREP_LOCK_TIMEOUT_S`. A deadlock surfaces as a timeout, not
+    /// as a wrong answer, so nothing else in the suite would have caught it.
+    #[test]
+    fn acquire_two_out_of_scope_pages_does_not_self_deadlock() {
+        let _env = env_lock();
+        let state_dir = tmpdir("state-oos2");
+        let dir_a = tmpdir("oos-a");
+        let dir_b = tmpdir("oos-b");
+        std::fs::write(dir_a.join("p.md"), "a").unwrap();
+        std::fs::write(dir_b.join("p.md"), "b").unwrap();
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            // Keep the failure FAST and unambiguous: with the bug this returns Err(timeout) in a
+            // second instead of stalling the suite for the 10s default.
+            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
+        }
+
+        let got = acquire_two(&dir_a.join("p.md"), &dir_b.join("p.md"));
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+        }
+        for d in [&state_dir, &dir_a, &dir_b] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+
+        let (_ga, gb) = got.expect("two out-of-scope pages must lock without self-deadlocking");
+        assert!(
+            gb.is_none(),
+            "sharing one lock means ONE guard — a second guard on the same flock is the deadlock"
         );
     }
 
