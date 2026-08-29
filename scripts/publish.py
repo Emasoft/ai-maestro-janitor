@@ -1070,11 +1070,43 @@ def run_gate(root: Path) -> int:
     _compiled_skip = {"target", ".git", "node_modules", ".venv", "vendor",
                       "dist", "build", "obj", "zig-out", "zig-cache", ".zig-cache"}
 
+    def _git_ignored(paths):
+        """The subset of `paths` git IGNORES. Empty set when git can't answer (fail-open).
+
+        WHY THIS GATE NEEDS IT (2026-08-29): discovery was a bare `rglob` filtered only by a
+        directory-NAME skip list, so it reached into `downloads_dev/` — a gitignored scratch dir
+        holding a THIRD-PARTY crate vendored for reading — and ran `clippy -D warnings` on it.
+        Someone else's lint debt then blocked this repo's push, on code the plugin does not ship,
+        cannot fix, and must not modify (see how-to-fix-issues-of-other-projects).
+
+        `git check-ignore` is the right predicate rather than more skip-list names: this gate
+        exists for components the plugin SHIPS, git is the authority on what ships, and a name
+        list needs a new entry for every scratch dir anyone ever invents. It also keeps the
+        build-source SUBMODULE case working, which a tracked-files test would break — a
+        submodule's contents are not tracked by the parent repo, but they are not ignored either.
+        """
+        if not paths:
+            return set()
+        try:
+            proc = subprocess.run(
+                ["git", "check-ignore", "--stdin"],
+                cwd=str(root),
+                input="\n".join(str(p) for p in paths),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return set()  # fail-open: never block a push because git was unavailable
+        return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
     def _find_manifests(pattern):
-        found = [
+        candidates = [
             m for m in root.rglob(pattern)
             if not any(part in _compiled_skip for part in m.relative_to(root).parts)
         ]
+        ignored = _git_ignored(candidates)
+        found = [m for m in candidates if str(m) not in ignored and str(m.relative_to(root)) not in ignored]
         # Keep only top-level manifests: a workspace/module root covers its members, so
         # a nested manifest inside another matched manifest dir is not run standalone.
         return [m for m in found if not any(o is not m and o.parent in m.parents for o in found)]
