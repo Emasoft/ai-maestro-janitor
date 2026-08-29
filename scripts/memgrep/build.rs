@@ -73,10 +73,11 @@ fn watch_targets() -> Vec<PathBuf> {
     // exists to remove, in the one case where nothing else can catch it.
     // `symbolic-ref -q` exits non-zero on a detached HEAD, which yields None here: correct,
     // because a detached HEAD moves `HEAD` itself and is already covered above.
-    if let Some(refname) = git_output(&["symbolic-ref", "-q", "HEAD"]) {
-        if let Some(p) = git_output(&["rev-parse", "--git-path", &refname]).and_then(|s| absolutize(&s)) {
-            targets.push(p);
-        }
+    if let Some(refname) = git_output(&["symbolic-ref", "-q", "HEAD"])
+        && let Some(p) =
+            git_output(&["rev-parse", "--git-path", &refname]).and_then(|s| absolutize(&s))
+    {
+        targets.push(p);
     }
 
     // packed-refs, only when present: it carries the branch tip before the first loose ref
@@ -84,10 +85,9 @@ fn watch_targets() -> Vec<PathBuf> {
     // ABSENCE tells us nothing worth re-running for, so do not pay the always-changed tax.
     if let Some(p) =
         git_output(&["rev-parse", "--git-path", "packed-refs"]).and_then(|s| absolutize(&s))
+        && p.exists()
     {
-        if p.exists() {
-            targets.push(p);
-        }
+        targets.push(p);
     }
 
     targets

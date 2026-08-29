@@ -101,10 +101,10 @@ fn marker_field_value(marker: &str, key: &str) -> Option<String> {
     let inside = &marker[open + 1..close];
     for seg in split_top_level_commas_local(inside) {
         let seg_t = seg.trim();
-        if let Some(rest) = seg_t.strip_prefix(key) {
-            if let Some(v) = rest.trim_start().strip_prefix(':') {
-                return Some(v.trim().trim_matches('"').to_string());
-            }
+        if let Some(rest) = seg_t.strip_prefix(key)
+            && let Some(v) = rest.trim_start().strip_prefix(':')
+        {
+            return Some(v.trim().trim_matches('"').to_string());
         }
     }
     None
@@ -239,7 +239,7 @@ fn merge_topic_compute(
         let (marker, body) = block.split_once('\n').unwrap_or((block.as_str(), ""));
         blocks.push((marker.to_string(), body.to_string()));
         for r in &ctx.footnote_refs {
-            if r.line >= marker_idx + 1 && r.line <= last_idx + 1 && seen_labels.insert(r.label.clone()) {
+            if r.line > marker_idx && r.line <= last_idx + 1 && seen_labels.insert(r.label.clone()) {
                 all_labels.push(r.label.clone());
             }
         }
@@ -252,10 +252,9 @@ fn merge_topic_compute(
     // label moves wholesale here — unlike `migrate`, the WHOLE source page is being retired, so
     // no other atom on --from is left behind to keep a def's OTHER user alive.
     let mut label_map: BTreeMap<String, String> = BTreeMap::new();
-    let mut next = next_footnote_label(into_text);
-    for lbl in &all_labels {
-        label_map.insert(lbl.clone(), next.to_string());
-        next += 1;
+    let first = next_footnote_label(into_text);
+    for (offset, lbl) in all_labels.iter().enumerate() {
+        label_map.insert(lbl.clone(), (first + offset as u32).to_string());
     }
 
     // Splice every atom into --into, before its footer boundary, in source order.

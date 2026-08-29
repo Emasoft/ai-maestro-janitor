@@ -8653,8 +8653,11 @@ mod tests {
 
     #[test]
     fn scope_ranks_encode_the_upward_only_order() {
-        assert!(SCOPE_LOCAL.rank < SCOPE_PROJECT.rank);
-        assert!(SCOPE_PROJECT.rank < SCOPE_USER.rank);
+        // Compared through `cmp` rather than `<`: both ranks are consts, so `assert!(a < b)`
+        // is a constant expression clippy rejects (assertions_on_constants) — it cannot tell a
+        // deliberate invariant check from a typo that always passes. Same assertion, evaluated.
+        assert_eq!(SCOPE_LOCAL.rank.cmp(&SCOPE_PROJECT.rank), std::cmp::Ordering::Less);
+        assert_eq!(SCOPE_PROJECT.rank.cmp(&SCOPE_USER.rank), std::cmp::Ordering::Less);
     }
 
     #[test]
@@ -8924,6 +8927,10 @@ mod tests {
     }
 
     #[test]
+    // Capitalised on purpose — the name carries the invariant, and a failing test name is the
+    // first thing a reader sees. Scoped to this one fn rather than the whole module so an
+    // ACCIDENTAL non-snake-case name elsewhere in `tests` is still caught.
+    #[allow(non_snake_case)]
     fn a_marker_mentioned_in_PROSE_does_not_declare_an_atom() {
         // The bug this anchoring fixes: the four `wikimem-atom-block-properties*` USER pages
         // DOCUMENT the grammar, and every mention of it was being indexed as a real atom — four of
@@ -9949,7 +9956,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // per-page lint in the corpus would recite the whole scope's reciprocity debt.
         let vb = lint_paths(std::slice::from_ref(&b), false);
         // Two roots resolved for two files in one scope ⇒ the coverage label says ONE.
-        let label = cross_page_coverage_label(&[a.clone()]);
+        let label = cross_page_coverage_label(std::slice::from_ref(&a));
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(

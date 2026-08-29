@@ -522,8 +522,7 @@ pub(crate) struct AtomSplitPlan<'a> {
 fn strip_trailing_anchors(line: &str) -> (String, Vec<String>) {
     let mut rest = line.trim_end().to_string();
     let mut labels: Vec<String> = Vec::new();
-    loop {
-        let Some(close) = rest.strip_suffix(']') else { break };
+    while let Some(close) = rest.strip_suffix(']') {
         let Some(open) = close.rfind("[^") else { break };
         // `[^` must open the LAST bracket group and the label must be non-empty and bracket-free,
         // or this is ordinary prose that happens to end in `]`.
@@ -564,13 +563,13 @@ fn split_atom_build(text: &str, atom: &str, at: &str, plan: &AtomSplitPlan<'_>) 
         n.checked_sub(1)
             .ok_or_else(|| anyhow::anyhow!("--at line number must be >= 1"))?
     } else {
-        let mut found = None;
-        for i in (marker_idx + 1)..=body_last {
-            if lines[i].contains(at) {
-                found = Some(i);
-                break;
-            }
-        }
+        let found = lines
+            .iter()
+            .enumerate()
+            .skip(marker_idx + 1)
+            .take(body_last.saturating_sub(marker_idx))
+            .find(|(_, line)| line.contains(at))
+            .map(|(i, _)| i);
         found.ok_or_else(|| {
             anyhow::anyhow!(
                 "--at `{at}` does not occur in atom `{atom}`'s body — pass a literal substring \

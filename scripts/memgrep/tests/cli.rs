@@ -1,6 +1,13 @@
 //! End-to-end tests: run the real `memgrep` binary against a committed fixture and assert the
 //! structural filters behave. Uses `CARGO_BIN_EXE_memgrep` (cargo points it at the built binary),
 //! so no extra dev-deps and we exercise the actual CLI a user/agent would invoke.
+//!
+//! Test names here deliberately SHOUT the invariant under test — `the_LINK_LAW_still_applies…`,
+//! `…broken_by_RECENCY_not_alphabetical_path_order`. The capitals are the point: a failing test
+//! name is the first thing a reader sees, and these names carry the rule rather than a label.
+//! Nothing outside this file calls them, so the naming convention costs no caller anything.
+
+#![allow(non_snake_case)]
 
 use std::process::Command;
 
