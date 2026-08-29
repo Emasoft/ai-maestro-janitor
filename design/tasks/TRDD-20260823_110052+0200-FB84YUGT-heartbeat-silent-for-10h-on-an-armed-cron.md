@@ -1,10 +1,10 @@
 ---
 trdd-id: FB84YUGT
 title: the heartbeat went silent for 10h20m on an armed cron and nothing noticed
-column: testing
+column: complete
 blocked-by: []
 created: 2026-08-23T11:00:52+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-08-29T22:34:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -311,3 +311,21 @@ third turned out to ask for something that already exists — that outcome is th
 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
+- 2026-08-29T22:34:00+0200 — COMPLETE. All four acceptance boxes re-verified against the tree as
+  it stands, not against the card's own account of itself:
+  - the escalation exists and is human-visible — `scripts/daemon.py:1461`
+    `code="FLEET-DECLINE-STALL"`, gated by `_STALL_ESCALATE_S` (`:120`, `:1453`) off a
+    `sig_since` that only restarts when the decline signature CHANGES (`:1443`);
+  - the remedy text names what is blocking (`daemon.py:136-142`, wired in at `:1456-1465`);
+  - the tests assert BOTH directions, and assert counts rather than presence —
+    `tests/test_daemon_session_liveness.py:600` `len(stall_rows) == 1` (F9 dedupe held) and
+    `:602` `len(findings) == 1` (escalated exactly once), with the inverse case at `:613`
+    proving an unchanged decline does not restart its own clock;
+  - the three gates pass clean: `uv run pytest -q` → 15912 passed, 1 skipped; `ruff check
+    scripts tests` → All checks passed; `mypy scripts/` → no issues in 494 source files.
+
+  NOT ARCHIVED, deliberately, and this is the exception the archival protocol does not cover
+  well: 293 terminal cards already sit in `design/tasks/`, and TRDD-63WVIWB4 owns the pending
+  decision on which of them relocate and how. Archiving this one card alone would make it the
+  single outlier in a directory of 293 identical cases — a fresh inconsistency dressed as
+  compliance. It archives with the rest, under 63WVIWB4's decision.
