@@ -3,7 +3,7 @@ trdd-id: X4LJFTB4
 title: Publish 3.4.0 is blocked at the push by GitHub push protection on two synthetic test fixtures
 column: todo
 created: 2026-08-27T16:06:31+0200
-updated: 2026-08-28T21:40:00+0200
+updated: 2026-08-29T16:12:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -27,6 +27,19 @@ relevant-rules: []
 Both blockers are synthetic test fixtures, not credentials, and both resolutions are the OWNER's
 to make — one is a repo security setting, the other is history.** Nothing here is for an agent
 to "fix" unattended.
+
+### The scale, measured 2026-08-29 — this is not one release, it is eight days
+
+`origin/main` is frozen at `ce03b9cb` (v3.3.26, **2026-08-21 02:23**) — the last push that
+succeeded. HEAD is **357 commits ahead, 0 behind**. The blocking commit `9690e5fd` is only the
+**16th** past `origin/main`, so it has gated the 341 commits behind it as well: nothing written
+since 02:32 on 2026-08-21 has ever left this machine.
+
+That number was misrecorded as "14" and then "16" in the session handoff for days — 16 is the
+distance to the BLOCKING commit, not to HEAD, and reading it as the backlog made an eight-day
+freeze look like an afternoon's work at risk. Measure it, never recall it:
+`git rev-list --left-right --count @{u}...HEAD` (and `git ls-remote origin refs/heads/main`
+when the local `origin/main` ref may itself be stale — here it was last fetched 2026-08-27).
 
 ### What is green (publish attempt 5, 2026-08-27)
 
