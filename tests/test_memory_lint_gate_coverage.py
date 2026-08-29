@@ -52,6 +52,31 @@ import memory_content_precheck as mcp  # noqa: E402
 
 needs_memgrep = pytest.mark.skipif(MEMGREP_BIN_PATH is None, reason="memgrep binary unavailable")
 
+
+@pytest.fixture(autouse=True)
+def _pin_memgrep_for_the_gates(monkeypatch):
+    """Point the CHORE GATES at the same binary this module already resolved.
+
+    Every test here computes findings with `_lint_codes(MEMGREP_BIN_PATH, ...)` — an explicit
+    path, from conftest's `find_or_build_memgrep()`, which BUILDS the crate when needed. But
+    `content_has_work` resolves its own binary through `user_mem_lib.find_memgrep()`
+    (`MEMGREP_BIN` → PATH → `~/.cargo/bin`), and that is a DIFFERENT lookup. So the module
+    guarded on one binary and then exercised a code path that hunts for another.
+
+    Where the two disagree the test reports on the ENVIRONMENT, not the code — and they
+    disagree exactly where it hurts: on a dev box with `cargo install --path scripts/memgrep`
+    both resolve and it passes, while CI's Tests job never installs memgrep (only the separate
+    `memgrep build+stage smoke` job builds it), so every gate answered "no work" and two tests
+    failed on GREEN code. Measured 2026-08-29 by reproducing it locally with `~/.cargo/bin`
+    stripped from PATH: same two failures, same messages.
+
+    The gate's own error text already named the lever — "check MEMGREP_BIN actually knows the
+    slug" — so pinning it here is what the assertion always assumed. This is NOT a way of
+    hiding a missing install: `needs_memgrep` still SKIPS when no binary can be found at all.
+    """
+    if MEMGREP_BIN_PATH:
+        monkeypatch.setenv("MEMGREP_BIN", MEMGREP_BIN_PATH)
+
 # Every finding is built as `violations.push((Severity::X, path, line, msg, "code"))` — the
 # call may close with `));` (a plain statement) or `)),` (a match-arm expression, used where
 # the code itself is chosen by a ternary, e.g. `if key == "ocd" { "atom-no-ocd" } else {
