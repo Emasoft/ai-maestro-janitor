@@ -1095,6 +1095,11 @@ def run_gate(root: Path) -> int:
                 capture_output=True,
                 text=True,
                 timeout=60,
+                # READ-ONLY git call → GIT_OPTIONAL_LOCKS=0 (janitor#245). Without it this
+                # can take .git/index.lock for an optional stat-cache write-back and kill
+                # this very pipeline's later commit/push. The repo's own guard test caught
+                # the first draft of this call missing it.
+                env=_readonly_git_env(),
             )
         except (OSError, subprocess.SubprocessError):
             return set()  # fail-open: never block a push because git was unavailable
