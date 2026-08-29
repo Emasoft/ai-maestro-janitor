@@ -1,8 +1,8 @@
 ---
 name: plugin-cache-install-integrity
-description: "the installed plugin is missing agents commands or hooks / Agent type not found but skills load fine / plugin cache incomplete after an update / how to verify an install against its release tag / cache extraction interrupted killed partway / hand-patched cache / every tool blocked machine-wide PreToolUse hook Errno 2 missing hook script / reload reports load errors after parking a quarantined broken copy inside a scanned cache tree / an install was killed by memory pressure not a bad release / how to diff a cache directory against a release tag / is a missing manifest-sha256.json a real finding / never hand-patch the plugin cache / a pid file in the cache dir looks suspicious is it damage / why does the plugin loader try to load a quarantined broken copy / how to root-cause a partially installed plugin / a quarantined broken plugin copy caused fleet-wide load errors / quarantine directory must sit outside every scanned tree"
+description: "the installed plugin is missing agents commands or hooks / Agent type not found but skills load fine / agents disappeared after a plugin reload / N agent types no longer available / agents missing but the plugin is installed and enabled / plugin cache incomplete after an update / how to verify an install against its release tag / cache extraction interrupted killed partway / hand-patched cache / every tool blocked machine-wide PreToolUse hook Errno 2 missing hook script / reload reports load errors after parking a quarantined broken copy inside a scanned cache tree / an install was killed by memory pressure not a bad release / how to diff a cache directory against a release tag / is a missing manifest-sha256.json a real finding / never hand-patch the plugin cache / a pid file in the cache dir looks suspicious is it damage / why does the plugin loader try to load a quarantined broken copy / how to root-cause a partially installed plugin / a quarantined broken plugin copy caused fleet-wide load errors / quarantine directory must sit outside every scanned tree"
 ocd: 2026-08-07
-lmd: 2026-08-19
+lmd: 2026-08-29
 metadata:
   node_type: memory
   type: project
@@ -41,6 +41,27 @@ the USER-scope page a-guard-disarmed-by-the-event-it-guards); since v2.7.2 an in
 with no manifest is a FINDING naming the interrupted-install cause. See
 [[claude-code-plugin-rollout-staleness]] for the sibling failure: a COMPLETE cache whose
 already-loaded skills stay stale until a new session. [^1]
+
+
+^ATOM-LFPX-9QX5 [desc: "Agents missing with an INTACT install: /reload-plugins replaces the session agent registry, so a reload for one plugin drops other plugins' agents — restart, do not reinstall", keywords: agents_missing_after_reload agent_type_not_found_but_plugin_installed agent_types_no_longer_available reload-plugins_dropped_agents janitor_agent_not_found fable-advisor_advisor_not_found plugin_unavailable_but_enabledPlugins_true 43_agents_reloaded reload_replaced_agent_registry do_not_reinstall_a_good_cache thin_session_registry restart_restores_agents claude_plugin_list_says_disabled_for_everything enabledPlugins_is_the_reliable_source, trdd: TRDD-HREGVXYP, ocd: 2026-08-29, lmd: 2026-08-29]
+
+`/reload-plugins` REPLACES this session's agent registry rather than merging into it, so a
+reload fired for ONE updated plugin drops the agents of every plugin it did not rescan — a
+DIFFERENT cause of this page's symptom than a damaged cache, with a different remedy.
+
+MEASURED 2026-08-29 (Claude Code 2.1.251): a reload for a single plugin reported
+`1 plugin · 1 skill · 43 agents` and the harness dropped **36 agent types across 9 ENABLED
+plugins**, including `ai-maestro-janitor:janitor-{memory-subconscious,repair,security}-agent`,
+`fable-advisor:advisor`, and every `claude-plugins-validation:*` agent.
+
+TELL IT APART FROM A BROKEN INSTALL with two cheap reads: `enabledPlugins` in
+`~/.claude/settings.json`, and the plugin cache's `agents/` dir. **Both intact ⇒ the install is
+fine and only the session's registry is thin** — a RESTART restores it. Do NOT reinstall or
+tag-diff the cache (this page's remedy for the other cause: you would be diffing a good cache
+against itself), and do NOT `/reload-plugins` again — that is the cause.
+
+`claude plugin list`'s Status column is NOT a check here: run from outside the project it
+reported all 76 plugins `✘ disabled`, including ones whose hooks had fired that same turn.
 
 ## Notes and lessons learned
 
