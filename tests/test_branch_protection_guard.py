@@ -1240,3 +1240,53 @@ def test_detect_required_status_checks_OMITS_an_uninterpolated_expression(
         "  build:\n    name: Build memgrep (${{ matrix.asset }})\n    runs-on: ubuntu-latest\n",
     )
     assert bpl.detect_required_status_checks(project_env) == [{"context": "Lint"}]
+
+
+def test_detect_repo_slug_falls_back_to_the_git_remote(tmp_path: Path) -> None:
+    """TRDD-H8WRCW0I. With NO manifest at the resolved root, the applier used to return None and
+    gate 3 declined forever — while the detector, resolving via `gh repo view` (the origin
+    remote), happily filed findings against the same repo. The two halves disagreed about which
+    repo they were looking at; the fallback reconciles them."""
+    import subprocess
+
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    subprocess.run(["git", "init", "-q", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin",
+         "https://github.com/Emasoft/ai-maestro-janitor.git"],
+        cwd=tmp_path, check=True,
+    )
+    assert not (tmp_path / ".claude-plugin" / "plugin.json").exists()
+    assert bpl.detect_repo_slug(tmp_path) == "Emasoft/ai-maestro-janitor"
+
+
+def test_detect_repo_slug_fallback_accepts_an_ssh_remote(tmp_path: Path) -> None:
+    """A repo cloned over SSH is not a different repo. A fallback that only understood https
+    would decline on it and reproduce the same silent no-op this card exists to remove."""
+    import subprocess
+
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    subprocess.run(["git", "init", "-q", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin",
+         "git@github.com:Emasoft/ai-maestro-janitor.git"],
+        cwd=tmp_path, check=True,
+    )
+    assert bpl.detect_repo_slug(tmp_path) == "Emasoft/ai-maestro-janitor"
+
+
+def test_detect_repo_slug_manifest_WINS_over_a_divergent_remote(project_env: Path) -> None:
+    """The manifest is a deliberate declaration of which repo a plugin belongs to; `origin` is
+    whatever the clone happens to point at — a fork, a mirror, a temporary remote. The fallback
+    is for 'nobody declared', never an override of 'somebody did'."""
+    import subprocess
+
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _make_plugin_manifest(project_env, "https://github.com/Emasoft/ai-maestro-janitor")
+    subprocess.run(["git", "init", "-q", "."], cwd=project_env, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin",
+         "https://github.com/someone-else/a-fork.git"],
+        cwd=project_env, check=True,
+    )
+    assert bpl.detect_repo_slug(project_env) == "Emasoft/ai-maestro-janitor"

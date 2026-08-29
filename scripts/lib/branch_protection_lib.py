@@ -475,23 +475,59 @@ def baseline_ruleset_payloads(
 _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
-def detect_repo_slug(plugin_root: Path) -> str | None:
-    """Read `repository` from `.claude-plugin/plugin.json` and return
-    the `owner/repo` slug. Returns None when the manifest is missing,
-    unparseable, or the URL doesn't match a github.com repo."""
-    manifest = plugin_root / ".claude-plugin" / "plugin.json"
-    if not manifest.is_file():
+def _slug_from_git_remote(root: Path) -> str | None:
+    """`owner/repo` from the git origin remote at `root`, or None.
+
+    Accepts BOTH URL shapes git actually produces — `https://github.com/o/r(.git)` and
+    `git@github.com:o/r(.git)` / `ssh://git@github.com/o/r` — because a repo cloned over SSH
+    is not a different repo, and a resolver that only reads https silently declines on it.
+    """
+    proc = _state.run_subprocess(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        timeout=10,
+        detector_name="branch-protection",
+    )
+    if proc is None or proc.returncode != 0:
         return None
-    try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    url = str(data.get("repository", "") or "")
-    m = re.match(r"^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    url = (proc.stdout or "").strip()
+    m = re.match(r"^(?:https?://|ssh://)?(?:[^@/]+@)?github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
     if not m:
         return None
     slug = m.group(1)
     return slug if _REPO_RE.match(slug) else None
+
+
+def detect_repo_slug(plugin_root: Path) -> str | None:
+    """The `owner/repo` slug: `.claude-plugin/plugin.json` first, then the git origin remote.
+
+    THE MANIFEST ALONE WAS NOT ENOUGH (TRDD-H8WRCW0I). The DETECTOR half of branch protection
+    resolves the repo with `gh repo view` — i.e. from the cwd's origin remote — while this, the
+    APPLIER half, read only the manifest at the resolved project root. Nothing reconciled them,
+    so on any layout where that root has no `.claude-plugin/plugin.json` (a repo nested under a
+    workspace parent, a non-plugin project, a manifest one level down) the detector filed
+    findings forever and the applier could never act: the janitor reported a problem it was
+    structurally unable to fix.
+
+    Measured in the wild before this fallback existed — a peer's applier log carried
+    `skip: cannot resolve owner/repo slug from plugin.json` four times a day for days while its
+    detector was filing real issues against the very repo it could not name.
+
+    The manifest stays FIRST and authoritative: it is a deliberate declaration of which repo a
+    plugin belongs to, whereas `origin` is whatever the clone happens to point at (a fork, a
+    mirror, a temporary remote). The remote is the fallback for "nobody declared", not an
+    override of "somebody did".
+    """
+    manifest = plugin_root / ".claude-plugin" / "plugin.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        url = str(data.get("repository", "") or "")
+        m = re.match(r"^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", url)
+        if m and _REPO_RE.match(m.group(1)):
+            return m.group(1)
+    return _slug_from_git_remote(plugin_root)
 
 
 def gh_available() -> bool:

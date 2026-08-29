@@ -1,9 +1,9 @@
 ---
 trdd-id: H8WRCW0I
 title: the branch-protection detector and applier identify the repo by different mechanisms so one can fire while the other is permanently inert
-column: todo
+column: dev
 created: 2026-08-30T00:46:14+0200
-updated: 2026-08-30T00:46:14+0200
+updated: 2026-08-30T01:22:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -75,8 +75,12 @@ heartbeat has no way to learn it has never once applied.
 
 ## Acceptance
 
-- [ ] the applier's repo resolution matches the detector's, or falls back to it — a git-remote
-      fallback in `detect_repo_slug`, or the detector's `gh repo view` result passed through
+- [x] the applier's repo resolution matches the detector's, or falls back to it — `detect_repo_slug`
+      now falls back to `_slug_from_git_remote` (origin, accepting BOTH https and ssh shapes,
+      since a repo cloned over SSH is not a different repo). Manifest stays FIRST and
+      authoritative: it is a deliberate declaration; `origin` is whatever the clone points at.
+      PROVEN load-bearing against HEAD on one fixture — `OLD: None` vs
+      `NEW: Emasoft/ai-maestro-janitor`. Three tests added, incl. manifest-beats-a-divergent-remote
 - [ ] an unresolvable slug on a project that HAS a GitHub remote raises a FINDING, not just a log
       line — "I cannot identify this repo" is a real condition, not routine
 - [ ] the skip does not advance the `last-run` stamp, OR the stamp is not the health signal —
