@@ -757,3 +757,53 @@ def test_every_skill_description_stays_under_the_frontmatter_token_cap():
         f"skill descriptions over the cap ({_SKILL_DESC_TOKEN_CAP}): {over}. "
         "A description states WHEN to invoke the skill; move the how/why into the body."
     )
+
+
+def test_missing_agents_branch_never_prescribes_the_reload_that_causes_it():
+    """The memory/ticket dispatch row must tell a THIN REGISTRY apart from a MISSING PLUGIN,
+    and must not answer the thin-registry case with `/reload-plugins`.
+
+    TRDD-HREGVXYP, measured 2026-08-29: one `/reload-plugins --force` fired for a single
+    updated plugin dropped 36 agent types across nine ENABLED plugins — the janitor's own
+    three dispatch agents among them — while every agent file stayed on disk and
+    `enabledPlugins` stayed untouched. The rule's old text keyed the diagnosis solely on
+    "the error lists NO ai-maestro-janitor:* agents" and concluded "the PLUGIN is
+    unavailable ... try /reload-plugins". Every clause of that antecedent is true after a
+    reload strips the registry, so the rule diagnosed an install failure that did not exist
+    and prescribed the operation that produced the symptom.
+
+    This pins the fix in both directions, because either half can rot back on its own:
+    the two discriminating reads must be NAMED (without them there is no third branch to
+    take), and the reload must not be prescribed inside this row (with it, an agent
+    following the rule faithfully loops on the cause).
+    """
+    row = next(
+        line
+        for line in (_PROJECT_ROOT / "rules" / "janitor-heartbeat-protocol.md")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if "janitor-memory-consolidate" in line
+    )
+    _, _, verdict = row.partition("Both names fail")
+    assert verdict, "the missing-agents branch vanished from the dispatch row"
+
+    for probe in ("enabledPlugins", "agents/"):
+        assert probe in verdict, (
+            f"the missing-agents branch no longer names `{probe}` — without both reads there "
+            "is no way to tell a thin session registry from a stale install, and the reader "
+            "falls back to the wrong one."
+        )
+    # A bare `"reload-plugins" not in verdict` was the first draft and it FAILED on the correct
+    # text, because the fix's whole point is to name the reload in order to forbid it. A guard
+    # that reddens on correct writing gets deleted, so assert the POLARITY, not the mention.
+    assert "do NOT `/reload-plugins`" in verdict, (
+        "the missing-agents branch no longer forbids the reload. Naming it is not enough — a "
+        "reload is what EMPTIES the agent registry (TRDD-HREGVXYP), so the reader has to be "
+        "told not to reach for it. A restart restores the registry; the reload does not."
+    )
+    for prescription in ("try `/reload-plugins`", "run `/reload-plugins`"):
+        assert prescription not in verdict, (
+            f"the missing-agents branch prescribes the reload again ({prescription!r}). That is "
+            "the pre-HREGVXYP text: it sends an agent following the rule faithfully straight "
+            "back into the operation that produced the symptom."
+        )

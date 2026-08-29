@@ -4,7 +4,7 @@ title: reload-plugins --force strips agents from plugins it did not reload and t
 column: backburner
 blocked-by: []
 created: 2026-08-29T16:13:56+0200
-updated: 2026-08-29T16:26:00+0200
+updated: 2026-08-29T16:33:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -120,8 +120,13 @@ third case, where the plugin is present and only the session's registry is thin.
       missing install. Done AHEAD of scope item 1 deliberately: the skill asserted "nothing is
       lost", and that is false as measured regardless of WHY the registry is replaced. A false
       assertion in a skill an agent follows unattended does not get to wait for a root cause.
-- [ ] Regression test: a dispatch marker whose agent is unregistered but whose plugin is
+- [x] Regression test: a dispatch marker whose agent is unregistered but whose plugin is
       installed reports "registry thin", not "plugin unavailable".
+      Done 2026-08-29 — `test_missing_agents_branch_never_prescribes_the_reload_that_causes_it`
+      (37 passed). It pins BOTH halves, since either can rot alone: the two discriminating
+      reads must be named, and the reload must not be prescribed in that row. **Verified it
+      fails on the pre-fix text** — all four assertions trip. A regression test never run
+      against the bug it describes is a decoration.
 
 ## Notes and lessons learned
 
