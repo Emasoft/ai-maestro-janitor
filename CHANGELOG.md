@@ -9,10 +9,12 @@ All notable changes to this project will be documented in this file.
 - The compiled-component gate ran clippy on 58 gitignored third-party crates (f5c6379)
 - The new check-ignore call needed GIT_OPTIONAL_LOCKS=0 (caught by the repo's own guard) (8df4d7b)
 - **memgrep:** Clippy -D warnings is clean — 18 errors the build gate never reached (c7f0bfa)
+- The shell-lint gate linted 311 gitignored scripts and blocked on a backup (09cb232)
 
 ### Miscellaneous Tasks
 
 - Bump version to 3.4.0 (b07b955)
+- Bump version to 3.4.0 (1571c0f)
 ## [3.4.0] — 2026-08-29
 
 ### Bug Fixes
