@@ -1,6 +1,6 @@
 ---
 trdd-id: X4LI97IK
-title: Per-scope lock files accumulate forever in the real DATA dir and the write-guard excuses them
+title: Per-scope lock files accumulate forever in the real DATA dir and nothing names the producer
 column: backburner
 blocked-by: []
 created: 2026-08-29T20:28:57+0200
@@ -89,9 +89,8 @@ conclusion survives, but the number is a floor, not a measurement.
 ## Scope
 
 1. **Attribute the hashes.** ~~Are the roots tmp paths or real ones?~~ **Half done — see the
-   attribution section: 1,099 of 1,128 match no existing root, but the test hypothesis is
-   FALSIFIED for the two modules that drive the txn core.** Remaining: a full-suite snapshot,
-   then instrumentation of `_scope_lock_path` if that comes back zero too.
+   attribution section: 1,099 of 1,128 match no existing root, and the TEST hypothesis is dead
+   (full suite, delta 0).** Remaining: instrument `_scope_lock_path` to log the root it hashed.
 2. ~~**If tests: give them their own state dir.**~~ **VOID — the tests are innocent.** Whatever
    the producer turns out to be, the fix is at ITS layer: either it should not be minting scope
    roots that never persist, or the lock for an ephemeral root belongs beside that root rather
@@ -122,11 +121,14 @@ conclusion survives, but the number is a floor, not a measurement.
 
 ## Notes and lessons learned
 
-- 2026-08-29 — **A guard with a correct exemption is where leaks hide.** The write-guard names
-  the shared DATA dir, sees the mutations, and excuses them because a live daemon legitimately
-  writes there. Every clause of that is true, and the net effect is that a real test leak reads
-  as normal operation. **When a check has an escape hatch, ask what a genuine defect looks like
-  as it goes through the hatch** — here, identical to the healthy case.
+- 2026-08-29 — **I read a guard's escape hatch as a blind spot, and the guard was simply RIGHT.**
+  The write-guard said "a LIVE janitor actor, not a test leak"; I filed that as an exemption
+  swallowing a real leak, and wrote a lesson to that effect. The full-suite probe then proved the
+  guard correct: these ARE live-actor writes. **A check whose verdict you distrust deserves a
+  probe before it deserves a lesson** — I had the probe available the whole time and wrote the
+  conclusion first. What survives is smaller and true: "a live actor did it" is the CEILING of
+  attribution here, so a component minting 165 orphan locks a day is indistinguishable from
+  healthy operation, and nothing anywhere names it.
 - 2026-08-29 — **Found while investigating something else entirely** (an agent-dispatch marker
   that could not run). The count was visible in one `ls`, and nobody had looked because nothing
   had ever failed. Zero-byte files raise no alarm anywhere — no disk pressure, no error, no test.
