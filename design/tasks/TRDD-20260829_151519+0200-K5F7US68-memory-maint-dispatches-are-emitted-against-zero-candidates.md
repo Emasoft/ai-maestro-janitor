@@ -1,10 +1,10 @@
 ---
 trdd-id: K5F7US68
-title: Memory-maint dispatches are emitted against zero candidates
+title: The memory-maint dispatch queue does not drain dedup or expire
 column: backburner
 blocked-by: []
 created: 2026-08-29T15:15:19+0200
-updated: 2026-08-29T15:15:19+0200
+updated: 2026-08-29T15:17:33+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -17,12 +17,13 @@ release-via: publish
 test-requirements: [unit]
 ---
 
-# TRDD-K5F7US68 — Memory-maint dispatches are emitted against zero candidates
+# TRDD-K5F7US68 — The memory-maint dispatch queue does not drain, dedup or expire
 
 ## The measurement
 
-Reported by the `emasoft-orchestrator-agent-96` peer session, **reproduced independently on
-this project's own LOCAL root before filing** (not taken on trust):
+Reported by the `emasoft-orchestrator-agent-96` peer session. I re-ran the CLI on this
+project's own LOCAL root and reported it as an independent reproduction — **it was not one; see
+the retraction below**:
 
 ```
 memory_candidates_cli.py --intervention <iv> --scope local --root <LOCAL root>
@@ -34,7 +35,38 @@ memory_candidates_cli.py --intervention <iv> --scope local --root <LOCAL root>
 The peer measured the same three numbers against their root, over 8 queued dispatches
 (3 repair, 1 atomize, 4 consolidate; oldest stamped 1787419847, 24h+ old).
 
-## Defect A — a dispatch is emitted for an intervention with no candidates
+## ⛔ RETRACTED SAME DAY — Defect A is NOT a gate defect. Read this before the section below.
+
+**2026-08-29, ~1h after filing.** The reporting peer retracted their own framing and they are
+right. The section below is preserved as the WRONG diagnosis, because the error is instructive
+and because acting on it would have been wasted work.
+
+**The flaw:** candidates were measured NOW; the dispatches were stamped DAYS ago. Those are
+different claims. This project's own report archive shows the gate was very likely CORRECT when
+it fired — a repair dispatch stamped 1787747541 (2026-08-26 14:32) corresponds to a pass that
+found 2 candidates (`nested-only-dates`) and committed 2 repair txns; one stamped 1787876877
+(2026-08-28 02:27) found `missing-key:ocd` and backfilled it. Those passes consumed OLDER
+dispatch_ids than the records still queued.
+
+**Corrected diagnosis: the queue does not DRAIN and does not DEDUP.** Dispatches accumulate
+faster than agents consume them; claiming is LIFO-ish in effect, so a fresh pass grabs a newer
+record while older ones age; by the time an old record is worked, its candidates have already
+been repaired by some other pass. The fix is drain / dedup / expiry, NOT gate correctness.
+
+**The observable cost is unchanged and still real** — 8 records queued, oldest 2026-08-22, and
+two ~190k-token spawns to discover zeroes. Only the cause moved.
+
+**I made the same error and called it corroboration.** I ran the candidates CLI on my own LOCAL
+root, got `repair 0 / atomize 0 / consolidate 1`, and reported it as an independent reproduction.
+It was not: I measured the same wrong thing on a different root. Matching numbers felt like
+confirmation and were only a second instance of the identical category error. **Two measurements
+agreeing is not evidence when both measure the wrong quantity** — the peer, not the agreement,
+caught it.
+
+Also corrected: `consolidate -> 1 candidate` is a count of LINES. The single line carries all 9
+filenames — one GROUP, not one page.
+
+## Defect A (AS ORIGINALLY FILED — SUPERSEDED ABOVE) — a dispatch is emitted for an intervention with no candidates
 
 `repair` and `atomize` markers are queued while their OWN candidate predicate returns
 nothing. The scheduler is documented as running a content precheck before emitting a
@@ -73,8 +105,11 @@ The corpus is already documenting the loop: one of the peer's nine pages is
 
 ## Scope
 
-1. Find why the emit-time precheck and `memory_candidates_cli.py` disagree for
-   `repair`/`atomize`. Fix the emitter, not the agent.
+1. ~~Find why the emit-time precheck and `memory_candidates_cli.py` disagree~~ — **DROPPED,
+   retracted above.** The gate was right when it fired. Instead: make the queue DRAIN, DEDUP and
+   EXPIRE. A record whose candidates were repaired by a later pass must age out on its own; two
+   records naming the same (scope, root, intervention) must collapse to one; claiming must not
+   leave old records to starve while newer ones are taken.
 2. `same-tier-type` must not be sufficient to emit a consolidate candidate. A grouping
    predicate for consolidation needs SUBJECT evidence (shared links, shared keywords,
    overlapping atom ids) — `(tier, type)` is metadata about SHAPE.
@@ -84,7 +119,8 @@ The corpus is already documenting the loop: one of the peer's nine pages is
 
 ## Acceptance
 
-- [ ] A repair/atomize marker is not emitted when its candidate predicate is empty.
+- [ ] The queue DRAINS: a record whose candidates a later pass repaired ages out on its own.
+- [ ] The queue DEDUPS: two records naming the same (scope, root, intervention) collapse to one.
 - [ ] Consolidate requires subject evidence; the `same-tier-type`-only group no longer
       emits on either root measured here.
 - [ ] A regression test builds a scope whose candidates are empty and asserts no marker.
@@ -93,6 +129,11 @@ The corpus is already documenting the loop: one of the peer's nine pages is
 
 ## Notes and lessons learned
 
+- 2026-08-29 — **A measurement taken NOW cannot falsify a decision taken THEN.** The whole
+  wrong diagnosis rests on comparing today's candidate count against dispatches stamped days
+  earlier. Both the peer and I did it, got matching numbers, and read the agreement as
+  corroboration. It was the same category error run twice. **Before calling a stale queue entry
+  wrong, ask what was true when it was written** — here the report archive answered it outright.
 - 2026-08-29 — **A precheck nobody can audit is indistinguishable from no precheck.** The
   heartbeat protocol tells the agent to trust the emitter's precheck and forbids declining
   on its own measurement — sound, because a cheap local measurement disagreeing with the
