@@ -118,20 +118,37 @@ no claimable memory-maintenance dispatch in <project>/.janitor/state
 sub-second CLI call already had. Same shape as the ~208k null this card already records, so it is
 not a one-off.
 
-**Two facts this adds:**
+### ⛔ RETRACTED 20 MINUTES LATER — the emitter is FINE. The 199k was MY prompt's fault.
 
-1. **The emitter fires markers for which NO per-dispatch record exists.** Not "a stale record" —
-   *none*. The heartbeat emitted `[janitor-memory-atomize]` and the claim step found nothing
-   claimable at all. Whatever the emit gate measures, it is not "a claimable dispatch exists".
-2. **A legacy pending slot is sitting in `.janitor/state` that the claim step can see and must
-   refuse** (it is not per-dispatch). It cannot be consumed and it is not being cleaned up, so
-   every claim attempt pays to rediscover it.
+I wrote here that "the emitter fires markers for which NO per-dispatch record exists". **False.**
+Listing `.janitor/state/memory-maint-pending-*.json` shows **four claimable records, one per
+marker fired tonight** — `split PROJECT`, `enrich LOCAL`, `repair PROJECT`, `atomize PROJECT` —
+and `--peek` returns the first of them.
 
-**Correction worth keeping:** four markers were reported blocked by an unspawnable agent earlier
-this session (registry thinned by a reload, TRDD-HREGVXYP). At least this one would have
-abstained anyway. **The registry gap may have cost ZERO chore throughput** — a second cause
-masking the first is exactly how a wrong fix gets shipped, so do not credit the reload bug with
-this backlog without checking each marker.
+**The real cause: the agent ran `--chore consolidate`, a chore nobody dispatched.** My dispatch
+prompt said "run whatever is claimable" and never named the chore, so the agent filled the gap
+with a guess. `--chore` filters STRICTLY by design (janitor#275 — a marker-routed agent must not
+consume another chore's assignment), so a wrong name yields exit 2 and looks exactly like an
+empty queue.
+
+**Two corrections, and the second is the one that matters:**
+
+1. The 199k null was **self-inflicted by an under-specified prompt**, not evidence about the
+   emit gate. It still demonstrates this card's cost thesis — a spawn to reach exit 2 costs ~200k
+   whatever the reason — but it is NOT evidence of an emitter defect. Do not cite it as one.
+2. **My "the registry gap may have cost ZERO throughput" retraction was itself wrong.** The four
+   markers WERE genuinely queued, they are still queued, and the unspawnable agent really did
+   block them. The original claim stood; I retracted a true statement on the strength of one
+   mis-parameterised run.
+
+**The lesson, at my own expense:** an exit code that means "nothing matched YOUR FILTER" reads
+identically to "nothing exists". Before concluding the queue is empty, list it —
+`ls .janitor/state/memory-maint-pending-*.json` is one command and it would have prevented both
+wrong conclusions.
+
+**Still true and still worth fixing:** a legacy pending slot sits in `.janitor/state` that the
+claim step must refuse on every attempt, and a spawn that reaches exit 2 costs ~200k. A cheap
+`--peek` before spawning would pay for itself immediately.
 
 ## Scope
 
