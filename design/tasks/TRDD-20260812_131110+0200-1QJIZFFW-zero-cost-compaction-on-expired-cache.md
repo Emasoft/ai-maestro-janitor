@@ -31,11 +31,24 @@ re-enabled". Two of those three are done, verified first-hand tonight rather tha
   `3.4.1/scripts/external_handoff_clear.py:250` — *"No template to fall back to any more. The
   caller reads `""` as 'do not clear'."* A failed summary no longer template-clears. The
   singleflight lock is there too (same file, ~line 369).
-- **In-flight agents cannot be cleared out from under**: the gate binds
-  `active_waiting = dispatch._cadence_active_waiting(sd, now)`, which counts
-  `pending_agents.pending_external(...)` — so a session with pending agents is vetoed, which is
-  the USER's 2026-08-29 "gate every compact on `pending-agents.json == []`" requirement already
-  satisfied in code, not something this card must add.
+- **In-flight agents cannot be cleared out from under.** Read the GATE, not its inputs:
+  `lib/external_clear.py:1566` — `if active_waiting: return ClearVerdict(False, why="active-waiting")`.
+  A hard refusal branch, third in the chain after `cooldown` and ahead of `awaiting-user`. The
+  term is fed by `external_handoff_clear.py`'s `active_waiting = dispatch._cadence_active_waiting(sd, now)`,
+  which counts `pending_agents.pending_external(...)`.
+
+  **The two-source form is the point, and the first source alone was not enough.** This was
+  originally written citing only `_cadence_active_waiting` — a function whose NAME and docstring
+  are about picking a cheap-vs-expensive CADENCE tier, i.e. how OFTEN the watcher acts, not
+  WHETHER it clears. Every line of that reading is satisfied by a watcher that merely runs
+  slower and still clears a session with four agents mid-flight. The refusal branch is what makes
+  the claim true; the input binding only makes it reachable. Do not re-derive this from the
+  caller side alone.
+
+  So the USER's 2026-08-29 "gate every compact on `pending-agents.json == []`" requirement is met
+  by `:1566` — **verify that line still says `return ClearVerdict(False, …)` before relying on
+  this**, because a sentence in a STATE block claiming a user directive is already discharged is
+  exactly the sentence that stops the next session from checking.
 
 **NEXT ACTION (one step, runnable as written):** flip the lever, then run the drill.
 

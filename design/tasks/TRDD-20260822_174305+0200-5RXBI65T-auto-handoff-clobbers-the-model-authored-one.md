@@ -34,6 +34,12 @@ The section below said "do not close this card on the repo state — re-verify w
   3.4.1                                                              → 3   lib/handoff_files.py: yes
 ```
 
+**`grep -c` counts MENTIONS, not instructions** — three hits could be one instruction and two
+comments, so the count alone does not prove the skill writes anywhere. Read the step itself
+(`3.4.1/skills/janitor-write-handoff/SKILL.md:36-45`): step 1 computes the Write target from
+`handoff_files.py --path`, and the step is explicit — *"**Never Write to `agent-handoff.md`
+itself.**"* That is the instruction; the count was only the pointer to it.
+
 And the installed module actually resolves a keyed path for a live session, which is the
 behaviour the grep only implies:
 
