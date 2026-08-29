@@ -24,23 +24,31 @@ USER (the user's own global) — in ONE invocation, because atom-id uniqueness i
 per-scope run cannot see a cross-scope collision. These are all the USER's own memory; no other
 project's data is touched, so the per-project channeling invariant holds.
 
-READ-ONLY AGAIN since 2026-08-29 (TRDD-VJL1YTCG Part C) — and the history is worth keeping,
-because the regression was invisible for two days. It shells out to `memgrep lint`, and
-TRDD-RY0IJBJI made that verb AUTOFIX (reconciling publish-globally/symlink state) on every
-invocation. Nothing here changed, so nothing looked wrong; but a heartbeat fire — every ~5
-minutes, in every armed session on this machine — silently began performing a corpus WRITE as a
-side effect, contradicting the separation of powers this file is built on (the janitor SURFACES,
-an agent FIXES).
+THIS DETECTOR WRITES, AND THAT IS REQUIRED — do not "fix" it. It shells out to `memgrep lint`,
+which since TRDD-RY0IJBJI autofixes publish-globally/symlink state on every page it visits, so a
+heartbeat fire (~5 minutes, every armed session on this machine) reconciles the corpus.
 
-The fix was to give `lint` a `--no-fix` mode rather than to stop calling it: this detector's
-checks deliberately live IN memgrep so the write gate and the heartbeat can never disagree (see
-below), so "stop calling the mutating verb" would have meant reimplementing them here — the exact
-duplication that design rejects. `_error_findings` passes `read_only=True`; the owner's "autofix
-always, no exceptions" ruling is untouched for every ordinary caller.
+That reads like a separation-of-powers violation — the janitor SURFACES, an agent FIXES — and it
+was treated as one on 2026-08-29 and switched to `lint --no-fix`, then reverted the same day on an
+owner ruling that reframes it as DATA INTEGRITY: a memgrep edit executed on a malformed page
+corrupts it and loses data, so keeping pages continuously well-formed is a PRECONDITION for the
+librarians' writes, not housekeeping. The frequent cadence is the point — it is what shrinks the
+window in which an editor can meet a malformed page.
 
-The transferable lesson: a verb this file merely CALLS grew a side effect, and no test or type
-here could notice. When a dependency's contract changes from report to write, every caller's
-read-only claim silently becomes false.
+What was actually wrong was the NOISE, not the write. TRDD-VJL1YTCG Part C says maintenance must
+be carried "in background invisibly … not by the main agent" — a statement about who SEES it, not
+about whether it happens. Fixed where it belongs, in the heartbeat's quiet filter
+(`_OTHER_ACTOR_DETECTORS` in dispatch.py): this detector's lint summary no longer rides the
+urgency override into the main conversation, while the reconciliation continues underneath.
+
+Two lessons, both paid for:
+  1. A verb this file merely CALLS grew a side effect, and no test or type here could notice. When
+     a dependency's contract changes from report to write, every caller's read-only claim silently
+     becomes false.
+  2. "Invisible" and "absent" are not the same requirement, and reading the first as the second
+     turned a noise complaint into a proposal to remove a safety property. When a directive says a
+     chore must not DISTRACT someone, ask whether it is asking you to stop DOING it or to stop
+     TELLING them — the cheap fix is almost always the second.
 
 What it still does NOT do itself: it never edits a page in its OWN code (RULE 0) — an agent fixes
 findings via /janitor-memory-update, EXCEPT `link-downward-cross-scope`: no editor chore re-homes
@@ -76,16 +84,29 @@ _CROSS_SCOPE_CODE = "link-downward-cross-scope"
 
 
 def _error_findings() -> list[lint.Finding]:
-    """Every ERROR finding across the 3 memory scopes — REPORT ONLY, never repairing.
+    """Every ERROR finding across the 3 memory scopes. FIXING, deliberately — do NOT pass
+    `read_only=True` here.
 
-    `read_only=True` is what makes this detector honest again (TRDD-VJL1YTCG Part C). Without it
-    the call autofixes `publish-globally`/symlink drift on every page it visits, so a heartbeat —
-    ~5 minutes, every armed session on the machine — performed a corpus WRITE just by looking.
-    The janitor SURFACES; an agent FIXES. Do not drop this argument to "also tidy while we're
-    here": the tidying is the librarian's job and doing it here is invisible to whoever is
-    accountable for it.
+    OWNER RULING 2026-08-29, and it is a DATA-INTEGRITY rule, not a tidiness preference:
+    "executing a memgrep command/edit on a malformed wikimem page containing errors will corrupt
+    the file and lose data. This is why fixing both BEFORE and AFTER executing the wikimem page
+    edit is MANDATORY, NO EXCEPTIONS. --no-fix can only be used for debug or diagnostic use
+    cases."
+
+    So the autofix on this ~5-minute cadence is not a side effect to be cleaned up — it is what
+    keeps the corpus continuously in a state where the next editor write cannot corrupt a page.
+    Removing it does not make the janitor tidier, it opens a corruption window between librarian
+    runs.
+
+    This was briefly changed to `read_only=True` (2026-08-29) on a misreading of TRDD-VJL1YTCG
+    Part C, and reverted the same day. Part C requires maintenance to be INVISIBLE to the main
+    agent, not ABSENT — "carried in background invisibly by the wikimem librarians agents" is a
+    statement about WHO SEES it, not about whether it happens. The visibility half is solved
+    where it belongs, in the heartbeat's quiet filter (`_OTHER_ACTOR_DETECTORS` in dispatch.py):
+    the fixing continues, and the main agent simply is not told about it. Both halves of the
+    owner's intent hold at once; suppressing the write satisfied neither.
     """
-    _code, _stdout, findings = lint.run_lint(read_only=True)
+    _code, _stdout, findings = lint.run_lint()
     return [f for f in findings if f.sev == "ERROR"]
 
 

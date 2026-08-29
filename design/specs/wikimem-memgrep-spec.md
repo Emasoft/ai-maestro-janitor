@@ -1344,14 +1344,26 @@ TRDD-RY0IJBJI: "autofix this always, no exceptions"). Lint is the only verb that
 nobody is writing, so it is where "always" has to live — reconciliation reachable only from the
 write path leaves an unwritten page one-sided forever, maintained by traffic rather than enforced.
 
+The reason is DATA INTEGRITY, not tidiness (owner ruling 2026-08-29): executing a memgrep
+command or edit against a malformed page **corrupts it and loses data**, so fixing both BEFORE and
+AFTER a wikimem page edit is `MUST`, no exceptions. Autofix on a frequent cadence is therefore a
+PRECONDITION for every writer that follows — it is what shrinks the window in which an editor can
+meet a malformed page — and any proposal to reduce how often it runs is a proposal to widen that
+window.
+
 `--no-fix` makes a run REPORT-ONLY: identical findings, zero writes, including the USER
-symlink-root reconciliation. It is `MUST NOT`-be-default, and the distinction it draws is
-AUTHORITY, not caution: a caller whose job is to WATCH must not perform maintenance as a side
-effect of looking. The janitor SURFACES; an agent FIXES (TRDD-VJL1YTCG Part C — "all the
-migrations and corrections of errors reported by the memgrep linter must be carried in background
-invisibly by the wikimem librarians agents, not by the main agent"). The `wikimem-syntax`
-heartbeat detector is the reference caller; it ran every ~5 minutes in every armed session on the
-machine, so leaving it on the fixing path made a corpus write a side effect of surveillance.
+symlink-root reconciliation. It is for **debug and diagnostic use only** (`MUST NOT` be the
+default, and `MUST NOT` be used on any path that precedes or follows a write). Answering "what is
+currently broken, without changing anything" is a legitimate question — measuring the finding
+mix, reproducing a report, checking a hypothesis — and that is its whole remit.
+
+It is `MUST NOT` a way to make a scheduled caller quieter. `wikimem-syntax` is the cautionary
+case: it was switched to `--no-fix` on 2026-08-29 to stop it writing on the heartbeat, and
+reverted the same day. TRDD-VJL1YTCG Part C — "all the migrations and corrections of errors
+reported by the memgrep linter must be carried in background invisibly by the wikimem librarians
+agents, not by the main agent" — constrains who SEES maintenance, not whether it happens.
+Suppressing the write satisfied neither half; the visibility half belongs in the heartbeat's quiet
+filter, and the fixing keeps running underneath.
 
 A consumer that asked for `--no-fix` and got an error `MUST NOT` silently retry without it, and
 `MUST NOT` report "no findings": the first restores the write it declined, the second makes a

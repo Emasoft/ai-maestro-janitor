@@ -127,10 +127,15 @@ def run_lint(
 
     `read_only=True` passes `--no-fix`, so the pass REPORTS without performing the
     `publish-globally`/symlink autofix `memgrep lint` otherwise does on every page it visits.
-    Default False, because the owner's ruling is that fixing happens always, no exceptions
-    (TRDD-RY0IJBJI) — this only lets a SURVEILLANCE caller decline to be the one doing it
-    (TRDD-VJL1YTCG Part C). Use it when the caller's job is to WATCH: a heartbeat detector runs
-    every ~5 minutes in every armed session, and a watcher that writes is not a watcher.
+
+    DEBUG AND DIAGNOSTIC USE ONLY (owner ruling 2026-08-29). The autofix is a data-integrity
+    precondition, not housekeeping: a memgrep edit executed against a malformed page corrupts it
+    and loses data, so fixing before AND after a wikimem edit is mandatory, and a frequent
+    autofixing pass is what keeps the corpus in a state where the next writer is safe. Use
+    `read_only=True` to ASK what is broken without changing anything — measuring the finding mix,
+    reproducing a report, testing a hypothesis. Never on a path that precedes or follows a write,
+    and never merely to stop a scheduled caller from writing: that trades a loud safety property
+    for a silent corruption window.
     """
     binary = find_memgrep()
     if binary is None:
