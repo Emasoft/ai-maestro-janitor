@@ -1,14 +1,14 @@
 ---
 trdd-id: 7KRF99WI
-title: the branch-protection guard requires a matrix job name that can never report and wedges every PR
+title: the branch-protection guard proposes a matrix job name that can never report
 column: todo
 created: 2026-08-30T00:39:59+0200
-updated: 2026-08-30T00:39:59+0200
+updated: 2026-08-30T00:52:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
-severity: high
+severity: medium
 min-approval-requirement: none
 blocked-by: []
 npt: []
@@ -37,24 +37,44 @@ configured name is required, is never reported, and stays permanently pending.
 a repo is blocked forever**, and `required_status_checks` is exactly the rule that cannot be
 waited out.
 
-## Why this is worse than a wrong value: the guard FIGHTS a correct fix
+## The hazard is REAL but UNREALIZED, and the reason it is unrealized is unknown
 
-Reported by the AMAMA peer session 2026-08-29, measured on their repo. They had already removed
-the unsatisfiable context by hand. `baselines_content_current` therefore reports their repo as
-DRIFTED right now, and the next guard pass would "heal" it by putting the broken context back:
+Reported by the AMAMA peer session 2026-08-29 on their repo, where
+`detect_required_status_checks()` returns `['Commitlint', 'Lint', 'Test', 'Test matrix',
+'Validate']`. They had already removed the unsatisfiable context by hand, so
+`baselines_content_current` reports that repo as DRIFTED — contexts compare as exact SETS
+(`_params_match:606-611`, `want_ctx != got_ctx` ⇒ drift), which means the applier SHOULD restore
+`Test matrix` on its next pass.
 
-```
-detect_required_status_checks() -> ['Commitlint', 'Lint', 'Test', 'Test matrix', 'Validate']
-```
+**It did not.** Their `last-run-guard-branch-protection.ts` reads `2026-08-30 00:01:41` — the
+guard ran, and the ruleset still holds their corrected 4-context set. Nobody has measured WHY,
+and that unknown is now the most valuable thing on this card: something between "drift detected"
+and "ruleset written" declined to act, and until it is identified we do not know whether this
+defect can actually fire in production or is held back by an accident downstream.
 
-Their sentence for it is the one worth keeping: **"right now a dead guard is the only thing
-protecting this repo from the guard."** Their `last-run-guard-branch-protection.ts` has not
-advanced since 2026-06-13 — 78 days — and that stall is the only reason the repo is not wedged.
-A stalled detector and a wrong applier are the same incident seen from opposite ends.
+Candidates, none measured: gate 7 (the viewer-not-admin warning path returns before applying);
+`require_pull_request_for(slug)` shaping which rules the payload emits for a single-party repo; or
+an apply that ran and failed with only a log line. Whichever it is, the answer changes the
+severity of this card in both directions — it could reveal a second defect (an applier that
+silently declines) or an existing safeguard.
 
-The `bypass_actors` entry (admin, `bypass_mode: always`) completes the trap: the OWNER merges
-straight past the pending check and sees nothing wrong, while any contributor is hard-blocked.
-The failure is invisible from the only account likely to look.
+The `bypass_actors` entry (admin, `bypass_mode: always`) is what would make a realized wedge hard
+to notice: the OWNER merges straight past a pending check while contributors are hard-blocked, so
+the failure is invisible from the only account likely to look.
+
+### Retracted — an earlier version of this card was wrong here
+
+This section previously read *"right now a dead guard is the only thing protecting this repo from
+the guard"*, citing a 78-day-stalled `last-run-guard-branch-protection.ts`. **Both facts were
+false.** The peer had read an ABANDONED `.janitor/state/` inside a repo subdirectory while the
+live one — resolved from cwd per `state.py:_resolve_project_root` — sat one level up with 76
+current stamps. Their guard is alive and ran 40 minutes before the retraction.
+
+Kept rather than deleted, because the shape is the point: a true measurement
+(`ls .janitor/state/last-run-*.ts` really does list what is in the state dir relative to cwd)
+was used to support a claim it does not license (*when did this project's detectors last run*).
+The wrong directory is not visible in the output. **This card's own severity was set from that
+false premise**, which is why the section above now leads with what is unmeasured.
 
 ## The exposure is NARROWER than "any matrix job" — measured, not assumed
 
@@ -86,6 +106,9 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
 
 ## Acceptance
 
+- [ ] **FIRST**: explain why the peer's 00:01 guard pass did NOT restore `Test matrix` despite a
+      correct drift verdict — the answer decides whether this defect can fire at all, and may
+      surface a second one (an applier that silently declines)
 - [ ] a job carrying `strategy.matrix` is NEVER emitted as a bare required context — either
       expanded to its real per-combination names, or omitted with a logged reason
 - [ ] a `name:` containing `${{ ... }}` is never emitted verbatim as a context (belt and braces:
