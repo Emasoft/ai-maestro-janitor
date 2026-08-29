@@ -69,6 +69,35 @@ def test_the_compiled_gate_never_builds_a_gitignored_crate() -> None:
     )
 
 
+def test_the_shell_lint_gate_never_lints_a_gitignored_script() -> None:
+    """G2f has the same shape as G2e and the same bug — and a sharper argument against it.
+
+    That gate exists for PARITY with CI's Mega-Linter, and CI only ever sees TRACKED files. A
+    local scan of gitignored paths is therefore STRICTER than the thing it mirrors, so anything
+    it finds there is a false block by construction: nothing in `scripts_dev/` can ever fail CI.
+
+    Measured 2026-08-29 while unblocking the 3.4.0 publish: 319 shell candidates in the tree, 8
+    of them shipped. It blocked on a dated backup of the OAuth rotator's reauth script.
+    """
+    candidates = _candidates("*.sh") + _candidates("*.bash")
+    assert candidates, "expected the plugin's own shell scripts to be discoverable"
+
+    ignored = _git_ignored(candidates)
+    kept = [
+        s for s in candidates
+        if str(s) not in ignored and str(s.relative_to(_PROJECT_ROOT)) not in ignored
+    ]
+    rel = {str(s.relative_to(_PROJECT_ROOT)) for s in kept}
+
+    assert not any(str(s) in ignored for s in kept), "a gitignored script survived the filter"
+    assert "hooks/hook-run.sh" in rel, (
+        f"a SHIPPED shell script was filtered out of the lint gate; kept={sorted(rel)}"
+    )
+    assert not any(p.startswith(("scripts_dev/", "downloads_dev/")) for p in rel), (
+        f"a *_dev scratch script reached the lint gate: {sorted(rel)}"
+    )
+
+
 def test_publish_py_filters_discovery_by_git_ignore() -> None:
     """The source itself must consult git-ignore, not just a name list.
 

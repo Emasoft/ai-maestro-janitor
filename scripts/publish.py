@@ -1185,13 +1185,23 @@ def run_gate(root: Path) -> int:
         cprint(f"  {GREEN}No compiled component (Rust/Go/C/C++/.NET/Swift/Zig) -- skipped.{NC}")
 
     # Gate 2f: Shell lint (shellcheck) -- issue #175.
-    # Self-detecting: runs ONLY when the plugin ships shell scripts (*.sh / *.bash).
+    # Self-detecting: runs ONLY when the plugin SHIPS shell scripts (*.sh / *.bash).
     # No shell -> skip. Shell present but `shellcheck` absent -> WARN+skip (CI's
     # Mega-Linter BASH_SHELLCHECK backstops); shellcheck ran + found issues -> BLOCK.
+    #
+    # Gitignored paths are excluded for the same reason as G2e (2026-08-29): this gate exists
+    # for PARITY with CI, and CI only ever sees TRACKED files. Scanning `scripts_dev/` made the
+    # local gate STRICTER than the CI it mirrors, so it blocked a real push on a dated backup
+    # script — a false block by construction, since nothing there can ever fail CI.
     cprint(f"\n{BLUE}[G2f] Shell lint (shellcheck, issue #175)...{NC}")
-    _shell_scripts = [
+    _shell_candidates = [
         s for s in list(root.rglob("*.sh")) + list(root.rglob("*.bash"))
         if not any(part in _compiled_skip for part in s.relative_to(root).parts)
+    ]
+    _shell_ignored = _git_ignored(_shell_candidates)
+    _shell_scripts = [
+        s for s in _shell_candidates
+        if str(s) not in _shell_ignored and str(s.relative_to(root)) not in _shell_ignored
     ]
     if not _shell_scripts:
         cprint(f"  {GREEN}No shell scripts -- skipped.{NC}")
