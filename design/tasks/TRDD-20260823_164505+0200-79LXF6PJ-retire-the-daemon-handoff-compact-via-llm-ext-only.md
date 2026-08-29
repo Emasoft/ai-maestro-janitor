@@ -4,7 +4,7 @@ title: retire the daemon-composed handoff and route every compaction through the
 column: testing
 blocked-by: []
 created: 2026-08-23T16:45:05+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-08-29T22:27:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -161,12 +161,24 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
 
 ## Acceptance
 
-- [ ] Q1 answered from documentation, not inference; the settings change applied only after that
-- [ ] the daemon's compose is removed ONLY in a change that also delivers the replacement path
+- [x] Q1 answered from documentation, not inference; the settings change applied only after that
+      — `155833b3`; `~/.claude/settings.json` carries `"autoCompactEnabled": false`
+- [x] the daemon's compose is removed ONLY in a change that also delivers the replacement path
+      — one commit `155833b3` both retires `_compose`'s daemon call site and ships the
+      skills-then-summary replacement + the hard "no summary → no clear" gate
+      (`external_handoff_clear.py:250`, re-enforced in `main()`); 139 external-clear tests pass
 - [ ] an idle unattended session is proven to still be resumable after the change (the drill that
       TRDD-1QJIZFFW box 2 already defines — an AUTOMATED run, not a hand-typed one)
-- [ ] TRDD-5RXBI65T is re-columned or closed honestly against whichever option ends up shipping
+      — **still open, and now UNBLOCKED**: 1QJIZFFW's gate (3.4.0 publishes + installs) discharged
+      2026-08-29; the only remaining step is flipping
+      `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED` to `true` at a seam and letting one
+      automated clear fire. This box closes when 1QJIZFFW box 2 closes — same run, one drill.
+- [x] TRDD-5RXBI65T is re-columned or closed honestly against whichever option ends up shipping
+      — 2026-08-29: option D shipped and is now INSTALLED (3.4.1 carries `lib/handoff_files.py`
+      and the keyed-name skill); 5RXBI65T moved `dev` → `testing` with its 3.4.0 gate marked
+      discharged and one observation left
 - [ ] token saving is MEASURED, not asserted — the directive's main benefit claim
+      — the one box with NO external dependency; it is the smallest independent next action here
 
 ## Notes and lessons learned
 

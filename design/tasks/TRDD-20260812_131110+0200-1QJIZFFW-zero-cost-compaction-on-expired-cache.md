@@ -4,7 +4,7 @@ title: Zero-cost compaction whenever the prompt cache is expired — wire the ll
 column: dev
 blocked-by: []
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-08-29T22:26:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -14,15 +14,46 @@ implementation-commits: [df7d4cb3, 169d967d, 295c1243]
 relevant-rules: []
 npt: []
 eht: []
-blocked-by: []
 external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 ---
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-29
 
-### ⚠ 2026-08-26 — BOX 2 IS UNREACHABLE RIGHT NOW, and it is not a scheduling problem
+### ✅ 2026-08-29 — THE BLOCKER BELOW IS DISCHARGED. Box 2 is now reachable.
+
+The 2026-08-26 section says box 2 waits on "3.4.0 publishes → installs → the lever is
+re-enabled". Two of those three are done, verified first-hand tonight rather than recalled:
+
+- **3.4.1 is published AND installed** — `~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/3.4.1/`.
+- **The freeze cause is gone in the INSTALLED copy**, which is the only copy that matters:
+  `3.4.1/scripts/external_handoff_clear.py:250` — *"No template to fall back to any more. The
+  caller reads `""` as 'do not clear'."* A failed summary no longer template-clears. The
+  singleflight lock is there too (same file, ~line 369).
+- **In-flight agents cannot be cleared out from under**: the gate binds
+  `active_waiting = dispatch._cadence_active_waiting(sd, now)`, which counts
+  `pending_agents.pending_external(...)` — so a session with pending agents is vetoed, which is
+  the USER's 2026-08-29 "gate every compact on `pending-agents.json == []`" requirement already
+  satisfied in code, not something this card must add.
+
+**NEXT ACTION (one step, runnable as written):** flip the lever, then run the drill.
+
+```
+~/.claude/settings.json:22  "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED": "false"  →  "true"
+```
+
+then let one automated external clear happen and measure boxes 4 and 5 against it.
+
+**Do NOT flip it while background agents are in flight or mid-edit-batch.** Not because the
+gate would misfire — it vetoes correctly — but because the drill needs the clear to actually
+FIRE to be measurable, and a vetoed fire measures nothing. Pick a seam.
+
+**SUPERSEDED — do NOT carry forward:** "this card moves to `blocked` on that publish" (the
+publish landed); "the lever was pulled because 3.3.26 template-clears on a failed summary"
+(true of 3.3.26, false of the installed 3.4.1).
+
+### ⚠ 2026-08-26 — BOX 2 IS UNREACHABLE RIGHT NOW, and it is not a scheduling problem (SUPERSEDED — see above)
 
 Box 2 needs a run through the AUTOMATED path. That path cannot run on this machine: the lever
 is OFF, verified rather than recalled —

@@ -1,10 +1,10 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: dev
+column: testing
 blocked-by: []
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-08-29T22:26:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -22,7 +22,41 @@ implementation-commits: [0581b940]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-### ⚠ 2026-08-26 — the fix is in the REPO and on NO MACHINE. Closure is gated on 3.4.0.
+### ✅ 2026-08-29 — GATE DISCHARGED. The fix is INSTALLED, and re-verified by the 2026-08-26 grep.
+
+The section below said "do not close this card on the repo state — re-verify with the grep after
+3.4.0 installs". Ran exactly that grep tonight, against the cache, not the repo:
+
+```
+~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/
+  3.3.26  grep -c handoff_files skills/janitor-write-handoff/SKILL.md → 0   lib/handoff_files.py: no
+  3.4.0                                                              → 3   lib/handoff_files.py: yes
+  3.4.1                                                              → 3   lib/handoff_files.py: yes
+```
+
+And the installed module actually resolves a keyed path for a live session, which is the
+behaviour the grep only implies:
+
+```
+CLAUDE_PROJECT_DIR=$PWD uv run …/3.4.1/scripts/lib/handoff_files.py --path
+  → .janitor/state/agent-handoff-08be725e-20260829_222446+0200-3997.md
+```
+
+**One observation that looks like a regression and is not:** `.janitor/state/agent-handoff.md`
+(the legacy shared path) has an mtime of 22:19 tonight, AFTER 3.4.1 was installed. It was written
+by the PREVIOUS session, whose in-session skill cache was still 3.3.26 — a session keeps the skill
+text it booted with. Not a writer that survived the migration; the stale-skill-cache lag this
+project already knows (`[[claude-code-plugin-rollout-staleness]]`). A session booted on 3.4.1
+writes keyed, as the probe above shows.
+
+**NEXT ACTION:** observe ONE real keyed write end-to-end (run `/janitor-write-handoff` in a
+3.4.1-booted session and confirm the keyed file appears and the legacy path is untouched), then
+tick box 1 and close. Boxes 2 and 3 are then a read of that same artifact.
+
+**SUPERSEDED — do NOT carry forward:** "the fix is on NO MACHINE"; "closure is gated on 3.4.0";
+"the clobber is still live on this machine".
+
+### ⚠ 2026-08-26 — the fix is in the REPO and on NO MACHINE. Closure is gated on 3.4.0. (SUPERSEDED — see above)
 
 Measured, not inferred. Every cached version carries ZERO occurrences of `handoff_files`:
 
