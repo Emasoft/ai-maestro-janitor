@@ -55,6 +55,12 @@ text it booted with. Not a writer that survived the migration; the stale-skill-c
 project already knows (`[[claude-code-plugin-rollout-staleness]]`). A session booted on 3.4.1
 writes keyed, as the probe above shows.
 
+**Say the column honestly: `testing` rests on ZERO observed keyed writes.** `ls -lt
+.janitor/state/ | grep -i handoff` returns no file matching `agent-handoff-<key>-<ts>-<pid>.md` —
+not one has ever been written on this machine (`agent-handoff-3.4.0-blocked.md` is hand-named, not
+keyed). What is proven is the INSTRUCTION and the PATH COMPUTATION; the write itself is executed by
+a model reading SKILL.md, so an instruction is not yet an execution.
+
 **NEXT ACTION:** observe ONE real keyed write end-to-end (run `/janitor-write-handoff` in a
 3.4.1-booted session and confirm the keyed file appears and the legacy path is untouched), then
 tick box 1 and close. Boxes 2 and 3 are then a read of that same artifact.

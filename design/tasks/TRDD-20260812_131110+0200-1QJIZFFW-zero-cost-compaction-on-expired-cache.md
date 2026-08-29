@@ -33,7 +33,15 @@ re-enabled". Two of those three are done, verified first-hand tonight rather tha
   singleflight lock is there too (same file, ~line 369).
 - **In-flight agents cannot be cleared out from under.** Read the GATE, not its inputs:
   `lib/external_clear.py:1566` — `if active_waiting: return ClearVerdict(False, why="active-waiting")`.
-  A hard refusal branch, third in the chain after `cooldown` and ahead of `awaiting-user`. The
+  A hard refusal branch, third in the chain after `cooldown` and ahead of `awaiting-user`.
+  That line is inside `should_clear_externally` — `def` at `:1503`, and no `def` between, so the
+  ownership is not assumed:
+  `awk '/^def /{last=NR": "$0} NR==1566{print last; exit}' <that file>` → `1503: def should_clear_externally(`.
+  Worth stating because the same file holds SIBLING decision functions (`should_clear_on_resume`
+  at `:1355`, and the docstring right above `:1566` discusses `should_clear_when_long_idle`), so a
+  line window alone cannot tell you which one you are reading. The caller side needs no such
+  check: `external_handoff_clear.py:172` splats `ec.should_clear_externally(**gate)`, and a
+  mismatched key would raise `TypeError` at call time rather than bind silently. The
   term is fed by `external_handoff_clear.py`'s `active_waiting = dispatch._cadence_active_waiting(sd, now)`,
   which counts `pending_agents.pending_external(...)`.
 
