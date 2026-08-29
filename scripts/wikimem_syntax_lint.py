@@ -65,6 +65,20 @@ class MemgrepMissing(RuntimeError):
     """No `memgrep` binary could be resolved, so nothing was checked."""
 
 
+class MemgrepTooOld(RuntimeError):
+    """The resolved `memgrep` predates `--no-fix`, so a READ-ONLY lint is not available.
+
+    Its own class, and raised rather than swallowed, because the two silent alternatives are both
+    worse than a loud failure. Falling back to a fixing lint would make a caller that asked NOT to
+    write start writing — the exact inversion `--no-fix` exists to prevent, now invisible.
+    Returning "no findings" would make a stale binary look like a clean corpus, so a watcher goes
+    permanently blind while reporting success.
+
+    Reachable whenever the Python ships ahead of the installed binary: memgrep is `cargo
+    install`-ed by hand, so plugin code and binary version skew routinely.
+    """
+
+
 def find_memgrep() -> str | None:
     """Resolve the memgrep binary: `MEMGREP_BIN` → PATH → the cargo bin dir.
 
@@ -100,18 +114,39 @@ def parse_findings(stdout: str) -> list[Finding]:
     return out
 
 
-def run_lint(paths: list[Path] | None = None, *, extra_args: list[str] | None = None) -> tuple[int, str, list[Finding]]:
+def run_lint(
+    paths: list[Path] | None = None,
+    *,
+    extra_args: list[str] | None = None,
+    read_only: bool = False,
+) -> tuple[int, str, list[Finding]]:
     """Run `memgrep lint` over `paths` (default: the three scopes) → (exit code, stdout, findings).
 
     Raises `MemgrepMissing` when the binary cannot be resolved — callers decide whether that is
     fatal (the CLI) or fail-open (the heartbeat detector).
+
+    `read_only=True` passes `--no-fix`, so the pass REPORTS without performing the
+    `publish-globally`/symlink autofix `memgrep lint` otherwise does on every page it visits.
+    Default False, because the owner's ruling is that fixing happens always, no exceptions
+    (TRDD-RY0IJBJI) — this only lets a SURVEILLANCE caller decline to be the one doing it
+    (TRDD-VJL1YTCG Part C). Use it when the caller's job is to WATCH: a heartbeat detector runs
+    every ~5 minutes in every armed session, and a watcher that writes is not a watcher.
     """
     binary = find_memgrep()
     if binary is None:
         raise MemgrepMissing("memgrep not found (set MEMGREP_BIN, or `cargo install --path scripts/memgrep`)")
     targets = [str(p) for p in (paths if paths is not None else default_roots())]
-    cmd = [binary, "lint", *(extra_args or []), *targets]
+    cmd = [binary, "lint", *(["--no-fix"] if read_only else []), *(extra_args or []), *targets]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+    # Checked BEFORE stderr is echoed and before findings are parsed: on this path stdout is empty,
+    # so parsing would hand the caller an empty finding list — indistinguishable from a clean
+    # corpus. clap's wording is matched loosely (the flag name, not the full sentence) so a
+    # future clap release rephrasing its error does not turn this back into silence.
+    if read_only and proc.returncode != 0 and "--no-fix" in proc.stderr:
+        raise MemgrepTooOld(
+            "the installed memgrep does not support `lint --no-fix` (read-only lint). "
+            "Rebuild it: `cargo install --path scripts/memgrep`"
+        )
     if proc.stderr:
         print(proc.stderr, end="", file=sys.stderr)
     return proc.returncode, proc.stdout, parse_findings(proc.stdout)

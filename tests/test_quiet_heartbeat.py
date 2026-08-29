@@ -91,10 +91,43 @@ def test_a_REAL_severity_count_still_claims_urgency(monkeypatch):
 
     Without this, suppressing the negated form could be 'fixed' by suppressing the whole
     advisory, which is the blindness the quiet filter exists to avoid.
+
+    SCOPE NARROWED 2026-08-29 (TRDD-VJL1YTCG Part C): the guard is right and its subject was
+    wrong. It is asserted here on `memory-librarian` — a detector whose findings the reader can
+    act on — because `wikimem-syntax` moved to `_OTHER_ACTOR_DETECTORS`; see the test below for
+    why that is not the blindness this guards against.
     """
     _quiet(monkeypatch, [])
     loud = "memgrep lint: 557 finding(s), 3 at or above ERROR (3 scope(s): LOCAL/PROJECT/USER)"
-    assert dispatch._quiet_filter("wikimem-syntax", loud + "\n").strip() == loud
+    assert dispatch._quiet_filter("memory-librarian", loud + "\n").strip() == loud
+
+
+def test_another_actors_finding_does_not_claim_urgency_however_loud(monkeypatch):
+    """A line the reader is NOT ALLOWED to act on must not ride the urgency override.
+
+    This deliberately reverses what the test above used to assert about `wikimem-syntax`, so the
+    reasoning belongs here rather than in a commit message.
+
+    The old assertion protected a real property — do not let a fix for the clean line blind us to
+    the dirty one — but it was applied to a detector whose findings are the LIBRARIAN's work, by
+    owner directive (TRDD-VJL1YTCG Part C): "all the migrations and corrections of errors reported
+    by the memgrep linter must be carried in background invisibly by the wikimem librarians
+    agents, not by the main agent." Urgency is a claim on the READER's attention; a reader with no
+    permitted response gains nothing from it, and pays on every fire. Measured 2026-08-29:
+    `1009 at or above ERROR` printed into a live session for hours, and not one of those fires
+    produced or could have produced an action.
+
+    This is NOT the blindness the quiet filter exists to avoid: the line is still recorded in the
+    findings ledger and read on demand via `/janitor-findings`. Suppressed here means "routed to
+    the actor who owns it", not "discarded" — which is exactly the distinction the test above
+    still enforces for detectors the main agent DOES own.
+
+    Note the count is deliberately huge: severity words inside a COUNT are not a severity claim,
+    and no threshold on the number would have made this line actionable.
+    """
+    _quiet(monkeypatch, [])
+    loud = "memgrep lint: 1053 finding(s), 1009 at or above ERROR (3 scope(s): LOCAL/PROJECT/USER)"
+    assert dispatch._quiet_filter("wikimem-syntax", loud + "\n") == ""
 
 
 def test_non_advisory_detectors_are_untouched(monkeypatch):

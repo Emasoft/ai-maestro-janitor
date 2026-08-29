@@ -1338,6 +1338,27 @@ consumer keys on (WM-BENCH-10). A parser reading this format `MUST` treat the `[
 so output from a binary predating codes still parses: a strict parser would report ZERO findings
 against an older binary, which is the worst available way to be wrong about a lint.
 
+`WM-LINT-09` **fixing-is-the-default-and-looking-is-opt-out** — `MUST`: `memgrep lint` autofixes
+`publish-globally`/symlink drift on every page it visits, before reporting (owner directive,
+TRDD-RY0IJBJI: "autofix this always, no exceptions"). Lint is the only verb that visits pages
+nobody is writing, so it is where "always" has to live — reconciliation reachable only from the
+write path leaves an unwritten page one-sided forever, maintained by traffic rather than enforced.
+
+`--no-fix` makes a run REPORT-ONLY: identical findings, zero writes, including the USER
+symlink-root reconciliation. It is `MUST NOT`-be-default, and the distinction it draws is
+AUTHORITY, not caution: a caller whose job is to WATCH must not perform maintenance as a side
+effect of looking. The janitor SURFACES; an agent FIXES (TRDD-VJL1YTCG Part C — "all the
+migrations and corrections of errors reported by the memgrep linter must be carried in background
+invisibly by the wikimem librarians agents, not by the main agent"). The `wikimem-syntax`
+heartbeat detector is the reference caller; it ran every ~5 minutes in every armed session on the
+machine, so leaving it on the fixing path made a corpus write a side effect of surveillance.
+
+A consumer that asked for `--no-fix` and got an error `MUST NOT` silently retry without it, and
+`MUST NOT` report "no findings": the first restores the write it declined, the second makes a
+stale binary indistinguishable from a clean corpus. Fail loudly instead (`MemgrepTooOld`) — the
+Python side ships ahead of a hand-`cargo install`ed binary routinely, so this skew is expected,
+not exceptional.
+
 `WM-LINT-06` **severity-model** — `MUST`: every finding carries a severity, printed as the LEADING
 token (`ERROR` / `WARN` / `INFO`) so `| grep '^ERROR'` is exact. `--min-severity` (default `error`)
 gates the EXIT CODE only — every finding `MUST` still print regardless. A model that hid findings

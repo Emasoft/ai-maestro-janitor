@@ -24,14 +24,23 @@ USER (the user's own global) — in ONE invocation, because atom-id uniqueness i
 per-scope run cannot see a cross-scope collision. These are all the USER's own memory; no other
 project's data is touched, so the per-project channeling invariant holds.
 
-MUTATION WARNING — this detector is NO LONGER read-only, and its own docstring claimed otherwise
-until 2026-08-27. It shells out to `memgrep lint`, and since TRDD-RY0IJBJI that verb AUTOFIXES
-(reconciling publish-globally/symlink state) on every invocation. So a heartbeat fire — every ~5
-minutes, in every armed session on this machine — performs a corpus WRITE as a side effect. That
-contradicts the separation of powers this file was built on (the janitor SURFACES, an agent
-FIXES), and it is the crux of TRDD-VJL1YTCG Part C, which is where the real fix belongs: either
-this detector stops calling the mutating verb, or `lint` grows a read-only mode for non-librarian
-callers. Until Part C lands, do not cite this file as an example of a read-only detector.
+READ-ONLY AGAIN since 2026-08-29 (TRDD-VJL1YTCG Part C) — and the history is worth keeping,
+because the regression was invisible for two days. It shells out to `memgrep lint`, and
+TRDD-RY0IJBJI made that verb AUTOFIX (reconciling publish-globally/symlink state) on every
+invocation. Nothing here changed, so nothing looked wrong; but a heartbeat fire — every ~5
+minutes, in every armed session on this machine — silently began performing a corpus WRITE as a
+side effect, contradicting the separation of powers this file is built on (the janitor SURFACES,
+an agent FIXES).
+
+The fix was to give `lint` a `--no-fix` mode rather than to stop calling it: this detector's
+checks deliberately live IN memgrep so the write gate and the heartbeat can never disagree (see
+below), so "stop calling the mutating verb" would have meant reimplementing them here — the exact
+duplication that design rejects. `_error_findings` passes `read_only=True`; the owner's "autofix
+always, no exceptions" ruling is untouched for every ordinary caller.
+
+The transferable lesson: a verb this file merely CALLS grew a side effect, and no test or type
+here could notice. When a dependency's contract changes from report to write, every caller's
+read-only claim silently becomes false.
 
 What it still does NOT do itself: it never edits a page in its OWN code (RULE 0) — an agent fixes
 findings via /janitor-memory-update, EXCEPT `link-downward-cross-scope`: no editor chore re-homes
@@ -67,8 +76,16 @@ _CROSS_SCOPE_CODE = "link-downward-cross-scope"
 
 
 def _error_findings() -> list[lint.Finding]:
-    """Every ERROR finding across the 3 memory scopes."""
-    _code, _stdout, findings = lint.run_lint()
+    """Every ERROR finding across the 3 memory scopes — REPORT ONLY, never repairing.
+
+    `read_only=True` is what makes this detector honest again (TRDD-VJL1YTCG Part C). Without it
+    the call autofixes `publish-globally`/symlink drift on every page it visits, so a heartbeat —
+    ~5 minutes, every armed session on the machine — performed a corpus WRITE just by looking.
+    The janitor SURFACES; an agent FIXES. Do not drop this argument to "also tidy while we're
+    here": the tidying is the librarian's job and doing it here is invisible to whoever is
+    accountable for it.
+    """
+    _code, _stdout, findings = lint.run_lint(read_only=True)
     return [f for f in findings if f.sev == "ERROR"]
 
 
@@ -154,6 +171,20 @@ def main() -> int:
         line = dedupe.emit_once(seen, key, msg)
         if line is not None:
             print(line)
+    except lint.MemgrepTooOld as exc:
+        # The ONE failure this detector must not fail-open on. Everything else here is "could not
+        # check this fire, try the next one"; this is "cannot check, ever, until a human rebuilds
+        # the binary" — a permanent blindness that looks exactly like a clean corpus from outside.
+        # Deduped like any other finding so a stale binary costs one line, not one per fire.
+        seen = state.state_dir() / "wikimem-syntax-seen.txt"
+        line = dedupe.emit_once(
+            seen,
+            "memgrep-too-old",
+            f"[wikimem-syntax] wikimem lint is NOT RUNNING: {exc}",
+        )
+        if line is not None:
+            print(line)
+        return 0
     except Exception:  # noqa: BLE001 -- a validator must never break the heartbeat
         return 0
     return 0

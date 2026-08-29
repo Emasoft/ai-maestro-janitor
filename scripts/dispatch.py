@@ -646,6 +646,32 @@ _REMOTE_TEXT_DETECTORS = frozenset({
     "github-issues-watch", "gh-reply-watch", "pr-reconciler", "task-pr-mismatch",
 })
 
+# Advisory detectors whose findings are ANOTHER ACTOR'S work. The urgency override must not apply
+# to these either — for a different reason than the set above. There the worry is WHO WROTE the
+# words; here it is WHO MUST ACT on them. A line the reader of stdout is not allowed to fix cannot
+# become more actionable by being urgent, so promoting it past quiet mode produces a permanent
+# alarm with no available response.
+#
+# Membership criterion, phrased so it can be applied rather than guessed at: a detector belongs
+# here iff the fix for its findings is owned by a background agent or a chore, NOT by the main
+# agent reading the heartbeat. `wikimem-syntax` is the first member because the owner ruled
+# exactly that (TRDD-VJL1YTCG Part C): "all the migrations and corrections of errors reported by
+# the memgrep linter must be carried in background invisibly by the wikimem librarians agents, not
+# by the main agent."
+#
+# Measured cost of not having this (2026-08-29): `memgrep lint: 1053 finding(s), 1009 at or above
+# ERROR` matched `_URGENT_LINE_RE` on the word ERROR inside its own COUNT clause and printed on
+# every fire for hours. janitor#276 had already fixed the CLEAN form of this same line by
+# exempting "none at or above ERROR" — but a negation test only ever covered the case where there
+# was nothing to say. The dirty form, the one that repeats forever precisely because the reader
+# cannot clear it, sailed through. A severity word in a COUNT is not a severity claim.
+#
+# Nothing is lost: these lines are still recorded in the findings ledger and read on demand with
+# `/janitor-findings`, which is where a maintenance backlog belongs.
+_OTHER_ACTOR_DETECTORS = frozenset({
+    "wikimem-syntax",
+})
+
 
 def _heartbeat_is_quiet() -> bool:
     """Quiet by default; `CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE` restores the firehose."""
@@ -665,9 +691,13 @@ def _quiet_filter(detector: str, text: str) -> str:
     """
     if not text or not _heartbeat_is_quiet() or detector not in _ADVISORY_DETECTORS:
         return text
-    # A detector that interpolates third-party text does not get the urgency override —
-    # otherwise the remote author, not this detector, chooses what escapes quiet mode.
-    may_claim_urgent = detector not in _REMOTE_TEXT_DETECTORS
+    # Two independent disqualifications from the urgency override, kept separate because their
+    # criteria differ: a detector that interpolates third-party text (the remote author, not this
+    # detector, would be choosing what escapes quiet mode), and a detector whose findings are
+    # another actor's work (urgency cannot help a reader who is not allowed to act).
+    may_claim_urgent = (
+        detector not in _REMOTE_TEXT_DETECTORS and detector not in _OTHER_ACTOR_DETECTORS
+    )
     kept: list[str] = []
     dropped: list[str] = []
     for line in text.splitlines():

@@ -5144,6 +5144,9 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
         \x20 # NOTE: lint WRITES — it always autofixes `publish-globally`/symlink drift on every\n\
         \x20 # page it visits, before it reports anything (owner directive, TRDD-RY0IJBJI)\n\
         \x20 memgrep lint .claude/project/memory\n\
+        \x20 # SURVEILLANCE callers (a heartbeat detector) must NOT perform maintenance as a side\n\
+        \x20 # effect — report only, touch nothing (TRDD-VJL1YTCG Part C)\n\
+        \x20 memgrep lint .claude/project/memory --no-fix\n\
         \x20 # --min-severity gates the EXIT CODE only — findings below it still PRINT, they just\n\
         \x20 # don't fail the command; use this in a pre-commit hook that should ignore NITs\n\
         \x20 memgrep lint .claude/project/memory --min-severity warn\n\
@@ -5156,6 +5159,17 @@ struct LintArgs {
     /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
     #[arg(long = "hidden")]
     hidden: bool,
+    /// REPORT ONLY — skip the `publish-globally`/symlink autofix this verb otherwise performs on
+    /// every page it visits. Off by default, so the owner's "autofix this always, no exceptions"
+    /// ruling (TRDD-RY0IJBJI) is what every ordinary caller still gets.
+    ///
+    /// It exists for SURVEILLANCE callers, and the distinction is about AUTHORITY, not caution: a
+    /// heartbeat detector runs every ~5 minutes in every armed session on the machine, so leaving
+    /// it on the fixing path made a corpus WRITE a side effect of merely looking — the janitor
+    /// SURFACES and an agent FIXES, and that inverted it. Fixing stays the librarian's job
+    /// (TRDD-VJL1YTCG Part C); this flag is how a watcher declines to do the librarian's work.
+    #[arg(long = "no-fix")]
+    no_fix: bool,
     /// Exit non-zero only when a finding is at or above this severity. Findings BELOW it are still
     /// PRINTED — the flag gates the gate, never the report. Defaults to `error`: that is the set a
     /// write can be blocked on without blocking work whose fix lives in a different file (link
@@ -5191,7 +5205,14 @@ struct LintArgs {
 /// instructions — we only parse it.
 pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     let a = LintArgs::parse_from(std::iter::once("lint".to_string()).chain(args.iter().cloned()));
-    let violations = lint_paths(&a.paths, a.hidden); // already sorted by (severity, path, line)
+    // already sorted by (severity, path, line). The DEFAULT path calls the unchanged
+    // `lint_paths` verbatim — so "adding --no-fix changed nothing for anyone who didn't pass it"
+    // is visible here, not merely asserted.
+    let violations = if a.no_fix {
+        lint_paths_with(&a.paths, a.hidden, false)
+    } else {
+        lint_paths(&a.paths, a.hidden)
+    };
     // EVERYTHING prints, always. Only the EXIT CODE is gated by --min-severity: a severity model
     // that hid findings would trade one unusable output (all-noise) for another (silently
     // incomplete), and the reader loses either way. The severity leads the line so
@@ -5856,7 +5877,19 @@ fn insert_frontmatter_field(text: &str, key: &str, value: &str) -> Option<String
     Some(out)
 }
 
+/// Lint AND autofix — the ordinary contract every caller but a surveillance one wants.
+///
+/// Deliberately kept as its own entry point rather than folded into `lint_paths_with`'s callers:
+/// the fixing behaviour is an owner ruling ("autofix this always, no exceptions", TRDD-RY0IJBJI),
+/// and hardcoding `true` here means adding `--no-fix` could not silently change what anyone else
+/// gets. Every existing caller keeps calling this.
 fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
+    lint_paths_with(paths, hidden, true)
+}
+
+/// `fix = false` is REPORT-ONLY: same findings, no writes. See `LintArgs::no_fix` for why that
+/// mode exists and who is allowed to want it.
+fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation> {
     // A NON-PAGE is not a lint target, however the path arrived. `collect_md` filters the
     // index/report family on a directory WALK, but an EXPLICITLY named file bypasses that ("the
     // caller asked for it") — right for index/recall, wrong here: grading MEMORY.md or a
@@ -5889,9 +5922,15 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
     // NOTE the argument to `collect_md`: `paths` here are usually DIRECTORIES (linting a scope
     // root), so iterating them directly and testing `is_file()` would normalize nothing in the
     // common case. It must be the EXPANDED page list, the same one the violation pass walks below.
-    let _ = reconcile_user_symlink_root();
-    for p in collect_md(&paths, hidden) {
-        let _ = normalize_page_until_clean(&p);
+    //
+    // Gated on `fix` (TRDD-VJL1YTCG Part C). The gate wraps the WHOLE block, root reconciliation
+    // included: a report-only pass that still reconciled the USER symlink root would write on
+    // exactly the schedule this flag exists to take writes off.
+    if fix {
+        let _ = reconcile_user_symlink_root();
+        for p in collect_md(&paths, hidden) {
+            let _ = normalize_page_until_clean(&p);
+        }
     }
     // Every named path was a non-page ⟹ nothing to lint. Returning early is load-bearing: an EMPTY
     // slice makes `collect_md` default to `["."]`, so falling through would silently lint the whole
@@ -12246,6 +12285,50 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     // `publish-globally`/symlink state forever while lint re-named it every sweep. Lint is the only
     // verb that visits unwritten pages, so "always" has to live here. Each test now proves the
     // state is REPAIRED and the finding consequently ABSENT.
+
+    /// TRDD-VJL1YTCG Part C: `--no-fix` REPORTS without repairing.
+    ///
+    /// The pair matters more than either half. `lint_missing_field_is_autofixed_…` below proves
+    /// the default still writes (the owner's TRDD-RY0IJBJI ruling), and this proves a surveillance
+    /// caller can look without writing. A flag that silently kept fixing would be worse than no
+    /// flag: the heartbeat would go on performing librarian work while the code claimed otherwise.
+    ///
+    /// Asserts the page is byte-identical, not merely "still has no field" — the autofix rewrites
+    /// frontmatter, so equality is what actually catches a partial write.
+    #[test]
+    fn lint_no_fix_reports_without_repairing() {
+        let (scope, page) = pubglobal_project_page("lint-nofix", PUBGLOBAL_PAGE_MISSING);
+        let user_root = edit_test_tmpdir("lint-nofix-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        let before = std::fs::read_to_string(&page).unwrap();
+        let v = lint_paths_with(std::slice::from_ref(&page), false, false);
+        let after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert_eq!(
+            before, after,
+            "--no-fix must not write a single byte — the whole point is that LOOKING is not MAINTAINING"
+        );
+        assert!(
+            !user_root.join("p.md").exists(),
+            "--no-fix must not create a symlink either: the root reconciliation is inside the gate"
+        );
+        // Reporting must survive the gate; a silent read-only mode would be useless to the
+        // detector that needs it.
+        assert!(
+            !v.is_empty(),
+            "--no-fix still REPORTS — an unrepaired page is exactly what the watcher must see"
+        );
+    }
 
     #[test]
     fn lint_missing_field_is_autofixed_and_therefore_not_reported() {
