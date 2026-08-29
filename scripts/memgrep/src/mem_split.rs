@@ -387,8 +387,13 @@ pub fn cmd_split_topic_cli(args: &[String]) -> Result<()> {
             page = a.page.display(),
         )
     })?;
-    reindex_owning_scope(&a.into, a.hidden)?;
-    reindex_owning_scope(&a.page, a.hidden)?;
+    // BOTH scopes, then the first error — never `?` on the first call. Both pages are already
+    // written by this point, so an early return would leave the second scope's index describing
+    // a page that no longer exists that way, and `recall` would keep surfacing atoms that just
+    // moved. Reindexing is idempotent, so attempting the second costs nothing when the first
+    // failed.
+    let reindexed = reindex_owning_scope(&a.into, a.hidden).and(reindex_owning_scope(&a.page, a.hidden));
+    reindexed?;
     println!(
         "moved {} atom(s) from {} to {} ({} footnote(s) moved, {} shared/copied)",
         r.moved_atoms,
@@ -473,7 +478,13 @@ struct SplitAtomArgs {
 /// only to INHERIT a value the caller didn't override — a plain regex is enough because the
 /// field order `build_atom_marker` emits never nests a `,`/`]` inside `keywords`/`type`.
 fn extract_marker_value(marker_line: &str, key: &str) -> Option<String> {
-    let re = Regex::new(&format!(r"(?:^|,)\s*{key}:\s*([^,\]]+)")).ok()?;
+    // `[` belongs in the leading class alongside `,`: the marker line is `^id [k: v, …]`, so the
+    // FIRST property is preceded by the bracket and by nothing else. `desc` is optional
+    // (`build_atom_marker` omits it when empty), which makes `keywords` the first property on
+    // every desc-less atom — and `(?:^|,)` matched neither, so `keywords` came back None and the
+    // split fell through to an empty list and a spurious `check_keyword_floor` refusal instead of
+    // inheriting the source atom's recall surface.
+    let re = Regex::new(&format!(r"(?:^|[,\[])\s*{key}:\s*([^,\]]+)")).ok()?;
     let caps = re.captures(marker_line)?;
     Some(caps[1].trim().trim_matches('"').to_string())
 }
@@ -812,6 +823,22 @@ mod tests {
         unsafe {
             std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
+    }
+
+    #[test]
+    fn marker_values_are_extracted_from_the_first_property_too() {
+        // `desc` is optional, so `keywords` is the FIRST property on a desc-less atom — preceded
+        // by `[`, not by a comma. The leading class must admit the bracket or split-mem-atom
+        // silently fails to inherit the source atom's recall surface and then refuses on the
+        // keyword floor.
+        let bare = "^ATOM-1111-1111 [keywords: alpha beta, ocd: 2026-08-01, lmd: 2026-08-01]";
+        assert_eq!(extract_marker_value(bare, "keywords").as_deref(), Some("alpha beta"));
+        let full = "^ATOM-2222-2222 [desc: \"a summary\", keywords: gamma, type: reference, \
+                    trdd: TRDD-M7BZ4X1Q, ocd: 2026-08-01, lmd: 2026-08-01]";
+        assert_eq!(extract_marker_value(full, "keywords").as_deref(), Some("gamma"));
+        assert_eq!(extract_marker_value(full, "type").as_deref(), Some("reference"));
+        assert_eq!(extract_marker_value(full, "trdd").as_deref(), Some("TRDD-M7BZ4X1Q"));
+        assert_eq!(extract_marker_value(bare, "type"), None, "an absent key stays None");
     }
 
     #[test]

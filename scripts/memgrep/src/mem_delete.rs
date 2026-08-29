@@ -333,6 +333,31 @@ fn compute_atom_delete(
     let mut candidate = kept.join("\n");
     candidate.push('\n');
 
+    // A SHARED lesson must be caught HERE, not by the integrity check below — that check cannot
+    // see this failure, because `renumber_footnotes_contiguous` hides it. Scenario: atoms X and Y
+    // both cite `[^1]`, atom Z owns `[^2]`. Deleting X `--with-lessons` drops the `[^1]:` def and
+    // leaves Y's `[^1]` citation; renumbering then maps the first SURVIVING def (`[^2]`, Z's
+    // unrelated lesson) to `[^1]` — so refs == defs == {1} and the integrity check passes on a
+    // page where Y now cites Z's lesson. Silent rebinding of one atom's lesson onto another's is
+    // the worst outcome available to this command, worse than either a dangling ref or a refusal.
+    // The refusal below is what the `--keep-lessons` hint in the guard above already promised
+    // ("e.g. still cited elsewhere"); the def lines are already excluded from `candidate`, so any
+    // remaining reference to a dropped label is a real citation by a surviving atom.
+    if with_lessons {
+        let still_cited: Vec<String> = referenced_labels(&candidate)
+            .into_iter()
+            .filter(|l| labels.contains(l))
+            .collect();
+        if !still_cited.is_empty() {
+            anyhow::bail!(
+                "atom `{atom}` shares footnote lesson(s) ({}) with another atom still on the \
+                 page — deleting their definitions would leave that atom citing someone else's \
+                 lesson after renumbering; pass --keep-lessons instead. Nothing written.",
+                still_cited.join(", ")
+            );
+        }
+    }
+
     let out_text = if labels.is_empty() {
         candidate
     } else {
@@ -565,6 +590,60 @@ mod tests {
         assert!(out.contains("baz fact.[^2]"), "baz's ref renumbered to [^2]: {out}");
         assert!(out.contains("[^2]: baz lesson."), "baz's def renumbered to [^2]: {out}");
         assert!(footnote_integrity_violations(&out).is_empty(), "must be footnote-clean: {out}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_atom_with_lessons_refuses_a_lesson_still_cited_by_a_surviving_atom() {
+        // The failure this guards: X and Y both cite [^1]; Z owns [^2]. Deleting X
+        // --with-lessons drops the [^1]: def and leaves Y's citation, then renumbering maps Z's
+        // surviving [^2] onto [^1] — refs == defs == {1}, so footnote_integrity_violations sees a
+        // clean page while Y now cites Z's unrelated lesson. Silent, and unrecoverable by reading
+        // the result.
+        let _env = env_lock();
+        let dir = tmpdir("atom-shared-lesson");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
+        }
+        let page = write_page(
+            &dir,
+            "misc",
+            "^ex [keywords: k]\nex fact.[^1]\n\n\
+             ^why [keywords: k]\nwhy fact.[^1]\n\n\
+             ^zed [keywords: k]\nzed fact.[^2]\n\n\
+             ## Notes and lessons learned\n\
+             [^1]: the SHARED lesson.\n\
+             [^2]: zed's own lesson.\n",
+        );
+        let before = std::fs::read_to_string(&page).unwrap();
+
+        let err = cmd_delete_atom_cli(&[
+            "--page".to_string(),
+            page.display().to_string(),
+            "--atom".to_string(),
+            "ex".to_string(),
+            "--with-lessons".to_string(),
+        ])
+        .expect_err("the lesson is still cited by ^why — must refuse rather than rebind it");
+        assert!(err.to_string().contains("--keep-lessons"), "names the way out: {err}");
+        assert_eq!(std::fs::read_to_string(&page).unwrap(), before, "nothing may be written");
+
+        // And the documented way out actually works: the def stays, only ^ex goes.
+        cmd_delete_atom_cli(&[
+            "--page".to_string(),
+            page.display().to_string(),
+            "--atom".to_string(),
+            "ex".to_string(),
+            "--keep-lessons".to_string(),
+        ])
+        .expect("--keep-lessons is the sanctioned path for a shared lesson");
+        let out = std::fs::read_to_string(&page).unwrap();
+        assert!(!out.contains("^ex "), "the atom is gone: {out}");
+        assert!(out.contains("why fact.[^1]"), "^why keeps citing its lesson: {out}");
+        assert!(out.contains("[^1]: the SHARED lesson."), "the shared def survives: {out}");
+        assert!(out.contains("[^2]: zed's own lesson."), "zed's lesson is NOT rebound: {out}");
+        assert!(footnote_integrity_violations(&out).is_empty(), "footnote-clean: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

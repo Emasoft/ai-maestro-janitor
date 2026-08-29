@@ -397,8 +397,12 @@ pub fn cmd_merge_topic_cli(args: &[String]) -> Result<()> {
             from = a.from.display(),
         )
     })?;
-    reindex_owning_scope(&a.into, a.hidden)?;
-    reindex_owning_scope(&a.from, a.hidden)?;
+    // BOTH scopes, then the first error — never `?` on the first call. Both pages are already
+    // written by this point, so an early return would leave the tombstoned page's index still
+    // advertising the atoms that just moved. Reindexing is idempotent, so attempting the second
+    // costs nothing when the first failed.
+    let reindexed = reindex_owning_scope(&a.into, a.hidden).and(reindex_owning_scope(&a.from, a.hidden));
+    reindexed?;
     println!(
         "merged {} atom(s) from {} into {} (source tombstoned)",
         r.moved_atoms,
