@@ -1,10 +1,10 @@
 ---
 trdd-id: 437UHNFS
 title: drain the corpus of thin recall surfaces before installing the memgrep metadata gates
-column: testing
+column: complete
 blocked-by: []
 created: 2026-08-23T18:25:47+0200
-updated: 2026-08-29T16:58:00+0200
+updated: 2026-08-29T22:20:00+0200
 current-owner: ai-maestro-janitor-48
 task-type: infra
 approval-tier: 0
@@ -254,9 +254,15 @@ stays as the steady-state guard.
 - [x] `cargo install --path scripts/memgrep` run; verified via `command -v memgrep`
       (`~/.cargo/bin/memgrep`) and by running `memgrep lint` through the bare name, not a
       repo-relative path — a build that only works from the checkout is not installed.
-- [ ] A heartbeat fire after the install is QUIET (no promoted lint line). **Cannot be closed in
-      this session:** the cron stub execs the CACHED plugin (3.3.26), whose `dispatch.py` predates
-      the quiet-filter fix, so this can only be observed after a publish — which X4LJFTB4 blocks.
+- [x] A heartbeat fire after the install is QUIET (no promoted lint line). **CLOSED 2026-08-29,
+      once X4LJFTB4 unblocked and 3.4.0/3.4.1 shipped.** The chain was verified, not assumed:
+      3.4.1 is the newest cached version, has a runnable `scripts/dispatch.py`, and appears in no
+      quarantine file — so the stub's newest-runnable-unquarantined walk execs it. That
+      `dispatch.py` carries `_quiet_filter` (:686) with `wikimem-syntax` in `_ADVISORY_DETECTORS`
+      (:596); 3.3.26's does not. Observed effect in this very session: the `wikimem-syntax` line
+      ("99 memory element(s) memgrep CANNOT parse (ERROR …)") arrived as a `LOW ADVISORY` row in
+      the findings ledger, and the heartbeat's own stdout stayed quiet. That is the criterion —
+      the lint still reports, it just no longer shouts on every fire.
 
 ## Notes
 
