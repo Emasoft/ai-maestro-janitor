@@ -3,18 +3,18 @@ trdd-id: 7KRF99WI
 title: the branch-protection guard proposes a matrix job name that can never report
 column: todo
 created: 2026-08-30T00:39:59+0200
-updated: 2026-08-30T00:52:00+0200
+updated: 2026-08-30T00:58:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
-severity: medium
+severity: high
 min-approval-requirement: none
 blocked-by: []
 npt: []
 eht: []
 relevant-rules: []
-external-refs: [janitor#294]
+external-refs: [janitor#294, TRDD-H8WRCW0I]
 ---
 
 # The guard restores a required check that can never pass
@@ -37,7 +37,7 @@ configured name is required, is never reported, and stays permanently pending.
 a repo is blocked forever**, and `required_status_checks` is exactly the rule that cannot be
 waited out.
 
-## The hazard is REAL but UNREALIZED, and the reason it is unrealized is unknown
+## The hazard is LATENT — and what holds it back is a misconfiguration anyone might fix
 
 Reported by the AMAMA peer session 2026-08-29 on their repo, where
 `detect_required_status_checks()` returns `['Commitlint', 'Lint', 'Test', 'Test matrix',
@@ -46,17 +46,26 @@ Reported by the AMAMA peer session 2026-08-29 on their repo, where
 (`_params_match:606-611`, `want_ctx != got_ctx` ⇒ drift), which means the applier SHOULD restore
 `Test matrix` on its next pass.
 
-**It did not.** Their `last-run-guard-branch-protection.ts` reads `2026-08-30 00:01:41` — the
-guard ran, and the ruleset still holds their corrected 4-context set. Nobody has measured WHY,
-and that unknown is now the most valuable thing on this card: something between "drift detected"
-and "ruleset written" declined to act, and until it is identified we do not know whether this
-defect can actually fire in production or is held back by an accident downstream.
+**It did not — and the reason is now measured**, from the applier's OWN log
+(`.janitor/logs/branch-protection-apply.log`), which had been saying the same thing four times a
+day for days:
 
-Candidates, none measured: gate 7 (the viewer-not-admin warning path returns before applying);
-`require_pull_request_for(slug)` shaping which rules the payload emits for a single-party repo; or
-an apply that ran and failed with only a log line. Whichever it is, the answer changes the
-severity of this card in both directions — it could reveal a second defect (an applier that
-silently declines) or an existing safeguard.
+```
+[2026-08-30T00:01:41+0200] skip: cannot resolve owner/repo slug from plugin.json
+```
+
+`CLAUDE_PROJECT_DIR` is unset there, so the project root resolves to cwd — the workspace PARENT —
+while the manifest lives one level down in the repo. `detect_repo_slug` returns `None` and **gate
+3 returns before anything else runs**: it never reached the drift comparison, never reached gate
+7, never attempted an apply. That divergence is its own defect, carded as **TRDD-H8WRCW0I**.
+
+**So severity goes back to HIGH, for a better reason than the one it lost.** The matrix hazard is
+blocked neither by luck nor by a dead guard, but by a **misconfiguration any reasonable person
+might fix**. Setting `CLAUDE_PROJECT_DIR`, moving the manifest, or re-arming from the repo
+directory are each ordinary, well-intentioned actions — and the very next pass then installs an
+unsatisfiable required context. **Fix THIS card before TRDD-H8WRCW0I**, or repairing repo
+resolution converts a silent no-op into an active breakage across every affected repo at once.
+Guard-first is load-bearing sequencing, not prudence.
 
 The `bypass_actors` entry (admin, `bypass_mode: always`) is what would make a realized wedge hard
 to notice: the OWNER merges straight past a pending check while contributors are hard-blocked, so
@@ -74,7 +83,10 @@ Kept rather than deleted, because the shape is the point: a true measurement
 (`ls .janitor/state/last-run-*.ts` really does list what is in the state dir relative to cwd)
 was used to support a claim it does not license (*when did this project's detectors last run*).
 The wrong directory is not visible in the output. **This card's own severity was set from that
-false premise**, which is why the section above now leads with what is unmeasured.
+false premise**. The lesson that outlived it: **when a tool declines, read its OWN log rather
+than inferring from what it did not do.** Six `skip:` lines had been sitting in
+`branch-protection-apply.log` for days saying exactly what was wrong, while both sessions
+reasoned about gates instead of reading them.
 
 ## The exposure is NARROWER than "any matrix job" — measured, not assumed
 
@@ -106,9 +118,8 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
 
 ## Acceptance
 
-- [ ] **FIRST**: explain why the peer's 00:01 guard pass did NOT restore `Test matrix` despite a
-      correct drift verdict — the answer decides whether this defect can fire at all, and may
-      surface a second one (an applier that silently declines)
+- [ ] **SEQUENCING**: land this BEFORE TRDD-H8WRCW0I — repairing repo resolution first turns a
+      silent no-op into a fleet-wide active breakage
 - [ ] a job carrying `strategy.matrix` is NEVER emitted as a bare required context — either
       expanded to its real per-combination names, or omitted with a logged reason
 - [ ] a `name:` containing `${{ ... }}` is never emitted verbatim as a context (belt and braces:
