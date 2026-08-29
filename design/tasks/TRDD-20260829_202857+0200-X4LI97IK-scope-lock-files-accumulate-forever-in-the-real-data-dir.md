@@ -1,10 +1,11 @@
 ---
 trdd-id: X4LI97IK
 title: scope_root_for falls back to the page's parent dir so the write lock key is unbounded
-column: backburner
+column: complete
 blocked-by: []
+implementation-commits: [d27c718f]
 created: 2026-08-29T20:28:57+0200
-updated: 2026-08-29T21:18:00+0200
+updated: 2026-08-29T22:05:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 5
@@ -18,6 +19,34 @@ test-requirements: [unit]
 ---
 
 # TRDD-X4LI97IK — 1,128 scope-lock files, +165 in one day, in the real plugin DATA dir
+
+## ⏵ FIXED 2026-08-29 — commit `d27c718f`, option 2 as recommended
+
+`lock_path_for` now maps any root whose basename is not `memory` onto ONE shared sentinel,
+`memory-maint-out-of-scope.lock` — deliberately not hex-shaped, so it can never alias a real
+`<sha16>` key. Applied to `memory_txn._scope_lock_path` in the SAME commit (TRDD-7YHT3FNK).
+
+**`scope_root_for` was deliberately NOT changed**, against this card's own "where the fix belongs"
+paragraph. Reading the call sites is what changed the answer: three of its nine callers
+(`mem_split.rs:730`, `mem_delete.rs:120/178/432`) use the returned path as a REAL scope root for
+reindex/lineage/delete, not as a lock key. Handing them a sentinel would have broken them. The
+lock key is the only thing that needed bounding, so the fix went where the key is made.
+
+**The half this card did not anticipate:** `acquire_two` compared SCOPE ROOTS to decide whether one
+lock covers both pages. Once two distinct roots can share a lock, that test takes the same flock
+twice from one process — a self-deadlock that surfaces only as a `MEMGREP_LOCK_TIMEOUT_S` timeout,
+never as a wrong answer. It now compares lock paths. Anyone porting this fix elsewhere must carry
+that second edit too.
+
+Both regression tests were confirmed to FAIL without the guard (disabled behind `#[cfg(any())]`,
+suite re-run, both FAILED, restored). One pre-existing test had to be repaired to stay meaningful:
+`test_scope_lock_path_resolves_symlinks` used `real-memory`/`link-memory`, whose basenames are not
+`memory`, so under the new rule it would have compared two sentinels and passed no matter what
+`resolve()` did.
+
+Verified end to end with `JANITOR_GLOBAL_STATE_DIR` redirected: two writes to pages in two
+different out-of-scope directories minted exactly ONE lock file. The 1,128 existing orphans are
+NOT reaped — see step 4, unchanged.
 
 ## The measurement (2026-08-29)
 
@@ -136,11 +165,14 @@ Option 2 is the lazy correct one unless someone shows the contention matters.
       no-memory-ancestor fallback.
 - [x] The producer is NAMED: `scope_root_for`'s no-memory-ancestor fallback. Proven by probe,
       not by instrumentation — reading the resolver was cheaper than logging it.
-- [ ] An out-of-scope page no longer mints a per-directory machine-wide lock, and the Rust
-      and Python sides still agree byte-for-byte (TRDD-7YHT3FNK parity).
+- [x] An out-of-scope page no longer mints a per-directory machine-wide lock, and the Rust
+      and Python sides still agree byte-for-byte (TRDD-7YHT3FNK parity) — the Python test reads
+      the sentinel back OUT of `write_gate.rs` rather than re-declaring the literal, so a drift
+      fails the suite instead of being discovered by a corrupted page.
 - [x] ~~No suite run adds a lock file to the real global-state dir~~ — already TRUE, measured:
       full suite, delta 0. Nothing to fix here.
-- [ ] Growth is bounded — the count stops tracking "scope roots ever seen".
+- [x] Growth is bounded — the count stops tracking "scope roots ever seen". It is now exactly
+      "real scope roots on this machine, plus one".
 
 ## Notes and lessons learned
 
@@ -152,6 +184,13 @@ Option 2 is the lazy correct one unless someone shows the contention matters.
   conclusion first. What survives is smaller and true: "a live actor did it" is the CEILING of
   attribution here, so a component minting 165 orphan locks a day is indistinguishable from
   healthy operation — which is why it went unnamed for months.
+- 2026-08-29 — **The card named the right fix and the wrong place for it, and only reading the
+  CALL SITES caught that.** "Where the fix belongs: in `scope_root_for`" was written from the
+  resolver alone; nine callers later, three of them use its return value as a real scope root, so
+  editing it would have broken reindex, lineage and delete to fix a lock. **A function's correct
+  behaviour is not decidable from its own body — grep every caller before changing what it
+  returns.** The same reading turned up the `acquire_two` self-deadlock, which no measurement in
+  this card would ever have surfaced: it fails as a timeout, and timeouts read as contention.
 - 2026-08-29 — **Found while investigating something else entirely** (an agent-dispatch marker
   that could not run). The count was visible in one `ls`, and nobody had looked because nothing
   had ever failed. Zero-byte files raise no alarm anywhere — no disk pressure, no error, no test.
