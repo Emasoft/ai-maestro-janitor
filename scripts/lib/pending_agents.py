@@ -88,9 +88,11 @@ MAX_AGE_S = 7 * 24 * 3600
 # non-stopped entry reaches nudges >= 1 within one fire of being written — regardless of
 # progress — and is evicted by the `nudges >= MAX_NUDGES` rule three fires later. The eviction
 # window for a LIVE agent is therefore ~15 minutes, not 7 days and not the 1 hour below.
-# MAX_NUDGES was sized for the RARE directive path ("the smallest number that still tolerates a
-# heartbeat firing while the model is mid-turn"); whether 3 is still the right budget once a
-# 5-minute pulse spends from it is an open question for the owner, not something to change here.
+# RESOLVED 2026-08-29: the pulse now charges THROTTLED (`NUDGE_MIN_INTERVAL_S`, 30 min), so a
+# live agent's eviction window is ~90 min again rather than ~15. The answer was not a bigger
+# MAX_NUDGES — that leaves the budget denominated in fire count, so the window moves whenever
+# the cadence does. The paragraph above still describes the old arithmetic; it is kept because
+# the reasoning is what makes the fix legible, but the ~15-minute figure is HISTORY, not current.
 #
 # ACCEPTED COST, stated so nobody has to rediscover it: `directive_lines()` only runs on
 # RESUME paths, so a healthy session that never compacts and never hits a rate limit may
@@ -116,6 +118,28 @@ MAX_DIRECTIVE_AGENTS = 10
 # the smallest number that still tolerates a heartbeat firing while the model is
 # mid-turn and cannot act on the directive yet.
 MAX_NUDGES = 3
+
+# The MINIMUM SPACING between two nudges charged to the same entry by a HIGH-CADENCE caller.
+#
+# WHY THIS EXISTS (janitor code-review finding #4, fixed 2026-08-29). MAX_NUDGES was sized for
+# the RARE path: `directive_lines()` runs only on a RESUME, so three listings meant three
+# genuine chances for a model to act. Then the keep-going pulse — which fires on EVERY due
+# heartbeat, ~5 min — started charging the same budget, and the arithmetic collapsed: 3 nudges
+# at 5-minute spacing evicts a LIVE, healthy agent in ~15 minutes, after which no later
+# compaction can cue its resume. The eviction bound was silently converted from "three chances
+# to act" into "fifteen minutes", which is not long enough for a model to finish one turn.
+#
+# Raising MAX_NUDGES was the obvious move and it is the wrong one: it tunes a number while
+# leaving the budget denominated in FIRE COUNT, so the window still moves whenever the
+# heartbeat cadence changes. Spacing is the invariant that actually matters — a nudge is only
+# unheeded if the reader had time to heed it — so the budget is spent in TIME, and MAX_NUDGES
+# goes back to meaning what it says.
+#
+# 30 min x 3 = a ~90-minute window for a live agent, and an unresumable corpse is still dropped
+# well inside the 7-day MAX_AGE_S backstop. The RARE directive path passes no interval and
+# charges unconditionally: it names the agent to the model, which is the strong signal the cap
+# was designed around, and it cannot run often enough to need throttling.
+NUDGE_MIN_INTERVAL_S = 30 * 60
 
 # Bound persisted description length (hook payloads are model-adjacent data).
 _MAX_DESC_LEN = 120
@@ -201,6 +225,14 @@ def _normalize(entry: object, now: int) -> dict | None:
         "description": str(entry.get("description", "") or "")[:_MAX_DESC_LEN],
         "ts": ts,
         "nudges": nudges,
+        # Carried through explicitly for the same reason as the fields below — this function
+        # REBUILDS from a fixed key set, so an unnamed field is dropped on the first load. Drop
+        # this one and every throttled spend looks like a first spend, which restores the exact
+        # ~15-minute eviction NUDGE_MIN_INTERVAL_S exists to remove. Absent/corrupt reads as 0
+        # ("never charged"), the safe direction: the entry pays its next nudge immediately.
+        "lastNudge": (
+            entry.get("lastNudge", 0) if isinstance(entry.get("lastNudge", 0), int) else 0
+        ),
         # Carried through explicitly: this function REBUILDS each entry from a fixed key
         # set, so any field not named here is silently dropped on the first load — which
         # would delete the one thing a respawn needs, at the moment it is needed most.
@@ -277,8 +309,14 @@ def add(
         pass
 
 
-def spend_nudges(now: int | None = None) -> int:
+def spend_nudges(now: int | None = None, min_interval: int = 0) -> int:
     """Charge one nudge to every non-`stopped` entry. Returns how many were charged.
+
+    `min_interval` (seconds) is the THROTTLE for high-cadence callers: an entry charged more
+    recently than that is skipped, so the nudge budget measures the reader's CHANCES TO ACT
+    rather than the heartbeat's fire count. See `NUDGE_MIN_INTERVAL_S` for why that distinction
+    is the whole fix. 0 (the default) charges unconditionally — correct for the rare directive
+    path, which cannot fire often enough to burn a budget.
 
     THE SECOND EMIT PATH. `directive_lines()` LISTS agents and pays; the heartbeat's
     keep-going pulse advertises the same entries as a COUNT (`dispatch._pending_agent_count`)
@@ -307,9 +345,19 @@ def spend_nudges(now: int | None = None) -> int:
             entries = _load_unlocked(t)
             charged = 0
             for e in entries:
-                if not e["stopped"]:
-                    e["nudges"] += 1
-                    charged += 1
+                if e["stopped"]:
+                    continue
+                last = e.get("lastNudge", 0)
+                if not isinstance(last, int) or last < 0:
+                    last = 0
+                # An entry never charged (last == 0) always pays, whatever the throttle: the
+                # first nudge is what starts the clock, and skipping it would leave `nudges`
+                # at 0, which is exactly the state the UNNUDGED_MAX_AGE_S sweep is guarded on.
+                if min_interval > 0 and last and t - last < min_interval:
+                    continue
+                e["nudges"] += 1
+                e["lastNudge"] = t
+                charged += 1
             if charged:
                 _save_unlocked(entries)
             return charged

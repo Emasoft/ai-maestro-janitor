@@ -1034,7 +1034,9 @@ def _spend_pending_agent_nudges() -> None:
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
-        pending_agents.spend_nudges()
+        # THROTTLED: this pulse fires every ~5 min, and charging it unthrottled evicted a LIVE
+        # agent in ~15 min (3 nudges x 5 min). See `pending_agents.NUDGE_MIN_INTERVAL_S`.
+        pending_agents.spend_nudges(min_interval=pending_agents.NUDGE_MIN_INTERVAL_S)
     except Exception:  # noqa: BLE001 - a manifest bug must never break a fire
         pass
 

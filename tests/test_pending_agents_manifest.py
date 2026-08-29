@@ -93,6 +93,8 @@ def test_add_then_pending_roundtrip(iso) -> None:
             "description": "fix runtime LOWs",
             "ts": 1000,
             "nudges": 0,
+            # 0 = never charged, so the next nudge is paid immediately whatever the throttle.
+            "lastNudge": 0,
             "transcript": "",
             "agentDir": "",
             "stopped": False,
@@ -987,7 +989,7 @@ def test_respawn_prompt_cli_fails_loud_on_unrecoverable_transcript(iso) -> None:
     assert "a1" in res.stderr
 
 
-def test_the_keep_going_pulse_SPENDS_the_nudge_budget_it_advertises(iso, capsys) -> None:
+def test_the_keep_going_pulse_SPENDS_the_nudge_budget_it_advertises(iso, capsys, monkeypatch) -> None:
     """Drives the REAL keep-going path, not `directive_lines()` — the gap was between them.
 
     Two emit paths advertise the same entries. `directive_lines()` LISTS agents and charges a
@@ -1002,16 +1004,24 @@ def test_the_keep_going_pulse_SPENDS_the_nudge_budget_it_advertises(iso, capsys)
 
     Reported by ai-maestro 2026-08-28 from the receiving end: five consecutive fires naming one
     DIED agent with `nudges` reading 2 before the first and 2 after the fifth. Testing the two
-    paths separately is exactly what let it through, so this test drives the pulse itself."""
+    paths separately is exactly what let it through, so this test drives the pulse itself.
+
+    Fires are SPACED by `NUDGE_MIN_INTERVAL_S` since 2026-08-29: the pulse now charges
+    throttled, so back-to-back fires deliberately do NOT evict (that is the sibling test
+    below). The cap this test guards is unchanged — MAX_NUDGES advertisements the reader had
+    time to act on still drop the entry, which is the whole janitor#75 mitigation."""
     state, pa = iso["state"], iso["pa"]
     (state.state_dir() / "resume-directive.txt").write_text("keep going\n", encoding="utf-8")
-    pa.add("fork-corpse", now=int(time.time()))
+    clock = [int(time.time())]
+    monkeypatch.setattr(pa.time, "time", lambda: clock[0])
+    pa.add("fork-corpse", now=clock[0])
     dispatch = _import_dispatch()
 
     for fire in range(pa.MAX_NUDGES):
         assert [e for e in pa.pending() if not e["stopped"]], f"evicted too early at fire {fire}"
         dispatch._phase_keep_going_nudge()
         capsys.readouterr()
+        clock[0] += pa.NUDGE_MIN_INTERVAL_S + 1
 
     assert [e for e in pa.pending() if not e["stopped"]] == [], (
         "after MAX_NUDGES advertisements the entry must be gone — otherwise the cap the note "
@@ -1019,6 +1029,46 @@ def test_the_keep_going_pulse_SPENDS_the_nudge_budget_it_advertises(iso, capsys)
     )
     dispatch._phase_keep_going_nudge()
     assert "background agent(s) pending" not in capsys.readouterr().out
+
+
+def test_back_to_back_pulses_do_not_evict_a_live_agent(iso, capsys, monkeypatch) -> None:
+    """The throttle: a LIVE agent must survive a long run of ~5-minute fires.
+
+    The sibling test above pins the CAP (a corpse is dropped after MAX_NUDGES). This one pins
+    the other half, and the two constrain each other — raising MAX_NUDGES to "fix" the eviction
+    would satisfy this test while quietly widening the corpse window the other one guards.
+
+    The bug (code-review finding #4): MAX_NUDGES was sized for `directive_lines()`, which runs
+    only on a RESUME, so 3 listings meant 3 real chances to act. When the keep-going pulse
+    started charging the same budget on EVERY ~5-minute fire, the bound silently became "15
+    minutes" — shorter than one model turn — and a healthy background agent was evicted from
+    the manifest while still running, after which no later compaction could cue its resume.
+
+    12 fires at 5-minute spacing is an hour of heartbeats, four times the old eviction window.
+    The entry must still be there, because the reader was never given 30 minutes to act on any
+    of them."""
+    state, pa = iso["state"], iso["pa"]
+    (state.state_dir() / "resume-directive.txt").write_text("keep going\n", encoding="utf-8")
+    clock = [int(time.time())]
+    monkeypatch.setattr(pa.time, "time", lambda: clock[0])
+    pa.add("live-agent", now=clock[0])
+    dispatch = _import_dispatch()
+
+    for _ in range(12):
+        dispatch._phase_keep_going_nudge()
+        capsys.readouterr()
+        clock[0] += 5 * 60
+
+    live = [e for e in pa.pending() if not e["stopped"]]
+    assert live, (
+        "a LIVE agent was evicted by 12 back-to-back ~5-minute pulses. The nudge budget is "
+        "meant to count the reader's CHANCES TO ACT, not heartbeat fires — see "
+        "pending_agents.NUDGE_MIN_INTERVAL_S."
+    )
+    assert live[0]["nudges"] < pa.MAX_NUDGES, (
+        f"budget nearly spent ({live[0]['nudges']}/{pa.MAX_NUDGES}) after one hour of fires — "
+        "the throttle is not holding, so eviction is still governed by cadence."
+    )
 
 
 def test_a_stopped_entry_is_never_charged_by_the_count_path(iso) -> None:
