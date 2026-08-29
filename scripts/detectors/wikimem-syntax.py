@@ -192,20 +192,13 @@ def main() -> int:
         line = dedupe.emit_once(seen, key, msg)
         if line is not None:
             print(line)
-    except lint.MemgrepTooOld as exc:
-        # The ONE failure this detector must not fail-open on. Everything else here is "could not
-        # check this fire, try the next one"; this is "cannot check, ever, until a human rebuilds
-        # the binary" — a permanent blindness that looks exactly like a clean corpus from outside.
-        # Deduped like any other finding so a stale binary costs one line, not one per fire.
-        seen = state.state_dir() / "wikimem-syntax-seen.txt"
-        line = dedupe.emit_once(
-            seen,
-            "memgrep-too-old",
-            f"[wikimem-syntax] wikimem lint is NOT RUNNING: {exc}",
-        )
-        if line is not None:
-            print(line)
-        return 0
+    # NO `except lint.MemgrepTooOld` here, deliberately. It was added alongside the `--no-fix`
+    # switch and left behind when that switch was reverted the same day — `run_lint` raises it
+    # ONLY under `read_only=True`, and `_error_findings` calls with the default False, so the
+    # handler was unreachable and its "wikimem lint is NOT RUNNING" alarm could never fire.
+    # Removed rather than made reachable: dead code that documents a guarantee it does not
+    # provide is worse than no code, because the next reader budgets for the alarm. Re-add it
+    # only together with a caller that actually passes `read_only=True`.
     except Exception:  # noqa: BLE001 -- a validator must never break the heartbeat
         return 0
     return 0

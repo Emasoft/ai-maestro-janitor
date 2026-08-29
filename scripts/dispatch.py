@@ -601,6 +601,11 @@ _ADVISORY_DETECTORS = frozenset({
     # class, not an incident. Advisory so it lands in the ledger instead of repeating on every
     # fire — which is the janitor#276 failure this same file was just fixed for.
     "gitignore-coverage",
+    # Deferred by construction: `queue_if_stale` only records that a CLAUDE.md write is owed and
+    # the marker is drained by the next compaction, so the detector reports the SAME stale index
+    # on every hourly fire until then — a line no reader can act on, repeating for as long as the
+    # deferral lasts. That is the janitor#276 shape exactly, and this list is where it is cured.
+    "claudemd-migration-queue",
     "runaway-file-growth",
     "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
     "oauth-cookie-reminder", "oauth-beacon-refresh",

@@ -78,13 +78,24 @@ MAX_AGE_S = 7 * 24 * 3600
 # heartbeat fire the whole time. A never-nudged entry older than an hour is
 # evidence the agent never came up: a live agent that IS being surfaced by
 # directive_lines() would have spent at least one nudge within an hour of
-# heartbeat fires. An agent that IS progressing (nudges >= 1) keeps the
-# full 7-day budget via MAX_AGE_S, unaffected by this shorter window.
+# heartbeat fires.
+#
+# ⚠ THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH — "an agent that IS progressing (nudges >= 1)
+# keeps the full 7-day budget via MAX_AGE_S, unaffected by this shorter window" — IS NO LONGER
+# TRUE, and it is corrected here rather than deleted because the number a reader needs changed.
+# `spend_nudges` is now also called from the heartbeat's keep-going pulse (dispatch.py), which
+# fires on EVERY due heartbeat (~5 min, muted only for the one fire after a resume). So every
+# non-stopped entry reaches nudges >= 1 within one fire of being written — regardless of
+# progress — and is evicted by the `nudges >= MAX_NUDGES` rule three fires later. The eviction
+# window for a LIVE agent is therefore ~15 minutes, not 7 days and not the 1 hour below.
+# MAX_NUDGES was sized for the RARE directive path ("the smallest number that still tolerates a
+# heartbeat firing while the model is mid-turn"); whether 3 is still the right budget once a
+# 5-minute pulse spends from it is an open question for the owner, not something to change here.
 #
 # ACCEPTED COST, stated so nobody has to rediscover it: `directive_lines()` only runs on
 # RESUME paths, so a healthy session that never compacts and never hits a rate limit may
-# not list anything for hours. A genuinely long-running agent (>1 h) can therefore still
-# be sitting at nudges == 0 and WILL be swept here — after which a later compaction would
+# not list anything for hours. A genuinely long-running agent can therefore be swept while
+# still alive — after which a later compaction would
 # not cue its resume. That is tolerable because this manifest already presumes an agent
 # gone after MAX_NUDGES (3) unheeded listings, i.e. the design accepts dropping a live
 # agent rather than nagging forever; this only extends the same judgement to the agent

@@ -253,12 +253,33 @@ def main() -> int:
         if checks
         else "no required checks auto-detected (CI has not run yet)"
     )
+    # DERIVED from the payload that was actually emitted, never restated by hand. This line is
+    # the human-facing record of what was applied (see the module docstring), and a hand-written
+    # copy of a payload drifts the moment the payload changes: it read "pull_request 1-approval"
+    # long after the ratified count became 0 (USER Tier-3 ruling 2026-08-13 — GitHub forbids
+    # self-approval, so 1 was unsatisfiable on a solo-owner repo), and it claimed the rule
+    # unconditionally even though `require_pull_request_for` omits it on most repos. An operator
+    # reading the audit log would have believed a review gate that is not there.
+    pr_rules = {
+        r["type"]: r.get("parameters", {})
+        for p in payloads
+        if p["name"] == bpl.PR_CHECKS_RULESET_NAME
+        for r in p["rules"]
+    }
+    if "pull_request" in pr_rules:
+        approvals = pr_rules["pull_request"].get("required_approving_review_count", 0)
+        pr_note = f"pull_request {approvals}-approval/dismiss-stale/thread-resolution"
+    else:
+        pr_note = "no pull_request rule (single-party repo — see require_pull_request_for)"
+    checks_note = (
+        "required_status_checks strict" if "required_status_checks" in pr_rules
+        else "no required_status_checks rule"
+    )
     print(
         f"[guard] applied branch-protection baseline on {slug}@{default_branch} "
         f"({summary}). Rulesets: baseline-history-protect (deletion only — "
         f"history rewrite/force-push allowed), baseline-pr-and-checks "
-        f"(pull_request 1-approval/dismiss-stale/thread-resolution + "
-        f"required_status_checks strict), and baseline-tag-protect "
+        f"({pr_note} + {checks_note}), and baseline-tag-protect "
         f"(tag refs/tags/v*.*.* deletion + update, owner bypass); {check_note}. "
         f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
     )
