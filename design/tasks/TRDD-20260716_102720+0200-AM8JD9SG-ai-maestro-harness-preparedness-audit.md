@@ -1,22 +1,40 @@
 ---
 trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
-column: todo
+column: blocked
+pre-block-column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-28T11:20:00+0200
+updated: 2026-08-29T07:58:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
 severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
 implementation-commits: [eb9faa1, e65ced5f]
-blocked-by: []
+blocked-by: [OZNG3N2D]
 relevant-rules: []
 ---
 
 # ai-maestro harness preparedness audit — janitor fleet machinery inside an ai-maestro agent
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-16
+
+> **⏵ 2026-08-29 — BLOCKED, and the block is honest.** Every remaining finding needs someone
+> other than a janitor session, so the card moved `todo` → `blocked` (`blocked-by: [OZNG3N2D]`)
+> rather than sitting in a column that claims it is workable. Of the ten findings, **F7 closed
+> this pass** (verified: `recovery_for_diagnosis("server_owned")` is None and `daemon.py:1396`
+> hands off before any rung is chosen, so the hard rungs are unreachable for its population — see
+> the box). What is left:
+>
+> | finding | why it cannot be worked here |
+> |---|---|
+> | **F1** provenance root-of-trust | recorded by the audit itself as USER/server scope, not janitor-side |
+> | **F3** transcript freshness ≠ presence | needs the hub's `aimaestro-session.sh activity` verb — **TRDD-OZNG3N2D**, `backburner` |
+> | **F4** presence gate is HOST-wide | structurally unfixable in place (`hid_idle_seconds` reads machine-wide IOHIDSystem); same vehicle, OZNG3N2D |
+>
+> **Do not "make progress" on F3/F4 by inferring presence some other way.** Both findings are
+> that the janitor currently INFERS presence from a proxy; a new proxy is the same bug with a new
+> signal. The vehicle is a server-OBSERVED input epoch, which only ai-maestro can supply.
 
 **What this is:** a high-effort (`/code-review high`, 35 agents, 1-vote recall-biased verify)
 compatibility audit the USER requested: *"audit the janitor plugin for preparedness to work inside
@@ -435,7 +453,7 @@ finding is fully resolved, and it cannot see a fix that landed without citing th
       place. **Same vehicle: TRDD-OZNG3N2D** — the hub verb is per-SESSION, which is the
       granularity F4 asks for. Note the fail-direction contract from TRDD-D2DD5GO8 must survive:
       `in_turn` NULL is UNKNOWN and never licenses an injection.
-- [ ] **F7** hard-restart rungs bypass the ai-maestro server lifecycle — must use
+- [x] **F7** hard-restart rungs bypass the ai-maestro server lifecycle — must use
       `hibernate`→`wake` (LIFECYCLE), never `restart` (DRIVE, revoked by R42).
 
       **NARROWED 2026-08-26 by F11's answer, and the narrowing is most of the work.** F7 binds
@@ -444,6 +462,21 @@ finding is fully resolved, and it cannot see a fix that landed without citing th
       are `~/Code/*` sessions that ai-maestro's own `CreateAgent`/`DeleteAgent` guards would
       refuse, so they were never in F7's population. What remains is real but small: the
       lifecycle path for the three.
+
+      **CLOSED 2026-08-29 — satisfied by construction, and MEASURED rather than reasoned.** For
+      the narrowed population there is no `restart` to convert, because those agents reach no
+      rung at all. `session_liveness.recovery_for_diagnosis("server_owned")` returns **None**
+      (run, not read), and `daemon.py:1396` hands off on exactly that None *before* any rung is
+      selected — so the hard rungs (`relaunch`/`force_restart`/`resurrect`) are unreachable for a
+      server-owned instance, not merely discouraged. The PZLVT2RN hands-off split already gives
+      F7 what it asked for.
+
+      **The residual is a DIFFERENT finding, and it is deliberate:** hands-off means the janitor
+      provides those three no recovery whatsoever. That is correct — ai-maestro's server owns
+      their continuity, confirmed under F11 — but it means F7 must NOT later be "improved" into a
+      `hibernate`→`wake` call. Issuing lifecycle verbs against an agent whose lifecycle another
+      server owns is the same class of intrusion R42 revoked, just politer. If the server ever
+      stops recovering them, that is a new card, not a reopening of this box.
 - [x] **F11** R42.5 compliance — the guardian must not cross-inject.
 
       **ANSWERED 2026-08-26 — and the answer is that the box as written cannot be satisfied
