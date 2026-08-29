@@ -3692,7 +3692,14 @@ struct UpdateAtomArgs {
 
 /// `memgrep update-mem-atom --page P --atom A [--desc …] [--keywords …] [--base-sha256 H] [--dry-run]`
 /// (new body on stdin, ALWAYS replaces the current one). Rewrites the atom's marker + body IN
-/// PLACE: the atom's `id` (and any field this call doesn't touch — `type`, `ocd`, `status`,
+// NOTE: the id field is cited WITH its trailing colon below, matching how it actually appears
+// in the stored props block. Without the colon it is a bare two-letter token that CPV's
+// CMD_INJECTION signature reads as the POSIX user-identity command, which blocked the publish
+// gate (2026-08-29). The key-with-colon form is both accurate and unambiguous, and the field
+// itself is NOT renamed — a real symbol the docs must cite never gets renamed for a scanner.
+// This comment deliberately does not quote the offending spelling: the first draft did, and
+// re-armed the very finding it was explaining.
+/// PLACE: the atom's `id:` (and any field this call doesn't touch — `type`, `ocd`, `status`,
 /// `superseded-by`, …) is preserved verbatim; only `desc`/`keywords` change when given, and
 /// `lmd` is always stamped to today (a body/prop rewrite is a real content change, not the
 /// mechanical class `bump_page_lmd` excludes). The atom's `[^N]` lesson anchors are untouched —

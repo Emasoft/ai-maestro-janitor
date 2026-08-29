@@ -568,6 +568,40 @@ USER) per the markdown-memory-recall rule. A `frontend` hub can be PROJECT
 searches all scopes with LOCAL > PROJECT > USER precedence. Tier is the pyramid;
 scope is visibility; they compose.
 
+### Resolving the scope root (moved here from the MEMORIZE skill, 2026-08-29)
+
+Decide by CONTENT. A wiki STRUCTURE page — a hub/aspect/component about the project's
+code, architecture, conventions or pipeline — is **PROJECT by definition**, and "project
+structure" is never the *unsure* case.
+
+- **PROJECT** — anything a teammate cloning the repo needs. Git-tracked and pushed, so
+  NO secrets. The default for structure pages.
+- **LOCAL** — ONLY machine-specific facts: local absolute paths, this host's name, this
+  machine's credentials or tokens. Never pushed.
+- **USER** — true across ALL projects (a preference, or a machine-independent lesson).
+- **Privacy backstop:** machine-specific AND unsure → LOCAL.
+
+```bash
+case "$SCOPE" in
+  local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
+  # in-repo, namespaced under .claude/ — add a `!.claude/project/memory/**` gitignore
+  # exception if .claude/ is ignored
+  project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory" ;;
+  # the janitor's FIXED data dir, hard-coded. NOT ${CLAUDE_PLUGIN_DATA} — in an agent
+  # shell that is the RUNNING plugin's dir, not the janitor's. Survives --keep-data.
+  user)    MEMDIR="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory" ;;
+esac
+mkdir -p "$MEMDIR"
+```
+
+The `memory-scope-leak` detector polices secrets and local paths in PROJECT/USER — keep
+machine-specific detail in LOCAL.
+
+Every PROJECT page also carries `publish-globally: true|false` (default `false`; `true`
+symlinks it into the USER root for cross-project recall). memgrep inserts the default and
+reconciles the symlink around every write — full mechanism:
+`~/.claude/rules/markdown-memory-recall.md` §`publish-globally:`.
+
 ## Backward compatibility
 
 Existing atomic notes (`node_type: memory`, no `tier`) are valid — treat a page
