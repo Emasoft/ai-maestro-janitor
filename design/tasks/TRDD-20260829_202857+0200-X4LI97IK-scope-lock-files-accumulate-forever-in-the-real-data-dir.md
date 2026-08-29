@@ -4,7 +4,7 @@ title: Per-scope lock files accumulate forever in the real DATA dir and the writ
 column: backburner
 blocked-by: []
 created: 2026-08-29T20:28:57+0200
-updated: 2026-08-29T20:28:57+0200
+updated: 2026-08-29T20:52:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 5
@@ -48,16 +48,48 @@ costs:
    daemon write from a test write in the same directory will keep saying "not a test leak" about
    test leaks.
 
-**HYPOTHESIS, not yet proven:** that the locks come from test tmp roots rather than real
-projects. The evidence is circumstantial but strong (count, timing, zero real projects at that
-rate). Prove it before fixing — a lock named for a REAL project root that no longer exists is a
-different problem with a different fix.
+## Attribution — step 1 partly done the same evening, and it FALSIFIED the obvious guess
+
+**Measured, and solid:** hashing every scope root that exists on this machine (214 of them —
+each `~/.claude/projects/<slug>/memory` and its `wikimem/`, the USER root, this repo's PROJECT
+root) and intersecting with the 1,128 lock hashes gives **29 matches. 1,099 (97.4%) correspond
+to no scope root that exists.** So the locks are overwhelmingly for roots that are gone or were
+never real — that part is not in doubt.
+
+**But the "it is the tests" guess did NOT survive its first probe.** Snapshotting the lock count
+around `pytest -k "memory_txn or memory_lint_gate"` (68 tests, the ones that actually drive the
+transaction core): **delta 0.** Those tests leak nothing.
+
+So the producer is STILL UNIDENTIFIED, and this section exists so nobody re-runs that probe. What
+is known: 97.4% orphan hashes, ~165/day on an active day, and the two most obviously suspicious
+test modules are innocent. What is NOT known: whether the rest of the suite leaks, or whether the
+daemon/heartbeat manufactures ephemeral roots of its own — the per-hour histogram for one day
+(10, 42, 11, 22, 34, 35, 11) is bursty rather than heartbeat-regular, which leans toward
+batch runs but does not settle it.
+
+**FULL-SUITE PROBE RUN, and it settles it: delta 0.** `uv run pytest -q` end to end — 15,911
+passed, 1 skipped, 9m53s — added **ZERO** lock files. **The test suite is not the producer.**
+That was the whole hypothesis this card was filed on, and it is dead.
+
+**So the producer is something in NORMAL OPERATION** — the daemon, the heartbeat, or a memory
+agent manufacturing ~165 ephemeral scope roots on an active day. That is a more interesting
+finding than the one the card started with, and it is unidentified.
+
+**Next probe:** instrument `_scope_lock_path` to log the root it hashed, then read one day of it.
+Do not guess again — this card has already burned two guesses, and each looked obvious.
+
+**Caveat on the 97.4%, so nobody over-trusts it:** the 214 roots I probed were every
+`~/.claude/projects/<slug>/memory` (+ its `wikimem/`), the USER root, and **only THIS repo's**
+PROJECT root. The janitor runs in every project on this machine, so each repo contributes a
+PROJECT root I did not enumerate. That could account for ~100 more matches, not 1,099 — the
+conclusion survives, but the number is a floor, not a measurement.
 
 ## Scope
 
-1. **Attribute the hashes.** Are the 1,128 roots tmp paths or real ones? A test that records the
-   roots it locks, or a one-off reverse-map over known project slugs, answers it. Do not skip
-   this step: the fix differs by answer.
+1. **Attribute the hashes.** ~~Are the roots tmp paths or real ones?~~ **Half done — see the
+   attribution section: 1,099 of 1,128 match no existing root, but the test hypothesis is
+   FALSIFIED for the two modules that drive the txn core.** Remaining: a full-suite snapshot,
+   then instrumentation of `_scope_lock_path` if that comes back zero too.
 2. **If tests: give them their own state dir.** The suite already redirects HOME and
    `CLAUDE_PROJECT_DIR` in places; the lock path should follow `JANITOR_GLOBAL_STATE_DIR` in the
    test environment so nothing lands in the real dir. That is the fix at the right layer — a
@@ -76,7 +108,10 @@ different problem with a different fix.
 
 ## Acceptance
 
-- [ ] The provenance of the 1,128 hashes is established (test tmp roots vs real project roots).
+- [x] ~~The provenance is established (test tmp roots vs real project roots)~~ — PARTIAL: the
+      TEST hypothesis is decisively dead (full suite, delta 0). 1,099/1,128 match no existing
+      root. The actual producer is still unnamed and is in normal operation.
+- [ ] The producer is NAMED, by instrumenting `_scope_lock_path` — not by a third guess.
 - [ ] If tests: no suite run adds a lock file to the real global-state dir; pinned by a test that
       snapshots the dir around a memory-txn test.
 - [ ] Growth is bounded — the count stops tracking "scope roots ever seen".
