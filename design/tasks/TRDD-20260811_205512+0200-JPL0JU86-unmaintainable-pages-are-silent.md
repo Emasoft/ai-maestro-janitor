@@ -1,10 +1,10 @@
 ---
 trdd-id: JPL0JU86
 title: A page no chore can ever maintain must say so — silent permanent abstention
-column: human_review
+column: complete
 blocked-by: []
 created: 2026-08-11T20:55:12+0200
-updated: 2026-08-26T21:26:59+0200
+updated: 2026-08-29T17:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -179,10 +179,45 @@ into `_run()` right after `_surface_mistiered`. Part (a) — re-scoping the four
 is NOT done here (needs the AZ6QRK0D sequencing this card already flags; a live-store
 mutation is outside a bugfix's blast radius) and stays open below.
 
+## ⏵ 2026-08-29 — DECIDED: option A is ratified. This card is closed.
+
+Decided under the owner's grant of full decision autonomy (2026-08-29), on the evidence this
+card had already assembled. **Option A — canonical page in PROJECT, USER-scope symlink for
+recall reach — is the ratified end state. Nothing is to be built.**
+
+Every argument was already on the page; what was missing was somebody willing to call it:
+
+1. **Option B fights shipped behaviour.** `publish-globally: true` is declared DELIBERATELY on
+   all four pages (`fba278d4`), so `TrueNoSymlink` re-creates any symlink deleted. The B box was
+   not work, it was a loop.
+2. **Two of the six symlinks point into a DIFFERENT project.** Under
+   `how-to-fix-issues-of-other-projects.md` those are not this repo's to touch, so B could not
+   be executed completely even if it were wanted — and a half-executed direction change is worse
+   than either direction.
+3. **A is coherent, not merely incumbent.** The page is maintainable where it is canonical,
+   `iter_note_files` excludes the alias so no chore burns a dispatch, and `_surface_scope_escapes`
+   REPORTS the condition rather than hiding it — which is the "must not abstain silently"
+   requirement this card was named for, already satisfied.
+
+**A gate that discharged without answering is not a gate, it is a stall.** This one was parked on
+TRDD-AZ6QRK0D, which reached `published` on 2026-08-18 having answered a different question; from
+that moment nothing was ever going to arrive to unblock it, and the card sat in `human_review` for
+11 days waiting for a decision that had in fact already been made by shipping. Recording it because
+the pattern is the reusable part: **when a blocker goes terminal without ruling, the card is not
+blocked any more — it is undecided, and someone has to notice the difference.**
+
+**Deliberately NOT folded in: the second population** (`free-prose-leaf` map stubs, ~208k tokens
+per null pass, re-nominating every 7 days). Real, measured, and a DIFFERENT defect — those pages
+are unmaintainable because they hold no durable facts, not because a guard refuses them. The card
+warned that conflating the two could silence a page that merely has nothing to do today, and that
+warning stands. Filed separately as **TRDD-QRPBHKZS**.
+
 ## Acceptance
 
-- [ ] The four symlinks are gone and the pages are maintainable from their new scope — **GATED ON
-      A USER DECISION, not on work.** This box presumes option B (move the pages). The competing
+- [x] ~~The four symlinks are gone and the pages are maintainable from their new scope~~ —
+      **SUPERSEDED by the option-A ruling above; deliberately NOT done.** The box presumed
+      option B. See the ⏵ 2026-08-29 section for why executing it would now be a loop. The
+      competing
       option A (keep the symlink, teach the chores to follow it) would rewrite it instead of
       satisfying it, so building either way now would be picking the answer. The two options and
       their real costs are written up on TRDD-AZ6QRK0D, which is in `human_review` for exactly
