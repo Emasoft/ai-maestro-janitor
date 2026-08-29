@@ -30,8 +30,8 @@ today, 11 in the last three hours.
 *correct* and deliberately mirrors memgrep's Rust side (TRDD-7YHT3FNK P3). One hash = one scope
 root. So **1,128 distinct scope roots have been locked on this machine.**
 
-That is not 1,128 projects. ~~It is test runs~~ — **FALSIFIED the same evening; see Attribution.
-The full suite adds ZERO locks.** The producer is in NORMAL OPERATION and is still unnamed.
+That is not 1,128 projects, and it is not test runs. **The producer is
+`write_gate.rs::scope_root_for`'s fallback — identified and proven below.**
 
 ## Why it is worth a card despite being harmless in bytes
 
@@ -47,35 +47,26 @@ costs:
    **Read this the right way round now that the test hypothesis is dead:** the guard's verdict
    was CORRECT — these really are live-actor writes, not test leaks. It was right and I did not
    believe it. The cost is not a missed leak; it is that "a live actor did it" is as far as any
-   attribution here goes, so a component writing 165 orphan locks a day looks exactly like
-   healthy operation and nothing anywhere names it.
+   attribution here goes, so the component writing 165 orphan locks a day looked exactly like
+   healthy operation — and stayed unnamed until someone read the resolver.
 
-## Attribution — step 1 partly done the same evening, and it FALSIFIED the obvious guess
+## Probes already run — do not repeat these
 
-**Measured, and solid:** hashing every scope root that exists on this machine (214 of them —
-each `~/.claude/projects/<slug>/memory` and its `wikimem/`, the USER root, this repo's PROJECT
-root) and intersecting with the 1,128 lock hashes gives **29 matches. 1,099 (97.4%) correspond
-to no scope root that exists.** So the locks are overwhelmingly for roots that are gone or were
-never real — that part is not in doubt.
+| probe | result |
+|---|---|
+| hash every scope root that EXISTS on this machine (214) and intersect | **29 match, 1,099 (97.4%) match nothing** — solid, and the shape the fix must explain |
+| `pytest -k "memory_txn or memory_lint_gate"` (68 tests), lock count before/after | delta **0** |
+| the FULL suite, `uv run pytest -q` (15,911 passed, 9m53s) | delta **0** — the test suite is not the producer |
+| `memgrep lint` on an out-of-scope page | delta **0** — lint takes no WRITE lock and looks innocent |
 
-**But the "it is the tests" guess did NOT survive its first probe.** Snapshotting the lock count
-around `pytest -k "memory_txn or memory_lint_gate"` (68 tests, the ones that actually drive the
-transaction core): **delta 0.** Those tests leak nothing.
+Two hypotheses died here — "it is the test suite" (the premise this card was filed on) and,
+before that, "it is the daemon minting ephemeral roots". Both looked obvious. What finally named
+the producer was READING the resolver, not more measuring.
 
-So the producer is STILL UNIDENTIFIED, and this section exists so nobody re-runs that probe. What
-is known: 97.4% orphan hashes, ~165/day on an active day, and the two most obviously suspicious
-test modules are innocent. What is NOT known: whether the rest of the suite leaks, or whether the
-daemon/heartbeat manufactures ephemeral roots of its own — the per-hour histogram for one day
-(10, 42, 11, 22, 34, 35, 11) is bursty rather than heartbeat-regular, which leans toward
-batch runs but does not settle it.
-
-**FULL-SUITE PROBE RUN, and it settles it: delta 0.** `uv run pytest -q` end to end — 15,911
-passed, 1 skipped, 9m53s — added **ZERO** lock files. **The test suite is not the producer.**
-That was the whole hypothesis this card was filed on, and it is dead.
-
-**So the producer is something in NORMAL OPERATION** — the daemon, the heartbeat, or a memory
-agent manufacturing ~165 ephemeral scope roots on an active day. That is a more interesting
-finding than the one the card started with, and it is unidentified.
+**Caveat on the 97.4%, so nobody over-trusts it:** the 214 roots probed were every
+`~/.claude/projects/<slug>/memory` (+ its `wikimem/`), the USER root, and **only THIS repo's**
+PROJECT root. The janitor runs in every project here, so each repo contributes a PROJECT root I
+did not enumerate — worth ~100 more matches, not 1,099. A floor, not a measurement.
 
 ## ✅ PRODUCER IDENTIFIED — `scope_root_for`'s fallback, proven not guessed (2026-08-29)
 
@@ -117,22 +108,14 @@ a file after a directory nobody will revisit. Options, in preference order:
 
 Option 2 is the lazy correct one unless someone shows the contention matters.
 
-**Caveat on the 97.4%, so nobody over-trusts it:** the 214 roots I probed were every
-`~/.claude/projects/<slug>/memory` (+ its `wikimem/`), the USER root, and **only THIS repo's**
-PROJECT root. The janitor runs in every project on this machine, so each repo contributes a
-PROJECT root I did not enumerate. That could account for ~100 more matches, not 1,099 — the
-conclusion survives, but the number is a floor, not a measurement.
-
 ## Scope
 
-1. **Attribute the hashes.** ~~Are the roots tmp paths or real ones?~~ **Half done — see the
-   attribution section: 1,099 of 1,128 match no existing root, and the TEST hypothesis is dead
-   (full suite, delta 0).** Remaining: instrument `_scope_lock_path` to log the root it hashed.
-2. ~~**If tests: give them their own state dir.**~~ **VOID — the tests are innocent.** Whatever
-   the producer turns out to be, the fix is at ITS layer: either it should not be minting scope
-   roots that never persist, or the lock for an ephemeral root belongs beside that root rather
-   than in the machine-wide dir.
-3. **Only then consider reaping.** A lock file cannot be deleted safely while a holder has it
+1. ~~**Attribute the hashes.**~~ **DONE — the producer is named and proven; see above.**
+2. ~~**If tests: give them their own state dir.**~~ **VOID — the tests are innocent.**
+3. **Fix `scope_root_for`** per "Where the fix belongs" — option 2 (one shared out-of-scope lock)
+   unless someone shows the contention matters. **Change the Rust and Python sides together or
+   neither**, or they stop excluding each other (TRDD-7YHT3FNK).
+4. **Only then consider reaping.** A lock file cannot be deleted safely while a holder has it
    flocked, and a reaper racing a live commit is far worse than 1,128 empty files. If one is
    built, it deletes only locks whose flock can be acquired AND whose mtime is old.
 
@@ -148,9 +131,9 @@ conclusion survives, but the number is a floor, not a measurement.
 
 ## Acceptance
 
-- [x] ~~The provenance is established (test tmp roots vs real project roots)~~ — PARTIAL: the
-      TEST hypothesis is decisively dead (full suite, delta 0). 1,099/1,128 match no existing
-      root. The actual producer is still unnamed and is in normal operation.
+- [x] The provenance is established: 1,099/1,128 match no existing root, the test hypothesis is
+      dead (full suite, delta 0), and the producer is NAMED and proven — `scope_root_for`'s
+      no-memory-ancestor fallback.
 - [x] The producer is NAMED: `scope_root_for`'s no-memory-ancestor fallback. Proven by probe,
       not by instrumentation — reading the resolver was cheaper than logging it.
 - [ ] An out-of-scope page no longer mints a per-directory machine-wide lock, and the Rust
@@ -168,7 +151,7 @@ conclusion survives, but the number is a floor, not a measurement.
   probe before it deserves a lesson** — I had the probe available the whole time and wrote the
   conclusion first. What survives is smaller and true: "a live actor did it" is the CEILING of
   attribution here, so a component minting 165 orphan locks a day is indistinguishable from
-  healthy operation, and nothing anywhere names it.
+  healthy operation — which is why it went unnamed for months.
 - 2026-08-29 — **Found while investigating something else entirely** (an agent-dispatch marker
   that could not run). The count was visible in one `ls`, and nobody had looked because nothing
   had ever failed. Zero-byte files raise no alarm anywhere — no disk pressure, no error, no test.
