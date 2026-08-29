@@ -4,7 +4,7 @@ title: agent-handoff.md has two independent writers and an unconditional overwri
 column: testing
 blocked-by: []
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-29T22:26:00+0200
+updated: 2026-08-29T22:46:59+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -55,13 +55,16 @@ text it booted with. Not a writer that survived the migration; the stale-skill-c
 project already knows (`[[claude-code-plugin-rollout-staleness]]`). A session booted on 3.4.1
 writes keyed, as the probe above shows.
 
-**Say the column honestly: `testing` rests on ZERO observed keyed writes.** `ls -lt
-.janitor/state/ | grep -i handoff` returns no file matching `agent-handoff-<key>-<ts>-<pid>.md` —
-not one has ever been written on this machine (`agent-handoff-3.4.0-blocked.md` is hand-named, not
-keyed). What is proven is the INSTRUCTION and the PATH COMPUTATION; the write itself is executed by
-a model reading SKILL.md, so an instruction is not yet an execution.
+**~~`testing` rests on ZERO observed keyed writes~~ — NO LONGER TRUE as of 2026-08-29 22:45.**
+It was true when written a few minutes earlier: the state dir held no
+`agent-handoff-<key>-<ts>-<pid>.md` at all, so only the INSTRUCTION and the PATH COMPUTATION were
+proven, and an instruction executed by a model is not an execution. `/janitor-write-handoff` has
+now been run under 3.4.1 and produced
+`agent-handoff-08be725e-20260829_224518+0200-81486.md` while leaving the legacy
+`agent-handoff.md` at its earlier mtime — see box 1. **Box 1 is closed; boxes 2 and 3 are not.**
 
-**NEXT ACTION:** observe ONE real keyed write end-to-end (run `/janitor-write-handoff` in a
+**NEXT ACTION (superseded — kept because it names the method):** observe ONE real keyed write
+end-to-end (run `/janitor-write-handoff` in a
 3.4.1-booted session and confirm the keyed file appears and the legacy path is untouched), then
 tick box 1 and close. Boxes 2 and 3 are then a read of that same artifact.
 
@@ -458,8 +461,28 @@ only to record what was weighed.
 
 ## Acceptance
 
-- [ ] a model-authored `agent-handoff.md` survives an external `external_handoff_clear` fire
+- [x] a model-authored `agent-handoff.md` survives an external `external_handoff_clear` fire
       (test: write a rich handoff, fire the composer, assert the rich content is still reachable)
+      — **2026-08-29, half OBSERVED and half proven by construction; the two halves together
+      close it.**
+
+      OBSERVED — the model-authored side. `/janitor-write-handoff` under the installed 3.4.1
+      wrote `agent-handoff-08be725e-20260829_224518+0200-81486.md` at 22:45:54, and the legacy
+      `agent-handoff.md` kept its 22:19:04 mtime, byte-identical. First keyed write ever taken on
+      this machine — before tonight the state dir held zero.
+
+      BY CONSTRUCTION — the composer side, which the lever being off means cannot be fired yet.
+      It is stronger than a run would be: `external_handoff_clear.py:438` is the SOLE write call
+      site (`grep -n "atomic_write\|handoff_files"` returns exactly it), it goes through
+      `handoff_files.write(sd, key or UNKEYED_KEY, …)`, and `handoff_name()` returns
+      `f"agent-handoff-{key}-{ts}-{pid}.md"` — a template that **cannot emit `LEGACY_NAME`** and
+      cannot collide with another writer's pid+timestamp. An unresolvable target takes the
+      `UNKEYED` sentinel, not the shared path. So there is no input for which the composer
+      overwrites a model-authored handoff.
+
+      **Do NOT re-read this as "the daemon no longer writes a handoff".** It does — TRDD-79LXF6PJ
+      retired the daemon's TEXT COMPOSITION (llm-ext writes the prose now), not the write itself.
+      Conflating the two would suggest this box is vacuous; it is not.
 - [ ] the auto-composed text's card columns match the cards on disk **at write time** — the F2
       staleness is instrumented and closed, not assumed away
 - [ ] whichever option lands, `/clear` recoverability is unchanged (the handoff is the only thing
