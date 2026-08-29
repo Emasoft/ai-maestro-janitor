@@ -3,7 +3,7 @@ trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
 column: todo
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-29T22:45:00+0200
+updated: 2026-08-29T22:53:18+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -13,22 +13,34 @@ eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-29
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-29 (re-verified)
 
-**UNBLOCKED. `blocked-by: [publish-of-AWXK0RFT]` was false for 17 days — by this card's OWN
-admission.** The 2026-08-12 note below records that AWXK0RFT "was already `complete` and had been
-since 2026-08-05… the line was stale on arrival". The card noticed, wrote it down, and stayed in
-`blocked` anyway. That is the failure the pipeline rule names: a card that claims to be waiting
-tells the only view anyone reads that it is handled, so nothing ever looks at it again.
+**Item 3 re-verified against the installed 3.4.1 code and found NOT WARRANTED — do not
+implement it as written.** Full evidence: `reports/trdd-verify/20260829_225318+0200-5ZVS1DDP-item3.md`.
 
-**Restored to `todo`, NOT to its `pre-block-column: testing`** — a deliberate deviation from the
-usual restore. Items 1 and 2 are done and verified; item 3 (move the four movable chores to
-per-repo crons) is UNSTARTED. `testing` would assert someone is testing it right now, and nobody
-is; an untrue column is worse than an unstarted card.
+Blocker QK7M2B0X is confirmed `column: complete` (2026-08-05) — item 3 is genuinely
+unblocked. But the gap it exists to close is itself closed by two later, independent
+changes this card never re-checked against:
 
-**NEXT ACTION:** item 3 only — its stated blocker QK7M2B0X is `complete`/released, so it is
-unblocked work. EHT KQ9WM4TZ sits in `human_review` (the OWNER's queue): it gates this card
-reaching `complete`, it does not gate doing item 3.
+- `scripts/lib/harness_backend.py:97-129,237-249` — `server_owns_every_chore()` (the
+  daemon's full-exit gate, `scripts/daemon.py:2949-2950`) requires ALL 13 `GLOBAL_CHORES`
+  claimed, and several (`integrity-repin`, `oauth-recovery`, and — relevantly —
+  `cache-prune`/`rules-cleanup`/`memory-guard`) are **permanently unabsorbed by design**.
+  So the daemon can never fully exit under normal operation, and per
+  `daemon.py:2483-2499` (`_task_yielded_to_server`, per-chore CLAIMED check, janitor#134
+  ruling) it never yields these three individually either — they are never in
+  `SERVER_ABSORBED_TASKS`. The original ai-maestro#111 silent-outage shape this item was
+  written against cannot recur for these three chores.
+- Even a daemon *crash* (not a server takeover) is now bounded to ~30 s–few-minutes by two
+  independent respawn paths (OS keepalive `Restart=always`/`ThrottleInterval: 30`, plus
+  every per-session heartbeat's `ensure_daemon_running()`) — neither existed in this shape
+  when item 3 was first written.
+
+**Item 3 → RETIRED, not done.** See the item-3 line below for what would revive it.
+Items 1 and 2 remain done and verified. Nothing else on this card is open.
+
+**NEXT ACTION:** none for item 3. EHT KQ9WM4TZ sits in `human_review` (the OWNER's queue)
+and still gates this card reaching `complete`; that is the only remaining next action.
 
 ## ⏵ STATE — 2026-08-05 (superseded by the block above; kept for the verified chain)
 
@@ -213,9 +225,21 @@ minute. Without that fix this TRDD could not be released reliably.
    moment" — true until `88e6f45a`; and "treat coverage as holding only while pid 97639 lives"
    — that pid is already gone, and the phrasing implied a manual start is a usable stopgap. It
    is not.)* Tracked as EHT TRDD-KQ9WM4TZ.
-3. The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
-   `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.
-   **STILL OPEN**; QK7M2B0X is at `column: dev`, so this is genuinely blocked, not stalled.
+3. ~~The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
+   `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.~~
+   **RETIRED 2026-08-29 (re-verified, NOT done) — QK7M2B0X landed (`complete`,
+   2026-08-05) so the stated blocker is gone, but the gap this item existed to close is
+   independently closed: `github-config-audit` is now server-absorbed
+   (`harness_backend.SERVER_ABSORBED_TASKS`, janitor#274) and the other three
+   (`cache-prune`/`rules-cleanup`/`memory-guard`) are permanently unabsorbed by design, so
+   the daemon can never yield them nor fully exit (`server_owns_every_chore()` needs ALL
+   13 `GLOBAL_CHORES` claimed and several — `integrity-repin`, `oauth-recovery` — are
+   deliberately never absorbed). A daemon crash is separately bounded to ~30s–minutes by
+   OS keepalive + per-session `ensure_daemon_running()`. Full evidence:
+   `reports/trdd-verify/20260829_225318+0200-5ZVS1DDP-item3.md`. Revives only if the server
+   later absorbs then regresses on these three specifically, if both respawn paths are
+   found to have a real gap, or on an explicit owner decision to decouple these chores from
+   the daemon entirely regardless of outage risk.
 
 **SUPERSEDED — do NOT carry forward:** the "NOT STARTED / get an owner decision" text this
 block replaced, and rev 4's "the daemon keeps running and yields the absorbed chores".

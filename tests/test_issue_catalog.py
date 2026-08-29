@@ -772,3 +772,45 @@ def test_the_incident_ticket_now_renders_a_READABLE_title(project: Path) -> None
     assert t is not None
     assert "`atoms`" in t.title and "`status`" in t.title
     assert "<?" not in t.title, f"a slot went unfilled: {t.title}"
+
+
+def test_retract_stamps_column_refused_even_when_the_proposal_was_BLOCKED(project: Path) -> None:
+    """A proposal can be sitting at `column: blocked` when its finding vanishes. The stamp used to
+    match only `^column: proposal$`, so such a card landed in `design/refused/` still asserting
+    `column: blocked` — the folder and the column contradicting each other, silently, because
+    `re.sub` returns the string unchanged on no-match. Reported by a peer agent from another repo
+    2026-08-29."""
+    r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    prop = _proposals(project)[0]
+    prop.write_text(
+        prop.read_text(encoding="utf-8").replace("column: proposal", "column: blocked"),
+        encoding="utf-8",
+    )
+
+    assert issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo") == r.trdd
+
+    refused = list((project / "design" / "refused").glob("*.md"))
+    assert len(refused) == 1
+    assert "column: refused" in refused[0].read_text(encoding="utf-8")
+    assert "column: blocked" not in refused[0].read_text(encoding="utf-8")
+
+
+def test_retract_stamps_ONLY_the_frontmatter_column_not_a_board_census_in_the_body(
+    project: Path,
+) -> None:
+    """The counterpart guard. Widening the pattern to any value made a greedy sub dangerous: cards
+    routinely paste a board census into their BODY (`column: complete    197`), which is evidence,
+    not state. `count=1` confines the rewrite to the frontmatter, which is always first in the
+    file."""
+    issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    prop = _proposals(project)[0]
+    prop.write_text(
+        prop.read_text(encoding="utf-8") + "\n## Census\n\ncolumn: complete    197\n",
+        encoding="utf-8",
+    )
+
+    issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
+
+    body = list((project / "design" / "refused").glob("*.md"))[0].read_text(encoding="utf-8")
+    assert "column: refused" in body
+    assert "column: complete    197" in body, "the body census must survive verbatim"

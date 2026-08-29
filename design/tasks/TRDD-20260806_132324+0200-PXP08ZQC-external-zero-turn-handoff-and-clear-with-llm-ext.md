@@ -4,7 +4,7 @@ title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, termi
 column: todo
 blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-08-29T22:51:10+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -315,7 +315,36 @@ the right moment (before the next turn executes).
       clear → re-arm → resume, with the verify harness PASS table
       — the CYCLE was observed 2026-08-15 (below); the `handoff_clear_verify.py` PASS table was NOT
       captured, so this stays open on that half alone
-- [ ] cost note: measured per-cycle cost vs today's per-fire cache-miss write
+- [x] cost note: measured per-cycle cost vs today's per-fire cache-miss write — see
+      `reports/trdd-verify/20260829_224254+0200-79LXF6PJ-token-saving.md` for the NEW-path
+      cost, cross-referenced against this TRDD's own baseline below.
+
+### Cost note (2026-08-29)
+
+- **Baseline (today, no fix)**: this TRDD's own WHY (line 281) states the next-fire
+  cache-miss write is **~400,000–460,000 tokens**; sibling TRDD-5C42VCUX (line 86, 120)
+  independently states the same range for the same trigger ("EVERY fire re-paid a
+  ~400–460k cache-miss WRITE"). Not re-measured here — cited from the existing corpus.
+- **NEW path (external handoff+clear, this TRDD)**: **0 Claude-side tokens, $0** —
+  verified by reading source in `reports/trdd-verify/20260829_224254+0200-79LXF6PJ-token-saving.md`
+  §1: `external_handoff_clear.py::_compose()` calls `run_llm_ext_summary()`, which shells
+  out to the `llm-ext` CLI (a $0 external OpenRouter model); grep of both modules for
+  `anthropic|claude.*api|messages.create` returns nothing, so no Anthropic API call exists
+  on the handoff-composition path this TRDD ships. The `/clear` + bootstrap step (typist,
+  box 3) is a terminal keystroke injection, not a model turn — also 0 tokens.
+- **Arithmetic**: saving per avoided cycle = baseline − new = (400,000–460,000) − 0 =
+  **400,000–460,000 tokens (100% of the cache-miss write), per fire this mechanism heads off**.
+  In dollars this is model-rate-dependent (not separately measured): at Sonnet's
+  $2.50/MTok input × 1.25 cache-write multiplier ($3.125/MTok) ≈ **$1.25–$1.44**; at
+  Opus's $6.25/MTok × 1.25 ($7.8125/MTok) ≈ **$3.13–$3.59**. Both dollar figures are
+  LABELLED derivations from the token range above, not independent measurements.
+- **What the cited report does NOT cover directly**: report 79LXF6PJ measured the
+  Claude-side cost of a full *compaction* turn over a 12MB/9,216-line transcript
+  (693k–3.0M tokens, bytes÷4 approximation) — a different, larger event than the
+  ~400–460k "next-fire cache-miss write" this box asks about. The two are compatible
+  (both show the NEW path's Claude-side cost is 0 either way) but are not the same
+  denominator; the 400–460k figure used above comes from this TRDD's own WHY section
+  and TRDD-5C42VCUX, not from 79LXF6PJ.
 
 ## ⏵ 2026-08-15/16 — OBSERVED IN PRODUCTION, and it found two real defects
 

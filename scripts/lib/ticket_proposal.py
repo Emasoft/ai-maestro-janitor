@@ -485,7 +485,17 @@ def retract(dedupe_key: str, project_dir: str | None = None, now: int | None = N
 
     ts = int(time.time()) if now is None else int(now)
     iso = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ts))
-    out = re.sub(r"(?m)^column: proposal$", "column: refused", text)
+    # `count=1` targets the FRONTMATTER column and nothing else: frontmatter is the first thing in
+    # the file, and a card BODY legitimately contains `column: <x>` lines (a board census pasted
+    # into a card is a real, common shape). A greedy multiline sub would rewrite those too and
+    # silently corrupt the card's own evidence.
+    #
+    # Matching ANY value, not just `proposal`: a proposal can sit at `column: blocked` when it is
+    # withdrawn, and the old `^column: proposal$` pattern simply did not match it — leaving the card
+    # in `design/refused/` still asserting `column: blocked`, i.e. the folder and the column
+    # contradicting each other. Reported from another repo by a peer agent 2026-08-29 and confirmed
+    # here; `re.sub` returning the string unchanged on no-match is what made it silent.
+    out = re.sub(r"(?m)^column: .*$", "column: refused", text, count=1)
     out = re.sub(r"(?m)^updated: .*$", f"updated: {iso}", out)
     out = out.replace(
         "**PROPOSED BY THE JANITOR — awaiting approval. NOT authorized to execute.**",

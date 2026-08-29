@@ -4,7 +4,7 @@ title: agent-handoff.md has two independent writers and an unconditional overwri
 column: testing
 blocked-by: []
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-29T22:46:59+0200
+updated: 2026-08-29T22:51:52+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -485,6 +485,22 @@ only to record what was weighed.
       Conflating the two would suggest this box is vacuous; it is not.
 - [ ] the auto-composed text's card columns match the cards on disk **at write time** — the F2
       staleness is instrumented and closed, not assumed away
+
+      **LEFT OPEN, 2026-08-29 — the premise this box describes no longer exists on the live
+      compose path.** `TRDD-79LXF6PJ` retired the mechanically-gathered card index (id, column,
+      title) entirely; `_compose` (`external_handoff_clear.py:211-259`) builds the payload from
+      `active_skills.render(transcript)` + `ec.summarize_with_retry(transcript, …)` only —
+      `del root, verdict  # the mechanical index they fed is retired` (line 210) is explicit.
+      `grep -n column scripts/external_handoff_clear.py scripts/lib/external_clear.py
+      scripts/handoff_files.py scripts/active_skills.py` (installed 3.4.1) returns exactly one
+      hit: `lib/external_clear.py:1699`, a `#(id, column, title)` comment on the now-unused
+      `HandoffInputs.cards` field of the retired `compose_template_handoff`/`compose_handoff`
+      fallback (not called from `_compose` or `main` — `grep -n "compose_handoff\b"` finds only
+      its own definition and a comment referencing it). Nothing on today's compose path reads a
+      TRDD `column:`, so there is no staleness left to instrument or close. Not ticking this box
+      as satisfied — its premise is gone, not proven. If a future change re-introduces a
+      card/column summary (e.g. inside the llm-ext prompt itself), re-open this box against that
+      new surface instead of reusing this note.
 - [ ] whichever option lands, `/clear` recoverability is unchanged (the handoff is the only thing
       that survives a clear, so a regression here is unrecoverable by construction)
 
