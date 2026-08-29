@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Bump version to 3.4.0 (b07b955)
 - Bump version to 3.4.0 (1571c0f)
+- Bump version to 3.4.0 (6c4be7c)
 ## [3.4.0] — 2026-08-29
 
 ### Bug Fixes
