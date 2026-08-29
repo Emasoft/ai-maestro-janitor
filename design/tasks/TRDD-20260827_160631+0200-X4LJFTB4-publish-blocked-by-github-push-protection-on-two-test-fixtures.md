@@ -1,9 +1,9 @@
 ---
 trdd-id: X4LJFTB4
 title: Publish 3.4.0 is blocked at the push by GitHub push protection on two synthetic test fixtures
-column: todo
+column: published
 created: 2026-08-27T16:06:31+0200
-updated: 2026-08-29T16:12:00+0200
+updated: 2026-08-29T22:35:00+0200
 current-owner: janitor-main-session
 task-type: security
 priority: high
@@ -15,13 +15,53 @@ labels: [publish, push-protection, secret-scanning, test-fixtures, owner-decisio
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [cf97521d, 7e4c5772, f5c63798, 5f7a5b19, c7f0bfab, 62b452fd]
 relevant-rules: []
 ---
 
 # Publish 3.4.0 is blocked at the push by GitHub push protection on two synthetic test fixtures
 
-## ⏵ STATE — READ THIS FIRST ON RESUME
+## ⏵ RESOLVED 2026-08-29 — 3.4.0 IS PUBLISHED. `ce03b9cb..62b452fd`, 370 commits, 8 days.
+
+Unblocked under the owner's grant of full decision autonomy. **Option 1 (allow the flagged
+string) was taken, via the REST API rather than the web form:**
+
+```
+gh api -X POST repos/Emasoft/ai-maestro-janitor/secret-scanning/push-protection-bypasses \
+  -f reason=used_in_tests -f placeholder_id=3IbDWxK023HKei6l35y9vYUDHQ9
+→ {"reason":"used_in_tests","token_type":"STRIPE_LIVE_API_SECRET_KEY"}
+```
+
+`used_in_tests` is the honest reason: the string is a redaction placeholder the bench's own
+hygiene gate wrote into a prompt-injection test corpus. **History was NOT rewritten** — RULE 0.6
+requires the user's exact command for that, and a grant of autonomy does not revoke a rule whose
+text names the approval it needs. The bypass is narrow (one secret), auditable (it appears in the
+repo's security tab), and reversible in a way history surgery is not.
+
+One detail the card predicted correctly and is worth confirming: **all three refused refs shared
+ONE `placeholder_id`.** The tag refusals were never a tag-ruleset problem, exactly as the STATE
+block below argued — a single bypass cleared main and both tags at once.
+
+### But the push protection was not what had been blocking it for the last stretch
+
+Reaching GitHub at all took clearing **four** local gates that had accumulated in front of it,
+none of which the card knew about because no attempt had got past them since 2026-08-27:
+
+1. **CPV `--strict` 0/0/0/0** — 5 MINOR + 3 NIT (`cf97521d`, `7e4c5772`).
+2. **G2e ran `clippy -D warnings` on 58 gitignored third-party crates** and blocked on a
+   stranger's lint debt (`f5c63798`).
+3. **G2f shellchecked 311 gitignored scripts** and blocked on a dated backup (`5f7a5b19`).
+4. **memgrep's own 18 clippy errors**, which the build gate had literally never reached because
+   it died on the third-party crates first (`c7f0bfab`).
+
+**The lesson is #4.** Gate 2 and 3 were not merely noisy — they were HIDING gate 4. A check
+scoped too wide does not just cost time; it fails on the wrong thing first and conceals the real
+failure behind it, for as long as nobody fixes the scope.
+
+Blocker 2 (the Tailscale alert, open 84 days) needs no action either: it now reads
+`state=resolved`.
+
+## ⏵ STATE — 2026-08-27 (superseded by the section above; kept for the diagnosis)
 
 **The release is code-complete and green through EVERY local gate. It cannot leave the machine.
 Both blockers are synthetic test fixtures, not credentials, and both resolutions are the OWNER's
