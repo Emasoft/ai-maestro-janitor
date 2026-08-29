@@ -4,7 +4,7 @@ title: retire the daemon-composed handoff and route every compaction through the
 column: testing
 blocked-by: []
 created: 2026-08-23T16:45:05+0200
-updated: 2026-08-29T22:27:00+0200
+updated: 2026-08-29T22:43:24+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -177,8 +177,26 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
       — 2026-08-29: option D shipped and is now INSTALLED (3.4.1 carries `lib/handoff_files.py`
       and the keyed-name skill); 5RXBI65T moved `dev` → `testing` with its 3.4.0 gate marked
       discharged and one observation left
-- [ ] token saving is MEASURED, not asserted — the directive's main benefit claim
-      — the one box with NO external dependency; it is the smallest independent next action here
+- [x] token saving is MEASURED, not asserted — the directive's main benefit claim
+      — **~693k–3.0M Claude-side input tokens per compaction event, ≈$4.33–$18.82 at Opus 5's
+      $6.25/MTok.** The saving is ~100% because the new path issues **zero** Claude API calls:
+      `_compose` → `ec.summarize_with_retry` → `run_llm_ext_summary`
+      (`lib/external_clear.py:498`), whose only outbound call is a `subprocess` to the `llm-ext`
+      CLI ($0 free-tier OpenRouter). Grepping both files for `anthropic|messages.create|claude
+      api` returns nothing — verified here, not taken from the report.
+
+      **Both bounds are bytes÷4 approximations, and both UNDERSTATE the real baseline.** Measured
+      on a complete 12,042,268-byte transcript: ceiling 3,010,567 tokens (raw bytes), floor
+      693,039 (message content only, 2,772,154 chars). The floor excludes the system prompt and
+      tool definitions a real compaction turn also pays and which are not in the transcript at
+      all. No exact tokenizer was available — `llm-ext` has no token-count verb.
+
+      **The real run did NOT complete** (exit 124 at the 900 s budget), and it is still evidence:
+      it produced 85,226 bytes of genuine partial summary, stderr shows real OpenRouter
+      map-reduce progress and a 403 from a flaky free model with backoff. It stalled on free-tier
+      flakiness — which does not touch the claim being measured, since the Claude-side cost is
+      zero whether the external model finishes or not. Report:
+      `reports/trdd-verify/20260829_224254+0200-79LXF6PJ-token-saving.md`
 
 ## Notes and lessons learned
 
