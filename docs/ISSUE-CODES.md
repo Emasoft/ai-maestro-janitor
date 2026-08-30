@@ -172,7 +172,7 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-17 code(s).
+18 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -180,6 +180,7 @@ unattended access to your repository.
 | `AICTX-003` | agent-context-integrity | high | an auto-loaded agent-context file carries an injection pattern: {path} |
 | `BRPROT-001` | branch-protection | high | the default branch of {slug} is unprotected |
 | `BRPROT-002` | branch-protection | high | the branch-protection baseline on {slug} has drifted: {detail} |
+| `BRPROT-003` | branch-protection | high | the branch-protection applier cannot identify the repo in {where} |
 | `CRED-001` | remote-credentials | critical | a credential appears to be exposed in {path} |
 | `DEP-001` | supply-chain | high | {package} {version} carries a known advisory: {advisory} |
 | `DEP-002` | historical-cache-scan | critical | a KNOWN-MALICIOUS package version is present: {package} {version} |
@@ -221,6 +222,13 @@ unattended access to your repository.
 - **What it is:** A ruleset that was part of the ratified baseline has been weakened, disabled, or given a new bypass actor.
 - **Why it matters:** Protection that silently degrades is worse than none, because everyone still believes the branch is protected.
 - **Fix attempted:** Restore the ruleset to the ratified baseline. If the deviation was deliberate, it needs an explicit decision from the user — do not re-apply over it without asking.
+
+### `BRPROT-003` — the branch-protection applier cannot identify the repo in {where}
+
+- **Scanner:** `branch-protection` · **Severity:** `high` · **Kind:** `branch-protection`
+- **What it is:** This project has a GitHub remote, but neither `.claude-plugin/plugin.json` nor the git origin URL yields an `owner/repo` slug the applier can use, so it declines every pass without applying anything.
+- **Why it matters:** The DETECTOR resolves the repo separately (via `gh repo view`), so it keeps filing accurate findings about a repo the APPLIER cannot name. The result is a janitor that reports a problem it is structurally unable to fix — and the decline is a log line, not a finding, so every user-facing surface reports health while nothing is ever applied (TRDD-H8WRCW0I).
+- **Fix attempted:** Give the project root a `.claude-plugin/plugin.json` whose `repository` is the `https://github.com/owner/repo` URL, or point `CLAUDE_PROJECT_DIR` at the directory that holds it. A malformed origin URL that git accepts but this cannot parse is worth reporting upstream rather than working around.
 
 ### `CRED-001` — a credential appears to be exposed in {path}
 

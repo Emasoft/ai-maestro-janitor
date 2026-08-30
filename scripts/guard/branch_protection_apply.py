@@ -93,6 +93,24 @@ import branch_protection_lib as bpl  # noqa: E402
 import state  # noqa: E402
 
 _LEDGER_FILE = "branch-protection-acted.txt"
+
+
+def _project_has_github_remote(root: Path) -> bool:
+    """True when `root` is a git repo whose origin points at github.com.
+
+    The discriminator between "this project is not a GitHub repo" (routine, silent) and "this
+    project IS on GitHub and the applier still cannot name it" (unexpected, worth a finding).
+    Deliberately cruder than `detect_repo_slug`'s parser: it asks only whether github.com is in
+    the origin URL at all, because the interesting case is exactly a URL that git accepts and
+    that parser rejects. Matching the parser here would make the two agree by construction and
+    the finding could never fire.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        timeout=10,
+        detector_name="branch-protection-apply",
+    )
+    return bool(proc and proc.returncode == 0 and "github.com" in (proc.stdout or ""))
 _LOG_FILE = "branch-protection-apply.log"
 
 
@@ -139,8 +157,33 @@ def main() -> int:
     if not slug:
         state.log_line(
             "branch-protection-apply",
-            "skip: cannot resolve owner/repo slug from plugin.json",
+            "skip: cannot resolve owner/repo slug from plugin.json or the git remote",
         )
+        # RAISE, don't just log — but ONLY when a GitHub remote exists (TRDD-H8WRCW0I).
+        #
+        # A silent decline here is the defect: the DETECTOR half resolves the repo by its own
+        # route (`gh repo view`) and keeps filing accurate findings, while this half cannot name
+        # the repo and applies nothing, forever. One log line in a file nobody reads was the only
+        # dissent, and every user-facing surface — heartbeat, fresh `last-run` stamp, other
+        # detectors' findings — reported health. Measured on a peer's host: four declines a day
+        # for days while its detector filed real issues about the very repo it could not name.
+        #
+        # THE GUARD ON THE GUARD: `_project_has_github_remote` is what keeps this from becoming
+        # noise. Most projects the janitor runs in are not GitHub repos at all, and a finding per
+        # pass on each of those would train its reader to ignore the channel — the card's own
+        # "do NOT make gate 3 loud without fixing resolution" warning. Resolution is fixed now
+        # (the remote fallback), so reaching here WITH a GitHub remote means something genuinely
+        # unexpected: a URL git accepts that this cannot parse. That is worth a human's attention;
+        # having no remote is not.
+        if _project_has_github_remote(plugin_root):
+            try:
+                import issue_catalog  # noqa: PLC0415 - lazy: a missing lib must not kill the guard
+
+                issue_catalog.raise_issue(
+                    "BRPROT-003", where=str(plugin_root), slug=str(plugin_root),
+                )
+            except Exception:  # noqa: BLE001 - reporting must never break the caller
+                pass
         return 0
 
     # Gate 4: gh availability.

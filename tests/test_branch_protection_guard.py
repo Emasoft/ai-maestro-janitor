@@ -1290,3 +1290,43 @@ def test_detect_repo_slug_manifest_WINS_over_a_divergent_remote(project_env: Pat
         cwd=project_env, check=True,
     )
     assert bpl.detect_repo_slug(project_env) == "Emasoft/ai-maestro-janitor"
+
+
+def test_apply_RAISES_when_a_github_repo_cannot_be_named(project_env: Path) -> None:
+    """TRDD-H8WRCW0I. A GitHub repo the applier cannot name is not routine — it means every pass
+    declines forever while the DETECTOR half, resolving separately via `gh repo view`, keeps
+    filing accurate findings about it. That silent decline was the defect: one log line nobody
+    reads, while the heartbeat, the fresh last-run stamp and other detectors' findings all
+    reported health."""
+    import subprocess
+
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    gh = _make_gh_stub(project_env)
+    subprocess.run(["git", "init", "-q", "."], cwd=project_env, check=True)
+    # A URL git accepts and `detect_repo_slug` cannot parse — the ONLY interesting case now that
+    # the remote fallback exists. A well-formed remote would simply resolve.
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/not-a-valid-slug"],
+        cwd=project_env, check=True,
+    )
+    assert bpl.detect_repo_slug(project_env) is None, "fixture must be unresolvable"
+
+    r = _run_apply(project_env, gh_bin=gh)
+
+    assert r.returncode == 0, r.stderr
+    findings = list((project_env / ".janitor").rglob("*findings*"))
+    blob = "".join(p.read_text(encoding="utf-8") for p in findings if p.is_file())
+    assert "BRPROT-003" in blob, f"expected a BRPROT-003 finding; findings files: {findings}"
+
+
+def test_apply_stays_SILENT_when_the_project_is_not_a_github_repo(project_env: Path) -> None:
+    """The guard on the guard. Most projects the janitor runs in are not GitHub repos, and a
+    finding per pass on each would train its reader to ignore the channel — the card's own
+    'do NOT make gate 3 loud without fixing resolution' warning. No remote, no finding."""
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(project_env, gh_bin=gh)
+
+    assert r.returncode == 0, r.stderr
+    findings = list((project_env / ".janitor").rglob("*findings*"))
+    blob = "".join(p.read_text(encoding="utf-8") for p in findings if p.is_file())
+    assert "BRPROT-003" not in blob, "a non-GitHub project must not be nagged every pass"

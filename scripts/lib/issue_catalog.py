@@ -325,6 +325,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="Protection that silently degrades is worse than none, because everyone still believes the branch is protected.",
         fix="Restore the ruleset to the ratified baseline. If the deviation was deliberate, it needs an explicit decision from the user — do not re-apply over it without asking.",
     ),
+    "BRPROT-003": Issue(
+        scanner="branch-protection",
+        kind="branch-protection",
+        severity="high",
+        title="the branch-protection applier cannot identify the repo in {where}",
+        what="This project has a GitHub remote, but neither `.claude-plugin/plugin.json` nor the git origin URL yields an `owner/repo` slug the applier can use, so it declines every pass without applying anything.",
+        why="The DETECTOR resolves the repo separately (via `gh repo view`), so it keeps filing accurate findings about a repo the APPLIER cannot name. The result is a janitor that reports a problem it is structurally unable to fix — and the decline is a log line, not a finding, so every user-facing surface reports health while nothing is ever applied (TRDD-H8WRCW0I).",
+        fix="Give the project root a `.claude-plugin/plugin.json` whose `repository` is the `https://github.com/owner/repo` URL, or point `CLAUDE_PROJECT_DIR` at the directory that holds it. A malformed origin URL that git accepts but this cannot parse is worth reporting upstream rather than working around.",
+    ),
     "DEP-001": Issue(
         scanner="supply-chain",
         kind="dependency-advisory",

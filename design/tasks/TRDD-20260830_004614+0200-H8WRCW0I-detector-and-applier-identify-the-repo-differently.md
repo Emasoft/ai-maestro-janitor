@@ -1,9 +1,9 @@
 ---
 trdd-id: H8WRCW0I
 title: the branch-protection detector and applier identify the repo by different mechanisms so one can fire while the other is permanently inert
-column: dev
+column: testing
 created: 2026-08-30T00:46:14+0200
-updated: 2026-08-30T01:22:00+0200
+updated: 2026-08-30T01:38:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -81,13 +81,27 @@ heartbeat has no way to learn it has never once applied.
       authoritative: it is a deliberate declaration; `origin` is whatever the clone points at.
       PROVEN load-bearing against HEAD on one fixture — `OLD: None` vs
       `NEW: Emasoft/ai-maestro-janitor`. Three tests added, incl. manifest-beats-a-divergent-remote
-- [ ] an unresolvable slug on a project that HAS a GitHub remote raises a FINDING, not just a log
-      line — "I cannot identify this repo" is a real condition, not routine
-- [ ] the skip does not advance the `last-run` stamp, OR the stamp is not the health signal —
-      a declined pass must be distinguishable from a completed one
-- [ ] a test asserts an applier skip is visible: build a project whose manifest is one level down,
-      run the applier, assert the finding. It must FAIL against today's code
+- [x] an unresolvable slug on a project that HAS a GitHub remote raises a FINDING, not just a log
+      line — new code **BRPROT-003** (severity high), raised from gate 3, gated on
+      `_project_has_github_remote`. That gate is deliberately CRUDER than `detect_repo_slug`'s
+      parser (it asks only whether `github.com` appears in the origin URL): matching the parser
+      would make the two agree by construction and the finding could never fire. No remote ⇒ no
+      finding, which is the card's own "do not make gate 3 loud" warning honoured
+- [x] the skip does not advance the `last-run` stamp, OR the stamp is not the health signal —
+      **resolved as the second branch, deliberately.** `dispatch.py:2159` writes the stamp
+      unconditionally after the subprocess, and that is CORRECT: it is a cadence marker meaning
+      "a pass was attempted", so making it conditional on success would make a declining project
+      retry every heartbeat forever instead of every 6 h. The real defect was that a decline
+      produced no OTHER signal — which BRPROT-003 above now supplies. **Nothing should read
+      `last-run-*.ts` as health**; it answers "when was this last attempted", never "did it
+      work" — the exact confusion that cost two sessions an investigation tonight
+- [x] a test asserts an applier skip is visible — two tests, and the pair is the point: one
+      proves a GitHub repo the applier cannot name RAISES BRPROT-003 (fixture: a URL git accepts
+      and the parser rejects, the only interesting case once the remote fallback exists), the
+      other proves a non-GitHub project stays SILENT. Load-bearing by construction: BRPROT-003
+      did not exist before this change, so the assertion could not have passed
 - [ ] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
+      — guard file green + ruff/mypy clean on the changed files; FULL-suite run still owed
 
 ## Notes and lessons learned
 
