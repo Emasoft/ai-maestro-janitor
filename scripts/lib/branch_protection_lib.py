@@ -517,6 +517,7 @@ def detect_repo_slug(plugin_root: Path) -> str | None:
     mirror, a temporary remote). The remote is the fallback for "nobody declared", not an
     override of "somebody did".
     """
+    plugin_root = Path(plugin_root)  # same str-tolerance as `detect_required_status_checks`
     manifest = plugin_root / ".claude-plugin" / "plugin.json"
     if manifest.is_file():
         try:
@@ -810,6 +811,11 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
     """
     import yaml  # lazy — see the module-top note; only this function needs it
 
+    # Coerce: the annotation says Path, but this is called from scripts and REPL probes where a
+    # str is the natural thing to type, and `"a" / "b"` raises a TypeError pointing at the `/`
+    # operator rather than at the caller's mistake. One constructor turns a confusing runtime
+    # error into correct behaviour, and Path(Path(...)) is free.
+    project_root = Path(project_root)
     workflows_dir = project_root / ".github" / "workflows"
     if not workflows_dir.is_dir():
         return []
