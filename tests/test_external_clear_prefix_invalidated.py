@@ -145,6 +145,16 @@ def test_a_fresh_skills_reload_ack_fires(tmp_path: Path) -> None:
     assert ec.reload_invalidated(tmp_path, now=now) is True
 
 
+def test_a_fresh_model_switch_ack_fires(tmp_path: Path) -> None:
+    """The PostModelSwitch hook's stamp (TRDD-GK35MOXU) rides the same trigger: a model
+    switch kills the prefix exactly like a reload, so one mechanism serves all three."""
+    now = 1_700_000_000
+    _write_stamp(tmp_path, "model-switch-acked.ts", 2, age_s=5, now=now)
+    assert ec.reload_invalidated(tmp_path, now=now) is True
+    ec.consume_reload_events(tmp_path)
+    assert ec.reload_invalidated(tmp_path, now=now) is False
+
+
 def test_a_stale_ack_is_consumed_silently(tmp_path: Path) -> None:
     """An ack older than the freshness window is a rewrite already paid — never fired on."""
     now = 1_700_000_000
@@ -186,6 +196,31 @@ def test_a_second_reload_after_consumption_fires_again(tmp_path: Path) -> None:
     ec.consume_reload_events(tmp_path)
     _write_stamp(tmp_path, "reload-acked.ts", 4, age_s=5, now=now + 60)
     assert ec.reload_invalidated(tmp_path, now=now + 60) is True
+
+
+def test_the_post_model_switch_hook_advances_the_stamp(tmp_path: Path) -> None:
+    """Real subprocess run of scripts/hooks/post-model-switch.py: each invocation bumps the
+    generation by one, and a fault-free run exits 0 even with an empty payload."""
+    import subprocess
+
+    repo = Path(__file__).resolve().parent.parent
+    project = tmp_path / "proj"
+    project.mkdir()
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_ROOT": str(repo),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    hook = repo / "scripts" / "hooks" / "post-model-switch.py"
+    for expected in ("1", "2"):
+        proc = subprocess.run(
+            [sys.executable, str(hook)],
+            input='{"previous_model": "opus", "new_model": "fable"}',
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+        stamp = project / ".janitor" / "state" / "model-switch-acked.ts"
+        assert stamp.read_text(encoding="utf-8") == expected
 
 
 def test_a_stale_event_pending_beside_a_fresh_one_is_not_consumed_early(tmp_path: Path) -> None:

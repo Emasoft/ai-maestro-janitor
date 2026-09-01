@@ -1860,7 +1860,16 @@ _RELOAD_EVENT_FRESH_S = 600
 def _read_reload_state(state_dir: Path) -> tuple[dict[str, tuple[int, int]], dict[str, object]]:
     """(acked gens+mtimes, seen cursor). Raises on a broken stamp; heals a corrupt cursor to {}."""
     acked: dict[str, tuple[int, int]] = {}
-    for name, stamp in (("plugins", "reload-acked.ts"), ("skills", "skills-reload-acked.ts")):
+    # "model" (TRDD-GK35MOXU): the PostModelSwitch hook (CC ≥ 2.1.251) advances
+    # model-switch-acked.ts on every switch — same generation-int shape, same consume-on-fire
+    # semantics as the reload stamps, because a switch and a reload kill the prefix the same
+    # way. `prefix_invalidated` (the statusline poll) stays as the pre-2.1.251 fallback; the
+    # in_cooldown veto dedupes when both see one event.
+    for name, stamp in (
+        ("plugins", "reload-acked.ts"),
+        ("skills", "skills-reload-acked.ts"),
+        ("model", "model-switch-acked.ts"),
+    ):
         p = state_dir / stamp
         try:
             gen = int(p.read_text(encoding="utf-8").strip() or "0")

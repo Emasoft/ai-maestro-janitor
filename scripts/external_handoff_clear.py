@@ -214,7 +214,10 @@ def _decide(
     # event to trigger a SECOND clear on the next beat — one dead prefix, two clears.
     reload_dead = None if (active_waiting or in_cooldown) else ec.reload_invalidated(sd, now=now)
     if reload_dead:
-        state.log_line(_LOG, "prefix invalidated (plugin/skills reload) — treating as cache-expired")
+        state.log_line(
+            _LOG,
+            "prefix invalidated (reload/model-switch stamp) — treating as cache-expired",
+        )
         cache_expired = True
     # SPLIT DELIBERATELY: `gate` is exactly the pure decision's parameters, `facts` is the log
     # record that also carries composer-only fields. They were one dict until `transcript` was
