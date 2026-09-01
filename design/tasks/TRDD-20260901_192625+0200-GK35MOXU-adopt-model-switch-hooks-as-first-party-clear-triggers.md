@@ -76,6 +76,12 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
   since the prefix died", not "the prefix died recently" — a mid-conversation `/model` switch
   is re-paid by the very next turn (heartbeats included), so a fresh-but-paid event is
   consumed silently, exactly like a stale one. Firing on it would clear a WARM session.
+- **Bounded residual of the 10s paid-slack (`f05ab464`, review-fork, no action)**: an idle
+  switch followed by a trivial turn completing within 10s leaves the event armed on a warm
+  session; if every veto passes, the cost is ONE spurious handoff-and-clear at idle (capped
+  by consume-on-fire + the fired cooldown, and llm-ext costs zero Claude-side tokens). The
+  10s value is an unmeasured knob — recalibrate when the live verify observes a real
+  switch's append timing. Boundary proven at exactly the constant (9s fires, 11s paid).
 - **Pre-existing cross-session ceiling (review-fork, no action)**: the ack stamps are
   per-PROJECT and the watcher clears the one RECORDED pane, so with two sessions in one
   project, session B's switch can trigger a clear aimed at session A. Same holds for the
