@@ -1,9 +1,9 @@
 ---
 trdd-id: VJL1YTCG
 title: The wikimem CLI must be topic/atom verb pairs with no paths and maintenance must leave the main agent
-column: human_review
+column: complete
 created: 2026-08-27T14:31:01+0200
-updated: 2026-08-29T07:50:49+0200
+updated: 2026-09-01T21:14:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -155,3 +155,11 @@ breaking change and needs its own card and its own sweep — do not fold it in h
 
 Owner directives during TRDD-RY0IJBJI's implementation. Part A's principle came from an objection
 to `--path` appearing in the new `--scope` work; Parts B and C followed in the same exchange.
+
+## Approval log
+
+- 2026-09-01T21:14:00+0200 — APPROVED human_review → complete by the session acting under the
+  USER's delegated review authority ("i've put you in charge", 2026-09-01). Reviewer verified 3
+  load-bearing claims against HEAD (memory.rs:3121-3134 + live --help; main.rs:661-681;
+  dispatch.py:676-705), 2 spot-checked first-hand by the approver. Report:
+  reports/trdd-verify/20260901_211317+0200-VJL1YTCG-human-review.md

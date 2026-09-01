@@ -1,15 +1,14 @@
 ---
 trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
-column: blocked
-pre-block-column: todo
+column: complete
 created: 2026-07-21T19:33:07+0200
-updated: 2026-09-01T22:20:00+0200
+updated: 2026-09-01T21:14:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-blocked-by: [KQ9WM4TZ]
+blocked-by: []
 eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
@@ -376,3 +375,13 @@ Do not implement until this is answered; the answer changes step 1's condition.
   permanent restart loop. DO drop the OS keepalive in the same `finally` that ends the
   loop — and only for deliberate-stop exit reasons — the way the kill-switch path
   already does.
+
+## Approval log
+
+- 2026-09-01T21:14:00+0200 — APPROVED → complete by the session acting under the USER's
+  delegated review authority ("i've put you in charge", 2026-09-01). The card's own STATE
+  (2026-08-29 re-verified) records items 1-2 done and item 3 retired-not-warranted; the sole
+  remaining gate, EHT TRDD-KQ9WM4TZ, was verified terminal (`column: complete` since
+  2026-08-18; reviewer re-confirmed its 3 load-bearing claims + 11/11 tests at HEAD —
+  reports/trdd-verify/20260901_211318+0200-KQ9WM4TZ-human-review.md). The earlier-tonight
+  `blocked` move was made against 5ZVS1DDP's stale "KQ9WM4TZ sits in human_review" claim.

@@ -1,11 +1,11 @@
 ---
 trdd-id: ULEGRT01
 title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82F)
-column: human_review
+column: complete
 blocked-by: []
 eht: [TK1H3LSA]
 created: 2026-07-07T18:23:04+0200
-updated: 2026-08-28T22:52:00+0200
+updated: 2026-09-01T21:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
@@ -1152,3 +1152,12 @@ pass is not "done":
   have gone green while saying nothing at all about the DATA path. It passes today only because
   a manual `ls` confirmed it; that is not a gate. When a card's scope grows to a new era, the
   gate does not grow with it — extend it deliberately, or split the passes.
+
+## Approval log
+
+- 2026-09-01T21:14:00+0200 — APPROVED human_review → complete by the session acting under the
+  USER's delegated review authority ("i've put you in charge", 2026-09-01). Reviewer verified:
+  `_legacy_read_path` deleted + 3-rung ladder (global_state.py:116), explicit migration
+  predicate (:412,:31), keepalive_install.sh resolve_log_dir paths, 140 named tests passing;
+  the deletion + :116 spot-checked first-hand by the approver. Report:
+  reports/trdd-verify/20260901_211325+0200-ULEGRT01-human-review.md
