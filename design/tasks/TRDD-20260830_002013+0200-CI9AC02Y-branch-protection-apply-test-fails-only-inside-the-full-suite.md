@@ -94,6 +94,11 @@ conditional in a way nobody states out loud. The defect is the dependence, not t
   this is not "re-running until green" (nothing was re-run to get a pass; the suite went green
   as a side effect of other cards), but the load-dependence theory keeps the card alive until
   the review date. If it recurs, the evidence above narrows the window to what changed since.
+  **The evidence is weaker than three green runs sounds** (review-fork, 2026-09-01): the
+  failing run took 3347.75s; tonight's three took 476.55s/492.73s/477.95s — a ~7× runtime
+  disparity, meaning the machine was under far lighter contention and the load window this
+  card's own theory names plausibly NEVER OPENED tonight. The stronger reading is "not
+  reproduced because not provoked", not "died with the branch-protection commits."
 - **Do NOT "fix" this by re-running until green.** A pass obtained by not overlapping the chore
   measures the clock, not the code, and it would close this card while leaving the property that
   makes the suite untrustworthy exactly as it was.
