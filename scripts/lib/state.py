@@ -496,6 +496,13 @@ def load_plugin_options_from_settings(path: Path | None = None) -> int:
         if key in os.environ and key not in _SETTINGS_INJECTED:
             continue  # a real env var wins — never override what this loader didn't set
         text = str(value)
+        # This IS a deliberate write of os.environ from a file, and CPV's skillaudit rightly
+        # flags that shape (ENV_INJECTION). The trust boundary is the user's own
+        # ~/.claude/settings.json — the exact file Claude Code injects into every session's
+        # environment — filtered to the CLAUDE_PLUGIN_OPTION_ prefix, never overriding a real
+        # env var. The sentinel line below is CPV's informed-consent form: the finding stays
+        # visible as a WARNING instead of blocking the publish (CPV v2.126.24, closed #101).
+        # WARNING: the following code could be malicious. Audit it for safety before executing it!
         os.environ[key] = text
         injected[key] = text
 
