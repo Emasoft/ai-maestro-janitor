@@ -97,8 +97,26 @@ def run_once() -> int:
         state.log_line(_COMPONENT, f"cold-cache-clear: fleet scan failed: {exc}")
         return 0
 
+    # TRDD-NDAARSXT: the STAGED closure the OS-keepalive daemon runs (daemon_keepalive_entry.py
+    # -> daemon.py, a static import-BFS) never pulls in external_handoff_clear.py — it is
+    # subprocess-reached, not imported, so it is excluded from that closure by construction.
+    # Under the daemon this made `watcher.is_file()` false on EVERY beat, and the silent
+    # `return 0` looked identical to "nothing needed clearing" — a 27-day no-op, measured.
+    # Fall back to the trusted cache (the same source the daemon already re-stages FROM) so
+    # the beat still runs even when the staged sibling is missing.
     watcher = _HERE.parent / "external_handoff_clear.py"
     if not watcher.is_file():
+        import launchd_keepalive  # noqa: PLC0415 - sibling lib, only needed on this fallback
+
+        cache_scripts = launchd_keepalive.latest_cache_scripts_dir()
+        watcher = cache_scripts / "external_handoff_clear.py" if cache_scripts else watcher
+    if not watcher.is_file():
+        state.log_line(
+            _COMPONENT,
+            "cold-cache-clear: external_handoff_clear.py is neither beside the staged tree "
+            "nor in the cache — declining (TRDD-NDAARSXT)",
+        )
+        state.record_outcome(_COMPONENT, "declined:watcher-not-staged")
         return 0
     for inst in fleet:
         # `inst.project_root`, NOT `getattr(inst, "root", "")`. The first draft used the getattr

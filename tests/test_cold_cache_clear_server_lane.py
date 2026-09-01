@@ -26,6 +26,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import cold_cache_clear_task  # noqa: E402
+import fleet_scan  # noqa: E402
 
 
 def _dispatch():
@@ -96,6 +97,116 @@ def test_the_stub_passes_argv_through_to_the_dispatch_it_execs(tmp_path: Path) -
         f"argv must reach the exec'd dispatch verbatim; stdout={proc.stdout!r} "
         f"stderr={proc.stderr!r}"
     )
+
+
+def test_watcher_falls_back_to_the_cache_when_not_staged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-NDAARSXT: the staged closure never carries external_handoff_clear.py (it is
+    subprocess-reached, not imported). When the sibling is absent, the beat must resolve
+    the watcher from the trusted cache instead of silently declining."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+
+    # A "staged" lib dir with NO watcher beside it.
+    staged = tmp_path / "staged" / "lib"
+    staged.mkdir(parents=True)
+    monkeypatch.setattr(cold_cache_clear_task, "_HERE", staged)
+
+    # A fake cache scripts dir that DOES carry the watcher.
+    cache_scripts = tmp_path / "cache" / "scripts"
+    cache_scripts.mkdir(parents=True)
+    cache_watcher = cache_scripts / "external_handoff_clear.py"
+    cache_watcher.write_text("# stub watcher\n", encoding="utf-8")
+
+    import launchd_keepalive
+
+    monkeypatch.setattr(launchd_keepalive, "latest_cache_scripts_dir", lambda: cache_scripts)
+
+    inst = fleet_scan.Instance(
+        pid=4242,
+        command="claude",
+        tty="ttys001",
+        project_root=str(proj),
+        terminal={"kind": "tmux", "pane": "%1"},
+        diagnosis="ok",
+        recovery=None,
+        dispatch_age_s=10,
+        active=False,
+        transcript_age_s=9000,
+    )
+    monkeypatch.setattr(fleet_scan, "gather_fleet", lambda now: [inst])
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", "1")
+
+    spawned: list[list[str]] = []
+    real_popen = cold_cache_clear_task.subprocess.Popen
+
+    def cap(*a, **k):
+        argv = list(a[0]) if a else []
+        if any(str(x).endswith("external_handoff_clear.py") for x in argv):
+            spawned.append(argv)
+
+            class _Stub:
+                pid = 99999
+
+            return _Stub()
+        return real_popen(*a, **k)
+
+    monkeypatch.setattr(cold_cache_clear_task.subprocess, "Popen", cap)
+
+    rc = cold_cache_clear_task.run_once()
+
+    assert rc == 0
+    assert len(spawned) == 1, "the watcher must still be spawned from the cache fallback"
+    assert spawned[0][1] == str(cache_watcher)
+
+
+def test_declines_and_records_outcome_when_no_watcher_anywhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No staged sibling AND no usable cache => decline loudly, not silently: the beat
+    must return 0 (fail-open) but leave a `last-outcome-cold-cache-clear.ts` breadcrumb
+    so the 27-day no-op this TRDD found can never again look like a clean pass."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+
+    import state as janitor_state
+
+    # `project_root`/`state_dir`/`log_dir` are process-lifetime `@lru_cache`s (state.py's own
+    # doc comment: "tests call `.cache_clear()`") — an earlier test in this file already
+    # memoised them against ITS tmp_path, so without clearing them this test would write to
+    # (and read back from) a stale project root instead of this test's own `proj`.
+    janitor_state.project_root.cache_clear()
+    janitor_state.janitor_root.cache_clear()
+    janitor_state.state_dir.cache_clear()
+    janitor_state.log_dir.cache_clear()
+
+    staged = tmp_path / "staged" / "lib"
+    staged.mkdir(parents=True)
+    monkeypatch.setattr(cold_cache_clear_task, "_HERE", staged)
+
+    import launchd_keepalive
+
+    monkeypatch.setattr(launchd_keepalive, "latest_cache_scripts_dir", lambda: None)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", "1")
+    # The real `gather_fleet` shells out (ps/tmux) and the suite's subprocess sandbox blocks
+    # that, which would otherwise be caught by run_once()'s own `except Exception` and return
+    # 0 for an unrelated reason ("fleet scan failed") before ever reaching the watcher check
+    # this test exists to pin. Stub it to the empty fleet — irrelevant to the decline path,
+    # which fires before the per-instance loop anyway.
+    monkeypatch.setattr(fleet_scan, "gather_fleet", lambda now: [])
+
+    rc = cold_cache_clear_task.run_once()
+
+    assert rc == 0, "fail-open: a beat must never fail its caller"
+
+    outcome_file = janitor_state.state_dir() / "last-outcome-cold-cache-clear.ts"
+    assert outcome_file.is_file()
+    assert "declined:watcher-not-staged" in outcome_file.read_text(encoding="utf-8")
 
 
 def test_daemon_yields_cold_cache_clear_the_tick_the_server_claims_it(
