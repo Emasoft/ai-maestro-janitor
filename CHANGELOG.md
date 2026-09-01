@@ -2,6 +2,94 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.2] — 2026-09-01
+
+### Bug Fixes
+
+- **memgrep:** The write-lock key was unbounded for any page outside a memory tree (TRDD-X4LI97IK) (d27c718)
+- **retract:** Stamp column: refused whatever the proposal was sitting at (8a18e18)
+- **branch-protection:** Never require a matrix job's bare name (TRDD-7KRF99WI) (df8ff66)
+- **branch-protection:** Fall back to the git remote when no manifest names the repo (TRDD-H8WRCW0I) (4929490)
+- **branch-protection:** Raise BRPROT-003 when a GitHub repo cannot be named (TRDD-H8WRCW0I) (3d54906)
+- **branch-protection:** Accept a str project root; card the last-run rename (04f6b5c)
+- **tests:** Defuse the two pre-existing suite failures found by the 2F3I2P18 full run (e3299d8)
+- **external-clear:** A reload event survives a non-firing probe — consume only on fire (TRDD-2F3I2P18) (b382a22)
+- **external-clear:** --dry-run returns BEFORE the capture — it armed the 15-min summary hold on an uncleared session (TRDD-2F3I2P18, review-fork finding) (20536e2)
+- **external-clear:** Dry-run applies the REAL readability predicate — never 'would clear' on a transcript the run would decline (TRDD-2F3I2P18, review-fork) (120bd12)
+- **external-clear:** A turn newer than the ack stamp means the re-cache was PAID — consume, never fire (TRDD-GK35MOXU, review-fork) (83e7242)
+- **external-clear:** Non-API transcript appends are not payment — 10s slack on the paid-detector (TRDD-GK35MOXU, review-fork; queue-operation/system events measured in live transcripts) (f05ab46)
+- **hooks:** Defer the PostModelSwitch registration — CPV's allowlist predates CC 2.1.251 and blocks the publish (upstream claude-plugins-validation#222; TRDD-GK35MOXU) (6b93a16)
+
+### Documentation
+
+- Add TRDD-X4LI97IK — 1128 scope-lock files accumulating in the real DATA dir (86ca410)
+- **TRDD-X4LI97IK:** The test hypothesis is dead — full suite adds ZERO locks (3c87b12)
+- **TRDD-X4LI97IK:** Purge the falsified claim from the card's own opening (6418e0b)
+- **TRDD-X4LI97IK:** Retract the write-guard lesson — the guard was right, I was not (c957c00)
+- **TRDD-X4LI97IK:** Producer identified — scope_root_for's fallback, proven by probe (84eca72)
+- **TRDD-X4LI97IK:** Collapse three dead hypotheses into a probes-already-run table (042f57c)
+- **TRDD-HREGVXYP:** Record the before-state and predictions, then run scope item 1 (fda5d5e)
+- **TRDD-HREGVXYP:** Scope item 1 CLOSED by measurement — replace-not-merge confirmed (400dcd0)
+- **TRDD-K5F7US68:** A marker fired with NO claimable dispatch — 199k to find out (aa20a0d)
+- **TRDD-K5F7US68:** Retract — the emitter is fine, the 199k was my prompt's fault (84aa084)
+- **memory:** Re-tier four oversized pages component -> hub, with globs (568ad01)
+- **TRDD-X4LI97IK:** Close the card — fixed in d27c718f, with the two things it got wrong (51ee3c5)
+- Refresh the auto-generated CLAUDE.md wikimem index (3fe358c)
+- **TRDD-437UHNFS:** Close the last box — the post-install heartbeat IS quiet (ddd6767)
+- **TRDD-V5FUX7H0:** Unblock — the publish landed, and the card's Do-NOT inverted (06bc3d7)
+- Unblock 8 cards whose blocker no longer exists — the board was claiming to wait (8573359)
+- **TRDD-88ZVEQY7:** Close — janitor#244 answered, all acceptance boxes checked (1fb0e0d)
+- **TRDD-V5FUX7H0:** A flat re-measurement inside the 6h cadence is not a failed fix (b84c624)
+- Discharge the 3.4.0-install gate on three cards (TRDD-1QJIZFFW, TRDD-5RXBI65T, TRDD-79LXF6PJ) (ac951cd)
+- Cite the refusal branch, not the cadence input (TRDD-1QJIZFFW, TRDD-5RXBI65T) (df00330)
+- Prove which function owns the cited line, and state what testing rests on (98499c2)
+- **TRDD-FB84YUGT:** Close it — all four boxes re-verified against the tree (f299a37)
+- **TRDD-79LXF6PJ:** Box 5 closed — the token saving is measured, not asserted (8bcf596)
+- **TRDD-5RXBI65T:** Box 1 closed — the first keyed handoff write ever taken here (0c85b90)
+- Add TRDD-CI9AC02Y — a guard test that fails only inside the full suite (bd6b00d)
+- Add TRDD-7KRF99WI — the guard requires a matrix context that can never report (5727feb)
+- **TRDD-7KRF99WI:** Retract the dead-guard premise; the hazard is unrealized and unexplained (0896578)
+- Add TRDD-H8WRCW0I — detector and applier identify the repo differently (574c871)
+- Add TRDD-2F3I2P18 — clear FIRST, then summarize; the owner supersedes the clear-blind rule (d48f7a5)
+- **TRDD-2F3I2P18:** The triggers are implementable today, no new CLI verb needed (c665792)
+- **TRDD-2F3I2P18:** Triggers wired, boxes closed — card to testing (730300f)
+- **TRDD-2F3I2P18:** Suite green — only the live-event measurement box remains (96fa8c4)
+- Add the CC 2.1.243-2.1.252 adoption cards (GK35MOXU, POA0157J, DD5X4O6Z, Y7KQYJXP, 0HRRZO8S) — the harness grew first-party events the janitor must use (USER, 2026-09-01) (9d001e3)
+- **memory:** CC 2.1.243-2.1.252 first-party signals supersede janitor pollers — the adoption map (TRDD-GK35MOXU) (bcfa433)
+- **memory:** Atomize oauth-rotation-renew-reauth — 18 atom markers, zero fact loss (janitor atomize chore) (fce46bb)
+- Close TRDD-H8WRCW0I (full suite green) and block TRDD-7KRF99WI on the AMAMA peer re-measure (d8b0ebd)
+- **TRDD-7KRF99WI:** Drop the stale empty blocked-by duplicate key (e160854)
+- **TRDD-TL5TSWK4:** Record implementation commit (fee9bce)
+- **TRDD-GK35MOXU:** Record the paid-detector + the cross-session ceiling (243e696)
+- **TRDD-GK35MOXU:** Record the bounded paid-slack residual + boundary proof (239c24a)
+- **TRDD-POA0157J:** Delivery channel verified — prompt_cache rides the agentlenspro statusline wrapper's stdin; record the ownership fork (c5c98aa)
+- **TRDD-POA0157J:** Shim placement verified — the wrapper forwards stdin verbatim to --inner (9a60227)
+- **TRDD-CI9AC02Y:** Park to backburner — 3 consecutive green full suites, no reproduction; review-after 2026-09-15 (cebabd0)
+- **TRDD-CI9AC02Y:** Record the 7x runtime disparity — non-reproduction may mean the load window never opened (68d5259)
+- **memory:** Split janitor-architecture into hub + 3 child pages — 0 line loss, 11/11 lessons preserved (janitor split chore, byte-verified against HEAD) (b8415a4)
+- Refresh the wikimem index — 53 pages including the janitor-architecture split children (955b458)
+- **TRDD-1QJIZFFW:** Lever flip deferred to post-publish — installed 3.4.1 still runs the pre-2F3I2P18 ordering (c4bff48)
+- **TRDD-COQN6KVA:** Implemented — card to testing, full-suite box awaits the next run (7518055)
+- **TRDD-PXP08ZQC:** Column re-honest-ed to blocked on next-publish-install — one post-publish drill closes 3 cards (df3a559)
+- **TRDD-5ZVS1DDP:** Column honest — blocked on EHT KQ9WM4TZ in human_review; all card items done or retired per STATE (ee57ef3)
+- Approve VJL1YTCG, ULEGRT01, 5ZVS1DDP -> complete (delegated review, USER 2026-09-01; verified per reports/trdd-verify) (9e49af6)
+
+### Features
+
+- **external-clear:** Fire the /clear FIRST, then summarize (TRDD-2F3I2P18) (59e31dc)
+- **dispatch:** Honour the summary hold — no resume, no chores, until the summary lands (5085601)
+- **session-start:** Summarize the PREVIOUS session, whatever ended it (TRDD-2F3I2P18) (3be4a95)
+- **external-clear:** Treat a model/effort switch as a dead prefix (TRDD-2F3I2P18) (109cc3b)
+- **external-clear:** Wire the reload triggers — a plugin/skills reload is a dead prefix (TRDD-2F3I2P18) (4181d6c)
+- **dispatch:** The keep-going nudge carries the open board + open GitHub issues (TRDD-TL5TSWK4) (cb17115)
+- **external-clear:** PostModelSwitch hook stamps the switch — first-party trigger (TRDD-GK35MOXU) (df26fa1)
+- **session-start:** Defensively persist the 2.1.251 staleness/re-cache-cost payload fields (TRDD-GK35MOXU); card to dev (73b242a)
+- **dispatch:** Per-detector last-outcome stamp — a decline is distinguishable from a pass (TRDD-COQN6KVA) (e1fa581)
+- **memory-maintenance:** Surface structurally unmaintainable pages — orphaned half (b) of TRDD-JPL0JU86, found uncommitted while its card claimed complete (lint+mypy green, 208 adjacent tests pass; committed under delegated review authority, USER 2026-09-01) (dd0de61)
+
+### Security
+
+- Repair pass fixes 5 pages; I verified it and found one regression it missed (bd8a942)
 ## [3.4.1] — 2026-08-29
 
 ### Bug Fixes
@@ -22,6 +110,7 @@ All notable changes to this project will be documented in this file.
 - Bump version to 3.4.0 (1571c0f)
 - Bump version to 3.4.0 (6c4be7c)
 - Bump version to 3.4.0 (62b452f)
+- Bump version to 3.4.1 (b99d8d6)
 ## [3.4.0] — 2026-08-29
 
 ### Bug Fixes
