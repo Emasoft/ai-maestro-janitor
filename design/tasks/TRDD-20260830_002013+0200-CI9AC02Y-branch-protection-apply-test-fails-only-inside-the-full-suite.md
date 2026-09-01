@@ -1,9 +1,10 @@
 ---
 trdd-id: CI9AC02Y
 title: test_apply_warns_when_viewer_not_admin passes alone and fails inside the full suite
-column: todo
+column: backburner
+review-after: 2026-09-15
 created: 2026-08-30T00:20:13+0200
-updated: 2026-08-30T00:20:13+0200
+updated: 2026-09-01T21:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -84,6 +85,15 @@ conditional in a way nobody states out loud. The defect is the dependence, not t
 
 ## Notes and lessons learned
 
+- **PARKED 2026-09-01 (backburner, review-after 2026-09-15): the failure did not reproduce in
+  THREE consecutive full-suite runs tonight** — 19:00 (15,937 passed; 2 unrelated failures),
+  19:30 (15,939 passed, 0 failed), 20:45 (15,948 passed, 0 failed) — after the branch-protection
+  changes of 2026-08-30/09-01 (`df8ff661`, `49294902`, `3d549068`, `04f6b5c9`, `e3299d8d`)
+  touched this exact area. This is an OBSERVATION of non-reproduction, not a claimed fix: no
+  change was made under this card, so it is parked, not closed. Consistent with the note below —
+  this is not "re-running until green" (nothing was re-run to get a pass; the suite went green
+  as a side effect of other cards), but the load-dependence theory keeps the card alive until
+  the review date. If it recurs, the evidence above narrows the window to what changed since.
 - **Do NOT "fix" this by re-running until green.** A pass obtained by not overlapping the chore
   measures the clock, not the code, and it would close this card while leaving the property that
   makes the suite untrustworthy exactly as it was.
