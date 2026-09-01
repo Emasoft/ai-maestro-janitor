@@ -102,6 +102,13 @@ import version_update_lib as vu  # noqa: E402
 # is correct for the OS-spawned daemon and False for a session-spawned one.
 _KEEPALIVE_INSTANCE = "--keepalive" in sys.argv
 
+# launchd carries none of the session harness's settings.json env block (TRDD-XCJFCJUX), so
+# the OS-spawned daemon must load it itself, BEFORE the interval constants below are computed
+# at import time — those knobs are read once here and never again. Gated on _KEEPALIVE_INSTANCE
+# so a plain import (e.g. by a test) never inhales the machine's real settings.json.
+if _KEEPALIVE_INSTANCE:
+    state.load_plugin_options_from_settings()
+
 
 def _env_interval(var: str, default: int) -> int:
     """Cadence knob from userConfig via env. MUST NOT be a bare int(): these run at import
@@ -2903,6 +2910,11 @@ def main() -> int:
     chores_yielded_last_loop = False  # Phase B2 transition logging (yield ↔ resume), not per-tick spam
     try:
         while _running:
+            # Call-time knobs (enabled(), shadow flags, …) can change mid-run even though the
+            # import-time intervals above never re-read. One stat per tick — cheap; the parse
+            # only fires when refresh_plugin_options_if_changed() sees the mtime move.
+            if _KEEPALIVE_INSTANCE:
+                state.refresh_plugin_options_if_changed()
             if gs.kill_switch_present():
                 # DISARM must reach every OTHER armed session BEFORE we exit: the loop
                 # short-circuits here ahead of the task list, so the fleet-stop beat can

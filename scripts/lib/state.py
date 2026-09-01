@@ -458,6 +458,74 @@ def rollback_marker_ack(filename: str, *, actor: str, why: str) -> bool:
     return True
 
 
+# Injected by load_plugin_options_from_settings(): the keys THIS process wrote into
+# os.environ from settings.json, so a later re-read can update/drop exactly those keys
+# without ever touching a value that came from a real environment (launchd, a shell export).
+_SETTINGS_INJECTED: dict[str, str] = {}
+_SETTINGS_MTIME_NS: int | None = None
+
+
+def load_plugin_options_from_settings(path: Path | None = None) -> int:
+    """Mirror ~/.claude/settings.json's CLAUDE_PLUGIN_OPTION_* into os.environ.
+
+    launchd starts the daemon with launchd's own environment — none of the session
+    harness's settings.json `env` block reaches it (TRDD-XCJFCJUX). This is the daemon's
+    only source for those knobs, so it re-reads the file the harness itself treats as the
+    source of truth instead of importing settings_ensurer (that module sits outside the
+    daemon's staged import closure — the exact failure class TRDD-NDAARSXT hit).
+
+    A real env var always wins: a key already in os.environ that this loader did NOT itself
+    inject is left untouched, which is how tests and the session lane isolate from a
+    machine's real settings.json.
+    """
+    resolved = path if path is not None else Path.home() / ".claude" / "settings.json"
+    try:
+        raw = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(raw, dict):
+        return 0
+    env_block = raw.get("env")
+    if not isinstance(env_block, dict):
+        return 0
+
+    injected: dict[str, str] = {}
+    for key, value in env_block.items():
+        if not isinstance(key, str) or not key.startswith("CLAUDE_PLUGIN_OPTION_"):
+            continue
+        if key in os.environ and key not in _SETTINGS_INJECTED:
+            continue  # a real env var wins — never override what this loader didn't set
+        text = str(value)
+        os.environ[key] = text
+        injected[key] = text
+
+    for stale_key in _SETTINGS_INJECTED:
+        if stale_key not in injected:
+            os.environ.pop(stale_key, None)
+
+    _SETTINGS_INJECTED.clear()
+    _SETTINGS_INJECTED.update(injected)
+    return len(injected)
+
+
+def refresh_plugin_options_if_changed(path: Path | None = None) -> bool:
+    """Re-run load_plugin_options_from_settings() only when the file's mtime moved.
+
+    One `stat` per daemon tick is cheap; re-parsing the whole file every tick is not.
+    """
+    global _SETTINGS_MTIME_NS
+    resolved = path if path is not None else Path.home() / ".claude" / "settings.json"
+    try:
+        mtime_ns: int | None = resolved.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = None
+    if mtime_ns == _SETTINGS_MTIME_NS:
+        return False
+    _SETTINGS_MTIME_NS = mtime_ns
+    load_plugin_options_from_settings(resolved)
+    return True
+
+
 def is_truthy_env(name: str, default: bool) -> bool:
     """Read a yes/no env var with friendly false-spellings.
 

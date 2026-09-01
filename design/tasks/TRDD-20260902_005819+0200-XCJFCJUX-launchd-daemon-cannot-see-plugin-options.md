@@ -1,9 +1,9 @@
 ---
 trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
-column: dev
+column: testing
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T00:58:19+0200
+updated: 2026-09-02T01:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -60,13 +60,18 @@ and duplicates the file the harness already treats as the source of truth.
 
 ## Acceptance
 
-- [ ] loader test: a settings file with the lever + one non-option key ⇒ only the option lands
+- [x] loader test: a settings file with the lever + one non-option key ⇒ only the option lands
       in `os.environ`; a pre-set real env value is NOT overridden; a changed/removed file value
-      updates/drops only the keys the loader injected
-- [ ] `daemon.main()` applies it before intervals are read (test via the module hook, not a
-      live daemon)
-- [ ] `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports` + the touched tests
-      green
+      updates/drops only the keys the loader injected — 6 tests in
+      `tests/test_state_plugin_options_from_settings.py`, tmp_path files only
+- [x] applied before the intervals are read — the call sits at daemon.py module level right
+      after `_KEEPALIVE_INSTANCE` and before the first `_env_interval(`, since the intervals
+      are computed at IMPORT time (not in `main()` as first written above); gated on
+      `_KEEPALIVE_INSTANCE` so a bare `import daemon` in a test never inhales the real file.
+      The loop refresh is one `stat` per tick and only affects call-time knobs.
+- [x] ruff clean on the three files, `mypy scripts/` clean (496 files) and clean on the test
+      file, 39/39 in the new test + the daemon keepalive/path/cold-cache-clear tests —
+      re-run by the approver, not taken from the worker's report
 - [ ] after publish + restage: `cold-cache-clear.log` shows `evaluating <root>` WITHOUT
       `[SHADOW — dry-run]` while the lever is on (the drill NDAARSXT/PXP08ZQC/1QJIZFFW waits on)
 
