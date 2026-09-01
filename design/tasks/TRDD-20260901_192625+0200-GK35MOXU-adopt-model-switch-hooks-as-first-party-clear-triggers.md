@@ -1,9 +1,10 @@
 ---
 trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
-column: dev
+column: blocked
+pre-block-column: dev
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-01T20:25:00+0200
+updated: 2026-09-02T01:28:00+0200
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
@@ -11,7 +12,7 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: []
+blocked-by: [claude-plugins-validation#222]
 npt: []
 eht: []
 relevant-rules: []
