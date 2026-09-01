@@ -1,9 +1,11 @@
 ---
 trdd-id: 7KRF99WI
 title: the branch-protection guard proposes a matrix job name that can never report
-column: testing
+column: blocked
+pre-block-column: testing
+blocked-by: [AMAMA-peer-matrix-repo-re-measure]
 created: 2026-08-30T00:39:59+0200
-updated: 2026-08-30T01:12:00+0200
+updated: 2026-09-01T19:55:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -118,8 +120,8 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
 
 ## Acceptance
 
-- [ ] **SEQUENCING**: land this BEFORE TRDD-H8WRCW0I — repairing repo resolution first turns a
-      silent no-op into a fleet-wide active breakage
+- [x] **SEQUENCING**: land this BEFORE TRDD-H8WRCW0I — satisfied: this card's fix landed as
+      `df8ff661` (00:58), H8WRCW0I's as `49294902`/`3d549068` (01:02/02:15), same night, in order
 - [x] a job carrying `strategy.matrix` is NEVER emitted as a bare required context — OMITTED,
       not expanded (`branch_protection_lib.py`, the job loop). Expansion was rejected: the real
       contexts depend on `include`/`exclude`, so a subtly-wrong expansion recreates this defect

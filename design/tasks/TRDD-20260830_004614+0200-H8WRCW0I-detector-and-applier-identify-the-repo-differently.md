@@ -1,9 +1,9 @@
 ---
 trdd-id: H8WRCW0I
 title: the branch-protection detector and applier identify the repo by different mechanisms so one can fire while the other is permanently inert
-column: testing
+column: complete
 created: 2026-08-30T00:46:14+0200
-updated: 2026-08-30T01:38:00+0200
+updated: 2026-09-01T19:55:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -100,8 +100,10 @@ heartbeat has no way to learn it has never once applied.
       and the parser rejects, the only interesting case once the remote fallback exists), the
       other proves a non-GitHub project stays SILENT. Load-bearing by construction: BRPROT-003
       did not exist before this change, so the assertion could not have passed
-- [ ] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
-      — guard file green + ruff/mypy clean on the changed files; FULL-suite run still owed
+- [x] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
+      — full suite GREEN 2026-09-01 19:30 (15,939 passed, 0 failed) + full ruff clean + mypy
+      clean over all 495 files. (The suite's `_state` alias guard hit in this card's own
+      `branch_protection_lib.py` was fixed in `e3299d8d` on the way.)
 
 ## Notes and lessons learned
 
