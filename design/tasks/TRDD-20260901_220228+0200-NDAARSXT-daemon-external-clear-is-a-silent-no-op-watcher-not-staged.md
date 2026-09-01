@@ -1,9 +1,9 @@
 ---
 trdd-id: NDAARSXT
 title: The keepalive daemon's external clear is a silent no-op — the watcher is not in the staged closure
-column: todo
+column: testing
 created: 2026-09-01T22:02:28+0200
-updated: 2026-09-01T22:02:28+0200
+updated: 2026-09-01T22:40:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -15,6 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18, TRDD-COQN6KVA, TRDD-ZM5LZ24Y]
+implementation-commits: [f0bba94c]
 ---
 
 # Every 5 minutes the daemon "runs" the external clear and does nothing, silently
@@ -70,9 +71,11 @@ closure entirely.
 
 ## Acceptance
 
-- [ ] the missing-watcher path logs + stamps an outcome (never a bare return)
-- [ ] the staged daemon can invoke the watcher (option (b) unless (a) is argued on the card)
-- [ ] test pins the staged-layout case; pytest + ruff + mypy green
+- [x] the missing-watcher path logs + stamps an outcome (never a bare return)
+- [x] the staged daemon can invoke the watcher — option (b): falls back to
+      `launchd_keepalive.latest_cache_scripts_dir()` (the same source the daemon restages from)
+- [x] test pins the staged-layout case (cache-resolved path + declined stamp); 5/5 in
+      `test_cold_cache_clear_server_lane.py`, ruff + mypy green — re-run by the approver
 - [ ] after the next publish + restage: `daemon.log` shows a real VERDICT line from
       `cold-cache-clear` (then the PXP08ZQC/1QJIZFFW/2F3I2P18 drill can finally run)
 
