@@ -51,4 +51,11 @@ definition flip on overage — two burn sources our heuristics may still be comp
 
 ## Notes and lessons learned
 
-*(none yet)*
+- **Delivery channel verified 2026-09-01**: this machine's statusline is `agentlenspro
+  statusline --inner '<venv python> ~/.claude/statusline.py'` (refresh 3s) — the
+  `prompt_cache` object arrives in the OUTER wrapper's stdin JSON, and that wrapper is
+  agentlensPro's code, a DIFFERENT project. So step 1 has a fork to decide at dev time:
+  (a) propose the persist upstream to agentlensPro (its wrapper already parses the payload —
+  cheapest, but cross-project per `how-to-fix-issues-of-other-projects`), or (b) a
+  janitor-owned shim between wrapper and inner script. Do not edit `~/.claude/statusline.py`
+  from a janitor session — it is user-owned machine config.
