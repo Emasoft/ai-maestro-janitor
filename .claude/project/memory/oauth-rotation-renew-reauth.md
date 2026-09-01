@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth
 description: "How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROTATE → RENEW → REAUTHENTICATE cascade, the keychain storage, the exact commands, and what to check when 'the rotator failed / a 429 landed instead of rotating / accounts won't switch / had to log in manually / the reauth login-nudge is SILENT though the daemon logs reauth-nudge / renew shows the login page not Authorize / token exchange 403 / error code 1010 / keychain secret truncated or came back as hex / tests wrote fake @x lines to rotator.log / what is the ROTATE RENEW REAUTHENTICATE cascade / why do two callers of cascade.classify disagree / how does the rotator drain-first select a target account / why is the 7-day window threshold different from the 5-hour threshold / is the reauth step ever fully hands-free without a human'. The component overview page; don't conflate the three layers."
 ocd: 2026-06-13
-lmd: 2026-08-29
+lmd: 2026-09-01
 metadata:
   node_type: memory
   type: project
@@ -12,6 +12,7 @@ metadata:
 publish-globally: false
 ---
 
+^1F3DSNBQ [desc:"The rotator is ONE cascade of three fallback layers — ROTATE, RENEW, REAUTHENTICATE — sharing a single classify() SSOT so the daemon and the nudge detectors never disagree.", keywords:"what_is_the_rotate_renew_reauthenticate_cascade why_do_two_callers_of_cascade_classify_disagree single_source_of_truth_classify cascade_governs_daemon_tick_and_detectors conflating_the_three_layers_is_the_number_one_debugging_mistake shared_function_must_resolve_same_state_json", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 The janitor OAuth account rotator (TRDD-32acd15f; redesign TRDD-dfc0959a) keeps an
 unattended Claude Code session alive across **N of the user's own paid Claude
 subscriptions** by swapping the live credential before any one account hits a rate
@@ -31,6 +32,7 @@ tests once wrote their fixture rotation lines into the PRODUCTION rotator.log.[^
 
 ## Where it runs
 
+^23SLTZIL [desc:"Rotation runs only in the janitor global daemon's 60s tick, gated by an opt-in flag; the supervisor is alert-only and never heals.", keywords:"where_does_rotation_run is_rotation_a_launchd_agent oauth_rotator_tick_task opt_in_flag_janitor_auto_manage_oauth supervisor_is_alert_only_never_heals rotator_not_opted_in_is_silent_noop", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 Rotation is a user/global-scope mutation (it swaps Claude Code's live keychain
 credential), so it is owned by the janitor **global daemon**, NOT a per-session
 detector and NOT a launchd agent (the launchd plist was RETIRED — TRDD-f892e109). It
@@ -39,6 +41,7 @@ runs as the daemon's 60-second `oauth-rotator-tick` Task, gated by an opt-in fla
 silent no-op. The supervisor (`supervisor.py`) is ALERT-ONLY — it records/logs
 findings, it does not heal.
 
+^2YLEAQ1R [desc:"Procedures/architecture here are project knowledge; account emails and tokens/cookies are machine-private, encrypted in the LOCAL keychain, not this pushed page.", keywords:"is_it_safe_to_paste_account_emails_here which_rotator_facts_are_project_vs_local oauth_tokens_stay_in_the_keychain_not_the_memory_page generic_placeholders_email_repo_root_ver run_oauth_health_for_live_state", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 > PRIVACY: this page is project/host-global knowledge. The **procedures, architecture,
 > commands, and lessons** are project knowledge and live here. The **actual account
 > emails and the OAuth tokens/cookies are machine-private** — they are stored ENCRYPTED
@@ -50,6 +53,7 @@ findings, it does not heal.
 
 ## The three layers — what each does, when it fires, how it falls back
 
+^40IRZA94 [desc:"ROTATE swaps to the next healthy stored slot in real time near a usage limit; needs >=2 tokens, window-asymmetric thresholds, drain-first selection, debounced 429s.", keywords:"how_does_the_rotator_drain_first_select_a_target_account why_is_the_7_day_window_threshold_different_from_the_5_hour_threshold rotate_layer_switch_thresholds live_429_debounce api_independent_death_signal_expires_at switch_blob_merges_mcp_oauth rotate_needs_two_valid_tokens_to_switch_to", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 **1. ROTATE — swap to an already-stored token. Real-time, silent, works.**
 When the live account nears a usage limit (or its token is about to expire), the daemon
 swaps Claude Code's live keychain credential to the next healthy stored slot. Agents
@@ -89,6 +93,7 @@ switch TO — its whole job depends on the RENEW leg keeping the alternate slots
   maxed simultaneously, no software fix exists — only a window reset, a fresh login, or a
   3rd account helps.)
 
+^53KFOJEI [desc:"RENEW has two sub-legs: silent keepalive refresh of a near-expiry slot, and cookie-driven browser capture when no refresh token works, plus a refresh-on-err recovery net.", keywords:"renew_refresh_keepalive_ahead_h renew_cookie_agent_browser_or_slot_capture_browser why_does_renew_show_the_login_page_not_authorize cmd_auto_refresh_on_err_recovery_net renew_falls_back_to_reauth_when_cookie_dead live_account_never_keepalive_refreshed", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 **2. RENEW — bring a degraded slot back, behind the scenes (fallback when there is
 nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
 - `RENEW_REFRESH`: the slot carries a **refresh token** and is within `KEEPALIVE_AHEAD_H`
@@ -120,6 +125,7 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
 - RENEW is fully automatic but REQUIRES a still-valid cookie for the cookie sub-leg — when
   the cookie is dead too, it falls back to layer 3.
 
+^5S350686 [desc:"REAUTHENTICATE is the last resort when refresh and cookie are dead: janitor nudges monthly via oauth-login-needed; reauth.py drives the hands-free tmux+CDP login flow.", keywords:"is_the_reauth_step_ever_fully_hands_free_without_a_human reauth_nudge_points_to_janitor_refresh_claude_logins reauth_py_tmux_claude_auth_login_cdp_authorize_click claude_ai_login_cookie_lasts_about_a_month wait_setup_token_benign_in_between_state classify_returns_healthy_when_refresh_and_runway_ample", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 **3. REAUTHENTICATE — the cookies themselves (fallback when RENEW can't: no USABLE refresh —
 none OR dead — AND no live cookie, token dead/near-dead).** Each account's claude.ai login cookie lasts ~1 month.
 When it expires (age, or the user logged in on another device), RENEW is impossible for
@@ -134,6 +140,7 @@ already-logged-in dedicated debug Chrome over CDP to click Authorize, reads the
 claude's "Paste code here >" prompt — so PKCE, the token exchange, and the keychain write
 stay Claude's job. `reauth.py --manual` lets the human click Authorize.
 
+^688FP1EM [desc:"REAUTH stays a human step forever: claude.ai login needs an OS-level passkey/Google 2FA prompt no automation can satisfy; a hands-free password-only login was rejected as less secure.", keywords:"why_cant_reauth_be_fully_automated passkey_google_oauth_2fa_is_os_level no_browser_automation_can_satisfy_2fa password_only_login_rejected_less_secure janitors_entire_job_at_this_layer_is_the_monthly_nudge", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 **Why the human is UNAVOIDABLE at this layer (user decision 2026-06-24):** the claude.ai
 login authenticates with a **passkey / Google-OAuth 2FA**, and that passkey/2FA prompt is
 **OS-level — outside the browser** — so NO browser automation (Playwright, agent-browser, or
@@ -147,6 +154,7 @@ nudge) to run `/janitor-refresh-claude-logins` — nothing more.
 that still has runway — nothing to do yet, do NOT nudge. (`classify()` also returns
 `HEALTHY` = has refresh + ample runway, no action.)
 
+^C19YLQV4 [desc:"ROTATE and RENEW are fully behind-the-scenes; only REAUTH needs a human because Anthropic requires human auth to issue credentials; the cascade degrades gracefully instead of stalling.", keywords:"why_does_the_rotator_have_three_layers_instead_of_one anthropic_requires_human_auth_to_issue_credentials cascade_degrades_gracefully_rotate_renew_reauth janitor_cannot_fabricate_tokens_from_nothing", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 **Why three layers:** "totally behind the scenes" is achievable for ROTATE + RENEW; the
 ONLY unavoidable human moment is layer-3 reauth (~monthly) because Anthropic requires a
 human to authenticate to issue credentials — the janitor cannot fabricate tokens or
@@ -156,6 +164,7 @@ instead of silently stalling.
 
 ## Where credentials live (keychain architecture — machine-private = LOCAL scope)
 
+^D0ZYQLAI [desc:"Cookies and OAuth tokens are both stored encrypted in the OS safe-storage (macOS Keychain, Linux Secret Service, Windows DPAPI), auto-selected per platform, never plaintext-on-disk.", keywords:"where_are_oauth_tokens_and_cookies_stored safe_storage_backend_per_platform macos_security_add_generic_password linux_secret_tool_libsecret windows_dpapi_powershell_not_round_trip_verified no_backend_present_never_silently_drop_plaintext", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 Per USER directive #2, **cookies AND OAuth tokens are BOTH stored ENCRYPTED in the OS
 safe-storage, cross-platform — never plaintext-on-disk Chrome-profile sqlite.** The
 keychain-stored cookie is the source used to switch profiles (inject into the Chrome
@@ -168,6 +177,7 @@ profile before a capture, scrub after). Backends (auto-selected,
 - none present → `store` returns `NO_BACKEND` so the caller decides its fallback; it MUST
   NEVER silently drop a plaintext secret.
 
+^HIUGT3MA [desc:"StoreResult is a three-valued fail-closed type (OK/NO_BACKEND/FAILED) so a write never drops a plaintext secret; every secret is base64-wrapped; cookie_vault.py never decrypts Chrome's cookie blobs.", keywords:"store_result_ok_no_backend_failed why_base64_wrap_the_secret_before_storing cookie_vault_never_decrypts_chrome_cookies fail_closed_never_drop_plaintext_token", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 `StoreResult` is three-valued for fail-closed semantics: `OK` (accepted), `NO_BACKEND`
 (no store present — documented plaintext fallback is legit), `FAILED` (a store IS present
 but the write failed — the caller MUST fail closed, NEVER drop a plaintext token). Every
@@ -175,6 +185,7 @@ secret is base64-wrapped at the public API (see the hex-dump lesson). The cookie
 (`cookie_vault.py`) extracts/injects Chrome cookie rows without ever decrypting them (it
 carries Chrome's OSCrypt-encrypted blobs, faithfully copying all NOT-NULL columns).
 
+^HZF6CKW1 [desc:"Four keychain services hold rotator data: the live credential, per-account slot backups, redundant corruption-recovery mirrors, and a metadata-only state.json, never the secret token.", keywords:"which_keychain_services_does_the_rotator_use claude_code_credentials_vs_claude_code_rotator_slot redundant_keychain_mirrors_livebak state_json_holds_metadata_only_never_the_token integrity_repair_runs_every_tick", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 Keychain services used (the values are LOCAL/machine-private; only the SHAPE is project
 knowledge):
 - LIVE credential: service `Claude Code-credentials` (what Claude Code itself reads).
@@ -185,6 +196,7 @@ knowledge):
 - `state.json` holds slot **metadata only** (`fp`, `expires_at`, `captured_at`,
   `live_email`, `live_fp`) — NEVER the secret token.
 
+^IIMB4R89 [desc:"A missing plaintext slots/<email>.json dir is correct by design; legacy slots are migrated into the keychain then deleted; state dir is the plugin DATA dir with a legacy-root fallback.", keywords:"why_is_there_no_slots_directory_is_that_a_bug plaintext_slots_migrated_into_keychain_then_deleted state_dir_is_claude_plugin_data_oauth_rotator resolve_chrome_profiles_via_print_profiles_root", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 An **ABSENT plaintext `slots/<email>.json` dir is CORRECT, not a bug** — the legacy
 plaintext slots (`$HOME/.claude/account-rotator/slots/`, and the data-dir
 `oauth-rotator/slots/`) are migrated INTO the keychain then DELETED by design
@@ -196,6 +208,7 @@ fallback to the legacy standalone root + one-time migration. [^5] Resolve Chrome
 
 ## The exact commands
 
+^JIDASKGJ [desc:"The rotator's CLI subcommand table (rotator.py auto/tick/oauth-health/usage/list/switch, slot_capture_browser.py, reauth.py, slot_capture_token.py, open-login.sh) and locking caveats.", keywords:"what_rotator_commands_exist rotator_py_auto_tick_oauth_health_usage_list_switch slot_capture_browser_vs_slot_capture_token reauth_py_manual_dry_run_flags open_login_sh_one_time_seed older_installed_rotator_may_lack_newer_subcommands mutating_commands_serialize_behind_oauth_rotator_lock", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 Run from `<repo-root>` (the working-tree rotator has the newest subcommands; an older
 *installed* version may lack `oauth-health` / `print-profiles-root` and prints
 `unknown command: …` to stdout — guard any consumer with an absolute-path `/*` or
@@ -221,6 +234,7 @@ Run rotator tooling with `env -u CLAUDE_PLUGIN_DATA` when invoking against a spe
 | one-time SEED (HUMAN-only) | `open-login.sh <email>` — clean real Chrome (NO automation flags so Cloudflare/2FA pass); the human signs into claude.ai ONCE; the `sessionKey` persists in that profile so later AUTO-lane runs are hands-free. |
 | `/janitor-refresh-claude-logins` (command) | The orchestrating REAUTH flow — guides the human login per account, saves+scrubs the cookie, repeats, then triggers RENEW with the fresh cookies. ~Monthly. |
 
+^KHQQ0SRZ [desc:"Daemon-managed rotation is opt-in only via /janitor-auto-manage-oauth-on|off (no launchd plist); after any capture, verify read_slot round-trips a non-empty accessToken with a real future expiry.", keywords:"how_do_i_turn_on_automatic_rotation janitor_auto_manage_oauth_on_off launchd_plist_retired verify_capture_round_trips_after_capture", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 The opt-in for daemon-managed rotation is flag-only: `/janitor-auto-manage-oauth-on|off`
 (the launchd plist is RETIRED; rotation is the daemon's 60s `oauth-rotator-tick` Task).
 After ANY capture: VERIFY `read_slot` round-trips (non-empty accessToken + a real future
@@ -228,6 +242,7 @@ expiry) — only reliable since the keychain-write fix (lesson [^4]).
 
 ## Janitor skills & commands for OAuth (the control surface — what each does, when to use it)
 
+^L7XKNBB1 [desc:"User-facing OAuth control surface: auto-manage-oauth-on|off skills toggle rotation; oauth-login-needed and oauth-cookie-reminder are surface-only detectors; refresh-claude-logins orchestrates reauth.", keywords:"what_janitor_commands_control_oauth_rotation oauth_login_needed_detector oauth_cookie_reminder_detector janitor_refresh_claude_logins_command what_do_i_actually_do_by_hand_for_oauth", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 The scripts above are the engine; these are the user-facing slash-commands + the automatic
 heartbeat nudges you actually interact with. The whole point: turn rotation ON once, then the
 only thing you ever do BY HAND is heed the ~monthly reauth nudge.
@@ -240,6 +255,7 @@ only thing you ever do BY HAND is heed the ~monthly reauth nudge.
 | `oauth-cookie-reminder` (heartbeat detector — AUTOMATIC, surface-only) | The PROACTIVE sibling: SURFACES a reminder BEFORE a seeded claude.ai cookie expires (warn before RENEW can fail, not after). | You don't run it — heed it: re-seed (one-time login) the warned account before its cookie lapses, so RENEW never falls to REAUTH by surprise. |
 | `/janitor-refresh-claude-logins` (command)[^9] | The orchestrating REAUTH flow the `REAUTH_NUDGE` points to: guides the human login per expired account, saves + scrubs the cookie, then triggers RENEW with the fresh cookies. | ~Monthly, when `oauth-login-needed` nudges — the ONE unavoidable human step (passkey / 2FA is OS-level; see layer 3). |
 
+^PYIXDOJ7 [desc:"The two auto-manage-oauth skills toggle rotation; the two detectors are always-on heartbeat surfacers you never invoke directly; the engine scripts live in the exact-commands table.", keywords:"do_i_ever_run_the_oauth_detectors_myself skills_toggle_rotation_detectors_only_surface where_are_the_engine_scripts_documented", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 The two `/janitor-auto-manage-oauth-*` skills toggle the daemon's rotation; the two detectors
 are part of the always-on heartbeat (active once the rotator is set up) and surface the
 human-only moments — you never invoke them. The engine SCRIPTS (`rotator.py`, `reauth.py`,
@@ -247,6 +263,7 @@ human-only moments — you never invoke them. The engine SCRIPTS (`rotator.py`, 
 
 ## Diagnostic entry points (when "rotator failed to keep the session alive")
 
+^Q3MFQKGQ [desc:"Five diagnostic entry points (rotator.log, state.json, daemon.log, daemon.pid/last-run.ts freshness, oauth-health/usage/live-email) and how to identify which cascade layer is actually failing.", keywords:"rotator_failed_to_keep_the_session_alive_where_do_i_look rotator_log_decisions_switch_refuse_within_limits is_the_daemon_even_alive which_cascade_layer_is_failing renew_capture_shows_login_page_means_dead_cookie", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 1. `oauth-rotator/rotator.log` — rotation DECISIONS (switch / refuse / within-limits) + the
    per-tick explicit `cascade:` plan line. Silence ≠ healthy.
 2. `oauth-rotator/state.json` — `live_email` + slot metadata.
@@ -265,6 +282,7 @@ dead → Layer 3 reauth needed (`/janitor-refresh-claude-logins`).
 
 ## Resume protocol (before touching ANY rotator code)
 
+^QP1KCS8Z [desc:"Before touching rotator code, read the two governing TRDDs and the script headers in order; never trust a compaction summary's rotator claims; verify against oauth-health and source.", keywords:"what_to_read_before_editing_rotator_code rotator_governing_trdds_32acd15f_dfc0959a do_not_trust_compaction_summary_for_rotator_facts compaction_summary_fabricated_wrong_root_cause", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
 Read, in order: (1) the STATE head of
 `design/tasks/TRDD-*-32acd15f-account-rotator.md`; (2)
 `design/tasks/TRDD-*-dfc0959a-rotator-3layer-keychain-cookies.md`; (3) the SCRIPT HEADERS
