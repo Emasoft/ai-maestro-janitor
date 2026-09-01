@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-NDAARSXT, TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
-implementation-commits: []
+implementation-commits: [dec760ed]
 ---
 
 # The lever is ON in settings.json and the daemon still runs the clear in shadow mode
