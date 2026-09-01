@@ -402,3 +402,38 @@ def test_a_second_watcher_for_the_same_root_exits_instead_of_queueing(tmp_path):
     assert "ALREADY_RUNNING" not in got.stdout, got.stdout
     assert "VERDICT" in got.stdout, "past a stale lock the watcher must actually run"
     assert not lock.exists(), "the takeover's own lock is released on exit"
+
+
+def test_dry_run_never_arms_the_summary_hold(tmp_path, monkeypatch, capsys):
+    """--dry-run must WRITE NOTHING (review-fork finding, 2026-09-01): the first cut captured
+    `summary-pending.json` before the dry-run return, arming the 15-minute hold that blocks
+    [janitor-resume] and chores — on a session that was never cleared."""
+    import argparse
+    import types
+
+    import fleet_restart
+
+    root = tmp_path / "p"
+    sd = root / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("{}\n")
+
+    monkeypatch.setattr(
+        ehc, "_decide",
+        lambda *_a, **_k: (
+            ec.ClearVerdict(True, "cache-certainly-expired", "test"),
+            {"transcript": str(transcript)},
+        ),
+    )
+    monkeypatch.setattr(fleet_restart, "recorded_terminal", lambda _r: {"kind": "tmux"})
+    monkeypatch.setattr(ec, "terminal_from_record", lambda _r: {"kind": "tmux", "pane": "%1"})
+    fired = types.SimpleNamespace(count=0)
+    monkeypatch.setattr(ehc, "_fire", lambda *_a, **_k: setattr(fired, "count", fired.count + 1))
+
+    args = argparse.Namespace(dry_run=True, force=False, on_resume=False, project_root=str(root))
+    assert ehc._run(root, sd, int(time.time()), args) == 0
+    out = capsys.readouterr().out
+    assert "DRY_RUN" in out, out
+    assert fired.count == 0, "a dry-run must never spawn the clear chain"
+    assert not (sd / ehc._PENDING_FILE).exists(), "a dry-run must not arm the summary hold"

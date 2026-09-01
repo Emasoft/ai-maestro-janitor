@@ -506,6 +506,15 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # made the clear too late to help. The new guard asks "is the transcript CAPTURED and
     # READABLE?" — milliseconds, no network — and that is the real precondition: it is what makes
     # the clear recoverable, because whatever happens after it, the source is named on disk.
+    # DRY-RUN RETURNS BEFORE THE CAPTURE (review-fork finding, 2026-09-01): the capture WRITES
+    # `summary-pending.json`, which arms the 15-minute hold `dispatch.summary_hold_active`
+    # honours — so a dry-run placed after it blocked resumes and chores on a session that was
+    # never cleared. A dry-run must write nothing; it reports from `facts` instead.
+    if args.dry_run:
+        print(f"DRY_RUN would clear via {terminal.get('kind')} "
+              f"then summarize {facts.get('transcript') or '<no transcript — would decline>'}")
+        return 0
+
     pending = _capture_summary_source(sd, facts, now)
     if pending is None:
         print("NO_TRANSCRIPT declining to clear — cannot name the summary source")
@@ -515,11 +524,6 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
             "leave nothing to summarize FROM, which is the one loss this reorder must not "
             "introduce",
         )
-        return 0
-
-    if args.dry_run:
-        print(f"DRY_RUN would clear via {terminal.get('kind')} "
-              f"then summarize {pending['transcript']}")
         return 0
 
     # FIRE NOW. Nothing between the gate and this line touches the network or the model: the
