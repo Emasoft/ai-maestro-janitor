@@ -41,6 +41,15 @@ predate the keepalive staging (or ran through the SessionStart lane), which is w
 the lane die. The task's own comment, three lines below the silent return, warns about
 "a permanent no-op that logs nothing and looks exactly like 'no session needed clearing'".
 
+## Why the closure misses it (root cause, read 2026-09-01)
+
+`keepalive_stage.daemon_closure()` is a **BFS over absolute imports** from the entry + daemon.
+`external_handoff_clear.py` is reached only by **subprocess** (`cold_cache_clear_task` execs
+it), never imported — so it is excluded by construction, and so is every module only it
+imports. Any fix via option (a) must add an explicit "subprocess-reached extras" list to the
+closure (or a deliberate import edge), not just append one file; option (b) sidesteps the
+closure entirely.
+
 ## Fix (two halves, both required)
 
 1. **Never silent.** Replace the bare `return 0` with a logged line AND an outcome stamp
