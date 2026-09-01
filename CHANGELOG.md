@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.3] — 2026-09-01
+
+### Bug Fixes
+
+- **daemon:** Cold-cache-clear resolves the watcher from the trusted cache when the staged closure lacks it, and never declines silently (TRDD-NDAARSXT) (f0bba94)
+
+### Documentation
+
+- Add TRDD-NUD3DGX5 — align with Claude Code 2.1.257 (daemon-reaping risk measured benign under launchd keepalive); memory atom (ee496dd)
+- Approve TRDD-4GQ94FNJ -> complete (delegated review; #52 answered after the 3.4.2 publish) (03e512f)
+- **TRDD-COQN6KVA:** Complete — suite box settled by the 3.4.2 publish gate (delegated review, self-closure disclosed) (2e65b79)
+- **TRDD-COQN6KVA:** Approval log for the delegated closure (ef71e85)
+- Add TRDD-NDAARSXT — the keepalive daemon's external clear is a silent no-op (watcher not in the staged closure; measured 2026-09-01) (4045b05)
+- **TRDD-NDAARSXT:** Root cause — the staged closure is an import BFS, a subprocess-reached script is excluded by construction (1bfc571)
+- **TRDD-NDAARSXT:** Fix landed (f0bba94c) — card to testing; last box waits on the publish+restage (152a1f5)
 ## [3.4.2] — 2026-09-01
 
 ### Bug Fixes
@@ -86,6 +101,10 @@ All notable changes to this project will be documented in this file.
 - **session-start:** Defensively persist the 2.1.251 staleness/re-cache-cost payload fields (TRDD-GK35MOXU); card to dev (73b242a)
 - **dispatch:** Per-detector last-outcome stamp — a decline is distinguishable from a pass (TRDD-COQN6KVA) (e1fa581)
 - **memory-maintenance:** Surface structurally unmaintainable pages — orphaned half (b) of TRDD-JPL0JU86, found uncommitted while its card claimed complete (lint+mypy green, 208 adjacent tests pass; committed under delegated review authority, USER 2026-09-01) (dd0de61)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.2 (04d979f)
 
 ### Security
 
