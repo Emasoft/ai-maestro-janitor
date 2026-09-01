@@ -74,3 +74,11 @@ AMAMA 2026-08-30; it corrected this repo's earlier framing of the two as alterna
   times fleet-wide; a drifted pair is worse than either name alone because the disagreement is
   silent and both files look authoritative. Outcome and cadence are DIFFERENT facts, which is why
   two files is right here — the prohibition is on writing one fact twice.
+
+## Approval log
+
+- 2026-09-01T22:05:00+0200 — COMPLETE, closed by the implementing session under the USER's
+  delegated review authority ("i've put you in charge", 2026-09-01). All five boxes hold; the
+  full-suite box was settled by the 3.4.2 publish gate (15,952 passed), which shipped this
+  code (commit e1fa581d). Self-closure disclosed: implementer and approver are the same
+  session tonight; the evidence is the machine gate, not the session's word.
