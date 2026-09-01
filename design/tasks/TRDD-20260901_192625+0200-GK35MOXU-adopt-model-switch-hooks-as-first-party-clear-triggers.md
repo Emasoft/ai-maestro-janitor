@@ -1,9 +1,10 @@
 ---
 trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
-column: todo
+column: dev
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-01T19:26:25+0200
+updated: 2026-09-01T20:25:00+0200
+implementation-commits: [df26fa12]
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -53,11 +54,18 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 ## Acceptance
 
 - [ ] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
-      real `/model` switch on this machine, not just a unit test)
-- [ ] the external-clear gate fires on the stamp with the consume-on-fire semantics
+      real `/model` switch on this machine, not just a unit test) — SHIPPED in `df26fa12`
+      (hook script + hooks.json entry; subprocess test bumps 1→2); the LIVE `/model` verify
+      waits on the next publish + local plugin update, since a repo hook is not loaded
+- [x] the external-clear gate fires on the stamp with the consume-on-fire semantics
+      (`df26fa12`: third stamp name in `_read_reload_state`; probe/consume tests)
 - [ ] measured whether `/effort` fires the hook; fallback poll retained or retired accordingly,
       with the finding written into the card
-- [ ] SessionStart staleness + re-cache cost persisted and preferred by the resume gate
+- [ ] SessionStart staleness + re-cache cost persisted and preferred by the resume gate —
+      HALF DONE: the resume hook now defensively persists every stale/cache/cost payload
+      scalar to `session-staleness.json` (field names are the harness's, undocumented; one
+      live 2.1.251+ resume payload on disk will name them). The gate-side consumer binds to
+      the real names then
 - [ ] pytest + ruff + mypy green
 
 ## Notes and lessons learned

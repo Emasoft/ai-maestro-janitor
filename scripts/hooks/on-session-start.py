@@ -471,6 +471,25 @@ def main() -> int:
                 # the session id so a clear/compact restart of the SAME session
                 # doesn't repeat it.
                 session_id = str(payload.get("session_id", "") or "")
+                # TRDD-GK35MOXU: CC ≥ 2.1.251 resume hooks carry session STALENESS and the
+                # estimated RE-CACHE COST — first-party inputs the resume gate
+                # (external_clear.should_clear_on_resume) currently infers from transcript
+                # mtime + an agentlens probe. The exact field names are the harness's, not
+                # documented in the changelog, so capture DEFENSIVELY: persist every scalar
+                # payload field whose name mentions stale/cache/cost, verbatim, and let the
+                # gate-side consumer bind to the real names once one live payload is on
+                # disk. Zero fields ⇒ no file write (pre-2.1.251, or a startup source).
+                fresh = {
+                    k: v
+                    for k, v in payload.items()
+                    if isinstance(v, (str, int, float, bool))
+                    and any(t in k.lower() for t in ("stale", "cache", "cost"))
+                }
+                if fresh:
+                    state.atomic_write(
+                        state.state_dir() / "session-staleness.json",
+                        json.dumps({**fresh, "source": source, "ts": int(time.time())}) + "\n",
+                    )
     except Exception:  # noqa: BLE001 -- best-effort; never break session start
         source = "startup"
     # Record what was parsed. Several branches below (the clear-observed stamp, the reload
