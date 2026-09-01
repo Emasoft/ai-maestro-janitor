@@ -3,7 +3,7 @@ trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
 column: testing
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T01:20:00+0200
+updated: 2026-09-02T01:15:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project

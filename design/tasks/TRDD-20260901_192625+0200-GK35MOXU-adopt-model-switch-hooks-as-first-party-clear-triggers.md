@@ -4,7 +4,7 @@ title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-c
 column: blocked
 pre-block-column: dev
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-02T01:28:00+0200
+updated: 2026-09-02T01:15:00+0200
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
