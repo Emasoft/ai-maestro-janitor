@@ -405,6 +405,44 @@ def main() -> int:
         return 0
 
 
+def _surface_unmaintainable(scopes: list[tuple[str, Path]]) -> None:
+    """Print one drift line per page NO chore can ever commit — TRDD-JPL0JU86 half (b).
+
+    The defect being fixed is SILENCE, not the pages. A chore that selects a scope-escaping
+    page, is refused by the M-10 guard, records the refusal and does not re-dispatch produces
+    output identical to a chore that had nothing to do — so "these pages are structurally
+    unmaintainable" is discoverable today only by watching an abstention and wondering why.
+    This is the class the owner's autonomy directive says MUST be surfaced: a problem no
+    automated pass can ever fix is exactly one only the main agent can.
+
+    The line names the fix, because the finding is otherwise a dead end: the page must MOVE to
+    the scope it belongs in (or the escaping link must be dropped), and neither is something a
+    chore may do on its own — moving a page across scopes is a governance decision about where
+    knowledge lives, not a repair.
+
+    Best-effort and never raises, like its `_surface_mistiered` sibling: a report must not cost
+    the maintenance pass it rides on.
+    """
+    try:
+        seen = state.state_dir() / "memory-unmaintainable.seen"
+        for scope, root in scopes:
+            for path in memory_content_precheck.unmaintainable_pages(Path(root)):
+                msg = (
+                    f"[memory-unmaintainable] {scope}/{path.name} resolves OUTSIDE its scope "
+                    f"root, so the M-10 guard refuses every write — no editorial chore can "
+                    f"ever maintain it, and its abstention is silent. Move the page into the "
+                    f"scope it belongs in, or drop the escaping link."
+                )
+                line = dedupe.emit_once(seen, f"unmaintainable|{scope}|{path.name}", msg)
+                if line:
+                    print(line, flush=True)
+    except Exception as exc:  # noqa: BLE001 — a report must never break the pass it rides on
+        try:
+            state.log_line("memory-maintenance", f"unmaintainable surface skipped: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _surface_mistiered(scopes: list[tuple[str, Path]], split_cap: int) -> None:
     """Print one drift line per over-cap MIS-TIERED page — the cheap half of issue #114.
 

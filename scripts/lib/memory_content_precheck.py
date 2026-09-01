@@ -88,6 +88,41 @@ def _candidate_pages(root: Path) -> list[Path]:
     return memory_scopes.iter_note_files(root)
 
 
+def unmaintainable_pages(root: Path) -> list[Path]:
+    """Pages under `root` that NO editorial chore can ever commit — TRDD-JPL0JU86 half (b).
+
+    A page whose real path resolves OUTSIDE its own scope root (a symlink tunnelling out, a
+    `..` walk) is refused by the transaction core's M-10 guard on every attempt. That refusal
+    is CORRECT, and it is also permanent: no future edit to the page's CONTENT can make it
+    eligible, because the problem is where the file IS, not what it says.
+
+    **Why this needs its own report at all.** A chore that selects such a page, refuses it,
+    records the refusal and declines to re-dispatch emits exactly the same observable output as
+    a chore that had nothing to do — a well-behaved abstention is indistinguishable from
+    success. The refusal ledger cannot tell them apart either: its entries are keyed on a
+    CONTENT hash so an edit can invalidate them, which is right for "already judged, unchanged"
+    and useless here, where content is not the variable. So the count is taken from the
+    filesystem directly and reported, or it is not discoverable at all.
+
+    The predicate is `memory_txn._ensure_rel_inside`'s, deliberately not a re-derivation: a
+    detector that disagreed with the guard would either report pages the guard accepts or miss
+    pages it refuses, and the second is the failure this function exists to end. Unreadable
+    paths are skipped rather than reported — an I/O error is not evidence of a scope escape.
+    """
+    out: list[Path] = []
+    try:
+        real_root = Path(root).resolve()
+    except OSError:
+        return out
+    for p in _candidate_pages(root):
+        try:
+            if not p.resolve().is_relative_to(real_root):
+                out.append(p)
+        except OSError:
+            continue
+    return out
+
+
 _TIER_RE = re.compile(r"^\s*tier:\s*([A-Za-z_-]+)\s*$", re.MULTILINE)
 
 # The tiers a split can actually operate on. `component` is the one the split skill REFUSES:
