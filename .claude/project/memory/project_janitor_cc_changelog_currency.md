@@ -244,6 +244,25 @@ audit before touching), TRDD-Y7KQYJXP (`claude attach/logs/stop/respawn/rm` + Se
 a "no event exists, poll for it" design claim expires with every harness release — re-read the
 changelog before building a poller.
 
+
+^ATOM-QOKA-WHO0 [desc: "CC 2.1.257 (2026-09-01): Fable 5.1 default; CLAUDE_CODE_SUBAGENT_MODEL_FORCE; session-only /effort; detached background commands reaped on exit (daemon safe under launchd keepalive); upstream fixed ca", keywords: claude_code_2.1.257 fable_5.1_default_model claude-fable-5-1_pricing SUBAGENT_MODEL_FORCE effort_session_only detached_background_command_killed_on_exit setsid_reaped_claude_exit daemon_died_after_claude_update advisor_model_cache_miss compaction_re-sent_whole_conversation_uncached remote_control_bash_tool_re-send_cache_miss why_did_my_quota_burn_with_the_advisor_on, trdd: TRDD-NUD3DGX5, ocd: 2026-09-01, lmd: 2026-09-01]
+
+**Claude Code 2.1.257 (2026-09-01) — janitor-relevant changes** (adoption card TRDD-NUD3DGX5).
+Fable 5.1 (`claude-fable-5-1`) is the default Fable: 1M ctx, $10/$50 per Mtok, $0.25/Mtok
+cache reads — pricing tables must follow. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` forces the
+subagent model over every override (launch lever). `/effort s` = session-only effort; a
+session-only change still rewrites the prefix. **Detached background commands (setsid/timeout)
+are now reaped on task stop / Claude exit** — the janitor daemon is SAFE on this host because
+its production path is the launchd keepalive (`daemon_keepalive_entry.py --keepalive`, measured
+pid 43176 etime 3d01h, survived the update), not a Bash-call child; the residual is
+no-keepalive hosts where `ensure_daemon_running` spawns from a heartbeat. **Upstream fixed
+three cache-miss sources**: sessions with an ADVISOR model re-sent the whole conversation
+uncached on every compaction / /recap / prompt-suggestion request (this owner runs the Fable
+advisor — plausibly a large share of the 2026-09-01 quota burn); Remote Control connecting
+mid-session re-sent the Bash tool definition; screenshot-heavy sessions missed every turn past
+the image cap. Standing lesson: a changelog line about a spawn FLAG (setsid) says nothing
+until you measure the spawn PATH (launchd vs Bash child).
+
 ## Notes and lessons learned
 
 (none yet)
