@@ -125,12 +125,16 @@ def _write_stamp(sd: Path, name: str, gen: int, *, age_s: int, now: int) -> None
     os.utime(p, (now - age_s, now - age_s))
 
 
-def test_a_fresh_plugin_reload_ack_fires_once(tmp_path: Path) -> None:
-    """A newly-advanced reload-acked.ts within the freshness window reads True, then False."""
+def test_a_fresh_plugin_reload_ack_fires_and_survives_a_non_firing_probe(tmp_path: Path) -> None:
+    """A fresh reload-acked.ts reads True, and STAYS True until the fire path consumes it —
+    a dry-run or a vetoed gate probing first must not eat the event (review-fork, 2026-09-01)."""
     now = 1_700_000_000
     _write_stamp(tmp_path, "reload-acked.ts", 3, age_s=30, now=now)
     assert ec.reload_invalidated(tmp_path, now=now) is True
-    # The cursor consumed the event: the same stamp must not fire a second clear.
+    # A second probe (the dry-run / vetoed-gate shape) still sees the pending event.
+    assert ec.reload_invalidated(tmp_path, now=now) is True
+    # Only the fire path consumes: after it, the same stamp must not fire a second clear.
+    ec.consume_reload_events(tmp_path)
     assert ec.reload_invalidated(tmp_path, now=now) is False
 
 
@@ -167,15 +171,30 @@ def test_a_corrupt_cursor_self_heals_instead_of_dying(tmp_path: Path) -> None:
     (tmp_path / ec._RELOAD_SEEN_FILE).write_text("{broken", encoding="utf-8")
     _write_stamp(tmp_path, "reload-acked.ts", 3, age_s=30, now=now)
     assert ec.reload_invalidated(tmp_path, now=now) is True
-    # The rewrite healed the cursor: it now parses and carries the consumed generation.
+    # The fire-path consume heals the cursor: it now parses and carries the generation.
+    ec.consume_reload_events(tmp_path)
     healed = json.loads((tmp_path / ec._RELOAD_SEEN_FILE).read_text(encoding="utf-8"))
     assert healed["plugins"] == 3
+    assert ec.reload_invalidated(tmp_path, now=now) is False
 
 
 def test_a_second_reload_after_consumption_fires_again(tmp_path: Path) -> None:
-    """Each ack advance is one event: gen 3 consumed, gen 4 must fire anew."""
+    """Each ack advance is one event: gen 3 consumed by the fire path, gen 4 fires anew."""
     now = 1_700_000_000
     _write_stamp(tmp_path, "reload-acked.ts", 3, age_s=30, now=now)
     assert ec.reload_invalidated(tmp_path, now=now) is True
+    ec.consume_reload_events(tmp_path)
     _write_stamp(tmp_path, "reload-acked.ts", 4, age_s=5, now=now + 60)
     assert ec.reload_invalidated(tmp_path, now=now + 60) is True
+
+
+def test_a_stale_event_pending_beside_a_fresh_one_is_not_consumed_early(tmp_path: Path) -> None:
+    """One name stale, the other fresh: the probe must fire AND leave the cursor alone — a
+    partial consume would need one write covering both names and would eat the fresh event."""
+    now = 1_700_000_000
+    _write_stamp(tmp_path, "reload-acked.ts", 2, age_s=ec._RELOAD_EVENT_FRESH_S + 60, now=now)
+    _write_stamp(tmp_path, "skills-reload-acked.ts", 5, age_s=10, now=now)
+    assert ec.reload_invalidated(tmp_path, now=now) is True
+    # No cursor write happened, so the fresh event is still pending on the next probe.
+    assert not (tmp_path / ec._RELOAD_SEEN_FILE).exists()
+    assert ec.reload_invalidated(tmp_path, now=now) is True

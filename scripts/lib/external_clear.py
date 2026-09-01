@@ -1857,6 +1857,25 @@ _RELOAD_SEEN_FILE = "prefix-reload-seen.json"
 _RELOAD_EVENT_FRESH_S = 600
 
 
+def _read_reload_state(state_dir: Path) -> tuple[dict[str, tuple[int, int]], dict[str, object]]:
+    """(acked gens+mtimes, seen cursor). Raises on a broken stamp; heals a corrupt cursor to {}."""
+    acked: dict[str, tuple[int, int]] = {}
+    for name, stamp in (("plugins", "reload-acked.ts"), ("skills", "skills-reload-acked.ts")):
+        p = state_dir / stamp
+        try:
+            gen = int(p.read_text(encoding="utf-8").strip() or "0")
+            mtime = int(p.stat().st_mtime)
+        except FileNotFoundError:
+            gen, mtime = 0, 0
+        acked[name] = (gen, mtime)
+    try:
+        raw = json.loads((state_dir / _RELOAD_SEEN_FILE).read_text(encoding="utf-8"))
+        seen = raw if isinstance(raw, dict) else {}
+    except (FileNotFoundError, ValueError):
+        seen = {}
+    return acked, seen
+
+
 def reload_invalidated(state_dir: Path, *, now: int) -> bool | None:
     """Did this session ack a plugin/skills reload the watcher has not yet processed?
 
@@ -1865,36 +1884,49 @@ def reload_invalidated(state_dir: Path, *, now: int) -> bool | None:
     EXISTS but does not parse is a broken signal and reads `None`, so it can never overwrite a
     verdict another trigger reached.
 
-    The cursor (`prefix-reload-seen.json`) records the last acked generations this watcher
-    processed, and is advanced on every read — including for STALE events — so one reload fires
-    at most one clear. A corrupt cursor self-heals to empty rather than reading `None`: the
-    freshness window bounds the worst case to a single spurious fire, while a dead cursor would
-    disable the trigger permanently and silently.
+    THE PROBE DOES NOT CONSUME A FRESH EVENT (review-fork finding, 2026-09-01): the first cut
+    advanced the cursor on every read, so a `--dry-run`, a gate veto after the probe, or the
+    NO_RECORDED_PANE decline ate the event without firing — and the daemon's next real pass was
+    blind to a prefix that was still dead. Now a FRESH event stays pending until
+    `consume_reload_events` is called on the FIRE path; re-probing while it is fresh keeps
+    reporting True, and once it ages past the window it is consumed silently below (a late clear
+    would only dump a warm cache). A corrupt cursor self-heals to empty rather than reading
+    `None`: the freshness window bounds the worst case to a single spurious fire, while a dead
+    cursor would disable the trigger permanently and silently.
     """
     try:
-        acked: dict[str, tuple[int, int]] = {}
-        for name, stamp in (("plugins", "reload-acked.ts"), ("skills", "skills-reload-acked.ts")):
-            p = state_dir / stamp
-            try:
-                gen = int(p.read_text(encoding="utf-8").strip() or "0")
-                mtime = int(p.stat().st_mtime)
-            except FileNotFoundError:
-                gen, mtime = 0, 0
-            acked[name] = (gen, mtime)
-        seen_path = state_dir / _RELOAD_SEEN_FILE
-        try:
-            raw = json.loads(seen_path.read_text(encoding="utf-8"))
-            seen = raw if isinstance(raw, dict) else {}
-        except (FileNotFoundError, ValueError):
-            seen = {}
+        acked, seen = _read_reload_state(state_dir)
         fired = False
+        stale_only: dict[str, int] = {}
         for name, (gen, mtime) in acked.items():
             prev = seen.get(name)
-            if gen > (prev if isinstance(prev, int) else 0) and now - mtime <= _RELOAD_EVENT_FRESH_S:
-                fired = True
-        new_seen = {name: gen for name, (gen, _) in acked.items()}
-        if any(seen.get(k) != v for k, v in new_seen.items()):
-            state.atomic_write(seen_path, json.dumps(new_seen) + "\n")
+            if gen > (prev if isinstance(prev, int) else 0):
+                if now - mtime <= _RELOAD_EVENT_FRESH_S:
+                    fired = True
+                else:
+                    stale_only[name] = gen
+        if not fired and stale_only:
+            # Only stale events pending: consume them now so they stop re-probing forever.
+            # Never while a fresh event is also pending — one cursor write covers both names,
+            # and consuming the pair here would eat the fresh event the fire path still needs.
+            new_seen = {**{k: v for k, v in seen.items() if isinstance(v, int)}, **stale_only}
+            state.atomic_write(state_dir / _RELOAD_SEEN_FILE, json.dumps(new_seen) + "\n")
         return fired
     except (OSError, ValueError, TypeError):
         return None
+
+
+def consume_reload_events(state_dir: Path) -> None:
+    """Mark every currently-acked reload generation as processed — FIRE-PATH ONLY.
+
+    Called after the clear chain is actually spawned, never from the probe: the event must
+    survive a dry-run, a veto, or a declined pane so the next beat can still act on it.
+    Best-effort — a failed write only means the same reload may fire one more clear, and the
+    cooldown veto already bounds that.
+    """
+    try:
+        acked = _read_reload_state(state_dir)[0]
+        new_seen = {name: gen for name, (gen, _) in acked.items()}
+        state.atomic_write(state_dir / _RELOAD_SEEN_FILE, json.dumps(new_seen) + "\n")
+    except (OSError, ValueError, TypeError):
+        pass

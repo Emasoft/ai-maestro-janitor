@@ -527,6 +527,11 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # TRDD-2F3I2P18 — every second spent here was a second the full context could still be
     # re-cached at full price.
     _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
+    # Consume any pending reload event ONLY now that the chain is actually spawned. The probe in
+    # `_decide` deliberately does not consume (review-fork finding, 2026-09-01): a dry-run, a
+    # gate veto, or the NO_RECORDED_PANE decline above must leave the event pending so the next
+    # beat can still clear a prefix that is still dead.
+    ec.consume_reload_events(sd)
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")
 
