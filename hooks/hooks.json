@@ -250,17 +250,6 @@
         ]
       }
     ],
-    "PostModelSwitch": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-model-switch.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [

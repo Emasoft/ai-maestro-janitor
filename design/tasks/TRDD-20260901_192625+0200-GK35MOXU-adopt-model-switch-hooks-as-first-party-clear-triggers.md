@@ -54,9 +54,12 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 ## Acceptance
 
 - [ ] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
-      real `/model` switch on this machine, not just a unit test) — SHIPPED in `df26fa12`
-      (hook script + hooks.json entry; subprocess test bumps 1→2); the LIVE `/model` verify
-      waits on the next publish + local plugin update, since a repo hook is not loaded
+      real `/model` switch on this machine, not just a unit test) — the SCRIPT shipped in
+      `df26fa12` (subprocess test bumps 1→2) but the hooks.json REGISTRATION is DEFERRED:
+      CPV's hook-event allowlist (v5.4.0 pin AND upstream main, checked 2026-09-01) predates
+      CC 2.1.251 and rejects the event as CRITICAL, blocking the publish. Filed upstream:
+      claude-plugins-validation issue 222. Re-add the hooks.json entry once a CPV release
+      knows the event; the script is inert until registered, so nothing half-works meanwhile
 - [x] the external-clear gate fires on the stamp with the consume-on-fire semantics
       (`df26fa12`: third stamp name in `_read_reload_state`; probe/consume tests)
 - [ ] measured whether `/effort` fires the hook; fallback poll retained or retired accordingly,
