@@ -1772,3 +1772,73 @@ def compose_template_handoff(
             n_cards -= 1
         text = render(n_cards, n_commits, n_findings)
     return text
+
+
+# ── TRDD-2F3I2P18: the prefix-invalidating events the schedule cannot imply ──────────────────
+#
+# `cache_certainly_expired` answers "did the cache time out?" and `next_fire_misses_cache`
+# answers "will it?". Neither can see the third family: events that kill the prefix OUTRIGHT,
+# instantly, regardless of the clock — a model switch, an effort switch, a plugin or skill
+# reload. At that instant the prefix is ALREADY dead, so a clear is free; one turn later it costs
+# a full re-write. These are the cheapest wins available and nothing was watching for them.
+#
+# NO NEW API IS NEEDED, which is why this ships now rather than waiting on the announced
+# agentlens cache-state verb: `agentlenspro statusline-history raw` already prints model and
+# effort per turn per session. Verified by running it, not by reading the help text.
+_STATUSLINE_MAX_ROWS = 40
+
+
+def prefix_invalidated(session_id: str | None = None) -> bool | None:
+    """Did MODEL or EFFORT change between this session's two most recent turns?
+
+    Tri-state, and the `None` is load-bearing in the same way `cache_certainly_expired`'s is: it
+    means "no signal", NEVER `False`. An absent CLI, an unparseable table, or fewer than two rows
+    for this session must leave the other triggers exactly as they were. A trigger that
+    synthesizes `False` out of an unreadable input does not merely fail to fire — it reports
+    健康 where there is no information, which is how a silent gate disables a whole lever.
+    """
+    sid = (session_id or os.environ.get("CLAUDE_CODE_SESSION_ID", ""))[:8]
+    if not sid:
+        return None
+    # Honour the SAME disable the cache probe already has, rather than minting a second one.
+    # `CACHE_EXPIRED_COMMAND_ENV` set to empty means "no agentlens on this host" — the suite uses
+    # it to keep the whole class of machine-touching calls out of tests, and a second, differently
+    # named switch would mean a host could disable one probe and silently keep the other.
+    if os.environ.get(CACHE_EXPIRED_COMMAND_ENV, "unset") == "":
+        return None
+    if shutil.which("agentlenspro") is None:
+        return None
+    # `state.run_subprocess`, NOT a raw `subprocess.run`. The repo's test guard refuses raw
+    # machine-touching calls by design — "deliberate friction — it makes a real machine-touching
+    # call visible in code review instead of an invisible default" — and it caught this function
+    # on its first run. The wrapper is the sanctioned path: it carries the detector name into the
+    # logs and the timeout scale the suite relaxes, so the same code is honest in production and
+    # inert under test.
+    proc = state.run_subprocess(
+        ["agentlenspro", "statusline-history", "raw"],
+        timeout=15,
+        detector_name="external-clear",
+    )
+    if proc is None or proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+
+    # Rows are newest-first: `time  session  model  effort  ctx%  ctx  $`. Only this session's
+    # rows are comparable — another session switching models says nothing about this prefix.
+    seen: list[tuple[str, str]] = []
+    for line in proc.stdout.splitlines()[:_STATUSLINE_MAX_ROWS]:
+        parts = line.split()
+        if len(parts) < 4 or not line[:2].isdigit():
+            continue
+        if not parts[1].startswith(sid):
+            continue
+        # The model name contains spaces ("Opus 5"), so index from the RIGHT of the fixed tail
+        # (ctx%, ctx, $) rather than the left: a left-indexed split silently reads the model's
+        # second word as the effort.
+        if len(parts) < 6:
+            continue
+        seen.append((" ".join(parts[2:-4]), parts[-4]))
+        if len(seen) == 2:
+            break
+    if len(seen) < 2:
+        return None
+    return seen[0] != seen[1]

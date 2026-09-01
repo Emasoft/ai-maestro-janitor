@@ -190,6 +190,17 @@ def _decide(
     # Both vetoes hold regardless of what the probe would say, so probing first would spend a
     # bounded-but-real 5 s per fire to compute an input the gate is about to ignore.
     cache_expired = None if (active_waiting or in_cooldown) else ec.cache_certainly_expired(root)
+    # TRDD-2F3I2P18 — a model/effort switch (and, once wired, a plugin or skill reload) kills the
+    # prefix OUTRIGHT, so from this gate's point of view it is an expired cache arriving by a
+    # different route. OR'd into the existing term rather than given a branch of its own: it wants
+    # the same veto set, the same cooldown and the same tests, and a parallel trigger would drift
+    # from them. Logged separately below so the ATTRIBUTION stays honest — "cache expired" and
+    # "you switched model" are the same verdict for very different reasons, and a log line that
+    # cannot tell them apart is one nobody can act on.
+    prefix_dead = None if (active_waiting or in_cooldown) else ec.prefix_invalidated()
+    if prefix_dead:
+        state.log_line(_LOG, "prefix invalidated (model/effort switch) — treating as cache-expired")
+        cache_expired = True
     # SPLIT DELIBERATELY: `gate` is exactly the pure decision's parameters, `facts` is the log
     # record that also carries composer-only fields. They were one dict until `transcript` was
     # added to it, which made every run raise `unexpected keyword argument 'transcript'` — the
