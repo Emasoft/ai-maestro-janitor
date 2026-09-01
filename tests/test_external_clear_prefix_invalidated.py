@@ -198,6 +198,26 @@ def test_a_second_reload_after_consumption_fires_again(tmp_path: Path) -> None:
     assert ec.reload_invalidated(tmp_path, now=now + 60) is True
 
 
+def test_a_turn_newer_than_the_stamp_means_the_recache_was_paid(tmp_path: Path) -> None:
+    """A /model switch mid-conversation is the norm: the next turn rebuilds the new prefix,
+    so a fresh-but-already-paid event must be consumed silently, never fired — firing would
+    clear a WARM session (review-fork, 2026-09-01)."""
+    now = 1_700_000_000
+    _write_stamp(tmp_path, "model-switch-acked.ts", 2, age_s=120, now=now)
+    # A turn ran 60s ago — AFTER the stamp (120s ago): the rewrite is paid.
+    assert ec.reload_invalidated(tmp_path, now=now, last_turn_ts=now - 60) is False
+    # Consumed: even with no newer turn on a later probe, the event is gone.
+    assert ec.reload_invalidated(tmp_path, now=now, last_turn_ts=None) is False
+
+
+def test_a_stamp_newer_than_the_last_turn_still_fires(tmp_path: Path) -> None:
+    """The switch happened AT IDLE (stamp after the last turn): the clear is genuinely free
+    and the event must fire."""
+    now = 1_700_000_000
+    _write_stamp(tmp_path, "model-switch-acked.ts", 2, age_s=60, now=now)
+    assert ec.reload_invalidated(tmp_path, now=now, last_turn_ts=now - 120) is True
+
+
 def test_the_post_model_switch_hook_advances_the_stamp(tmp_path: Path) -> None:
     """Real subprocess run of scripts/hooks/post-model-switch.py: each invocation bumps the
     generation by one, and a fault-free run exits 0 even with an empty payload."""

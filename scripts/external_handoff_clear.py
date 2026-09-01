@@ -212,7 +212,18 @@ def _decide(
     # Probed AFTER the same vetoes, and NOT short-circuited by `prefix_dead`: the probe consumes
     # its cursor, so skipping it when the model switch already fired would leave a pending reload
     # event to trigger a SECOND clear on the next beat — one dead prefix, two clears.
-    reload_dead = None if (active_waiting or in_cooldown) else ec.reload_invalidated(sd, now=now)
+    # `last_turn_age` doubles as the reload probe's paid-detector: a transcript turn newer
+    # than an ack stamp means the re-cache already happened and the event must not fire.
+    last_turn_age = _last_turn_age(root, now)
+    reload_dead = (
+        None
+        if (active_waiting or in_cooldown)
+        else ec.reload_invalidated(
+            sd,
+            now=now,
+            last_turn_ts=None if last_turn_age is None else now - last_turn_age,
+        )
+    )
     if reload_dead:
         state.log_line(
             _LOG,
@@ -227,7 +238,7 @@ def _decide(
     # reach the gate by being added to the wrong dict.
     gate = {
         "idle_seconds": idle_s,
-        "last_turn_age_s": _last_turn_age(root, now),
+        "last_turn_age_s": last_turn_age,
         "ttl_minutes": ec.read_ttl_minutes(sd),
         "seconds_to_next_fire": ec.seconds_until_next_fire(cron, now),
         "context_tokens": cold_cache_compact.context_tokens_for(newest),

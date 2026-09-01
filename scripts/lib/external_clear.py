@@ -1885,7 +1885,9 @@ def _read_reload_state(state_dir: Path) -> tuple[dict[str, tuple[int, int]], dic
     return acked, seen
 
 
-def reload_invalidated(state_dir: Path, *, now: int) -> bool | None:
+def reload_invalidated(
+    state_dir: Path, *, now: int, last_turn_ts: int | None = None
+) -> bool | None:
     """Did this session ack a plugin/skills reload the watcher has not yet processed?
 
     Tri-state like `prefix_invalidated`: `None` means "no signal", never `False`. An ABSENT ack
@@ -1906,19 +1908,27 @@ def reload_invalidated(state_dir: Path, *, now: int) -> bool | None:
     try:
         acked, seen = _read_reload_state(state_dir)
         fired = False
-        stale_only: dict[str, int] = {}
+        consumable: dict[str, int] = {}
         for name, (gen, mtime) in acked.items():
             prev = seen.get(name)
             if gen > (prev if isinstance(prev, int) else 0):
-                if now - mtime <= _RELOAD_EVENT_FRESH_S:
+                # A TURN NEWER THAN THE STAMP means the re-cache was ALREADY PAID (review-fork,
+                # 2026-09-01): the invariant that makes a clear free is "no turn ran since the
+                # prefix died", not "the prefix died recently". A /model switch mid-conversation
+                # is the norm — the user switches and keeps chatting, the very next turn (or a
+                # heartbeat fire) rebuilds the new prefix — and firing then would clear a WARM
+                # session, the exact failure the stale path exists to avoid. `>=` on the fire
+                # side: a turn and a stamp in the same second cannot prove the turn came after.
+                paid = last_turn_ts is not None and mtime < last_turn_ts
+                if now - mtime <= _RELOAD_EVENT_FRESH_S and not paid:
                     fired = True
                 else:
-                    stale_only[name] = gen
-        if not fired and stale_only:
-            # Only stale events pending: consume them now so they stop re-probing forever.
-            # Never while a fresh event is also pending — one cursor write covers both names,
-            # and consuming the pair here would eat the fresh event the fire path still needs.
-            new_seen = {**{k: v for k, v in seen.items() if isinstance(v, int)}, **stale_only}
+                    consumable[name] = gen
+        if not fired and consumable:
+            # Only stale/paid events pending: consume them now so they stop re-probing forever.
+            # Never while a firing event is also pending — one cursor write covers all names,
+            # and consuming the set here would eat the fresh event the fire path still needs.
+            new_seen = {**{k: v for k, v in seen.items() if isinstance(v, int)}, **consumable}
             state.atomic_write(state_dir / _RELOAD_SEEN_FILE, json.dumps(new_seen) + "\n")
         return fired
     except (OSError, ValueError, TypeError):
