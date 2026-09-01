@@ -1,14 +1,15 @@
 ---
 trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
-column: todo
+column: blocked
+pre-block-column: todo
 created: 2026-07-21T19:33:07+0200
-updated: 2026-08-29T22:53:18+0200
+updated: 2026-09-01T22:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-blocked-by: []
+blocked-by: [KQ9WM4TZ]
 eht: [KQ9WM4TZ]
 implementation-commits: [419a470, 3edcf0c, 88e6f45a]
 ---
