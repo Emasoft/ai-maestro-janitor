@@ -1,9 +1,10 @@
 ---
 trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
-column: todo
+column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-01T18:29:00+0200
+updated: 2026-09-01T19:08:29+0200
+implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5]
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -161,16 +162,24 @@ invisible to the gate.
 
 - [x] USER rules on inverting the 2026-08-28 "never clear blind" invariant — RULED 2026-09-01,
       quoted verbatim above: superseded, because the jsonl transcript is not in the cleared context
-- [ ] the transcript path is captured BEFORE the clear and passed explicitly to llm-ext — never
-      re-resolved as "newest" afterwards
-- [ ] `/clear` on a cache-invalidating event fires with NO network call preceding it
-- [ ] model change, EFFORT change, /reload-plugins and /reload-skills are detected and treated as
-      cache-invalidating — model+effort from `agentlenspro statusline-history raw`, reloads from
-      the janitor's own reload-acked stamps
-- [ ] the session is held from new work between clear and injection, with a **15-minute TTL**
+- [x] the transcript path is captured BEFORE the clear and passed explicitly to llm-ext — never
+      re-resolved as "newest" afterwards (`59e31dcb`: `_capture_summary_source` +
+      `pending["transcript"]` at the compose site)
+- [x] `/clear` on a cache-invalidating event fires with NO network call preceding it (`59e31dcb`:
+      the only work between gate and `_fire` is naming the transcript on disk)
+- [x] model change, EFFORT change, /reload-plugins and /reload-skills are detected and treated as
+      cache-invalidating — model+effort from `agentlenspro statusline-history raw`
+      (`109cc3b9`: `prefix_invalidated`), reloads from the janitor's own reload-acked stamps
+      (`4181d6c5`: `reload_invalidated`, cursor-consumed, 10-min freshness window)
+- [x] the session is held from new work between clear and injection, with a **15-minute TTL**
       (USER, 2026-09-01); on expiry it degrades to `precompact-handoff.md` and releases
-- [ ] measured: a cache-invalidating event costs no full prefix write on the next turn
-- [ ] `uv run pytest -q` + ruff + mypy
+      (`50856019`: `summary_hold_active` honoured in `dispatch.py`)
+- [ ] measured: a cache-invalidating event costs no full prefix write on the next turn — awaits
+      the first LIVE event; watch `external-clear.log` for the `prefix invalidated (…)` lines
+- [ ] `uv run pytest -q` + ruff + mypy — ruff+mypy green; 2026-09-01 19:00 full suite: 15,937
+      passed, 2 failed, both PRE-EXISTING and unrelated to this card
+      (`branch_protection_lib.py:485` git-locks guard — TRDD-H8WRCW0I's territory — and the
+      gh_issues_monitor baseline replay); box closes when those are fixed
 
 ## Notes and lessons learned
 
