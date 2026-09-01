@@ -3,8 +3,8 @@ trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
 column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-01T19:08:29+0200
-implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5]
+updated: 2026-09-01T19:32:00+0200
+implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -176,10 +176,10 @@ invisible to the gate.
       (`50856019`: `summary_hold_active` honoured in `dispatch.py`)
 - [ ] measured: a cache-invalidating event costs no full prefix write on the next turn — awaits
       the first LIVE event; watch `external-clear.log` for the `prefix invalidated (…)` lines
-- [ ] `uv run pytest -q` + ruff + mypy — ruff+mypy green; 2026-09-01 19:00 full suite: 15,937
-      passed, 2 failed, both PRE-EXISTING and unrelated to this card
-      (`branch_protection_lib.py:485` git-locks guard — TRDD-H8WRCW0I's territory — and the
-      gh_issues_monitor baseline replay); box closes when those are fixed
+- [x] `uv run pytest -q` + ruff + mypy — full suite GREEN 2026-09-01 19:30: 15,939 passed,
+      0 failed (the 2 pre-existing failures the 19:00 run surfaced — the `_state` alias hiding
+      `branch_protection_lib.py:485` from the git-locks guard, and the gh_issues_monitor
+      time-bomb fixture — were fixed in `e3299d8d`)
 
 ## Notes and lessons learned
 
