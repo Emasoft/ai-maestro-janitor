@@ -1,16 +1,17 @@
 ---
 trdd-id: POA0157J
 title: Read the harness's own prompt_cache status object as the primary cache-state signal
-column: todo
+column: blocked
+pre-block-column: todo
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-01T19:26:25+0200
+updated: 2026-09-02T01:38:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: []
+blocked-by: [AgentlensPro#19]
 npt: []
 eht: []
 relevant-rules: []
@@ -18,6 +19,22 @@ external-refs: [TRDD-2F3I2P18, TRDD-1QJIZFFW]
 ---
 
 # The harness now publishes warm/cold directly — prefer it over inference
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+**Fork decided: (a), upstream.** Filed AgentlensPro#19 (own repo) asking the status-line
+wrapper to persist the `prompt_cache` object per session and expose
+`agentlenspro cache-state [--session] [--json]` (`warm|cold`, exit 2 + empty stdout for
+cannot-answer, same contract as `cache-expired`). Checked first, 2026-09-02, on 2.33.2: nothing
+under `~/.agentlens/` or `~/.claude/agentlens/` carries warm/cold or a hit ratio, `forensics.db`
+has only `api_calls`/`call_content`/`call_injections`/`index_state`, and `--help` lists no
+cache-state verb — the one `external_clear.py` calls "announced". Option (b) rejected: it
+rewrites a user-owned status-line command from a plugin and leaves two tools parsing one payload.
+
+**NEXT ACTION (when #19 ships):** pin the reader to the verb's `--json` output (field names
+from the live object, box 1), then step 2 of the design below — prefer the fresh first-party
+signal in `cache_certainly_expired`, tri-state preserved, fall through unchanged when stale
+or absent.
 
 ## Why
 
