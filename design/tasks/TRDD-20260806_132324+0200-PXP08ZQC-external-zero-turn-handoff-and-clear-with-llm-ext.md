@@ -1,8 +1,9 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: todo
-blocked-by: []
+column: blocked
+pre-block-column: todo
+blocked-by: [next-publish-install]
 created: 2026-08-06T13:23:24+0200
 updated: 2026-08-29T22:51:10+0200
 current-owner: claude-ai-maestro-janitor
@@ -16,6 +17,16 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+
+### ⏵ 2026-09-01 — column re-honest-ed; ONE post-publish drill closes three cards
+
+The frontmatter had drifted back to `todo` (the 2026-08-26 correction below set it to
+`blocked` — the same claim-vs-reality failure this card documents, third occurrence). Reset
+to `blocked` on `next-publish-install`: the remaining box (one observed end-to-end cycle WITH
+the verify PASS table) must run on the post-2F3I2P18 clear-first ordering, which exists only
+in the repo until the next `scripts/publish.py` release installs. The SAME drill then closes
+the measurement boxes of TRDD-2F3I2P18, TRDD-1QJIZFFW (its STATE carries the lever-flip
+step), and this card — run it once, harvest three.
 
 ### ⚠ 2026-08-26 — the opt-in below was REVERSED, and the card's column was wrong
 
