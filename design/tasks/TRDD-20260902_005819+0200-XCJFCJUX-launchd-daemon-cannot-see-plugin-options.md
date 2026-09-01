@@ -1,9 +1,9 @@
 ---
 trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
-column: testing
+column: dev
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T01:15:00+0200
+updated: 2026-09-02T01:50:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -19,6 +19,31 @@ implementation-commits: [dec760ed]
 ---
 
 # The lever is ON in settings.json and the daemon still runs the clear in shadow mode
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 01:50
+
+**The os.environ mirror (dec760ed) is SUPERSEDED — do not carry it forward.** Publish #5
+(3.4.4) failed at the remote CPV gate: `[MAJOR] skillaudit:persistence ENV_INJECTION` on
+`os.environ[key] = text`. CPV's three Python carve-outs (literal key+value, build-cache vars,
+read-modify-write) correctly do not match a dynamic key with a file-sourced value, and the
+documented audit-consent sentinel does NOT apply — `_EXECUTION_CLASS_RULES` omits
+`ENV_INJECTION` in every CPV version on this machine (filed as claude-plugins-validation#223;
+the sentinel commit 19a52dc8 is therefore dead weight and is removed by the redesign). A plist
+`EnvironmentVariables` route was also rejected: the installer writes its plist through a
+scanned heredoc by design, and `test_config_injects_no_code_loading_env` guards exactly that
+surface.
+
+**Design now: no process-environment writes at all.** `state.py` keeps a dict mirror
+(`_SETTINGS_OPTIONS`, filled by `load_plugin_options_from_settings`, refreshed on mtime) and
+exposes ONE accessor, `state.plugin_option(name)` — a real env var always wins, then the
+mirror — plus `state.plugin_options_env()` for what a CHILD must inherit. `is_truthy_env`,
+`_env_interval` and the daemon-lane direct reads route through the accessor; the daemon's
+spawn points and `cold_cache_clear_task` merge the mirror into the child env. Session-lane
+detectors and hooks are untouched (they already have the env). Implemented by a lean-worker
+from this spec; verified first-hand before commit.
+
+**NEXT ACTION:** verify the worker's diff (`grep -rn 'os.environ\[' scripts/lib/state.py` must
+be empty), run ruff/mypy/tests, commit, re-run `uv run scripts/publish.py --patch`.
 
 ## Measured 2026-09-02 (not inferred)
 
