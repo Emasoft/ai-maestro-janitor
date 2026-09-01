@@ -1,9 +1,9 @@
 ---
 trdd-id: 4GQ94FNJ
 title: The scope-leak detector is blind to publish-globally, so a published page's leak reads as a one-project problem
-column: human_review
+column: complete
 created: 2026-08-22T16:20:25+0200
-updated: 2026-08-22T17:04:00+0200
+updated: 2026-09-01T22:02:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: medium
@@ -90,7 +90,8 @@ Port the stash's 5 tests to the current file.
 - [x] gate green: 27/27 in the module, `ruff check scripts tests` clean, `mypy scripts/` clean
       (489 files); the full-suite result is analysed under **Gate** below — 10 red, all of them
       pre-existing parallel-load flakes, none in this card's blast radius
-- [ ] #52 answered with this card id — **queued behind the publish gate**
+- [x] #52 answered with this card id — posted 2026-09-01 after the 3.4.2 publish that ships
+      it (issuecomment-5499620080)
 
 ## Falsification — both new behaviours were proven killable
 
@@ -138,3 +139,12 @@ which this session's own heartbeat mutates *while the suite runs*. That is the k
 not re-minted as memory. Worth its own card if it recurs.
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-01T22:02:00+0200 — APPROVED human_review → complete by the session acting under the
+  USER's delegated review authority ("i've put you in charge", 2026-09-01). All boxes done: the
+  detector change shipped in 3.4.2 (published tonight, tag verified first-hand); the last box
+  (answer #52) closed by issuecomment-5499620080. The card's own gate evidence (27/27 module,
+  ruff/mypy clean, mutation probes killable) stands; the 10 "pre-existing parallel-load flakes"
+  it recorded were resolved separately (suite green at the 3.4.2 publish gate, 15,952 passed).
