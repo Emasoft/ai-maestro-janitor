@@ -12,7 +12,6 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: []
 npt: []
 eht: []
 relevant-rules: []
