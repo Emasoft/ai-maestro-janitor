@@ -1842,3 +1842,59 @@ def prefix_invalidated(session_id: str | None = None) -> bool | None:
     if len(seen) < 2:
         return None
     return seen[0] != seen[1]
+
+
+# The reload half of the same trigger family (TRDD-2F3I2P18). A `/reload-plugins` or
+# `/reload-skills` re-injects CLAUDE.md, skills and tool schemas into the prefix, killing it as
+# surely as a model switch — but neither appears in the statusline series (a built-in reload takes
+# no API turn), so `prefix_invalidated` cannot see them. The janitor's own per-project ack stamps
+# are the signal: `dispatch.py` advances `reload-acked.ts` / `skills-reload-acked.ts` in the very
+# turn that tells the session to reload, so an ack the watcher has not yet processed IS the event.
+_RELOAD_SEEN_FILE = "prefix-reload-seen.json"
+# An ack older than this is CONSUMED SILENTLY, never fired on: the prefix rewrite it caused was
+# paid by whatever turn ran since, so a late clear would throw away a freshly warm cache — the
+# exact "clear a warm session for nothing" failure the rest of this gate is built to avoid.
+_RELOAD_EVENT_FRESH_S = 600
+
+
+def reload_invalidated(state_dir: Path, *, now: int) -> bool | None:
+    """Did this session ack a plugin/skills reload the watcher has not yet processed?
+
+    Tri-state like `prefix_invalidated`: `None` means "no signal", never `False`. An ABSENT ack
+    stamp is a readable fact (no reload has ever been acked here) and reads `False`; a stamp that
+    EXISTS but does not parse is a broken signal and reads `None`, so it can never overwrite a
+    verdict another trigger reached.
+
+    The cursor (`prefix-reload-seen.json`) records the last acked generations this watcher
+    processed, and is advanced on every read — including for STALE events — so one reload fires
+    at most one clear. A corrupt cursor self-heals to empty rather than reading `None`: the
+    freshness window bounds the worst case to a single spurious fire, while a dead cursor would
+    disable the trigger permanently and silently.
+    """
+    try:
+        acked: dict[str, tuple[int, int]] = {}
+        for name, stamp in (("plugins", "reload-acked.ts"), ("skills", "skills-reload-acked.ts")):
+            p = state_dir / stamp
+            try:
+                gen = int(p.read_text(encoding="utf-8").strip() or "0")
+                mtime = int(p.stat().st_mtime)
+            except FileNotFoundError:
+                gen, mtime = 0, 0
+            acked[name] = (gen, mtime)
+        seen_path = state_dir / _RELOAD_SEEN_FILE
+        try:
+            raw = json.loads(seen_path.read_text(encoding="utf-8"))
+            seen = raw if isinstance(raw, dict) else {}
+        except (FileNotFoundError, ValueError):
+            seen = {}
+        fired = False
+        for name, (gen, mtime) in acked.items():
+            prev = seen.get(name)
+            if gen > (prev if isinstance(prev, int) else 0) and now - mtime <= _RELOAD_EVENT_FRESH_S:
+                fired = True
+        new_seen = {name: gen for name, (gen, _) in acked.items()}
+        if any(seen.get(k) != v for k, v in new_seen.items()):
+            state.atomic_write(seen_path, json.dumps(new_seen) + "\n")
+        return fired
+    except (OSError, ValueError, TypeError):
+        return None
