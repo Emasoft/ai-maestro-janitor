@@ -1,9 +1,9 @@
 ---
 trdd-id: NUD3DGX5
 title: Align the janitor with Claude Code 2.1.257 — Fable 5.1 default, subagent model force, session-only effort, upstream cache-miss fixes
-column: dev
+column: complete
 created: 2026-09-01T21:56:08+0200
-updated: 2026-09-02T00:54:00+0200
+updated: 2026-09-02T01:12:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -73,11 +73,21 @@ Verify on such a host before assuming; `daemon.log` restart cadence is the tell.
 
 ## Acceptance
 
-- [ ] items 1-9 each resolved (done, retired-with-reason, or split into its own card)
-- [ ] memory page updated; pytest + ruff + mypy green for any code change
+- [x] items 1-9 each resolved (done, retired-with-reason, or split into its own card) —
+      1/4/6 measured or read in the installed code, 2/7/8/9 retired with the grep that proves
+      the absence, 3 a table row, 5 a memory atom
+- [x] memory page updated (ATOM-L1OG-ZN6M, validate NONE, lint INFO-only); no code changed, so
+      the pytest/ruff/mypy clause is vacuous
 
 ## Notes and lessons learned
 
 - The changelog said "detached background commands no longer survive exit" and the first
   instinct was "the daemon is dead". The measurement said otherwise in one `ps`: the
   production path is launchd, not a Bash child. Measure the spawn PATH, not the spawn FLAG.
+
+## Approval log
+
+- 2026-09-02T01:12:00+0200 — COMPLETE, closed by the implementing session under the USER's
+  delegated review authority ("i've put you in charge", 2026-09-01). Nine items, nine
+  dispositions, each with its evidence on the item line; no code changed. Self-closure
+  disclosed: implementer and approver are the same session.
