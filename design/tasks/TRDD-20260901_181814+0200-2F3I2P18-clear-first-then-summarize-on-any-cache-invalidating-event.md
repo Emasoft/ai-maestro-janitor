@@ -3,7 +3,7 @@ trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
 column: todo
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-01T18:24:00+0200
+updated: 2026-09-01T18:29:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -114,6 +114,36 @@ The new order, in the SAME process, because the script outlives the `/clear` it 
 The old read-back guard at `:456-470` is retired by this, and its comment must go with it rather
 than be left describing a flow that no longer exists.
 
+## USER ANSWERS 2026-09-01 — the two open decisions, settled
+
+**Hold TTL = 15 minutes.** After that the hold releases and the session degrades to the
+mechanical `precompact-handoff.md` rather than staying stuck.
+
+**Triggers: model change, EFFORT change, `/reload-plugins`, `/reload-skills`** — all of them, not
+just the two originally listed. Effort is the one this card had missed.
+
+**Source: the agentlens CLI directly.** And it does NOT need the forthcoming cache-state verb —
+that verb is an upgrade path, not a blocker, because the signal is already there today:
+
+```
+$ agentlenspro statusline-history raw
+time +0200  session   model   effort  ctx%  ctx     $
+18:27:33    08be725e  Opus 5  high    69    686.9k  127.92
+```
+
+**`model` and `effort` per turn, per session, newest first.** A change between consecutive rows
+for one session IS the cache-invalidating event, with no new API required. Verified by running
+it, not from the help text.
+
+Already wired and usable now: `agentlenspro cache-expired` (feeds the existing `cache_expired`
+term — note its contract: exit 2 with EMPTY stdout for cannot-answer, never `false`) and
+`agentlenspro last-compact`. Follow that same tri-state discipline for the new triggers: an
+unreadable signal must leave the other triggers exactly as they were, never synthesize a `False`.
+
+`/reload-plugins` and `/reload-skills` are not in the statusline series; they need their own
+signal (the janitor already writes `reload-acked.ts` / `skills-reload-acked.ts` in
+`.janitor/state/`, which is the cheapest place to look first).
+
 ## The detection gap — the user named events we do not watch
 
 `should_clear_externally` triggers on: measured cache expiry (agentlensPro), predicted
@@ -134,9 +164,11 @@ invisible to the gate.
 - [ ] the transcript path is captured BEFORE the clear and passed explicitly to llm-ext — never
       re-resolved as "newest" afterwards
 - [ ] `/clear` on a cache-invalidating event fires with NO network call preceding it
-- [ ] model change and plugin reload are detected and treated as cache-invalidating
-- [ ] the session is held from new work between clear and injection, and the hold RELEASES on
-      llm-ext failure rather than stranding the session
+- [ ] model change, EFFORT change, /reload-plugins and /reload-skills are detected and treated as
+      cache-invalidating — model+effort from `agentlenspro statusline-history raw`, reloads from
+      the janitor's own reload-acked stamps
+- [ ] the session is held from new work between clear and injection, with a **15-minute TTL**
+      (USER, 2026-09-01); on expiry it degrades to `precompact-handoff.md` and releases
 - [ ] measured: a cache-invalidating event costs no full prefix write on the next turn
 - [ ] `uv run pytest -q` + ruff + mypy
 
