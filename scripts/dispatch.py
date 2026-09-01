@@ -2966,6 +2966,28 @@ def main() -> int:
     if _phase_clear_resume():
         return 0
 
+    # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18). A session that was just cleared is waiting
+    # for llm-ext to finish summarizing the transcript it had BEFORE the clear. Until that lands
+    # it knows nothing, so resuming it now would hand a blank session its old task list and every
+    # chore at once — the owner's ruling was explicit that the resume comes AFTER the injection
+    # ("at that point only we can resume all the other tasks. chron, etc.").
+    #
+    # Placed ahead of every resume phase and every detector, because it is a HOLD: anything that
+    # runs before it is work done into a context that is about to be replaced.
+    #
+    # It is bounded by the record's own 15-minute TTL, and `summary_hold_active` fails OPEN on a
+    # missing, unreadable or malformed record. A hold is a refusal to work, so an unparseable
+    # byte must never be able to wedge a host — the TTL and the fail-open are the two independent
+    # guarantees that this can only ever delay a session, never strand one.
+    try:
+        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
+
+        if _ehc.summary_hold_active(state.state_dir(), int(time.time())):
+            state.log_line("dispatch", "summary hold active — no resume, no chores this fire")
+            return 0
+    except Exception:  # noqa: BLE001 - a broken import must not stop the heartbeat
+        pass
+
     # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
     # skip drift detectors this fire so resume gets clean attention.
     if _phase_rate_limit_recovery():

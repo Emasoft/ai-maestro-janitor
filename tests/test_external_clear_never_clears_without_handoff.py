@@ -201,3 +201,52 @@ def test_a_failed_handoff_write_never_reaches_the_clear(tmp_path, monkeypatch) -
         "the clear chain was spawned even though writing the handoff FAILED — the session would "
         "be cleared with no handoff to resume from."
     )
+
+
+def test_the_heartbeat_HOLDS_while_a_cleared_session_awaits_its_summary(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-2F3I2P18. Between the clear and the injection the session knows nothing, so resuming
+    it would hand a blank context its old task list and every chore at once. The owner's ruling
+    was explicit: the resume comes AFTER the injection."""
+    import external_handoff_clear as ehc_mod
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    now = int(time.time())
+    (sd / "summary-pending.json").write_text(
+        json.dumps({"transcript": "/x.jsonl", "key": "abc", "captured": now,
+                    "expires": now + 900}),
+        encoding="utf-8",
+    )
+    assert ehc_mod.summary_hold_active(sd, now) is True
+
+
+def test_the_hold_EXPIRES_rather_than_stranding_the_session(tmp_path) -> None:
+    """The TTL is the whole reason the hold is safe to have. llm-ext dying must degrade the
+    session to the mechanical precompact handoff, not hold it forever — an unbounded hold turns
+    one expensive session into a permanently stuck one, which is worse than the cost the reorder
+    exists to avoid."""
+    import external_handoff_clear as ehc_mod
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    now = int(time.time())
+    (sd / "summary-pending.json").write_text(
+        json.dumps({"transcript": "/x.jsonl", "key": "abc", "captured": now - 1000,
+                    "expires": now - 1}),
+        encoding="utf-8",
+    )
+    assert ehc_mod.summary_hold_active(sd, now) is False
+
+
+def test_an_unreadable_hold_record_FAILS_OPEN(tmp_path) -> None:
+    """A hold is a REFUSAL to do work, so an unparseable record must never be able to stop the
+    session. A corrupt byte wedging a host is the exact failure the TTL exists to bound."""
+    import external_handoff_clear as ehc_mod
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "summary-pending.json").write_text("{ not json", encoding="utf-8")
+    assert ehc_mod.summary_hold_active(sd, int(time.time())) is False
+    assert ehc_mod.summary_hold_active(sd / "nope", int(time.time())) is False
