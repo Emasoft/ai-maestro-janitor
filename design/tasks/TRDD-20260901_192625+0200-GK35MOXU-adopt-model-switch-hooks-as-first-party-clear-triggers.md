@@ -4,7 +4,7 @@ title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-c
 column: dev
 created: 2026-09-01T19:26:25+0200
 updated: 2026-09-01T20:25:00+0200
-implementation-commits: [df26fa12]
+implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -72,3 +72,12 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 
 - The lesson that produced this card: a trigger design claim ("no event exists, we must poll")
   has a shelf life of one harness release. Re-read the changelog BEFORE building a poller.
+- **The paid-detector (`83e7242d`)**: the invariant that makes a clear free is "no turn ran
+  since the prefix died", not "the prefix died recently" — a mid-conversation `/model` switch
+  is re-paid by the very next turn (heartbeats included), so a fresh-but-paid event is
+  consumed silently, exactly like a stale one. Firing on it would clear a WARM session.
+- **Pre-existing cross-session ceiling (review-fork, no action)**: the ack stamps are
+  per-PROJECT and the watcher clears the one RECORDED pane, so with two sessions in one
+  project, session B's switch can trigger a clear aimed at session A. Same holds for the
+  reload stamps since birth; a per-session stamp keyed on session id is the upgrade if it
+  ever bites.
