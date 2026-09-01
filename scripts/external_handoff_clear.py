@@ -67,6 +67,21 @@ _HOLD_TTL_S = 15 * 60
 _PENDING_FILE = "summary-pending.json"
 
 
+def _summary_source_readable(transcript: str) -> bool:
+    """READABLE, not merely present: an unreadable or EMPTY transcript is a source we cannot
+    summarize, and discovering that AFTER the clear is exactly the loss the capture guard
+    exists to prevent. Shared by the capture AND the dry-run report (review-fork, 2026-09-01):
+    a dry-run that only checked the path string claimed "would clear" on a 0-byte transcript
+    the real run declines — same inputs, opposite reports."""
+    if not transcript:
+        return False
+    try:
+        p = Path(transcript)
+        return p.is_file() and p.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     """Name the summary's source ON DISK, before anything destructive. None ⇒ do not clear.
 
@@ -83,14 +98,7 @@ def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     import json  # noqa: PLC0415 - only this path needs it
 
     transcript = str(facts.get("transcript") or "")
-    if not transcript:
-        return None
-    try:
-        # READABLE, not merely present: an unreadable transcript is a source we cannot summarize,
-        # and discovering that AFTER the clear is exactly the loss this check exists to prevent.
-        if not Path(transcript).is_file() or Path(transcript).stat().st_size == 0:
-            return None
-    except OSError:
+    if not _summary_source_readable(transcript):
         return None
 
     record = {
@@ -511,8 +519,13 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # honours — so a dry-run placed after it blocked resumes and chores on a session that was
     # never cleared. A dry-run must write nothing; it reports from `facts` instead.
     if args.dry_run:
-        print(f"DRY_RUN would clear via {terminal.get('kind')} "
-              f"then summarize {facts.get('transcript') or '<no transcript — would decline>'}")
+        transcript = str(facts.get("transcript") or "")
+        if _summary_source_readable(transcript):
+            print(f"DRY_RUN would clear via {terminal.get('kind')} then summarize {transcript}")
+        else:
+            # The SAME predicate the real capture applies, so a dry-run never claims a fire
+            # the real run would decline (an empty just-born .jsonl is the common case).
+            print("DRY_RUN would decline: transcript missing, empty, or unreadable")
         return 0
 
     pending = _capture_summary_source(sd, facts, now)

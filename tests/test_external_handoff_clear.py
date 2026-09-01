@@ -437,3 +437,11 @@ def test_dry_run_never_arms_the_summary_hold(tmp_path, monkeypatch, capsys):
     assert "DRY_RUN" in out, out
     assert fired.count == 0, "a dry-run must never spawn the clear chain"
     assert not (sd / ehc._PENDING_FILE).exists(), "a dry-run must not arm the summary hold"
+
+    # FIDELITY (review-fork, 2026-09-01): on a transcript the real run would DECLINE (empty
+    # file), the dry-run must say so — not claim "would clear" from the path string alone.
+    transcript.write_text("")
+    assert ehc._run(root, sd, int(time.time()), args) == 0
+    out = capsys.readouterr().out
+    assert "would decline" in out, out
+    assert "would clear" not in out, "same inputs must not produce opposite reports"
