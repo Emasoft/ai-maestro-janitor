@@ -110,41 +110,50 @@ def _run_main(root: Path, monkeypatch) -> int:
     return ehc.main()
 
 
-def test_the_handoff_is_on_disk_before_the_clear_chain_is_spawned(tmp_path, monkeypatch) -> None:
-    """The ordering, asserted from INSIDE the fire: both happening is not the same as the right
-    one happening first. A chain spawned before the write would still leave a handoff on disk by
-    the time any after-the-fact assertion looked."""
+def test_the_summary_SOURCE_is_on_disk_before_the_clear_chain_is_spawned(
+    tmp_path, monkeypatch
+) -> None:
+    """The ordering invariant, REWRITTEN for TRDD-2F3I2P18 rather than deleted.
+
+    This test used to assert the finished HANDOFF was on disk before the fire. That was the
+    2026-08-28 "never clear blind" rule, and the owner superseded it on 2026-09-01: llm-ext
+    summarizes from the on-disk transcript, which `/clear` does not touch, so waiting for the
+    summary bought no safety and cost the whole point of the clear — it arrived minutes late,
+    after the cache write it exists to prevent.
+
+    What must still be true before the destructive step is that the summary's SOURCE is named
+    and readable. That is the claim asserted here, from INSIDE the fire, because both happening
+    is not the same as the right one happening first.
+    """
     root, sd = _firing_project(tmp_path, monkeypatch)
     seen: dict = {}
 
-    # Mirrors `_fire`'s real signature, `trigger` included. A spy that silently accepted
-    # **kwargs would keep passing if the production signature drifted again — the point of
-    # spying here is the ORDERING, and a spy that cannot be called is the only honest way to
-    # learn the thing it stands in for has changed.
     def _spy_fire(_root, _sd, _terminal, _now, trigger=""):
         del trigger  # not part of this test's claim; named so the call shape is exact
-        # Resolved by CONTENT, not by a literal filename. This test's claim is an ORDERING one —
-        # a handoff is on disk before the chain spawns — and since TRDD-5RXBI65T each write lands
-        # on its own `agent-handoff-<key>-<ts>-<pid>.md` path so two writers cannot clobber each
-        # other. Hard-coding the old shared name pinned the implementation instead of the claim,
-        # and would have gone on "passing" only until the day it silently guarded nothing.
-        handoff = handoff_files.newest(sd)
-        existed = handoff is not None and handoff.is_file()
-        seen["existed_at_fire"] = existed
-        seen["bytes_at_fire"] = handoff.stat().st_size if handoff is not None and existed else 0
+        pending = sd / "summary-pending.json"
+        seen["pending_at_fire"] = pending.is_file()
+        if pending.is_file():
+            rec = json.loads(pending.read_text(encoding="utf-8"))
+            seen["transcript_at_fire"] = rec.get("transcript", "")
+            seen["expires_at_fire"] = rec.get("expires", 0)
 
     monkeypatch.setattr(ehc, "_fire", _spy_fire)
 
     rc = _run_main(root, monkeypatch)
 
     assert rc == 0
-    assert seen.get("existed_at_fire") is True, (
-        "the clear chain was spawned while no handoff existed on disk — an unattended /clear "
-        "with nothing to resume from is unrecoverable data loss."
+    assert seen.get("pending_at_fire") is True, (
+        "the clear chain was spawned before the summary source was captured — after the clear "
+        "the newest transcript is the NEW EMPTY one, so a later capture summarizes nothing "
+        "while reporting success."
     )
-    assert seen["bytes_at_fire"] > 0, "the handoff existed but was empty at fire time"
-
-
+    assert Path(seen.get("transcript_at_fire", "")).is_file(), (
+        "the captured path must be a readable transcript at fire time, not merely a string"
+    )
+    assert seen.get("expires_at_fire", 0) > 0, (
+        "the hold must carry a TTL — an unbounded hold turns a failed summary into a "
+        "permanently stuck session, which is worse than the cost this reorder avoids"
+    )
 def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkeypatch) -> None:
     """TRDD-5RXBI65T acceptance box 1: the daemon's auto handoff must not destroy the model's.
 

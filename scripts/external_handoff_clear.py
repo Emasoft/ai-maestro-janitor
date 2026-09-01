@@ -57,6 +57,77 @@ import state  # noqa: E402
 _LOG = "external-clear"
 
 
+# The hold's lifetime. 15 minutes (USER, 2026-09-01). It is a CEILING, not a schedule: the hold
+# normally ends when the summary lands, seconds-to-minutes later. The TTL exists only so that an
+# llm-ext that never returns — a dead network, a wedged free-tier model — degrades the session to
+# the mechanical `precompact-handoff.md` instead of holding it forever. An unbounded hold would
+# convert one expensive session into a permanently stuck one, which is a worse failure than the
+# cost this whole card exists to avoid.
+_HOLD_TTL_S = 15 * 60
+_PENDING_FILE = "summary-pending.json"
+
+
+def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
+    """Name the summary's source ON DISK, before anything destructive. None ⇒ do not clear.
+
+    This is the guard that REPLACES "never clear blind" (TRDD-2F3I2P18). The old one waited for
+    the finished summary — minutes, network — which is precisely what made the clear arrive too
+    late to prevent the cache write it exists to prevent. The real precondition was never "the
+    summary exists"; it is "the material the summary will be made FROM is still there, and we
+    know where". That is answerable with two syscalls.
+
+    Writing the file before the clear also makes the hold crash-safe: if this process dies
+    between the fire and the summary, the next heartbeat finds a pending record with a TTL rather
+    than a session that silently resumed with nothing.
+    """
+    import json  # noqa: PLC0415 - only this path needs it
+
+    transcript = str(facts.get("transcript") or "")
+    if not transcript:
+        return None
+    try:
+        # READABLE, not merely present: an unreadable transcript is a source we cannot summarize,
+        # and discovering that AFTER the clear is exactly the loss this check exists to prevent.
+        if not Path(transcript).is_file() or Path(transcript).stat().st_size == 0:
+            return None
+    except OSError:
+        return None
+
+    record = {
+        "transcript": transcript,
+        "key": handoff_files.session_key(transcript),
+        "captured": now,
+        "expires": now + _HOLD_TTL_S,
+    }
+    state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
+    return record
+
+
+def _release_summary_hold(sd: Path) -> None:
+    """Drop the hold. Its ABSENCE is the release signal, so this must be unlink-not-rewrite."""
+    try:
+        (sd / _PENDING_FILE).unlink()
+    except OSError:
+        pass
+
+
+def summary_hold_active(sd: Path, now: int) -> bool:
+    """True while a cleared session is waiting for its summary — read by the heartbeat.
+
+    FAIL-OPEN on every uncertainty: a missing file, unreadable JSON, or a malformed `expires`
+    all mean "not held". A hold is a REFUSAL to do work, so an unparseable record must never be
+    able to stop the session — that would turn a corrupt byte into a wedged host, which is the
+    failure mode the TTL exists to bound in the first place.
+    """
+    import json  # noqa: PLC0415
+
+    try:
+        rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
+        return now < int(rec["expires"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _last_turn_age(root: Path, now: int) -> int | None:
     """Seconds since the last turn of ANY kind — the PROMPT-CACHE clock.
 
@@ -395,86 +466,79 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
         state.log_line(_LOG, "declined: no recorded pane, a cleared session could not re-arm")
         return 0
 
-    text, reasons = _compose(root, verdict, facts)
-    # TRDD-79LXF6PJ — NEVER CLEAR BLIND. With the composed handoff retired there is no
-    # network-free floor left: an empty payload means the session would lose everything, and
-    # `/clear` is the one operation here that cannot be undone. Declining costs a full-price turn;
-    # clearing costs the work. The next fire retries, which is the correct outer loop.
-    if not text.strip():
-        print("NO_SUMMARY declining to clear — llm-ext produced no summary")
-        state.log_line(_LOG, "declined: no llm-ext summary, refusing to clear blind")
+    # ─── TRDD-2F3I2P18 — CLEAR FIRST, THEN SUMMARIZE ───────────────────────────────────────
+    #
+    # The old order was compose → verify → fire. `_compose` shells out to llm-ext, which takes
+    # MINUTES (a 12 MB transcript did not finish inside a 900 s budget), and through that whole
+    # window the session still held its full context. Any turn taken in it paid the exact
+    # cache-build write the clear exists to prevent. The clear was gated behind the slowest step
+    # in its own chain — measured cost: the owner burned a week of quota in two days, then could
+    # not use Claude Code for three (2026-09-01).
+    #
+    # THE OWNER'S 2026-08-28 INVARIANT ("never execute the /clear unless you have already the
+    # certainty of having the summarized context ready to be injected") IS SUPERSEDED, BY THEM,
+    # 2026-09-01, on this ground: llm-ext summarizes from the ON-DISK transcript
+    # (`external_clear.run_llm_ext_summary` passes `--transcript <path>`), and that append-only
+    # `.jsonl` under ~/.claude/projects/ is NOT in the context `/clear` empties. Nothing can be
+    # lost by clearing first, so the invariant's premise — that the source dies with the context —
+    # does not hold for this composer. It was reasoning about a template composed from LIVE state.
+    #
+    # THE SAFETY MOVES RATHER THAN DISAPPEARING, which is the only reason this reorder is
+    # legitimate. The old guard asked "is the summary ready?" — minutes, network, and it is what
+    # made the clear too late to help. The new guard asks "is the transcript CAPTURED and
+    # READABLE?" — milliseconds, no network — and that is the real precondition: it is what makes
+    # the clear recoverable, because whatever happens after it, the source is named on disk.
+    pending = _capture_summary_source(sd, facts, now)
+    if pending is None:
+        print("NO_TRANSCRIPT declining to clear — cannot name the summary source")
+        state.log_line(
+            _LOG,
+            "declined: the target transcript is missing or unreadable — clearing now would "
+            "leave nothing to summarize FROM, which is the one loss this reorder must not "
+            "introduce",
+        )
         return 0
-    if reasons:
-        print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}")
-        state.log_line(_LOG, f"summary violates the concision contract: {reasons}")
 
     if args.dry_run:
         print(f"DRY_RUN would clear via {terminal.get('kind')} "
-              f"({len(text.encode('utf-8'))}B handoff)")
-        print("--- handoff ---")
-        print(text)
+              f"then summarize {pending['transcript']}")
         return 0
 
-    # TRDD-5RXBI65T — write to a path NOBODY ELSE WILL WRITE, never the shared
-    # `agent-handoff.md`. This line was an unconditional `atomic_write` on that shared path, and
-    # it destroyed the model-authored handoff twice in two days (2026-08-22 17:38:10 and
-    # 2026-08-23 09:22), silently: no `.prev`, and `.janitor/state/` is gitignored.
-    #
-    # The key is the TARGET session's — `facts["transcript"]`, resolved once at :236 — and NOT
-    # this process's `CLAUDE_CODE_SESSION_ID`. That distinction is the whole fix: this script
-    # usually runs from the machine-wide daemon, a long-lived singleton that inherits its session
-    # id from whichever session launched it (one id held for three days across every project it
-    # served). Keying on the writer would file this handoff under a stranger's id, in the state
-    # dir of a session that will never look for it — a lost write traded for an unreadable one.
-    # An unresolvable target gets the UNKEYED sentinel, NOT the legacy shared path. Writing
-    # `agent-handoff.md` here would have reproduced this card's bug verbatim on the very line
-    # meant to remove it: an unconditional `atomic_write` to a path other writers use, so two
-    # keyless runs would clobber each other and either would destroy a pre-upgrade handoff that
-    # is some session's ONLY record. An unkeyed handoff groups slightly wrong and stays readable;
-    # a clobbered one is gone. Nothing writes the legacy path any more — it is read-only.
-    key = handoff_files.session_key(facts.get("transcript"))
-    if not key:
-        state.log_line(_LOG, "no target transcript — filing the handoff under the unkeyed group")
-    handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
-
-    # READ IT BACK BEFORE FIRING. Owner invariant (2026-08-28, hard): "never execute the
-    # /clear unless you have already the certainty of having the summarized context ready to
-    # be injected."
-    #
-    # Writing then firing is the right ORDER but not yet certainty: a write that raises does
-    # stop the fire (the exception propagates past `_fire`), but a write that SUCCEEDS at the
-    # syscall level and lands empty or truncated does not — and `/clear` is unrecoverable with
-    # no PostClear hook, so that clear destroys the session with an empty file standing in for
-    # its context. The failure is silent in the worst direction: everything reports success.
-    #
-    # So verify the artifact, not the call. Re-read what the next session will actually be
-    # given, and refuse to fire if it is not there. A skipped clear costs one bloated context
-    # until the next attempt; a fired one with no payload costs the work.
-    # NON-EMPTY is the bar, deliberately — not a size threshold. A first version required
-    # >=200 chars as "substantive"; that is an invented number, and it rejected a short but
-    # perfectly valid handoff (caught by `test_the_handoff_is_on_disk_before_the_clear_chain_is
-    # _spawned`). The invariant is "the summarized context is READY", not "large": a terse
-    # handoff still restores the work, and a guard that discards it would cause the very loss
-    # it exists to prevent, while looking like caution.
-    try:
-        written = [p for p in handoff_files.newest_group(sd)
-                   if p.is_file() and p.read_text(encoding="utf-8").strip()]
-    except OSError as exc:
-        written = []
-        state.log_line(_LOG, f"handoff read-back FAILED ({exc!r}) — refusing to clear")
-    if not written:
-        state.log_line(
-            _LOG,
-            "REFUSING to /clear: the handoff read-back found no substantive payload in "
-            f"{sd} — clearing now would destroy this session's context with nothing to "
-            "restore it. Left the session untouched.",
-        )
-        print("CLEAR_REFUSED handoff-readback-empty", file=sys.stderr)
-        return 1
-
+    # FIRE NOW. Nothing between the gate and this line touches the network or the model: the
+    # only work done above is naming the transcript on disk. That is the entire point of
+    # TRDD-2F3I2P18 — every second spent here was a second the full context could still be
+    # re-cached at full price.
     _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")
+
+    # NOW summarize — after the clear, from the path captured BEFORE it. This process outlives
+    # the `/clear` it fired (the clear lands in the SESSION's pane; we are a separate process),
+    # which is what lets the expensive half run on the far side of the cheap half.
+    #
+    # `pending["transcript"]` and NOT a fresh `newest_transcript(root)`: after the clear the
+    # newest transcript is the NEW, EMPTY one, so re-resolving here would summarize nothing and
+    # report success. This is the single most likely way to get this reorder wrong.
+    text, reasons = _compose(root, verdict, {**facts, "transcript": pending["transcript"]})
+    if reasons:
+        state.log_line(_LOG, f"summary violates the concision contract: {reasons}")
+    if not text.strip():
+        # No summary. The session is ALREADY cleared, so declining is not an option any more —
+        # the question is only what it resumes from. The mechanical `precompact-handoff.md`
+        # written by the PreCompact hook is the floor, and the hold's TTL releases the session
+        # onto it. Leaving `summary-pending.json` in place would be the worse failure: a session
+        # held forever on a summary that is never coming.
+        state.log_line(
+            _LOG,
+            "no llm-ext summary AFTER the clear — leaving the hold to expire on its TTL so the "
+            "session resumes from the mechanical precompact handoff rather than waiting forever",
+        )
+        print("NO_SUMMARY_POST_CLEAR degrading to the mechanical handoff")
+        return 0
+
+    handoff_files.write(sd, pending["key"] or handoff_files.UNKEYED_KEY, text, now=now)
+    _release_summary_hold(sd)
+    print(f"SUMMARY_READY {len(text.encode('utf-8'))}B")
     return 0
 
 
