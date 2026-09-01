@@ -1,9 +1,10 @@
 ---
 trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
-column: testing
+column: blocked
+pre-block-column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-01T19:32:00+0200
+updated: 2026-09-02T01:06:00+0200
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
@@ -11,14 +12,23 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: user
-blocked-by: []
+blocked-by: [TRDD-XCJFCJUX]
 npt: []
 eht: []
 relevant-rules: []
-external-refs: [TRDD-1QJIZFFW, TRDD-79LXF6PJ, TRDD-PXP08ZQC]
+external-refs: [TRDD-1QJIZFFW, TRDD-79LXF6PJ, TRDD-PXP08ZQC, TRDD-XCJFCJUX]
 ---
 
 # The clear must precede the summary, not follow it
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+Code is shipped and installed (3.4.3; the daemon restaged and respawned 23:43:56). The only
+open item is the "measured" box: one automated clear observed under the new clear-first
+ordering. It cannot happen yet — the lever is ON in `~/.claude/settings.json` but the
+launchd-run daemon has no `CLAUDE_PLUGIN_OPTION_*` in its environment (measured 2026-09-02),
+so it evaluates in shadow. Blocked on **TRDD-XCJFCJUX**; the drill is shared with
+TRDD-1QJIZFFW (its STATE carries the runnable NEXT ACTION) and TRDD-PXP08ZQC.
 
 ## The incident (USER, 2026-09-01)
 

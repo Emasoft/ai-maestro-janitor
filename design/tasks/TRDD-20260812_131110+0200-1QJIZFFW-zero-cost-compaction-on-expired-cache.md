@@ -1,10 +1,11 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: dev
-blocked-by: []
+column: blocked
+pre-block-column: dev
+blocked-by: [TRDD-XCJFCJUX]
 created: 2026-08-12T13:11:10+0200
-updated: 2026-08-29T22:26:00+0200
+updated: 2026-09-02T01:04:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -19,7 +20,22 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-29
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+### ⛔ 2026-09-02 — THE LEVER IS ON AND CANNOT REACH THE DAEMON; blocked on TRDD-XCJFCJUX
+
+The 2026-09-01 NEXT ACTION below WAS executed (`~/.claude/settings.json` line 20 reads
+`"true"`, file mtime 21:30) and 3.4.3 is installed + restaged (TRDD-NDAARSXT closed on the
+daemon's live VERDICT lines). Yet the daemon still evaluates in SHADOW: under launchd it has
+ZERO `CLAUDE_PLUGIN_OPTION_*` variables (measured 2026-09-02 — `ps -E` snapshot of the daemon
+pid, no `EnvironmentVariables` in the plist, `launchctl getenv` empty), so
+`external_clear.enabled()` is False regardless of the file. Boxes 4/5 wait on XCJFCJUX's
+settings loader shipping in the next publish + restage; the drill then needs NO further action
+— the lever is already set. Do not flip anything else, and do not re-run the flip.
+
+**NEXT ACTION:** after the XCJFCJUX publish is installed and `cold-cache-clear.log` shows
+`evaluating <root>` WITHOUT `[SHADOW — dry-run]`, let one automated clear happen and measure
+boxes 4 and 5 against it.
 
 ### ✅ 2026-08-29 — THE BLOCKER BELOW IS DISCHARGED. Box 2 is now reachable.
 

@@ -3,9 +3,9 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: blocked
 pre-block-column: todo
-blocked-by: [next-publish-install]
+blocked-by: [TRDD-XCJFCJUX]
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-29T22:51:10+0200
+updated: 2026-09-02T01:06:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -16,7 +16,18 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-26
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+### ⛔ 2026-09-02 — publish+install DONE (3.4.3), lever ON, and the daemon still cannot see it
+
+`next-publish-install` is discharged: 3.4.3 is installed, the daemon restaged and respawned
+(23:43:56), and TRDD-NDAARSXT closed on its live VERDICT lines. The lever has read `"true"`
+since 2026-09-01 21:30. The daemon STILL runs every evaluation as `[SHADOW — dry-run]`,
+because under launchd it carries ZERO `CLAUDE_PLUGIN_OPTION_*` variables (measured: `ps -E`
+snapshot of the daemon pid, no plist `EnvironmentVariables`, `launchctl getenv` empty) —
+`external_clear.enabled()` reads `os.environ`, never the file. Re-blocked on
+**TRDD-XCJFCJUX** (the settings-env loader); when its publish is installed and the shadow
+tag disappears from `cold-cache-clear.log`, the drill below runs unchanged.
 
 ### ⏵ 2026-09-01 — column re-honest-ed; ONE post-publish drill closes three cards
 
