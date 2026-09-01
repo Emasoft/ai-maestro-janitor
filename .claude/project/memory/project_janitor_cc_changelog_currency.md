@@ -2,7 +2,7 @@
 name: project_janitor_cc_changelog_currency
 description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code / a forked session cleared itself or reloaded plugins it already had / the exfil guard missed a < redirection / the context watchdog never fires and looks healthy / my LOCAL TRDDs under ~/.claude/projects vanished / TaskCreate does not exist any more / the rules tell me to use a task tool I do not have / stale-task detector never fires is that a bug / a subagent spawn cap changed did the janitor adapt / does the janitor cover GitLab token families / is a symlinked plugin dev checkout safe from cache prune / the janitor thinks context is under 20 percent when it is nearly full / does Claude Code now resume itself after a rate limit / is the OAuth rotator still needed / Continue automatically at usage limit / CLAUDE_CODE_PROJECT_DIR_NAME / project_slug returns the wrong dir / why is every project sharing one memory dir / fleet_scan resolves every project to the same slug / promptCacheTtl and subagentPromptCacheTtl / is the janitor up to date with Claude Code 2.1.248 / --restricted mode makes the janitor inert / CLAUDE_CODE_RESTRICTED / arming a heartbeat that can never fire / why did arming succeed in a session with no Bash / a hook stdout brace object is now an error / experimental.cacheTtl per-agent prompt cache TTL"
 ocd: 2026-06-11
-lmd: 2026-08-28
+lmd: 2026-09-01
 metadata:
   node_type: memory
   type: project
@@ -225,6 +225,24 @@ go stale.
 **Correction to the 2.1.213-2.1.232 audit above:** its "2.1.228 session cleanup ⚠ OPEN -
 TRDD-9DLBHWGV" line is stale - that card reached `column: complete`. Read that block as the
 audit's state on 2026-08-14, not as current status. [^2]
+
+
+^ATOM-H76S-947V [desc: "CC 2.1.251+ gives first-party signals the janitor's pollers predate: PreModelSwitch/PostModelSwitch hooks, SessionStart staleness+re-cache cost, a prompt_cache warm/cold status object, promptCacheTtl ", keywords: model_change_event PostModelSwitch_hook PreModelSwitch no_event_exists_we_must_poll prompt_cache_status_object warm_cold_cache_signal promptCacheTtl_setting claude_attach_logs_respawn notify_when_idle continue_automatically_at_usage_limit statusline_polling_fallback changelog_adoption_cards, trdd: TRDD-GK35MOXU, ocd: 2026-09-01, lmd: 2026-09-01]
+
+**Claude Code 2.1.243–2.1.252 added first-party signals that supersede several janitor
+inference mechanisms** (found 2026-09-01 on the USER's direction after the 2F3I2P18 statusline
+poller shipped against a stale premise). The adoption cards: TRDD-GK35MOXU
+(`PostModelSwitch`/`PreModelSwitch` hooks — 2.1.251 — replace polling `agentlenspro
+statusline-history` for model switches; SessionStart resume hooks now carry session staleness
++ estimated re-cache cost), TRDD-POA0157J (the `prompt_cache` status-line object — hit ratio,
+misses, warm/cold — is first-party ground truth for `cache_certainly_expired`), TRDD-DD5X4O6Z
+("Continue automatically at usage limit", 2.1.234, overlaps the rotator/auto-resume stack —
+audit before touching), TRDD-Y7KQYJXP (`claude attach/logs/stop/respawn/rm` + SendMessage
+`notify_when_idle` for fleet liveness), TRDD-0HRRZO8S (launch levers: `promptCacheTtl`,
+`ANTHROPIC_DEFAULT_MODEL`, `CLAUDE_CODE_RETRY_WATCHDOG`, `--restricted`;
+`CLAUDE_CODE_SUBAGENT_MODEL` became a default, not an override, in 2.1.251). Standing lesson:
+a "no event exists, poll for it" design claim expires with every harness release — re-read the
+changelog before building a poller.
 
 ## Notes and lessons learned
 
