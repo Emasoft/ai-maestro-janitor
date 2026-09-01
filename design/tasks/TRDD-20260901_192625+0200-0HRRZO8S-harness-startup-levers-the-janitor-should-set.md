@@ -3,7 +3,7 @@ trdd-id: 0HRRZO8S
 title: Use the ai-maestro harness's startup-argument power — the new env vars and settings worth setting fleet-wide
 column: backburner
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-01T19:26:25+0200
+updated: 2026-09-02T00:58:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -34,6 +34,7 @@ levers that materially serve the janitor's goals (cache economy, continuity, con
 | `--restricted` / `CLAUDE_CODE_RESTRICTED=1` | 2.1.248 | a contained profile for read-only worker launches |
 | `CLAUDE_CODE_PROJECT_DIR_NAME` | 2.1.234 | short per-project transcript dir names for per-session config dirs |
 | `CLAUDE_CODE_SUBAGENT_MODEL` (semantics changed) | 2.1.251 | now a DEFAULT, not an override — re-check any harness use of it |
+| `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | 2.1.257 | forces the subagent model over per-spawn `model:` and agent-definition overrides — pins a whole fleet's workers to sonnet[1m] (workflows-rules) without editing every agent file; pair with the 2.1.251 DEFAULT semantics above (TRDD-NUD3DGX5 item 3) |
 
 ## Scope
 

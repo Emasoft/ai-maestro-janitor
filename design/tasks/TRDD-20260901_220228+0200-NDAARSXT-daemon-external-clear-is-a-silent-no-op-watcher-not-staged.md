@@ -1,9 +1,9 @@
 ---
 trdd-id: NDAARSXT
 title: The keepalive daemon's external clear is a silent no-op — the watcher is not in the staged closure
-column: testing
+column: complete
 created: 2026-09-01T22:02:28+0200
-updated: 2026-09-01T22:40:00+0200
+updated: 2026-09-02T00:56:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -76,11 +76,23 @@ closure entirely.
       `launchd_keepalive.latest_cache_scripts_dir()` (the same source the daemon restages from)
 - [x] test pins the staged-layout case (cache-resolved path + declined stamp); 5/5 in
       `test_cold_cache_clear_server_lane.py`, ruff + mypy green — re-run by the approver
-- [ ] after the next publish + restage: `daemon.log` shows a real VERDICT line from
-      `cold-cache-clear` (then the PXP08ZQC/1QJIZFFW/2F3I2P18 drill can finally run)
+- [x] after the next publish + restage: a real VERDICT line from `cold-cache-clear` — measured
+      2026-09-02: `cold-cache-clear.log` (the component's own sink, where the watcher's stdout
+      lands) carries `VERDICT HOLD trigger=- why=context 222640 < 300000` at 00:42:08 and
+      00:47:19, emitted by the daemon respawned at 23:43:56 after the 3.4.3 auto-update
+      (`os-keepalive: newer version staged → exit for respawn`; staged
+      `cold_cache_clear_task.py` md5 == cache 3.4.3). The lane silent since 2026-08-05 speaks.
 
 ## Notes and lessons learned
 
 - Found while preparing the post-3.4.2 drill: checking WHICH tree the daemon executes
   (staged vs cache) before flipping a lever. The lesson generalizes: a version on disk is not
   the version running; measure the process's tree (md5 vs cache), not the cache dir listing.
+
+## Approval log
+
+- 2026-09-02T00:56:00+0200 — COMPLETE, closed by the implementing session under the USER's
+  delegated review authority ("i've put you in charge", 2026-09-01). All four boxes hold; the
+  last one is a log line the restaged daemon wrote on its own, not the session's word. Fix
+  shipped in 3.4.3 (commit f0bba94c; tag verified first-hand, CI green). Self-closure disclosed:
+  implementer and approver are the same session.

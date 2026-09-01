@@ -1,9 +1,9 @@
 ---
 trdd-id: NUD3DGX5
 title: Align the janitor with Claude Code 2.1.257 — Fable 5.1 default, subagent model force, session-only effort, upstream cache-miss fixes
-column: todo
+column: dev
 created: 2026-09-01T21:56:08+0200
-updated: 2026-09-01T21:56:08+0200
+updated: 2026-09-02T00:54:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -36,35 +36,40 @@ Verify on such a host before assuming; `daemon.log` restart cadence is the tell.
 
 ## Items
 
-1. [ ] **No-keepalive hosts**: confirm whether a heartbeat-spawned daemon is reaped at Bash-call
-       end on 2.1.257; if yes, the keepalive install must become mandatory (not best-effort)
-       and `ensure_daemon_running` should say so loudly.
-2. [ ] **Fable 5.1 is the default Fable** (`claude-fable-5-1`, 1M ctx, $10/$50 per Mtok,
-       $0.25/Mtok cache reads): update every pricing/model table the token-report, burn-rate
-       and cost detectors carry; agentlens integration (`agentlens-diagnostics-integration`)
-       may carry its own.
-3. [ ] `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` — add to TRDD-0HRRZO8S's launch-lever table (forces
-       the subagent model over per-spawn and agent-definition overrides).
-4. [ ] `/effort` `s` (session-only) + `--effort` per-session hold: GK35MOXU's effort trigger
-       must count session-only changes as real switches (they are; they still rewrite the
-       prefix).
-5. [ ] **Upstream cache-miss sources FIXED** — record in `project_janitor_cc_changelog_currency`
+1. [x] **No-keepalive hosts** — MEASURED 2026-09-02 on CC 2.1.257: a `start_new_session=True`
+       child spawned from a foreground Bash call SURVIVES the call ending (reparented to pid 1),
+       so the heartbeat's daemon spawn is not reaped by the spawn itself; 2.1.257's reaping
+       targets background-task stop and CC exit. The CC-exit half is unmeasured; the next
+       heartbeat's respawn already bounds it. No change — keepalive install stays best-effort.
+2. [x] **Fable 5.1 pricing** — RETIRED: the janitor carries no per-model price table. The only $
+       figure is the opt-in `CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK` knob
+       (`token_report.py::_price_per_mtok`, "there is no sane universal price"); `token_burn.py`
+       only tracks Fable's separate weekly window, which 2.1.257 did not change. No code change.
+3. [x] `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` — row added to TRDD-0HRRZO8S's launch-lever table
+       2026-09-02 (forces the subagent model over per-spawn and agent-definition overrides).
+4. [x] `/effort` `s` (session-only) — RESOLVED: `external_clear.prefix_invalidated` diffs the
+       per-turn `(model, effort)` pair from the statusline series, so a session-only effort
+       change is counted exactly like a persistent one. No change.
+5. [x] **Upstream cache-miss sources FIXED** — recorded 2026-09-02 as ATOM-L1OG-ZN6M on
+       `project_janitor_cc_changelog_currency` (validate NONE, lint INFO-only). Was: record in `project_janitor_cc_changelog_currency`
        and re-read the quota-incident diagnosis (TRDD-2F3I2P18) in their light: (a) sessions
        with an ADVISOR model set missed the prompt cache on every background request
        (compaction, /recap, prompt suggestions) and re-sent the whole conversation uncached —
        this USER runs the Fable advisor, so this was plausibly a large share of the burn;
        (b) Remote Control connecting mid-session re-sent the Bash tool definition (a miss);
        (c) screenshot-heavy sessions missed on every turn past the image size cap.
-6. [ ] "Proactive output style sessions busy-looping with filler while a background command or
-       Monitor runs" is fixed upstream — cross-check TL5TSWK4's nudge never induces the same
-       shape (a nudge must not start a turn that only re-reads a running task's log).
-7. [ ] "Background sessions left running an older CC binary piling up across auto-updates" is
-       fixed upstream — check the janitor's stale-binary / process-drift detectors for overlap
-       and retire duplicated logic if any.
-8. [ ] `defaultMode: "bypassPermissions"` in project `.claude/settings.json` is now IGNORED
-       (user/managed only) — identify-environment prober note.
-9. [ ] "Fixed sandbox network hosts with a trailing dot bypassing deniedDomains" +
-       "Containment Escape rule in auto mode" — note for the security agent's sandbox checks.
+6. [x] Busy-loop shape — CROSS-CHECKED: the nudge carries the board and issue counts only,
+       never a running task. The "re-read a running task's log each fire" shape did appear
+       tonight while publish #4 ran, but as the agent's own choice bounded to one `tail` per
+       fire, not induced by the nudge text. No change.
+7. [x] Stale CC binary — RETIRED: the janitor has no stale-CC-binary detector; its only
+       "stale binary" logic is `issue_catalog.py` MEMGREP-010, about the memgrep binary. No
+       overlap, nothing to retire.
+8. [x] `defaultMode: "bypassPermissions"` — RETIRED: nothing in `scripts/` reads `defaultMode`
+       or `bypassPermissions` (grep: 0 hits), so the prober has nothing to note.
+9. [x] Sandbox deniedDomains / Containment Escape — RETIRED: no janitor code touches sandbox
+       network rules (`deniedDomains`, "sandbox network": 0 hits in `scripts/`); the security
+       agent's checks are supply-chain, secrets, workflows and branch protection.
 
 ## Acceptance
 
