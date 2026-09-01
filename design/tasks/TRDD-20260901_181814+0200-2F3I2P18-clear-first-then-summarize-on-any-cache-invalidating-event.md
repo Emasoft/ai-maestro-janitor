@@ -183,6 +183,12 @@ invisible to the gate.
 
 ## Notes and lessons learned
 
+- **UPGRADE PATH (2026-09-01, USER):** the "no new API needed / poll the statusline" premise
+  was already stale when written — Claude Code 2.1.251 (installed: 2.1.252) added
+  `PreModelSwitch`/`PostModelSwitch` HOOK events, a first-party model-change signal, and gives
+  SessionStart resume hooks the session staleness + estimated re-cache cost. TRDD-GK35MOXU
+  adopts them; the statusline poll built here becomes the pre-2.1.251 fallback.
+
 - **Do NOT delete the no-summary refusal — MOVE it.** Under the new order there is nothing to
   refuse (the clear already happened); the equivalent safety is that the transcript path is
   captured and the handoff is retried, so a failed summary costs context, never the transcript.
