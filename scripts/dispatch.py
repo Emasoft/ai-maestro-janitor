@@ -2493,6 +2493,67 @@ def _directive_task_is_terminal(directive_text: str) -> bool:
         return False
 
 
+_WORK_COLUMNS = ("dev", "todo", "testing", "human_review")
+
+
+def _board_summary_bit() -> str:
+    """One clause naming the open WORK-column cards, appended to every keep-going nudge.
+
+    WHY (USER, 2026-09-01: *"the fact that you stopped is the epitome of the janitor
+    failure — where is the janitor reminding him the pending tasks and TRDDs?"*): the nudge
+    said only "continue your pending task", so a session that finished ITS task read the
+    board as empty and idled while `todo`/`testing` held open cards. The kanban rule is
+    drain-by-default — finishing a card means pulling the next one — and the nudge is the
+    only voice an unattended session hears, so the board must ride ON the nudge itself.
+    Scans only `tasks/` (the open zone), never archived/proposals — this runs every fire.
+    Best-effort: an unreadable board must never break the survival pulse.
+    """
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        by_column: dict[str, list[str]] = {}
+        for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
+            uid = trdd_common.extract_uid(path.name)
+            if not uid:
+                continue
+            _, column = trdd_common.parse_trdd_state(path)
+            if column in _WORK_COLUMNS:
+                by_column.setdefault(column, []).append(uid)
+        if not by_column:
+            return ""
+        parts = []
+        for col in _WORK_COLUMNS:
+            ids = by_column.get(col)
+            if not ids:
+                continue
+            shown = ", ".join(f"TRDD-{u}" for u in sorted(ids)[:3])
+            more = f" +{len(ids) - 3} more" if len(ids) > 3 else ""
+            parts.append(f"{len(ids)} in {col} ({shown}{more})")
+        return "open board: " + "; ".join(parts) + " — finishing a card means pulling the next"
+    except Exception:  # noqa: BLE001 -- a board read must never break the always-on nudge
+        return ""
+
+
+def _open_issues_bit() -> str:
+    """One clause counting the repo's open GitHub issues, from the issues-watch seen-map.
+
+    Deliberately reads the DETECTOR'S persisted snapshot instead of calling `gh` — the nudge
+    runs on every fire and must stay network-free; the github-issues-watch detector already
+    keeps `issues-watch-seen.json` ({number: updatedAt} of the open issues it tracks)
+    current on its own cadence. Absent or unreadable ⇒ no clause, never a guess.
+    """
+    try:
+        import json  # noqa: PLC0415 - lazy, matches this file's helper-import convention
+
+        seen = json.loads(
+            (state.state_dir() / "issues-watch-seen.json").read_text(encoding="utf-8")
+        )
+        n = len(seen) if isinstance(seen, dict) else 0
+        return f"{n} open GitHub issue(s) on this repo (browse: /janitor-findings)" if n else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def _phase_keep_going_nudge() -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working. UNCONDITIONAL.
 
@@ -2595,6 +2656,12 @@ def _phase_keep_going_nudge() -> None:
         # corresponds to a line the reader actually saw — a counter that charges for an
         # advertisement it did not make is the same class of bug in the other direction.
         _spend_pending_agent_nudges()
+    # The BOARD and the open-issues count ride on every nudge (USER, 2026-09-01): "continue
+    # your pending task" alone let a session that finished its task idle over a board with
+    # open cards. Appended AFTER the directive/agent bits so the current target stays first.
+    for extra in (_board_summary_bit(), _open_issues_bit()):
+        if extra:
+            bits.append(extra)
     if bits:
         note = "continue your pending task (keep-going mode) — " + "; ".join(bits)
     else:

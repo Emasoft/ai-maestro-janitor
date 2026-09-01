@@ -3018,3 +3018,55 @@ def test_a_genuinely_missing_detector_is_still_reported(tmp_path, monkeypatch):
     (tmp_path / "detectors").mkdir()
     monkeypatch.setattr(dispatch, "_HERE", tmp_path)
     dispatch._run_detector("does-not-exist", 300)  # must not raise
+
+
+# ---------- keep-going nudge carries the BOARD (USER, 2026-09-01) -------------
+
+
+def _card(folder: Path, uid: str, column: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"TRDD-20260901_000000+0200-{uid}-t.md").write_text(
+        f"---\ntrdd-id: {uid}\ntitle: t\ncolumn: {column}\n---\nbody\n", encoding="utf-8"
+    )
+
+
+def test_board_summary_names_the_open_work_columns(env_isolation: dict) -> None:
+    """The nudge must enumerate todo/dev/testing/human_review cards — a session that finished
+    ITS task idled over an open board because the nudge only said 'continue your task'."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card(tasks, "AAAA1111", "todo")
+    _card(tasks, "BBBB2222", "testing")
+    _card(tasks, "CCCC3333", "complete")  # terminal — must NOT appear
+    got = dispatch._board_summary_bit()
+    assert "1 in todo (TRDD-AAAA1111)" in got
+    assert "1 in testing (TRDD-BBBB2222)" in got
+    assert "CCCC3333" not in got
+    assert "pulling the next" in got
+
+
+def test_board_summary_is_empty_on_an_empty_board(env_isolation: dict) -> None:
+    """No open cards ⇒ no clause — the nudge must not fabricate work."""
+    dispatch = _import_dispatch()
+    assert dispatch._board_summary_bit() == ""
+
+
+def test_open_issues_bit_counts_the_seen_map_without_calling_gh(env_isolation: dict) -> None:
+    """The clause comes from the issues-watch snapshot on disk; absent map ⇒ no clause."""
+    dispatch = _import_dispatch()
+    import state as _st
+
+    assert dispatch._open_issues_bit() == ""
+    sd = _st.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "issues-watch-seen.json").write_text('{"1": "x", "2": "y"}', encoding="utf-8")
+    assert "2 open GitHub issue(s)" in dispatch._open_issues_bit()
+
+
+def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:
+    """End-to-end: the emitted [janitor-resume] payload names the open cards."""
+    dispatch = _import_dispatch()
+    _card(env_isolation["project"] / "design" / "tasks", "DDDD4444", "todo")
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "[janitor-resume]" in out
+    assert "TRDD-DDDD4444" in out
