@@ -1855,6 +1855,9 @@ _RELOAD_SEEN_FILE = "prefix-reload-seen.json"
 # paid by whatever turn ran since, so a late clear would throw away a freshly warm cache — the
 # exact "clear a warm session for nothing" failure the rest of this gate is built to avoid.
 _RELOAD_EVENT_FRESH_S = 600
+# A transcript-mtime bump within this many seconds of an ack stamp is the switch/reload's own
+# non-API bookkeeping append, not a paying turn — see the paid-detector comment below.
+_PAID_TURN_SLACK_S = 10
 
 
 def _read_reload_state(state_dir: Path) -> tuple[dict[str, tuple[int, int]], dict[str, object]]:
@@ -1917,9 +1920,21 @@ def reload_invalidated(
                 # prefix died", not "the prefix died recently". A /model switch mid-conversation
                 # is the norm — the user switches and keeps chatting, the very next turn (or a
                 # heartbeat fire) rebuilds the new prefix — and firing then would clear a WARM
-                # session, the exact failure the stale path exists to avoid. `>=` on the fire
-                # side: a turn and a stamp in the same second cannot prove the turn came after.
-                paid = last_turn_ts is not None and mtime < last_turn_ts
+                # session, the exact failure the stale path exists to avoid.
+                #
+                # THE SLACK: `last_turn_ts` is raw transcript mtime, and transcripts gain
+                # NON-API appends (measured: `queue-operation`, `system`, `attachment` event
+                # types in a live .jsonl) — the switch itself plausibly appends one right after
+                # the hook stamps. Counting such an append as "payment" would silently kill the
+                # trigger's PRIMARY case (an idle switch). So a turn pays only when it lands
+                # clearly AFTER the stamp; anything within the slack is treated as the switch's
+                # own bookkeeping. A user who switches and messages within the slack is covered
+                # anyway: active_waiting vetoes while busy, and by the next probe the turn's
+                # END has moved past the slack.
+                paid = (
+                    last_turn_ts is not None
+                    and last_turn_ts - mtime > _PAID_TURN_SLACK_S
+                )
                 if now - mtime <= _RELOAD_EVENT_FRESH_S and not paid:
                     fired = True
                 else:

@@ -218,6 +218,18 @@ def test_a_stamp_newer_than_the_last_turn_still_fires(tmp_path: Path) -> None:
     assert ec.reload_invalidated(tmp_path, now=now, last_turn_ts=now - 120) is True
 
 
+def test_a_mtime_bump_within_the_slack_is_not_payment(tmp_path: Path) -> None:
+    """Transcripts gain NON-API appends (queue-operation/system events — measured), and the
+    switch itself plausibly appends one right after the hook stamps. A bump within the slack
+    must not read as a paying turn, or the idle-switch case dies silently."""
+    now = 1_700_000_000
+    _write_stamp(tmp_path, "model-switch-acked.ts", 2, age_s=60, now=now)
+    # "Turn" 5s after the stamp — inside the slack: the event still fires.
+    assert ec.reload_invalidated(
+        tmp_path, now=now, last_turn_ts=now - 60 + ec._PAID_TURN_SLACK_S // 2
+    ) is True
+
+
 def test_the_post_model_switch_hook_advances_the_stamp(tmp_path: Path) -> None:
     """Real subprocess run of scripts/hooks/post-model-switch.py: each invocation bumps the
     generation by one, and a fault-free run exits 0 even with an empty payload."""
