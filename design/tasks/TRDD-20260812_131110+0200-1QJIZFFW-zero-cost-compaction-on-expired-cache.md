@@ -58,7 +58,19 @@ re-enabled". Two of those three are done, verified first-hand tonight rather tha
   this**, because a sentence in a STATE block claiming a user directive is already discharged is
   exactly the sentence that stops the next session from checking.
 
-**NEXT ACTION (one step, runnable as written):** flip the lever, then run the drill.
+### ⛔ 2026-09-01 — DO NOT FLIP THE LEVER YET; the flip now waits on the NEXT PUBLISH, deliberately
+
+The 2026-08-29 NEXT ACTION below is SUPERSEDED in timing, not in substance. TRDD-2F3I2P18
+landed the clear-first reorder tonight (capture transcript → fire /clear → summarize; commits
+`59e31dcb`…`f05ab464`) — but only in the REPO. The installed 3.4.1 still runs the OLD
+compose-then-clear ordering, the exact shape the USER's 2026-09-01 quota incident indicts.
+Enabling `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED` now would arm the known-bad flow
+machine-wide. Flip it only AFTER the next `scripts/publish.py` release is installed locally;
+then run the drill and measure boxes 4/5 against the NEW ordering (which is also what
+2F3I2P18's own "measured" box needs). One drill can close both cards' measurement boxes.
+
+**NEXT ACTION (one step, runnable as written — AFTER the publish+install):** flip the lever,
+then run the drill.
 
 ```
 ~/.claude/settings.json:22  "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED": "false"  →  "true"
