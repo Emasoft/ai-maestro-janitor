@@ -57,5 +57,7 @@ definition flip on overage — two burn sources our heuristics may still be comp
   agentlensPro's code, a DIFFERENT project. So step 1 has a fork to decide at dev time:
   (a) propose the persist upstream to agentlensPro (its wrapper already parses the payload —
   cheapest, but cross-project per `how-to-fix-issues-of-other-projects`), or (b) a
-  janitor-owned shim between wrapper and inner script. Do not edit `~/.claude/statusline.py`
-  from a janitor session — it is user-owned machine config.
+  janitor-owned shim between wrapper and inner script — VIABLE, verified 2026-09-01: the
+  wrapper forwards its stdin verbatim to `--inner` (probe JSON piped through
+  `agentlenspro statusline --inner 'cat'` echoed byte-identical). Do not edit
+  `~/.claude/statusline.py` from a janitor session — it is user-owned machine config.
