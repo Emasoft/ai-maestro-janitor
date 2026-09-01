@@ -120,7 +120,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=dbd4b155493e generated=2026-08-29T21:40:59+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=361cfe6a0ef8 generated=2026-09-01T20:24:49+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -130,18 +130,18 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **claude-code-continuity-engineering** — claude stalled overnight
 - [claude-code-continuity-engineering](.claude/project/memory/claude-code-continuity-engineering.md) — claude stalled overnight
   - [claude-code-continuity-settings](.claude/project/memory/claude-code-continuity-settings.md) — claude stopped on an api error instead of retrying
-  - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
   - [claude-code-esc-input-semantics](.claude/project/memory/claude-code-esc-input-semantics.md) — how many ESC to unstick claude
   - [claude-code-plugin-rollout-staleness](.claude/project/memory/claude-code-plugin-rollout-staleness.md) — the fix is published but the bug keeps happening
 
 **janitor-architecture** — how does the ai-maestro-janitor work
 - [janitor-architecture](.claude/project/memory/janitor-architecture.md) — how does the ai-maestro-janitor work
-  - [janitor-beat-tasks-and-limitations](.claude/project/memory/janitor-beat-tasks-and-limitations.md) — what is the heartbeat rate
-  - [agentlens-diagnostics-integration](.claude/project/memory/agentlens-diagnostics-integration.md) — should I switch a janitor detector to agentlensPro's window budget
-  - [janitor-fleet-control-plane](.claude/project/memory/janitor-fleet-control-plane.md) — a chore ran twice
+  - [janitor-architecture-control-flow](.claude/project/memory/janitor-architecture-control-flow.md) — how does the janitor heartbeat vs daemon control flow work
+  - [janitor-architecture-detectors-and-resilience](.claude/project/memory/janitor-architecture-detectors-and-resilience.md) — which detector finds X
+  - [janitor-architecture-state-and-conventions](.claude/project/memory/janitor-architecture-state-and-conventions.md) — where should persistent state be written
   - [window-burn-rate-alarm-contract](.claude/project/memory/window-burn-rate-alarm-contract.md) — when does the janitor's burn alarm actually fire
   - [janitor-keepalive-test-isolation-fsevents](.claude/project/memory/janitor-keepalive-test-isolation-fsevents.md) — a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir
   - [janitor-fleet-guardian-reachability](.claude/project/memory/janitor-fleet-guardian-reachability.md) — the status table says a project is NOT armed but I armed it myself
+  - [janitor-fleet-control-plane](.claude/project/memory/janitor-fleet-control-plane.md) — a chore ran twice
   - [three-pillars-rules-ownership](.claude/project/memory/three-pillars-rules-ownership.md) — which repo owns trdd-design-tasks
   - [janitor-daemon-handover-unowned-chores](.claude/project/memory/janitor-daemon-handover-unowned-chores.md) — every daemon chore stamp is frozen at the same age but no flag is set
   - [janitor-daemon-process-identity](.claude/project/memory/janitor-daemon-process-identity.md) — the daemon keeps restarting every heartbeat
@@ -149,36 +149,47 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-findings-pipeline](.claude/project/memory/janitor-findings-pipeline.md) — where do janitor findings/drift lines actually get recorded
   - [janitor-core-files-reference](.claude/project/memory/janitor-core-files-reference.md) — what does dispatch.py do
   - [git-index-lock-orphan-recovery](.claude/project/memory/git-index-lock-orphan-recovery.md) — git hangs forever on .git/index.lock
-  - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
   - [janitor-gh-reply-monitor](.claude/project/memory/janitor-gh-reply-monitor.md) — how does the janitor notice a reply to a github thread it opened
   - [janitor-skills-and-agents-roster](.claude/project/memory/janitor-skills-and-agents-roster.md) — why did janitor-pause disappear
 
+**janitor-compaction-floor-gate** — the janitor compacted my context over and over
+- [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
+  - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
+  - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
+
+**janitor-detector-and-hook-roster** — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
+- [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
+
+**memory-system** — how does the wiki-memory system work
+- [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
+  - [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
+  - [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
+  - [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
+  - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
+  - [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
+  - [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
+
+**oauth-rotation-renew-reauth** — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
+- [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
+  - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
+  - [janitor-beat-tasks-and-limitations](.claude/project/memory/janitor-beat-tasks-and-limitations.md) — what is the heartbeat rate
+  - [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
+  - [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
+
 **Other topics**
-- [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
-- [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
+- [agentlens-diagnostics-integration](.claude/project/memory/agentlens-diagnostics-integration.md) — should I switch a janitor detector to agentlensPro's window budget
 - [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
 - [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment
-- [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
-- [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
-- [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
 - [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
-- [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
-- [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
 - [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
-- [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
-- [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
-- [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
-- [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
-- [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
 - [status-lines-to-autonomous-readers-cause-escalation](.claude/project/memory/status-lines-to-autonomous-readers-cause-escalation.md) — agents keep turning global maintenance back on by themselves
-- [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
 <+-+-JANITOR-WIKIMEM-INDEX-END-(do-not-modify)-+-+>
