@@ -58,7 +58,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import state as _state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
+# Plain `import state`, NOT `import state as _state`: the git-locks drift guard
+# (test_git_optional_locks_guard) recognizes the protected callee by its spelled name
+# `state.run_subprocess`, and an alias hides the protection from it — the call IS protected
+# either way, but a guard that cannot prove it fails the suite (found 2026-09-01).
+import state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
 
 
 def _t(seconds: float) -> float:
@@ -71,7 +75,7 @@ def _t(seconds: float) -> float:
     as a guard that did not fire rather than as a `gh` call that never answered. Measured: 18
     such failures across two 2x-oversubscribed runs.
     """
-    return seconds * _state.timeout_scale()
+    return seconds * state.timeout_scale()
 
 # NOTE (TRDD-157OH2D7): `yaml` is imported LAZILY inside detect_required_status_checks (the ONLY
 # function that parses workflow YAML), NOT at module top. This lets lightweight importers of this
@@ -482,7 +486,7 @@ def _slug_from_git_remote(root: Path) -> str | None:
     `git@github.com:o/r(.git)` / `ssh://git@github.com/o/r` — because a repo cloned over SSH
     is not a different repo, and a resolver that only reads https silently declines on it.
     """
-    proc = _state.run_subprocess(
+    proc = state.run_subprocess(
         ["git", "-C", str(root), "remote", "get-url", "origin"],
         timeout=10,
         detector_name="branch-protection",

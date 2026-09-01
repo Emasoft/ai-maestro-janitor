@@ -15,6 +15,7 @@ out to `gh api`, so a stub executable is the honest seam. Every test pins
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import importlib.util
 import io
 import json
@@ -63,7 +64,11 @@ def _fake_gh(bin_dir: Path, payload: object) -> None:
 def _notification(*, tid: str, repo: str, number: int, reason: str = "comment", title: str = "T") -> dict:
     return {
         "id": tid,
-        "updated_at": "2026-07-31T12:00:00Z",
+        # Dynamic, NOT a literal date: the poller prunes `seen` entries older than
+        # SEEN_TTL_DAYS, so a frozen timestamp here is a time-bomb — the baseline test
+        # passed for a month and started failing the day the hardcoded date crossed the
+        # TTL (found 2026-09-01, date was 2026-07-31, TTL 30 days).
+        "updated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "reason": reason,
         "repository": {"full_name": repo},
         "subject": {
