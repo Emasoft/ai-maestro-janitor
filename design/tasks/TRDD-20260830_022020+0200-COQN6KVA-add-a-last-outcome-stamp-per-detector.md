@@ -1,9 +1,9 @@
 ---
 trdd-id: COQN6KVA
 title: add a per-detector last-outcome stamp so a decline is distinguishable from a completed pass
-column: testing
+column: complete
 created: 2026-08-30T02:20:20+0200
-updated: 2026-09-01T21:55:00+0200
+updated: 2026-09-01T22:05:00+0200
 implementation-commits: [e1fa581d]
 current-owner: janitor-main-session
 task-type: feature
@@ -62,7 +62,9 @@ AMAMA 2026-08-30; it corrected this repo's earlier framing of the two as alterna
       calculation keeps reading it
 - [x] a test asserts a declining detector writes `declined:<reason>` while its cadence stamp
       still advances — the two must not be coupled
-- [ ] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
+- [x] `uv run pytest -q` + `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports`
+      — satisfied by the 3.4.2 publish gate (2026-09-01): 15,952 passed, ruff + mypy clean
+      over 496 files, with this card's code included
 
 ## Notes and lessons learned
 
