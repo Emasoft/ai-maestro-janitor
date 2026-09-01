@@ -504,6 +504,30 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 -- never break session start
             _slog(state, "session-start", f"post-clear handoff injection failed: {exc!r}")
 
+    # TRDD-2F3I2P18 — summarize the PREVIOUS session, whatever ended it.
+    #
+    # `/clear` has no hook and `claude -n` is a new process, so the janitor cannot be the one to
+    # notice a HUMAN ending a session. From the transcript's side both look identical: a complete
+    # `.jsonl` on disk and a blank session starting beside it. This is the only place that fact is
+    # observable, so it is where the summary is kicked off.
+    #
+    # DETACHED, always. llm-ext takes minutes; blocking here would stall the start of every
+    # session behind a network call, and a SessionStart hook that hangs is worse than one that
+    # does nothing. The child takes the hold itself (writing `summary-pending.json` before it
+    # begins), so the heartbeat honours it even though this parent has already returned.
+    try:
+        import subprocess  # noqa: PLC0415
+
+        script = Path(__file__).resolve().parent.parent / "summarize_previous_session.py"
+        if script.is_file():
+            subprocess.Popen(  # noqa: S603 - explicit args, no shell
+                [str(script)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception as exc:  # noqa: BLE001 -- never break session start
+        _slog(state, "session-start", f"previous-session summary spawn failed: {exc!r}")
+
     # "fork" added for CC 2.1.214 ("SessionStart hooks now report source 'fork' when a
     # session begins as a fork instead of 'resume'"). A fork is a NEW process that loaded
     # the CURRENT plugins, exactly like startup/resume — so it must seed the ack too.
