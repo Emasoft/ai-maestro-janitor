@@ -223,6 +223,28 @@ def atomic_write(target: Path | str, value: str) -> None:
     os.replace(tmp, target)
 
 
+def record_outcome(detector_name: str, outcome: str) -> None:
+    """Write `last-outcome-<detector>.ts`: `"<epoch> <outcome>"` (TRDD-COQN6KVA).
+
+    The OUTCOME stamp, a different fact from the `last-run-*.ts` CADENCE stamp beside it: the
+    cadence stamp means "a pass was attempted" and MUST stay unconditional (making it
+    success-gated would retry a declining project every heartbeat instead of every interval).
+    This one answers the question nothing on disk answered — did the pass DO anything —
+    with `applied` / `ok[...]` / `declined:<reason>` / `error:<reason>`. Measured cost of the
+    gap (TRDD-H8WRCW0I): an applier declined four times a day for days while every surface
+    reported health. Do NOT feed this stamp into the due calculation — that re-couples the two
+    facts and reintroduces the retry storm. Best-effort: an outcome record must never break
+    the pass it describes.
+    """
+    try:
+        atomic_write(
+            state_dir() / f"last-outcome-{detector_name}.ts",
+            f"{int(time.time())} {outcome}\n",
+        )
+    except OSError:
+        pass
+
+
 # --- host-level user-presence breadcrumb (TRDD-fb4850b5, janitor#15) --------
 #
 # A cross-plugin host file the MANAGER's `amama-presence-tracker` reads as a

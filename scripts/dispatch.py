@@ -805,6 +805,26 @@ def _emit_quiet_if_idle() -> None:
         print("[janitor-quiet]")
 
 
+def _record_default_outcome(name: str, outcome: str, started: int) -> None:
+    """Dispatcher-side outcome default (TRDD-COQN6KVA) — the detector's own record wins.
+
+    A detector that called `state.record_outcome` during THIS pass (its stamp epoch >=
+    `started`) already said something more precise than the dispatcher can (`declined:<why>`,
+    `applied`); overwriting it with a generic `ok` would erase exactly the distinction the
+    stamp exists to make. Only when the detector said nothing does the dispatcher write the
+    coarse truth it can see: exit code + timeout. Best-effort like the stamp itself.
+    """
+    try:
+        p = state.state_dir() / f"last-outcome-{name}.ts"
+        if p.is_file():
+            first = p.read_text(encoding="utf-8").split(None, 1)[0]
+            if int(first) >= started:
+                return
+    except (OSError, ValueError, IndexError):
+        pass
+    state.record_outcome(name, outcome)
+
+
 def _run_detector(name: str, interval: int) -> None:
     script = _HERE / "detectors" / f"{name}.py"
     if not script.is_file():
@@ -845,6 +865,7 @@ def _run_detector(name: str, interval: int) -> None:
     # (timeout=10s), but that's a convention, not an enforced bound — this is
     # the enforced one.
     timeout = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT"), 120)
+    started = int(time.time())
     try:
         # stdout is CAPTURED (not inherited) so the F6 central defang above can
         # neutralize forged reserved markers before they reach the cron turn.
@@ -872,16 +893,21 @@ def _run_detector(name: str, interval: int) -> None:
             sys.stdout.flush()
         # Stamp last-run even on timeout so a chronically-slow detector backs
         # off to its cadence instead of re-firing (and re-hanging) every fire.
+        _record_default_outcome(name, "error:timeout", started)
         _mark_detector_ran(name)
         return
     except OSError as exc:
         state.log_line("dispatch", f"detector '{name}' spawn failed: {exc}")
+        _record_default_outcome(name, "error:spawn-failed", started)
         return
     if proc.stdout:
         sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, proc.stdout)))
         sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
+        _record_default_outcome(name, f"error:rc={proc.returncode}", started)
+    else:
+        _record_default_outcome(name, "ok", started)
     _mark_detector_ran(name)
 
 
@@ -2154,8 +2180,10 @@ def _phase_guard_branch_protection() -> None:
         )
     except subprocess.TimeoutExpired:
         state.log_line("dispatch", "guard branch-protection apply timed out")
+        state.record_outcome("guard-branch-protection", "error:timeout")
     except OSError as exc:
         state.log_line("dispatch", f"guard branch-protection apply spawn failed: {exc}")
+        state.record_outcome("guard-branch-protection", "error:spawn-failed")
     state.atomic_write(last_file, str(int(time.time())))
 
 

@@ -130,12 +130,25 @@ def _ledger_append(slug: str, default_branch: str, msg: str) -> None:
         f.write(f"{ts}\t{slug}\t{default_branch}\t{msg}\n")
 
 
+def _decline(reason: str) -> int:
+    """Record a gate decline on the outcome stamp (TRDD-COQN6KVA), then exit 0.
+
+    THIS is the applier the card was written about: it declined four times a day for days
+    while every user-facing surface reported health, because a gate exit and a completed
+    apply left identical disk state. Every `return 0` before the apply now names its gate on
+    `last-outcome-guard-branch-protection.ts`; the cadence stamp stays the dispatcher's and
+    stays unconditional.
+    """
+    state.record_outcome("guard-branch-protection", f"declined:{reason}")
+    return 0
+
+
 def main() -> int:
     state.init_state()
 
     # Gate 1: master switch.
     if not bpl.guard_mode_enabled():
-        return 0  # silent — the user has not opted in
+        return _decline("guard-mode-off")  # silent — the user has not opted in
 
     # Gate 2: project-scope autofix toggle. /janitor-autofix-off vetoes
     # guarded actions too — one fewer switch for the user to remember.
@@ -144,7 +157,7 @@ def main() -> int:
             "branch-protection-apply",
             "skip: /janitor-autofix-off is set — guard mode honours the project toggle",
         )
-        return 0
+        return _decline("autofix-off")
 
     # Gate 3: resolve repo slug from this project's plugin.json (if any).
     plugin_root_env = os.environ.get("CLAUDE_PLUGIN_ROOT")
@@ -184,7 +197,7 @@ def main() -> int:
                 )
             except Exception:  # noqa: BLE001 - reporting must never break the caller
                 pass
-        return 0
+        return _decline("no-repo-slug")
 
     # Gate 4: gh availability.
     if not bpl.gh_available():
@@ -192,7 +205,7 @@ def main() -> int:
             "[branch-protection] guard mode ON but `gh` CLI not in PATH — "
             "install GitHub CLI to apply the baseline ruleset.",
         )
-        return 0
+        return _decline("gh-missing")
 
     # Gate 5: default branch discovery.
     default_branch = bpl.detect_default_branch(slug)
@@ -201,7 +214,7 @@ def main() -> int:
             "branch-protection-apply",
             f"skip: could not resolve default branch of {slug}",
         )
-        return 0
+        return _decline("no-default-branch")
 
     # Gate 6: convergence short-circuit — by NAME **and CONTENT** (TRDD-DD0M4QL7).
     # Name-presence alone let a hand-loosened or older-parameter ruleset stay
@@ -216,7 +229,7 @@ def main() -> int:
             "branch-protection-apply",
             f"skip: ruleset list lookup failed for {slug}",
         )
-        return 0
+        return _decline("ruleset-list-lookup-failed")
     if present:
         verdict = bpl.baselines_content_current(slug, default_branch, plugin_root)
         if verdict is None:
@@ -224,7 +237,7 @@ def main() -> int:
                 "branch-protection-apply",
                 f"skip: ruleset detail lookup failed for {slug} — content unverified",
             )
-            return 0
+            return _decline("ruleset-detail-lookup-failed")
         current, reasons = verdict
         if current:
             # The converged no-op leaves ONE honest trace per pass, so silence
@@ -237,6 +250,8 @@ def main() -> int:
             ledger = state.state_dir() / _LEDGER_FILE
             if not ledger.is_file():
                 _ledger_append(slug, default_branch, "already-present")
+            # A COMPLETION, not a decline: the check ran to the end and found nothing to do.
+            state.record_outcome("guard-branch-protection", "ok:converged")
             return 0
         state.log_line(
             "branch-protection-apply",
@@ -251,7 +266,7 @@ def main() -> int:
             f"[branch-protection] guard mode ON for {slug}@{default_branch} but the "
             "authenticated viewer is not an admin — surface for human review.",
         )
-        return 0
+        return _decline("viewer-not-admin")
 
     # All gates passed → apply BOTH rulesets idempotent-by-name, then
     # delete the legacy orphan. apply_baseline_rulesets auto-detects the
@@ -277,6 +292,7 @@ def main() -> int:
             _audit_append(
                 f"{'OK' if ok else 'FAIL'}\t{slug}\t{default_branch}\t{name}\t{msg}",
             )
+        state.record_outcome("guard-branch-protection", "error:apply-failed")
         return 0
 
     # Loud + auditable announcement. Record both emitted payloads.
@@ -326,6 +342,7 @@ def main() -> int:
         f"(tag refs/tags/v*.*.* deletion + update, owner bypass); {check_note}. "
         f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
     )
+    state.record_outcome("guard-branch-protection", "applied")
     return 0
 
 

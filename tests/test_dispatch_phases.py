@@ -3063,6 +3063,56 @@ def test_open_issues_bit_counts_the_seen_map_without_calling_gh(env_isolation: d
     assert "2 open GitHub issue(s)" in dispatch._open_issues_bit()
 
 
+# ---------- per-detector last-outcome stamp (TRDD-COQN6KVA) -------------
+
+
+def _fake_detector(dets: Path, name: str, body: str) -> None:
+    dets.mkdir(parents=True, exist_ok=True)
+    p = dets / f"{name}.py"
+    p.write_text(f"#!/usr/bin/env python3\n{body}\n", encoding="utf-8")
+    p.chmod(0o755)
+
+
+def _outcome(name: str) -> str:
+    import state as _st
+
+    return (_st.state_dir() / f"last-outcome-{name}.ts").read_text(encoding="utf-8")
+
+
+def test_outcome_stamp_distinguishes_decline_from_completion(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE card's acceptance: a detector that records `declined:<reason>` itself keeps that
+    record (the dispatcher's generic default must not overwrite it), a silent exit-0 detector
+    gets `ok`, a non-zero one gets `error:rc=N` — and the CADENCE stamp advances in every
+    case, uncoupled from the outcome (TRDD-COQN6KVA)."""
+    import state as _st
+
+    dispatch = _import_dispatch()
+    dets = tmp_path / "detectors"
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+
+    sd = _st.state_dir()
+    decl = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "import state\n"
+        "state.record_outcome('fake-decliner', 'declined:not-opted-in')\n"
+    ) % str(_PROJECT_ROOT / "scripts" / "lib")
+    _fake_detector(dets, "fake-decliner", decl)
+    _fake_detector(dets, "fake-quiet", "pass")
+    _fake_detector(dets, "fake-broken", "import sys; sys.exit(3)")
+
+    for name in ("fake-decliner", "fake-quiet", "fake-broken"):
+        dispatch._run_detector(name, interval=1)
+        assert (sd / f"last-run-{name}.ts").is_file(), f"cadence stamp missing for {name}"
+
+    assert "declined:not-opted-in" in _outcome("fake-decliner"), (
+        "the detector's own outcome must survive the dispatcher default"
+    )
+    assert " ok" in _outcome("fake-quiet")
+    assert "error:rc=3" in _outcome("fake-broken")
+
+
 def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:
     """End-to-end: the emitted [janitor-resume] payload names the open cards."""
     dispatch = _import_dispatch()
