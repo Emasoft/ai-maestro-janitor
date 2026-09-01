@@ -1,10 +1,10 @@
 ---
 trdd-id: 9T0U3M00
 title: The tick-stalled alert fires on an absorbed chore and reports healthy server-side execution as rotation being OFF
-column: testing
+column: complete
 blocked-by: []
 created: 2026-08-21T14:30:06+0200
-updated: 2026-08-29T22:30:00+0200
+updated: 2026-09-02T01:21:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -123,9 +123,10 @@ by the same test.
 - [x] Mutation-proven: the guard's removal turns the test red
 - [x] `uv run pytest tests/test_oauth_supervisor.py` 21 passed · `ruff` clean · `mypy` clean
       across 486 files
-- [ ] Observed on a fresh heartbeat: `session-start.log` no longer carries the false
-      `tick-stalled` line — **UNOBSERVABLE ON THIS HOST UNTIL THE PUBLISH, measured
-      2026-08-22. Do NOT read a firing alert as the fix having failed.**
+- [x] Observed on a fresh heartbeat: `session-start.log` no longer carries the false
+      `tick-stalled` line — OBSERVED 2026-09-02: zero `tick-stalled` lines dated after
+      2026-08-29 across 6 session starts on 3.4.x (was: UNOBSERVABLE ON THIS HOST UNTIL THE
+      PUBLISH, measured 2026-08-22).
 
       The alert IS still firing: `session-start.log:2096`, `[2026-08-22T10:08:26+0200] …
       ALERT tick-stalled: the 60s rotator tick has not COMPLETED for 80888s … rotation is
@@ -188,3 +189,8 @@ was genuinely the janitor's.
 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
+- 2026-09-02T01:21:00+0200 — COMPLETE, closed under the USER's delegated review authority
+  ("i've put you in charge", 2026-09-01). The last box's evidence is on disk, re-verified
+  first-hand: `.janitor/logs/session-start.log` carries ZERO `tick-stalled` lines dated after
+  2026-08-29 (the last false alert, on cached 3.3.26) across 6 session starts on 3.4.x, and the
+  guard is present in the installed 3.4.3 supervisor. Self-closure disclosed.

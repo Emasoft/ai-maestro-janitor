@@ -1,10 +1,11 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: testing
-blocked-by: []
+column: blocked
+pre-block-column: testing
+blocked-by: [TRDD-XCJFCJUX]
 created: 2026-08-23T16:45:05+0200
-updated: 2026-08-29T22:43:24+0200
+updated: 2026-09-02T01:21:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -14,11 +15,17 @@ release-via: publish
 relevant-rules: []
 npt: []
 eht: []
-external-refs: []
+external-refs: [TRDD-XCJFCJUX, TRDD-1QJIZFFW]
 implementation-commits: [155833b3]
 ---
 
 # Retire the daemon-composed handoff; compact only via the llm-externalizer
+
+> **2026-09-02 — re-blocked on TRDD-XCJFCJUX.** Code shipped (3.4.3 installed, daemon restaged);
+> the one open box (an idle unattended session proven resumable after an AUTOMATED clear) is the
+> same drill TRDD-1QJIZFFW box 2 needs, and that drill cannot fire: the launchd daemon reads no
+> `CLAUDE_PLUGIN_OPTION_*` (measured), so the enabled lever never reaches it. Nothing to do here
+> until XCJFCJUX's loader is published and restaged; then one drill closes this card too.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 

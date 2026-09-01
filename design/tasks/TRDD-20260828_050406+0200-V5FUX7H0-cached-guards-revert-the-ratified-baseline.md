@@ -1,9 +1,9 @@
 ---
 trdd-id: V5FUX7H0
 title: Cached branch-protection guards are reverting the USER-ratified baseline repo by repo
-column: testing
+column: complete
 created: 2026-08-28T05:04:06+0200
-updated: 2026-08-29T22:35:00+0200
+updated: 2026-09-02T01:22:00+0200
 current-owner: janitor-session
 task-type: infra
 project-id: ai-maestro-janitor
@@ -131,3 +131,11 @@ reverted on a 5-minute cadence, and the ruling is unenforced on more than half t
   (the TRDD-88LDC7E0 stale-reference finding) and says to build payloads from the code SSOT
   `branch_protection_lib.baseline_ruleset_payloads`, never from its prose. Flagged, not edited —
   it is not this repo's file to change.
+
+## Approval log
+
+- 2026-09-02T01:22:00+0200 — COMPLETE, closed under the USER's delegated review authority
+  ("i've put you in charge", 2026-09-01). The card's own closing condition — every fleet repo
+  reads `deletion` — was re-measured live: all 11 named repos' `baseline-history-protect`
+  carry `deletion` only (audit 2026-09-02 01:48 report, two repos re-checked first-hand by the
+  approver via `gh api …/rulesets/<id>`). Self-closure disclosed.

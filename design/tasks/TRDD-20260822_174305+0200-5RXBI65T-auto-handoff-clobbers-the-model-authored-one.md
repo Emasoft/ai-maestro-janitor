@@ -1,10 +1,11 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: testing
-blocked-by: []
+column: blocked
+pre-block-column: testing
+blocked-by: [TRDD-XCJFCJUX]
 created: 2026-08-22T17:43:05+0200
-updated: 2026-08-29T22:51:52+0200
+updated: 2026-09-02T01:21:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -14,11 +15,19 @@ release-via: publish
 relevant-rules: []
 npt: []
 eht: []
-external-refs: []
+external-refs: [TRDD-XCJFCJUX]
 implementation-commits: [0581b940]
 ---
 
 # `.janitor/state/agent-handoff.md` has TWO writers and no coordination
+
+> **2026-09-02 — re-blocked on TRDD-XCJFCJUX.** Box 1 holds on disk (four keyed
+> `agent-handoff-<session>-<ts>-<pid>.md` files since 08-29, the legacy file frozen at 08-29
+> 22:19). Box 3 ("/clear recoverability unchanged") has never been drilled and is the same
+> automated-clear drill the external-clear cards wait on; that drill cannot fire until the
+> launchd daemon can read the lever (XCJFCJUX). Box 2 stays honestly parked: 79LXF6PJ removed
+> the card/column index from the compose path, so there is nothing to match until a card
+> summary is reintroduced.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
