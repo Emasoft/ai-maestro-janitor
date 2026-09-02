@@ -1,9 +1,9 @@
 ---
 trdd-id: 0TM5NDYN
 title: The clear beat re-evaluates the same first fleet candidate every beat, so a HOLD on candidate one starves every other session
-column: testing
+column: complete
 created: 2026-09-02T03:57:41+0200
-updated: 2026-09-02T04:03:00+0200
+updated: 2026-09-02T04:40:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -51,8 +51,16 @@ are different facts (evaluated vs cleared), so two files, per the COQN6KVA lesso
 - [x] a CLEAR still lands the cooldown stamp; `clear_in_cooldown` untouched (existing tests)
 - [x] ruff clean, `mypy scripts/` clean (497 files), 47 tests in the three files green —
       re-run by the approver after the worker's report
-- [ ] after publish + restage: `cold-cache-clear.log` shows `evaluating` lines for at least
-      two different roots within four consecutive beats
+- [x] after publish + restage — OBSERVED: daemon respawned on 3.4.7 at 04:31:04 (pid 53070,
+      staged `cold_cache_compact.py` == cache); beat 04:33:53 evaluated this repo, beat
+      04:39:00 evaluated AgentlensPro — two different roots in two CONSECUTIVE beats — and
+      `clear-evaluated.ts` exists under both roots' `.janitor/state/`
+
+## Approval log
+
+- 2026-09-02T04:40:00+0200 — COMPLETE, closed under the USER's delegated review authority
+  ("i've put you in charge", 2026-09-01). Shipped in 3.4.7 (6a3605b4); the closing box is
+  the restaged daemon's own log. Self-closure disclosed.
 
 ## Notes and lessons learned
 
