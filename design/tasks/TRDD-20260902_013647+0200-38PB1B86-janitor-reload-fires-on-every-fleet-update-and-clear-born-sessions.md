@@ -3,7 +3,7 @@ trdd-id: 38PB1B86
 title: janitor-reload fires on every fleet-update epoch and on every clear-born session — gate it on relevance and seed the ack for clear
 column: testing
 created: 2026-09-02T01:36:47+0200
-updated: 2026-09-02T02:37:00+0200
+updated: 2026-09-02T02:35:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
