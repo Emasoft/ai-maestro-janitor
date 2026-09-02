@@ -91,15 +91,23 @@ eht: []
   succeeding, so THIS card's fix holds on this machine via the symlink). The user still ended
   up rotating by hand because the blocked panes never got the ESC — the typing gate, a
   different defect, filed as TRDD-NACCL0CB (proposal, needs USER ruling).
-- **NEXT ACTION:** 3.4.12 via `publish.py --patch` (bundles `301fbcec` with NACCL0CB if
-  approved), install on green CI, then `complete`.
+- **21:42 — v3.4.12 shipped (CI green ×5), installed, daemon restaged 21:28:04 onto it.**
+  Boxes 1–3 verified against the DATA copy under the daemon's own interpreter + env:
+  `verifying_context()` → 136 CAs (default store also 136, the symlink stands); an SSL-wrapped
+  URLError classifies `tls`, a plain one `network`; 0 `refresh failed (network)` lines since
+  the restage and `oauth-health` shows all three slots `refresh=yes status=ok`.
+- **NEXT ACTION:** box 4 only — the next scoped wall on this host rotates AND the panes get
+  their ESC (TRDD-NACCL0CB's live box) with no human keystroke; then `published`.
 
 ## Acceptance criteria
 
-- [ ] Under the daemon's interpreter + env, `verifying_context().cert_store_stats()["x509_ca"] > 0`.
-- [ ] A URLError wrapping an SSLError classifies as `tls`, a plain URLError still as `network`.
-- [ ] `rotator.log` shows slot refreshes succeeding again (no `(network)` line on a tick
+- [x] Under the daemon's interpreter + env, `verifying_context().cert_store_stats()["x509_ca"] > 0`.
+      (2026-09-02 21:42: 136, on the 3.4.12 DATA copy.)
+- [x] A URLError wrapping an SSLError classifies as `tls`, a plain URLError still as `network`.
+      (2026-09-02 21:42: verified on the 3.4.12 DATA copy.)
+- [x] `rotator.log` shows slot refreshes succeeding again (no `(network)` line on a tick
       after the fix) and `oauth-health` shows both spare slots with `days=` > 0.
+      (2026-09-02 21:42: 0 `(network)` lines since the 21:28 restage; all slots `days=0.3 status=ok`.)
 - [ ] The next scoped wall rotates automatically — the user does not rotate by hand.
       (2026-09-02 20:39:50: the rotation half is OBSERVED; the by-hand half failed for the
       TRDD-NACCL0CB reason, not this card's. Box stays open until both halves hold.)

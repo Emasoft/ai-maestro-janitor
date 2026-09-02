@@ -60,9 +60,15 @@ supersedes-directive: 2026-07-18 typing gate (TRDD-6Q0OYYYH) for the retry-wedge
   to GIVING UP + one human page in ~8 min. Deliberate: with no rotation there is no
   headroom to resume onto, so a human (or TRDD-3T9HQEQ6's `/model opus` flush) IS the
   next step — the page names the pane instead of the daemon typing into it.
-- **NEXT ACTION:** ship in 3.4.12 (`publish.py --patch`, bundles `301fbcec`), install on
-  green CI, restage the daemon, then the live box: the next rotation on this host must log
-  `rotation-esc: FIRED ESC` within one beat of `rotation-success.ts`.
+- **21:40 — SHIPPED AND LIVE IN THE DAEMON.** v3.4.12 (`2f5883f2`) CI green on all five runs;
+  installed at user scope; the daemon restaged itself at 21:28:04 (`os-keepalive: newer
+  version staged → exit for respawn`, `version-update: certified last-good=3.4.12`) and the
+  DATA copy carries `_rotation_esc_pass` and `retry_wedge_attempt_at_tail`. Two follow-up
+  commits await the next patch: `4a4b857f` (join a wrapped status row) and `d3dde9f9` (`·` is
+  not a join-stopper) — both only matter on panes narrower than ~72 columns; every pane on
+  this host is 204 wide.
+- **NEXT ACTION:** the live box — the next rotation on this host must log
+  `rotation-esc: FIRED ESC` within one beat of `rotation-success.ts`; then `published`.
 
 ## Incident (2026-09-02, 20:38 to 20:47, this host)
 
