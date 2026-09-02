@@ -427,7 +427,12 @@ def cmd_begin(args) -> int:
         print("error: wikimem editor disabled (kill-switch or option)", file=sys.stderr)
         return 2
     scope = Path(args.scope_root).expanduser()
-    txn = MemoryTxn.begin(scope, args.op, args.sources)
+    # TRDD-0A8FN3W3: this CLI process exits right after printing txn_id, so recording
+    # os.getpid() (the default) would name a DEAD owner the instant a concurrent
+    # resume_pending() looks at the journal — reaping a live staging txn regardless of
+    # age. owner_pid=0 is the pre-existing "owner unknown" contract: staleness-only
+    # reclaim, never the dead-pid fast path.
+    txn = MemoryTxn.begin(scope, args.op, args.sources, owner_pid=0)
     print(f"txn_id={txn.txn_id}")
     print(f"staging={txn.staging_dir}")
     return 0

@@ -1,9 +1,9 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: approval
+column: design
 created: 2026-08-02T14:19:42+0200
-updated: 2026-08-28T07:33:30+0200
+updated: 2026-09-02T08:40:27+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -436,6 +436,11 @@ genuinely open, and is listed rather than quietly closed.
 - 2026-08-12T15:39:16+0200 — RE-COLUMNED testing → todo by janitor-main-session. A WORK column
   asserts active work; nobody was working this (idle 10d). 0/5 acceptance, `blocked-by: []`, no
   external wait — just unstarted. No scope or acceptance changed.
+- 2026-09-02T08:40:27+0200 — RULED by USER: "wait. find a better solution and implement it asap."
+  The per-beat dry-run measurement (a fleet walk + a watcher spawn on every beat while the feature
+  is off) is REFUSED; the goal stands. `approval` → `design`: janitor-main-session designs a
+  cheaper path to the same outcome (an idle keep-warm session's prefix shrunk without a
+  permanent measurement bill), then implements it. The design lands as a new STATE entry here.
 
 ## ⏵ 2026-08-28 — `todo` → `approval`, because the card says so about itself
 

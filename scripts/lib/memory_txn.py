@@ -268,10 +268,17 @@ class MemoryTxn:
         return Path(scope_root) / _STAGING_DIRNAME
 
     @classmethod
-    def begin(cls, scope_root, op: str, source_rel_paths) -> "MemoryTxn":
+    def begin(cls, scope_root, op: str, source_rel_paths, owner_pid: int | None = None) -> "MemoryTxn":
         """Open a transaction: snapshot each source's content hash and copy it into
         the staging tree (so the agent edits the COPY, never the live page, until
-        commit). `source_rel_paths` are paths relative to `scope_root`."""
+        commit). `source_rel_paths` are paths relative to `scope_root`.
+
+        `owner_pid` defaults to `os.getpid()` (in-process API, issue #158 dead-owner
+        reaping applies as before). TRDD-0A8FN3W3: a short-lived CLI process (`begin`,
+        exit, later `commit` in a different process) must pass `owner_pid=0` — the pid
+        it would otherwise record dies the instant the CLI exits, so `resume_pending`
+        would reap a live staging txn out from under a concurrent pass. `0` is the
+        existing "owner unknown, staleness-only reclaim" contract (see resume_pending)."""
         scope_root = Path(scope_root).resolve()
         staging_root = cls._staging_root(scope_root)
         open_count = cls._staging_phase_count(staging_root)
@@ -304,7 +311,7 @@ class MemoryTxn:
             scope_root=scope_root, txn_id=txn_id, op=op, staging_dir=staging_dir,
             journal_path=staging_root / f"{txn_id}.json", sources=sources,
             writes=[], deletes=[], phase=_PHASE_STAGING, started_at=int(time.time()),
-            owner_pid=os.getpid(),
+            owner_pid=os.getpid() if owner_pid is None else owner_pid,
         )
         txn._persist()
         return txn

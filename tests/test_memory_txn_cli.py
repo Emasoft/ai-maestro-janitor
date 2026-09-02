@@ -22,6 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import memory_txn  # noqa: E402
 import memory_txn_cli as cli  # noqa: E402
 from memory_txn import MemoryTxn  # noqa: E402
 
@@ -381,6 +382,38 @@ def test_cli_begin_creates_staging_with_source_copies(tmp_path):
     txn_id = next(ln.split("=", 1)[1] for ln in printed.splitlines() if ln.startswith("txn_id="))
     staging = _staging(scope, txn_id)
     assert (staging / "a.md").exists() and (staging / "b.md").exists()  # source copies staged
+
+
+def test_cli_begin_owner_pid_survives_resume_from_a_live_process(tmp_path, monkeypatch):
+    """TRDD-0A8FN3W3: `begin` run as a REAL subprocess (as an agent invokes it) exits
+    immediately, so os.getpid() would record a pid that is already dead by the time
+    anyone looks at the journal. A `resume_pending` run right after must NOT reclaim
+    the fresh staging txn it just created."""
+    import subprocess
+
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    (scope / "a.md").write_text(_note("a"), encoding="utf-8")
+
+    env = dict(**{"JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate")})
+    import os as _os
+    full_env = {**_os.environ, **env}
+    full_env.pop("CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED", None)
+    cli_path = _PROJECT_ROOT / "scripts" / "memory_txn_cli.py"
+    proc = subprocess.run(
+        [sys.executable, str(cli_path), "begin", str(scope), "merge", "a.md"],
+        capture_output=True, text=True, env=full_env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    txn_id = next(ln.split("=", 1)[1] for ln in proc.stdout.splitlines() if ln.startswith("txn_id="))
+
+    journal = MemoryTxn._staging_root(scope) / f"{txn_id}.json"
+    reloaded = MemoryTxn._load(journal)
+    assert reloaded.owner_pid == 0  # never a dead pid from the exited CLI process
+
+    acted = memory_txn.resume_pending(scope, stale_seconds=99999)
+    assert acted == []  # a live/fresh CLI-begun txn must survive a concurrent resume
+    assert journal.exists()
 
 
 def test_commit_with_no_staged_changes_errors(tmp_path):

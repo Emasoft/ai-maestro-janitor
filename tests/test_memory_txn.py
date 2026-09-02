@@ -324,6 +324,46 @@ def test_resume_reclaims_a_fresh_orphan_whose_owner_process_died(tmp_path):
     assert not (scope / "c.md").exists()
 
 
+def test_begin_owner_pid_kwarg_still_reclaims_a_dead_owner(tmp_path):
+    """TRDD-0A8FN3W3 regression guard for issue #158: passing an explicit dead
+    owner_pid at begin() (as the CLI now does via 0, or as any other caller that
+    resolves its own pid) must still be reclaimed on sight by resume_pending — the
+    new kwarg must not silently disable the dead-owner fast path for a real pid."""
+    import subprocess
+
+    scope = _scope(tmp_path)
+    proc = subprocess.Popen(["true"])
+    proc.wait()  # pid is now free of any live process
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"], owner_pid=proc.pid)
+    txn.stage_write("c.md", "never applied")
+    acted = memory_txn.resume_pending(scope, stale_seconds=99999)
+    assert any(a == f"discarded owner-dead {txn.txn_id}" for a in acted), acted
+    assert not txn.staging_dir.exists()
+
+
+def test_begin_owner_pid_zero_is_staleness_only(tmp_path):
+    """TRDD-0A8FN3W3: owner_pid=0 (what the CLI now passes) is the pre-existing
+    'owner unknown' contract — a fresh journal is left alone, and only elapsing
+    stale_seconds reclaims it. Guards against the CLI fix accidentally reviving
+    the dead-owner fast path for pid 0."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"], owner_pid=0)
+    assert txn.owner_pid == 0
+    fresh_acted = memory_txn.resume_pending(scope, stale_seconds=99999)
+    assert fresh_acted == []
+    assert txn.staging_dir.exists()  # still alive — not reclaimed while fresh
+
+    # Age the journal past stale_seconds and confirm the staleness path still fires.
+    # `is_stale` is computed against max(journal mtime, started_at) — both must be aged.
+    old = time.time() - 10000
+    txn.started_at = int(old)
+    txn._persist()
+    os.utime(txn.journal_path, (old, old))
+    stale_acted = memory_txn.resume_pending(scope, stale_seconds=1)
+    assert any(a == f"discarded stale {txn.txn_id}" for a in stale_acted), stale_acted
+    assert not txn.staging_dir.exists()
+
+
 def test_resume_leaves_a_fresh_orphan_whose_owner_is_alive(tmp_path):
     """The other half: a fresh staging txn whose owner pid IS this (alive) test
     process must not be reclaimed — only a provably-dead owner is a green light."""

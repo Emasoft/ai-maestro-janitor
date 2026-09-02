@@ -1,9 +1,9 @@
 ---
 trdd-id: 0A8FN3W3
 title: memory_txn CLI begin records its own dead pid as owner so any concurrent resume reaps a live staging txn
-column: proposal
+column: testing
 created: 2026-09-02T08:21:39+0200
-updated: 2026-09-02T08:21:39+0200
+updated: 2026-09-02T08:40:27+0200
 current-owner: janitor-memory-subconscious-agent
 task-type: bugfix
 min-approval-requirement: user
@@ -63,10 +63,12 @@ may it be reclaimed.
 
 ## Acceptance
 
-- [ ] CLI `begin` writes `owner_pid: 0` (or an owner provably alive across turns).
-- [ ] Test: CLI-begun fresh txn survives a concurrent `resume_pending`.
-- [ ] Test: in-process `begin` from a process that then dies is still reclaimed on sight (#158 preserved).
-- [ ] `uv run pytest tests/ -k memory_txn` green; `ruff` + `mypy` clean.
+- [x] CLI `begin` writes `owner_pid: 0` (or an owner provably alive across turns) — `MemoryTxn.begin`
+      gained `owner_pid: int | None = None`; `cmd_begin` passes `owner_pid=0` (2026-09-02).
+- [x] Test: CLI-begun fresh txn survives a concurrent `resume_pending`.
+- [x] Test: in-process `begin` from a process that then dies is still reclaimed on sight (#158 preserved).
+- [x] `uv run pytest tests/ -k memory_txn` green; `ruff` + `mypy` clean — 66 passed, ruff clean,
+      mypy clean on 497 files, verified first-hand by janitor-main-session 2026-09-02 08:46.
 
 ## Evidence
 
@@ -74,3 +76,8 @@ may it be reclaimed.
 (gitignored, local) — the pass that hit it, with the settling commands.
 
 ## Approval log
+
+- 2026-09-02T08:40:27+0200 — APPROVED by USER ("0A8FN3W3: yes"). Promoted `proposal` → `dev`
+  (moved to `design/tasks/`); implemented by a lean-worker under janitor-main-session rather than
+  routed through `ticket_cli.py`, because the USER's reply is the approval and the fix is one
+  keyword plus three tests. Lands in the next patch publish.

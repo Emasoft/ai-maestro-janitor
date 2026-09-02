@@ -1,9 +1,9 @@
 ---
 trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
-column: proposal
+column: dev
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T06:10:31+0200
+updated: 2026-09-02T08:40:27+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -150,7 +150,14 @@ filed alongside this proposal.
 
 ## Acceptance
 
-- [ ] USER rules on A / B / C (or names another placement)
+- [x] USER rules on A / B / C (or names another placement) — 2026-09-02 08:31: **none of them**.
+      "the llm-externalizer plugin already provides llm-ext with the api keys. just use them", and
+      08:38: "you don't need to investigate the api key exporting. just use llm-ext and it will
+      work!" So: no credential placement by the janitor, no allowlist, no keychain feature request.
+      Measured 08:40 (one probe, not an investigation): `env -i HOME=… PATH=/usr/bin:… llm-ext llm
+      summarize <file>` fails with the daemon's exact line (`env var $OPENROUTER_API_KEY is not
+      set`), while the same command in a session works. The key exists wherever a SESSION runs, so
+      the summary must be produced from session context, never from the launchd daemon.
 - [ ] the daemon's llm-ext child env carries the key under launchd — proven by the next
       automated fire's `external-clear.log` showing a `SUMMARY_READY <N>B` line instead of
       `NO_SUMMARY_POST_CLEAR`
@@ -171,3 +178,10 @@ filed alongside this proposal.
 
 - 2026-09-02T05:12:04+0200 — PROPOSED by janitor-main-session (min-approval-requirement: user —
   every option places a credential). Filed from the first live automated clear on the 3.4.7 lane.
+- 2026-09-02T08:40:27+0200 — RULED by USER: options A, B and C all REFUSED; the janitor places no
+  credential. Directive: "just use llm-ext and it will work". Card promoted `proposal` → `dev`
+  (moved to `design/tasks/`) under approach **D — produce the summary from session context**,
+  where llm-ext already has its key, instead of from the launchd daemon, which measurably has
+  none. Design + implementation by janitor-main-session; the acceptance boxes below are re-read
+  against D (the "daemon's child env carries the key" box is superseded by "a session-side path
+  writes the keyed handoff").
