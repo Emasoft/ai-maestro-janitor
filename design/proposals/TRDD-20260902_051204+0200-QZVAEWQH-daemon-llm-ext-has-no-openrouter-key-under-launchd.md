@@ -3,7 +3,7 @@ trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
 column: proposal
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T06:08:29+0200
+updated: 2026-09-02T06:10:31+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -93,10 +93,11 @@ that session's actual llm-externalizer-plugin work — substantive, not a link-o
 come from the janitor's llm-ext path (the daemon composer gave up with no text at 05:20:40, no
 llm-ext session log in that window names the transcript, and no janitor code emits the
 `--- Part N of M ---` shape). The only keyed-handoff writers in the cached 3.4.7 are
-`hooks/on-session-start.py` and `clear_trigger.py`, so the likeliest writer is the resumed
-session's SessionStart hook persisting the compaction summary it was handed — no log line confirms
-it, and AgentlensPro's resumed session wrote nothing comparable, so this is per-session variance,
-not a guarantee. Either way the USER's 2026-08-23 directive (llm-ext as the only sanctioned
+`hooks/on-session-start.py` and `clear_trigger.py`, so the writer is one of those two — the
+05:20:25 stamp matching the resumed session's SessionStart second favours the hook — and where the
+summary TEXT came from is genuinely unknown (a `/clear` hands the new session no compaction
+summary). No log line confirms either, and AgentlensPro's resumed session wrote nothing comparable,
+so this is per-session variance, not a guarantee. Either way the USER's 2026-08-23 directive (llm-ext as the only sanctioned
 compaction) was not met, and a human who had stepped away from that project 27 minutes earlier
 came back to a cleared session — the trigger legitimately ignores idle, but the experience is
 exactly the "useless handoff" one the directive retired. Both cleared transcripts survive under
