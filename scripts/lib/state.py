@@ -1116,8 +1116,13 @@ def run_subprocess(
     cwd: Path | str | None = None,
     capture: bool = True,
     detector_name: Optional[str] = None,
+    input: Optional[str] = None,
 ) -> Optional[subprocess.CompletedProcess[str]]:
     """Run a subprocess with a default timeout, never propagate exceptions.
+
+    `input` feeds the child's stdin (text) — for the `--stdin` batch forms of git commands,
+    where one call over N paths replaces N calls (gitignore-coverage asks `check-ignore` about
+    every tracked file, ~1,800 on this repo, once an hour).
 
     Returns the CompletedProcess on success, None on:
       * `subprocess.TimeoutExpired` — the command ran past `timeout` seconds.
@@ -1164,6 +1169,7 @@ def run_subprocess(
             check=False,
             timeout=timeout * timeout_scale(),
             env=env,
+            input=input,
         )
     except subprocess.TimeoutExpired:
         _log_fail_open(detector_name, f"subprocess timed out after {timeout}s", cmd)

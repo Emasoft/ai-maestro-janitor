@@ -24,21 +24,36 @@ import gitignore_coverage as gc  # noqa: E402
 import state  # noqa: E402
 
 
-def _probe_ignored(root: Path) -> "object":
-    """Return a callable answering git's own 'would you ignore this path?'.
+def _git_verdicts(root: Path, paths: list[str]) -> dict[str, str]:
+    """Git's own answer for every path, in ONE call: {path: "ignored" | "negated" | "unmatched"}.
 
-    `git check-ignore -q` exits 0 when the path IS ignored, 1 when it is not. Any other exit
-    (or a timeout, which `run_subprocess` reports as None) is treated as NOT ignored, which is
-    the loud direction: a coverage detector that goes quiet when it cannot ask is useless.
+    `git check-ignore -v -n -z --stdin` over all paths replaces one `-q` call per tracked file
+    (~1,800 on this repo, hourly). `-v -n` is also what makes a NEGATION visible: `-q` answers
+    "not ignored" both for a path no rule mentions and for one a `!` line deliberately
+    re-includes, and those must diverge — the re-included path is tracked ON PURPOSE (this
+    repo's `.trashcan/` markers, the `.claude/project/memory/**` block) and must never be an
+    offender even when it sits inside a private class by name. `-z` output is NUL groups of
+    four: source, line, pattern, path; an empty pattern means no rule at all. Exit 1 only says
+    "nothing ignored" and is a valid answer. A missing verdict reads as "unmatched" — the LOUD
+    direction for coverage (the class is reported uncovered), so a failed call is never a
+    silent pass.
     """
-    def ask(rel: str) -> bool:
-        res = state.run_subprocess(
-            ["git", "-C", str(root), "check-ignore", "-q", "--no-index", rel],
-            timeout=10, detector_name="gitignore-coverage",
+    if not paths:
+        return {}
+    res = state.run_subprocess(
+        ["git", "-C", str(root), "check-ignore", "-v", "-n", "-z", "--no-index", "--stdin"],
+        timeout=30, detector_name="gitignore-coverage", input="\0".join(paths) + "\0",
+    )
+    if res is None or res.returncode not in (0, 1):
+        return {}
+    fields = res.stdout.split("\0")
+    verdicts: dict[str, str] = {}
+    for i in range(0, len(fields) - 3, 4):
+        pattern, path = fields[i + 2], fields[i + 3]
+        verdicts[path] = (
+            "negated" if pattern.startswith("!") else "ignored" if pattern else "unmatched"
         )
-        return bool(res is not None and res.returncode == 0)
-
-    return ask
+    return verdicts
 
 
 def main() -> int:
@@ -46,17 +61,23 @@ def main() -> int:
     if not (root / ".git").exists():
         return 0
 
-    ask = _probe_ignored(root)
-    uncovered = gc.uncovered_classes(ask)  # type: ignore[arg-type]
-
     tracked_res = state.run_subprocess(
-        ["git", "-C", str(root), "ls-files"], timeout=30, detector_name="gitignore-coverage",
+        ["git", "-C", str(root), "ls-files", "-z"], timeout=30, detector_name="gitignore-coverage",
     )
-    offenders: list[str] = []
+    tracked: list[str] = []
     if tracked_res is not None and tracked_res.returncode == 0:
-        offenders = gc.tracked_offenders(
-            (ln for ln in tracked_res.stdout.splitlines() if ln.strip()), ask,  # type: ignore[arg-type]
-        )
+        tracked = [p for p in tracked_res.stdout.split("\0") if p]
+
+    verdicts = _git_verdicts(root, [c.probe for c in gc.PRIVATE_CLASSES] + tracked)
+
+    def ignored(rel: str) -> bool:
+        return verdicts.get(rel) == "ignored"
+
+    def negated(rel: str) -> bool:
+        return verdicts.get(rel) == "negated"
+
+    uncovered = gc.uncovered_classes(ignored)
+    offenders = gc.tracked_offenders(tracked, ignored, negated)
 
     if uncovered:
         names = ", ".join(f"{c.name} (add `{c.pattern}`)" for c in uncovered[:6])
@@ -69,12 +90,14 @@ def main() -> int:
     if offenders:
         # Deliberately separate: a rule does not untrack anything, so this needs `git rm --cached`
         # and NOT a working-tree delete. Saying so at the point of the finding is the whole value.
+        # "present or not": an offender may be tracked with NO rule for it (matched by the class
+        # table) — the case the coverage line's "next such file" wording would otherwise hide.
         shown = ", ".join(offenders[:5])
         more = f" +{len(offenders) - 5} more" if len(offenders) > 5 else ""
         print(
-            f"⟦gitignore-coverage⟧ {len(offenders)} file(s) are ignored by a rule yet still "
-            f"TRACKED: {shown}{more} — adding the rule did not untrack them; remedy is "
-            f"`git rm --cached <path>` (never a working-tree delete)."
+            f"⟦gitignore-coverage⟧ {len(offenders)} file(s) in a private class are still "
+            f"TRACKED: {shown}{more} — a rule, present or not, does not untrack them; remedy "
+            f"is `git rm --cached <path>` (never a working-tree delete)."
         )
     return 0
 

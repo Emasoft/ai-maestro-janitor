@@ -1,9 +1,9 @@
 ---
 trdd-id: 6WM4BFKF
 title: gitignore-coverage chore — prove the ignore file covers every private class BEFORE a secret can be tracked
-column: complete
+column: testing
 created: 2026-07-24T03:08:22+0200
-updated: 2026-09-02T13:36:41+0200
+updated: 2026-09-02T13:48:03+0200
 current-owner: main-session
 task-type: security
 scope: project
@@ -14,9 +14,35 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 13:48
 
-- **✅ CLOSED 2026-09-02 13:36 — done-but-unclosed since `e607e95a`.** The card sat at `planned`
+- **⏵ REOPENED 13:48 → `testing` — criterion 2 was NOT met by the shipped code; fixed, awaiting
+  the next publish.** The second review fork caught it: the 13:36 close asserted criterion 2 on
+  the CODE's definition of contamination (`tracked ∧ is_ignored`, i.e. a rule must already
+  exist), while the criterion and D2 say "a `.env` ALREADY tracked" with no rule mentioned —
+  `git ls-files` against the CLASS matcher. The first seeded run WAS that scenario and printed
+  no contamination line; adding the rule until the line appeared changed the scenario, not the
+  evidence. Fleet-wide effect: a secret tracked in an UNCOVERED class was invisible to the
+  contamination line, and the coverage line's "the NEXT such file is published" was false for
+  a file already shipping.
+  **Fix (this commit):** `gitignore_coverage.matches_private_class` matches tracked paths
+  against the table's own thirteen canonical patterns (three fixed shapes: bare glob → basename
+  at any depth, `dir/` → any directory component, inner slash → anchored), OR-ed with git's
+  `is_ignored`; and the detector now asks git ONCE (`check-ignore -v -n -z --stdin` over the
+  probes + all tracked paths, instead of one `-q` call per file — 1,802 here, hourly), which is
+  also what makes a `!` NEGATION visible: `-q` says "not ignored" for both a path no rule
+  mentions and one deliberately re-included, and `tracked_offenders` now yields to the latter
+  (`is_negated`). Without that the matcher flagged this repo's own `/.trashcan/*` +
+  `!/.trashcan/.gitkeep` markers for `git rm --cached` — the exact false positive D3 warns
+  about. `state.run_subprocess` gained `input=` for the `--stdin` form.
+  **Verified:** 9 focused tests (the criterion-2 scenario verbatim on a real seeded repo,
+  asserting on the marker not on silence; a negated marker beside a tracked `.env`; the
+  matcher's three shapes with their nearest non-matches) + `test_tracked_ignored` = 15 passed;
+  ruff + mypy clean; this repo silent again on a live run (criterion 4 control holds); the
+  fork's settling command prints `CRITERION-2 MET`.
+  **NEXT ACTION:** `uv run scripts/publish.py --patch`; on green CI + install, add the fix SHA
+  to `implementation-commits:` and move to `complete`. Nothing else is open on this card.
+- **(superseded by the reopen above) ✅ CLOSED 2026-09-02 13:36 — done-but-unclosed since `e607e95a`.** The card sat at `planned`
   for six weeks after its detector shipped (`scripts/detectors/gitignore-coverage.py`,
   `scripts/lib/gitignore_coverage.py`, `tests/test_gitignore_coverage.py`, wired in
   `dispatch.py` at a 3600 s cadence, in the roster page). Re-verified against the six
@@ -145,6 +171,10 @@ ledger; a debris class is informational.
 
 ## Approval log
 
+- 2026-09-02T13:48:03+0200 — REOPENED complete → testing by janitor-main-session. Review fork:
+  criterion 2 closed on the code's contamination predicate, not the card's; the shipped code
+  never reported a tracked file in an uncovered class. Fixed in this commit; complete after the
+  next publish installs it.
 - 2026-09-02T13:36:41+0200 — COMPLETED by janitor-main-session (Tier 0, own scope). All six
   acceptance criteria verified live today (see STATE); implementation `e607e95a`, shipped since
   3.4.x and part of the 3.4.9 green range. D5 spun out to TRDD-VMXAF9IY.
@@ -162,3 +192,12 @@ ledger; a debris class is informational.
   keeps existing index entries by design and the file keeps shipping. DO check coverage AND
   contamination as two separate conditions, and remedy contamination with `git rm --cached`
   (which preserves the working-tree copy) instead of a delete.
+
+[^3]: [id:ATOM-6WM4-BF03, status:valid, keywords:"detector printed nothing exit 0 is it clean fail-open silence proves nothing seeded must-fire control check-ignore -q cannot see negation contamination requires class matcher tracked secret uncovered class invisible", ocd:2026-09-02, lmd:2026-09-02]
+  DO NOT close an acceptance criterion on a detector that printed nothing, BECAUSE a fail-open
+  detector prints nothing for "clean" AND for "could not run" — and DO NOT settle a criterion by
+  adjusting the scenario until the expected line appears (the first seeded run with no rule WAS
+  criterion 2, and its silence was the defect). DO run the identical invocation on a seeded repo
+  that MUST fire and assert on the marker; and when a class matcher joins git's answer, ask git
+  with `check-ignore -v -n` so a `!` re-include is distinguishable from "no rule" — `-q` merges
+  them and the matcher then proposes untracking what the user deliberately kept.

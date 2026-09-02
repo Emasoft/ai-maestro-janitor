@@ -25,6 +25,7 @@ disagree with git exactly where the syntax is subtle, which is exactly where a l
 """
 from __future__ import annotations
 
+import fnmatch
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -98,13 +99,58 @@ def uncovered_classes(
     return [c for c in classes if not is_ignored(c.probe)]
 
 
+def matches_private_class(
+    path: str,
+    classes: Iterable[PrivateClass] = PRIVATE_CLASSES,
+) -> bool:
+    """Does this tracked path fall in a private class by the class's OWN canonical pattern?
+
+    This is the contamination half of D2 — `git ls-files` against the CLASS matcher — and it
+    must not depend on the repo's `.gitignore`: the case it exists for is the file that was
+    tracked BEFORE any rule existed, where `is_ignored` answers False and the coverage line's
+    "the NEXT such file is published" is silently false for a file already shipping (found by
+    the review fork on the 2026-09-02 close: a seeded repo with a tracked `.env` and no ignore
+    file printed no contamination line at all). The module docstring's ban on a gitignore
+    parser is about the USER's file — its negations and precedence. This matches only the
+    thirteen patterns WE own, which have three fixed, simple shapes: a bare name or glob
+    matches the basename at any depth, a `dir/` pattern matches any directory component, and a
+    pattern with an inner slash is anchored at the root.
+    """
+    norm = path.removeprefix("./")
+    parts = norm.split("/")
+    for c in classes:
+        pat = c.pattern
+        if pat.endswith("/"):
+            if any(fnmatch.fnmatchcase(d, pat[:-1]) for d in parts[:-1]):
+                return True
+        elif "/" in pat:
+            if norm == pat or norm.startswith(pat + "/"):
+                return True
+        elif fnmatch.fnmatchcase(parts[-1], pat):
+            return True
+    return False
+
+
 def tracked_offenders(
     tracked: Iterable[str],
     is_ignored: Callable[[str], bool],
+    is_negated: Callable[[str], bool] = lambda _: False,
 ) -> list[str]:
-    """Tracked paths that a private-class rule covers — already in the index despite the rule.
+    """Tracked paths in a private class — in the index whether or not a rule exists for them.
 
-    Adding the rule did not untrack them; only `git rm --cached` does. Protected PROJECT paths
-    are excluded, since being tracked is their whole point.
+    Two ways in, deliberately OR-ed: the path matches a class's own canonical pattern (the file
+    tracked before any rule existed), or git says a rule now covers it (the rule added after the
+    commit). Adding a rule did not untrack either; only `git rm --cached` does.
+
+    Two ways OUT, both meaning "tracked ON PURPOSE": the protected PROJECT prefixes, and any path
+    git reports as re-included by a `!` line (`is_negated`). The second is what stops the class
+    matcher from over-reaching — this repo's `.trashcan/.gitkeep` sits inside the `.trashcan/`
+    class by name, and `/.trashcan/*` + `!/.trashcan/.gitkeep` is exactly how it is meant to be
+    tracked. A negation is the user's explicit decision; reporting it would propose untracking
+    what they deliberately kept.
     """
-    return sorted(p for p in tracked if not is_protected(p) and is_ignored(p))
+    return sorted(
+        p for p in tracked
+        if not is_protected(p) and not is_negated(p)
+        and (matches_private_class(p) or is_ignored(p))
+    )
