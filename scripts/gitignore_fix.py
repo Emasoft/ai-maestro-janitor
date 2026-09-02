@@ -15,7 +15,9 @@ the protected-prefix allowlist (`design/**`, `.claude/project/memory/**`). This 
 no second pattern list — it only decides WHAT git says is (un)covered, via `git check-ignore`,
 same as the `gitignore-coverage` detector.
 
-Exit code: always 0 (a report, not a gate) unless usage is wrong (2).
+Exit code: 0 whenever git answered (a report, not a gate — "nothing to do" is 0 too);
+1 when git itself failed (the answer is UNKNOWN, so nothing is proposed and nothing is
+written); 2 on wrong usage.
 """
 from __future__ import annotations
 
