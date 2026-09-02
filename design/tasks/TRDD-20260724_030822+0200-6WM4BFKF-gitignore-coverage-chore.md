@@ -22,10 +22,19 @@ eht: []
   `dispatch.py` at a 3600 s cadence, in the roster page). Re-verified against the six
   acceptance criteria today, not inferred from the commit: 1–3 by the shipped tests (uncovered
   class reported with its canonical pattern; an existing rule does not clear an already-tracked
-  file; protected prefixes recognised); 4 by a live run on this repo — zero findings, exit 0; 5
-  by `git status` byte-identical after that run; 6 by the 3.4.9 publish gate (ruff + mypy + the
+  file; protected prefixes recognised); 4 by a live run on this repo — zero findings, exit 0 —
+  **made meaningful by a control**, because the detector fails OPEN to silence and an empty
+  run alone cannot tell CLEAN from DID-NOT-RUN (review-fork finding): the identical invocation
+  (`CLAUDE_PROJECT_DIR=<root> uv run --script --quiet scripts/detectors/gitignore-coverage.py`)
+  on a seeded repo with a tracked `.env` and no `.gitignore` printed the coverage line naming
+  `dotenv (add .env)` among 12 uncovered classes; adding the `.env` rule and re-running printed
+  the separate contamination line `1 file(s) are ignored by a rule yet still TRACKED: .env …
+  remedy is git rm --cached` — which is also criterion 2 observed live (contamination means
+  "ignored by a rule AND still tracked"; a tracked file in an UNCOVERED class surfaces through
+  the coverage line first, then as contamination once the rule exists). 5 by `git status`
+  byte-identical after the run on this repo; 6 by the 3.4.9 publish gate (ruff + mypy + the
   full suite, green, with this code in the range). Fleet census the same day: ten projects carry
-  LOW `ADVISORY-GITIGNORE-COVER` findings, so the detector reaches real repos.
+  LOW `ADVISORY-GITIGNORE-COVER` findings, so dispatch's run path reaches real repos too.
 - **D5 (the `/janitor-gitignore-fix` remedy command) was NOT built and is NOT required by the
   criteria above** — spun out as its own card, **TRDD-VMXAF9IY** (`todo`), because the fleet
   findings are being re-recorded hourly with nobody remedying them by hand.
