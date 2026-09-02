@@ -120,7 +120,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=361cfe6a0ef8 generated=2026-09-01T20:24:49+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=c33cc94950f2 generated=2026-09-02T08:59:50+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -156,6 +156,15 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
   - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
   - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
+
+**janitor-compaction-floor-gate-clear-lever** — the cache-expired trigger never fires
+- [janitor-compaction-floor-gate-clear-lever](.claude/project/memory/janitor-compaction-floor-gate-clear-lever.md) — the cache-expired trigger never fires
+
+**janitor-compaction-floor-gate-hooks** — the hook says compact but I just compacted
+- [janitor-compaction-floor-gate-hooks](.claude/project/memory/janitor-compaction-floor-gate-hooks.md) — the hook says compact but I just compacted
+
+**janitor-compaction-floor-gate-triggers** — the janitor compacted my context over and over
+- [janitor-compaction-floor-gate-triggers](.claude/project/memory/janitor-compaction-floor-gate-triggers.md) — the janitor compacted my context over and over
 
 **janitor-detector-and-hook-roster** — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
