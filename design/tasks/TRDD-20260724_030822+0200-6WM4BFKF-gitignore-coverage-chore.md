@@ -1,9 +1,9 @@
 ---
 trdd-id: 6WM4BFKF
 title: gitignore-coverage chore — prove the ignore file covers every private class BEFORE a secret can be tracked
-column: testing
+column: published
 created: 2026-07-24T03:08:22+0200
-updated: 2026-09-02T15:50:25+0200
+updated: 2026-09-02T21:36:00+0200
 current-owner: main-session
 task-type: security
 scope: project
@@ -62,8 +62,8 @@ eht: []
   matcher's three shapes with their nearest non-matches) + `test_tracked_ignored` = 15 passed;
   ruff + mypy clean; this repo silent again on a live run (criterion 4 control holds); the
   fork's settling command prints `CRITERION-2 MET`.
-  **NEXT ACTION:** `uv run scripts/publish.py --patch`; on green CI + install, add the fix SHA
-  to `implementation-commits:` and move to `complete`. Nothing else is open on this card.
+  **DONE 2026-09-02 21:36:** `10faea1e` shipped in v3.4.11 (CI red on an unrelated pyright
+  MINOR) and v3.4.12 (CI green on all five runs), installed at user scope. Card `published`.
 - **(superseded by the reopen above) ✅ CLOSED 2026-09-02 13:36 — done-but-unclosed since `e607e95a`.** The card sat at `planned`
   for six weeks after its detector shipped (`scripts/detectors/gitignore-coverage.py`,
   `scripts/lib/gitignore_coverage.py`, `tests/test_gitignore_coverage.py`, wired in
@@ -193,6 +193,9 @@ ledger; a debris class is informational.
 
 ## Approval log
 
+- 2026-09-02T21:36:00+0200 — PUBLISHED by janitor-main-session (Tier 0, own scope). The
+  reopen's fix `10faea1e` (root-anchored class matcher, criterion 2) is in v3.4.12, CI green
+  on all five runs, installed at user scope.
 - 2026-09-02T13:48:03+0200 — REOPENED complete → testing by janitor-main-session. Review fork:
   criterion 2 closed on the code's contamination predicate, not the card's; the shipped code
   never reported a tracked file in an uncovered class. Fixed in this commit; complete after the
