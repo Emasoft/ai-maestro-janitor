@@ -1,9 +1,9 @@
 ---
 trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
-column: dev
+column: testing
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T01:50:00+0200
+updated: 2026-09-02T02:03:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-NDAARSXT, TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
-implementation-commits: [dec760ed]
+implementation-commits: [dec760ed, 19a52dc8, d6c82d60]
 ---
 
 # The lever is ON in settings.json and the daemon still runs the clear in shadow mode

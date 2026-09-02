@@ -3,7 +3,7 @@ trdd-id: 38PB1B86
 title: janitor-reload fires on every fleet-update epoch and on every clear-born session — gate it on relevance and seed the ack for clear
 column: dev
 created: 2026-09-02T01:36:47+0200
-updated: 2026-09-02T01:36:47+0200
+updated: 2026-09-02T02:03:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [290, TRDD-VHPYSN56, TRDD-Z582IKIR, TRDD-HREGVXYP]
-implementation-commits: []
+implementation-commits: [2e9a76c8]
 ---
 
 # `[janitor-reload]` is emitted far more often than a plugin THIS session runs actually changes
