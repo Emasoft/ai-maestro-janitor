@@ -1,15 +1,16 @@
 ---
 trdd-id: 0A8FN3W3
 title: memory_txn CLI begin records its own dead pid as owner so any concurrent resume reaps a live staging txn
-column: testing
+column: complete
 created: 2026-09-02T08:21:39+0200
-updated: 2026-09-02T08:40:27+0200
+updated: 2026-09-02T13:33:21+0200
 current-owner: janitor-memory-subconscious-agent
 task-type: bugfix
 min-approval-requirement: user
 scope: project
 labels: [memory-txn, janitor-machinery, concurrency, data-loss-adjacent]
 severity: high
+implementation-commits: [7ad5f842]
 ---
 
 # memory_txn CLI `begin` records its own dead pid as owner, so any concurrent `resume` reaps a live staging txn
@@ -77,6 +78,9 @@ may it be reclaimed.
 
 ## Approval log
 
+- 2026-09-02T13:33:21+0200 — COMPLETED by janitor-main-session. Fix `7ad5f842` shipped in
+  3.4.9 (publish gate + GitHub CI green, installed at user scope, daemon respawned on it at
+  13:32:33). All acceptance boxes ticked; nothing left to observe.
 - 2026-09-02T08:40:27+0200 — APPROVED by USER ("0A8FN3W3: yes"). Promoted `proposal` → `dev`
   (moved to `design/tasks/`); implemented by a lean-worker under janitor-main-session rather than
   routed through `ticket_cli.py`, because the USER's reply is the approval and the fix is one

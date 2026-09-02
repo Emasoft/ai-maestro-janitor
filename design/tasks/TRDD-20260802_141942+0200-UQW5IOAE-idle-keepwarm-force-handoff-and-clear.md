@@ -1,15 +1,15 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: testing
+column: complete
 created: 2026-08-02T14:19:42+0200
-updated: 2026-09-02T08:40:27+0200
+updated: 2026-09-02T13:33:21+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 blocked-by: []
-implementation-commits: [d2a5204, 67802e0, 5ecf47f2]
+implementation-commits: [d2a5204, 67802e0, 5ecf47f2, 196d5eed]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
@@ -45,8 +45,12 @@ the card:
   200k session pays ~20k weighted per fire versus a ~137k one-off re-cache after a clear, so
   lowering it only wins after roughly an hour of idling. Left as a knob, not changed here.
 
-**NEXT ACTION:** none on this card once the shadow-removal commit lands and the next publish
-ships it. Card → `testing` on commit, `complete` after the publish.
+**✅ CLOSED 2026-09-02 13:33** — `196d5eed` shipped in 3.4.9 (gate + CI green, installed at
+user scope, daemon respawned on it 13:32:33). Card → `complete`.
+
+**NEXT ACTION (superseded by the close above):** none on this card once the shadow-removal
+commit lands and the next publish ships it. Card → `testing` on commit, `complete` after the
+publish.
 
 ### ⏵ 2026-08-26 — column corrected `testing` → `todo`. Nothing is being tested.
 
@@ -311,7 +315,10 @@ into a pane it does not own)?
       session would apply — silently turning a failed handoff into a destructive clear while
       every other test stayed green. Both tests are self-proving: (a) fails if `_fire` is never
       reached, (b) fails if `main()` never reaches the write.
-- [ ] **(REPLACED per advisor — the old wording was unfalsifiable.)** Not "observed working
+- [x] **(REPLACED per advisor — the old wording was unfalsifiable.)** ✅ 2026-09-02: closed on
+      LIVE data, not shadow data — see the STATE entry of 2026-09-02 (5 FIRE / 52 HOLD census
+      00:47→08:50, zero policy false positives; the 04:23 AgentlensPro fire IS the staged
+      end-to-end drill). Original wording kept below. Not "observed working
       once": that proves one TRUE POSITIVE, while the risk on an irreversible action is a
       FALSE positive, and this card's own data (10/45 candidates, all dead) says a live
       firing may never occur — so the old criterion waited on an event that may not happen,
@@ -463,6 +470,10 @@ genuinely open, and is listed rather than quietly closed.
 
 ## Approval log
 
+- 2026-09-02T13:33:21+0200 — COMPLETED by janitor-main-session. USER ruling 08:31 ("wait. find
+  a better solution and implement it asap") satisfied by `196d5eed` (shadow lane deleted, evidence
+  from the live audit channel), shipped in 3.4.9 — gate + CI green, installed, daemon respawned.
+  Box 5 closed on live data (see STATE 2026-09-02). 5/5 boxes ticked.
 - 2026-08-14T18:10:00+0200 — Advisor verdict recorded; acceptance boxes 2 and 5 REWRITTEN
   (box 5's old form was unfalsifiable), box 3 marked blocked on TRDD-OO301H7D. Card stays
   `todo`: the verdict was DO NOT SHIP AS DESIGNED, and three STATE claims are now marked
