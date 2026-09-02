@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.10] — 2026-09-02
+
+### Bug Fixes
+
+- **gitignore-coverage:** A tracked file in an UNCOVERED class is contamination too, and a ! re-include never is (TRDD-6WM4BFKF) (8d563f8)
+
+### Documentation
+
+- **TRDD-0A8FN3W3, TRDD-UQW5IOAE:** Testing → complete — both fixes shipped in 3.4.9 (194c7b4)
+- **TRDD-6WM4BFKF:** Planned → complete, done-but-unclosed since e607e95a; spin D5 out as TRDD-VMXAF9IY (ca64ac5)
+- **TRDD-6WM4BFKF:** Criterion 4 evidence gets its control — a silent run is the detector's fail-open shape, not proof of clean (2899fdc)
 ## [3.4.9] — 2026-09-02
 
 ### Bug Fixes
@@ -21,6 +32,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **publish:** [G1b] block a NEW personal e-mail address in the pushed diff (TRDD-QW7K3M2V) (da47129)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.9 (0bb8ac9)
 
 ### Refactor
 
