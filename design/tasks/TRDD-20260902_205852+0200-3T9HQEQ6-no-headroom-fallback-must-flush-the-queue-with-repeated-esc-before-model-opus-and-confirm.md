@@ -1,9 +1,9 @@
 ---
 trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
-column: todo
+column: dev
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T20:58:52+0200
+updated: 2026-09-02T21:58:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
