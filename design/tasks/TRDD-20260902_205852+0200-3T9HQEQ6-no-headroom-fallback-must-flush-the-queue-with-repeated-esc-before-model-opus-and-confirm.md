@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T22:52:00+0200
+updated: 2026-09-02T22:40:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,9 +22,9 @@ created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:52
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:40
 
-- **Review-fork correction, 22:52.** The worker's loop treated an UNREADABLE pane (reader
+- **Review-fork correction, 22:40.** The worker's loop treated an UNREADABLE pane (reader
   `None`, or a raising reader swallowed by `except Exception`) as "queue clear" after one
   ESC and typed `/model opus` blind — on exactly the pane the daemon logs every tick as
   `rotation-esc: cannot read the pane … — skipped`. That is the card's own bug re-created
