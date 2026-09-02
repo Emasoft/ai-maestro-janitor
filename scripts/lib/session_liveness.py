@@ -81,6 +81,11 @@ _TAIL_FALLBACK_ROWS = 12
 # user prompt echoes as `❯ text`, a tool row as `⏺`, an agent message as `›` — all at column
 # 0 too, so "column 0" alone admitted the owner's OWN prompt quoting the red line.
 _STATUS_ROW_GLYPHS = "✻✽✶✢✳·"
+# Every glyph that opens a NEW row in Claude Code's transcript view: the status glyphs above,
+# a tool row `⏺`, a prompt echo `❯`, an agent message `›`, a recap `※`, an agent-list entry
+# `◯`. A row that starts with none of these (after stripping) is the wrap continuation of the
+# row above it — the terminal's continuation indent is unmeasured, so this does not assume one.
+_ROW_MARKER_GLYPHS = _STATUS_ROW_GLYPHS + "⏺❯›※◯"
 
 
 def retry_wedge_attempt_at_tail(text: str) -> int | None:
@@ -111,10 +116,20 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
         window = rows[max(0, top - _STATUS_BLOCK_ROWS):top]
     else:
         window = rows[-_TAIL_FALLBACK_ROWS:]
-    for row in reversed(window):
+    # A status row re-wraps at the terminal width (the session-limit line is ~70 chars, so a
+    # pane under ~72 columns splits `Retrying in …` from `attempt N/M`). Join each glyph-led
+    # row with the rows below it up to the next row marker, then match — probed 2026-09-02:
+    # per-row matching returned None at 60 and 48 columns. An indented QUOTE of the wedge line
+    # is not stitched in: it starts with a status glyph after stripping, i.e. it is a marker.
+    for i, row in enumerate(window):
         if row[:1] not in _STATUS_ROW_GLYPHS:
             continue  # prose, a prompt echo, a tool row — never Claude Code's own status row
-        m = _RETRY_WEDGE_RE.search(row)
+        joined = [row]
+        for cont in window[i + 1:]:
+            if cont.strip()[:1] in _ROW_MARKER_GLYPHS or _INPUT_BOX_BORDER_RE.match(cont):
+                break
+            joined.append(cont.strip())
+        m = _RETRY_WEDGE_RE.search(" ".join(joined))
         if m:
             return int(m.group(1))
     return None

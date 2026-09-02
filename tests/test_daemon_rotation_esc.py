@@ -238,6 +238,17 @@ def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
     assert sl.retry_wedge_attempt_at_tail(session_limit) == 1
     plain_429 = "· 429 Rate limited · Retrying in 0s · attempt 5/300\n" + CHROME
     assert sl.retry_wedge_attempt_at_tail(plain_429) == 5
+    # A narrow pane wraps the status row (per-row matching returned None at 60 columns). The
+    # continuation indent is unmeasured, so both an indented and a flush-left wrap must join.
+    import textwrap
+    status = session_limit.split("\n")[0]
+    for width in (110, 72, 60, 48):
+        for indent in ("  ", ""):
+            wrapped = "\n".join(textwrap.wrap(status, width, subsequent_indent=indent))
+            assert sl.retry_wedge_attempt_at_tail(wrapped + "\n" + CHROME) == 1, f"{width} cols indent={indent!r}"
+    # The join must not stitch an indented QUOTE of the wedge line onto a calm status row.
+    stitched = "✻ Cogitated for 9s\n  " + WEDGE_LINE + "\n" + CHROME
+    assert sl.retry_wedge_attempt_at_tail(stitched) is None
     # A column-0 copy of the line far above the status block (an old turn) does not count.
     old_turn = WEDGE_LINE + "\n" + "\n".join(f"⏺ step {i}" for i in range(12)) + "\n" + CHROME
     assert sl.retry_wedge_attempt_at_tail(old_turn) is None
