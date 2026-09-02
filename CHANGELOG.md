@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.6] — 2026-09-02
+
+### Bug Fixes
+
+- **clear-lane:** Idle means no HUMAN turn — a heartbeat fire no longer keeps an armed session out of the external clear (TRDD-O7UCNNN2) (438f29e)
+
+### Documentation
+
+- Add TRDD-O7UCNNN2 — a heartbeat fire is a substantive transcript turn, so an armed session is never idle to the external-clear lane (measured 2026-09-02: enabled()=True, 5/5 instances active at every beat, 1 h idle floor unreachable) (774d3fb)
+- Six clear-lane cards re-blocked on TRDD-O7UCNNN2 — XCJFCJUX shipped in 3.4.4 (probe: enabled()=True) but its last box and the whole drill wait on the heartbeat-activity fix (025e54b)
 ## [3.4.5] — 2026-09-02
 
 ### Documentation
@@ -13,6 +23,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **reload:** Gate [janitor-reload] on a real version change of a plugin THIS session runs, and say which (janitor#290 §2, TRDD-38PB1B86) (58d2372)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.5 (e57018d)
 ## [3.4.4] — 2026-09-02
 
 ### Bug Fixes
