@@ -59,7 +59,7 @@ CHANNEL ASYMMETRY, load-bearing: the rules need a READ-BACK, so they hold only o
 
 ## See also
 
-- [[janitor-compaction-floor-gate]] — the clear/compact levers whose keystrokes obey the injector rules on this page.
+- [[janitor-compaction-floor-gate-clear-lever]] — the clear/compact levers whose keystrokes obey the injector rules on this page.
 
 ## Notes and lessons learned
 
