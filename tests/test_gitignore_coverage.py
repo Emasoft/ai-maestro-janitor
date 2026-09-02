@@ -95,10 +95,18 @@ def test_a_tracked_file_in_an_uncovered_class_is_an_offender_even_with_no_rule()
 
 
 def test_class_matcher_shapes_follow_the_canonical_pattern_not_a_loose_substring() -> None:
-    """The three pattern shapes in the table, each next to its nearest non-match."""
+    """The four pattern shapes in the table, each next to its nearest non-match.
+
+    The `/dir/` shape is the 2026-09-02 fleet-sweep fix: unanchored `reports/` matched a skill's
+    tracked `templates/reports/*.md` in another repo and would have prescribed `git rm --cached`
+    for it hourly. The rules place `reports/`, `*_dev/` and `.trashcan/` at the ROOT only.
+    """
     m = gc.matches_private_class
     assert m("a/b/.env.local") and not m("a/b/env.local")      # bare glob: basename, any depth
-    assert m("x/reports/r.md") and not m("x/reports")         # `dir/`: a directory component only
+    assert m("x/node_modules/y.js") and not m("x/node_modules")  # `dir/`: a dir component, any depth
+    assert m("reports/r.md") and not m("reports")               # `/dir/`: the ROOT directory only …
+    assert not m("skills/x/templates/reports/r.md")             # … never a nested one
+    assert m("scripts_dev/x.py") and not m("pkg/scripts_dev/x.py")
     assert m(".claude/settings.local.json")                     # inner slash: anchored at the root
     assert not m("pkg/.claude/settings.local.json")
     assert not m("keychain.py") and not m("envelope.txt")     # no substring matching

@@ -42,6 +42,12 @@ class PrivateClass:
 
 # Table-driven, per TRDD-6WM4BFKF D1 — "a table of classes, not a regex pile". Extending this is
 # the intended way to add coverage; adding a branch elsewhere is not.
+#
+# `/reports/`, `/*_dev/` and `/.trashcan/` are ROOT-anchored on purpose: the rules that define
+# them put them at the project root, and nothing else. Unanchored, `reports/` named
+# `skills/<x>/templates/reports/*.md` — a skill's report TEMPLATES, tracked on purpose — in a
+# fleet repo on the 2026-09-02 sweep, and would have prescribed `git rm --cached` for them every
+# hour. `.venv/` and `node_modules/` stay unanchored: a nested one is still machine bulk.
 PRIVATE_CLASSES: tuple[PrivateClass, ...] = (
     PrivateClass("dotenv", ".env", ".env", "environment files routinely hold live credentials"),
     PrivateClass("dotenv-variant", ".env.local", ".env.*", "per-env variants leak the same way"),
@@ -53,18 +59,18 @@ PRIVATE_CLASSES: tuple[PrivateClass, ...] = (
         "machine-local Claude settings, often carrying tokens and absolute home paths",
     ),
     PrivateClass(
-        "reports", "reports/x.md", "reports/",
+        "reports", "reports/x.md", "/reports/",
         "agent reports carry absolute paths, hostnames and quoted source",
     ),
     PrivateClass(
-        "dev-dirs", "scripts_dev/x.py", "*_dev/",
+        "dev-dirs", "scripts_dev/x.py", "/*_dev/",
         "the _dev folders are the sanctioned home for unpublished work",
     ),
     PrivateClass("venv", ".venv/pyvenv.cfg", ".venv/", "a virtualenv is machine-specific bulk"),
     PrivateClass("node-modules", "node_modules/x.js", "node_modules/", "dependency bulk"),
     PrivateClass("ds-store", ".DS_Store", ".DS_Store", "macOS directory metadata"),
     PrivateClass("logs", "debug.log", "*.log", "logs quote whatever the run touched"),
-    PrivateClass("trashcan", ".trashcan/x", ".trashcan/", "safe-delete staging holds deleted work"),
+    PrivateClass("trashcan", ".trashcan/x", "/.trashcan/", "safe-delete staging holds deleted work"),
 )
 
 # NEVER propose ignoring these, and never report them as leaks. They are PROJECT scope and are
@@ -112,16 +118,22 @@ def matches_private_class(
     the review fork on the 2026-09-02 close: a seeded repo with a tracked `.env` and no ignore
     file printed no contamination line at all). The module docstring's ban on a gitignore
     parser is about the USER's file — its negations and precedence. This matches only the
-    thirteen patterns WE own, which have three fixed, simple shapes: a bare name or glob
-    matches the basename at any depth, a `dir/` pattern matches any directory component, and a
+    thirteen patterns WE own, which have four fixed, simple shapes, each with git's meaning: a
+    bare name or glob matches the basename at any depth, a `dir/` pattern matches any directory
+    component, a `/dir/` pattern matches ONLY the root directory (the 2026-09-02 fleet sweep:
+    unanchored `reports/` named a skill's tracked `templates/reports/` as contamination), and a
     pattern with an inner slash is anchored at the root.
     """
     norm = path.removeprefix("./")
     parts = norm.split("/")
     for c in classes:
-        pat = c.pattern
+        rooted = c.pattern.startswith("/")
+        pat = c.pattern.removeprefix("/")
         if pat.endswith("/"):
-            if any(fnmatch.fnmatchcase(d, pat[:-1]) for d in parts[:-1]):
+            # `parts[:-1]` is every directory component; a rooted pattern may match only the
+            # first. Both are empty for a root-level FILE, so `reports` (a file) never matches.
+            dirs = parts[:-1][:1] if rooted else parts[:-1]
+            if any(fnmatch.fnmatchcase(d, pat[:-1]) for d in dirs):
                 return True
         elif "/" in pat:
             if norm == pat or norm.startswith(pat + "/"):
