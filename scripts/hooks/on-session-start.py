@@ -557,7 +557,14 @@ def main() -> int:
     # reload above the context threshold SHRINKS FIRST, meaning the fork would `/clear` the
     # very conversation it was forked to preserve. A missing enum value became destructive
     # by composition with a feature added months later.
-    if source in ("startup", "resume", "fork"):
+    #
+    # "clear" added 2026-09-02 (janitor#290 §1, TRDD-38PB1B86) — the SAME omission a second
+    # time: a `/clear`-born session is also a fresh process on the current plugins, and
+    # without the seed every one of them paid one spurious `[janitor-reload]` (measured by
+    # the filer: cleared 13:38:28, marker 13:38:57, against a generation stamped 10:30).
+    # The tuple is named so the next SessionStart source value gets added HERE, once.
+    fresh_process_sources = ("startup", "resume", "fork", "clear")
+    if source in fresh_process_sources:
         try:
             state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
             # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a

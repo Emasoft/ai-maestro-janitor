@@ -49,8 +49,10 @@ never answered by this project until 2026-09-02. Re-checked against the tree ton
 
 ## Acceptance
 
-- [ ] item 1: the seed tuple covers `clear` (and the enum is spelled once); a test asserts a
-      `source=clear` SessionStart seeds `reload-acked.ts` to the current generation
+- [x] item 1: the seed tuple covers `clear` (named `fresh_process_sources`, one place);
+      `tests/test_session_start_reload_ack_seed.py` runs the REAL hook in a sandbox for each
+      of startup/resume/fork/clear and asserts the stamp lands with the flag's generation,
+      plus a `compact` control that must not seed — 5/5, 2026-09-02
 - [ ] item 2: `_phase_plugin_reload` compares the CHANGED plugin set against this session's
       enabled plugins and stays silent when they do not intersect; the marker line carries the
       changed plugin(s) and versions; a test pins both the silent and the firing case
