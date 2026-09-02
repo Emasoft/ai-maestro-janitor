@@ -47,12 +47,12 @@ eht: []
   proven with an empty default store) + a classify test.
 - **Confirmed causal, not confounded by the 15:48:54 manual login** (the review fork's
   challenge, settled from the log): from 15:49:06 to 15:54:41 — AFTER the manual login and
-  BEFORE the symlink took effect — every tick still ended `live account emanuele.sabetta…
+  BEFORE the symlink took effect — every tick still ended `live account ema***…
   has no usable slot twin to probe — staying put`. The first tick after the symlink,
-  15:55:50, logged `keepalive: refreshed fmuaddib@gmail.com, ipazia.emasoft@gmail.com`
+  15:55:50, logged `keepalive: refreshed fmu***, ipa***` (the two spare-slot accounts)
   (emitted only after `refresh_oauth_token` returned an access token AND `write_slot`
   succeeded — read in `_keepalive_refresh`), and at 15:55:53 the same tick ended `live
-  emanuele.sabetta@gmail.com 5h=25% 7d=4% — within limits`. `oauth-health` moved from
+  ema*** 5h=25% 7d=4% — within limits`. `oauth-health` moved from
   `days=−4.0 / −3.7` to `0.3` on both spare slots. The twin path is the same TLS call: `read_slot`
   → `_blob_locally_expired` → `_refresh_and_heal_slot` → `refresh_oauth_token` → `urlopen`
   (rotator.py 1827–1840), so a fresh login could not have unblocked it on its own.
