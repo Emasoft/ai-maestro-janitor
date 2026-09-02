@@ -61,7 +61,11 @@ def _check_ignore_verdicts(root: Path, paths: list[str]) -> dict[str, str]:
         capture_output=True, text=True, check=False, input="\0".join(paths) + "\0", env=git_env,
     )
     if proc.returncode not in (0, 1):
-        return {}
+        # Fail fast: an empty verdict map would read as "nothing is ignored", and with
+        # --apply that appends EVERY class pattern on a git error. Exit 1 means "the answer
+        # is unknown", never "the answer is none" — a report can be wrong silently, a write
+        # cannot.
+        sys.exit(f"error: git check-ignore failed (rc={proc.returncode}): {proc.stderr.strip()}")
     fields = proc.stdout.split("\0")
     verdicts: dict[str, str] = {}
     for i in range(0, len(fields) - 3, 4):
@@ -80,7 +84,9 @@ def _tracked_files(root: Path) -> list[str]:
         capture_output=True, text=True, check=False, env=git_env,
     )
     if proc.returncode != 0:
-        return []
+        # Same reason as _check_ignore_verdicts: an empty tracked list hides every
+        # contamination offender behind a git error. Unknown is not "none".
+        sys.exit(f"error: git ls-files failed (rc={proc.returncode}): {proc.stderr.strip()}")
     return [p for p in proc.stdout.split("\0") if p]
 
 
@@ -99,9 +105,18 @@ def main() -> int:
     offenders = gc.tracked_offenders(tracked, lambda p: verdicts.get(p) == "negated")
 
     gitignore = root / ".gitignore"
-    current = gitignore.read_text().splitlines() if gitignore.is_file() else []
+    # newline="" on BOTH the read and the write: universal-newline mode would silently turn
+    # CRLF into LF on read, and the append would then rewrite every existing line ending.
+    current_text = (
+        gitignore.open(encoding="utf-8", newline="").read() if gitignore.is_file() else ""
+    )
     new_patterns = [c.pattern for c in uncovered]
-    proposed = current + new_patterns
+    # APPEND, never re-join: the existing bytes are kept verbatim (CRLF endings, a missing
+    # final newline, trailing blank lines — all as found), and the new lines go after them.
+    # Splitting into lines and re-joining would "normalise" the file and break the card's
+    # byte-identical guarantee for everything the user already had.
+    separator = "" if not current_text or current_text.endswith("\n") else "\n"
+    proposed_text = current_text + separator + "".join(p + "\n" for p in new_patterns)
 
     if not new_patterns and not offenders:
         print("[gitignore-fix] up to date — no missing coverage, no tracked private files.")
@@ -109,13 +124,13 @@ def main() -> int:
 
     if new_patterns:
         diff = difflib.unified_diff(
-            [line + "\n" for line in current],
-            [line + "\n" for line in proposed],
+            current_text.splitlines(keepends=True),
+            proposed_text.splitlines(keepends=True),
             fromfile=".gitignore",
             tofile=".gitignore (proposed)",
             lineterm="",
         )
-        print("\n".join(diff))
+        print("".join(diff))
     else:
         print("[gitignore-fix] .gitignore already covers every private class.")
 
@@ -130,7 +145,7 @@ def main() -> int:
             print("\n[gitignore-fix] --apply: nothing to append.")
             return 0
         tmp = gitignore.with_suffix(gitignore.suffix + f".tmp.{os.getpid()}")
-        tmp.write_text("\n".join(proposed) + "\n", encoding="utf-8")
+        tmp.write_text(proposed_text, encoding="utf-8", newline="")
         os.replace(tmp, gitignore)
         print(f"\n[gitignore-fix] appended {len(new_patterns)} pattern(s) to .gitignore.")
 

@@ -3,7 +3,7 @@ trdd-id: VMXAF9IY
 title: a janitor-gitignore-fix command — the remedy path for gitignore-coverage findings (D5 of TRDD-6WM4BFKF)
 column: testing
 created: 2026-09-02T13:36:41+0200
-updated: 2026-09-02T22:35:00+0200
+updated: 2026-09-02T23:13:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -16,7 +16,16 @@ eht: []
 relevant-rules: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:35
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 23:13
+
+Orchestrator review correction, 23:38 (on top of the worker's `1c576fd4`): (1) a failing
+`git check-ignore` / `git ls-files` returned `{}` / `[]`, which read as "nothing ignored / nothing
+tracked" — with `--apply` that would have appended EVERY class pattern on a git error; both now
+`sys.exit` non-zero (unknown ≠ none). (2) the write path split lines and re-joined them, so a
+`.gitignore` with CRLF endings or no final newline was normalised, not appended; it now reads
+and writes with `newline=""` and appends after the existing bytes verbatim. Criterion-3 test
+re-seeded with CRLF + no trailing newline and asserts on bytes; new
+`test_a_git_failure_exits_nonzero_and_writes_nothing`.
 
 Shipped: `scripts/gitignore_fix.py` (propose/`--apply`, reuses `lib/gitignore_coverage`'s
 class table + `is_protected`, git-check-ignore-backed, never runs `git rm`), `skills/janitor-

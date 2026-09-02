@@ -67,19 +67,21 @@ def test_a_tracked_dotenv_prints_git_rm_cached_but_never_runs_it(tmp_path: Path)
 
 
 def test_apply_preserves_existing_lines_order_and_negations_byte_identical(tmp_path: Path) -> None:
-    """Criterion 3: --apply only appends; existing lines, order, and `!` lines stay byte-identical."""
+    """Criterion 3: --apply only appends; existing bytes (CRLF, `!` lines, no final newline) stay byte-identical."""
     repo = tmp_path / "seed"
     _seed(repo)
-    original = "*.log\n/.trashcan/*\n!/.trashcan/.gitkeep\n"
-    (repo / ".gitignore").write_text(original)
+    # Deliberately hostile to a split-and-rejoin implementation: a CRLF line, a negation, and
+    # NO trailing newline. Byte-identical means these survive exactly as written.
+    original = b"*.log\r\n/.trashcan/*\n!/.trashcan/.gitkeep"
+    (repo / ".gitignore").write_bytes(original)
 
     _run(repo, "--apply")
 
-    after = (repo / ".gitignore").read_text()
-    assert after.startswith(original)
-    prefix_lines = original.splitlines()
-    after_lines = after.splitlines()
-    assert after_lines[: len(prefix_lines)] == prefix_lines
+    after = (repo / ".gitignore").read_bytes()
+    assert after.startswith(original + b"\n"), after
+    appended = after[len(original) + 1 :].decode()
+    assert appended and all(line for line in appended.rstrip("\n").split("\n")), appended
+    assert b".env" in after  # something real was appended after the preserved prefix
 
 
 def test_protected_prefixes_never_appear_in_either_direction(tmp_path: Path) -> None:
@@ -101,3 +103,18 @@ def test_protected_prefixes_never_appear_in_either_direction(tmp_path: Path) -> 
     assert "design" not in proposed.stdout
     assert "memory" not in proposed.stdout
     assert "git rm --cached" not in proposed.stdout
+
+
+def test_a_git_failure_exits_nonzero_and_writes_nothing(tmp_path: Path) -> None:
+    """Fail fast: when git cannot answer (not a repo), --apply exits non-zero and never touches .gitignore."""
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    (not_a_repo / ".gitignore").write_text("*.log\n")
+
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--repo", str(not_a_repo), "--apply"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode != 0, proc.stdout
+    assert "git ls-files failed" in proc.stderr, proc.stderr
+    assert (not_a_repo / ".gitignore").read_text() == "*.log\n"  # an unknown answer writes nothing
