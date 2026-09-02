@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.13] — 2026-09-02
+
+### Bug Fixes
+
+- **session-liveness:** Join a wrapped status row before matching the retry wedge (TRDD-NACCL0CB) (4a4b857)
+- **session-liveness:** The middle dot is not a join-stopper — a wrapped status row can continue with it (TRDD-NACCL0CB) (d3dde9f)
+- **daemon:** Run the rotation-ESC pass from the 60 s rotator tick too (TRDD-NACCL0CB) (32afb28)
+- **rotator:** Never land on the Fable-spent account — is_active is the LIMIT flag, and a burn projection is not a wall (TRDD-Q0Y4M1TF) (43861b9)
+
+### Documentation
+
+- **TRDD-6WM4BFKF:** Published — 10faea1e shipped in v3.4.12 (CI green) and installed (b78ea6d)
+- **TRDD-X6I04SAO, TRDD-NACCL0CB:** V3.4.12 live in the daemon (restaged 21:28:04); X6I04SAO boxes 1-3 verified on the DATA copy, box 4 and the rotation-ESC live box remain (6784c45)
+- **TRDD-X6I04SAO:** Box 1 re-proven with the default store emptied — the fallback path, not the symlink, supplies the 136 CAs (a2504d7)
+- **TRDD-X6I04SAO:** Box 1 — both fallback rungs exercised (certifi 136, OS bundle 128 with certifi hidden) (ec0b524)
+- **tls_context:** The certifi comment had it backwards — a fresh python.org build has NO certifi; Install Certificates.command is what adds it (TRDD-X6I04SAO) (5d3c82d)
+- **TRDD-3T9HQEQ6:** Todo → dev (9277f03)
+- **TRDD-3T9HQEQ6:** Dev → todo — worker died mid-edit, partial work parked in stash@{0} (12a4c98)
 ## [3.4.12] — 2026-09-02
 
 ### Bug Fixes
@@ -18,6 +36,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-X6I04SAO:** 3.4.11 CI red on the certifi pyright MINOR → 301fbcec for 3.4.12; mixed-commit note on c7a8d46a; tonight's wall as split evidence for box 4 (94d6afd)
 - Approve TRDD-NACCL0CB → testing (USER ruling; shipped in 625d7809); add TRDD-3T9HQEQ6 — no-headroom fallback must flush the queue with repeated ESC before /model opus + confirm (e91bfab)
 - Add TRDD-N954KWUC — one screen-state reader drives every keystroke the janitor types (USER architecture directive 2026-09-02) (40b2291)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.12 (2f5883f)
 ## [3.4.11] — 2026-09-02
 
 ### Bug Fixes
