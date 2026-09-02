@@ -598,3 +598,22 @@ def test_a_field_still_busy_after_five_escs_types_nothing(monkeypatch) -> None:
     esc_count = sum(1 for c in calls if "Escape" in c)
     assert esc_count == 5, f"exactly 5 ESCs are spent, no more: {calls!r}"
     assert not any("/model opus" in c for c in calls), f"nothing must be typed: {calls!r}"
+
+
+def test_an_unreadable_pane_after_the_first_esc_types_nothing(monkeypatch) -> None:
+    """A channel whose pane cannot be read back (reader returns None — the daemon's live
+    `rotation-esc: cannot read the pane … — skipped` case) must be refused after the one
+    mandatory ESC, never treated as "queue clear": typing `/model opus` into a field that
+    may still hold a queued command is the exact bug this loop exists to prevent."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: None, is_typing=lambda _t: False,
+    )
+    assert ok is False
+    assert why == "pane not readable — typing nothing"
+    esc_count = sum(1 for c in calls if "Escape" in c)
+    assert esc_count == 1, f"one ESC, then refuse — no ESC budget burnt on a blind channel: {calls!r}"
+    assert not any("/model opus" in c for c in calls), f"nothing must be typed blind: {calls!r}"

@@ -1141,14 +1141,21 @@ def send_model_switch_true_error(
             "terminal_trigger",
             f"[{label}] queue-flush ESC {attempt}/{_QUEUE_FLUSH_MAX_ESC}",
         )
-        try:
-            pane = read_fn(terminal)
-        except Exception:  # noqa: BLE001 — a flaky read must not abort the flush loop
-            pane = None
-        # An unreadable pane cannot PROVE the queue is still busy (same permissive rule as
-        # `fleet_inject.command_plan_field_busy`), so it is treated as clear rather than
-        # spending the remaining ESC budget on a channel we cannot observe.
-        if pane is None or prompt_field_is_empty(pane):
+        pane = read_fn(terminal)
+        # An unreadable pane (read_pane_text returns None for a channel with no readback)
+        # cannot PROVE the queue is clear, and typing `/model opus` into a field that may
+        # still hold a queued command reproduces the very bug this loop exists to fix —
+        # so, like `wait_for_empty_prompt` and the daemon's rotation-esc pass, we REFUSE
+        # rather than type blind. The permissive "unobservable ⇒ don't block" rule of
+        # `fleet_inject.command_plan_field_busy` is about not blocking the human; it is
+        # not a licence to type into a pane we cannot see.
+        if pane is None:
+            state.log_line(
+                "terminal_trigger",
+                f"[{label}] pane not readable after ESC {attempt} — typing nothing",
+            )
+            return False, "pane not readable — typing nothing"
+        if prompt_field_is_empty(pane):
             state.log_line("terminal_trigger", f"[{label}] queue clear after {attempt} ESC")
             break
     else:

@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T22:34:00+0200
+updated: 2026-09-02T22:52:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,8 +22,18 @@ created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:34
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:52
 
+- **Review-fork correction, 22:52.** The worker's loop treated an UNREADABLE pane (reader
+  `None`, or a raising reader swallowed by `except Exception`) as "queue clear" after one
+  ESC and typed `/model opus` blind — on exactly the pane the daemon logs every tick as
+  `rotation-esc: cannot read the pane … — skipped`. That is the card's own bug re-created
+  on the unobservable channel. Now unreadable ⇒ `return False, "pane not readable — typing
+  nothing"` after the one mandatory ESC (same refusal as `wait_for_empty_prompt` and the
+  daemon's rotation-esc pass); the `except Exception` is gone — `read_pane_text` already
+  returns `None` for a channel without readback, and an injected reader that raises must
+  raise. Test: `test_an_unreadable_pane_after_the_first_esc_types_nothing`. Also the failure
+  string reads the cap from `_QUEUE_FLUSH_MAX_ESC` (was a literal 5). 97 passed, 1 skipped.
 - **dev → testing, 22:34.** Stash popped, worker's partial edits verified and finished.
   `terminal_trigger.send_model_switch_true_error` now ESC-flushes the pane (re-reading after
   each ESC, ≤5 presses, via new `_QUEUE_FLUSH_MAX_ESC`) before typing `/model opus` — only a
