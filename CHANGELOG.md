@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.8] — 2026-09-02
+
+### Bug Fixes
+
+- **clear-lane:** Take the verify harness's before-snapshot right before the daemon types /clear (TRDD-BDZG8Y8A) (8ee015d)
+- **publish:** Bound the gate-wrapped release push by the gate's own budgets, not the 600 s network default (06c85a2)
+
+### Documentation
+
+- **TRDD-0TM5NDYN:** Commit 6a3605b4 recorded; shipped in 3.4.7, last box waits on the restaged daemon's log (4794c47)
+- **TRDD-0TM5NDYN:** Complete — two different roots evaluated in two consecutive beats after the 3.4.7 restage (04:33 this repo, 04:39 AgentlensPro) (a2a7f66)
+- **memory:** ATOM on the clear-lane root rotation (TRDD-0TM5NDYN) — a per-beat limiter without a rotation rule degenerates to a fixed pick (3342ec1)
+- **TRDD-QZVAEWQH:** First live automated clear fired and could not summarize — the launchd daemon's llm-ext has no OpenRouter key (8670d09)
+- **drill:** Record the 04:23 automated clear on the five drill cards — four blocked on TRDD-QZVAEWQH, 2F3I2P18 stays testing; box 3 of 5RXBI65T is REFUTED, not observed (878ec0b)
+- **memory:** Extend the state-and-conventions description so the launchd-secret atom and its correction lesson are recallable by symptom (e20f116)
+- **TRDD-BDZG8Y8A:** Todo → testing on 8ee015de; box 3 gated on the next publish + restage (d5d6d9c)
+- **TRDD-BDZG8Y8A:** Daemon-shaped probe of the before-snapshot passed — bare env, framework python, foreign cwd, cached harness (6e1ee09)
+- **TRDD-BDZG8Y8A:** The harness's transcript branch proven under the daemon shape; box 3 also requires before.context_tokens non-null (d77bd58)
+- **TRDD-BDZG8Y8A:** Say how the reader probe was imported (in-process, scripts/ + scripts/lib on the path) instead of overclaiming the daemon shape (3791d96)
+- **TRDD-QZVAEWQH:** Second no-summary fire at 05:20 (llm-externalizer) — recurs on every fire; lever deliberately left on; back-fill box added (ba6a0d9)
+- **TRDD-QZVAEWQH:** The second session's keyed handoff read (substantive, writer likely the SessionStart hook, unconfirmed); back-fill box gets the 90-day prune and newest-file caveats (5af7db5)
+- **TRDD-QZVAEWQH:** Drop the asserted writer mechanism — one of two keyed writers, SessionStart stamp favours the hook, summary text origin unknown (46a0647)
 ## [3.4.7] — 2026-09-02
 
 ### Bug Fixes
@@ -14,6 +36,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-O7UCNNN2, TRDD-XCJFCJUX:** Complete — the daemon clear lane evaluated an armed session for the first time (03:53:09, no shadow tag, human_idle_s in the verdict) (a7da886)
 - Five drill cards unblocked — O7UCNNN2 complete, the clear lane is live; they now wait only for a qualifying session (>=300k context, >=1 h human-idle), which is the drill itself, not a card (ef5ff49)
 - Add TRDD-0TM5NDYN — the clear beat re-evaluates the same first candidate every beat; a HOLD on root one starves the three sessions above the floor (measured 03:53-03:57) (54218fd)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.7 (8b43899)
 ## [3.4.6] — 2026-09-02
 
 ### Bug Fixes
