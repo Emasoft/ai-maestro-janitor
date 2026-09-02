@@ -1,9 +1,9 @@
 ---
 trdd-id: 38PB1B86
 title: janitor-reload fires on every fleet-update epoch and on every clear-born session — gate it on relevance and seed the ack for clear
-column: dev
+column: testing
 created: 2026-09-02T01:36:47+0200
-updated: 2026-09-02T02:03:00+0200
+updated: 2026-09-02T02:37:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [290, TRDD-VHPYSN56, TRDD-Z582IKIR, TRDD-HREGVXYP]
-implementation-commits: [2e9a76c8]
+implementation-commits: [2e9a76c8, 58d23723]
 ---
 
 # `[janitor-reload]` is emitted far more often than a plugin THIS session runs actually changes
@@ -53,12 +53,21 @@ never answered by this project until 2026-09-02. Re-checked against the tree ton
       `tests/test_session_start_reload_ack_seed.py` runs the REAL hook in a sandbox for each
       of startup/resume/fork/clear and asserts the stamp lands with the flag's generation,
       plus a `compact` control that must not seed — 5/5, 2026-09-02
-- [ ] item 2: `_phase_plugin_reload` compares the CHANGED plugin set against this session's
-      enabled plugins and stays silent when they do not intersect; the marker line carries the
-      changed plugin(s) and versions; a test pins both the silent and the firing case
-- [ ] item 3 recorded as resolved on #290
-- [ ] `ruff check scripts tests` + `mypy scripts/ --ignore-missing-imports` + the touched tests green
-- [ ] #290 answered with this card id, then closed when items 1–2 ship
+- [x] item 2 (58d23723): SessionStart snapshots each enabled plugin's newest cached version
+      (`plugins-at-start.json`, fresh-process sources only); `_phase_plugin_reload` diffs the
+      cache against it — no delta ⇒ ack advanced silently, delta ⇒ bare token + one
+      `plugin=X old=Y new=Z` payload line per change, snapshot rewritten on emit so a later
+      no-op re-list cannot re-find the same delta; no snapshot ⇒ legacy emit. Tests pin the
+      silent, firing, legacy and post-emit-no-refire cases (`tests/test_dispatch_phases.py`,
+      `tests/test_plugin_versions.py` incl. 3.4.10 > 3.4.9). The server's
+      `plugins-updated.json` was measured to list the same 7 plugins with no versions on every
+      refresh, so it cannot be the relevance signal — the snapshot is.
+- [x] item 3 recorded as resolved on #290 (issuecomment-5502292641)
+- [x] `ruff check scripts tests` + `mypy scripts/` (497 files) + 193 tests green — re-run by
+      the approver after the worker's report, not taken from it
+- [x] #290 answered with this card id (issuecomment-5502292641)
+- [ ] #290 closed once items 1–2 SHIP (next publish + install), with the live `[reload-guard]`
+      log line as evidence
 
 ## Notes and lessons learned
 
