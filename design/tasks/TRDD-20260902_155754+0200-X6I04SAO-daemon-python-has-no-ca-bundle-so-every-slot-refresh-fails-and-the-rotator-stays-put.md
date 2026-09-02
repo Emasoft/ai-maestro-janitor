@@ -3,13 +3,13 @@ trdd-id: X6I04SAO
 title: the daemon's Python has no CA bundle, so every slot refresh fails TLS and the rotator stays put while the user rotates by hand
 column: testing
 created: 2026-09-02T15:57:54+0200
-updated: 2026-09-02T16:12:00+0200
+updated: 2026-09-02T20:55:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
 severity: critical
 relevant-rules: []
-implementation-commits: [c3beaf04]
+implementation-commits: [c3beaf04, 301fbcec]
 npt: []
 eht: []
 ---
@@ -76,8 +76,23 @@ eht: []
   the box stays open until a scoped wall rotates on its own.
 - Wikimem: ATOM-V316-ZKU6 on `oauth-rotation-renew-reauth` (recall: "had to rotate manually
   again", "refresh failed (network) every tick").
-- **NEXT ACTION:** ship (`publish.py --patch`) so the DATA copy carries the shared helper,
-  install, then `complete`. Until then this machine is covered by the symlink alone.
+- **20:55 — shipped in v3.4.11 (c3beaf04 is in the tag) but CI is RED on it**, so it is NOT
+  installed: CPV's CI pyright has no `certifi`, and the optional `import certifi` in
+  `tls_context.py` was one MINOR (`reportMissingImports`) — exit 3 under `--strict`. The
+  local publish gate passed because this box's venv happens to carry certifi. Fixed in
+  `301fbcec` (`# type: ignore[import-not-found]`, the repo's existing form for optional
+  imports; proven against a fresh certifi-less venv: 1 error before, 0 after). Ships in 3.4.12.
+- **Mixed-commit note:** `c7a8d46a` (this card + its wikimem) ALSO carries the Sonnet
+  atomize chore's rewrite of three unrelated memory pages (macos-keychain,
+  janitor-fleet-control-plane, three-pillars-rules-ownership) — validated NONE, only `lmd:`
+  lines dropped, but a `git show c7a8d46a` is not a clean read of this card's change.
+- **Tonight's wall (20:38–20:47) is evidence for box 4, split:** the rotator DID rotate on its
+  own twice (20:38:45 5h burn, 20:39:50 `SCOPED[7d/Fable=100%]` → emanuele; slot refreshes
+  succeeding, so THIS card's fix holds on this machine via the symlink). The user still ended
+  up rotating by hand because the blocked panes never got the ESC — the typing gate, a
+  different defect, filed as TRDD-NACCL0CB (proposal, needs USER ruling).
+- **NEXT ACTION:** 3.4.12 via `publish.py --patch` (bundles `301fbcec` with NACCL0CB if
+  approved), install on green CI, then `complete`.
 
 ## Acceptance criteria
 
@@ -86,6 +101,8 @@ eht: []
 - [ ] `rotator.log` shows slot refreshes succeeding again (no `(network)` line on a tick
       after the fix) and `oauth-health` shows both spare slots with `days=` > 0.
 - [ ] The next scoped wall rotates automatically — the user does not rotate by hand.
+      (2026-09-02 20:39:50: the rotation half is OBSERVED; the by-hand half failed for the
+      TRDD-NACCL0CB reason, not this card's. Box stays open until both halves hold.)
 
 ## Approval log
 
