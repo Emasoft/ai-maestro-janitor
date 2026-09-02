@@ -6,9 +6,10 @@ lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
-  tier: component
+  tier: hub
   globs:
     - "scripts/publish.py"
+    - ".cpv-version"
     - "cliff.toml"
     - "CHANGELOG.md"
 publish-globally: false
@@ -134,6 +135,10 @@ TELL THEM APART BY THE FAILURE TEXT, not by which file failed: empty stdout ⇒ 
 ^ATOM-M8YK-YILO [desc: "publish.py [G1b] blocks a push whose ADDED lines introduce a non-allow-listed e-mail address the same file did not already hold on the remote base ref; masked output; the gate scans its own tests", keywords: personal_e-mail_address_introduced G1b_personal-address_lint BLOCKED_personal_e-mail_address publish_blocked_on_an_email_address gmail_address_in_a_tracked_file redact_the_way_the_repo_already_does address_already_on_the_base_ref masked_address_f***@domain users.noreply.github.com_allowed example.com_allowed per-file_known_address_exclusion git_show_ref_path added_lines_only the_gate_flagged_its_own_test_file, type: project, trdd: TRDD-QW7K3M2V, ocd: 2026-09-02, lmd: 2026-09-02]
 
 `scripts/publish.py` gate `[G1b] Personal-address lint` (2026-09-02, TRDD-QW7K3M2V, commits da471290/fb48d144/92af2072): after [G1] it diffs `<remote default ref>...HEAD` with `--unified=0` and scans ADDED lines only for an e-mail address whose domain is not allow-listed (`users.noreply.github.com`, RFC reserved doc domains .local/.test/.example/.invalid/.localhost, exact example.com/org/net, local parts noreply/no-reply) and that the SAME FILE did not already hold on the base ref (`git show <ref>:<path>`, per file — a repo-wide set would let an address living only in a frozen terminal card be pasted into any new file). A hit blocks the push and prints the address MASKED (`f***@domain`). It exists because three personal addresses already sit in 12 tracked files of this public repo since 2026-05-28 and the owner ruled: leave history alone, stop the bleeding (option 1). The gate's own test module must assemble every flaggable address at runtime around a split `@` and never spell one in a comment — the gate scans its own tests too. [^13]
+
+
+^ATOM-YPAN-OCVC [desc: "publish blocked — CPV ABORTED validate exceeded its 1800s budget, exit 124, stuck in a phase: CPV walks a nested-ignored build tree (cargo target) because it loads only the root .gitignore", keywords: CPV_ABORTED_validate_exceeded_budget exit_124_publish cpv_stuck_phase_validate_submodule_containment gitignore_filter_rglob_slow nested_.gitignore_not_honoured_by_CPV cargo_target_walked scripts/memgrep/target_huge publish_hangs_in_CPV is_dir_ignored_False_for_ignored_dir cpv-version_pin_stale, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-02]
+publish.py exited 124 with 'CPV ABORTED: validate exceeded its 1800s wall-clock budget … Phase in flight: validate_submodule_containment, stuck for 1301s' and a thread dump ending in gitignore_filter.rglob → cpv_lint_engine.detect_languages. That is not a plugin verdict; it is CPV walking a huge tree, and the 'phase in flight' name is only the batch's last START line — the thread dump names the real one. CPV's GitignoreFilter loads ONLY the root .gitignore (gitignore_filter.py:183, still so on CPV master at v5.16.0), so scripts/memgrep/target — 98,730 files / 5.1 GB, ignored only by the NESTED scripts/memgrep/.gitignore — was descended on every rglob: 32.7 s per rglob('*.py') measured with CPV's own filter, 0.2 s after adding /scripts/memgrep/target/ to the ROOT .gitignore (45d9410a). That baseline cost had been there all along (the passing 3.4.10 runs spent 297–452 s in the same batch); what tipped it over the budget on 2026-09-02 was CONCURRENT LOAD — a second session's CPV self-validation (its own .venv workers, the ones a ps grep for 'claude-plugins-validation' shows; ours runs from ~/.cache/uv/archive-v0/…/cpv-remote-validate) ran through the whole window and every phase was 1.5–13× slower. Diagnose from the thread dump, probe with GitignoreFilter(root).is_dir_ignored(<dir>), and check the machine's load before blaming the plugin; the budget cannot be raised. Upstream: claude-plugins-validation issue 226. Also noticed: .cpv-version pins v5.4.0 while CPV's latest is v5.16.0.
 
 ## See also
 
