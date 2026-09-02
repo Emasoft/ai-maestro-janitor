@@ -47,6 +47,7 @@ import json
 import os
 import re
 import sqlite3
+import ssl
 import subprocess
 import sys
 import time
@@ -70,6 +71,7 @@ import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
 import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — keychain_scope_args() lever (TRDD-K3WQ7XM9 FIX B)
+import tls_context  # noqa: E402  # scripts/lib/tls_context.py — verifying_context() (TRDD-X6I04SAO)
 import token_burn  # noqa: E402  # scripts/lib/token_burn.py — scoped_rotation_veto (TRDD-QE390SJA)
 import usage_probe  # noqa: E402  # scripts/lib/usage_probe.py (throttled /api/oauth/usage, TRDD-WEBA1RMF)
 
@@ -1333,7 +1335,7 @@ def account_email(blob: dict) -> str | None:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
+        with urllib.request.urlopen(req, timeout=20, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
             data = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None
@@ -1391,7 +1393,17 @@ def account_usage(blob: dict) -> dict | None:
 REFRESH_FAIL_TRANSPORT_REFUSED = "transport-refused"  # CF 403 / error 1010 — retryable, alarming
 REFRESH_FAIL_CREDENTIAL_DEAD = "credential-dead"  # 400/401 invalid_grant — human-actionable
 REFRESH_FAIL_NETWORK = "network"  # timeout / DNS / connection — retryable, benign
+REFRESH_FAIL_TLS = "tls"  # certificate verification failed — OUR trust store, not the network; never benign
 REFRESH_FAIL_MALFORMED = "malformed"  # bad JSON or a 200 with no access token
+
+# Note on CERTIFICATE_VERIFY_FAILED (2026-09-02): the janitor daemon runs under whatever
+# Python launchd was pointed at — a python.org framework build ships with
+# `etc/openssl/cert.pem` MISSING until its "Install Certificates.command" is run, so every
+# `urlopen` there died with CERTIFICATE_VERIFY_FAILED. Classified as "network — benign", that
+# hid a 100 %-failing slot keepalive for days (454 failures in one day, both spare slots
+# expired, the rotator "staying put" while the user hit the wall and rotated by hand). A
+# shell's uv-managed Python had a bundle, so nothing reproduced outside the daemon. Fixed by
+# `tls_context.verifying_context()` (scripts/lib/tls_context.py, TRDD-X6I04SAO) used below.
 
 
 def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
@@ -1420,6 +1432,11 @@ def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
         return REFRESH_FAIL_NETWORK
     if isinstance(exc, (json.JSONDecodeError, ValueError)):
         return REFRESH_FAIL_MALFORMED
+    # A URLError wrapping an SSLError is OUR trust store, not the network: it recurs on every
+    # tick until someone fixes the interpreter, so it must not wear the "retryable, benign" label
+    # that let it run unnoticed (see _FALLBACK_CA_BUNDLES).
+    if isinstance(exc, urllib.error.URLError) and isinstance(getattr(exc, "reason", None), ssl.SSLError):
+        return REFRESH_FAIL_TLS
     return REFRESH_FAIL_NETWORK  # URLError (non-HTTP) / TimeoutError — plain network trouble
 
 
@@ -1468,7 +1485,7 @@ def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None 
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
+        with urllib.request.urlopen(req, timeout=30, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             tok = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError) as exc:
         if on_failure is not None:

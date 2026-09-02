@@ -50,6 +50,7 @@ if str(_HERE) not in sys.path:
 import global_state as gs  # noqa: E402  -- sibling lib (daemon-side state dir)
 import state  # noqa: E402  -- sibling lib
 import terminal_trigger  # noqa: E402  -- applescript_quote (the ONE AppleScript escaper)
+import tls_context  # noqa: E402  -- sibling lib (TRDD-X6I04SAO)
 
 SENT_NAME = "notify-sent.txt"
 DIGEST_STAMP_NAME = "notify-digest.ts"
@@ -153,7 +154,7 @@ def _deliver(
         req = urllib.request.Request(
             url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
         )
-        urllib.request.urlopen(req, timeout=10)  # noqa: S310 -- user-supplied webhook URL  # nosec B310 -- user-configured webhook, not attacker input
+        urllib.request.urlopen(req, timeout=10, context=tls_context.verifying_context())  # noqa: S310 -- user-supplied webhook URL  # nosec B310 -- user-configured webhook, not attacker input
 
     run = runner or _default_runner
     open_ = opener or _default_opener

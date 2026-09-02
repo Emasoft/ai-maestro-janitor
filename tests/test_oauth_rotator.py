@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import ssl
 import stat
 import sys
 import time
@@ -1304,7 +1305,7 @@ def test_refresh_oauth_token_maps_response(monkeypatch: pytest.MonkeyPatch) -> N
     """refresh_oauth_token POSTs the refresh grant to TOKEN_URL and maps access/refresh/expires into a NEW blob, preserving other inner fields; None without a refreshToken."""
     captured: dict = {}
 
-    def _fake_urlopen(req: object, timeout: float = 0) -> _FakeResp:
+    def _fake_urlopen(req: object, timeout: float = 0, **_kw: object) -> _FakeResp:
         captured["body"] = json.loads(req.data.decode())     # type: ignore[attr-defined]
         captured["url"] = req.full_url                        # type: ignore[attr-defined]
         return _FakeResp({"access_token": "NEW", "refresh_token": "NEWR", "expires_in": 28800})
@@ -1327,7 +1328,7 @@ def test_refresh_oauth_token_maps_response(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_refresh_oauth_token_network_error_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """A network/HTTP failure during the refresh exchange returns None (fail-soft — the slot keeps its old token)."""
-    def _boom(req: object, timeout: float = 0) -> _FakeResp:
+    def _boom(req: object, timeout: float = 0, **_kw: object) -> _FakeResp:
         raise rotator.urllib.error.URLError("endpoint down")
     monkeypatch.setattr(rotator.urllib.request, "urlopen", _boom)
     assert rotator.refresh_oauth_token(_blob("OLD", refresh="OLDR")) is None
@@ -1362,6 +1363,19 @@ def test_classify_refresh_failure_network_on_plain_url_error() -> None:
     assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_NETWORK
 
 
+def test_classify_refresh_failure_tls_on_certificate_verify_failure() -> None:
+    """A URLError wrapping an SSLCertVerificationError classifies as `tls` — OUR trust
+    store, never benign (TRDD-X6I04SAO: this was mis-classified as `network` for days)."""
+    exc = rotator.urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_TLS
+
+
+def test_classify_refresh_failure_network_stays_network_when_not_tls() -> None:
+    """A plain DNS URLError is still `network`, not misrouted to `tls` by the new branch."""
+    exc = rotator.urllib.error.URLError("dns")
+    assert rotator.classify_refresh_failure(exc) == rotator.REFRESH_FAIL_NETWORK
+
+
 def test_classify_refresh_failure_malformed_on_bad_json() -> None:
     """A response body that fails to parse as JSON classifies as malformed."""
     exc = json.JSONDecodeError("Expecting value", "not json", 0)
@@ -1391,7 +1405,7 @@ def test_classify_refresh_failure_never_raises_on_unreadable_body() -> None:
 def test_refresh_oauth_token_reports_credential_dead_via_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """refresh_oauth_token still returns None on a 400 invalid_grant, but now ALSO calls
     on_failure with the classified cause — the return contract is unchanged (janitor#228)."""
-    def _boom(req: object, timeout: float = 0) -> _FakeResp:
+    def _boom(req: object, timeout: float = 0, **_kw: object) -> _FakeResp:
         raise _http_error(400, b'{"error":"invalid_grant"}')
     monkeypatch.setattr(rotator.urllib.request, "urlopen", _boom)
     causes: list[str] = []
@@ -1403,7 +1417,7 @@ def test_refresh_oauth_token_reports_credential_dead_via_on_failure(monkeypatch:
 def test_refresh_oauth_token_reports_transport_refused_via_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """refresh_oauth_token still returns None on a Cloudflare 403, but ALSO calls on_failure
     with transport-refused — distinguishable from a dead credential (janitor#228)."""
-    def _boom(req: object, timeout: float = 0) -> _FakeResp:
+    def _boom(req: object, timeout: float = 0, **_kw: object) -> _FakeResp:
         raise _http_error(403, b'{"error":"1010"}')
     monkeypatch.setattr(rotator.urllib.request, "urlopen", _boom)
     causes: list[str] = []

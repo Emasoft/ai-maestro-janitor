@@ -62,6 +62,7 @@ if str(_HERE) not in sys.path:
 
 import memory_scopes  # noqa: E402  -- sibling lib
 import state  # noqa: E402  -- sibling lib
+import tls_context  # noqa: E402  -- sibling lib (TRDD-X6I04SAO)
 
 URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA = "oauth-2025-04-20"
@@ -425,7 +426,7 @@ def http_get(token: str) -> tuple[int, dict | None, int | None]:
     )
     timeout = _int_option(TIMEOUT_ENV, _TIMEOUT_DEFAULT)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 -- as above
+        with urllib.request.urlopen(req, timeout=timeout, context=tls_context.verifying_context()) as resp:  # nosec B310 -- as above
             body = json.loads(resp.read().decode("utf-8", "replace"))
             status = int(getattr(resp, "status", 200) or 200)
             return status, (body if isinstance(body, dict) else None), None

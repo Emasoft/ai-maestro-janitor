@@ -42,7 +42,9 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import rotator  # type: ignore[import-not-found]  # noqa: E402
+import tls_context  # noqa: E402  -- scripts/lib/tls_context.py (TRDD-X6I04SAO)
 
 # setup-token tokens are documented valid for ~1 year.
 ONE_YEAR_S = 365 * 24 * 3600
@@ -122,7 +124,7 @@ def _account_status(tok: str) -> tuple[str, str]:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
+        with urllib.request.urlopen(req, timeout=20, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             data = json.loads(r.read().decode("utf-8", "replace"))
         fh = rotator._util(data, "five_hour")
         return "ok", ("usage 5h=%.0f%%" % fh) if fh is not None else "usage 200"

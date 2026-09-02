@@ -82,7 +82,9 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import rotator  # type: ignore[import-not-found]  # noqa: E402
+import tls_context  # noqa: E402  -- scripts/lib/tls_context.py (TRDD-X6I04SAO)
 
 # Constants VERBATIM from claude-login-automation/src/auth.ts (the working ref).
 # CLIENT_ID + TOKEN_URL are sourced from rotator (single source of truth; F2b reuses them).
@@ -403,7 +405,7 @@ def _exchange(code: str, verifier: str, state: str) -> dict:
         TOKEN_URL, data=body, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
-    with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
+    with urllib.request.urlopen(req, timeout=30, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
         return json.loads(r.read().decode())
 
 
