@@ -50,6 +50,16 @@ supersedes-directive: 2026-07-18 typing gate (TRDD-6Q0OYYYH) for the retry-wedge
   for long backoffs (attempt never advances) — without a rotation the ESC would only make
   Claude Code re-hit the same wall; (b) the no-headroom fallback the USER added at 21:05:
   multiple ESC until the queue is clean, then `/model opus` + Enter — TRDD-3T9HQEQ6.
+- **Guard shape after two review passes (`fb4ae704`, + glyph rule):** the wedge counts only as
+  Claude Code's OWN status row — inside the 8 rows above the input box's upper border AND
+  starting with a spinner glyph (`✻✽✶✢✳·`). Measured on five real frames: an indented
+  assistant quote and a column-0 past-prompt echo (`❯ …`, the owner typed the red line
+  tonight) are both rejected; the session-limit and 429 variants share the row and pass.
+- **Without a rotation, a wedged `cron_dead` pane now declines its rearm every beat**
+  (`retry_wedge_on_screen`), and `_decline` spends an attempt, so the 4-attempt budget walks
+  to GIVING UP + one human page in ~8 min. Deliberate: with no rotation there is no
+  headroom to resume onto, so a human (or TRDD-3T9HQEQ6's `/model opus` flush) IS the
+  next step — the page names the pane instead of the daemon typing into it.
 - **NEXT ACTION:** ship in 3.4.12 (`publish.py --patch`, bundles `301fbcec`), install on
   green CI, restage the daemon, then the live box: the next rotation on this host must log
   `rotation-esc: FIRED ESC` within one beat of `rotation-success.ts`.

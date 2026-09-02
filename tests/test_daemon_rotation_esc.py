@@ -47,6 +47,12 @@ QUOTED_FRAME = (
     "⏺ Root cause: every pane showed\n  " + WEDGE_LINE + "\n  until you pressed ESC by hand.\n"
     "✻ Cogitated for 9s · done 8:46 PM\n" + CHROME
 )
+# The second false-hit shape (review fork, settled on this session's own frame): a PAST USER
+# PROMPT echoes at column 0 as `❯ text`, and the owner typed the red line into a prompt.
+ECHO_FRAME = (
+    "❯ the janitor failed, all sessions showed `" + WEDGE_LINE + "`\n"
+    "⏺ Diagnosed: the typing gate deferred the ESC.\n" + CHROME
+)
 
 
 def _inst(diagnosis: str, root: Path, terminal: dict, *, awaiting: bool = False) -> "fleet_scan.Instance":
@@ -149,6 +155,15 @@ def test_a_reply_quoting_the_wedge_line_is_prose_not_a_wedge(tmp_path, monkeypat
     assert not (root / ".janitor" / "state" / "rate-limited.flag").exists()
 
 
+def test_a_prompt_echo_quoting_the_wedge_line_is_not_escd(tmp_path, monkeypatch) -> None:
+    """The owner typed the red line into a prompt; that echo must not get a working session ESC'd."""
+    root = tmp_path / "proj"
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})], frame=ECHO_FRAME)
+    gs.record_rotation_success(int(time.time()))
+    daemon.task_session_liveness()
+    assert _escs(fired) == []
+
+
 def test_server_owned_and_unarmed_and_dead_panes_are_never_escd(tmp_path, monkeypatch) -> None:
     """The hands-off classes stay hands-off even with the wedge on screen."""
     fleet = [
@@ -217,6 +232,12 @@ def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
     assert sl.retry_wedge_attempt_at_tail(WEDGED_FRAME) == 1
     assert sl.retry_wedge_attempt_at_tail(CALM_FRAME) is None
     assert sl.retry_wedge_attempt_at_tail(QUOTED_FRAME) is None, "indented quote = prose"
+    assert sl.retry_wedge_attempt_at_tail(ECHO_FRAME) is None, "a prompt echo is not a status row"
+    # The session-limit and 429 variants share the status row and the same regex shape.
+    session_limit = "✻ Session limit reached · Retrying in 2m 50s (2:10pm) · attempt 1/300\n" + CHROME
+    assert sl.retry_wedge_attempt_at_tail(session_limit) == 1
+    plain_429 = "· 429 Rate limited · Retrying in 0s · attempt 5/300\n" + CHROME
+    assert sl.retry_wedge_attempt_at_tail(plain_429) == 5
     # A column-0 copy of the line far above the status block (an old turn) does not count.
     old_turn = WEDGE_LINE + "\n" + "\n".join(f"⏺ step {i}" for i in range(12)) + "\n" + CHROME
     assert sl.retry_wedge_attempt_at_tail(old_turn) is None

@@ -75,6 +75,12 @@ _STATUS_BLOCK_ROWS = 8
 # Without an input box in the frame (a bare tmux pane, a capture cut short) fall back to the
 # bottom rows of whatever was captured.
 _TAIL_FALLBACK_ROWS = 12
+# The glyphs Claude Code's OWN status row starts with (spinner frames and the retry / limit
+# line share the row: `✻ Fable limit reached · Retrying in …`, `· Tomfoolering…`). Tallied
+# from five real frames on 2026-09-02: every status row starts with one of these; a past
+# user prompt echoes as `❯ text`, a tool row as `⏺`, an agent message as `›` — all at column
+# 0 too, so "column 0" alone admitted the owner's OWN prompt quoting the red line.
+_STATUS_ROW_GLYPHS = "✻✽✶✢✳·"
 
 
 def retry_wedge_attempt_at_tail(text: str) -> int | None:
@@ -90,11 +96,13 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
     - the input box is the pair of dash borders at the bottom; the status block (spinner or
       retry line, queued `❯ cmd` rows) is the few rows directly above the UPPER border, and
       conversation content is above that;
-    - a real retry line starts at column 0 with its glyph (`✻ Fable limit reached · …`);
-      assistant prose is indented under its `⏺` marker, so a quoted wedge line is indented.
+    - a real retry line is Claude Code's status row: column 0, starting with a glyph from
+      `_STATUS_ROW_GLYPHS` (`✻ Fable limit reached · …`). Assistant prose is indented under
+      its `⏺` marker; a PAST USER PROMPT echoes at column 0 as `❯ text` — the owner typed the
+      red line into a prompt on 2026-09-02, so column 0 alone is not enough.
 
-    So: the FIRST column-0 row matching the wedge signature within `_STATUS_BLOCK_ROWS` rows
-    above the upper border counts; anything indented or higher up does not.
+    So: the first status-glyph row matching the wedge signature within `_STATUS_BLOCK_ROWS`
+    rows above the upper border counts; anything indented, prompt-echoed or higher up does not.
     """
     rows = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
     borders = [i for i, r in enumerate(rows) if _INPUT_BOX_BORDER_RE.match(r)]
@@ -104,8 +112,8 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
     else:
         window = rows[-_TAIL_FALLBACK_ROWS:]
     for row in reversed(window):
-        if row[:1].isspace():
-            continue  # indented = conversation content, never Claude Code's own status row
+        if row[:1] not in _STATUS_ROW_GLYPHS:
+            continue  # prose, a prompt echo, a tool row — never Claude Code's own status row
         m = _RETRY_WEDGE_RE.search(row)
         if m:
             return int(m.group(1))
