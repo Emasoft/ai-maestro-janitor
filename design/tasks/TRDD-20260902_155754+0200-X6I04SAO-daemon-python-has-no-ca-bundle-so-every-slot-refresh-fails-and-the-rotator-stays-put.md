@@ -102,9 +102,11 @@ eht: []
 ## Acceptance criteria
 
 - [x] Under the daemon's interpreter + env, `verifying_context().cert_store_stats()["x509_ca"] > 0`.
-      (2026-09-02 21:42: 136, on the 3.4.12 DATA copy.)
+      (2026-09-02 21:42: 136 — and, with the default store EMPTIED via `SSL_CERT_FILE`/
+      `SSL_CERT_DIR` so the 15:54 symlink is out of the picture, default = 0 while
+      `verifying_context()` = 136: the code's OS-bundle fallback itself, not the symlink.)
 - [x] A URLError wrapping an SSLError classifies as `tls`, a plain URLError still as `network`.
-      (2026-09-02 21:42: verified on the 3.4.12 DATA copy.)
+      (2026-09-02 21:42: verified on the 3.4.12 DATA copy under the daemon's interpreter.)
 - [x] `rotator.log` shows slot refreshes succeeding again (no `(network)` line on a tick
       after the fix) and `oauth-health` shows both spare slots with `days=` > 0.
       (2026-09-02 21:42: 0 `(network)` lines since the 21:28 restage; all slots `days=0.3 status=ok`.)
