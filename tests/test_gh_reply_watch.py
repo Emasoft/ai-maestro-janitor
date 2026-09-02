@@ -230,20 +230,31 @@ def _run_with_home(project: Path, home: Path) -> subprocess.CompletedProcess[str
 _STAMP_REL = Path(".claude") / "janitor-control" / "gh-reply-watch-global-poll.last-run.ts"
 
 
-def _re_arm_floor(home: Path) -> None:
-    """Re-stamp the machine-wide poll floor to NOW, right before a later project fires.
+def _re_arm_floor(home: Path, t0: int) -> None:
+    """Prove the FIRST fire stamped the floor, then re-stamp it to NOW for the next fire.
 
     The stamp carries the `now` the FIRST child read at its own start, so a sequential later
     child reads a window that has been running for the first child's ENTIRE run (python
-    start-up, three fake-`gh` spawns, cursor writes). Under xdist load one run reached ~60 s
-    (publish gate, 2026-09-02): the 60 s floor expired mid-test and the "deferred" project
-    polled — a wall-clock bound hiding in the fixture, not a detector bug. Refreshing the
-    stamp keeps the claim causal ("a fire INSIDE the window defers") and shrinks the timing
-    assumption to one child's start-up. It is the mirror of the back-dating in
+    start-up, its fake-`gh` spawns, cursor writes). At the 2026-09-02 publish gate, under
+    xdist load, the gap from the first child's start to the second's reached the 60 s floor
+    (inferred from `2 reported`, not timed): the floor expired mid-test and the "deferred"
+    project polled — a wall-clock bound hiding in the fixture, not a detector bug. Refreshing
+    the stamp keeps the claim causal ("a fire INSIDE the window defers") and shrinks the timing
+    assumption to one child's start-up; the mirror of the back-dating in
     `test_the_floor_expires_so_a_later_fire_polls_again`.
+
+    `t0` is the test's clock reading taken BEFORE the first fire. Asserting the detector's
+    stamp is no earlier than that is what keeps the janitor#215 guard load-bearing: without
+    it a `_mark_global_poll` writing `0` (or any stale value) would stay green, because the
+    deferral would then be proven against a TEST-authored stamp, not the detector's.
     """
     stamp = home / _STAMP_REL
     assert stamp.is_file(), "the first fire must have written the machine-wide stamp"
+    written = int(stamp.read_text(encoding="utf-8").strip())
+    assert written >= t0, (
+        f"the first fire stamped {written}, earlier than its own launch at {t0}: the floor "
+        f"would be re-armed by the test, not proven written by the detector"
+    )
     stamp.write_text(str(int(time.time())), encoding="utf-8")
 
 
@@ -261,11 +272,12 @@ def test_a_second_projects_fire_is_deferred_by_the_shared_machine_floor(tmp_path
     _fake_gh(project_b / "bin", [_thread("reply on B")],
              comment={"user": {"login": "octocat"}, "body": "hi from B"})
 
+    t0 = int(time.time())
     r1 = _run_with_home(project_a, home)
     assert r1.returncode == 0
     assert r1.stdout.strip() != "", "the FIRST fire, machine-wide, must be allowed to poll"
 
-    _re_arm_floor(home)
+    _re_arm_floor(home, t0)
     r2 = _run_with_home(project_b, home)
     assert r2.returncode == 0
     assert r2.stdout.strip() == "", (
@@ -411,9 +423,10 @@ def test_without_the_inbox_only_ONE_project_on_a_host_sees_the_reply(tmp_path: P
     projects = [_host_project(home, f"proj{i}") for i in range(_FLEET_N)]
 
     reported: list[Path] = []
+    t0 = int(time.time())
     for i, project in enumerate(projects):
         if i:
-            _re_arm_floor(home)  # every later fire lands INSIDE the window, whatever the load
+            _re_arm_floor(home, t0)  # every later fire lands INSIDE the window, whatever the load
         if _REPLY_MARK in _run_on_host(project, home).stdout:
             reported.append(project)
     assert len(reported) == 1, (

@@ -56,11 +56,15 @@ precisely so a fast green could not be spent as proof later. The artifacts are i
 failed once under xdist (`2 reported`, expected 1). The janitor#215 machine-wide floor is
 `now - stamp >= 60` with `now` read at each child's START, so the stamp carries the FIRST
 child's start time and a sequential later child's window has been running for the first child's
-whole run — one run reached ~60 s under load, the floor expired mid-test, the "starved" project
+whole run — under load the gap from the first child's start to the second's reached the 60 s
+floor (inferred from `2 reported`, not timed), the floor expired mid-test, the "starved" project
 polled. A wall-clock bound hidden in a fixture (category C), not a detector bug and not a new
 kind. Fix (test only): `_re_arm_floor` re-stamps the floor to NOW before each later fire — the
-mirror of the expiry test's back-dating — in both floor tests. Lesson `[^14]` on
-`janitor-publish-pipeline.md#ATOM-SQZO-66VW`. Nothing here changes this card's gates.
+mirror of the expiry test's back-dating — in both floor tests, AFTER asserting the detector's
+own stamp is no earlier than the test's pre-fire clock; without that value check the review
+fork showed a `_mark_global_poll` writing `0` would stay green (mutation probe: RED with the
+assert, both re-arm tests). Lesson `[^14]` on `janitor-publish-pipeline.md#ATOM-SQZO-66VW`.
+Nothing here changes this card's gates.
 
 **THERE IS NO FIFTH CATEGORY. Category D was simply MUCH larger than every enumeration of it,
 and the fix moved from the call sites to a seam.** The 39-failure soak, triaged by failure

@@ -173,7 +173,7 @@ filed alongside this proposal.
       "the llm-externalizer plugin already provides llm-ext with the api keys. just use them", and
       08:38: "you don't need to investigate the api key exporting. just use llm-ext and it will
       work!" So: no credential placement by the janitor, no allowlist, no keychain feature request.
-      Measured 08:40 (one probe, not an investigation): `env -i HOME=… PATH=/usr/bin:… llm-ext llm
+      Measured 08:40 (one probe, not an investigation): `env -i HOME=… PATH=<bare system dirs> llm-ext llm
       summarize <file>` fails with the daemon's exact line (`env var $OPENROUTER_API_KEY is not
       set`), while the same command in a session works. The key exists wherever a SESSION runs, so
       the summary must be produced from session context, never from the launchd daemon.
