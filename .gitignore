@@ -7,6 +7,12 @@ __pycache__/
 dist/
 build/
 .eggs/
+# The memgrep crate's cargo build tree (98,730 files / 5.1 GB on 2026-09-02). It is already
+# ignored by the NESTED scripts/memgrep/.gitignore (`/target`), but CPV's walker loads only
+# the ROOT .gitignore (claude-plugins-validation v5.4.0, GitignoreFilter.__init__), so it
+# walked every file on every rglob and `validate` blew its 1800 s budget mid-phase — the
+# 3.4.11 publish aborted with exit 124. A root-level line is what root-only tools honour.
+/scripts/memgrep/target/
 
 # Virtual environments
 .venv/
