@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -65,6 +66,11 @@ _LOG = "external-clear"
 # cost this whole card exists to avoid.
 _HOLD_TTL_S = 15 * 60
 _PENDING_FILE = "summary-pending.json"
+# TRDD-BDZG8Y8A — ceiling on the verify harness's `--phase before` snapshot taken right before
+# the clear keystroke. Local file reads only (its external context probe is switched off), so
+# the real cost is well under a second; the bound exists so a wedged harness can never hold the
+# fire back for longer than this.
+_VERIFY_BEFORE_TIMEOUT_S = 10
 
 
 def _summary_source_readable(transcript: str) -> bool:
@@ -391,6 +397,45 @@ def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, li
     return text, []
 
 
+def _snapshot_before(env: dict[str, str]) -> None:
+    """TRDD-BDZG8Y8A — take the harness's own `--phase before` snapshot right before the clear.
+
+    Without it an automated clear left `handoff-clear-verify.json` whatever the last HAND-RUN
+    drill wrote, so the resumed session's `--phase after` (its resume cue runs it first)
+    compared against a snapshot hours old and its PASS table proved nothing about THIS clear
+    (first seen on the 2026-09-02 04:23 AgentlensPro fire). A subprocess, not an import: the
+    harness resolves root and state dir from CLAUDE_PROJECT_DIR, which must stay child-only in
+    this long-lived daemon process (see `_fire`). Pure local reads by construction — the
+    harness's agentlensPro probe is switched off through its own option, so the snapshot
+    measures the context with the SAME transcript reader the gate used and never waits on an
+    external command: every second between the gate and the keystroke is a second the full
+    context could still be re-cached at full price (TRDD-2F3I2P18). Fail-open and bounded — a
+    diagnostic must never hold back the clear it exists to measure.
+    """
+    harness = _SCRIPTS / "handoff_clear_verify.py"
+    snap_env = {**env, "CLAUDE_PLUGIN_OPTION_HANDOFF_VERIFY_CONTEXT_COMMAND": ""}
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(harness), "--phase", "before"],
+            capture_output=True,
+            text=True,
+            timeout=_VERIFY_BEFORE_TIMEOUT_S,
+            env=snap_env,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        state.log_line(
+            _LOG,
+            f"verify before-snapshot skipped ({exc.__class__.__name__}: {exc}) — firing anyway",
+        )
+        return
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip()[-200:]
+        state.log_line(
+            _LOG, f"verify before-snapshot failed rc={proc.returncode}: {tail} — firing anyway"
+        )
+
+
 def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str = "") -> None:
     """Spawn `clear_trigger`'s verified chain against the RECORDED pane.
 
@@ -406,6 +451,10 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
     # Claude-reserved var for the whole parent process — this runs inside the long-lived
     # daemon, so every later plugin in that process would inherit one project's path.
     child_env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
+    # BEFORE the spawn, never after: the chain types `/clear` as soon as a pane is free, and a
+    # snapshot that lands after the keystroke records the collapsed context and the recreated
+    # cron — the `after` phase would then see no delta and report a false FAIL (TRDD-BDZG8Y8A).
+    _snapshot_before(child_env)
     clear_trigger._spawn_chain({
         "delay": 0.0,  # no turn to settle out — nothing is running in front of us
         "terminal": terminal,

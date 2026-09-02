@@ -312,6 +312,68 @@ def test_idle_and_predictive_triggers_do_not_arm_the_warm_cancel_probe(tmp_path,
         assert _captured_payload(monkeypatch, tmp_path, trigger)["cache_gated"] is False, trigger
 
 
+# --- _fire: the verify harness's before-snapshot lands ahead of the keystroke (TRDD-BDZG8Y8A) --
+
+
+def test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain(tmp_path, monkeypatch):
+    """An automated clear used to leave `handoff-clear-verify.json` whatever the last hand-run
+    drill wrote, so the resumed session's `--phase after` compared against a snapshot hours old
+    (AgentlensPro, 2026-09-02 04:23). `_fire` now takes the harness's own `before` snapshot, and
+    it must exist BEFORE the chain is spawned — one taken after the `/clear` keystroke would
+    record the collapsed state and turn the `after` table into a false FAIL."""
+    import json
+
+    import clear_trigger
+    import cold_cache_compact
+
+    _project(tmp_path)
+    sd = tmp_path / ".janitor" / "state"
+    (sd / "heartbeat-cron-id.txt").write_text("abc12345", encoding="utf-8")
+    verify = sd / "handoff-clear-verify.json"
+    seen: dict = {}
+
+    def fake_spawn(payload, env=None):
+        seen["json_present_at_spawn"] = verify.is_file()
+        seen["env_root"] = (env or {}).get("CLAUDE_PROJECT_DIR")
+
+    monkeypatch.setattr(clear_trigger, "_spawn_chain", fake_spawn)
+    monkeypatch.setattr(cold_cache_compact, "mark_clear_fired", lambda sd, now=0: None)
+    t0 = int(time.time())
+    ehc._fire(tmp_path, sd, {"kind": "tmux", "pane": "%1"}, t0, trigger=ec.TRIGGER_NEXT_FIRE_MISSES)
+
+    assert seen["json_present_at_spawn"] is True
+    assert seen["env_root"] == str(tmp_path)
+    before = json.loads(verify.read_text(encoding="utf-8"))["before"]
+    assert before["cron_id"] == "abc12345"
+    assert t0 <= before["ts"] <= t0 + ehc._VERIFY_BEFORE_TIMEOUT_S
+
+
+def test_fire_still_spawns_when_the_verify_snapshot_fails(tmp_path, monkeypatch):
+    """The snapshot is a DIAGNOSTIC: a broken harness must never hold back the clear it exists
+    to measure — fail-open, logged, like every other gather in that harness."""
+    import clear_trigger
+    import cold_cache_compact
+
+    _project(tmp_path)
+    sd = tmp_path / ".janitor" / "state"
+    spawned: list = []
+    logged: list = []
+    monkeypatch.setattr(clear_trigger, "_spawn_chain",
+                        lambda payload, env=None: spawned.append(payload))
+    monkeypatch.setattr(cold_cache_compact, "mark_clear_fired", lambda sd, now=0: None)
+    monkeypatch.setattr(ehc.state, "log_line", lambda name, msg: logged.append(msg))
+
+    def boom(*args, **kwargs):
+        raise OSError("no interpreter here")
+
+    monkeypatch.setattr(ehc.subprocess, "run", boom)
+    ehc._fire(tmp_path, sd, {"kind": "tmux", "pane": "%1"}, 0, trigger="")
+
+    assert len(spawned) == 1
+    assert not (sd / "handoff-clear-verify.json").exists()
+    assert any("before-snapshot skipped" in m for m in logged)
+
+
 # --- came_back_since: the cancel that falsifies EVERY trigger's premise -------
 
 
