@@ -214,6 +214,21 @@ _PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", 
 # a human would sit through.
 _CPV_TIMEOUT_SEC = 3600
 
+# The release push's wall clock CONTAINS the branch-aware pre-push gate (`publish.py
+# --gate`: lint, jscpd, actionlint, mypy, the compiled-component build + tests, remote
+# CPV, the full pytest suite), so its bound must be at least the sum of the gate's own
+# bounds — it cannot inherit cpv_network_resilience's 600 s DEFAULT_TIMEOUT_SEC, which
+# is sized for a bare network transfer. Under that default the gate was killed mid-run
+# on EVERY attempt, the kill was classified transient, and the 60-attempt git budget
+# re-ran the ~15-min gate again and again while each killed attempt's hook subtree
+# survived as an orphan (subprocess.run's timeout kills only `git`, not the hook it
+# spawned) still grinding CPV + pytest. Measured 2026-09-02 on the 3.4.8 publish:
+# 4 attempts in 46 min, 2 orphaned gates running concurrently, zero pushes, remote
+# untouched. 3 attempts still absorb a real transfer hiccup after a green gate; 60 was
+# sized for a 4 s bare push, and 60 × a 15-min gate is a 10-hour futile loop.
+_PUSH_TIMEOUT_SEC = _CPV_TIMEOUT_SEC + _TEST_SUITE_TIMEOUT_SEC + 1800
+_PUSH_MAX_ATTEMPTS = 3
+
 # The CPV validator pin — ONE literal, in `.cpv-version` at the repo root.
 #
 # It was previously written out eight times: five here and three across ci.yml and
@@ -2308,10 +2323,13 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # transaction in the wire protocol; the server rolls back if any ref
     # update fails. git_with_retry still wraps the call so transient
     # network hiccups (4xx-class permanent errors fall through immediately).
+    # The explicit timeout/attempts are load-bearing: this push runs the whole
+    # pre-push gate inside its wall clock — see _PUSH_TIMEOUT_SEC.
     cprint(f"  {BLUE}$ git push --atomic origin {' '.join(push_refs)}{NC}")
     git_with_retry(
         ["git", "push", "--atomic", "origin", *push_refs],
         cwd=str(root), capture_output=False,
+        timeout=_PUSH_TIMEOUT_SEC, max_attempts=_PUSH_MAX_ATTEMPTS,
     )
     _pushed = tag if dep_tag is None else f"{tag} + {dep_tag}"
     cprint(f"  {GREEN}Pushed {_pushed} atomically.{NC}")
