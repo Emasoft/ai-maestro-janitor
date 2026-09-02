@@ -1,10 +1,11 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: testing
-blocked-by: []
+column: blocked
+pre-block-column: testing
+blocked-by: [QZVAEWQH]
 created: 2026-08-22T17:43:05+0200
-updated: 2026-09-02T03:56:00+0200
+updated: 2026-09-02T05:21:37+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
@@ -29,6 +30,41 @@ implementation-commits: [0581b940]
 > summary is reintroduced.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+### ⛔ 2026-09-02 05:21 — the first live automated fire REFUTED box 3; blocked on TRDD-QZVAEWQH
+
+> **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
+> (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
+> human_idle 1100 s — that trigger needs no idle floor, the next heartbeat would have missed the
+> 5-min cache anyway). `external-clear.log`: `fired:` at 04:23:51, then three llm-ext attempts at
+> 04:24:02 / 04:24:16 / 04:24:28 — the TRDD-2F3I2P18 clear-first ordering is observed live. The
+> session re-armed at 04:24:45 and emitted its post-clear resume cue at 04:25:03 (a new session
+> id; heartbeat fires continue). **But every llm-ext attempt failed identically:**
+> `Remote api 'openrouter-remote' requires 'api_key' (env var $OPENROUTER_API_KEY is not set)` —
+> the launchd daemon carries no such variable (the twin of TRDD-XCJFCJUX, for a credential instead
+> of an option), so the chain logged `NO_SUMMARY_POST_CLEAR`, held the session on the 15-minute
+> summary hold (dispatch.log 04:29/04:34/04:39) and left the resumed session to ground itself on
+> the only handoff there was: the link-only `agent-handoff.md` of 22:59 (the resumed session Read
+> it at 04:25:33), written BEFORE the cleared session was born (23:08) — so that session's five
+> hours of work (23:08 → 04:19, 418k tokens) are covered by NO handoff; `precompact-handoff.md`
+> is older still (18:48) and llm-ext wrote nothing. Filed as **TRDD-QZVAEWQH** (`design/proposals/`, USER ruling — every fix
+> places a credential). Also exposed: the daemon fire path takes no `handoff_clear_verify.py
+> --phase before` snapshot, so no PASS table can exist for an automated clear — **TRDD-BDZG8Y8A**
+> (`todo`).
+
+A first draft of this entry closed the card on "`agent-handoff.md` kept its 22:59 mtime through
+the 04:23:51 clear". The review fork refused it, correctly: **that observation is VACUOUS** — the
+composer wrote nothing, so nothing could have clobbered anything — and the fire's actual outcome
+is the OPPOSITE of box 3. The cleared session was born from the 23:08 clear (dispatch.log
+`[s:f7594ac9] post-clear resume cue emitted` 23:09:08), ran five hours to 418k tokens, and was
+cleared with NO handoff covering that work: the link-only `agent-handoff.md` predates its birth,
+`precompact-handoff.md` is older still, and llm-ext produced nothing. Before TRDD-79LXF6PJ the
+daemon's facts+tail compose would have captured those turns; the retirement was made safe by the
+llm-ext summary, and under launchd the daemon cannot produce one (TRDD-QZVAEWQH). **That is a
+recoverability REGRESSION observed, not "unchanged"** — box 3 stays open, and this card is
+blocked on QZVAEWQH like the other drill cards. Re-measure box 3 against the first fire whose
+`external-clear.log` shows `SUMMARY_READY`. Box 2 stays unticked on purpose: its premise (a
+mechanically-gathered card index) was retired by TRDD-79LXF6PJ, as documented in the box itself.
 
 ### ✅ 2026-08-29 — GATE DISCHARGED. The fix is INSTALLED, and re-verified by the 2026-08-26 grep.
 
@@ -511,6 +547,11 @@ only to record what was weighed.
       new surface instead of reusing this note.
 - [ ] whichever option lands, `/clear` recoverability is unchanged (the handoff is the only thing
       that survives a clear, so a regression here is unrecoverable by construction)
+      — **REFUTED 2026-09-02 04:23**: the first automated daemon fire (AgentlensPro) cleared a
+      session born 23:08 that had run five hours to 418k tokens, and no handoff covered that
+      work — `agent-handoff.md` (22:59) predates the session, `precompact-handoff.md` (18:48) is
+      older, llm-ext wrote nothing (no OpenRouter key under launchd, TRDD-QZVAEWQH). Stays open
+      until a fire whose summary lands shows the cleared work reachable from the resumed session.
 
 ## Notes and lessons learned
 
@@ -553,3 +594,4 @@ survived only because it had also been written into TRDD-4GQ94FNJ's own `## Gate
 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
+- 2026-09-02T05:21:37+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). A first draft closed this card on the 04:23 automated fire; the review fork refuted it — the fire cleared five hours of work with no handoff covering them, which contradicts box 3 rather than proving it. Blocked on TRDD-QZVAEWQH (the daemon's llm-ext has no OpenRouter key under launchd).

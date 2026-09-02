@@ -3,7 +3,7 @@ trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
 column: proposal
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T05:12:04+0200
+updated: 2026-09-02T05:21:37+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -48,8 +48,11 @@ Everything mechanical worked: the cleared session's context was 418,505 tokens (
 captured transcript with `cold_cache_compact.context_tokens_for`, ≥ the 300k floor); the session
 came back as a new id, re-armed at 04:24:45, emitted its post-clear resume cue at 04:25:03, sat on
 the 15-minute summary hold (dispatch.log: `summary hold active — no resume, no chores this fire`
-at 04:29, 04:34, 04:39) and then continued from the mechanical `precompact-handoff.md` — whose
-mtime was 18:48 the previous day. The model-authored `agent-handoff.md` (22:59) was untouched.
+at 04:29, 04:34, 04:39 — chores deferred) and then grounded itself on the only handoff there was:
+the link-only `agent-handoff.md` of 22:59, which it Read at 04:25:33. That handoff was written
+BEFORE the cleared session was born (23:08, `[s:f7594ac9] post-clear resume cue emitted`
+23:09:08), so the five hours of work in the cleared session (23:08 → 04:19, 418k tokens) are
+covered by NO handoff at all; `precompact-handoff.md` is older still (18:48).
 
 **So the lane's cheap half is proven and its whole point — a free llm-ext summary as the
 post-clear payload — ran dark.** The retry logic correctly classified the failure as permanent
@@ -68,19 +71,25 @@ XCJFCJUX (3.4.4) fixed the same shape for the plugin OPTIONS by mirroring
 (`state.plugin_options_env`) — deliberately and only that prefix. The key is not covered, and it
 is not IN that file either.
 
-Where the interactive sessions get it (verified, names only, values never read): NOT from any
-shell file — `~/.zshenv`, `~/.zprofile`, `~/.zshrc`, `~/.zautovenv` (the protected loader) and
-the usual `.env` candidates define nothing; `launchctl getenv` is empty; `~/.claude/settings.json`
-`env` has no such key; the keychain has no item under that account name. The variable is present
-in a live session's Bash, so it is injected by the desktop harness that launches Claude Code from
-its own secure store. A launchd daemon can never inherit that.
+Where the interactive sessions get it is INFERRED from absence (checked by name only, values never
+read): no shell file — `~/.zshenv`, `~/.zprofile`, `~/.zshrc`, `~/.zautovenv` (the protected
+loader) and the usual `.env` candidates — defines it; `launchctl getenv` is empty;
+`~/.claude/settings.json` `env` has no such key; the keychain has no item under that account name.
+The variable IS present in a live session's Bash, so the likeliest source is the desktop harness
+that launches Claude Code from its own secure store — not verified. What is verified, and all that
+options A–C depend on, is that no file on disk defines it, so no rc-sourcing trick can hand it to
+a launchd daemon.
 
 ## Why it matters more now than before 2F3I2P18
 
 Before the clear-first reorder, "no summary" meant "no clear" (the 79LXF6PJ gate). After it, the
 clear happens FIRST, so a missing key now produces the worst of both: the session is cleared, held
-15 minutes, and resumed from the cheap mechanical handoff the USER retired on 2026-08-23 as
-"useless". Every automated clear on this machine will take that path until the daemon has a key.
+15 minutes, and left with whatever link-only handoff the PREVIOUS session wrote — on AgentlensPro
+one written before the cleared session was even born, so five hours of work were cleared with no
+record of them anywhere. Before TRDD-79LXF6PJ retired the daemon's facts+tail compose, those turns
+would at least have been captured; the retirement was made safe by the llm-ext summary, and the
+daemon cannot produce one. **This is a live recoverability regression, not a degraded mode**, and
+every automated clear on this machine takes that path until the daemon has a key.
 
 ## Options — the USER decides, because each one places a credential
 

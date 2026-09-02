@@ -3,7 +3,7 @@ trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
 column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-02T03:56:00+0200
+updated: 2026-09-02T05:16:16+0200
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
@@ -21,6 +21,32 @@ external-refs: [TRDD-1QJIZFFW, TRDD-79LXF6PJ, TRDD-PXP08ZQC, TRDD-XCJFCJUX]
 # The clear must precede the summary, not follow it
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+### ✅ 2026-09-02 05:15 — the clear-first ORDERING is observed live; the "measured" box still waits for a prefix-invalidation event
+
+> **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
+> (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
+> human_idle 1100 s — that trigger needs no idle floor, the next heartbeat would have missed the
+> 5-min cache anyway). `external-clear.log`: `fired:` at 04:23:51, then three llm-ext attempts at
+> 04:24:02 / 04:24:16 / 04:24:28 — the TRDD-2F3I2P18 clear-first ordering is observed live. The
+> session re-armed at 04:24:45 and emitted its post-clear resume cue at 04:25:03 (a new session
+> id; heartbeat fires continue). **But every llm-ext attempt failed identically:**
+> `Remote api 'openrouter-remote' requires 'api_key' (env var $OPENROUTER_API_KEY is not set)` —
+> the launchd daemon carries no such variable (the twin of TRDD-XCJFCJUX, for a credential instead
+> of an option), so the chain logged `NO_SUMMARY_POST_CLEAR`, held the session on the 15-minute
+> summary hold (dispatch.log 04:29/04:34/04:39) and left the resumed session to ground itself on
+> the only handoff there was: the link-only `agent-handoff.md` of 22:59 (the resumed session Read
+> it at 04:25:33), written BEFORE the cleared session was born (23:08) — so that session's five
+> hours of work (23:08 → 04:19, 418k tokens) are covered by NO handoff; `precompact-handoff.md`
+> is older still (18:48) and llm-ext wrote nothing. Filed as **TRDD-QZVAEWQH** (`design/proposals/`, USER ruling — every fix
+> places a credential). Also exposed: the daemon fire path takes no `handoff_clear_verify.py
+> --phase before` snapshot, so no PASS table can exist for an automated clear — **TRDD-BDZG8Y8A**
+> (`todo`).
+
+This fire was a `next-fire-misses` trigger, not a model/effort switch or reload, so the remaining
+box (a cache-invalidating event costing no full prefix write) is not closed by it — watch
+`external-clear.log` for `prefix invalidated (…)`. The 2026-09-02 paragraph below saying the
+drill "cannot happen yet" is SUPERSEDED: XCJFCJUX shipped in 3.4.4 and the lane evaluates live.
 
 Code is shipped and installed (3.4.3; the daemon restaged and respawned 23:43:56). The only
 open item is the "measured" box: one automated clear observed under the new clear-first

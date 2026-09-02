@@ -1,10 +1,11 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: testing
-blocked-by: []
+column: blocked
+pre-block-column: testing
+blocked-by: [QZVAEWQH]
 created: 2026-08-23T16:45:05+0200
-updated: 2026-09-02T03:56:00+0200
+updated: 2026-09-02T05:16:16+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
@@ -27,6 +28,32 @@ implementation-commits: [155833b3]
 > until XCJFCJUX's loader is published and restaged; then one drill closes this card too.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
+
+### ⛔ 2026-09-02 05:15 — box 3 observed on the DEGRADED path; the directive's end state is contradicted. Blocked on TRDD-QZVAEWQH
+
+> **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
+> (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
+> human_idle 1100 s — that trigger needs no idle floor, the next heartbeat would have missed the
+> 5-min cache anyway). `external-clear.log`: `fired:` at 04:23:51, then three llm-ext attempts at
+> 04:24:02 / 04:24:16 / 04:24:28 — the TRDD-2F3I2P18 clear-first ordering is observed live. The
+> session re-armed at 04:24:45 and emitted its post-clear resume cue at 04:25:03 (a new session
+> id; heartbeat fires continue). **But every llm-ext attempt failed identically:**
+> `Remote api 'openrouter-remote' requires 'api_key' (env var $OPENROUTER_API_KEY is not set)` —
+> the launchd daemon carries no such variable (the twin of TRDD-XCJFCJUX, for a credential instead
+> of an option), so the chain logged `NO_SUMMARY_POST_CLEAR`, held the session on the 15-minute
+> summary hold (dispatch.log 04:29/04:34/04:39) and left the resumed session to ground itself on
+> the only handoff there was: the link-only `agent-handoff.md` of 22:59 (the resumed session Read
+> it at 04:25:33), written BEFORE the cleared session was born (23:08) — so that session's five
+> hours of work (23:08 → 04:19, 418k tokens) are covered by NO handoff; `precompact-handoff.md`
+> is older still (18:48) and llm-ext wrote nothing. Filed as **TRDD-QZVAEWQH** (`design/proposals/`, USER ruling — every fix
+> places a credential). Also exposed: the daemon fire path takes no `handoff_clear_verify.py
+> --phase before` snapshot, so no PASS table can exist for an automated clear — **TRDD-BDZG8Y8A**
+> (`todo`).
+
+The idle session WAS automatically cleared and DID resume (box 3's literal text) — but from the
+mechanical handoff the USER retired as useless, not from the llm-ext summary, so "all compactions
+go through the llm-externalizer" is exactly what this fire disproved. Box 3 stays open until a
+fire resumes from a keyed llm-ext summary.
 
 ### ⏵ 2026-08-26 — "Not started" is WRONG. Both concrete asks already landed.
 
@@ -215,3 +242,4 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
+- 2026-09-02T05:16:16+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). Blocked on TRDD-QZVAEWQH: the first automated clear resumed from the mechanical handoff because the daemon's llm-ext has no OpenRouter key under launchd.

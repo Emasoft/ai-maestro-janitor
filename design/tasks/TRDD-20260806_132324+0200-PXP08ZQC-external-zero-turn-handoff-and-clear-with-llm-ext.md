@@ -1,10 +1,11 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: testing
-blocked-by: []
+column: blocked
+pre-block-column: testing
+blocked-by: [QZVAEWQH, BDZG8Y8A]
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-02T03:56:00+0200
+updated: 2026-09-02T05:16:16+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -16,6 +17,32 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+### ⛔ 2026-09-02 05:15 — ONE AUTOMATED CYCLE OBSERVED, minus its external handoff. Blocked on TRDD-QZVAEWQH + TRDD-BDZG8Y8A
+
+> **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
+> (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
+> human_idle 1100 s — that trigger needs no idle floor, the next heartbeat would have missed the
+> 5-min cache anyway). `external-clear.log`: `fired:` at 04:23:51, then three llm-ext attempts at
+> 04:24:02 / 04:24:16 / 04:24:28 — the TRDD-2F3I2P18 clear-first ordering is observed live. The
+> session re-armed at 04:24:45 and emitted its post-clear resume cue at 04:25:03 (a new session
+> id; heartbeat fires continue). **But every llm-ext attempt failed identically:**
+> `Remote api 'openrouter-remote' requires 'api_key' (env var $OPENROUTER_API_KEY is not set)` —
+> the launchd daemon carries no such variable (the twin of TRDD-XCJFCJUX, for a credential instead
+> of an option), so the chain logged `NO_SUMMARY_POST_CLEAR`, held the session on the 15-minute
+> summary hold (dispatch.log 04:29/04:34/04:39) and left the resumed session to ground itself on
+> the only handoff there was: the link-only `agent-handoff.md` of 22:59 (the resumed session Read
+> it at 04:25:33), written BEFORE the cleared session was born (23:08) — so that session's five
+> hours of work (23:08 → 04:19, 418k tokens) are covered by NO handoff; `precompact-handoff.md`
+> is older still (18:48) and llm-ext wrote nothing. Filed as **TRDD-QZVAEWQH** (`design/proposals/`, USER ruling — every fix
+> places a credential). Also exposed: the daemon fire path takes no `handoff_clear_verify.py
+> --phase before` snapshot, so no PASS table can exist for an automated clear — **TRDD-BDZG8Y8A**
+> (`todo`).
+
+Of the last box's five elements — big idle session → external handoff → clear → re-arm → resume —
+four are now observed on the automated path; the external handoff (the llm-ext summary) is the
+one that failed, and the PASS table cannot be produced for an automated clear until BDZG8Y8A. Not
+ticked.
 
 ### ⛔ 2026-09-02 — publish+install DONE (3.4.3), lever ON, and the daemon still cannot see it
 
@@ -411,3 +438,4 @@ equality test now pins producer and checker together so they cannot drift apart 
   and concrete (wire the watcher). No scope or acceptance changed.
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
+- 2026-09-02T05:16:16+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). Blocked on TRDD-QZVAEWQH (daemon llm-ext has no OpenRouter key under launchd) and TRDD-BDZG8Y8A (no before-snapshot on the daemon fire path); four of the five cycle elements observed live 04:23.
