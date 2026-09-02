@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.4] — 2026-09-02
+
+### Bug Fixes
+
+- **daemon:** The launchd-run daemon loads CLAUDE_PLUGIN_OPTION_* from settings.json itself — at import, before the interval constants, and on mtime change each tick (TRDD-XCJFCJUX) (dec760e)
+- **state:** CPV informed-consent sentinel on the settings-env write — the ENV_INJECTION finding stays visible as a WARNING instead of blocking the publish (TRDD-XCJFCJUX) (19a52dc)
+- **session-start:** Seed reload-acked.ts for clear-born sessions too — the fork omission, repeated (janitor#290 §1, TRDD-38PB1B86) (2e9a76c)
+
+### Documentation
+
+- **TRDD-NUD3DGX5, TRDD-NDAARSXT:** 2.1.257 alignment resolved item-by-item; NDAARSXT complete on the daemon's own live verdicts (118984f)
+- Add TRDD-XCJFCJUX — the launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* (measured 2026-09-02: lever true in settings.json since 21:30, daemon env has 0 option vars, clear still runs in shadow) (261c815)
+- **TRDD-1QJIZFFW, TRDD-PXP08ZQC, TRDD-2F3I2P18:** Re-blocked on TRDD-XCJFCJUX — publish+install is done, the lever is on, and the launchd daemon still cannot read it (a36d0ec)
+- **TRDD-NUD3DGX5:** Complete — nine 2.1.257 items, nine evidenced dispositions, no code change (delegated review, self-closure disclosed) (a62cf1b)
+- **TRDD-XCJFCJUX:** Fix landed (dec760ed) — card to testing; last box waits on the publish + restage (a540931)
+- **TRDD-GK35MOXU:** Column honest — blocked on claude-plugins-validation#222 (still OPEN, latest CPV v5.14.2 predates the PostModelSwitch allowlist); the hook code is done, only the hooks.json registration waits (eb5276a)
+- **TRDD-XCJFCJUX, TRDD-GK35MOXU:** Updated stamps corrected to the real clock — the session's guessed times ran up to 12 min into the future (a future stamp mis-sorts the whole board) (34d8b25)
+- Testing column drained — 9T0U3M00 and V5FUX7H0 complete on disk evidence, 79LXF6PJ and 5RXBI65T blocked on TRDD-XCJFCJUX (delegated review, 2026-09-02) (b2e656c)
+- POA0157J blocked on AgentlensPro#19 (fork decided upstream); add TRDD-38PB1B86 — janitor-reload fires on every fleet-update epoch and every clear-born session (janitor#290, unanswered since 2026-08-28) (8e5310e)
+- **TRDD-XCJFCJUX:** STATE — os.environ mirror superseded (CPV ENV_INJECTION blocks it, sentinel does not cover the rule: claude-plugins-validation#223); redesign to a dict mirror behind state.plugin_option + child-env merge (a541198)
+- **TRDD-XCJFCJUX, TRDD-38PB1B86:** Commits recorded — XCJFCJUX to testing on d6c82d60 (last box waits on publish + restage), 38PB1B86 item 1 landed as 2e9a76c8 (d3d7db2)
+
+### Refactor
+
+- **daemon:** Plugin options read through state.plugin_option() from a settings.json mirror — no process-environment writes (TRDD-XCJFCJUX) (d6c82d6)
 ## [3.4.3] — 2026-09-01
 
 ### Bug Fixes
@@ -17,6 +42,10 @@ All notable changes to this project will be documented in this file.
 - Add TRDD-NDAARSXT — the keepalive daemon's external clear is a silent no-op (watcher not in the staged closure; measured 2026-09-01) (4045b05)
 - **TRDD-NDAARSXT:** Root cause — the staged closure is an import BFS, a subprocess-reached script is excluded by construction (1bfc571)
 - **TRDD-NDAARSXT:** Fix landed (f0bba94c) — card to testing; last box waits on the publish+restage (152a1f5)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.3 (aa72beb)
 ## [3.4.2] — 2026-09-01
 
 ### Bug Fixes
