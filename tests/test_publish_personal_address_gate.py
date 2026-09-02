@@ -20,9 +20,10 @@ import publish  # noqa: E402
 
 # The flaggable addresses are ASSEMBLED at runtime, never written as literals:
 # this file is itself tracked in the public repo, and the gate under test scans
-# every added line of every tracked file — a literal `x@gmail.com` here would
-# block the very publish that ships the gate (measured 2026-09-02: six hits,
-# all in this file). Splitting the `@` keeps the regex from matching the source.
+# every added line of every tracked file — a literal gmail address here would
+# block the very publish that ships the gate (measured 2026-09-02: six hits in
+# this file, then one more from a comment that spelled one out). Splitting the
+# `@` keeps the regex from ever matching the source.
 _AT = "@"
 
 
