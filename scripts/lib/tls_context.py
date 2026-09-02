@@ -36,7 +36,7 @@ def verifying_context() -> ssl.SSLContext:
         # checker's own env may lack it — CPV's CI pyright did, and that one unresolved import
         # was the MINOR that turned the 3.4.11 release red while the local gate (a venv that
         # happens to carry certifi) passed. Same form as zizmor_classifier's optional re2.
-        import certifi  # type: ignore[import-not-found]  # noqa: PLC0415 -- optional; present on python.org builds, absent elsewhere
+        import certifi  # type: ignore[import-not-found]  # noqa: PLC0415 -- optional: a python.org build gets it only once "Install Certificates.command" has run; a fresh one has neither certifi nor a bundle, which is what the OS rung below is for
 
         candidates.append(certifi.where())
     except ImportError:
