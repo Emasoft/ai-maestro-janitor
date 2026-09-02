@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-O7UCNNN2, TRDD-PXP08ZQC, TRDD-1QJIZFFW]
-implementation-commits: []
+implementation-commits: [6a3605b4]
 ---
 
 # One candidate per beat is right; the SAME candidate every beat is not
