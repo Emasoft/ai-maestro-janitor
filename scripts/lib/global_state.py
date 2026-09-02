@@ -2637,7 +2637,7 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
     # closing the "written-but-never-read" gap that allowed unbounded respawn
     # churn when the daemon dies on start.
     min_interval = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MIN_SPAWN_INTERVAL"),
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_DAEMON_MIN_SPAWN_INTERVAL"),
         _DEFAULT_MIN_SPAWN_INTERVAL_SECONDS,
     )
     last_attempt = state.read_int_state(_spawn_marker_path(), 0)

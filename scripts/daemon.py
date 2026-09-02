@@ -116,7 +116,7 @@ def _env_interval(var: str, default: int) -> int:
     spawned daemon instantly, trip the crash-loop breaker, and silently stop ALL machine-global
     services (marketplace refresh, plugin updates, OAuth keepalive). coerce_int falls back to
     the default like every other janitor entry point."""
-    return state.coerce_int(os.environ.get(var), default)
+    return state.coerce_int(state.plugin_option(var), default)
 
 
 _INTERVAL_KEEPALIVE_SELF_HEAL = _env_interval(
@@ -415,6 +415,10 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             text=True,
             close_fds=True,
             preexec_fn=preexec_fn,
+            # launchd's own env has no settings.json knobs (TRDD-XCJFCJUX) — merge the
+            # in-memory mirror in so a child that reads CLAUDE_PLUGIN_OPTION_* sees them
+            # via its own os.environ; a real env var still wins.
+            env={**os.environ, **state.plugin_options_env()},
         )
     except FileNotFoundError:
         state.log_line("daemon", f"  binary not in PATH: {cmd[0]}")
@@ -805,7 +809,7 @@ def task_memory_guard() -> None:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ENABLED", True):
         return
     min_free_mb = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_MIN_FREE_MB"),
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_MIN_FREE_MB"),
         mg.DEFAULT_MIN_FREE_MB,
     )
     free_mb = mg.free_memory_mb()
@@ -819,7 +823,7 @@ def task_memory_guard() -> None:
     rows = mg.snapshot_processes(str(snapshot))
     protected = frozenset({os.getpid(), os.getppid()})
     min_age = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_RUNAWAY_ETIME_S"),
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_RUNAWAY_ETIME_S"),
         mg.DEFAULT_RUNAWAY_ETIME_S,
     )
     victim = mg.select_victim(rows, protected_pids=protected, min_etime_s=min_age)
@@ -835,7 +839,7 @@ def task_memory_guard() -> None:
         # (once per distinct hog, emit_once-deduped) with the S7 dual disk metric so a
         # human can judge whether "low disk" is real or purgeable-covered.
         alert_rss_kb = state.coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ALERT_RSS_KB"),
+            state.plugin_option("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ALERT_RSS_KB"),
             mg.DEFAULT_ALERT_RSS_KB,
         )
         if alert_rss_kb > 0:
@@ -904,13 +908,13 @@ def task_cache_prune() -> None:
     if not cache_root.is_dir():
         return
     keep_recent = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_KEEP_RECENT"), 5
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_KEEP_RECENT"), 5
     )
     min_age_days = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_MIN_AGE_DAYS"), 7
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_MIN_AGE_DAYS"), 7
     )
     margin_hours = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_SESSION_MARGIN_HOURS"), 24
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_SESSION_MARGIN_HOURS"), 24
     )
     now = int(time.time())
 
@@ -1583,7 +1587,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # A None reading (cannot tell) fails toward NOT touching it, same as the
             # typing gate above this loop.
             esc_idle_s = state.coerce_int(
-                os.environ.get("CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S"),
+                state.plugin_option("CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S"),
                 1800,
                 detector_name="session-liveness",
                 var_name="fleet_awaiting_esc_idle_s",
@@ -2315,6 +2319,10 @@ class Task:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,  # own pgroup → killpg reaps its subprocesses too
+                # this child re-imports daemon.py, which recomputes every _env_interval
+                # constant at import time — give it the mirror so it sees the same
+                # settings.json knobs this process loaded (TRDD-XCJFCJUX).
+                env={**os.environ, **state.plugin_options_env()},
             )
             self._child_t0 = time.time()
             state.log_line(
@@ -2674,13 +2682,14 @@ def _consume_plugin_update_requests() -> int:
                 state.log_line("daemon", f"plugin-update deferred (marketplace lock held): {plugin_id}")
                 continue
             try:
+                child_env = {**os.environ, **state.plugin_options_env()}
                 subprocess.run(  # noqa: S603 - explicit args, no shell
                     ["claude", "plugin", "marketplace", "update", marketplace],
-                    capture_output=True, text=True, timeout=120, check=False,
+                    capture_output=True, text=True, timeout=120, check=False, env=child_env,
                 )
                 up = subprocess.run(  # noqa: S603
                     ["claude", "plugin", "update", plugin_id, "--scope", "user"],
-                    capture_output=True, text=True, timeout=180, check=False,
+                    capture_output=True, text=True, timeout=180, check=False, env=child_env,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
                 state.log_line("daemon", f"plugin-update {plugin_id} failed: {exc}")

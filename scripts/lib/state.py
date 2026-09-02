@@ -458,15 +458,17 @@ def rollback_marker_ack(filename: str, *, actor: str, why: str) -> bool:
     return True
 
 
-# Injected by load_plugin_options_from_settings(): the keys THIS process wrote into
-# os.environ from settings.json, so a later re-read can update/drop exactly those keys
-# without ever touching a value that came from a real environment (launchd, a shell export).
-_SETTINGS_INJECTED: dict[str, str] = {}
+# Mirror of settings.json's CLAUDE_PLUGIN_OPTION_* — read via plugin_option()/
+# plugin_options_env(), NEVER written into os.environ. CPV's security gate blocks any
+# dynamic write of a computed key into the process environment (ENV_INJECTION, MAJOR)
+# with no consent path for it (TRDD-XCJFCJUX), so the daemon keeps its own copy instead
+# of mutating the process environment, merging it into a child's env only at spawn time.
+_SETTINGS_OPTIONS: dict[str, str] = {}
 _SETTINGS_MTIME_NS: int | None = None
 
 
 def load_plugin_options_from_settings(path: Path | None = None) -> int:
-    """Mirror ~/.claude/settings.json's CLAUDE_PLUGIN_OPTION_* into os.environ.
+    """Load ~/.claude/settings.json's CLAUDE_PLUGIN_OPTION_* into the in-memory mirror.
 
     launchd starts the daemon with launchd's own environment — none of the session
     harness's settings.json `env` block reaches it (TRDD-XCJFCJUX). This is the daemon's
@@ -474,9 +476,9 @@ def load_plugin_options_from_settings(path: Path | None = None) -> int:
     source of truth instead of importing settings_ensurer (that module sits outside the
     daemon's staged import closure — the exact failure class TRDD-NDAARSXT hit).
 
-    A real env var always wins: a key already in os.environ that this loader did NOT itself
-    inject is left untouched, which is how tests and the session lane isolate from a
-    machine's real settings.json.
+    Fills `_SETTINGS_OPTIONS` only — never touches `os.environ`. Callers read through
+    `plugin_option()` (a real env var always wins over the mirror) or merge
+    `plugin_options_env()` into a child process's env at spawn time.
     """
     resolved = path if path is not None else Path.home() / ".claude" / "settings.json"
     try:
@@ -489,30 +491,38 @@ def load_plugin_options_from_settings(path: Path | None = None) -> int:
     if not isinstance(env_block, dict):
         return 0
 
-    injected: dict[str, str] = {}
+    loaded: dict[str, str] = {}
     for key, value in env_block.items():
         if not isinstance(key, str) or not key.startswith("CLAUDE_PLUGIN_OPTION_"):
             continue
-        if key in os.environ and key not in _SETTINGS_INJECTED:
-            continue  # a real env var wins — never override what this loader didn't set
-        text = str(value)
-        # This IS a deliberate write of os.environ from a file, and CPV's skillaudit rightly
-        # flags that shape (ENV_INJECTION). The trust boundary is the user's own
-        # ~/.claude/settings.json — the exact file Claude Code injects into every session's
-        # environment — filtered to the CLAUDE_PLUGIN_OPTION_ prefix, never overriding a real
-        # env var. The sentinel line below is CPV's informed-consent form: the finding stays
-        # visible as a WARNING instead of blocking the publish (CPV v2.126.24, closed #101).
-        # WARNING: the following code could be malicious. Audit it for safety before executing it!
-        os.environ[key] = text
-        injected[key] = text
+        loaded[key] = str(value)
 
-    for stale_key in _SETTINGS_INJECTED:
-        if stale_key not in injected:
-            os.environ.pop(stale_key, None)
+    _SETTINGS_OPTIONS.clear()
+    _SETTINGS_OPTIONS.update(loaded)
+    return len(loaded)
 
-    _SETTINGS_INJECTED.clear()
-    _SETTINGS_INJECTED.update(injected)
-    return len(injected)
+
+def plugin_option(name: str, default: str | None = None) -> str | None:
+    """Read a `CLAUDE_PLUGIN_OPTION_*` value — a real env var always wins over the mirror.
+
+    The mirror (`_SETTINGS_OPTIONS`) exists only because launchd's environment has no
+    settings.json `env` block (TRDD-XCJFCJUX); a session that DOES have the var set for
+    real must never be shadowed by a stale file read.
+    """
+    real = os.environ.get(name)
+    if real is not None:
+        return real
+    return _SETTINGS_OPTIONS.get(name, default)
+
+
+def plugin_options_env() -> dict[str, str]:
+    """Mirror entries a spawned child needs merged into ITS env to see them via os.environ.
+
+    Excludes any key already real in this process's os.environ — that value already
+    propagates to a child by inheritance, and re-adding it here would let a stale mirror
+    entry override a live env var at the merge site.
+    """
+    return {k: v for k, v in _SETTINGS_OPTIONS.items() if k not in os.environ}
 
 
 def refresh_plugin_options_if_changed(path: Path | None = None) -> bool:
@@ -543,7 +553,7 @@ def is_truthy_env(name: str, default: bool) -> bool:
     here keeps the spelling-of-false rules in one place so a future
     addition (e.g. `disabled`) doesn't drift between callers.
     """
-    raw = os.environ.get(name, "").strip()
+    raw = (plugin_option(name) or "").strip()
     if not raw:
         return default
     return raw.lower() not in ("false", "0", "no", "off")
@@ -1060,7 +1070,7 @@ def detached_uv_env() -> dict[str, str]:
     marketplace-refresh empty-worker-log flake (TRDD-UO93APWN) — worse under suite load
     because load widens the window between parent-uv exit and worker-uv start.
     """
-    env = dict(os.environ)
+    env = {**os.environ, **plugin_options_env()}
     env.pop("VIRTUAL_ENV", None)
     return env
 
@@ -1089,7 +1099,7 @@ def timeout_scale() -> float:
     Anything unparseable or non-positive falls back to 1.0: a malformed knob must never
     silently shorten a production timeout.
     """
-    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE")
+    raw = plugin_option("CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE")
     if not raw:
         return 1.0
     try:

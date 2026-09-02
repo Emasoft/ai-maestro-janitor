@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import keepalive_stage  # sibling in scripts/lib/; computes + verbatim-stages the closure
+import state  # sibling in scripts/lib/; plugin_option() reads the settings.json mirror
 import version_update_lib  # sibling in scripts/lib/; the C3 quarantine reader (read_quarantine)
 
 # The janitor's FIXED persistent DATA dir — hard-coded (NOT ${CLAUDE_PLUGIN_DATA}, which
@@ -93,7 +94,7 @@ def opted_in() -> bool:
     session-spawned only. It is removed when the daemon stops machine-wide (the
     kill-switch exit calls ``uninstall``), NOT by a per-project /janitor-disarm — the
     daemon is a machine-global singleton other projects rely on."""
-    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE", "1").strip().lower()
+    raw = (state.plugin_option("CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE", "1") or "").strip().lower()
     return raw not in ("0", "false", "no", "off", "")
 
 

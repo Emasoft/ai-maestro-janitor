@@ -179,7 +179,12 @@ def run_once() -> int:
                     stdout=sink,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
-                    env={**os.environ, "CLAUDE_PROJECT_DIR": root, "PYTHONUNBUFFERED": "1"},
+                    env={
+                        **os.environ,
+                        **state.plugin_options_env(),
+                        "CLAUDE_PROJECT_DIR": root,
+                        "PYTHONUNBUFFERED": "1",
+                    },
                 )
         except Exception as exc:  # noqa: BLE001 - one bad spawn must not stop the beat
             state.log_line(_COMPONENT, f"cold-cache-clear: spawn failed for {root}: {exc}")

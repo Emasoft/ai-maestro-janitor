@@ -48,6 +48,7 @@ from pathlib import Path
 
 import keepalive_stage  # sibling: computes the daemon's verbatim import closure
 import launchd_keepalive  # sibling: latest_cache_scripts_dir() + restage()
+import state  # sibling: plugin_option() reads the settings.json mirror
 
 try:
     # Sibling in the daemon closure. Its global_state_dir() honors
@@ -136,7 +137,7 @@ def _restage_cooldown_s() -> int:
     whole ~16-file closure on EVERY keepalive boot — the fsevents-churn half of the
     fseventsd runaway (TRDD-ZNN0UK5K). Env-tunable; 0 disables the suppression."""
     try:
-        return max(0, int(os.environ.get("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S", "300")))
+        return max(0, int(state.plugin_option("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S") or "300"))
     except (TypeError, ValueError):
         return 300
 

@@ -156,33 +156,33 @@ def min_context_tokens() -> int:
     The result is floored at `DEFAULT_MIN_CONTEXT_TOKENS` so a pathologically small auto-window can
     never push the threshold below this install's post-compaction floor (nothing to reclaim there).
     """
-    raw = os.environ.get(MIN_CONTEXT_ENV)
+    raw = state.plugin_option(MIN_CONTEXT_ENV)
     if raw is not None:
         parsed = state.parse_nonneg_int(raw)
         if parsed is not None:
             return parsed  # explicit operator override — trust it verbatim
     margin = state.coerce_int(
-        os.environ.get(HARNESS_BACKSTOP_MARGIN_ENV), DEFAULT_HARNESS_BACKSTOP_MARGIN
+        state.plugin_option(HARNESS_BACKSTOP_MARGIN_ENV), DEFAULT_HARNESS_BACKSTOP_MARGIN
     )
     # predict_auto_compact(0) returns the used-independent geometry when the env var is set (the
     # effective point is `auto_window - overhead`), and None when it is unset.
     pred = token_meter.predict_auto_compact(0)
     if pred is not None:
         return max(pred.effective_compact_point + margin, DEFAULT_MIN_CONTEXT_TOKENS)
-    window = state.coerce_int(os.environ.get(CONTEXT_WINDOW_ENV), DEFAULT_CONTEXT_WINDOW_TOKENS)
+    window = state.coerce_int(state.plugin_option(CONTEXT_WINDOW_ENV), DEFAULT_CONTEXT_WINDOW_TOKENS)
     overhead = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS"),
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS"),
         token_meter._DEFAULT_COMPACT_SUMMARY_OVERHEAD,
     )
     return max(window - overhead + margin, DEFAULT_MIN_CONTEXT_TOKENS)
 
 
 def cooldown_seconds() -> int:
-    return state.coerce_int(os.environ.get(COOLDOWN_ENV), DEFAULT_COOLDOWN_SECONDS)
+    return state.coerce_int(state.plugin_option(COOLDOWN_ENV), DEFAULT_COOLDOWN_SECONDS)
 
 
 def min_gain_tokens() -> int:
-    return state.coerce_int(os.environ.get(MIN_GAIN_ENV), DEFAULT_MIN_GAIN_TOKENS)
+    return state.coerce_int(state.plugin_option(MIN_GAIN_ENV), DEFAULT_MIN_GAIN_TOKENS)
 
 
 def proactive_idle_enabled() -> bool:
@@ -200,11 +200,11 @@ def clear_enabled() -> bool:
 
 
 def clear_min_idle_seconds() -> int:
-    return state.coerce_int(os.environ.get(CLEAR_MIN_IDLE_ENV), DEFAULT_CLEAR_MIN_IDLE_SECONDS)
+    return state.coerce_int(state.plugin_option(CLEAR_MIN_IDLE_ENV), DEFAULT_CLEAR_MIN_IDLE_SECONDS)
 
 
 def clear_cooldown_seconds() -> int:
-    return state.coerce_int(os.environ.get(CLEAR_COOLDOWN_ENV), DEFAULT_CLEAR_COOLDOWN_SECONDS)
+    return state.coerce_int(state.plugin_option(CLEAR_COOLDOWN_ENV), DEFAULT_CLEAR_COOLDOWN_SECONDS)
 
 
 def clear_in_cooldown(state_dir: Path, *, now: int) -> bool:
