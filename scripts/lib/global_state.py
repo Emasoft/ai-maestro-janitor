@@ -1005,14 +1005,22 @@ def record_rotation_success(now: int) -> None:
         pass
 
 
+def rotation_success_epoch() -> int | None:
+    """The epoch of the last recorded rotation, or None when there is no readable stamp.
+    The rotation-ESC pass keys its once-per-rotation dedupe on this value (TRDD-NACCL0CB)."""
+    try:
+        raw = (global_state_dir() / _ROTATION_SUCCESS_NAME).read_text(encoding="utf-8")
+        return int(raw.strip())
+    except (OSError, ValueError):
+        return None
+
+
 def rotation_succeeded_within(seconds: int, *, now: int) -> bool:
     """True iff a rotation landed within the last `seconds` — i.e. the reason a pane is
     stuck may have JUST been removed. Fail-CLOSED (no stamp / unreadable / future-dated ⇒
     False): this gates typing into a user's pane, so it acts only on positive evidence."""
-    try:
-        raw = (global_state_dir() / _ROTATION_SUCCESS_NAME).read_text(encoding="utf-8")
-        ts = int(raw.strip())
-    except (OSError, ValueError):
+    ts = rotation_success_epoch()
+    if ts is None:
         return False
     return 0 <= (int(now) - ts) <= max(0, seconds)
 

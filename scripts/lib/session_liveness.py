@@ -65,6 +65,20 @@ def retry_wedge_attempt(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def retry_wedge_attempt_at_tail(text: str, *, lines: int = 12) -> int | None:
+    """`retry_wedge_attempt` restricted to the LAST `lines` non-empty rows of the frame. PURE.
+
+    The rotation-ESC pass (TRDD-NACCL0CB) cannot use the advance-across-polls guard: a
+    weekly-window wall shows `Retrying in 5h … attempt 1/5` and that attempt number does not
+    move for five hours, so "advanced" can never come true there. Its guard is positional
+    instead — Claude Code draws the retry status directly above its input box, i.e. within
+    the bottom rows of the frame — so a message body higher up that merely QUOTES the wedge
+    line (this repo's own TRDD cards do) is outside the window and is not read as a wedge.
+    """
+    rows = [ln for ln in (text or "").splitlines() if ln.strip()]
+    return retry_wedge_attempt("\n".join(rows[-lines:]))
+
+
 def retry_wedge_state_update(
     *, prev: Mapping[str, object] | None, current_attempt: int | None
 ) -> tuple[dict[str, object] | None, bool]:

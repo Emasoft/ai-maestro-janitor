@@ -76,6 +76,9 @@ RATE_LIMITED_SINCE_FILE = "rate-limited-since.ts"
 # inject dedupe (never read by dispatch).
 DAEMON_WAKE_COVERED_FILE = "daemon-wake-covered.ts"
 DAEMON_RESUME_WAKE_FILE = "daemon-resume-wake.ts"
+# daemon._rotation_esc_pass's once-per-rotation dedupe: holds the rotation epoch whose ESC
+# this pane already received, so a rotation ESCs each wedged pane exactly once (TRDD-NACCL0CB).
+DAEMON_ROTATION_ESC_FILE = "daemon-rotation-esc.ts"
 
 # --- path resolution -------------------------------------------------------
 

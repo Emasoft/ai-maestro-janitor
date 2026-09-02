@@ -1359,6 +1359,11 @@ def task_session_liveness(fleet: list | None = None) -> None:
         except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
             state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
             return
+    # BEFORE the typing gate, on purpose (TRDD-NACCL0CB): a pane wedged in the retry
+    # watchdog has a BLOCKED input line, so an ESC there cannot land under anyone's fingers —
+    # and the 2026-09-02 wall showed the gate deferring it for 12 minutes straight while the
+    # owner sat looking at the red line.
+    _rotation_esc_pass(fleet, now, fire=fire)
     rec_dir = gs.global_state_dir() / "recovery"
     rec_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1394,9 +1399,18 @@ def task_session_liveness(fleet: list | None = None) -> None:
     hid = user_intent.hid_idle_seconds()
     _record_hid_probe_verdict(hid)
     if hid is not None and hid <= user_intent.USER_PRESENT_IDLE_S:
+        # Name what the deferral is sitting on. On 2026-09-02 twelve consecutive deferrals
+        # left NO trace of the wedged panes behind them — a silent early return is how a
+        # missed recovery stays invisible (TRDD-NACCL0CB).
+        pending = ", ".join(
+            f"{os.path.basename(i.project_root or '?')}:{i.diagnosis}"
+            for i in fleet
+            if i.diagnosis not in ("healthy", "unarmed", "server_owned")
+        )
         state.log_line(
             "daemon",
-            f"session-liveness: user typing (HID idle {hid:.0f}s) — recovery injections deferred this beat",
+            f"session-liveness: user typing (HID idle {hid:.0f}s) — recovery injections deferred this beat"
+            + (f"; deferred: {pending}" if pending else ""),
         )
         return
 
@@ -1797,6 +1811,76 @@ def _rate_limit_window_key(sd: Path, flag: Path) -> int:
         return int(flag.stat().st_mtime)
     except OSError:
         return 0
+
+
+def _rotation_esc_pass(fleet: list, now: int, *, fire: bool) -> None:
+    """Rotation-triggered ESC for panes wedged in Claude Code's retry watchdog
+    (TRDD-NACCL0CB — owner ruling 2026-09-02: "the very moment you switch/rotate the
+    account, inject ESC to all claude code instances with the red error").
+
+    Why a separate pass, and why it needs no diagnosis:
+    - The retry-watchdog wedge (`Retrying in … attempt N/M`) keeps the turn alive, so nothing
+      writes `rate-limited.flag` and `_resume_wake_pass` cannot see it; and a typed command
+      into that pane only buffers (TRDD-P7WU40G9). ESC is the one actuation that works.
+    - The `retry_wedged` diagnosis needs a stale transcript (≥ 15 min) AND an attempt number
+      that ADVANCES across polls. A weekly-window wall reads `Retrying in 5h … attempt 1/5`
+      for five hours: measured 2026-09-02, the daemon had produced 0 `retry_wedged`
+      diagnoses in its whole history. So this pass reads the pane NOW and keys on the
+      signature at the frame's tail instead.
+    - It runs BEFORE the typing gate: the pane's input line is blocked, so the ESC cannot
+      land under a human's fingers, and the gate is machine-wide HID idle — the owner typing
+      in a DIFFERENT session was what deferred the ESC for 12 minutes.
+
+    Guards that stay: `unarmed` / `server_owned` / `dead` are never touched, a pane holding
+    a human decision is left alone, one ESC per pane per rotation, and only within
+    `_ROTATION_WAKE_WINDOW_S` of the switch. `rate-limited.flag` is written before the ESC for
+    the same reason the `retry_wedged` rung writes it: the ESC ends the turn with a plain Stop,
+    and the flag is what makes dispatch emit the resume instead of leaving the pane idle.
+    Fail-open throughout: an unreadable pane or a channel-less terminal is logged and skipped.
+    """
+    if not gs.rotation_succeeded_within(_ROTATION_WAKE_WINDOW_S, now=now):
+        return
+    epoch = gs.rotation_success_epoch()
+    if epoch is None:
+        return
+    for inst in fleet:
+        root = inst.project_root
+        if not root or inst.diagnosis in ("unarmed", "server_owned", "dead"):
+            continue
+        if getattr(inst, "awaiting_user", False):
+            continue
+        label = os.path.basename(root)
+        sd = Path(root) / ".janitor" / "state"
+        dedupe = sd / state.DAEMON_ROTATION_ESC_FILE
+        if state.read_int_state(dedupe, 0) == epoch:
+            continue  # this pane already got its ESC for THIS rotation
+        text = fleet_scan.capture_pane_text(inst.terminal)
+        if text is None:
+            state.log_line("daemon", f"rotation-esc: cannot read the pane for {label} — skipped")
+            continue
+        attempt = sl.retry_wedge_attempt_at_tail(text)
+        if attempt is None:
+            continue  # no retry wedge on screen — the rotation has nothing to unblock here
+        plan = fleet_inject.build_esc_plan(inst.terminal)
+        if plan is None:
+            state.log_line("daemon", f"rotation-esc: {label} is wedged but has no ESC channel — skipped")
+            continue
+        if not fire:
+            state.log_line(
+                "daemon",
+                f"rotation-esc:DRY would ESC → {plan['channel']} for {label} (attempt {attempt} on screen)",
+            )
+            continue
+        fleet_scan.write_rate_limited_flag(root, now)
+        ok = fleet_inject.fire(plan)
+        if ok:
+            sd.mkdir(parents=True, exist_ok=True)
+            state.atomic_write(dedupe, str(epoch))
+        state.log_line(
+            "daemon",
+            f"rotation-esc: {'FIRED' if ok else 'FIRE-FAILED'} ESC → {plan['channel']} for {label} "
+            f"(retry attempt {attempt} on screen, rotation {now - epoch}s ago)",
+        )
 
 
 def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
