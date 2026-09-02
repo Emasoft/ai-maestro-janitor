@@ -1,9 +1,9 @@
 ---
 trdd-id: VMXAF9IY
 title: a janitor-gitignore-fix command — the remedy path for gitignore-coverage findings (D5 of TRDD-6WM4BFKF)
-column: todo
+column: testing
 created: 2026-09-02T13:36:41+0200
-updated: 2026-09-02T13:36:41+0200
+updated: 2026-09-02T22:35:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -15,6 +15,28 @@ npt: []
 eht: []
 relevant-rules: []
 ---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:35
+
+Shipped: `scripts/gitignore_fix.py` (propose/`--apply`, reuses `lib/gitignore_coverage`'s
+class table + `is_protected`, git-check-ignore-backed, never runs `git rm`), `skills/janitor-
+gitignore-fix/SKILL.md`, `tests/test_gitignore_fix.py` (4 tests, one per criterion 1-4:
+`test_missing_dotenv_is_proposed_and_only_written_after_apply`,
+`test_a_tracked_dotenv_prints_git_rm_cached_but_never_runs_it`,
+`test_apply_preserves_existing_lines_order_and_negations_byte_identical`,
+`test_protected_prefixes_never_appear_in_either_direction`). All 16 (4 new + 12 existing
+`gitignore_coverage`) green; ruff + mypy clean. Skills are auto-discovered from `skills/` —
+no `.claude-plugin/plugin.json` registration needed (grep confirmed no skill-name array
+there). Roster line added next to the real `safe_delete.py` entry in
+`janitor-core-files-reference.md` (not `janitor-skills-and-agents-roster.md` as drafted —
+that page never actually names `safe-delete`; `janitor-core-files-reference.md` is where the
+`safe_delete.py` line genuinely lives), via `memgrep update-mem-topic`; validate + lint clean.
+No Agent tool available to this lean-worker, so the fable-advisor threshold hook could not be
+honored — noted, not silently skipped; task was fully specified by the orchestrator.
+
+NEXT ACTION: run `/janitor-gitignore-fix` for real on one of the ten fleet repos already
+carrying `ADVISORY-GITIGNORE-COVER` lines, confirm the proposed diff, apply it, and manually
+`git rm --cached` any tracked offender after user confirmation.
 
 ## Problem
 

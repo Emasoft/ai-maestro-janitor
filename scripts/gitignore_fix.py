@@ -1,0 +1,141 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""gitignore-fix — the remedy path for `gitignore-coverage` findings. D5 of TRDD-6WM4BFKF.
+
+Read-only by default: prints the proposed `.gitignore` diff (missing canonical patterns
+appended at the end, nothing reordered, no negation line touched) plus the exact
+`git rm --cached <path>` lines for tracked private files. `--apply` writes ONLY the
+`.gitignore` append; it never runs `git rm` — untracking is the caller's decision, made
+after reading the printed command, never this script's.
+
+ONE source of truth: `scripts/lib/gitignore_coverage.py` owns the private-class table and
+the protected-prefix allowlist (`design/**`, `.claude/project/memory/**`). This script adds
+no second pattern list — it only decides WHAT git says is (un)covered, via `git check-ignore`,
+same as the `gitignore-coverage` detector.
+
+Exit code: always 0 (a report, not a gate) unless usage is wrong (2).
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import gitignore_coverage as gc  # noqa: E402
+
+
+def _repo_root(explicit: str | None) -> Path:
+    if explicit:
+        return Path(explicit).resolve()
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, check=False, env=git_env,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        print("error: not inside a git repo (pass --repo <path>)", file=sys.stderr)
+        sys.exit(2)
+    return Path(proc.stdout.strip()).resolve()
+
+
+def _check_ignore_verdicts(root: Path, paths: list[str]) -> dict[str, str]:
+    """Git's own verdict per path: {path: "ignored" | "negated" | "unmatched"}.
+
+    Same `-v -n -z --no-index --stdin` shape as the `gitignore-coverage` detector, so this
+    tool and the finding it remedies never disagree about what "covered" means.
+    """
+    if not paths:
+        return {}
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
+    proc = subprocess.run(
+        ["git", "-C", str(root), "check-ignore", "-v", "-n", "-z", "--no-index", "--stdin"],
+        capture_output=True, text=True, check=False, input="\0".join(paths) + "\0", env=git_env,
+    )
+    if proc.returncode not in (0, 1):
+        return {}
+    fields = proc.stdout.split("\0")
+    verdicts: dict[str, str] = {}
+    for i in range(0, len(fields) - 3, 4):
+        pattern, path = fields[i + 2], fields[i + 3]
+        verdicts[path] = (
+            "negated" if pattern.startswith("!") else "ignored" if pattern else "unmatched"
+        )
+    return verdicts
+
+
+def _tracked_files(root: Path) -> list[str]:
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True, text=True, check=False, env=git_env,
+    )
+    if proc.returncode != 0:
+        return []
+    return [p for p in proc.stdout.split("\0") if p]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--repo", default=None, help="repo root (default: cwd's git root)")
+    parser.add_argument("--apply", action="store_true", help="append the missing patterns")
+    args = parser.parse_args()
+
+    root = _repo_root(args.repo)
+    tracked = _tracked_files(root)
+    probes = [c.probe for c in gc.PRIVATE_CLASSES]
+    verdicts = _check_ignore_verdicts(root, probes + tracked)
+
+    uncovered = gc.uncovered_classes(lambda p: verdicts.get(p) == "ignored")
+    offenders = gc.tracked_offenders(tracked, lambda p: verdicts.get(p) == "negated")
+
+    gitignore = root / ".gitignore"
+    current = gitignore.read_text().splitlines() if gitignore.is_file() else []
+    new_patterns = [c.pattern for c in uncovered]
+    proposed = current + new_patterns
+
+    if not new_patterns and not offenders:
+        print("[gitignore-fix] up to date — no missing coverage, no tracked private files.")
+        return 0
+
+    if new_patterns:
+        diff = difflib.unified_diff(
+            [line + "\n" for line in current],
+            [line + "\n" for line in proposed],
+            fromfile=".gitignore",
+            tofile=".gitignore (proposed)",
+            lineterm="",
+        )
+        print("\n".join(diff))
+    else:
+        print("[gitignore-fix] .gitignore already covers every private class.")
+
+    if offenders:
+        print()
+        print("[gitignore-fix] tracked private files — a rule does not untrack them:")
+        for path in offenders:
+            print(f"  git rm --cached {path}")
+
+    if args.apply:
+        if not new_patterns:
+            print("\n[gitignore-fix] --apply: nothing to append.")
+            return 0
+        tmp = gitignore.with_suffix(gitignore.suffix + f".tmp.{os.getpid()}")
+        tmp.write_text("\n".join(proposed) + "\n", encoding="utf-8")
+        os.replace(tmp, gitignore)
+        print(f"\n[gitignore-fix] appended {len(new_patterns)} pattern(s) to .gitignore.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

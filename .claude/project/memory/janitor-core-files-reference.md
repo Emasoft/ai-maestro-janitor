@@ -1,8 +1,8 @@
 ---
 name: janitor-core-files-reference
-description: "what does dispatch.py do / what does daemon.py do / what is in state.py under the lib folder / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of the top-level scripts and their lib core modules / where does the dispatcher-stub live / what does doctor.py check / what does safe_delete.py do / what does branch_protection_apply.py do / what does dedupe.py do / what does version_update.py do / what does rules_installer.py do / which module owns rate-limit resume"
+description: "what does dispatch.py do / what does daemon.py do / what is in state.py under the lib folder / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of the top-level scripts and their lib core modules / where does the dispatcher-stub live / what does doctor.py check / what does safe_delete.py do / what does branch_protection_apply.py do / what does dedupe.py do / what does version_update.py do / what does rules_installer.py do / which module owns rate-limit resume / what does gitignore_fix.py do / how do I fix a gitignore-coverage finding"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: reference
@@ -25,6 +25,10 @@ publish-globally: false
 - `doctor_classify.py` + `commands/doctor.py` — GitHub workflow-doctor CLI (zizmor + Sentinel classifiers).
 - `publish.py` — 14-gate fail-fast release pipeline (version bump → validate → lint → tests → commit → push → tag → GH release).
 - `safe_delete.py` — moves targets to `.trashcan/` (the `/janitor-safe-delete` backend).
+- `gitignore_fix.py` — the `/janitor-gitignore-fix` remedy for `gitignore-coverage` findings:
+  proposes the missing `.gitignore` patterns (`lib/gitignore_coverage.PRIVATE_CLASSES`, the
+  same table the detector reads) and the `git rm --cached <path>` lines for tracked private
+  files, applies only the `.gitignore` append on `--apply`, never runs `git rm` itself.
 - `guard/branch_protection_apply.py` — applies branch-protection rules.
 
 **`scripts/lib/` core (non-pattern)**
