@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -226,6 +227,26 @@ def _run_with_home(project: Path, home: Path) -> subprocess.CompletedProcess[str
     )
 
 
+_STAMP_REL = Path(".claude") / "janitor-control" / "gh-reply-watch-global-poll.last-run.ts"
+
+
+def _re_arm_floor(home: Path) -> None:
+    """Re-stamp the machine-wide poll floor to NOW, right before a later project fires.
+
+    The stamp carries the `now` the FIRST child read at its own start, so a sequential later
+    child reads a window that has been running for the first child's ENTIRE run (python
+    start-up, three fake-`gh` spawns, cursor writes). Under xdist load one run reached ~60 s
+    (publish gate, 2026-09-02): the 60 s floor expired mid-test and the "deferred" project
+    polled — a wall-clock bound hiding in the fixture, not a detector bug. Refreshing the
+    stamp keeps the claim causal ("a fire INSIDE the window defers") and shrinks the timing
+    assumption to one child's start-up. It is the mirror of the back-dating in
+    `test_the_floor_expires_so_a_later_fire_polls_again`.
+    """
+    stamp = home / _STAMP_REL
+    assert stamp.is_file(), "the first fire must have written the machine-wide stamp"
+    stamp.write_text(str(int(time.time())), encoding="utf-8")
+
+
 def test_a_second_projects_fire_is_deferred_by_the_shared_machine_floor(tmp_path: Path) -> None:
     """THE janitor#215 fix. Two DIFFERENT projects, same account (same HOME, so the same
     control-dir stamp): the second project's fire, moments after the first, must not also
@@ -244,6 +265,7 @@ def test_a_second_projects_fire_is_deferred_by_the_shared_machine_floor(tmp_path
     assert r1.returncode == 0
     assert r1.stdout.strip() != "", "the FIRST fire, machine-wide, must be allowed to poll"
 
+    _re_arm_floor(home)
     r2 = _run_with_home(project_b, home)
     assert r2.returncode == 0
     assert r2.stdout.strip() == "", (
@@ -268,7 +290,7 @@ def test_the_floor_expires_so_a_later_fire_polls_again(tmp_path: Path) -> None:
     assert r1.stdout.strip() != ""
 
     # Back-date the shared machine-wide stamp past the floor window rather than sleeping.
-    stamp = home / ".claude" / "janitor-control" / "gh-reply-watch-global-poll.last-run.ts"
+    stamp = home / _STAMP_REL
     assert stamp.is_file(), "the first fire must have written the machine-wide stamp"
     stamp.write_text("0", encoding="utf-8")
 
@@ -388,7 +410,12 @@ def test_without_the_inbox_only_ONE_project_on_a_host_sees_the_reply(tmp_path: P
              comment={"user": {"login": "octocat"}, "body": "here is my answer"})
     projects = [_host_project(home, f"proj{i}") for i in range(_FLEET_N)]
 
-    reported = [p for p in projects if _REPLY_MARK in _run_on_host(p, home).stdout]
+    reported: list[Path] = []
+    for i, project in enumerate(projects):
+        if i:
+            _re_arm_floor(home)  # every later fire lands INSIDE the window, whatever the load
+        if _REPLY_MARK in _run_on_host(project, home).stdout:
+            reported.append(project)
     assert len(reported) == 1, (
         f"expected the first-come token to starve all but one project, {len(reported)} reported"
     )

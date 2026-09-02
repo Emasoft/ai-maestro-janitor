@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: testing
 blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-08-26T18:47:29+0200
+updated: 2026-09-02T12:35:39+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -49,6 +49,18 @@ precisely so a fast green could not be spent as proof later. The artifacts are i
    `subprocess.run` patch for the enforcement), test-only, production untouched.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 13:40
+
+### ⏵ 2026-09-02 12:35 — one category-C flake surfaced at the 3.4.9 publish gate; fixed causally, still no fifth category
+
+`test_gh_reply_watch.py::test_without_the_inbox_only_ONE_project_on_a_host_sees_the_reply`
+failed once under xdist (`2 reported`, expected 1). The janitor#215 machine-wide floor is
+`now - stamp >= 60` with `now` read at each child's START, so the stamp carries the FIRST
+child's start time and a sequential later child's window has been running for the first child's
+whole run — one run reached ~60 s under load, the floor expired mid-test, the "starved" project
+polled. A wall-clock bound hidden in a fixture (category C), not a detector bug and not a new
+kind. Fix (test only): `_re_arm_floor` re-stamps the floor to NOW before each later fire — the
+mirror of the expiry test's back-dating — in both floor tests. Lesson `[^14]` on
+`janitor-publish-pipeline.md#ATOM-SQZO-66VW`. Nothing here changes this card's gates.
 
 **THERE IS NO FIFTH CATEGORY. Category D was simply MUCH larger than every enumeration of it,
 and the fix moved from the call sites to a seam.** The 39-failure soak, triaged by failure
