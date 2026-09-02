@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.7] — 2026-09-02
+
+### Bug Fixes
+
+- **clear-lane:** Space re-evaluation of a root by 15 min so the one-per-beat rule rotates through the fleet instead of re-picking the first root forever (TRDD-0TM5NDYN) (6a3605b)
+
+### Documentation
+
+- **memory:** ATOM-TTA0-7I0C — the clear lane's idle is human_activity_age since 3.4.6 (heartbeat turns no longer count); O7UCNNN2 records commit 438f29e9 (0dbcb22)
+- **TRDD-O7UCNNN2, TRDD-XCJFCJUX:** Complete — the daemon clear lane evaluated an armed session for the first time (03:53:09, no shadow tag, human_idle_s in the verdict) (a7da886)
+- Five drill cards unblocked — O7UCNNN2 complete, the clear lane is live; they now wait only for a qualifying session (>=300k context, >=1 h human-idle), which is the drill itself, not a card (ef5ff49)
+- Add TRDD-0TM5NDYN — the clear beat re-evaluates the same first candidate every beat; a HOLD on root one starves the three sessions above the floor (measured 03:53-03:57) (54218fd)
 ## [3.4.6] — 2026-09-02
 
 ### Bug Fixes
@@ -12,6 +24,10 @@ All notable changes to this project will be documented in this file.
 
 - Add TRDD-O7UCNNN2 — a heartbeat fire is a substantive transcript turn, so an armed session is never idle to the external-clear lane (measured 2026-09-02: enabled()=True, 5/5 instances active at every beat, 1 h idle floor unreachable) (774d3fb)
 - Six clear-lane cards re-blocked on TRDD-O7UCNNN2 — XCJFCJUX shipped in 3.4.4 (probe: enabled()=True) but its last box and the whole drill wait on the heartbeat-activity fix (025e54b)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.6 (0dd9795)
 ## [3.4.5] — 2026-09-02
 
 ### Documentation
