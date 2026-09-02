@@ -30,8 +30,23 @@ import global_state as gs  # type: ignore[import-not-found]  # noqa: E402
 import session_liveness as sl  # type: ignore[import-not-found]  # noqa: E402
 
 WEDGE_LINE = "✻ Fable limit reached · Retrying in 5h (Sep 8 at 5pm) · attempt 1/5"
-WEDGED_FRAME = "some earlier output\n\n" + WEDGE_LINE + "\n\n> \n? for shortcuts\n"
-CALM_FRAME = "some earlier output\n\n✻ Baked for 3s\n\n> \n? for shortcuts\n"
+BORDER = "─" * 110
+CHROME = f"{BORDER}\n❯ Press up to edit queued messages\n{BORDER}\n  🤖 Fable 5.1 v2.1.258 | 📁 proj\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+# Captured on this host 2026-09-02 21:03 from the pane that stayed wedged after the rotation:
+# the retry line sits one queued command above the input box's upper border.
+WEDGED_FRAME = (
+    "⏺ janitor heartbeat\n  Ran 1 shell command\n✻ Running scheduled task (Sep 2 8:38pm)\n"
+    "⏺ Remote Control disconnected — run /remote-control\n  /remote-control\n"
+    "  Janitor re-arm step 1: prepare\n  ⎿  $ uv run --script --quiet arm_prepare.py\n"
+    + WEDGE_LINE + "\n  ❯ /janitor-arm\n" + CHROME
+)
+CALM_FRAME = "⏺ some earlier output\n  detail\n✽ Boogieing… (1m 13s · ↓ 779 tokens)\n     (ctrl+b to run in background)\n" + CHROME
+# The false-hit shape the reviewer named: an assistant reply QUOTING the red line, ending the
+# turn, so its last rows sit directly above the input box.
+QUOTED_FRAME = (
+    "⏺ Root cause: every pane showed\n  " + WEDGE_LINE + "\n  until you pressed ESC by hand.\n"
+    "✻ Cogitated for 9s · done 8:46 PM\n" + CHROME
+)
 
 
 def _inst(diagnosis: str, root: Path, terminal: dict, *, awaiting: bool = False) -> "fleet_scan.Instance":
@@ -123,14 +138,15 @@ def test_a_calm_pane_is_not_escd_after_a_rotation(tmp_path, monkeypatch) -> None
     assert not (root / ".janitor" / "state" / "rate-limited.flag").exists()
 
 
-def test_a_quoted_wedge_line_high_in_the_frame_is_not_a_wedge(tmp_path, monkeypatch) -> None:
-    """A TRDD card quoting the red line, shown well above the input box, is prose, not a wedge."""
+def test_a_reply_quoting_the_wedge_line_is_prose_not_a_wedge(tmp_path, monkeypatch) -> None:
+    """The false-hit shape: an assistant reply quoting the red line right above the input box
+    must NOT be ESC'd (that would interrupt a working session and flag it rate-limited)."""
     root = tmp_path / "proj"
-    frame = WEDGE_LINE + "\n" + "\n".join(f"line {i}" for i in range(20)) + "\n> \n"
-    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})], frame=frame)
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})], frame=QUOTED_FRAME)
     gs.record_rotation_success(int(time.time()))
     daemon.task_session_liveness()
     assert _escs(fired) == []
+    assert not (root / ".janitor" / "state" / "rate-limited.flag").exists()
 
 
 def test_server_owned_and_unarmed_and_dead_panes_are_never_escd(tmp_path, monkeypatch) -> None:
@@ -169,10 +185,14 @@ def test_dry_run_escs_nothing_and_stamps_nothing(tmp_path, monkeypatch) -> None:
     assert not (sd / daemon.state.DAEMON_ROTATION_ESC_FILE).exists()
 
 
-def test_tail_parser_reads_the_status_line_and_ignores_prose_above_it() -> None:
-    """The positional guard: the wedge counts only within the frame's bottom rows."""
+def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
+    """The positional guard, against frames shaped like this host's real captures."""
     assert sl.retry_wedge_attempt_at_tail(WEDGED_FRAME) == 1
-    high = WEDGE_LINE + "\n" + "\n".join(f"line {i}" for i in range(20)) + "\n> \n"
-    assert sl.retry_wedge_attempt_at_tail(high) is None
-    assert sl.retry_wedge_attempt_at_tail(high, lines=40) == 1
+    assert sl.retry_wedge_attempt_at_tail(CALM_FRAME) is None
+    assert sl.retry_wedge_attempt_at_tail(QUOTED_FRAME) is None, "indented quote = prose"
+    # A column-0 copy of the line far above the status block (an old turn) does not count.
+    old_turn = WEDGE_LINE + "\n" + "\n".join(f"⏺ step {i}" for i in range(12)) + "\n" + CHROME
+    assert sl.retry_wedge_attempt_at_tail(old_turn) is None
+    # No input box in the frame at all (bare tmux capture): fall back to the bottom rows.
+    assert sl.retry_wedge_attempt_at_tail("noise\n" + WEDGE_LINE + "\n") == 1
     assert sl.retry_wedge_attempt_at_tail("") is None

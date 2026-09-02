@@ -65,18 +65,51 @@ def retry_wedge_attempt(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def retry_wedge_attempt_at_tail(text: str, *, lines: int = 12) -> int | None:
-    """`retry_wedge_attempt` restricted to the LAST `lines` non-empty rows of the frame. PURE.
+# A Claude Code input-box border: a full row of box-drawing dashes. Two of them frame the
+# input line; the status/queue block sits directly ABOVE the upper one.
+_INPUT_BOX_BORDER_RE = re.compile(r"^\s*[─━—-]{20,}\s*$")
+# How many non-empty rows above the upper border may hold the status block: the spinner /
+# retry line, `(ctrl+b to run in background)`, and a few queued `❯ cmd` rows. Measured on
+# this host 2026-09-02: the wedge sat 1 row above the border (one queued command between).
+_STATUS_BLOCK_ROWS = 8
+# Without an input box in the frame (a bare tmux pane, a capture cut short) fall back to the
+# bottom rows of whatever was captured.
+_TAIL_FALLBACK_ROWS = 12
+
+
+def retry_wedge_attempt_at_tail(text: str) -> int | None:
+    """The retry-wedge attempt number from a pane frame's STATUS block, or None. PURE.
 
     The rotation-ESC pass (TRDD-NACCL0CB) cannot use the advance-across-polls guard: a
     weekly-window wall shows `Retrying in 5h … attempt 1/5` and that attempt number does not
-    move for five hours, so "advanced" can never come true there. Its guard is positional
-    instead — Claude Code draws the retry status directly above its input box, i.e. within
-    the bottom rows of the frame — so a message body higher up that merely QUOTES the wedge
-    line (this repo's own TRDD cards do) is outside the window and is not read as a wedge.
+    move for five hours, so "advanced" can never come true there. Its guard is POSITIONAL,
+    anchored on Claude Code's own chrome rather than a row count (a plain "last N rows"
+    window was reviewed and rejected: on this host assistant prose reaches within a dozen rows
+    of the bottom, and this repo's own replies quote the wedge line verbatim):
+
+    - the input box is the pair of dash borders at the bottom; the status block (spinner or
+      retry line, queued `❯ cmd` rows) is the few rows directly above the UPPER border, and
+      conversation content is above that;
+    - a real retry line starts at column 0 with its glyph (`✻ Fable limit reached · …`);
+      assistant prose is indented under its `⏺` marker, so a quoted wedge line is indented.
+
+    So: the FIRST column-0 row matching the wedge signature within `_STATUS_BLOCK_ROWS` rows
+    above the upper border counts; anything indented or higher up does not.
     """
-    rows = [ln for ln in (text or "").splitlines() if ln.strip()]
-    return retry_wedge_attempt("\n".join(rows[-lines:]))
+    rows = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
+    borders = [i for i, r in enumerate(rows) if _INPUT_BOX_BORDER_RE.match(r)]
+    if len(borders) >= 2:
+        top = borders[-2]
+        window = rows[max(0, top - _STATUS_BLOCK_ROWS):top]
+    else:
+        window = rows[-_TAIL_FALLBACK_ROWS:]
+    for row in reversed(window):
+        if row[:1].isspace():
+            continue  # indented = conversation content, never Claude Code's own status row
+        m = _RETRY_WEDGE_RE.search(row)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def retry_wedge_state_update(
