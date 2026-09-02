@@ -3,7 +3,7 @@ trdd-id: BDZG8Y8A
 title: the daemon fire path takes no handoff_clear_verify before-snapshot, so an automated clear can never produce the PASS table
 column: testing
 created: 2026-09-02T05:13:49+0200
-updated: 2026-09-02T05:57:19+0200
+updated: 2026-09-02T05:59:47+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -40,7 +40,17 @@ and this repo's own `handoff-clear-verify.json` was untouched. Root precedence i
 `state._resolve_project_root`: `CLAUDE_PROJECT_DIR` first, then override, git toplevel, cwd. The
 daemon beat runs `sys.executable <latest cache scripts>/external_handoff_clear.py --project-root`
 (`cold_cache_clear_task.py:111-186`), so `_SCRIPTS` resolves to the cache tree, which ships the
-harness and `lib/state.py` alongside — the fix cannot ship dark for a path reason.
+harness and `lib/state.py` alongside — the fix cannot ship dark for a root/path reason.
+
+**The context-measurement branch is proven too, separately (05:59)** — the second review fork
+pointed out that `context_source=unknown` on a transcript-less throwaway dir leaves the
+harness's transcript branch UNEXERCISED, and its `except Exception: pass` would print the same
+`unknown` on an ImportError under the bare env. So the harness's own `_context_tokens()` was run
+in daemon shape (`env -i`, framework python, probe option `""`) against a REAL project root, zero
+writes: it returned `(353811, 'transcript')` — the same `cold_cache_compact.context_tokens_for`
+reader the gate uses, on the newest transcript of that root. **Box 3 therefore also requires
+`before.context_tokens` to be non-null** on the observed automated fire: a `None` there means the
+branch went dark silently (the 2026-08-15 shape), not that the session was small.
 
 **NEXT ACTION:** after the next publish installs, read the `after` table the resumed session's
 cue produces and check its `before.ts` sits seconds before the matching `fired:` line in
@@ -77,6 +87,8 @@ clears too.
       `test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain` +
       `test_fire_still_spawns_when_the_verify_snapshot_fails`
 - [ ] the next automated clear's `--phase after` run (from the resume cue) reports a table whose
-      `before.ts` is seconds before the `fired:` line in `external-clear.log`
+      `before.ts` is seconds before the `fired:` line in `external-clear.log` AND whose
+      `before.context_tokens` is non-null (a null there is the transcript branch gone dark under
+      the daemon, not a small session — see STATE)
 
 ## Notes and lessons learned
