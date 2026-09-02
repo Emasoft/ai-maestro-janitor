@@ -3,7 +3,7 @@ trdd-id: Q0Y4M1TF
 title: the rotator lands on the Fable-spent account because is_active false reads as model not in use, and a burn projection is allowed to do it
 column: testing
 created: 2026-09-02T22:04:52+0200
-updated: 2026-09-02T22:04:52+0200
+updated: 2026-09-02T22:36:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
@@ -48,9 +48,16 @@ implementation-commits: []
   the model in use. Tests: `test_is_active_false_does_not_withdraw_the_in_use_evidence`,
   `test_cmd_auto_burn_projection_alone_never_rotates_onto_a_target_spent_on_the_model_in_use`;
   202 green across the rotator, burn-rate and model-fallback suites.
-- **Ships in 3.4.13.** Until the daemon restages onto it, the rotator can repeat the 21:53
-  move whenever the burn gate projects a wall on the live account.
-- **NEXT ACTION:** publish 3.4.13, install, restage; then the live box below.
+- **Shipped in 3.4.13** (published 22:13, all 5 CI runs on bump sha ca398cf8 green). Daemon
+  respawned 22:22:18 on the staged 3.4.13 (`os-keepalive: newer version staged`), so the
+  21:53 move can no longer repeat on a burn projection. The C3 `certified last-good=3.4.13`
+  re-pin is periodic and had not fired by 22:36 — not a tamper signal (see CLAUDE.md).
+- **Review-fork finding (22:19), carry to N954KWUC:** "model in use" as read from
+  `/api/oauth/usage` means *used this week* — the API only emits weekly scoped windows, so
+  `util > 0` cannot distinguish "the live session is on Fable now" from "Fable was touched
+  this week". The per-session, per-pane signal is the model badge on the status row; the
+  one-screen-state reader in TRDD-N954KWUC is where that belongs.
+- **NEXT ACTION:** the live box below (a day with no rotation onto a 7d/Fable ≥ 99% target).
 
 ## Acceptance
 
