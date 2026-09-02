@@ -125,14 +125,23 @@ def main() -> int:
         return 0
 
     if new_patterns:
+        # This diff is the CONFIRMATION SURFACE — the user approves what it shows. Content
+        # lines keep their own endings (keepends), so difflib's default lineterm="\n" must
+        # stay for the ---/+++/@@ header lines; lineterm="" glued all three headers and the
+        # first context line onto one row (caught by the review fork, 2026-09-02). The one
+        # line the file may lack an ending on is its last one: give it one for DISPLAY only,
+        # or the first "+" line glues onto it — the bytes written come from proposed_text,
+        # not from these display lines.
+        before = current_text.splitlines(keepends=True)
+        if before and not before[-1].endswith("\n"):
+            before[-1] += "\n"
         diff = difflib.unified_diff(
-            current_text.splitlines(keepends=True),
+            before,
             proposed_text.splitlines(keepends=True),
             fromfile=".gitignore",
             tofile=".gitignore (proposed)",
-            lineterm="",
         )
-        print("".join(diff))
+        print("".join(diff), end="")
     else:
         print("[gitignore-fix] .gitignore already covers every private class.")
 

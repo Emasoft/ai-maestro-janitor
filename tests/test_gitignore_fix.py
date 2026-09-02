@@ -36,7 +36,11 @@ def test_missing_dotenv_is_proposed_and_only_written_after_apply(tmp_path: Path)
     (repo / ".gitignore").write_text("*.log\n")
 
     proposed = _run(repo)
-    assert "+.env" in proposed.stdout
+    assert "+.env\n" in proposed.stdout
+    # The diff is what the user confirms on: every header on its own line, the unchanged
+    # line as context, the new pattern as its own "+" line — not glued together.
+    assert "--- .gitignore\n+++ .gitignore (proposed)\n@@ " in proposed.stdout, proposed.stdout
+    assert "\n *.log\n+.env\n" in proposed.stdout, proposed.stdout
     assert (repo / ".gitignore").read_text() == "*.log\n"  # untouched by propose mode
 
     _run(repo, "--apply")
