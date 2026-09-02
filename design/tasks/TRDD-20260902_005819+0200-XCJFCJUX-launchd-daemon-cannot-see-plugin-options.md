@@ -1,17 +1,16 @@
 ---
 trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
-column: blocked
-pre-block-column: testing
+column: complete
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T03:09:00+0200
+updated: 2026-09-02T03:54:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: [TRDD-O7UCNNN2]
+blocked-by: []
 npt: []
 eht: []
 relevant-rules: []
@@ -107,8 +106,17 @@ and duplicates the file the harness already treats as the source of truth.
 - [x] ruff clean on the three files, `mypy scripts/` clean (496 files) and clean on the test
       file, 39/39 in the new test + the daemon keepalive/path/cold-cache-clear tests —
       re-run by the approver, not taken from the worker's report
-- [ ] after publish + restage: `cold-cache-clear.log` shows `evaluating <root>` WITHOUT
-      `[SHADOW — dry-run]` while the lever is on (the drill NDAARSXT/PXP08ZQC/1QJIZFFW waits on)
+- [x] after publish + restage — OBSERVED 2026-09-02 03:53:09 (daemon respawned on 3.4.6 at
+      03:50:20): `cold-cache-clear: evaluating <this repo>` with NO `[SHADOW — dry-run]` tag,
+      followed by a real `VERDICT HOLD … why=active-waiting`. The lever set in
+      `~/.claude/settings.json` reached the launchd daemon through `state.plugin_option`.
+
+## Approval log
+
+- 2026-09-02T03:54:00+0200 — COMPLETE, closed under the USER's delegated review authority
+  ("i've put you in charge", 2026-09-01). Fix shipped in 3.4.4 (d6c82d60, after the CPV-
+  blocked os.environ route dec760ed/19a52dc8); the closing box is the daemon's own log
+  line, not the session's word. Self-closure disclosed.
 
 ## Notes and lessons learned
 

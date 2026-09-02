@@ -1,9 +1,9 @@
 ---
 trdd-id: O7UCNNN2
 title: A heartbeat fire is a substantive transcript turn, so an ARMED session is never idle to the external-clear lane — the daemon can only ever clear sessions the janitor does not run in
-column: testing
+column: complete
 created: 2026-09-02T02:42:18+0200
-updated: 2026-09-02T03:25:00+0200
+updated: 2026-09-02T03:54:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -96,8 +96,20 @@ not prompts.
       `declined:no-candidate`; `_decide` feeds the human age to the gate's idle
 - [x] ruff clean, `mypy scripts/` clean (497 files), 126 tests in the touched files green —
       re-run by the approver
-- [ ] after publish + restage: `cold-cache-clear.log` shows an `evaluating <root>` line for
-      an armed session that was idle in HUMAN terms (this closes XCJFCJUX box 4 too)
+- [x] after publish + restage — OBSERVED 2026-09-02 03:53:09, first beat after the daemon
+      respawned on 3.4.6 (03:50:20, pid 85181, staged `fleet_scan.py` == cache):
+      `cold-cache-clear: evaluating <this repo>` with NO shadow tag, then
+      `VERDICT HOLD trigger=- why=active-waiting transcript_idle_s=14 human_idle_s=334` —
+      the armed session that was "active" at every beat for a month is now evaluated, and
+      the gate holds for a REAL reason (agents pending), not for the heartbeat
+
+## Approval log
+
+- 2026-09-02T03:54:00+0200 — COMPLETE, closed under the USER's delegated review authority
+  ("i've put you in charge", 2026-09-01). Shipped in 3.4.6 (438f29e9); the closing box is a
+  line the restaged daemon wrote on its own. Self-closure disclosed. The drill cards blocked
+  on this one now wait only for a QUALIFYING session (≥300k context, ≥1 h human-idle) — no
+  card blocks them any more.
 
 ## Notes and lessons learned
 
