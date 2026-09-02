@@ -29,6 +29,26 @@ switch model to Opus, the ESC must be multiple, until the queue is cleaned, and 
 clear, it must run the `/model opus` command, followed by Enter (because it asks for
 confirmation)."
 
+## Why the ESC count is N+1 (USER, 2026-09-02 21:04, verbatim intent)
+
+"Even after the red error message blocked the agents, the janitor scripts in background
+still send the commands `/janitor-arm` or `/janitor-resume` or `/clear`, etc. The janitor
+script seems blind and does not check what is in the terminal before giving the commands.
+So pressing ESC is a remediation to clear the queue, since each ESC clears one command. If
+there are 4 queued commands, you need 5 ESC (one for the red message, 4 for the queued
+commands) before giving the `/model opus` command followed by the confirmation of the
+AskUser prompt."
+
+Observed live 21:04 on this host: one ESC into the wedged CLAUDE-PLUGIN-VALIDATION pane
+broke the retry, and the queued `/ai-maestro-janitor:janitor-arm` then sat in the input
+box — the next ESC would have been needed to clear it before any `/model` command.
+
+So the ESC loop is: ESC → re-read the frame → while the input box still holds text, ESC
+again → only on an empty field type `/model opus`, Enter, wait for the menu, Enter. The
+blind-injection half (typed commands landing on a pane that shows the retry line) is fixed
+at the source in the session-liveness loop under TRDD-NACCL0CB, so the queue stops growing;
+this card still flushes whatever is already queued.
+
 ## Where this lands
 
 - The scoped-only wall with no scoped-clear target is the case `rotator.cmd_auto` STAYS PUT on

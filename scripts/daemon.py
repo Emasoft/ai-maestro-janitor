@@ -1693,6 +1693,24 @@ def task_session_liveness(fleet: list | None = None) -> None:
             except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
                 pass
             continue
+        # TRDD-NACCL0CB (owner, 2026-09-02): "the janitor script seems blind and does not
+        # check what is in the terminal before giving the commands." A SOFT command typed
+        # at a pane showing Claude Code's retry line only joins the queue behind it — every
+        # queued command later costs the human one more ESC. The `retry_wedged` diagnosis
+        # cannot see a long-backoff wedge (its attempt number never advances), so read the
+        # frame itself here, once, right before typing. An unreadable pane stays permissive
+        # (same contract as `command_plan_field_busy`).
+        if not fr.injection_is_hard(inst.diagnosis):
+            frame = fleet_scan.capture_pane_text(inst.terminal)
+            wedge_attempt = sl.retry_wedge_attempt_at_tail(frame) if frame is not None else None
+            if wedge_attempt is not None:
+                state.log_line(
+                    "daemon",
+                    f"session-liveness: {tag} shows the retry wedge (attempt {wedge_attempt}) — "
+                    f"would {action}; not typing into a blocked pane",
+                )
+                _decline("retry_wedge_on_screen", action, None)
+                continue
         # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
         # session gets a soft enqueue so its in-flight turn survives (TRDD-0GPQROC1).
         plan = fleet_inject.build_injection(

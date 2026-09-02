@@ -185,6 +185,33 @@ def test_dry_run_escs_nothing_and_stamps_nothing(tmp_path, monkeypatch) -> None:
     assert not (sd / daemon.state.DAEMON_ROTATION_ESC_FILE).exists()
 
 
+def _rearm_isolated(monkeypatch) -> None:
+    """Isolate the new pre-type guard: the downstream field-busy checks read the real pane."""
+    monkeypatch.setattr(daemon.fleet_inject, "command_plan_field_busy", lambda terminal, plan: False)
+    monkeypatch.setattr(daemon.fleet_inject, "field_holds_our_queued_command", lambda terminal, plan: "")
+
+
+def test_a_soft_command_is_never_typed_into_a_pane_showing_the_retry_line(tmp_path, monkeypatch) -> None:
+    """The owner's 'the janitor is blind' finding: a cron_dead pane on the red line must NOT get
+    `/janitor-arm` queued behind it (every queued command costs the human one more ESC)."""
+    root = tmp_path / "proj"
+    fired = _setup(monkeypatch, tmp_path, [_inst("cron_dead", root, {"tmux_pane": "%5"})],
+                   frame=WEDGED_FRAME, hid_idle=600.0)
+    _rearm_isolated(monkeypatch)
+    daemon.task_session_liveness()
+    assert [p for p in fired if p.get("command")] == [], "no command may be typed at a wedged pane"
+
+
+def test_the_control_a_calm_cron_dead_pane_still_gets_its_rearm(tmp_path, monkeypatch) -> None:
+    """Same instance, calm frame: the guard must not swallow the ordinary rearm."""
+    root = tmp_path / "proj"
+    fired = _setup(monkeypatch, tmp_path, [_inst("cron_dead", root, {"tmux_pane": "%5"})],
+                   frame=CALM_FRAME, hid_idle=600.0)
+    _rearm_isolated(monkeypatch)
+    daemon.task_session_liveness()
+    assert any("janitor-arm" in (p.get("command") or "") for p in fired), "the rearm must still fire"
+
+
 def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
     """The positional guard, against frames shaped like this host's real captures."""
     assert sl.retry_wedge_attempt_at_tail(WEDGED_FRAME) == 1
