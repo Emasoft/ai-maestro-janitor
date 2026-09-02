@@ -1,9 +1,9 @@
 ---
 trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
-column: todo
+column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T22:07:00+0200
+updated: 2026-09-02T22:34:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,17 +22,28 @@ created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:07
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:34
 
-- **dev → todo, 22:07.** A lean-worker started the implementation at 21:39 and its transcript
-  froze at 21:43:38 (the 21:41 wall / the owner's re-login); stopped at 22:04. Its partial
-  edits — `terminal_trigger.send_model_switch_true_error` ESC loop plus three tests in
-  `tests/test_terminal_trigger.py` and a `test_terminal_trigger_readback.py` tweak, 145
-  lines, untested — sit in **`git stash@{0}`** ("3T9HQEQ6 lean-worker partial edits"), stashed
-  so the tree could publish the TRDD-Q0Y4M1TF rotator fix. `git stash pop` to resume; run the
-  three suites before trusting any of it.
-- **NEXT ACTION:** pop the stash, finish the ESC loop per the directive below, three tests
-  green, then `dev → testing`.
+- **dev → testing, 22:34.** Stash popped, worker's partial edits verified and finished.
+  `terminal_trigger.send_model_switch_true_error` now ESC-flushes the pane (re-reading after
+  each ESC, ≤5 presses, via new `_QUEUE_FLUSH_MAX_ESC`) before typing `/model opus` — only a
+  field that reads empty gets the command typed; a still-busy field after 5 ESC types nothing
+  and reports `"queue not cleared after 5 ESC"`.
+- Tests (all green): `test_two_queued_commands_need_three_escs_before_model_opus_is_typed`,
+  `test_a_clean_field_gets_one_esc_then_the_command`,
+  `test_a_field_still_busy_after_five_escs_types_nothing` (all in
+  `tests/test_terminal_trigger.py`), plus the updated
+  `test_true_error_switch_flushes_the_queue_then_submits_then_confirms_the_detected_menu` and
+  `test_true_error_switch_sends_no_blind_enter_when_no_menu_appears` in
+  `tests/test_terminal_trigger_readback.py`. Fixed one worker bug on the way: the readback
+  test mixed a string char-index (`joined.index(...)`) with list indices (`enters[0]`) —
+  replaced with all-list-index comparisons (`esc_at < cmd_at < enters[0] < enters[1]`).
+  `uv run pytest tests/test_terminal_trigger.py tests/test_terminal_trigger_readback.py -q`:
+  96 passed, 1 skipped. `ruff check` + `mypy --ignore-missing-imports` clean on both files.
+- **NEXT ACTION:** the card's third acceptance box is a LIVE check — next real scoped-only
+  wall with no headroom must end with `/model opus` confirmed and no human keystroke; watch
+  the daemon log for `queue-flush ESC` / `queue clear after N ESC` lines when it next fires.
+  Stash is fully consumed (dropped by the pop).
 
 ## Directive (USER, 2026-09-02 21:05, verbatim intent)
 

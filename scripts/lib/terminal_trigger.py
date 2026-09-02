@@ -1086,6 +1086,16 @@ def send_verified(
     )
 
 
+# A pane on Claude Code's retry line has every janitor command TYPED WHILE IT ERRORED still
+# QUEUED behind it — the janitor scripts keep firing blind (`/janitor-arm`, `/clear`, …)
+# because they never checked the pane before sending. Each ESC clears exactly ONE queued
+# item, so the flush needs "1 (the red error) + N (queued commands)" presses before the
+# field is actually empty (owner, 2026-09-02 21:04). 5 is a hard ceiling, not a guess at a
+# typical queue depth — a pane still busy after 5 ESCs is reported and left alone rather
+# than ESCed indefinitely (which could itself start cancelling the human's own typing).
+_QUEUE_FLUSH_MAX_ESC = 5
+
+
 def send_model_switch_true_error(
     terminal: Mapping[str, str],
     command: str,
@@ -1098,35 +1108,63 @@ def send_model_switch_true_error(
     is_typing=None,
 ) -> tuple[bool, str]:
     """The OWNER-RATIFIED actuation for a model switch while the session is in a TRUE error
-    state (owner, 2026-08-15, specified from watching the real Fable wall by hand):
+    state (owner, 2026-09-02 21:05, superseding the 2026-08-15 order once the janitor's own
+    blind background sends were found queuing UP against the retry line):
 
-        `/model opus` + Enter  →  ESC  →  wait for the Ask-user menu  →  Enter
+        ESC (flush the queue, ≤5x)  →  `/model opus` + Enter  →  wait for the Ask-user menu  →  Enter
 
-    This ORDER is the point, and it is the opposite of `send_verified(esc_first=True)`:
-    in the erroring/retrying state the input field is still usable, so the switch command
-    is typed and submitted FIRST; the ESC then ends the erroring turn; Claude Code responds
-    with an Ask-user menu, and one Enter confirms it. ESC-first would end the turn before
-    the command exists, and the menu that follows would swallow the slash command entirely
-    (a slash command typed into a menu does nothing useful — this module's oldest
-    janitor#222 lesson).
+    Every ESC clears exactly one item sitting in the pane's queue — the red retry line
+    itself counts as one, and each command the janitor typed blind while erroring (janitor
+    #261-style) counts as another — so the flush re-reads the pane after each ESC and keeps
+    going while the input field still holds text, capped at `_QUEUE_FLUSH_MAX_ESC` presses.
+    Only once the field reads EMPTY is `command` typed: an ESC into an already-clear field
+    would otherwise interrupt the fresh turn `/model opus` is about to start. If the field is
+    still non-empty after the cap, NOTHING is typed — a queue this deep is reported rather
+    than guessed at.
 
     The confirming Enter is sent ONLY when the menu is actually detected on screen
     (`_CHOICE_ROW_RE` — the numbered-choice row shape), NEVER blind on a timer: the one
     destructive keystroke in this family is an Enter into an unexpected open menu (e.g.
     the rewind menu), so an undetected menu within `menu_wait_s` means we stop after the
-    ESC and report it — the caller's three-state badge confirm still tells the truth
+    submit and report it — the caller's three-state badge confirm still tells the truth
     downstream. Returns (sent, why); `sent` reflects the COMMAND injection only.
     """
+    label = terminal.get("pane") or terminal.get("session_id") or terminal.get("kind", "?")
+    esc = build_esc_only_steps(terminal)
+    if esc is None:
+        return False, f"channel {terminal.get('kind', '?')!r} cannot ESC"
+    read_fn = reader if reader is not None else read_pane_text
+
+    for attempt in range(1, _QUEUE_FLUSH_MAX_ESC + 1):
+        _run_steps(esc)
+        state.log_line(
+            "terminal_trigger",
+            f"[{label}] queue-flush ESC {attempt}/{_QUEUE_FLUSH_MAX_ESC}",
+        )
+        try:
+            pane = read_fn(terminal)
+        except Exception:  # noqa: BLE001 — a flaky read must not abort the flush loop
+            pane = None
+        # An unreadable pane cannot PROVE the queue is still busy (same permissive rule as
+        # `fleet_inject.command_plan_field_busy`), so it is treated as clear rather than
+        # spending the remaining ESC budget on a channel we cannot observe.
+        if pane is None or prompt_field_is_empty(pane):
+            state.log_line("terminal_trigger", f"[{label}] queue clear after {attempt} ESC")
+            break
+    else:
+        state.log_line(
+            "terminal_trigger",
+            f"[{label}] queue not cleared after {_QUEUE_FLUSH_MAX_ESC} ESC — typing nothing",
+        )
+        return False, "queue not cleared after 5 ESC"
+
     sent, why = send_verified(
         terminal, command, esc_first=False,
         giveup_s=giveup_s, sleeper=sleeper, reader=reader, is_typing=is_typing,
     )
     if not sent:
         return False, why
-    esc = build_esc_only_steps(terminal)
-    if esc:
-        _run_steps(esc)
-    read_fn = reader if reader is not None else read_pane_text
+    state.log_line("terminal_trigger", f"[{label}] {command!r} typed and submitted")
     waited = 0.0
     while waited < menu_wait_s:
         try:
@@ -1137,10 +1175,12 @@ def send_model_switch_true_error(
             submit = build_submit_steps(terminal)
             if submit:
                 _run_steps(submit)
+                state.log_line("terminal_trigger", f"[{label}] ask-user menu confirmed")
                 return True, "sent; ask-user menu confirmed"
             return True, "sent; ask-user menu seen but channel lost its submit builder"
         sleeper(poll_s)
         waited += poll_s
+    state.log_line("terminal_trigger", f"[{label}] no ask-user menu within {menu_wait_s:.0f}s")
     return True, "sent+esc; no ask-user menu appeared within %.0fs (no blind Enter sent)" % menu_wait_s
 
 

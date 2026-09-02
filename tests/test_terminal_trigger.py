@@ -522,3 +522,79 @@ def test_not_in_agent_skips_cli(monkeypatch, tmp_path):
     _force(monkeypatch, "iterm")                              # _force clears agent flags
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     assert tt.send_self_command("/compact") == tt.USE_ITERM_PATH
+
+
+# --- TRDD-3T9HQEQ6: the queue-flush ESC loop ahead of `/model opus` ------------------------
+
+_QF_NBSP = " "
+
+
+def _qf_pane(field: str) -> str:
+    """A capture shaped like a real prompt box: box rule, marker + NBSP + field, box rule."""
+    return "some earlier output\n" + "─" * 40 + f"\n❯{_QF_NBSP}{field}\n" + "─" * 40 + "\n"
+
+
+def test_two_queued_commands_need_three_escs_before_model_opus_is_typed(monkeypatch) -> None:
+    """A pane whose field still holds queued commands after the first two ESCs (the red
+    error line, then one queued command each) only gets its THIRD ESC clearing it — and
+    only THEN does `/model opus` get typed."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([
+        _qf_pane("/janitor-arm"),      # after ESC 1 — one queued command remains
+        _qf_pane("/janitor-resume"),   # after ESC 2 — a second queued command remains
+        _qf_pane(""),                  # after ESC 3 — clear
+        _qf_pane(""),                  # send_verified's own pre-type read
+        _qf_pane("/model opus"),       # send_verified's post-type read-back
+    ])
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: next(reads, _qf_pane("/model opus")), is_typing=lambda _t: False,
+    )
+    assert ok is True, why
+    esc_count = sum(1 for c in calls if "Escape" in c)
+    assert esc_count == 3, f"exactly 3 ESCs to flush 1 red-line + 2 queued commands: {calls!r}"
+    joined = " | ".join(calls)
+    last_esc = max(i for i, c in enumerate(calls) if "Escape" in c)
+    assert joined.index("/model opus") > joined.index(calls[last_esc]), (
+        f"/model opus must be typed only AFTER the queue is flushed: {calls!r}"
+    )
+
+
+def test_a_clean_field_gets_one_esc_then_the_command(monkeypatch) -> None:
+    """A field that is already empty still gets its one mandatory ESC (the red error line
+    itself), then `/model opus` is typed straight away — no wasted extra ESCs."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    reads = iter([
+        _qf_pane(""),             # after the single ESC — already clear
+        _qf_pane(""),             # send_verified's pre-type read
+        _qf_pane("/model opus"),  # send_verified's post-type read-back
+    ])
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: next(reads, _qf_pane("/model opus")), is_typing=lambda _t: False,
+    )
+    assert ok is True, why
+    esc_count = sum(1 for c in calls if "Escape" in c)
+    assert esc_count == 1, f"a clean field needs exactly one ESC: {calls!r}"
+    assert any("/model opus" in c for c in calls), f"the command must still be typed: {calls!r}"
+
+
+def test_a_field_still_busy_after_five_escs_types_nothing(monkeypatch) -> None:
+    """A pane whose field never clears within the 5-ESC bound must be reported and left
+    alone — never typed into, since a queue this deep cannot be safely guessed at."""
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    ok, why = tt.send_model_switch_true_error(
+        {"kind": "tmux", "pane": "%1"}, "/model opus",
+        menu_wait_s=1.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
+        reader=lambda _t: _qf_pane("/janitor-arm"), is_typing=lambda _t: False,
+    )
+    assert ok is False
+    assert why == "queue not cleared after 5 ESC"
+    esc_count = sum(1 for c in calls if "Escape" in c)
+    assert esc_count == 5, f"exactly 5 ESCs are spent, no more: {calls!r}"
+    assert not any("/model opus" in c for c in calls), f"nothing must be typed: {calls!r}"

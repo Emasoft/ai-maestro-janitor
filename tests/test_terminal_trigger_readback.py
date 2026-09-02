@@ -1063,26 +1063,30 @@ def test_confirm_model_switch_is_three_state() -> None:
 _MENU_PANE = "some output\n❯ 1. Yes, switch the model\n  2. No, keep retrying\n"
 
 
-def test_true_error_switch_submits_then_escs_then_confirms_the_detected_menu(monkeypatch) -> None:
-    """The owner-ratified TRUE-ERROR order (2026-08-15, watched at the real Fable wall) in
-    one trace: the command is typed AND submitted FIRST, the ESC comes after that submit,
-    and a SECOND Enter is sent only once the Ask-user menu (numbered-choice rows) is read
-    back on the pane — command → Enter → Escape → Enter, exactly two Enters."""
+def test_true_error_switch_flushes_the_queue_then_submits_then_confirms_the_detected_menu(
+    monkeypatch,
+) -> None:
+    """The owner-ratified TRUE-ERROR order (2026-09-02 21:05, superseding the 2026-08-15
+    order once the janitor's own blind background sends were found queuing up against the
+    retry line) in one trace: ESC flushes the queue until the field reads empty, THEN the
+    command is typed and submitted, THEN a SECOND Enter confirms the detected Ask-user
+    menu — Escape → command → Enter → Enter, exactly two Enters, the Escape strictly first."""
     calls: list[str] = []
     monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
-    reads = iter([_pane(""), _pane("/model opus"), _MENU_PANE])
+    # ESC flush sees an empty field on the first read; send_verified's own read-back then
+    # sees the command settle; the menu-wait loop finally sees the confirmation menu.
+    reads = iter([_pane(""), _pane(""), _pane("/model opus"), _MENU_PANE])
     ok, why = tt.send_model_switch_true_error(
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=5.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
         reader=lambda _t: next(reads, _MENU_PANE), is_typing=lambda _t: False,
     )
     assert ok is True and "menu confirmed" in why
-    joined = " | ".join(calls)
     enters = [i for i, c in enumerate(calls) if "Enter" in c]
     assert len(enters) == 2, f"exactly two Enters (submit + menu confirm): {calls!r}"
-    assert joined.index("/model opus") < joined.index("Enter"), f"command before its submit: {calls!r}"
     esc_at = next(i for i, c in enumerate(calls) if "Escape" in c)
-    assert enters[0] < esc_at < enters[1], f"Escape must sit between the two Enters: {calls!r}"
+    cmd_at = next(i for i, c in enumerate(calls) if "/model opus" in c)
+    assert esc_at < cmd_at < enters[0] < enters[1], f"Escape, then command, then both Enters: {calls!r}"
 
 
 def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch) -> None:
@@ -1092,7 +1096,7 @@ def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch
     sent, so the caller's three-state badge confirm decides the truth downstream."""
     calls: list[str] = []
     monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
-    reads = iter([_pane(""), _pane("/model opus")])
+    reads = iter([_pane(""), _pane(""), _pane("/model opus")])
     ok, why = tt.send_model_switch_true_error(
         {"kind": "tmux", "pane": "%1"}, "/model opus",
         menu_wait_s=3.0, poll_s=1.0, giveup_s=5.0, sleeper=lambda _s: None,
@@ -1100,7 +1104,7 @@ def test_true_error_switch_sends_no_blind_enter_when_no_menu_appears(monkeypatch
     )
     assert ok is True and "no ask-user menu" in why
     assert sum(1 for c in calls if "Enter" in c) == 1, f"only the submit Enter is allowed: {calls!r}"
-    assert any("Escape" in c for c in calls), f"the ESC after the submit is mandatory: {calls!r}"
+    assert any("Escape" in c for c in calls), f"the queue-flush Escape is mandatory: {calls!r}"
 
 
 def test_an_EMPTY_readback_is_polled_not_treated_as_malformed() -> None:
