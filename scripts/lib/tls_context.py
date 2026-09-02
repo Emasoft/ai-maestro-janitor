@@ -32,7 +32,11 @@ def verifying_context() -> ssl.SSLContext:
         return ctx
     candidates: list[str] = []
     try:
-        import certifi  # noqa: PLC0415 -- optional; present on python.org builds, absent elsewhere
+        # `type: ignore[import-not-found]`: certifi is deliberately NOT a dependency, so the
+        # checker's own env may lack it — CPV's CI pyright did, and that one unresolved import
+        # was the MINOR that turned the 3.4.11 release red while the local gate (a venv that
+        # happens to carry certifi) passed. Same form as zizmor_classifier's optional re2.
+        import certifi  # type: ignore[import-not-found]  # noqa: PLC0415 -- optional; present on python.org builds, absent elsewhere
 
         candidates.append(certifi.where())
     except ImportError:
