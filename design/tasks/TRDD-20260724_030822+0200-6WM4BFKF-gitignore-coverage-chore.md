@@ -3,7 +3,7 @@ trdd-id: 6WM4BFKF
 title: gitignore-coverage chore — prove the ignore file covers every private class BEFORE a secret can be tracked
 column: testing
 created: 2026-07-24T03:08:22+0200
-updated: 2026-09-02T14:26:00+0200
+updated: 2026-09-02T15:50:25+0200
 current-owner: main-session
 task-type: security
 scope: project
@@ -14,21 +14,25 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 14:26
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 15:50
 
 - **⏵ 14:26 — still `testing`. 8d563f85 SHIPPED in 3.4.10 unattended (the publish landed
   while the user's `sweep` / `stop publish` / `let it land` decision was pending), then the
   third fork's precision finding was MEASURED, not argued: a read-only sweep of the detector
-  over all 32 janitor-managed repos.** Class-matched offenders fleet-wide: 37 real (ANIME2SVG:
-  a tracked `scripts_dev/` tree + `reports/img2num/…`) and **4 false** — a skill's tracked
+  over all 32 janitor-managed repos.** Class-matched offenders fleet-wide (85 offenders in 4
+  repos): 34 real (ANIME2SVG: a tracked `scripts_dev/` tree + `reports/img2num/…`) and
+  **4 false** — a skill's tracked
   `skills/<x>/templates/reports/*.md` in ai-maestro-orchestrator-agent, named hourly with
   `git rm --cached` as the remedy. None of the feared shapes (`.env.example`, `*.pub`,
   `cacert.pem`, fixture logs) appeared. **Fix `10faea1e`:** `/reports/`, `/*_dev/`,
   `/.trashcan/` are ROOT-anchored (the rules place them at the project root only) and the
   matcher honours a leading `/` by checking only the first directory component; `.venv/` and
-  `node_modules/` stay any-depth. Re-sweep: orchestrator 0, ANIME2SVG the same 37. 11 tests +
+  `node_modules/` stay any-depth. Re-sweep: orchestrator 0 (the real detector prints no
+  contamination line there), ANIME2SVG the same 37 (its repo total: 34 class + 3 rule-branch).
+  The 10faea1e commit message's "37 … were real" is that repo total misread as the class
+  count — the review fork caught it; 34 is the number. 11 tests +
   ruff + mypy green. This supersedes the "three fixed shapes" wording below — there are four.
-  **Separately observed, NOT this card:** 47 fleet offenders come from the OTHER branch
+  **Separately observed, NOT this card:** 47 of the 85 fleet offenders come from the OTHER branch
   (`tracked ∧ ignored-by-rule`, live since `e607e95a`: `ccpm/**` ×41 in svg2fbf,
   `data/specimens/` ×3, `logs/` ×2, `CLAUDE.md` ×1) — the fork's claim-7 overlap with
   `tracked-ignored`, two lines with different wording per file per hour. Needs its own card.

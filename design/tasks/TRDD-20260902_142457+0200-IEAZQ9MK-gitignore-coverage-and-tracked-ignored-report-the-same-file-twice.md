@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: todo
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-02T14:24:57+0200
+updated: 2026-09-02T15:50:25+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -23,7 +23,7 @@ the class matcher (a tracked path in one of the thirteen private classes) and gi
 reports, so a file that is both tracked and ignored gets one line from each detector every
 hour, worded differently, and dispatch does not dedupe across detectors.
 
-Measured on the 2026-09-02 read-only fleet sweep (32 janitor-managed repos): 47 of the 84
+Measured on the 2026-09-02 read-only fleet sweep (32 janitor-managed repos): 47 of the 85
 contamination offenders fleet-wide came from the rule branch alone — `ccpm/**` ×41 (svg2fbf),
 `data/specimens/` ×3 (ANIME2SVG), `logs/` ×2 and `CLAUDE.md` ×1 (SVG-BBOX). None of those is
 in a private class; they are simply files a repo ignores and tracks on purpose, and
