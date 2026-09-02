@@ -135,15 +135,20 @@ def models_in_use(usage: dict | None, now: int) -> set[str]:
     windows — no pane, no session introspection.
 
     Evidence is `util_pct > 0`: a model's window cannot be consumed without running that
-    model. An explicit `is_active: false` withdraws the evidence (the API says the limit is
-    not in effect); a MISSING `is_active` does not, so a payload that omits the field still
-    reports. Pure. An empty set means NO EVIDENCE — callers must read it as "unknown", never
-    as "no model is in use"."""
+    model. `is_active` is deliberately IGNORED here: on the live API it means "this LIMIT is
+    currently binding" (true only once the window is hit — `7d/Fable 100% is_active=true
+    severity=critical`), not "this model is in use". The previous reading — an explicit
+    `is_active: false` withdraws the evidence — made every healthy live account report NO
+    model in use (measured 2026-09-02 22:00: `7d/Fable 52% is_active=false` on the live
+    account → in_use = {}), which disarmed `scoped_rotation_veto` for every target and let a
+    burn-projected rotation land on the one account whose Fable window was at 100%. Pure. An
+    empty set means NO EVIDENCE — callers must read it as "unknown", never as "no model is in
+    use"."""
     out: set[str] = set()
     if not isinstance(usage, dict):
         return out
     for w in model_windows_from_usage(usage, now):
-        if w["util_pct"] <= 0 or w.get("is_active") is False:
+        if w["util_pct"] <= 0:
             continue
         _, _, model = str(w["label"]).partition("/")
         family = model_family(model)

@@ -1954,6 +1954,7 @@ def cmd_auto() -> int:
     # dead token; a local-expiry hit is an API-independent death signal that lets us rotate even
     # when /usage is unreachable (the user's "must work even if the API is not reachable").
     scoped_only = False  # True ⇒ `near` tripped SOLELY on a model-scoped window (see below)
+    burn_only = False    # True ⇒ `near` tripped SOLELY on a burn-gate PROJECTION, not a wall
     if live_status == 429:
         streak = int(state.get("live_429_streak", 0)) + 1
         state["live_429_streak"] = streak
@@ -1989,6 +1990,7 @@ def cmd_auto() -> int:
             burn_why = burn_gate.live_burn_verdict(state, live_email, time.time())
             if burn_why:
                 near = True
+                burn_only = True
                 live_desc += " +BURN[%s]" % burn_why
         if not near:
             # MODEL-SCOPED trigger (owner failure report 2026-08-15, TRDD-QE390SJA's missing
@@ -2203,6 +2205,22 @@ def cmd_auto() -> int:
         reason = "live %s %s -> rotate" % (live_email or "(live)", live_desc)
         _switch_blob(target_email, target_blob, reason)
         _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)" % (live_email or "(live)", target_email, bfh, bsd, reason))
+        return 0
+    # BURN PROJECTION with no scoped-clear target: STOP HERE too (2026-09-02 21:53 incident).
+    # The live account was at 5h=85% with Fable WORKING; the gate projected a wall in ~14 min
+    # (it never came — 86% twenty minutes later), and tier 1b rotated onto the one alternate
+    # whose Fable window was at 100%: a working model traded for a hard wall on a guess, and
+    # the owner rotated back by hand. A projection is not a wall. Tier 1b is for a REAL
+    # threshold/429, where any credential beats none; on a projection the honest move is to
+    # stay and let the projection either come true (the threshold then rotates for real) or
+    # not.
+    if burn_only and best is None and scoped_blocked:
+        detail = (" [%s]" % "; ".join(verdicts)) if verdicts else ""
+        _decide(
+            "auto: live %s %s — burn projection only, and every target is spent on the model "
+            "in use; staying put (a projection must not trade a working model for a hard wall)%s"
+            % (live_email or "(live)", live_desc, detail)
+        )
         return 0
     # SCOPED-ONLY wall with no scoped-clear target: STOP HERE, before tiers 1b and 2.
     # Every usage-confirmed alternate is spent on the same model (or unusable), while the

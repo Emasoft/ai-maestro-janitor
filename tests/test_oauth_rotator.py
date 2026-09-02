@@ -958,6 +958,31 @@ def test_cmd_auto_scoped_only_wall_stays_put_when_no_target_has_model_headroom(
     assert switches == [], "a scoped-only wall with no scoped-clear target must not rotate"
 
 
+def test_cmd_auto_burn_projection_alone_never_rotates_onto_a_target_spent_on_the_model_in_use(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-09-02 21:53 incident: the live account sat at 5h=85% with Fable working (7d/Fable
+    52%, reported `is_active: false`), the burn gate PROJECTED a 5h wall in ~14 min, and
+    cmd_auto rotated onto the one alternate whose Fable window was at 100% — trading a working
+    model for a hard wall on a guess (the projection never materialized: 85% → 86% in 20 min).
+    A projection is not a wall: with every target spent on the model in use it must stay put.
+    Contrast: at a REAL threshold (98%) tier 1b still rotates, see
+    test_cmd_auto_still_rotates_when_every_target_is_spent_on_the_model_in_use."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    spent = _blob("SPENT", expires_ms=_ms_in(50))
+    live_usage = _scoped_usage(85.0, 32.0, fable=52.0)
+    live_usage["limits"][0]["is_active"] = False  # what the API says on a healthy account
+    switches = _setup_auto(
+        monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+        slot_blobs={"spent@x": spent},
+        usage={"LIVE": (200, live_usage),
+               "SPENT": (200, _scoped_usage(1.0, 76.0, fable=100.0))},
+    )
+    monkeypatch.setattr(rotator.burn_gate, "live_burn_verdict",
+                        lambda state, email, now, **kw: "5h wall projected in ~14 min (recent burn slope)")
+    rotator.cmd_auto()
+    assert switches == [], "a burn projection must not rotate onto a Fable-spent target"
+
+
 def test_cmd_auto_scoped_window_below_the_bar_does_not_trigger(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CONTROL for the scoped trigger: same fleet, Fable merely WARM (60% < the 90 bar) and

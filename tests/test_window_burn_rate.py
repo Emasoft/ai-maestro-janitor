@@ -142,10 +142,16 @@ def test_a_model_window_at_zero_is_not_evidence_of_use() -> None:
     assert tbn.models_in_use(_scoped(0.0), NOW) == set()
 
 
-def test_is_active_false_withdraws_the_in_use_evidence() -> None:
-    """The API saying the limit is not in effect beats our inference from the number. A
-    MISSING is_active does not — a payload that omits the field must still report."""
-    assert tbn.models_in_use(_scoped(60.0, active=False), NOW) == set()
+def test_is_active_false_does_not_withdraw_the_in_use_evidence() -> None:
+    """`is_active` means the LIMIT is binding, not that the model is in use: the live API
+    reports `7d/Fable 52% is_active=false` on a healthy account and `100% is_active=true`
+    only once the wall is hit (2026-09-02). Reading false as "not in use" left every healthy
+    live account with NO model in use, disarmed the target veto, and rotated onto the one
+    account whose Fable window was spent. A missing field must still report too."""
+    assert tbn.models_in_use(_scoped(60.0, active=False), NOW) == {"fable"}
+    payload = _scoped(60.0)
+    del payload["limits"][0]["is_active"]
+    assert tbn.models_in_use(payload, NOW) == {"fable"}
 
 
 def test_a_target_spent_on_the_model_in_use_is_vetoed() -> None:
