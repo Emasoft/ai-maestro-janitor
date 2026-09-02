@@ -1,9 +1,9 @@
 ---
 trdd-id: 6WM4BFKF
 title: gitignore-coverage chore — prove the ignore file covers every private class BEFORE a secret can be tracked
-column: planned
+column: complete
 created: 2026-07-24T03:08:22+0200
-updated: 2026-07-24T03:08:22+0200
+updated: 2026-09-02T13:36:41+0200
 current-owner: main-session
 task-type: security
 scope: project
@@ -14,7 +14,24 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-24
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+
+- **✅ CLOSED 2026-09-02 13:36 — done-but-unclosed since `e607e95a`.** The card sat at `planned`
+  for six weeks after its detector shipped (`scripts/detectors/gitignore-coverage.py`,
+  `scripts/lib/gitignore_coverage.py`, `tests/test_gitignore_coverage.py`, wired in
+  `dispatch.py` at a 3600 s cadence, in the roster page). Re-verified against the six
+  acceptance criteria today, not inferred from the commit: 1–3 by the shipped tests (uncovered
+  class reported with its canonical pattern; an existing rule does not clear an already-tracked
+  file; protected prefixes recognised); 4 by a live run on this repo — zero findings, exit 0; 5
+  by `git status` byte-identical after that run; 6 by the 3.4.9 publish gate (ruff + mypy + the
+  full suite, green, with this code in the range). Fleet census the same day: ten projects carry
+  LOW `ADVISORY-GITIGNORE-COVER` findings, so the detector reaches real repos.
+- **D5 (the `/janitor-gitignore-fix` remedy command) was NOT built and is NOT required by the
+  criteria above** — spun out as its own card, **TRDD-VMXAF9IY** (`todo`), because the fleet
+  findings are being re-recorded hourly with nobody remedying them by hand.
+- The 2026-07-24 entries below are kept as the design record; their NEXT ACTION is superseded.
+
+### 2026-07-24 (design-time state, superseded by the close above)
 
 - **WHY THIS EXISTS:** on Claude Code a plugin ships its **whole tracked repo** — there is no
   packaging-exclusion field in `plugin.json` and none in the plugin spec. Verified empirically:
@@ -116,6 +133,12 @@ ledger; a debris class is informational.
    plus a clean run is the regression guard).
 5. The detector only reads; a run leaves `.gitignore` and the git index byte-identical.
 6. pyright 0 new errors, ruff clean, full `pytest tests/` green.
+
+## Approval log
+
+- 2026-09-02T13:36:41+0200 — COMPLETED by janitor-main-session (Tier 0, own scope). All six
+  acceptance criteria verified live today (see STATE); implementation `e607e95a`, shipped since
+  3.4.x and part of the 3.4.9 green range. D5 spun out to TRDD-VMXAF9IY.
 
 ## Notes and lessons learned
 
