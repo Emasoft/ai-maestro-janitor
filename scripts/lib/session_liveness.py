@@ -85,7 +85,11 @@ _STATUS_ROW_GLYPHS = "✻✽✶✢✳·"
 # a tool row `⏺`, a prompt echo `❯`, an agent message `›`, a recap `※`, an agent-list entry
 # `◯`. A row that starts with none of these (after stripping) is the wrap continuation of the
 # row above it — the terminal's continuation indent is unmeasured, so this does not assume one.
-_ROW_MARKER_GLYPHS = _STATUS_ROW_GLYPHS + "⏺❯›※◯"
+# `·` is deliberately NOT a join-stopper although it is a spinner frame: it is also the
+# separator INSIDE the status text (`… · attempt 1/5`), and at 15 of the widths 30-120 the
+# wrap lands right before it, so a continuation row starts with `·`. Only one status row is
+# ever on screen, so a `·`-led row under a wedge row can only be that wedge's continuation.
+_ROW_MARKER_GLYPHS = "✻✽✶✢✳⏺❯›※◯"
 
 
 def retry_wedge_attempt_at_tail(text: str) -> int | None:

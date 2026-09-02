@@ -240,12 +240,16 @@ def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
     assert sl.retry_wedge_attempt_at_tail(plain_429) == 5
     # A narrow pane wraps the status row (per-row matching returned None at 60 columns). The
     # continuation indent is unmeasured, so both an indented and a flush-left wrap must join.
+    # Every width from 30 to 120 columns, all three wall variants: at 15 of them the wrap lands
+    # right before the `·` separator, so the continuation row starts with the middle dot.
     import textwrap
-    status = session_limit.split("\n")[0]
-    for width in (110, 72, 60, 48):
-        for indent in ("  ", ""):
-            wrapped = "\n".join(textwrap.wrap(status, width, subsequent_indent=indent))
-            assert sl.retry_wedge_attempt_at_tail(wrapped + "\n" + CHROME) == 1, f"{width} cols indent={indent!r}"
+    variants = {WEDGE_LINE: 1, session_limit.split("\n")[0]: 1, plain_429.split("\n")[0]: 5}
+    for status, expected in variants.items():
+        for width in range(30, 121):
+            for indent in ("  ", ""):
+                wrapped = "\n".join(textwrap.wrap(status, width, subsequent_indent=indent))
+                got = sl.retry_wedge_attempt_at_tail(wrapped + "\n" + CHROME)
+                assert got == expected, f"{status[:14]!r} at {width} cols indent={indent!r}: {got}"
     # The join must not stitch an indented QUOTE of the wedge line onto a calm status row.
     stitched = "✻ Cogitated for 9s\n  " + WEDGE_LINE + "\n" + CHROME
     assert sl.retry_wedge_attempt_at_tail(stitched) is None
