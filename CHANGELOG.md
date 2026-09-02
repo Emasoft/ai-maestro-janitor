@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.9] — 2026-09-02
+
+### Bug Fixes
+
+- **memory-txn:** CLI begin records owner_pid=0, not its own dying pid (TRDD-0A8FN3W3) (7ad5f84)
+- **publish:** [G1b] known-address exclusion is PER FILE, and the gate's own tests no longer trip it (TRDD-QW7K3M2V) (fb48d14)
+- **clear-lane:** The clear chain never composes — the cleared session's own SessionStart summarizer owns the llm-ext summary in both modes (TRDD-QZVAEWQH) (1e0606b)
+
+### Documentation
+
+- Add proposal TRDD-0A8FN3W3 — memory_txn CLI begin records its own dead pid, so a concurrent resume reaps a live staging txn (555a7a8)
+- **memory:** Split janitor-compaction-floor-gate into hub + hooks/triggers/clear-lever sub-pages (cf811da)
+- **CLAUDE.md:** Refresh the wikimem index for the compaction-floor-gate split (56 pages) (a8a3c73)
+- **memory:** Automated-clear summary comes from the session side (supersedes ATOM-2IUL-97C3); [G1b] address gate atom + self-trip lesson (526c6a7)
+- **TRDD-QZVAEWQH:** Approach D landed in 1e0606b9 — STATE block, boxes re-read against D, dev → testing (04aae9e)
+
+### Features
+
+- **publish:** [G1b] block a NEW personal e-mail address in the pushed diff (TRDD-QW7K3M2V) (da47129)
+
+### Refactor
+
+- **cold-cache-clear:** Drop the shadow lane — a disabled lane computes nothing (TRDD-UQW5IOAE) (196d5ee)
+
+### Testing
+
+- **publish:** The [G1b] test file's own comment spelled out a gmail address (TRDD-QW7K3M2V) (92af207)
+- **gh-reply-watch:** Re-stamp the machine-wide floor before each later fire — the window spanned the first child's whole run (TRDD-7NSRD8OV) (020c905)
+- **gh-reply-watch:** The re-arm must first PROVE the detector's stamp — value >= the test's pre-fire clock (TRDD-7NSRD8OV) (4079a5c)
 ## [3.4.8] — 2026-09-02
 
 ### Bug Fixes
@@ -24,6 +53,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-QZVAEWQH:** Second no-summary fire at 05:20 (llm-externalizer) — recurs on every fire; lever deliberately left on; back-fill box added (ba6a0d9)
 - **TRDD-QZVAEWQH:** The second session's keyed handoff read (substantive, writer likely the SessionStart hook, unconfirmed); back-fill box gets the 90-day prune and newest-file caveats (5af7db5)
 - **TRDD-QZVAEWQH:** Drop the asserted writer mechanism — one of two keyed writers, SessionStart stamp favours the hook, summary text origin unknown (46a0647)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.8 (0c4e208)
 ## [3.4.7] — 2026-09-02
 
 ### Bug Fixes
