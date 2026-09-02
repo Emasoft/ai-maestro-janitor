@@ -1,7 +1,7 @@
 ---
 trdd-id: UQW5IOAE
 title: An idle keep-warm session should be forced through handoff-and-clear to shrink its prefix
-column: design
+column: testing
 created: 2026-08-02T14:19:42+0200
 updated: 2026-09-02T08:40:27+0200
 current-owner: claude-ai-maestro-janitor
@@ -13,6 +13,40 @@ implementation-commits: [d2a5204, 67802e0, 5ecf47f2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative)
+
+### ⏵ 2026-09-02 — the trade is MOOT: the lane is LIVE, the evidence is free, the shadow bill is deleted
+
+**USER ruling 08:31:** "wait. find a better solution and implement it asap." The per-beat
+dry-run measurement is refused. The better solution, measured against the machine rather than
+the card:
+
+- **The lever is ON.** `~/.claude/settings.json` → `env` carries
+  `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED=true` and `…_MIN_CONTEXT_TOKENS=300000`.
+  So `run_once`'s shadow branch has been dormant since the lever flipped — the refused bill was
+  not being paid — and every verdict since `cold-cache-clear.log:781` (2026-09-02 00:47, the
+  last `[SHADOW — dry-run]` line) is a LIVE one.
+- **Live census, 00:47 → 08:50 on 2026-09-02:** 5 FIRE / 52 HOLD. HOLD reasons: 22 `context <
+  300000`, 14 `active-waiting`, 9 `no-headroom`, 7 `idle < 3600s`. FIRES: AgentlensPro 04:23
+  (human_idle 1100 s, transcript_idle 234 s — the keep-warm shape this card is about),
+  llm-externalizer 05:20 (human_idle 1613 s), this repo 06:21 and 08:05 (other panes' sessions
+  `f8a4d55a`, `e44f28c7`; human_idle 416/393 s), AgentlensPro 06:26. **Zero policy false
+  positives**: every fire satisfied the configured predicates; none hit `awaiting_user` or an
+  active human. The 04:23 fire also IS the "staged end-to-end drill" box 5 asked for — handoff
+  → `/clear` → bootstrap (`/janitor-arm`) → resume observed live (`AgentlensPro/.janitor/logs`,
+  04:24–04:25).
+- **Decision:** (1) delete the shadow branch of `cold_cache_clear_task.run_once` and its env
+  switch, so the refused per-beat cost is impossible by construction, not by an env value —
+  implemented 2026-09-02 (lean-worker, this commit's `implementation-commits:`); (2) evidence
+  comes from the live log's audit channel (`5ecf47f2`), which already exists — no new
+  measurement code; (3) box 5 is closed on live data, strictly stronger than shadow data.
+- **What this deliberately does NOT change:** the `min_context` floor (300k) is evaluated above
+  `long-idle` in `external_clear.should_clear_externally` (~1606-1609), so a keep-warm session
+  under 300k never clears however long it idles. That is the USER's own configured floor; a
+  200k session pays ~20k weighted per fire versus a ~137k one-off re-cache after a clear, so
+  lowering it only wins after roughly an hour of idling. Left as a knob, not changed here.
+
+**NEXT ACTION:** none on this card once the shadow-removal commit lands and the next publish
+ships it. Card → `testing` on commit, `complete` after the publish.
 
 ### ⏵ 2026-08-26 — column corrected `testing` → `todo`. Nothing is being tested.
 

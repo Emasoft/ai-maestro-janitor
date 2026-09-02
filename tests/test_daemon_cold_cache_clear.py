@@ -126,61 +126,34 @@ def test_it_reads_the_real_project_root_field(wired, monkeypatch, tmp_path: Path
     )
 
 
-def test_the_disabled_lane_evaluates_in_shadow_but_can_never_clear(
+def test_the_disabled_lane_is_fully_inert_no_walk_no_spawn(
     wired, monkeypatch, tmp_path: Path
 ) -> None:
-    """TRDD-UQW5IOAE: OFF now means "takes no action", NOT "computes nothing".
+    """TRDD-UQW5IOAE (2026-09-02 ruling): OFF means no fleet walk and no spawn — full stop.
 
-    This test previously asserted `spawns == []`, and that assertion was a stricter claim than
-    the invariant it was defending. Its docstring names the real one — *"`/clear` is
-    unrecoverable, so the capability ships OFF"* — which is about the CLEAR, not about whether
-    a verdict is computed. Holding the strict version had a cost the card measured: the
-    zero-false-positive evidence the feature needs before it can ever ship enabled could not be
-    collected, because the disabled lane returned before the fleet scan and recorded nothing.
-
-    So the spawn is now expected, and `--dry-run` is what carries the safety — the watcher
-    returns before the clear chain on that flag.
+    The USER refused the shadow lane's per-beat dry-run bill once the live lane already logs
+    real verdicts on this host, so a disabled beat must compute nothing: not walk the fleet,
+    not spawn the watcher, not log a verdict.
     """
     d, spawns = wired
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", raising=False)
+    walked: list[bool] = []
     monkeypatch.setattr(
-        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(_project(tmp_path))]
+        d.fleet_scan,
+        "gather_fleet",
+        lambda **_k: walked.append(True) or [_instance(_project(tmp_path))],
     )
 
     d.task_cold_cache_clear()
 
-    assert len(spawns) == 1, "the disabled lane must still evaluate, or shadow collects nothing"
-    assert "--dry-run" in spawns[0], (
-        "a shadow spawn WITHOUT --dry-run would run the real clear chain on a feature the "
-        "owner has not opted into — the one outcome this test exists to prevent"
-    )
+    assert spawns == [], "a disabled lane must never spawn the watcher"
+    assert walked == [], "a disabled lane must never walk the fleet"
 
 
-def test_shadow_can_be_switched_off_making_the_disabled_lane_fully_inert(
+def test_the_enabled_lane_never_carries_a_dry_run_flag(
     wired, monkeypatch, tmp_path: Path
 ) -> None:
-    """The escape hatch: shadow defaults ON, and one env var restores total inertness.
-
-    Worth a test rather than trust, because a default-ON behaviour whose off-switch does not
-    work is indistinguishable from having no switch — and this one exists precisely for a host
-    where the owner wants the lane to do nothing at all.
-    """
-    d, spawns = wired
-    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", raising=False)
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_CLEAR_SHADOW", "0")
-    monkeypatch.setattr(
-        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(_project(tmp_path))]
-    )
-
-    d.task_cold_cache_clear()
-
-    assert spawns == []
-
-
-def test_the_enabled_lane_never_carries_the_shadow_flag(
-    wired, monkeypatch, tmp_path: Path
-) -> None:
-    """The inverse leak, and the more dangerous direction to get wrong.
+    """The enabled lane must actually clear, never pass `--dry-run`.
 
     If `--dry-run` ever rode along on the ENABLED lane, the feature would be silently dead: it
     would log confident FIRE verdicts and clear nothing, and — because a dry-run verdict and a
@@ -198,7 +171,7 @@ def test_the_enabled_lane_never_carries_the_shadow_flag(
     d.task_cold_cache_clear()
 
     assert len(spawns) == 1
-    assert "--dry-run" not in spawns[0], "the enabled lane must actually clear, not shadow"
+    assert "--dry-run" not in spawns[0], "the enabled lane must actually clear"
 
 
 def test_it_never_clears_a_session_that_is_working(wired, monkeypatch, tmp_path: Path) -> None:
@@ -288,9 +261,8 @@ def test_it_is_registered_on_the_daemon_task_table() -> None:
 def test_the_watchers_verdict_lines_are_kept_not_discarded(monkeypatch, tmp_path: Path) -> None:
     """TRDD-UQW5IOAE: the beat spawned the watcher with `stdout=DEVNULL`, so every
     `VERDICT FIRE/HOLD … why=…` line — the ONLY audit trail this feature is judged on — was
-    thrown away, in the ENABLED case too. The shadow-mode acceptance box was therefore waiting
-    on a channel that did not exist, and a later reader would have concluded "shadow mode ran
-    and found nothing" when nothing had been recorded at all.
+    thrown away, in the ENABLED case too. A reader would have concluded the lane was quiet
+    because nothing needed clearing, when nothing had been recorded at all.
 
     Self-proving: the fake writes through the handle the beat actually passed, so restoring
     DEVNULL makes the marker vanish from the log and this test RED.

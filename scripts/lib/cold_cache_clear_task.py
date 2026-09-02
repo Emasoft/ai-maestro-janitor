@@ -54,23 +54,6 @@ import state  # noqa: E402
 
 _COMPONENT = "cold-cache-clear"
 
-# SHADOW MODE (TRDD-UQW5IOAE). When the feature is OFF — which is how it ships, because
-# `/clear` is unrecoverable — this lane still walks the fleet and spawns the watcher with
-# `--dry-run`, so a verdict is COMPUTED and LOGGED for every candidate while nothing is ever
-# cleared. Default ON; set this to 0 to make the disabled lane fully inert again.
-#
-# Why it must default ON rather than be a second opt-in nobody sets: the card's acceptance is
-# "N days of shadow verdicts with zero FALSE POSITIVES", and the risk on an irreversible action
-# is a false positive, not a missed true one. A criterion gated behind a switch nobody flips
-# collects no evidence, and the card measured exactly that outcome once already — a reader
-# concluding "shadow mode has been running and found nothing" when nothing had run at all.
-# Two opt-ins in series is how a feature stays permanently unevidenced and therefore
-# permanently unshippable.
-#
-# Safe by construction: `--dry-run` returns before the clear chain (external_handoff_clear.py),
-# so the worst case is one extra detached python per beat, for AT MOST one candidate.
-_SHADOW_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_CLEAR_SHADOW"
-
 
 def run_once() -> int:
     """One beat: evaluate the fleet, spawn the watcher for AT MOST one candidate.
@@ -84,11 +67,9 @@ def run_once() -> int:
     except Exception as exc:  # noqa: BLE001 - a missing sibling must not kill the beat
         state.log_line(_COMPONENT, f"cold-cache-clear: libs unavailable: {exc}")
         return 0
-    # ships inert, exactly like the SessionStart half — /clear is unrecoverable. But "inert"
-    # now means "takes no action", NOT "computes nothing": the shadow lane below evaluates and
-    # logs a verdict so the card's zero-false-positive clock can actually run.
-    shadow = not ec.enabled()
-    if shadow and not state.is_truthy_env(_SHADOW_ENV, True):
+    # /clear is unrecoverable; a disabled lane computes nothing — the USER refused a per-beat
+    # dry-run bill on 2026-09-02, TRDD-UQW5IOAE.
+    if not ec.enabled():
         return 0
     now = int(time.time())
     try:
@@ -157,11 +138,10 @@ def run_once() -> int:
             continue
         # KEEP THE WATCHER'S STDOUT (TRDD-UQW5IOAE). It prints exactly the audit line this
         # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus NO_SUMMARY /
-        # HANDOFF_NOT_CONCISE / CLEAR_CHAIN_SPAWNED — and DEVNULL threw every one of them away,
-        # in the ENABLED case too. That is why "shadow mode has been running and found nothing"
-        # would have been the opposite of the truth: nothing was recorded, so nothing could be
-        # found. The SessionStart lane never had this hole (it is blocking and logs its own
-        # verdict via state.log_line), so this was the one call site.
+        # HANDOFF_NOT_CONCISE / CLEAR_CHAIN_SPAWNED — and DEVNULL threw every one of them away.
+        # A silent lane looks identical to an idle one, so nothing would ever be recorded. The
+        # SessionStart lane never had this hole (it is blocking and logs its own verdict via
+        # state.log_line), so this was the one call site.
         #
         # Appending to the component's own log file, NOT a pipe: the child is detached and
         # nobody survives to read a pipe — a full pipe buffer would simply block it forever.
@@ -174,18 +154,8 @@ def run_once() -> int:
         # Log the header BEFORE the spawn, not after: it puts the "evaluating <root>" line
         # ahead of the watcher's own lines in the same file (they interleave otherwise), and
         # a beat that dies mid-spawn still says which root it was on.
-        state.log_line(
-            _COMPONENT,
-            f"cold-cache-clear: evaluating {root}" + (" [SHADOW — dry-run]" if shadow else ""),
-        )
-        # The shadow marker rides in the ARGV, not in an env var, because the watcher's own
-        # `--dry-run` branch is the thing that guarantees no clear happens. Reusing the flag the
-        # tool already documents keeps one code path instead of two, and means a shadow verdict
-        # and a live verdict are produced by identical code — which is the only way N days of
-        # shadow evidence says anything about the live case.
+        state.log_line(_COMPONENT, f"cold-cache-clear: evaluating {root}")
         argv = [sys.executable, str(watcher), "--project-root", root]
-        if shadow:
-            argv.append("--dry-run")
         # Stamp BEFORE the spawn, not after: a spawn failure below must still space out the
         # retry, or a root whose watcher keeps failing to launch would be re-picked every beat
         # exactly like the HOLD case this feature exists to fix (TRDD-0TM5NDYN).

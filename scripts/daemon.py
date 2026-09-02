@@ -2919,7 +2919,7 @@ def main() -> int:
     chores_yielded_last_loop = False  # Phase B2 transition logging (yield ↔ resume), not per-tick spam
     try:
         while _running:
-            # Call-time knobs (enabled(), shadow flags, …) can change mid-run even though the
+            # Call-time knobs (enabled(), …) can change mid-run even though the
             # import-time intervals above never re-read. One stat per tick — cheap; the parse
             # only fires when refresh_plugin_options_if_changed() sees the mtime move.
             if _KEEPALIVE_INSTANCE:
