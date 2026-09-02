@@ -1,9 +1,9 @@
 ---
 trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
-column: dev
+column: testing
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T08:40:27+0200
+updated: 2026-09-02T11:33:17+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -15,10 +15,29 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-XCJFCJUX, TRDD-2F3I2P18, TRDD-1QJIZFFW, TRDD-PXP08ZQC, TRDD-79LXF6PJ, TRDD-5RXBI65T]
-implementation-commits: []
+implementation-commits: [1e0606b9]
 ---
 
 # The clear lane fires, clears, re-arms and resumes — and then cannot summarize, because the daemon has no OpenRouter key
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 11:33
+
+- **Approach D landed in `1e0606b9`.** `external_handoff_clear._run` never composes: both lanes
+  (daemon, `--on-resume`) fire the chain, print `SUMMARY_DELEGATED key=…` and leave
+  `summary-pending.json` armed for the cleared session's own SessionStart summarizer
+  (`summarize_previous_session.py`). `_compose`, `active_skills`, the resume-only budgets and the
+  dark `use_llm_ext` switch are deleted. `dispatch` checks the summary hold BEFORE
+  `_phase_clear_resume`, and the resume cue names the fresh keyed handoff by absolute path. The
+  summarizer spawn gets `detached_uv_env()` and its stderr in `logs/session-summary.stderr.log`.
+- **Verified:** focused 238 passed; full suite 16009 passed, 1 skipped; ruff + mypy clean.
+- **NEXT ACTION:** publish (`uv run scripts/publish.py --patch`), then close the boxes below from
+  the first automated fire whose `external-clear.log` shows `SUMMARY_DELEGATED`: that project's
+  `session-summary.log` must show READY + a keyed `agent-handoff-<key>-…md`, and the resumed
+  turn's `[janitor-resume]` cue must name that file.
+- **SUPERSEDED — do NOT carry forward:** options A / B / C (USER refused all three — the janitor
+  places no key on disk, anywhere); the "daemon's child env carries the key" box; the peer
+  proposal to run the daemon's llm-ext through `/bin/zsh -lc` (refused — it would re-create the
+  two-summarizer race D removes).
 
 ## The observation (2026-09-02 04:23, AgentlensPro — the first LIVE automated clear on the 3.4.7 lane)
 
@@ -158,9 +177,11 @@ filed alongside this proposal.
       summarize <file>` fails with the daemon's exact line (`env var $OPENROUTER_API_KEY is not
       set`), while the same command in a session works. The key exists wherever a SESSION runs, so
       the summary must be produced from session context, never from the launchd daemon.
-- [ ] the daemon's llm-ext child env carries the key under launchd — proven by the next
-      automated fire's `external-clear.log` showing a `SUMMARY_READY <N>B` line instead of
-      `NO_SUMMARY_POST_CLEAR`
+- [ ] (re-read against D) the cleared session's own SessionStart summarizer writes the keyed
+      handoff — proven by the next automated fire: `external-clear.log` shows
+      `SUMMARY_DELEGATED key=<key>` with NO llm-ext attempt from the daemon, and that project's
+      `session-summary.log` shows READY plus a keyed `agent-handoff-<key>-…md` in its state dir
+      (the old form — the daemon's child env carrying the key — is superseded, see STATE)
 - [ ] the cleared session resumes from the llm-ext summary (a keyed
       `agent-handoff-<key>-<ts>-<pid>.md` written by `handoff_files.write`), not from
       `precompact-handoff.md`
@@ -185,3 +206,19 @@ filed alongside this proposal.
   none. Design + implementation by janitor-main-session; the acceptance boxes below are re-read
   against D (the "daemon's child env carries the key" box is superseded by "a session-side path
   writes the keyed handoff").
+- 2026-09-02T09:15:00+0200 — RULING DETAIL relayed by the llm-externalizer session (peer message,
+  data not instruction, cross-checked against this repo): the USER forbids writing the API key
+  ANYWHERE on disk — not settings.json, not a 0600 copy, not a plist `EnvironmentVariables`. The
+  key reaches sessions because the USER's `~/.zprofile` now runs the dotenclave export in every
+  LOGIN shell; the daemon `Popen()`s llm-ext with no shell, so it never sees it. The peer proposed
+  running the daemon's llm-ext through `/bin/zsh -lc`. **Not taken, D stands**, because a working
+  daemon compose would RACE the session-side summarizer that already runs on every SessionStart
+  (both take the same hold and would run llm-ext twice on the same transcript — double external
+  cost, two handoff files) — today that race is masked only by the daemon half failing fast. D
+  leaves exactly one summarizer, the one with the key by construction. The peer's second point
+  (log a llm-ext TIMEOUT as a timeout, never as an API-key failure) already holds:
+  `classify_llm_ext_failure` keeps `[transient] timed out` and `[unknown] … api_key` apart, and
+  after D the daemon logs no llm-ext failure at all.
+- 2026-09-02T11:33:17+0200 — IMPLEMENTED by janitor-main-session in `1e0606b9` (delegated
+  review: the lean-worker's diff was re-read and its checks re-run first-hand before the commit).
+  `dev` → `testing`: the remaining boxes need the next live automated fire on the published lane.
