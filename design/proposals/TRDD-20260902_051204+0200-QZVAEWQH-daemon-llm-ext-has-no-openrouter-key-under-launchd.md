@@ -3,7 +3,7 @@ trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
 column: proposal
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T05:21:37+0200
+updated: 2026-09-02T06:05:42+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -80,6 +80,23 @@ that launches Claude Code from its own secure store — not verified. What is ve
 options A–C depend on, is that no file on disk defines it, so no rc-sourcing trick can hand it to
 a launchd daemon.
 
+## Second occurrence, one hour later — it recurs on every fire
+
+05:20:19, root `~/Code/llm-externalizer` (session 28ec9a0e, trigger next-fire-misses,
+human_idle 1613 s): same three identical `requires 'api_key'` failures, same
+`NO_SUMMARY_POST_CLEAR`, resumed as c557c807 at 05:20:55 and held. One difference worth
+recording: that project's session DID get a keyed `agent-handoff-28ec9a0e-20260902_052025+0200-38150.md`
+five seconds after the fire (its own hooks/skill are on a newer cached version than AgentlensPro's
+were), so it was not cleared without ANY record — but still without the llm-ext summary the USER's
+2026-08-23 directive makes the only sanctioned compaction. Both cleared transcripts survive under
+`~/.claude/projects/<slug>/` (AgentlensPro `f7594ac9`, llm-externalizer `28ec9a0e`), so the missing
+summaries can be back-filled once the daemon has a key.
+
+**The lever was deliberately NOT flipped off** (2026-09-02 06:05): the USER's 2026-09-01 ruling
+(TRDD-2F3I2P18) chose clear-first over "never clear blind" precisely because the source survives on
+disk and the quota burn of NOT clearing was the incident being fixed; turning the lane off would
+re-expose that burn to fix a loss that is deferrable, not permanent. The USER can overrule.
+
 ## Why it matters more now than before 2F3I2P18
 
 Before the clear-first reorder, "no summary" meant "no clear" (the 79LXF6PJ gate). After it, the
@@ -130,6 +147,9 @@ filed alongside this proposal.
       `precompact-handoff.md`
 - [ ] the five drill cards blocked on this (2F3I2P18, 1QJIZFFW, PXP08ZQC, 79LXF6PJ, 5RXBI65T's
       successor observation) re-measure against that fire
+- [ ] the two summaries the key's absence cost are back-filled from the surviving transcripts
+      (`llm-ext session-summary --transcript <path>` for AgentlensPro `f7594ac9` and
+      llm-externalizer `28ec9a0e`) and written as keyed handoffs in those projects' state dirs
 
 ## Approval log
 
