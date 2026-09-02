@@ -3,7 +3,7 @@ trdd-id: BDZG8Y8A
 title: the daemon fire path takes no handoff_clear_verify before-snapshot, so an automated clear can never produce the PASS table
 column: testing
 created: 2026-09-02T05:13:49+0200
-updated: 2026-09-02T05:59:47+0200
+updated: 2026-09-02T06:01:53+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -46,7 +46,9 @@ harness and `lib/state.py` alongside — the fix cannot ship dark for a root/pat
 pointed out that `context_source=unknown` on a transcript-less throwaway dir leaves the
 harness's transcript branch UNEXERCISED, and its `except Exception: pass` would print the same
 `unknown` on an ImportError under the bare env. So the harness's own `_context_tokens()` was run
-in daemon shape (`env -i`, framework python, probe option `""`) against a REAL project root, zero
+under the daemon's env + interpreter (`env -i`, framework python, probe option `""`), imported
+in-process with `scripts/` and `scripts/lib` on the path — the same two dirs the script entry
+has (its own dir by the sys.path[0] rule, plus `_HERE/lib`) — against a REAL project root, zero
 writes: it returned `(353811, 'transcript')` — the same `cold_cache_compact.context_tokens_for`
 reader the gate uses, on the newest transcript of that root. **Box 3 therefore also requires
 `before.context_tokens` to be non-null** on the observed automated fire: a `None` there means the
