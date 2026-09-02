@@ -428,7 +428,14 @@ def main() -> int:
     _early_log(f"entered (plugin_root={plugin_root})")
     try:
         from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-        from lib import harness_backend, memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
+        from lib import (  # noqa: E402  -- local package, not PyPI
+            harness_backend,
+            memory_scopes,
+            plugin_versions,
+            rules_installer,
+            settings_ensurer,
+            state,
+        )
     except Exception as exc:  # noqa: BLE001 -- logged, then re-raised; never swallowed
         _early_log(f"FATAL: lib import failed ({type(exc).__name__}: {exc}) — hook aborted")
         raise
@@ -576,6 +583,19 @@ def main() -> int:
             )
         except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
             _slog(state, "session-start", f"reload-ack seeding failed: {exc}")
+
+        # janitor#290 §2 (TRDD-38PB1B86): snapshot which version of each enabled plugin is
+        # cached RIGHT NOW, so dispatch._phase_plugin_reload can later tell a generation bump
+        # with a real version delta apart from a fleet-wide no-op re-list (same plugins, same
+        # versions). Best-effort — a missing/unreadable snapshot just falls back to the legacy
+        # "emit on every generation bump" behaviour, never blocks or breaks session start.
+        try:
+            plugin_versions.write_snapshot(
+                state.state_dir() / "plugins-at-start.json",
+                plugin_versions.snapshot_enabled(Path.home() / ".claude" / "settings.json"),
+            )
+        except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+            _slog(state, "session-start", f"plugin-version snapshot failed: {exc}")
 
     # Clear any stale flag from a prior session crash. If the last session
     # ended mid-rate-limit, the flag is preserved and the heartbeat cron

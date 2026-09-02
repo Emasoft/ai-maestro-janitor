@@ -419,6 +419,121 @@ def test_phase_plugin_reload_threshold_zero_disables_guard(env_isolation: dict, 
     assert out.strip() == "[janitor-reload]", f"threshold=0 must disable the guard entirely, got {out!r}"
 
 
+# ---------- Phase 1.61: reload relevance gate (janitor#290 §2, TRDD-38PB1B86) ----------
+
+
+def _write_plugin_versions_snapshot(project: Path, versions: dict) -> None:
+    import plugin_versions
+    import state
+
+    state.init_state()
+    plugin_versions.write_snapshot(state.state_dir() / "plugins-at-start.json", versions)
+
+
+def test_phase_plugin_reload_silent_when_snapshot_shows_no_version_change(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot exists and the ONLY enabled plugin's cached version is unchanged since
+    session start → no marker, and the ack is still advanced (so a LATER real change is
+    not masked by a stale, already-consumed generation)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("foo@mp")
+    home = _isolate_home(env_isolation, monkeypatch)
+    cache = home / ".claude" / "plugins" / "cache" / "mp" / "foo" / "1.0.0"
+    cache.mkdir(parents=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"foo@mp": true}}')
+    _write_plugin_versions_snapshot(env_isolation["project"], {"foo@mp": "1.0.0"})
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out == "", f"no version delta on an enabled plugin must stay silent, got {out!r}"
+    assert gs.reload_flag_present() is True, "the global generation is never cleared"
+
+
+def test_phase_plugin_reload_emits_with_payload_when_a_relevant_plugin_changed(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot exists and an enabled plugin's cached version DID change → the bare
+    marker fires, followed by a `plugin=... old=... new=...` payload line."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("foo@mp")
+    home = _isolate_home(env_isolation, monkeypatch)
+    cache_root = home / ".claude" / "plugins" / "cache"
+    (cache_root / "mp" / "foo" / "1.0.0").mkdir(parents=True)
+    (cache_root / "mp" / "foo" / "1.1.0").mkdir(parents=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"foo@mp": true}}')
+    _write_plugin_versions_snapshot(env_isolation["project"], {"foo@mp": "1.0.0"})
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    lines = out.strip().splitlines()
+    assert lines[0] == "[janitor-reload]"
+    assert lines[1] == "plugin=foo@mp old=1.0.0 new=1.1.0"
+
+
+def test_phase_plugin_reload_refreshes_snapshot_after_emit_so_next_bump_stays_silent(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coordinator follow-up: after an emit, the on-disk snapshot must be updated to the
+    CURRENT versions — otherwise a LATER generation bump with no further real change
+    re-diffs against the STALE (pre-change) snapshot, finds the same already-handled
+    delta again, and re-emits forever (the exact spurious-reload shape the gate exists
+    to stop)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import plugin_versions
+    import state
+
+    gs.init_global_state()
+    gs.set_reload_flag("foo@mp")
+    home = _isolate_home(env_isolation, monkeypatch)
+    cache_root = home / ".claude" / "plugins" / "cache"
+    (cache_root / "mp" / "foo" / "1.0.0").mkdir(parents=True)
+    (cache_root / "mp" / "foo" / "1.1.0").mkdir(parents=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"foo@mp": true}}')
+    _write_plugin_versions_snapshot(env_isolation["project"], {"foo@mp": "1.0.0"})
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip().splitlines()[0] == "[janitor-reload]"
+
+    # The snapshot on disk now reflects the CURRENT (post-change) versions, not the
+    # start-of-session ones the emit just fired on.
+    snap_path = state.state_dir() / "plugins-at-start.json"
+    assert plugin_versions.read_snapshot(snap_path) == {"foo@mp": "1.1.0"}
+
+    # Model a LATER generation bump with no further real version change: lower the
+    # ack below the (already-bumped) generation directly, so the phase re-evaluates
+    # relevance without a real cache change having happened.
+    state.atomic_write(state.state_dir() / "reload-acked.ts", "0")
+    second = _capture_stdout(dispatch._phase_plugin_reload)
+    assert second == "", f"a stale snapshot must not re-trigger an already-handled delta, got {second!r}"
+    assert state.read_int_state(state.state_dir() / "reload-acked.ts", 0) == gs.reload_generation(), \
+        "the ack must still advance to the current generation even though nothing was emitted"
+
+
+def test_phase_plugin_reload_legacy_behavior_without_a_snapshot(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No snapshot at all (pre-feature session) → the relevance gate is skipped entirely
+    and the phase emits unconditionally, exactly as it did before this feature."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("foo@mp")
+    _isolate_home(env_isolation, monkeypatch)  # no ~/.claude/settings.json, no snapshot file
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip() == "[janitor-reload]", f"no snapshot must fall back to legacy emit, got {out!r}"
+
+
 # ---------- Phase 1.62: standalone-skills reload (TRDD-LQU7OXXV) ------------
 
 

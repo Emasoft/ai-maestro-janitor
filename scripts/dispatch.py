@@ -1602,6 +1602,33 @@ def _phase_plugin_reload() -> None:
     if acked >= gen:
         return
 
+    # janitor#290 §2 (TRDD-38PB1B86) relevance gate: the generation above is a machine-global
+    # "something changed somewhere" epoch, bumped even when the fleet re-lists the SAME plugins
+    # at the SAME versions. Compare against the snapshot the SessionStart hook took of THIS
+    # session's enabled plugins' cached versions — only a real delta on a plugin we actually run
+    # is worth the reload's prompt-cache-break tax. No snapshot (pre-feature session, or the
+    # write failed) means we cannot tell relevance apart from noise, so fall back to the legacy
+    # behaviour (emit unconditionally) rather than silently starving a session of a real reload.
+    changed: dict[str, tuple[str, str]] = {}  # legacy sessions (no snapshot) emit no payload lines
+    try:
+        import plugin_versions  # noqa: PLC0415 -- lazy: keep this phase's import cost near-zero when the ack already covers `gen`
+
+        snapshot = plugin_versions.read_snapshot(state.state_dir() / "plugins-at-start.json")
+        if snapshot is not None:
+            changed = plugin_versions.changed_since(
+                snapshot, Path.home() / ".claude" / "settings.json"
+            )
+            if not changed:
+                state.atomic_write(acked_path, str(gen))
+                state.log_line(
+                    "dispatch",
+                    f"[reload-guard] generation {gen}: no enabled plugin changed version "
+                    "since session start — ack advanced, no marker",
+                )
+                return
+    except Exception as exc:  # noqa: BLE001 -- a relevance-gate fault must never block a real reload
+        state.log_line("dispatch", f"[reload-guard] relevance check failed, falling open: {exc}")
+
     threshold = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD"),
         tm.RELOAD_GUARD_DEFAULT_THRESHOLD,
@@ -1654,7 +1681,36 @@ def _phase_plugin_reload() -> None:
         return
 
     state.atomic_write(acked_path, str(gen))
-    _emit_decision("[janitor-reload]")  # D5: bare token, marks the fire non-quiet
+    # Re-snapshot to the CURRENT versions now, not just the ack. Without this, the emitted
+    # marker is the authorization to reload, but `plugins-at-start.json` still holds the OLD
+    # (pre-change) versions — so the NEXT generation bump (even a no-op fleet re-list) diffs
+    # against a stale snapshot, finds the SAME already-handled delta, and re-emits forever.
+    # The snapshot's meaning is "versions this session is believed to run", and after this
+    # marker fires that belief is the NEW versions. Best-effort: a snapshot-write fault must
+    # never block the emit — it only means the NEXT fire falls back to diffing the old
+    # snapshot (self-heals no worse than the pre-fix behaviour). Gated on `changed` being
+    # non-empty: a LEGACY emit (no snapshot existed to diff against, so `changed` was never
+    # populated) has nothing to refresh FROM — writing one here would silently opt a
+    # never-snapshotted session into relevance-gating using whatever `Path.home()` happens to
+    # resolve to, which is exactly the surprise a no-snapshot session is supposed to be exempt
+    # from until its OWN SessionStart seeds one.
+    if changed:
+        try:
+            import plugin_versions  # noqa: PLC0415 -- re-import: the read-side import above is inside its own try, so a failure there leaves the name unbound here
+
+            plugin_versions.write_snapshot(
+                state.state_dir() / "plugins-at-start.json",
+                plugin_versions.snapshot_enabled(Path.home() / ".claude" / "settings.json"),
+            )
+        except Exception as exc:  # noqa: BLE001 -- best-effort; must never block the reload emit
+            state.log_line("dispatch", f"[reload-guard] post-emit snapshot refresh failed: {exc}")
+    # PAYLOAD lines name which plugin(s) moved (janitor#290 §2) — the heartbeat protocol keys
+    # on the bare token line alone, so the reason follows it rather than replacing it, letting
+    # a receiving session see WHY and decline a cosmetic bump itself.
+    _emit_decision(
+        "[janitor-reload]",  # D5: bare token, marks the fire non-quiet
+        [f"plugin={key} old={old} new={new}" for key, (old, new) in changed.items()],
+    )
     state.log_line(
         "dispatch",
         f"reload generation {gen} > project ack → [janitor-reload] emitted (per-project ack advanced; global generation left intact)",
