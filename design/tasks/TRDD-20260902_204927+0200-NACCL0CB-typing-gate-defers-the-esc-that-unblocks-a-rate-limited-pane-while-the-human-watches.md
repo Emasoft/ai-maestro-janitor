@@ -1,9 +1,9 @@
 ---
 trdd-id: NACCL0CB
 title: the typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
-column: proposal
+column: testing
 created: 2026-09-02T20:49:27+0200
-updated: 2026-09-02T20:49:27+0200
+updated: 2026-09-02T21:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
@@ -16,11 +16,43 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [625d7809]
 supersedes-directive: 2026-07-18 typing gate (TRDD-6Q0OYYYH) for the retry-wedge ESC class only
 ---
 
 # The typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 21:12
+
+- **USER ruled 2026-09-02 ~21:00** (verbatim intent): the HID gate cannot tell typing in
+  another session from typing in the blocked one, so "remove the typing gate entirely, or
+  make an exception injecting the ESC key anyway … or even better, the very moment you
+  switch/rotate the account, inject ESC to all claude code instances with the red error."
+  The owner was NOT at the blocked session's keyboard; the machine-wide HID reading came from
+  another Claude Code session.
+- **Review-fork finding (settled, changed the design):** the typing gate was NOT the only
+  thing between the panes and an ESC. `fleet` is built before the gate, so diagnoses ran
+  every beat — and the daemon has produced **0 `retry_wedged` diagnoses in its whole logged
+  history**, because `retry_wedge_state_update` confirms only when the attempt number
+  ADVANCES across polls, and a weekly-window wall reads `Retrying in 5h … attempt 1/5` for
+  five hours. Plus the diagnosis needs a transcript stale ≥ 15 min. Splitting the gate alone
+  would have shipped a no-op. Claim 1 of the incident section is therefore "never logged or
+  acted on", not "would have been diagnosed".
+- **Shipped in `625d7809` (76 tests green, incl. 10 new in `tests/test_daemon_rotation_esc.py`):**
+  `daemon._rotation_esc_pass` runs BEFORE the typing gate: within `_ROTATION_WAKE_WINDOW_S`
+  (600 s) of `rotation-success.ts` it reads each live pane NOW, keys on the wedge signature
+  in the frame's bottom 12 rows (`session_liveness.retry_wedge_attempt_at_tail`, no
+  attempt-advance, no stale-transcript precondition), writes `rate-limited.flag` and fires
+  ONE ESC per pane per rotation epoch (`daemon-rotation-esc.ts`). unarmed/server_owned/dead
+  and awaiting-user panes stay hands-off. The typing-gate deferral line now names the
+  non-healthy diagnoses it defers.
+- **Deliberately NOT done here (own cards):** (a) the beat-path `retry_wedged` confirmation
+  for long backoffs (attempt never advances) — without a rotation the ESC would only make
+  Claude Code re-hit the same wall; (b) the no-headroom fallback the USER added at 21:05:
+  multiple ESC until the queue is clean, then `/model opus` + Enter — TRDD-3T9HQEQ6.
+- **NEXT ACTION:** ship in 3.4.12 (`publish.py --patch`, bundles `301fbcec`), install on
+  green CI, restage the daemon, then the live box: the next rotation on this host must log
+  `rotation-esc: FIRED ESC` within one beat of `rotation-success.ts`.
 
 ## Incident (2026-09-02, 20:38 to 20:47, this host)
 
@@ -86,3 +118,9 @@ anyone's fingers and cannot choose anything; it can only release the retry.
 - [ ] TRDD-UA4FAX67 unblocked and cross-linked.
 
 ## Approval log
+
+- 2026-09-02T21:12:00+0200 — APPROVED by USER (min-approval-requirement: user), in-session
+  ruling on the incident report: exempt the ESC from the typing gate and, better, ESC every
+  pane showing the red line the moment the account rotates. Promoted proposal → tasks;
+  implemented the same session (`625d7809`), so it enters at `testing`, gated on the 3.4.12
+  release + one live rotation.
