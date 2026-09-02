@@ -14,9 +14,11 @@ executes), and so does every in-model lever.
 
 WHAT THIS HOOK DOES NOT DO: the work itself. A hook gets seconds; composing the summary is a
 map-reduce over the transcript that takes minutes, and a hook cannot type `/clear` at all. So
-this decides and DETACHES, handing the whole job to `external_handoff_clear.py`, which composes
-the handoff and then drives the ratified injection chain (`/clear`, wait for the fresh session,
-type the bootstrap).
+this decides and DETACHES, handing the whole job to `external_handoff_clear.py`, which fires the
+ratified injection chain (`/clear`, wait for the fresh session, type the bootstrap) and DELEGATES
+composing the handoff to the cleared session's own SessionStart summarizer
+(`summarize_previous_session.py`, TRDD-QZVAEWQH) — every caller of `external_handoff_clear.py`
+delegates, on-resume included, so exactly one summarizer ever touches a given transcript.
 
 THE LOOP GUARD IS THE POINT. `SessionStart` also fires with `source=compact` and `source=clear`
 — re-entries into a session that was JUST shrunk. Acting on those is an infinite loop: shrink →

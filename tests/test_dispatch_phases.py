@@ -1036,6 +1036,98 @@ def test_rate_limit_recovery_must_not_consume_the_pending_clear_flag(
     assert (sd / "resume-after-clear.ts").exists(), "its sidecar must survive too"
 
 
+# ---------- summary hold gates the post-clear resume (TRDD-QZVAEWQH) -------
+
+
+def _arm_summary_hold(sd: Path, *, expires_in_s: int, key: str = "") -> None:
+    """Write a minimal `summary-pending.json` — only the fields `summary_hold_active` and
+    `pending_summary_key` actually read."""
+    import json
+
+    (sd / "summary-pending.json").write_text(
+        json.dumps({"key": key, "expires": int(time.time()) + expires_in_s}), encoding="utf-8"
+    )
+
+
+def _run_main(dispatch) -> str:
+    """Run a WHOLE fire (dispatch.main()) and return its stdout."""
+    from io import StringIO
+
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        dispatch.main()
+    finally:
+        sys.stdout = old
+    return buf.getvalue()
+
+
+def test_an_active_hold_defers_the_clear_resume_cue(env_isolation: dict) -> None:
+    """One fire with an active summary hold and an armed clear-resume flag emits NO
+    [janitor-resume] — the reorder that fixes TRDD-QZVAEWQH's stale-handoff bug."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    _arm_summary_hold(sd, expires_in_s=900)
+
+    out = _run_main(dispatch)
+    assert "[janitor-resume]" not in out, f"the hold must block the resume cue, got {out!r}"
+    assert (sd / "resume-after-clear.flag").exists(), "the resume must not fire while held"
+
+
+def test_the_hold_clearing_lets_the_next_fire_resume(env_isolation: dict) -> None:
+    """Once the hold record is gone, the VERY NEXT fire emits the deferred [janitor-resume]."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    _arm_summary_hold(sd, expires_in_s=900)
+    assert "[janitor-resume]" not in _run_main(dispatch)
+    assert (sd / "resume-after-clear.flag").exists()
+
+    (sd / "summary-pending.json").unlink()
+    out = _run_main(dispatch)
+    assert "[janitor-resume]" in out, out
+    assert not (sd / "resume-after-clear.flag").exists(), "now it must be consumed"
+
+
+def test_the_resume_note_names_the_fresh_keyed_handoff_by_absolute_path(
+    env_isolation: dict,
+) -> None:
+    """When a keyed handoff for the pending key exists, the emitted [janitor-resume] note
+    carries its absolute path — the fix for the resumed session reading the STALE handoff
+    SessionStart injected instead of the fresh llm-ext summary that landed after."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    # No pending record at all here (the summarizer already wrote its handoff and released
+    # its own hold) — `pending_summary_key` must fall back to the newest handoff GROUP.
+    handoff_path = handoff_files.write(sd, "deadbeef", "the fresh llm-ext summary body")
+
+    out = _run_main(dispatch)
+    assert "[janitor-resume]" in out, out
+    assert str(handoff_path.resolve()) in out, out
+
+
+def test_fresh_summary_note_empty_when_no_keyed_handoff_exists(env_isolation: dict) -> None:
+    """No pending record and no handoff group on disk at all → the helper adds nothing, and
+    the resume cue falls back to the generic directive alone."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    assert dispatch._fresh_summary_note(sd) == ""
+
+
 # ---------- _run_detector wall-clock timeout (audit finding 1) -------------
 #
 # A hung detector must NOT wedge the whole heartbeat turn. These tests spawn a

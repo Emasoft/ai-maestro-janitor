@@ -55,7 +55,6 @@ import state  # noqa: E402  -- sibling lib
 ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED"
 MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
 HEADROOM_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_HEADROOM_SECONDS"
-USE_LLM_EXT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_USE_LLM_EXT"
 
 # DEFAULT OFF, deliberately, unlike its in-model sibling. `/clear` is unrecoverable, and this
 # path fires it with NO model turn in front of it — nothing reads the handoff back before the
@@ -173,7 +172,6 @@ __all__ = [
     "seconds_until_next_fire",
     "should_clear_externally",
     "terminal_from_record",
-    "use_llm_ext",
 ]
 
 
@@ -248,10 +246,6 @@ def min_context_tokens() -> int:
 
 def headroom_seconds() -> int:
     return state.coerce_int(os.environ.get(HEADROOM_ENV), DEFAULT_HEADROOM_SECONDS)
-
-
-def use_llm_ext() -> bool:
-    return state.is_truthy_env(USE_LLM_EXT_ENV, True)
 
 
 # Bounded by US, not by the CLI. llm-externalizer 12.0.0 shipped with an unbounded body-read:
@@ -611,7 +605,6 @@ def fleet_lease_ttl_s() -> int:
 
 
 SUMMARY_DEADLINE_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_SUMMARY_DEADLINE_S"
-RESUME_SUMMARY_DEADLINE_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_CLEAR_RESUME_SUMMARY_DEADLINE_S"
 # How long the whole summarize effort — lane waits, attempts and backoff together — may run
 # before the handoff degrades to the network-free template and the clear proceeds anyway.
 #
@@ -633,35 +626,6 @@ def summary_deadline_s() -> int:
         DEFAULT_SUMMARY_DEADLINE_S,
         detector_name="external-clear",
         var_name=SUMMARY_DEADLINE_ENV,
-    )
-
-
-# THE RESUME BUDGETS — sized against a HUMAN, not against the network (incident 2026-08-25).
-# The on-resume path runs inside a BLOCKING SessionStart hook: the session cannot take its first
-# prompt until the summary lands. The 2600 s abandoned-session deadline is correct where nobody
-# is watching; applied at resume it froze 16 simultaneously-restarted sessions for 40+ minutes,
-# because every blocking hook queued on the same `fleet_max_concurrent()` llm-ext lane at 600 s
-# per attempt. Two bounds follow, both resume-only:
-#
-#   * ONE attempt, not four. `LLM_EXT_TIMEOUT_S` + margin: a person is at the keyboard, and a
-#     second 600 s attempt spends 10 more visible minutes to save a token cost the decline
-#     already accepted. llm-ext checkpoints per chunk, so the paid work is not lost — the next
-#     cold resume of the same transcript reuses it.
-#   * A saturated lane is a VERDICT, not a queue position. At most `RESUME_LEASE_WAIT_S` waiting
-#     for a lease: if every lane slot is busy the moment a resume asks, the fleet is in a resume
-#     storm, and N blocked startups serialized behind the lane is exactly the incident. Decline
-#     fast; the session starts normally and pays its cold turn — human time outranks token cost.
-DEFAULT_RESUME_SUMMARY_DEADLINE_S = LLM_EXT_TIMEOUT_S + 60
-RESUME_LEASE_WAIT_S = 45
-
-
-def resume_summary_deadline_s() -> int:
-    """The on-resume summarize budget — one attempt plus margin, never the 2600 s deadline."""
-    return state.coerce_int(
-        os.environ.get(RESUME_SUMMARY_DEADLINE_ENV, ""),
-        DEFAULT_RESUME_SUMMARY_DEADLINE_S,
-        detector_name="external-clear",
-        var_name=RESUME_SUMMARY_DEADLINE_ENV,
     )
 
 
@@ -1077,8 +1041,9 @@ def summarize_with_retry(
             say(f"summary: deadline reached after {i} attempt(s) — {last.detail}")
             return SummaryAttempt(None, last.outcome, f"deadline: {last.detail}")
 
-        # `lease_wait_budget_s` caps how long ONE wait for a lane slot may poll (the resume path
-        # passes `RESUME_LEASE_WAIT_S`). Unbounded waiting is correct for the abandoned-session
+        # `lease_wait_budget_s` caps how long ONE wait for a lane slot may poll (a caller running
+        # inside a blocking human-facing hook would pass a small budget here). Unbounded waiting
+        # is correct for the abandoned-session
         # path — nobody is watching, and the deadline is the policy — but inside a blocking
         # SessionStart hook it serialized a fleet-wide resume behind the lane cap for 40+ minutes
         # (incident 2026-08-25). A lane that stays full past the budget is treated as a verdict:

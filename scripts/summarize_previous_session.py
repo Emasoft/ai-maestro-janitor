@@ -66,6 +66,22 @@ def previous_transcript(root: Path, current_session_id: str) -> Path | None:
 
 
 def main() -> int:
+    """Entry point — wraps `_main` so a crash is LOGGED, not silent (TRDD-QZVAEWQH).
+
+    Measured incident: AgentlensPro 2026-09-02 04:24 took the summary hold and never logged
+    READY or FAILED — its stderr went to DEVNULL (fixed separately, at the spawn site in
+    on-session-start.py), so nothing on disk said WHY. Re-raising after logging keeps the
+    fail-fast contract: the caller's stderr file still gets the traceback, and this line names
+    the exception before it propagates.
+    """
+    try:
+        return _main()
+    except Exception as exc:  # noqa: BLE001 - log then re-raise, never swallow
+        state.log_line(_LOG, f"crashed: {exc!r}")
+        raise
+
+
+def _main() -> int:
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
     sd = state.state_dir()
     now = int(time.time())

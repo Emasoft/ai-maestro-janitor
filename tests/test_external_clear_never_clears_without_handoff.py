@@ -60,16 +60,12 @@ def _firing_project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     monkeypatch.setenv(ec.ENABLED_ENV, "true")
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no third-party probe
-    # llm-ext is ON but its subprocess is STUBBED — the summariser must never really spawn here.
-    # The original leak is worth keeping in view: these tests once spawned the machine's REAL
-    # llm-ext against a pytest tmp transcript, which the suite's allow-list correctly refused
-    # (SandboxViolation), after which the retry loop slept through its backoff — slow AND impure.
-    #
-    # It used to be switched OFF instead, because `compose_handoff` produced a template handoff
-    # with no summary. TRDD-79LXF6PJ retired that template: no summary now means NO CLEAR, so an
-    # OFF switch would make every test in this file assert nothing. Stubbing keeps the subject
-    # intact — the ORDER of the payload write versus the chain spawn — without a subprocess.
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    # The summariser is STUBBED so it can never really spawn here. The original leak is worth
+    # keeping in view: these tests once spawned the machine's REAL llm-ext against a pytest tmp
+    # transcript, which the suite's allow-list correctly refused (SandboxViolation), after which
+    # the retry loop slept through its backoff — slow AND impure. Since TRDD-QZVAEWQH the lane
+    # under test never calls it at all (it delegates), so the stub is a tripwire, not a fixture;
+    # the subject stays the ORDER of the payload write versus the chain spawn.
     monkeypatch.setattr(
         ec,
         "summarize_with_retry",
@@ -162,6 +158,12 @@ def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkey
     about whether the two production writers actually take that path. This is the one that would
     have caught the original bug: before the fix, :428 wrote `agent-handoff.md` unconditionally,
     so the rich text below was simply gone by the time the chain spawned.
+
+    UPDATED for TRDD-QZVAEWQH: this drives the daemon lane (`main()`, no `--on-resume`), which no
+    longer composes a second handoff at all — it delegates that to the cleared session's own
+    SessionStart summarizer (keyless under launchd). So the claim this test protects is now
+    stronger, not weaker: the model-authored handoff must survive UNTOUCHED, and the daemon must
+    write NOTHING beside it.
     """
     root, sd = _firing_project(tmp_path, monkeypatch)
     rich = "# Rich model handoff\n\nTRDD-5RXBI65T — the reasoning a snapshot cannot produce.\n"
@@ -178,7 +180,10 @@ def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkey
         "the external composer destroyed the model-authored handoff — the exact TRDD-5RXBI65T "
         "defect: a cheap automatic artifact overwriting an expensive deliberate one, silently"
     )
-    assert len(survivors) >= 2, "the auto-composed handoff should exist ALONGSIDE the rich one"
+    assert len(survivors) == 1, (
+        "the daemon lane must delegate, not compose — a second auto-written file here would mean "
+        "SUMMARY_DELEGATED regressed back to spending llm-ext attempts it cannot authenticate"
+    )
 
 
 def test_a_failed_handoff_write_never_reaches_the_clear(tmp_path, monkeypatch) -> None:

@@ -37,108 +37,106 @@ def test_last_turn_age_is_none_without_a_transcript(tmp_path):
     assert ehc._last_turn_age(_project(tmp_path), int(time.time())) is None
 
 
-# --- _compose ----------------------------------------------------------------
+# --- pending_summary_key (TRDD-QZVAEWQH) --------------------------------------
 
 
-def test_the_payload_is_the_llm_ext_summary(tmp_path, monkeypatch):
-    """TRDD-79LXF6PJ: the post-/clear payload IS the llm-ext summary, and passes the contract.
+def test_pending_summary_key_reads_the_live_pending_record(tmp_path):
+    """The still-armed record's own `key` field wins over anything already on disk."""
+    import json
 
-    Replaces two tests that asserted the retired shape — that the payload carried the gathered
-    TRDD index and named its trigger. Both were true of the composed handoff the owner retired on
-    2026-08-23, so keeping them would have pinned deleted behaviour; they are rewritten rather
-    than dropped, because the CLAIM underneath ("what survives an unrecoverable /clear must pass
-    the contract by construction") outlived the shape that carried it.
-    """
-    import clear_trigger
+    sd = _project(tmp_path) / ".janitor" / "state"
+    (sd / ehc._PENDING_FILE).write_text(
+        json.dumps({"key": "abcd1234", "expires": int(time.time()) + 900}), encoding="utf-8"
+    )
+    assert ehc.pending_summary_key(sd) == "abcd1234"
+
+
+def test_pending_summary_key_falls_back_to_the_newest_group_once_released(tmp_path):
+    """After `_release_summary_hold` deletes the record, the newest handoff group on disk
+    still names the key a late reader needs."""
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    handoff_files.write(sd, "ffee9988", "some summary text")
+    assert ehc.pending_summary_key(sd) == "ffee9988"
+
+
+def test_pending_summary_key_empty_when_neither_source_names_one(tmp_path):
+    """No pending record, no handoff on disk — "" is the correct "nothing to point at"."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    assert ehc.pending_summary_key(sd) == ""
+
+
+# --- _run: NEITHER lane composes (TRDD-QZVAEWQH) ------------------------------
+
+
+def _armed_run(root: Path, *, on_resume: bool) -> tuple[int, str]:
+    """Invoke `ehc._run` with `_decide`/`_fire`/the pane lookup already monkeypatched by the
+    caller, so the real capture -> fire -> (delegate | compose) tail runs unmodified."""
+    import argparse
+    import contextlib
+    import io
+
+    sd = root / ".janitor" / "state"
+    args = argparse.Namespace(dry_run=False, force=False, on_resume=on_resume, project_root=str(root))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = ehc._run(root, sd, int(time.time()), args)
+    return rc, buf.getvalue()
+
+
+def _delegation_case(tmp_path, monkeypatch, *, on_resume: bool, trigger: str, gate_facts: dict):
+    """Shared body for both delegation tests: only the gate verdict/facts differ by mode."""
+    import fleet_restart
 
     root = _project(tmp_path)
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("{}\n")
     monkeypatch.setattr(
-        ec, "summarize_with_retry",
-        lambda *a, **k: ec.SummaryAttempt(text="pending: finish TRDD-PXP08ZQC", outcome="ok"),
+        ehc, "_decide",
+        lambda *_a, **_k: (
+            ec.ClearVerdict(True, trigger, "test"),
+            {"transcript": str(transcript), **gate_facts},
+        ),
     )
-    verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
-    text, reasons = ehc._compose(
-        root, verdict,
-        {"idle_seconds": 7200, "context_tokens": 460_000, "transcript": str(tmp_path / "t.jsonl")},
+    monkeypatch.setattr(fleet_restart, "recorded_terminal", lambda _r: {"kind": "tmux"})
+    monkeypatch.setattr(ec, "terminal_from_record", lambda _r: {"kind": "tmux", "pane": "%1"})
+    monkeypatch.setattr(ehc, "_fire", lambda *_a, **_k: None)
+
+    def must_not_compose(*_a, **_k):
+        raise AssertionError("must not compose — every caller delegates (TRDD-QZVAEWQH)")
+
+    monkeypatch.setattr(ec, "summarize_with_retry", must_not_compose)
+    return _armed_run(root, on_resume=on_resume), root
+
+
+def test_daemon_lane_delegates_and_leaves_the_hold_armed(tmp_path, monkeypatch):
+    """No --on-resume (the keyless launchd caller): fires the clear, never calls llm-ext,
+    prints SUMMARY_DELEGATED, and leaves `summary-pending.json` in place for the cleared
+    session's own SessionStart summarizer to pick up."""
+    (rc, out), root = _delegation_case(
+        tmp_path, monkeypatch,
+        on_resume=False, trigger="cache-certainly-expired", gate_facts={},
     )
-    assert reasons == []
-    assert "pending: finish TRDD-PXP08ZQC" in text, "the summary IS the payload"
-    # NOT asserted: check_handoff_concise. That contract governs a LINK-ONLY handoff, and this
-    # payload is a compaction RESULT that replaces the context — see _compose for why applying it
-    # here would fail every correct payload. clear_trigger's own path still enforces it.
-    del clear_trigger
+    assert rc == 0
+    assert "SUMMARY_DELEGATED" in out, out
+    assert "NO_SUMMARY_POST_CLEAR" not in out and "SUMMARY_READY" not in out
+    assert (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "hold stays armed"
 
 
-def test_active_skills_are_injected_IN_FULL_and_BEFORE_the_summary(tmp_path, monkeypatch):
-    """Owner requirement (2026-08-23): skills first, in full, then the summary.
-
-    The ORDER is the requirement, not a preference — the summary describes a session that had
-    those skills loaded, so it refers to them; placed after the summary they would arrive too
-    late to resolve the references the reader has already hit.
-    """
-    root = _project(tmp_path)
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
-    monkeypatch.setattr(
-        ec, "summarize_with_retry",
-        lambda *a, **k: ec.SummaryAttempt(text="SUMMARY-BODY referring to the skill", outcome="ok"),
+def test_on_resume_lane_also_delegates_and_never_calls_llm_ext(tmp_path, monkeypatch):
+    """TRDD-QZVAEWQH: `--on-resume` (the SessionStart hook caller) used to compose inline —
+    that kept alive the race this card removes (an on-resume fire's own compose racing the
+    freshly-cleared session's SessionStart summarizer over the SAME transcript). It now
+    delegates exactly like the daemon lane, and calling llm-ext at all is a bug."""
+    (rc, out), root = _delegation_case(
+        tmp_path, monkeypatch,
+        on_resume=True, trigger="resumed-cold", gate_facts={"gate": "resume"},
     )
-    import active_skills
-
-    monkeypatch.setattr(active_skills, "render", lambda _t: "SKILL-BODY in full")
-    verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
-    text, reasons = ehc._compose(
-        root, verdict,
-        {"idle_seconds": 7200, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
-    )
-    assert reasons == []
-    assert "SKILL-BODY in full" in text and "SUMMARY-BODY" in text
-    assert text.index("SKILL-BODY in full") < text.index("SUMMARY-BODY"), (
-        "skills must precede the summary — a summary that references skills the reader has not "
-        "seen yet opens with dangling references"
-    )
-
-
-def test_no_active_skills_still_yields_a_payload(tmp_path, monkeypatch):
-    """A session that invoked no skills is normal; an empty skill block must not withhold the
-    summary, which would turn 'nothing to prepend' into 'refuse to clear'."""
-    root = _project(tmp_path)
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
-    monkeypatch.setattr(
-        ec, "summarize_with_retry",
-        lambda *a, **k: ec.SummaryAttempt(text="SUMMARY-ONLY", outcome="ok"),
-    )
-    import active_skills
-
-    monkeypatch.setattr(active_skills, "render", lambda _t: "")
-    verdict = ec.ClearVerdict(True, ec.TRIGGER_LONG_IDLE, "idle")
-    text, reasons = ehc._compose(
-        root, verdict,
-        {"idle_seconds": 7200, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
-    )
-    assert reasons == [] and "SUMMARY-ONLY" in text
-
-
-def test_no_summary_means_no_payload_so_the_caller_cannot_clear(tmp_path, monkeypatch):
-    """The new safety floor: with the template retired, an empty summary must block the clear.
-
-    This REVERSES the 2026-08-13 ruling that the clear must always succeed. That ruling was
-    written when a network-free template always existed; without it, clearing on an empty summary
-    destroys a session with no record at all. Declining costs one full-price turn — recoverable.
-    """
-    root = _project(tmp_path)
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
-    monkeypatch.setattr(
-        ec, "summarize_with_retry",
-        lambda *a, **k: ec.SummaryAttempt(text=None, outcome="transient", detail="offline"),
-    )
-    verdict = ec.ClearVerdict(True, ec.TRIGGER_NEXT_FIRE_MISSES, "would miss")
-    text, reasons = ehc._compose(
-        root, verdict,
-        {"idle_seconds": 60, "context_tokens": 1, "transcript": str(tmp_path / "t.jsonl")},
-    )
-    assert text == "", "an empty payload is how the caller learns not to clear"
-    assert reasons == ["no-summary"]
+    assert rc == 0
+    assert "SUMMARY_DELEGATED" in out, out
+    assert "SUMMARY_READY" not in out and "NO_SUMMARY_POST_CLEAR" not in out
+    assert (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "hold stays armed"
 
 
 # --- end to end (real subprocess) --------------------------------------------
@@ -417,33 +415,7 @@ def test_the_payload_carries_the_verdict_timestamp(tmp_path, monkeypatch):
     assert "verdict_ts" in payload
 
 
-# --- the resume budgets + singleflight (incident 2026-08-25) ------------------
-
-
-def test_the_resume_gate_uses_the_one_attempt_budget(tmp_path, monkeypatch):
-    """`_compose` on the RESUME gate passes the human-sized budget: one attempt's deadline and a
-    bounded lane wait. The abandoned-session gate keeps the full deadline and no lane budget."""
-    root = _project(tmp_path)
-    monkeypatch.setenv(ec.USE_LLM_EXT_ENV, "true")
-    captured: dict = {}
-
-    def fake_retry(_transcript, **kw):
-        captured.update(kw)
-        return ec.SummaryAttempt(text="s", outcome="ok")
-
-    monkeypatch.setattr(ec, "summarize_with_retry", fake_retry)
-    verdict = ec.ClearVerdict(True, ec.TRIGGER_RESUMED_COLD, "resumed cold")
-
-    t0 = time.time()
-    ehc._compose(root, verdict, {"transcript": str(tmp_path / "t.jsonl"), "gate": "resume"})
-    assert captured["lease_wait_budget_s"] == ec.RESUME_LEASE_WAIT_S
-    assert captured["deadline"] - t0 <= ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S + 10
-
-    captured.clear()
-    t0 = time.time()
-    ehc._compose(root, verdict, {"transcript": str(tmp_path / "t.jsonl")})
-    assert captured["lease_wait_budget_s"] is None, "the abandoned path waits unbounded"
-    assert captured["deadline"] - t0 >= ec.DEFAULT_SUMMARY_DEADLINE_S - 10
+# --- the singleflight lock (incident 2026-08-23) ------------------------------
 
 
 def test_a_second_watcher_for_the_same_root_exits_instead_of_queueing(tmp_path):

@@ -591,9 +591,6 @@ def test_without_a_lease_budget_a_full_lane_polls_to_the_deadline(tmp_path: Path
     )
 
 
-def test_the_resume_deadline_budgets_one_attempt_not_four() -> None:
-    """The on-resume budget is one `LLM_EXT_TIMEOUT_S` attempt plus margin — a human is waiting
-    at the keyboard, so the 4-attempt abandoned-session deadline must never apply there."""
-    assert ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S == ec.LLM_EXT_TIMEOUT_S + 60
-    assert ec.DEFAULT_RESUME_SUMMARY_DEADLINE_S < ec.DEFAULT_SUMMARY_DEADLINE_S
-    assert 0 < ec.RESUME_LEASE_WAIT_S < ec.LLM_EXT_TIMEOUT_S
+# TRDD-QZVAEWQH retired the resume-only deadline/lease-wait constants along with `_compose`'s
+# on-resume branch — every caller of `external_handoff_clear.py` now delegates the summarize
+# step instead of budgeting its own attempt, so there is no resume-sized deadline left to pin.

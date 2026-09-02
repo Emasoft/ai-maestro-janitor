@@ -1249,6 +1249,36 @@ def _phase_compact_resume() -> bool:
     return True
 
 
+def _fresh_summary_note(sd: Path) -> str:
+    """A one-line pointer at the freshest post-clear llm-ext summary, when one exists on disk.
+
+    TRDD-QZVAEWQH: SessionStart injects the NEWEST handoff group at hook time, but the
+    session-side summarizer (`summarize_previous_session.py`, spawned detached from that same
+    hook) can still be composing minutes later — the summary hold above is exactly what makes
+    THIS phase run after it lands (or after the TTL fallback), so by the time this note is
+    built the fresh file is very likely to exist. Name it explicitly rather than trust the
+    resumed turn to notice a file SessionStart already read past.
+
+    Returns "" when no keyed handoff can be attributed to this clear — the caller then falls
+    back to the generic "read the injected SessionStart handoff summary" directive alone.
+    """
+    try:
+        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
+    except ImportError:
+        return ""
+    key = _ehc.pending_summary_key(sd)
+    if not key:
+        return ""
+    candidates = sorted(Path(sd).glob(f"agent-handoff-{key}-*.md"))
+    if not candidates:
+        return ""
+    latest = max(candidates, key=state.file_mtime)
+    return (
+        f"Read {latest.resolve()} FIRST — the llm-ext summary of the cleared session (it "
+        "landed after SessionStart injected the older handoff)."
+    )
+
+
 def _phase_clear_resume() -> bool:
     """Return True if a [janitor-resume] line was emitted for a post-CLEAR resume.
 
@@ -1351,6 +1381,12 @@ def _phase_clear_resume() -> bool:
             f"Session was cleared {age}s ago — auto-resume. Read the injected "
             "SessionStart handoff summary and resume your prior task."
         )
+    # TRDD-QZVAEWQH: appended AFTER the 280-char truncation above, which governs only the
+    # ORIGINAL directive text — an absolute path truncated at 277 chars is useless, so this
+    # line is built and appended separately and is never subject to that cap.
+    fresh = _fresh_summary_note(sd)
+    if fresh:
+        note = f"{note} {fresh}"
     # A /clear wipes the working memory of in-flight background agents from the fresh
     # context — list them so the resumed turn re-attaches to each via SendMessage.
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
@@ -3107,21 +3143,22 @@ def main() -> int:
     # Phase 0.5: log retention.
     _phase_log_retention()
 
-    # Phase 0.9: post-CLEAR resume (TRDD-Z582IKIR P1). Runs FIRST among the resume
-    # phases because it is the only one gated on an event the others cannot observe:
-    # `clear-observed.ts`, stamped by SessionStart(source=clear). Ordering it first is
-    # what lets the two phases below stop deleting `resume-after-clear.*` as "subsumed"
-    # — that deletion consumed a PRE-marker and silently stranded the fresh session. A
-    # /clear genuinely obsoletes a pending compact / rate-limit marker, so this phase
-    # clears those instead, and exactly one [janitor-resume] is still emitted.
-    if _phase_clear_resume():
-        return 0
-
-    # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18). A session that was just cleared is waiting
-    # for llm-ext to finish summarizing the transcript it had BEFORE the clear. Until that lands
-    # it knows nothing, so resuming it now would hand a blank session its old task list and every
-    # chore at once — the owner's ruling was explicit that the resume comes AFTER the injection
-    # ("at that point only we can resume all the other tasks. chron, etc.").
+    # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18; reordered AHEAD of the clear-resume phase by
+    # TRDD-QZVAEWQH). A session that was just cleared is waiting for llm-ext to finish
+    # summarizing the transcript it had BEFORE the clear. Until that lands it knows nothing, so
+    # resuming it now would hand a blank session its old task list and every chore at once — the
+    # owner's ruling was explicit that the resume comes AFTER the injection ("at that point only
+    # we can resume all the other tasks. chron, etc.").
+    #
+    # MUST run before `_phase_clear_resume` (was after it — the QZVAEWQH bug): the resume phase
+    # fires on `clear-observed.ts` alone, which lands ~1 minute after the clear, while the
+    # session-side llm-ext summary can take ~10 minutes. With the old order the resume cue fired
+    # first, telling the fresh turn to "read the injected SessionStart handoff summary" — but
+    # SessionStart had only the OLD handoff group on disk at that point, so the directive pointed
+    # at stale text and the fresh summary was never read at all (measured: AgentlensPro
+    # 2026-09-02, cue at 04:25:03, summary landed ~04:34). Checking the hold FIRST defers the
+    # resume itself until the summary lands (or the TTL expires onto the mechanical fallback),
+    # so `_phase_clear_resume`'s composed note can then name the fresh file directly.
     #
     # Placed ahead of every resume phase and every detector, because it is a HOLD: anything that
     # runs before it is work done into a context that is about to be replaced.
@@ -3134,10 +3171,24 @@ def main() -> int:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
 
         if _ehc.summary_hold_active(state.state_dir(), int(time.time())):
-            state.log_line("dispatch", "summary hold active — no resume, no chores this fire")
+            state.log_line(
+                "dispatch",
+                "summary hold active — resume deferred until the summary lands or the hold "
+                "expires",
+            )
             return 0
     except Exception:  # noqa: BLE001 - a broken import must not stop the heartbeat
         pass
+
+    # Phase 0.9: post-CLEAR resume (TRDD-Z582IKIR P1). Runs FIRST among the resume
+    # phases because it is the only one gated on an event the others cannot observe:
+    # `clear-observed.ts`, stamped by SessionStart(source=clear). Ordering it first is
+    # what lets the two phases below stop deleting `resume-after-clear.*` as "subsumed"
+    # — that deletion consumed a PRE-marker and silently stranded the fresh session. A
+    # /clear genuinely obsoletes a pending compact / rate-limit marker, so this phase
+    # clears those instead, and exactly one [janitor-resume] is still emitted.
+    if _phase_clear_resume():
+        return 0
 
     # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
     # skip drift detectors this fire so resume gets clean attention.

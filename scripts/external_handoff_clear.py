@@ -14,12 +14,17 @@ today the model does all three. Here:
 
   1. DECIDE  — `external_clear.should_clear_externally`, from files the session already writes
      (transcript mtime, `ttl-regime.json`, `armed-cadence.cron`, the presence breadcrumb).
-  2. COMPOSE — the ACTIVE SKILLS in full, then the `llm-ext session-summary`. Zero tokens from
-     THIS session (llm-ext runs on its own free models, out of process), which is what "zero
-     turn" means — not that no model is involved. **No summary means NO CLEAR** (TRDD-79LXF6PJ):
-     the composed handoff that used to be the network-free fallback is gone, so an empty payload
-     would clear a session with nothing to resume from. Declining costs a full-price turn;
-     clearing blind costs the work.
+  2. DELEGATE — the `llm-ext session-summary` is composed by the CLEARED session's own
+     SessionStart summarizer, out of process and on llm-ext's own free models. Zero tokens from
+     THIS session, which is what "zero turn" means — not that no model is involved.
+     TRDD-QZVAEWQH — THIS SCRIPT NEVER COMPOSES, IN EITHER MODE. It used to: the `--on-resume`
+     caller (a SessionStart hook, which has the summarizer's API key) composed inline while the
+     keyless daemon lane delegated. That split kept a race alive — an on-resume fire types
+     `/clear`, and the NEW session's own SessionStart spawns `summarize_previous_session.py` for
+     "the newest transcript that is not mine", which is the SAME transcript the inline compose
+     was still summarizing. Two `llm-ext` runs on one transcript, two keyed handoffs. So both
+     modes now fire and DELEGATE the compose to the cleared session's own SessionStart
+     summarizer (`summarize_previous_session.py`) — see `_run`'s `SUMMARY_DELEGATED` branch.
   3. TYPE    — `clear_trigger`'s ALREADY-RATIFIED verified injection chain, reused verbatim by
      spawning its `--__chain` child with a payload we build. Nothing in `clear_trigger` had to
      change: `_run_chain_payload` takes the pane, the state dir and the directive as DATA, and
@@ -50,7 +55,6 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
-import active_skills  # noqa: E402
 import external_clear as ec  # noqa: E402
 import handoff_files  # noqa: E402
 import state  # noqa: E402
@@ -142,6 +146,34 @@ def summary_hold_active(sd: Path, now: int) -> bool:
         return False
 
 
+def pending_summary_key(sd: Path) -> str:
+    """The key for the handoff that is (or was just) being composed for this state dir.
+
+    TRDD-QZVAEWQH: `dispatch._phase_clear_resume` needs to point the resumed turn at the
+    fresh keyed handoff instead of whatever SessionStart already injected. Read
+    `summary-pending.json`'s own `key` field while the record is still present — the common
+    case, since a resume racing the hold or landing seconds after release both see it. Fall
+    back to the newest handoff GROUP on disk once the record is gone (`_release_summary_hold`
+    deletes it on success, and a resume can land after that deletion). Returns "" when neither
+    source names a key, so the caller omits the extra note rather than pointing at a guess.
+    """
+    import json  # noqa: PLC0415
+
+    try:
+        rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
+        key = str(rec.get("key") or "")
+        if key:
+            return key
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    group = handoff_files.newest_group(sd)
+    if group:
+        parsed = handoff_files.parse(group[-1].name)
+        if parsed:
+            return parsed[0]
+    return ""
+
+
 def _last_turn_age(root: Path, now: int) -> int | None:
     """Seconds since the last turn of ANY kind — the PROMPT-CACHE clock.
 
@@ -193,10 +225,9 @@ def _decide(
     # non-zero AFTER something has already been typed, so it would miss the FIRST unanswered
     # `tool_use` — the one that actually reaches a human. `awaiting_user`, below, is the fix for
     # TRDD-OO301H7D: it used to be bound to `_await` and discarded on this same line.
-    # Resolved ONCE and carried in `facts`, because the composer needs the same transcript the
-    # verdict was computed from. Without it there `_compose` had no path to hand llm-ext, and
-    # the summary branch would have degraded to template-only on every run — shipping the
-    # feature dark in the same commit that exists to un-dark it (TRDD-1QJIZFFW).
+    # Resolved ONCE and carried in `facts`, because `_capture_summary_source` needs the same
+    # transcript the verdict was computed from — it is what names the summary source on disk
+    # for the delegated summarizer to pick up (TRDD-QZVAEWQH).
     newest = cold_cache_compact.newest_transcript(root)
     active_waiting = dispatch._cadence_active_waiting(sd, now)
     in_cooldown = cold_cache_compact.clear_in_cooldown(sd, now=now)
@@ -308,93 +339,6 @@ def _decide(
         # the whole lever.)
         verdict = ec.ClearVerdict(True, "forced", f"--force (gate said: {verdict.why})")
     return verdict, facts
-
-
-def _compose(root: Path, verdict: ec.ClearVerdict, facts: dict) -> tuple[str, list[str]]:
-    """Return the llm-ext session summary that becomes the post-`/clear` payload.
-
-    TRDD-79LXF6PJ — THE DAEMON NO LONGER COMPOSES A HANDOFF. It used to emit a three-part
-    document: a mechanically-gathered index (in-flight cards, recent commits, open findings), the
-    llm-ext summary, and a truncated tail of raw turns. The owner retired that whole shape
-    (2026-08-23), having been shown and having declined the narrower option of keeping the free
-    index: every compaction goes through the llm-externalizer, and its summary already ends with
-    the pending work, so a separately-composed handoff is redundant.
-
-    Returns ("", reasons) when no summary exists — see `main`, which then DECLINES TO CLEAR.
-
-    ⚠ THIS REVERSES A PRIOR OWNER RULING, DELIBERATELY, AND THE REVERSAL IS THE RISKY PART.
-    On 2026-08-13 the owner ruled *"the compacting must succeed no matter what"*, and this
-    function concluded: *"Degrading to a smaller handoff is survivable; degrading to NO clear is
-    not"* — hence the old facts+tail fallback, which needed no network and could always be
-    produced. With the handoff gone there is no such floor: if llm-ext cannot summarize, there is
-    NOTHING to survive the clear. Clearing anyway would destroy a session with no record at all,
-    which is strictly worse than the full-price turn the 2026-08-13 ruling was protecting against
-    — one costs money, the other costs the work. So the guarantee moves from "always clear" to
-    "never clear blind", per the standing fail-fast rule: it either works as intended or it stops.
-    """
-    del root, verdict  # the mechanical index they fed is retired; kept in the signature so the
-    # call site and its tests keep one shape while this lands.
-    transcript = str(facts.get("transcript") or "")
-
-    # THE WIRING (TRDD-1QJIZFFW). `use_llm_ext()` shipped exported, defaulting True, with ZERO
-    # callers — a switch whose default was a promise the code did not keep. This is the caller.
-    #
-    # RETRY, THEN DEGRADE — NEVER BLOCK FOREVER (owner, 2026-08-13: *"the compacting must succeed
-    # no matter what. even if it gets timeouts or error or disconnects from the internet for
-    # hours"*). `summarize_with_retry` keeps trying across timeouts, 429s and a dead network,
-    # taking a fleet-lane ticket per attempt so 20 sessions do not burst at one free-tier
-    # endpoint. It stops early only when retrying provably cannot help.
-    #
-    # What must succeed unconditionally is the CLEAR, and it does: both branches produce a
-    # handoff and neither can produce none. When the summary never lands, `compose_handoff`
-    # emits the scriptable facts and the message tail alone — no network, no model, always
-    # available. Degrading to a smaller handoff is survivable; degrading to NO clear is not,
-    # because the un-shrunk session then pays the full-price turn this whole feature exists to
-    # prevent. So the summary is best-effort and the clear is the guarantee.
-    summary = None
-    if ec.use_llm_ext() and transcript:
-        # RESUME RUNS ON THE HUMAN'S CLOCK (incident 2026-08-25): this compose executes inside a
-        # BLOCKING SessionStart hook, so its budget is one attempt plus a bounded lane wait —
-        # never the 2600 s abandoned-session deadline, which froze 16 simultaneously-resumed
-        # sessions for 40+ minutes behind the shared llm-ext lane. The abandoned-session path
-        # (daemon-driven, nobody watching) keeps the full deadline and the unbounded lane wait.
-        on_resume = facts.get("gate") == "resume"
-        got = ec.summarize_with_retry(
-            transcript,
-            deadline=time.time()
-            + (ec.resume_summary_deadline_s() if on_resume else ec.summary_deadline_s()),
-            log=lambda m: state.log_line(_LOG, m),
-            # TRDD-YOZ9TS3W: engages the progress-observed retry gate so a chunk stuck past
-            # LLM_EXT_TIMEOUT_S is given up on instead of restarting the same doomed chunk until
-            # the deadline. None (llm-ext unresolvable) simply runs without the gate.
-            progress_fn=ec.llm_ext_progress_fn(),
-            lease_wait_budget_s=ec.RESUME_LEASE_WAIT_S if on_resume else None,
-        )
-        summary = got.text
-        if not summary:
-            state.log_line(_LOG, f"no summary: {got.outcome} — {got.detail}")
-    if not summary:
-        # No template to fall back to any more. The caller reads "" as "do not clear".
-        return "", ["no-summary"]
-
-    # ACTIVE SKILLS FIRST, IN FULL, THEN THE SUMMARY (owner, 2026-08-23). The order is the
-    # requirement, not a preference: the summary describes a session in which those skills were
-    # loaded and therefore refers to them, so a summary injected above (or without) them opens
-    # with references that resolve to nothing.
-    skills = active_skills.render(transcript) if transcript else ""
-    header = f"# Session summary — {time.strftime('%Y-%m-%dT%H:%M:%S%z')} (llm-externalizer)\n\n"
-    text = f"{skills}\n\n---\n\n{header}{summary}\n" if skills else f"{header}{summary}\n"
-
-    # THE CONCISION CONTRACT IS DELIBERATELY NOT APPLIED HERE ANY MORE, and that is a ratified
-    # constraint being retired for this path — recorded loudly rather than dropped quietly.
-    # `check_handoff_concise` (4096 B, no fenced blocks, must carry a reference) governs a
-    # LINK-ONLY HANDOFF: a pointer into durable storage, whose whole virtue is not inlining what a
-    # link can resolve. This payload is the opposite artifact by design — a compaction RESULT that
-    # REPLACES the context, carrying skills reproduced verbatim at the owner's explicit
-    # instruction. Judging it by that contract would fail every correct payload and pass only
-    # useless ones. The guard still governs the in-session handoff path in `clear_trigger`, which
-    # is still link-only; nothing there is weakened.
-    return text, []
 
 
 def _snapshot_before(env: dict[str, str]) -> None:
@@ -627,33 +571,24 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     state.log_line(_LOG, f"fired: trigger={verdict.trigger} — {verdict.why}")
     print(f"CLEAR_CHAIN_SPAWNED trigger={verdict.trigger}")
 
-    # NOW summarize — after the clear, from the path captured BEFORE it. This process outlives
-    # the `/clear` it fired (the clear lands in the SESSION's pane; we are a separate process),
-    # which is what lets the expensive half run on the far side of the cheap half.
+    # TRDD-QZVAEWQH — NEITHER MODE COMPOSES. Both the daemon's abandoned-session lane (no
+    # `--on-resume`, keyless under launchd — measured: no shell rc file, `launchctl getenv`, nor
+    # `~/.claude/settings.json` env defines OPENROUTER_API_KEY there) and the `--on-resume`
+    # SessionStart-hook lane used to differ here: the hook composed inline because it happened to
+    # have the key. That let an on-resume fire type `/clear` while its OWN compose was still
+    # summarizing the transcript the brand-new session's SessionStart was about to summarize
+    # again — two `llm-ext` runs on one transcript, two keyed handoffs. So this branch is now
+    # unconditional: fire, then delegate, in both modes.
     #
-    # `pending["transcript"]` and NOT a fresh `newest_transcript(root)`: after the clear the
-    # newest transcript is the NEW, EMPTY one, so re-resolving here would summarize nothing and
-    # report success. This is the single most likely way to get this reorder wrong.
-    text, reasons = _compose(root, verdict, {**facts, "transcript": pending["transcript"]})
-    if reasons:
-        state.log_line(_LOG, f"summary violates the concision contract: {reasons}")
-    if not text.strip():
-        # No summary. The session is ALREADY cleared, so declining is not an option any more —
-        # the question is only what it resumes from. The mechanical `precompact-handoff.md`
-        # written by the PreCompact hook is the floor, and the hold's TTL releases the session
-        # onto it. Leaving `summary-pending.json` in place would be the worse failure: a session
-        # held forever on a summary that is never coming.
-        state.log_line(
-            _LOG,
-            "no llm-ext summary AFTER the clear — leaving the hold to expire on its TTL so the "
-            "session resumes from the mechanical precompact handoff rather than waiting forever",
-        )
-        print("NO_SUMMARY_POST_CLEAR degrading to the mechanical handoff")
-        return 0
-
-    handoff_files.write(sd, pending["key"] or handoff_files.UNKEYED_KEY, text, now=now)
-    _release_summary_hold(sd)
-    print(f"SUMMARY_READY {len(text.encode('utf-8'))}B")
+    # The hold is left ARMED, not released: `summarize_previous_session.py`, spawned detached from
+    # the CLEARED session's own SessionStart (which always has the key — it inherits the new
+    # session's environment), re-captures the same transcript under its own hold and writes the
+    # keyed handoff once llm-ext returns. That is the ONE summarizer for this transcript now —
+    # there is no second writer left to race it.
+    print(
+        f"SUMMARY_DELEGATED key={pending['key'] or handoff_files.UNKEYED_KEY} — the "
+        "cleared session's SessionStart summarizer owns it"
+    )
     return 0
 
 

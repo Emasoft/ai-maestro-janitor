@@ -546,11 +546,26 @@ def main() -> int:
 
         script = Path(__file__).resolve().parent.parent / "summarize_previous_session.py"
         if script.is_file():
-            subprocess.Popen(  # noqa: S603 - explicit args, no shell
-                [str(script)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+            # `detached_uv_env()` strips `VIRTUAL_ENV` (see its docstring): this child re-invokes
+            # `uv run --script` via its own shebang, and inheriting the PARENT script's ephemeral
+            # venv path makes uv refuse to run at all if that venv is torn down before the
+            # detached child starts — the same class of bug the cold-cache-clear hook works
+            # around at its own spawn site.
+            #
+            # stderr goes to a FILE, not DEVNULL (TRDD-QZVAEWQH): the AgentlensPro 04:24 incident
+            # took the summary hold and never logged READY or FAILED — its crash was
+            # undiagnosable because stderr went nowhere. Opened in append mode so consecutive
+            # SessionStarts accumulate rather than clobber; stdout stays DEVNULL — the script's
+            # only stdout lines are the one-word outcome, already duplicated into state.log_line.
+            log_dir = state.log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "session-summary.stderr.log").open("a", encoding="utf-8") as errsink:
+                subprocess.Popen(  # noqa: S603 - explicit args, no shell
+                    [str(script)],
+                    stdout=subprocess.DEVNULL, stderr=errsink,
+                    start_new_session=True,
+                    env=state.detached_uv_env(),
+                )
     except Exception as exc:  # noqa: BLE001 -- never break session start
         _slog(state, "session-start", f"previous-session summary spawn failed: {exc!r}")
 
