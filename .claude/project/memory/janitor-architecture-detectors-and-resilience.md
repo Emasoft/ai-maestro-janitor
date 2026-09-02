@@ -2,7 +2,7 @@
 name: janitor-architecture-detectors-and-resilience
 description: "which detector finds X / where are the pattern libs / full detector roster by function / what skills does the janitor ship / what are the resilience pillars / how does the janitor survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / why did the fleet sit idle overnight with keep-going off / why did the self-trigger refuse while the user was judged present in another pane / does a machine-global presence signal wrongly gate a per-session action"
 ocd: 2026-06-13
-lmd: 2026-09-01
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
@@ -144,6 +144,11 @@ human woke it by hand. Measured at the fix: five projects holding flags, two of 
 `state.terminal_pane_key()` + `state.per_pane_presence_path()` are the per-pane breadcrumb;
 `user_intent.user_is_present()` is its reader; the global file is the fallback only when the pane key
 cannot be resolved. Fixed in eb52843 (v0.63.2). [^12]
+
+
+^ATOM-TTA0-7I0C [desc: "the external-clear lane never evaluated an ARMED session because a heartbeat fire is a substantive turn and ACTIVE_FRESH_S equals the heartbeat cadence — since 3.4.6 the lane's idle is fleet_scan.huma", keywords: cold-cache-clear_never_evaluates no_evaluating_line_in_cold-cache-clear.log external_clear_never_fires every_session_active_at_every_beat armed_session_never_idle ACTIVE_FRESH_S_heartbeat_cadence transcript_activity_counts_heartbeat_turns human_activity_age scheduledFireId_cron_prompt_marker clear_lane_idle_floor_unreachable shadow_mode_found_nothing daemon_clear_lane_silent_for_weeks no_candidate_active=_self=_no-state-dir=_cooldown=, type: project, trdd: TRDD-O7UCNNN2, ocd: 2026-09-02, lmd: 2026-09-02]
+
+Measured 2026-09-02 (TRDD-O7UCNNN2): with the lever on and the daemon restaged on 3.4.4, `cold-cache-clear` ran every 5 min and logged NO `evaluating` line — every fleet instance was `active=True` at every beat. Cause: `fleet_scan.ACTIVE_FRESH_S = 300` equals the `*/5` heartbeat cadence, and `transcript_activity`'s "substantive" age excludes ONLY `queue-operation` bookkeeping; a cron fire appends a user prompt + assistant + tool records, all substantive, so an armed session's age cycles 0→~285 s forever and the watcher's `DEFAULT_CLEAR_MIN_IDLE_SECONDS = 3600` is unreachable by construction. The lane could only ever clear sessions the janitor does NOT run in. Since 3.4.6: `fleet_scan.human_activity_age_from_tail`/`human_activity_age` walk the same tail but skip whole turns whose prompt record carries the top-level `scheduledFireId` key (a cron-fired prompt; tool-result echoes are `type: user` too but never prompts), `Instance.human_active`/`human_age_s` feed `cold_cache_clear_task` (which now logs `no candidate — active=… self=… no-state-dir=… cooldown=… of N` and stamps `declined:no-candidate` instead of a silent return) and the watcher gate's idle. `transcript_activity` is deliberately UNCHANGED — it is the fleet guardian's liveness signal, and hiding heartbeat turns there would re-open the 8DR0X08A re-inject loop. Live check the same night: three idle sessions read 764–1538 s human-idle vs 100–158 s substantive. When the lane looks dead again, read the `no candidate` summary line first — it names the skip reason per beat.
 
 ## Governed by
 

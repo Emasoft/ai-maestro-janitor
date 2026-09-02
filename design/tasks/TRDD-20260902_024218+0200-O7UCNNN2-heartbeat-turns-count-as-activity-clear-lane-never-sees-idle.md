@@ -15,7 +15,7 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-XCJFCJUX, TRDD-NDAARSXT, TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18, TRDD-8DR0X08A]
-implementation-commits: []
+implementation-commits: [438f29e9]
 ---
 
 # The clear lane's "idle" can never be reached by a session whose heartbeat is armed
