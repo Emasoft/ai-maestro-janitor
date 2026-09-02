@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.11] — 2026-09-02
+
+### Bug Fixes
+
+- **gitignore-coverage:** Root-anchor reports/ *_dev/ .trashcan/ in the class matcher (TRDD-6WM4BFKF) (10faea1)
+- **oauth-rotator:** Verify TLS with a CA bundle even when the daemon's Python ships none (TRDD-X6I04SAO) (c3beaf0)
+
+### Documentation
+
+- **TRDD-6WM4BFKF:** Fleet sweep measured the matcher's precision — 37 real, 4 false, fixed in 10faea1e; claim-7 overlap noted for its own card (0a61b76)
+- Add TRDD-IEAZQ9MK — gitignore-coverage and tracked-ignored report the same file twice (claim 7 of 6WM4BFKF) (88afa08)
+- **TRDD-6WM4BFKF:** The sweep's class-hit count is 34, not 37 — 37 was ANIME2SVG's repo total (review-fork finding) (c689b4c)
+- **TRDD-X6I04SAO:** Card + wikimem for the daemon CA-bundle incident; atomize pass on 3 memory pages (c7a8d46)
+- **TRDD-X6I04SAO:** Redact the three account addresses in the card (pre-push gate G1b blocked the 3.4.11 push on them) (e176c88)
+
+### Miscellaneous Tasks
+
+- **gitignore:** Root-ignore scripts/memgrep/target so root-only walkers (CPV) prune the 98k-file cargo tree (45d9410)
+
+### Mem
+
+- **janitor-detector-and-hook-roster:** Why gitignore-coverage root-anchors reports/ *_dev/ .trashcan/ and how a matcher change is measured on the fleet (TRDD-6WM4BFKF) (f6e7808)
+- **janitor-publish-pipeline:** CPV budget-abort lesson (nested-ignored cargo tree + concurrent load); page re-tiered to hub (f23c2dc)
 ## [3.4.10] — 2026-09-02
 
 ### Bug Fixes
@@ -13,6 +36,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-0A8FN3W3, TRDD-UQW5IOAE:** Testing → complete — both fixes shipped in 3.4.9 (194c7b4)
 - **TRDD-6WM4BFKF:** Planned → complete, done-but-unclosed since e607e95a; spin D5 out as TRDD-VMXAF9IY (ca64ac5)
 - **TRDD-6WM4BFKF:** Criterion 4 evidence gets its control — a silent run is the detector's fail-open shape, not proof of clean (2899fdc)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.10 (4d72ff5)
 ## [3.4.9] — 2026-09-02
 
 ### Bug Fixes
