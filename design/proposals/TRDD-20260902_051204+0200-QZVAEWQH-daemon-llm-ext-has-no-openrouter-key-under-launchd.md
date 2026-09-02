@@ -3,7 +3,7 @@ trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
 column: proposal
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T06:05:42+0200
+updated: 2026-09-02T06:08:29+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -85,10 +85,21 @@ a launchd daemon.
 05:20:19, root `~/Code/llm-externalizer` (session 28ec9a0e, trigger next-fire-misses,
 human_idle 1613 s): same three identical `requires 'api_key'` failures, same
 `NO_SUMMARY_POST_CLEAR`, resumed as c557c807 at 05:20:55 and held. One difference worth
-recording: that project's session DID get a keyed `agent-handoff-28ec9a0e-20260902_052025+0200-38150.md`
-five seconds after the fire (its own hooks/skill are on a newer cached version than AgentlensPro's
-were), so it was not cleared without ANY record — but still without the llm-ext summary the USER's
-2026-08-23 directive makes the only sanctioned compaction. Both cleared transcripts survive under
+recording: a keyed `agent-handoff-28ec9a0e-20260902_052025+0200-38150.md` (62 KB, a four-part
+structured summary, last modified 05:30) appeared in that project's state dir five seconds after
+the fire, so that session was not cleared without ANY record. Read, not inferred from the
+name: 504 lines, zero wikilinks, a "Primary Request and Intent / Key Technical Concepts" summary of
+that session's actual llm-externalizer-plugin work — substantive, not a link-only stub. It did NOT
+come from the janitor's llm-ext path (the daemon composer gave up with no text at 05:20:40, no
+llm-ext session log in that window names the transcript, and no janitor code emits the
+`--- Part N of M ---` shape). The only keyed-handoff writers in the cached 3.4.7 are
+`hooks/on-session-start.py` and `clear_trigger.py`, so the likeliest writer is the resumed
+session's SessionStart hook persisting the compaction summary it was handed — no log line confirms
+it, and AgentlensPro's resumed session wrote nothing comparable, so this is per-session variance,
+not a guarantee. Either way the USER's 2026-08-23 directive (llm-ext as the only sanctioned
+compaction) was not met, and a human who had stepped away from that project 27 minutes earlier
+came back to a cleared session — the trigger legitimately ignores idle, but the experience is
+exactly the "useless handoff" one the directive retired. Both cleared transcripts survive under
 `~/.claude/projects/<slug>/` (AgentlensPro `f7594ac9`, llm-externalizer `28ec9a0e`), so the missing
 summaries can be back-filled once the daemon has a key.
 
@@ -148,8 +159,12 @@ filed alongside this proposal.
 - [ ] the five drill cards blocked on this (2F3I2P18, 1QJIZFFW, PXP08ZQC, 79LXF6PJ, 5RXBI65T's
       successor observation) re-measure against that fire
 - [ ] the two summaries the key's absence cost are back-filled from the surviving transcripts
-      (`llm-ext session-summary --transcript <path>` for AgentlensPro `f7594ac9` and
-      llm-externalizer `28ec9a0e`) and written as keyed handoffs in those projects' state dirs
+      (`llm-ext session-summary --stdout --transcript <path>` for AgentlensPro `f7594ac9` and
+      llm-externalizer `28ec9a0e`) and written as keyed handoffs in those projects' state dirs —
+      two caveats: the transcripts survive only until `cleanupPeriodDays: 90` prunes them
+      (`~/.claude/settings.json` line 2), and SessionStart injects the NEWEST handoff file, so by
+      the time the key lands newer handoffs will exist there and a back-fill reaches a future
+      session only by link (cite its path from the current handoff), not by injection
 
 ## Approval log
 
