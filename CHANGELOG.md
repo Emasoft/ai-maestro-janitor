@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.12] — 2026-09-02
+
+### Bug Fixes
+
+- **tls_context:** Mark the optional certifi import type-ignore so CPV's pyright passes without it (TRDD-X6I04SAO) (301fbce)
+- **daemon:** ESC every retry-wedged pane the moment a rotation lands, ahead of the typing gate (TRDD-NACCL0CB) (625d780)
+- **session-liveness:** Anchor the rotation-ESC wedge check on Claude Code's input box, not a row count (TRDD-NACCL0CB) (fb4ae70)
+- **daemon:** Never type a soft command into a pane showing the retry line (TRDD-NACCL0CB) (1fefb74)
+- **session-liveness:** The wedge row must start with Claude Code's status glyph, not merely column 0 (TRDD-NACCL0CB) (b98e2f7)
+
+### Documentation
+
+- Add proposal TRDD-NACCL0CB — the typing gate defers the retry-wedge ESC while the human watches (2026-09-02 Fable-wall incident) (bd84227)
+- **TRDD-X6I04SAO:** 3.4.11 CI red on the certifi pyright MINOR → 301fbcec for 3.4.12; mixed-commit note on c7a8d46a; tonight's wall as split evidence for box 4 (94d6afd)
+- Approve TRDD-NACCL0CB → testing (USER ruling; shipped in 625d7809); add TRDD-3T9HQEQ6 — no-headroom fallback must flush the queue with repeated ESC before /model opus + confirm (e91bfab)
+- Add TRDD-N954KWUC — one screen-state reader drives every keystroke the janitor types (USER architecture directive 2026-09-02) (40b2291)
 ## [3.4.11] — 2026-09-02
 
 ### Bug Fixes
@@ -20,6 +36,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - **gitignore:** Root-ignore scripts/memgrep/target so root-only walkers (CPV) prune the 98k-file cargo tree (45d9410)
+- Bump version to 3.4.11 (8843615)
 
 ### Mem
 
