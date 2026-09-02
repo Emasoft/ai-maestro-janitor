@@ -18,6 +18,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import publish  # noqa: E402
 
+# The flaggable addresses are ASSEMBLED at runtime, never written as literals:
+# this file is itself tracked in the public repo, and the gate under test scans
+# every added line of every tracked file — a literal `x@gmail.com` here would
+# block the very publish that ships the gate (measured 2026-09-02: six hits,
+# all in this file). Splitting the `@` keeps the regex from matching the source.
+_AT = "@"
+
+
+def _gmail(local: str) -> str:
+    return f"{local}{_AT}gmail.com"
+
+
+JOHN = _gmail("john.doe")
+OLD = _gmail("old")
+NEW = _gmail("new")
+
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
@@ -43,16 +59,18 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _hits(repo: Path, base_ref: str = "base") -> list[tuple[str, int, str]]:
-    known = frozenset(publish._base_ref_email_addresses(repo, base_ref))
-    return publish._personal_email_hits(publish._added_lines_since(repo, base_ref), known)
+    def known_for(path: str) -> frozenset[str]:
+        return frozenset(publish._base_ref_email_addresses(repo, base_ref, path))
+
+    return publish._personal_email_hits(publish._added_lines_since(repo, base_ref), known_for)
 
 
 def test_new_personal_address_is_flagged_and_masked(repo: Path) -> None:
     """An added line with a raw gmail address yields one masked hit."""
-    (repo / "notes.txt").write_text("line1\nline2\nline3\ncontact: john.doe@gmail.com\n", encoding="utf-8")
+    (repo / "notes.txt").write_text(f"line1\nline2\nline3\ncontact: {JOHN}\n", encoding="utf-8")
     _git(repo, "add", "notes.txt")
     _git(repo, "commit", "-q", "-m", "add contact")
-    assert _hits(repo) == [("notes.txt", 4, "j***@gmail.com")]
+    assert _hits(repo) == [("notes.txt", 4, "j***" + _AT + "gmail.com")]
 
 
 def test_allow_listed_placeholder_addresses_are_not_flagged(repo: Path) -> None:
@@ -72,7 +90,7 @@ def test_allow_listed_placeholder_addresses_are_not_flagged(repo: Path) -> None:
 def test_preexisting_address_untouched_by_new_commits_is_ignored(repo: Path) -> None:
     """An address already on the base ref, never touched since, is out of scope."""
     _git(repo, "checkout", "-q", "base")
-    (repo / "notes.txt").write_text("line1\nline2\nline3\nold@gmail.com\n", encoding="utf-8")
+    (repo / "notes.txt").write_text(f"line1\nline2\nline3\n{OLD}\n", encoding="utf-8")
     _git(repo, "add", "notes.txt")
     _git(repo, "commit", "-q", "-m", "old address on base")
     _git(repo, "checkout", "-q", "work")
@@ -86,25 +104,39 @@ def test_preexisting_address_untouched_by_new_commits_is_ignored(repo: Path) -> 
 def test_modified_line_only_flags_when_it_adds_a_new_address(repo: Path) -> None:
     """A modified line keeping an old address is clean; adding a second address is a hit."""
     _git(repo, "checkout", "-q", "base")
-    (repo / "notes.txt").write_text("line1\nline2\nline3\nold@gmail.com\n", encoding="utf-8")
+    (repo / "notes.txt").write_text(f"line1\nline2\nline3\n{OLD}\n", encoding="utf-8")
     _git(repo, "add", "notes.txt")
     _git(repo, "commit", "-q", "-m", "old address on base")
     _git(repo, "checkout", "-q", "work")
     _git(repo, "merge", "-q", "base")
 
     # Reformat the line but keep the same single address -> no new hit.
-    (repo / "notes.txt").write_text("line1\nline2\nline3\ncontact (old@gmail.com)\n", encoding="utf-8")
+    (repo / "notes.txt").write_text(f"line1\nline2\nline3\ncontact ({OLD})\n", encoding="utf-8")
     _git(repo, "add", "notes.txt")
     _git(repo, "commit", "-q", "-m", "reformat, same address")
     assert _hits(repo) == []
 
     # Now add a second, new address on the same line -> one hit.
     (repo / "notes.txt").write_text(
-        "line1\nline2\nline3\ncontact (old@gmail.com, new@gmail.com)\n", encoding="utf-8"
+        f"line1\nline2\nline3\ncontact ({OLD}, {NEW})\n", encoding="utf-8"
     )
     _git(repo, "add", "notes.txt")
     _git(repo, "commit", "-q", "-m", "add a second address")
-    assert _hits(repo) == [("notes.txt", 4, "n***@gmail.com")]
+    assert _hits(repo) == [("notes.txt", 4, "n***" + _AT + "gmail.com")]
+
+
+def test_address_known_only_in_another_file_is_still_new_for_a_new_file(repo: Path) -> None:
+    """An address that lives in file A on the base ref is a NEW disclosure when pasted into file B."""
+    _git(repo, "checkout", "-q", "base")
+    (repo / "notes.txt").write_text(f"line1\nline2\nline3\n{OLD}\n", encoding="utf-8")
+    _git(repo, "add", "notes.txt")
+    _git(repo, "commit", "-q", "-m", "old address on base, in notes.txt only")
+    _git(repo, "checkout", "-q", "work")
+    _git(repo, "merge", "-q", "base")
+    (repo / "copy.txt").write_text(f"see {OLD}\n", encoding="utf-8")
+    _git(repo, "add", "copy.txt")
+    _git(repo, "commit", "-q", "-m", "paste the address into a new file")
+    assert _hits(repo) == [("copy.txt", 1, "o***" + _AT + "gmail.com")]
 
 
 def test_added_lines_since_reports_correct_new_line_numbers(repo: Path) -> None:

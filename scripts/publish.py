@@ -83,6 +83,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 # Load gh / git retry wrappers from the sibling module so every push +
@@ -955,37 +956,42 @@ def _added_lines_since(root: Path, base_ref: str) -> list[tuple[str, int, str]]:
     return out
 
 
-def _base_ref_email_addresses(root: Path, base_ref: str) -> set[str]:
-    """Every e-mail address already present anywhere in `base_ref`'s tree.
+def _base_ref_email_addresses(root: Path, base_ref: str, path: str) -> set[str]:
+    """Every e-mail address already present in `path` AS OF `base_ref`.
 
-    Used to avoid re-flagging an address a modified line merely carries forward
-    unchanged (e.g. reformatting a line around an address that was already there
-    pre-existing in the tree isn't "introducing" it). `git grep` searches the ref's
-    tree content directly — no checkout needed. Exit code 1 means no match, not
-    an error; anything else degrades to an empty (permissive-for-old-addresses) set
-    rather than blocking the gate on a grep hiccup.
+    PER FILE, deliberately (review-fork finding, 2026-09-02): a repo-wide set would
+    let an address that lives only in a frozen terminal card be pasted into any NEW
+    file unchallenged — the exact "no new file introduces a raw address" case the
+    owner's ruling exists to stop. Per file, a modified line that merely carries an
+    address forward unchanged is still not a new disclosure, while the same address
+    landing in a file that never held it is. `git show` reads the ref's blob directly
+    — no checkout. A path absent from the ref (new file) has no known addresses; a
+    git hiccup degrades to an empty set, which errs toward FLAGGING, never toward
+    waving a disclosure through.
     """
     try:
         r = subprocess.run(
-            ["git", "grep", "-I", "-h", "-E", _EMAIL_RE.pattern, base_ref],
+            ["git", "show", f"{base_ref}:{path}"],
             capture_output=True, text=True, cwd=str(root), timeout=30,
             env=_readonly_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return set()
-    if r.returncode not in (0, 1):
+    if r.returncode != 0:
         return set()
     return {m.group(0) for m in _EMAIL_RE.finditer(r.stdout)}
 
 
 def _personal_email_hits(
-    lines: list[tuple[str, int, str]], known_addresses: frozenset[str] = frozenset()
+    lines: list[tuple[str, int, str]],
+    known_for: Callable[[str], frozenset[str]] = lambda _: frozenset(),
 ) -> list[tuple[str, int, str]]:
     """Flag added e-mail addresses whose domain isn't an allow-listed placeholder.
 
-    `known_addresses` (typically `_base_ref_email_addresses(root, base_ref)`) are
-    addresses already present pre-change — a modified line that keeps one of these
-    isn't a NEW disclosure, so it's skipped even though it sits on an added line.
+    `known_for(path)` returns the addresses `path` already held pre-change (see
+    `_base_ref_email_addresses`) — a modified line that keeps one of THOSE isn't a
+    NEW disclosure, so it's skipped even though it sits on an added line. Any other
+    file, including a brand-new one, starts with nothing known.
 
     Returns MASKED addresses only (`f***@domain`) — the gate's own BLOCKED output
     must never echo a full address, since it can land in a log.
@@ -994,7 +1000,7 @@ def _personal_email_hits(
     for path, lineno, text in lines:
         for m in _EMAIL_RE.finditer(text):
             addr = m.group(0)
-            if addr in known_addresses:
+            if addr in known_for(path):
                 continue
             local, _, domain = addr.rpartition("@")
             domain_l = domain.lower()
@@ -1108,8 +1114,14 @@ def run_gate(root: Path) -> int:
     if base_ref is None:
         cprint(f"  {YELLOW}No remote ref found (first push?) — skipping personal-address lint.{NC}")
     else:
-        known_addrs = frozenset(_base_ref_email_addresses(root, base_ref))
-        email_hits = _personal_email_hits(_added_lines_since(root, base_ref), known_addrs)
+        known_cache: dict[str, frozenset[str]] = {}
+
+        def _known_for(path: str, _ref: str = base_ref) -> frozenset[str]:
+            if path not in known_cache:
+                known_cache[path] = frozenset(_base_ref_email_addresses(root, _ref, path))
+            return known_cache[path]
+
+        email_hits = _personal_email_hits(_added_lines_since(root, base_ref), _known_for)
         if email_hits:
             for hit_path, hit_line, masked in email_hits:
                 cprint(f"  {RED}BLOCKED: personal e-mail address introduced — {hit_path}:{hit_line} {masked}{NC}")
