@@ -1,9 +1,9 @@
 ---
 trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
-column: dev
+column: todo
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T21:58:00+0200
+updated: 2026-09-02T22:07:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -21,6 +21,18 @@ created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
 ---
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:07
+
+- **dev → todo, 22:07.** A lean-worker started the implementation at 21:39 and its transcript
+  froze at 21:43:38 (the 21:41 wall / the owner's re-login); stopped at 22:04. Its partial
+  edits — `terminal_trigger.send_model_switch_true_error` ESC loop plus three tests in
+  `tests/test_terminal_trigger.py` and a `test_terminal_trigger_readback.py` tweak, 145
+  lines, untested — sit in **`git stash@{0}`** ("3T9HQEQ6 lean-worker partial edits"), stashed
+  so the tree could publish the TRDD-Q0Y4M1TF rotator fix. `git stash pop` to resume; run the
+  three suites before trusting any of it.
+- **NEXT ACTION:** pop the stash, finish the ESC loop per the directive below, three tests
+  green, then `dev → testing`.
 
 ## Directive (USER, 2026-09-02 21:05, verbatim intent)
 
