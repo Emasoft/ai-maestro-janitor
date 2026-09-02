@@ -111,6 +111,21 @@ class TestTrackedIgnored(unittest.TestCase):
             second = _run(repo)
             self.assertEqual(second.strip(), "")
 
+    def test_ordinary_rule_no_private_class_still_reported_here(self):
+        """TRDD-IEAZQ9MK: a plain rule (`ccpm/**`), no private-class match — this detector is
+        the SOLE owner of that case now that `gitignore-coverage` dropped its `is_ignored`
+        branch, so the file must still surface here."""
+        with TemporaryDirectory() as tmp:
+            repo = self._repo(tmp)
+            (repo / "ccpm").mkdir()
+            (repo / "ccpm" / "state.json").write_text("{}")
+            _git(repo, "add", "ccpm/state.json")
+            _git(repo, "commit", "-q", "-m", "add ccpm")
+            (repo / ".gitignore").write_text("ccpm/**\n")
+            out = _run(repo)
+            self.assertIn("[tracked-ignored]", out)
+            self.assertIn("ccpm/state.json", out)
+
     def test_clean_repo_silent(self):
         """A repo with no tracked-yet-ignored files emits nothing."""
         with TemporaryDirectory() as tmp:

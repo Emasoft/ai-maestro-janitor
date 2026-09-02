@@ -13,15 +13,19 @@ guards the opposite direction. None asks the prior question this module asks.
 
 TWO INDEPENDENT FAULTS PER CLASS, because a rule does not untrack anything:
   * UNCOVERED — no ignore rule matches the class, so the next such file is committed silently.
-  * ALREADY TRACKED — a file in the class is in the index. Adding a rule does NOT fix this
-    (git keeps existing index entries by design); the remedy is `git rm --cached`, NEVER a
-    working-tree delete.
+  * ALREADY TRACKED — a file already IN the class (by the class's own pattern) is in the index.
+    Adding a rule does NOT fix this (git keeps existing index entries by design); the remedy is
+    `git rm --cached`, NEVER a working-tree delete. A tracked file merely COVERED by some other
+    `.gitignore` rule but matching NO private class is `tracked-ignored`'s finding, not this
+    module's — TRDD-IEAZQ9MK, the two used to report the same file, hourly, with different
+    wording.
 
 WHY THERE IS NO GITIGNORE PARSER HERE: `git check-ignore` already answers "would this path be
 ignored?" — negation lines, precedence, `.git/info/exclude`, nested ignore files and all. A
 hand-rolled matcher would be a second, worse implementation of git's own rules, and it would
 disagree with git exactly where the syntax is subtle, which is exactly where a leak hides.
-`is_ignored` is injected so the classification is pure and testable without a repo.
+`is_ignored` is injected into `uncovered_classes` so that half of the classification stays pure
+and testable without a repo.
 """
 from __future__ import annotations
 
@@ -145,24 +149,28 @@ def matches_private_class(
 
 def tracked_offenders(
     tracked: Iterable[str],
-    is_ignored: Callable[[str], bool],
     is_negated: Callable[[str], bool] = lambda _: False,
 ) -> list[str]:
-    """Tracked paths in a private class — in the index whether or not a rule exists for them.
+    """Tracked paths in one of the thirteen private classes, by the class's OWN pattern.
 
-    Two ways in, deliberately OR-ed: the path matches a class's own canonical pattern (the file
-    tracked before any rule existed), or git says a rule now covers it (the rule added after the
-    commit). Adding a rule did not untrack either; only `git rm --cached` does.
+    ONE way in: `matches_private_class` — the file is in a private class whether or not any
+    `.gitignore` rule exists for it. This module used to ALSO report a path merely because git
+    said a rule covers it (`is_ignored`), even when the path matched no private class at all —
+    but that rule-only case is exactly what `tracked-ignored` already reports (`git ls-files
+    --ignored --exclude-standard --cached`), so a file both tracked and covered by a plain repo
+    rule (e.g. `ccpm/**`, `logs/`) got one line from each detector, hourly, worded differently
+    and neither saying "private class" truthfully (TRDD-IEAZQ9MK — 47 of 85 fleet contamination
+    offenders on 2026-09-02 were rule-only, no private-class match). `tracked-ignored` is now the
+    sole owner of the rule-only case; this module owns only the private-class case, so a rule
+    that merely covers an ordinary tracked file is no longer misreported as "in a private class".
 
-    Two ways OUT, both meaning "tracked ON PURPOSE": the protected PROJECT prefixes, and any path
-    git reports as re-included by a `!` line (`is_negated`). The second is what stops the class
-    matcher from over-reaching — this repo's `.trashcan/.gitkeep` sits inside the `.trashcan/`
-    class by name, and `/.trashcan/*` + `!/.trashcan/.gitkeep` is exactly how it is meant to be
-    tracked. A negation is the user's explicit decision; reporting it would propose untracking
-    what they deliberately kept.
+    The one way OUT is still "tracked ON PURPOSE": any path git reports as re-included by a `!`
+    line (`is_negated`) — this repo's `.trashcan/.gitkeep` sits inside the `.trashcan/` class by
+    name, and `/.trashcan/*` + `!/.trashcan/.gitkeep` is exactly how it is meant to be tracked.
+    A negation is the user's explicit decision; reporting it would propose untracking what they
+    deliberately kept. `is_protected` still excludes the shared PROJECT-scope prefixes.
     """
     return sorted(
         p for p in tracked
-        if not is_protected(p) and not is_negated(p)
-        and (matches_private_class(p) or is_ignored(p))
+        if not is_protected(p) and not is_negated(p) and matches_private_class(p)
     )

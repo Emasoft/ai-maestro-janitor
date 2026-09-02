@@ -77,7 +77,7 @@ def main() -> int:
         return verdicts.get(rel) == "negated"
 
     uncovered = gc.uncovered_classes(ignored)
-    offenders = gc.tracked_offenders(tracked, ignored, negated)
+    offenders = gc.tracked_offenders(tracked, negated)
 
     if uncovered:
         names = ", ".join(f"{c.name} (add `{c.pattern}`)" for c in uncovered[:6])

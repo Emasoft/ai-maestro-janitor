@@ -52,7 +52,7 @@ def test_PROJECT_scope_is_never_reported_as_an_offender() -> None:
         ".claude/project/memory/page.md",
         ".env",
     ]
-    assert gc.tracked_offenders(tracked, lambda _: True) == [".env"]
+    assert gc.tracked_offenders(tracked) == [".env"]
 
 
 def test_protected_prefixes_are_recognised_with_or_without_a_leading_dot_slash() -> None:
@@ -68,20 +68,18 @@ def test_a_rule_that_exists_does_not_clear_an_already_tracked_file() -> None:
 
     A `.gitignore` rule does NOT untrack an existing index entry (git keeps them by design), so
     a repo can be fully COVERED and still be shipping the secret. Reporting only coverage would
-    miss exactly the case that has already leaked.
+    miss exactly the case that has already leaked. `.env` is in a private class by its own
+    pattern, so it stays an offender with no `is_ignored` involved at all.
     """
-    assert gc.uncovered_classes(lambda _: True) == []          # coverage: perfect
-    assert gc.tracked_offenders([".env"], lambda _: True) == [".env"]  # yet still tracked
+    assert gc.uncovered_classes(lambda _: True) == []  # coverage: perfect
+    assert gc.tracked_offenders([".env"]) == [".env"]  # yet still tracked
 
 
 def test_a_tracked_file_in_an_uncovered_class_is_an_offender_even_with_no_rule() -> None:
     """Criterion 2 as WRITTEN: a `.env` already tracked, no rule anywhere — still contamination.
 
-    `is_ignored` answers False for everything (the repo has no ignore file at all), so only the
-    class table's own canonical pattern can classify the tracked paths. Before this the offender
-    predicate required the rule to exist, so a tracked secret in an UNCOVERED class never reached
-    the contamination line, and the coverage line said "the NEXT such file is published" about a
-    file that was already shipping. Protected PROJECT paths stay excluded even when they match.
+    The class table's own canonical pattern classifies the tracked paths regardless of any
+    `.gitignore` rule. Protected PROJECT paths stay excluded even when they match.
     """
     private = [
         ".env", "conf/.env.local", "keys/id_rsa.pub", "certs/server.pem", "signing.key",
@@ -90,7 +88,7 @@ def test_a_tracked_file_in_an_uncovered_class_is_an_offender_even_with_no_rule()
     ]
     plain = ["src/app.py", "README.md", "environment.md"]
     protected = ["design/tasks/notes.log", ".claude/project/memory/debug.log"]
-    offenders = gc.tracked_offenders(private + plain + protected, lambda _: False)
+    offenders = gc.tracked_offenders(private + plain + protected)
     assert offenders == sorted(private)
 
 
@@ -121,7 +119,7 @@ def test_a_path_git_re_includes_with_a_negation_is_never_an_offender() -> None:
     """
     negated = {".trashcan/.gitkeep", ".trashcan/README.txt"}
     tracked = [".trashcan/.gitkeep", ".trashcan/README.txt", ".trashcan/2026/junk.md", ".env"]
-    got = gc.tracked_offenders(tracked, lambda _: False, is_negated=lambda p: p in negated)
+    got = gc.tracked_offenders(tracked, is_negated=lambda p: p in negated)
     assert got == [".env", ".trashcan/2026/junk.md"]
 
 
@@ -185,3 +183,23 @@ def test_criterion_2_on_a_seeded_repo_a_tracked_dotenv_with_no_rule_prints_conta
     assert coverage and "dotenv (add `.env`)" in coverage[0]
     assert contamination and "git rm --cached" in contamination[0]
     assert (repo / ".gitignore").exists() is False              # the detector only reads
+
+
+def test_a_tracked_file_covered_by_an_ordinary_rule_is_not_this_detectors_finding(
+    tmp_path: Path,
+) -> None:
+    """TRDD-IEAZQ9MK: a plain repo rule (`ccpm/**`), no private-class match — `tracked-ignored`
+    owns this, not `gitignore-coverage`. Before the fix this fired here too, wrongly worded
+    "in a private class" for a file in none of the thirteen.
+    """
+    repo = tmp_path / "seed"
+    git = _seed(repo)
+    (repo / "ccpm").mkdir()
+    (repo / "ccpm" / "state.json").write_text("{}\n")
+    git("add", "ccpm/state.json")
+    git("commit", "-qm", "seed")
+    (repo / ".gitignore").write_text("ccpm/**\n")
+
+    lines = _run_detector(repo)
+    contamination = [ln for ln in lines if "still TRACKED" in ln]
+    assert not contamination, contamination

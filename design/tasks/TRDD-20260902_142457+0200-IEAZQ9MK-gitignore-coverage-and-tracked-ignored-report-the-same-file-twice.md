@@ -1,9 +1,9 @@
 ---
 trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
-column: todo
+column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-02T15:50:25+0200
+updated: 2026-09-02T22:46:41+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -14,6 +14,33 @@ implementation-commits: []
 npt: []
 eht: []
 ---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02T22:46:41+0200
+
+Took the smaller-diff option: dropped the `is_ignored` OR-branch from
+`lib/gitignore_coverage.tracked_offenders`. It now takes `(tracked, is_negated=...)` — no more
+`is_ignored` parameter — and reports a tracked path ONLY when `matches_private_class` matches
+one of the thirteen classes by its own pattern. `tracked-ignored` is unchanged and is now the
+sole owner of "tracked ∧ covered by a plain rule, no private-class match".
+
+Files touched:
+- `scripts/lib/gitignore_coverage.py` — `tracked_offenders` signature + docstring; module
+  docstring's "TWO INDEPENDENT FAULTS" section updated to state the split.
+- `scripts/detectors/gitignore-coverage.py` — call site drops the `ignored` arg.
+- `tests/test_gitignore_coverage.py` — 4 existing calls updated to the new signature; added
+  `test_a_tracked_file_covered_by_an_ordinary_rule_is_not_this_detectors_finding` (seeded repo,
+  `ccpm/**` rule, no private-class match ⇒ no "still TRACKED" line here).
+- `tests/test_tracked_ignored.py` — added
+  `test_ordinary_rule_no_private_class_still_reported_here` (same `ccpm/**` fixture ⇒ still
+  reported by `tracked-ignored`), proving exactly one detector fires for that case.
+
+Gates: `uv run pytest tests/test_gitignore_coverage.py tests/test_tracked_ignored.py -q` → 17
+passed. `ruff check` + `mypy --ignore-missing-imports` clean on all touched files.
+
+NEXT ACTION: on the next hourly fleet fire, confirm the 47 rule-only offenders from the
+2026-09-02 sweep (svg2fbf `ccpm/**`, ANIME2SVG `data/specimens/`, SVG-BBOX `logs/`+`CLAUDE.md`)
+no longer appear in `gitignore-coverage` output and still appear in `tracked-ignored` output —
+this is a live check, not re-testable locally without those repos.
 
 ## Problem
 
