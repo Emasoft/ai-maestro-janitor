@@ -1156,7 +1156,7 @@ def send_model_switch_true_error(
             "terminal_trigger",
             f"[{label}] queue not cleared after {_QUEUE_FLUSH_MAX_ESC} ESC — typing nothing",
         )
-        return False, "queue not cleared after 5 ESC"
+        return False, f"queue not cleared after {_QUEUE_FLUSH_MAX_ESC} ESC"
 
     sent, why = send_verified(
         terminal, command, esc_first=False,
