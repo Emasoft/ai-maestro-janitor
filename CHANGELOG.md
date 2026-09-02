@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.5] — 2026-09-02
+
+### Documentation
+
+- **memory:** ATOM-LE4O-6B4F + ATOM-0EBD-0XQE — CPV blocks file-sourced os.environ writes (sentinel does not cover ENV_INJECTION); the launchd daemon reads options via state.plugin_option (TRDD-XCJFCJUX) (74995f1)
+- **TRDD-38PB1B86:** Items 1-3 landed (2e9a76c8, 58d23723) — card to testing; #290 closes on the next publish with the live reload-guard line (239bfdd)
+- **TRDD-38PB1B86:** Updated stamp to the real clock (was 1 min in the future) (074b670)
+
+### Features
+
+- **reload:** Gate [janitor-reload] on a real version change of a plugin THIS session runs, and say which (janitor#290 §2, TRDD-38PB1B86) (58d2372)
 ## [3.4.4] — 2026-09-02
 
 ### Bug Fixes
@@ -23,6 +34,10 @@ All notable changes to this project will be documented in this file.
 - POA0157J blocked on AgentlensPro#19 (fork decided upstream); add TRDD-38PB1B86 — janitor-reload fires on every fleet-update epoch and every clear-born session (janitor#290, unanswered since 2026-08-28) (8e5310e)
 - **TRDD-XCJFCJUX:** STATE — os.environ mirror superseded (CPV ENV_INJECTION blocks it, sentinel does not cover the rule: claude-plugins-validation#223); redesign to a dict mirror behind state.plugin_option + child-env merge (a541198)
 - **TRDD-XCJFCJUX, TRDD-38PB1B86:** Commits recorded — XCJFCJUX to testing on d6c82d60 (last box waits on publish + restage), 38PB1B86 item 1 landed as 2e9a76c8 (d3d7db2)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.4 (6701756)
 
 ### Refactor
 
