@@ -2,7 +2,7 @@
 name: janitor-fleet-control-plane
 description: "a chore ran twice / two daemons / the ai-maestro server ignored maintenance mode and kept running chores / a flag I set had no effect on the other daemon / where do the kill-switch and maintenance flags actually live / why is there a ~/.claude/janitor-control folder when the rule says use the DATA dir / a lock stopped excluding anything after I moved it / a chore skips forever but the logs only say contended / what is the audience scope rule for the control plane / why does JANITOR_CONTROL_DIR only apply to tests / flock conflicts across independent open file descriptions even in one process / dual flock new-then-old order deadlock free / external consumer hardcoded one rung of the resolution ladder and silently missed the flag / does moving a lock differ from moving a flag / integration test caught coincident JANITOR_CONTROL_DIR and JANITOR_GLOBAL_STATE_DIR paths"
 ocd: 2026-07-22
-lmd: 2026-07-22
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
@@ -20,6 +20,7 @@ publish-globally: false
 
 ## What it is and why it breaks the DATA-dir principle
 
+^8ZFF42S7 [desc:"A second chore owner (an ai-maestro server) can also run janitor chores, so the control plane must be a literal unresolved path (~/.claude/janitor-control/), not a ladder-resolved DATA-dir flag a foreign reader could silently miss.", keywords:"second_chore_owner_ai_maestro_server global_state_dir_four_rung_ladder foreign_program_hardcodes_one_rung flag_absent_looks_healthy literal_unresolved_control_path janitor_control_dir_tests_only data_dir_survives_updates_wrong_for_mode_flags uninstalled_janitor_must_not_leave_flag"]
 A **second chore owner** exists on the host: an ai-maestro server absorbs the
 OAuth pair and the update trio (`harness_backend.SERVER_ABSORBED_TASKS`). Two
 owners can only coordinate through state BOTH can find.
@@ -40,6 +41,7 @@ janitor must not leave a flag behind claiming the host is in maintenance.
 
 ## The scope rule is AUDIENCE, not kind
 
+^I8XY42BG [desc:"The control-plane scope rule is AUDIENCE not kind: if a second chore owner must observe or contend on a piece of state, it moves to janitor-control/; mode flags and the three coordination locks move, janitor-internal-only state stays in DATA/global-state.", keywords:"scope_rule_is_audience_not_kind second_owner_must_observe_or_contend six_mode_flags_move three_coordination_locks_move per_chore_last_run_stamps daemon_singleton_pid_flock_heartbeat ticket_dispatch_lock_stays_janitor_internal flags_carry_provenance_but_key_on_presence_only"]
 > If a SECOND chore owner must observe it or contend on it, it moves.
 
 | in `~/.claude/janitor-control/` | stays in `<DATA>/global-state/` |
@@ -54,6 +56,7 @@ PRESENCE only** — a corrupt body must never swallow a stop signal.
 
 ## Migration status
 
+^0Y09UI3D [desc:"Migration to the control plane proceeds in phases: Phase A (six mode flags, triple-read/single-write) is done, Phase B step 1 (three coordination locks) is done, Phase B step 2 (last-run stamps + the flock-moves-last singleton) is NOT done.", keywords:"migration_phase_a_six_mode_flags_done phase_b_step_1_coordination_locks_done phase_b_step_2_not_done triple_read_new_old_legacy single_write_clear_sweeps_all_three last_run_stamps_pending daemon_singleton_flock_moves_last v0_60_0_release"]
 - **Phase A** (v0.60.0) — the six mode flags. Triple-read on read (new + old +
   legacy), single-write on write, clear sweeps all three.
 - **Phase B step 1** (`78879d4`) — the three coordination locks.
@@ -64,6 +67,7 @@ PRESENCE only** — a corrupt body must never swallow a stop signal.
 
 This is the load-bearing distinction of the whole migration.
 
+^IJX58BQ6 [desc:"Moving a LOCK is not moving a FLAG: a flag is data (dual-read is complete), but a flock is kernel state bound to an inode, so during migration two peers locking different paths BOTH run the chore; _acquire_dual_flock holds both inodes, order fixed NEW-then-OLD, deadlock-free.", keywords:"flag_is_data_dual_read_complete flock_is_kernel_state_bound_to_inode new_and_old_peer_both_run_chore acquire_dual_flock_holds_both_inodes order_fixed_new_then_old_deadlock_free release_half_when_other_contended opaque_handle_never_bare_fd singleton_move_cannot_reuse_this_primitive"]
 A flag is **data**: a reader that probes both paths cannot miss it, so a
 dual-READ is a complete transition. A flock is **kernel state bound to an
 inode**: during the upgrade window a new-code peer locking only the new path and

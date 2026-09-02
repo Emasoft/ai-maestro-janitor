@@ -2,7 +2,7 @@
 name: three-pillars-rules-ownership
 description: "which repo owns trdd-design-tasks / prrd-design-rules / universal-kanban / I edited a rule file in the repo and nothing changed on disk / two plugins install rules with the same filename / an agent seems to be reading two different generations of the same governance rule / where do the aimaestro-* overlays come from / a rule in ~/.claude/rules matches no repo / who owns aimaestro-trdd-approval aimaestro-prrd-governance aimaestro-kanban-multiagent / why do overlay filenames matter as a cross-repo contract / does editing a rule file in the repo change anything on disk without a stamp file / what is install-governance-rules.cjs stamp guard / are trdd-approval-tiers.md and manager-approval-defaults.md orphan files / does the janitor's orphaned-rule sweep ever delete a foreign rule file / which repo installs universal rules at user scope versus workdir scope"
 ocd: 2026-07-22
-lmd: 2026-07-22
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
@@ -20,6 +20,7 @@ publish-globally: false
 
 ## Three tiers, three owners (verified 2026-07-22)
 
+^EI4OUPCY [desc:"Three-tier rule ownership map: IND universal rules ship via the janitor to ~/.claude/rules/ (user scope); DEP harness overlays ship via ai-maestro server to each workdir's .claude/rules/; retired pre-split copies were CORE's, per the owner's 2026-07-22 directive.", keywords:"three_tier_rule_ownership_map ind_universal_janitor_owns trdd_design_tasks_prrd_design_rules_universal_kanban dep_harness_overlay_ai_maestro_owns aimaestro_trdd_approval_prrd_governance_kanban_multiagent retired_pre_split_copies_core_owned owner_directive_2026_07_22 rules_installer_ships_to_user_scope"]
 | tier | files | ships to | owner |
 |---|---|---|---|
 | **IND universal** | `trdd-design-tasks.md`, `prrd-design-rules.md`, `universal-kanban.md` | `~/.claude/rules/` (user scope) | **janitor** (issue #73, TRDD-DE9757LJ) |
@@ -32,6 +33,7 @@ enforces it."*
 
 ## The overlay filenames are a CROSS-REPO CONTRACT
 
+^YQKDHXFI [desc:"Each IND base rule names its DEP overlay filename in prose as a cross-repo contract (since the overlay is invisible from user scope); ai-maestro added a CI test asserting the four aimaestro-*.md filenames, so do not tidy/rename them.", keywords:"overlay_filenames_cross_repo_contract ind_base_names_overlay_in_prose overlay_invisible_from_user_scope prrd_design_rules_names_aimaestro_prrd_governance universal_kanban_names_aimaestro_kanban_multiagent trdd_design_tasks_names_aimaestro_trdd_approval ai_maestro_83_ci_test_asserts_filenames do_not_tidy_these_names"]
 Each IND base names its overlay **in prose** — that pointer is the only way a
 reader gets from base to overlay, because the overlay seeds into a *workdir*,
 not user scope, so it is invisible from anywhere else.
@@ -48,6 +50,7 @@ a pointer here. **Do not "tidy" these names.**
 
 ## Why this is hard to see from inside one repo
 
+^R0AFQIBC [desc:"Rule ownership is hard to see from inside one repo: the janitor cannot see workdir overlays and ai-maestro cannot see what CORE installs at user scope, so two agents each verify their own half and wrongly conclude the other is missing — measure installed bytes on disk instead.", keywords:"half_blind_by_construction_each_repo janitor_cannot_see_workdir_overlays ai_maestro_cannot_see_core_user_scope_installs two_agents_each_verified_own_half wrongly_concluded_other_half_missing measure_installed_bytes_on_disk not_reason_from_installer_source"]
 Each side is half-blind by construction: the janitor cannot see the workdir
 overlays (they seed into agent workdirs it never visits), and ai-maestro cannot
 see what CORE installs at user scope. Two agents each verified their own half and

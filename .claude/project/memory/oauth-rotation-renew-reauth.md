@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth
 description: "How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROTATE → RENEW → REAUTHENTICATE cascade, the keychain storage, the exact commands, and what to check when 'the rotator failed / a 429 landed instead of rotating / accounts won't switch / had to log in manually / the reauth login-nudge is SILENT though the daemon logs reauth-nudge / renew shows the login page not Authorize / token exchange 403 / error code 1010 / keychain secret truncated or came back as hex / tests wrote fake @x lines to rotator.log / what is the ROTATE RENEW REAUTHENTICATE cascade / why do two callers of cascade.classify disagree / how does the rotator drain-first select a target account / why is the 7-day window threshold different from the 5-hour threshold / is the reauth step ever fully hands-free without a human'. The component overview page; don't conflate the three layers."
 ocd: 2026-06-13
-lmd: 2026-09-01
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
@@ -293,6 +293,10 @@ claims keep going stale/wrong (a 2026-06-06 "account A dead / account B healthy"
 had fully INVERTED by 2026-06-08; the summary has also fabricated a transient wrong
 root-cause and promoted it to "fact"). Query `oauth-health` live; treat every summary
 technical claim as UNVERIFIED until checked against the TRDD + the source headers.
+
+
+^ATOM-V316-ZKU6 [desc: "had to rotate the account manually again — every slot refresh failed (network) on every tick: the daemon's python.org interpreter has no CA bundle, CERTIFICATE_VERIFY_FAILED filed as network", keywords: had_to_rotate_manually_again refresh_failed_network_every_tick no_usable_slot_twin_staying_put rotation_stuck_all-accounts-maxed_refresh-failed CERTIFICATE_VERIFY_FAILED_daemon python.org_python_no_cert.pem Install_Certificates.command launchd_daemon_interpreter_trust_store oauth-health_days_negative rotator_did_not_rotate_on_wall primary_live_credential_unreadable_is_by_design, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-02]
+When rotator.log shows [keepalive] <slot>: refresh failed (network) on EVERY tick for EVERY spare slot while the token endpoint answers from a shell, the daemon's interpreter is the problem, not the network. The launchd daemon runs whatever Python the plist names; a python.org framework build ships with etc/openssl/cert.pem MISSING until its Install Certificates.command is run, so every urlopen dies with CERTIFICATE_VERIFY_FAILED — a URLError, which classify_refresh_failure filed as network/benign. Seen 2026-09-02: ≥878 failures in one day across the two rotated logs, both spare slot tokens expired (oauth-health days negative), every auto tick ending 'no usable slot twin to probe — staying put (fail-safe)', rotation-stuck.json 'all-accounts-maxed refresh-failed' since 08-25 (onset unknown: the log rotates daily), and the user rotated by hand. Reproduce with the daemon's exact interpreter and env: env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin <plist python> -c 'urlopen(token endpoint)'; a shell's uv Python has a bundle and never shows it. Machine fix: the symlink Install Certificates.command creates (etc/openssl/cert.pem -> certifi/cacert.pem) — the next tick refreshed both slots. Durable fix: scripts/lib/tls_context.verifying_context() on every daemon-side https urlopen + the REFRESH_FAIL_TLS cause (TRDD-X6I04SAO). The model-scoped (Fable) wall trigger already exists in cmd_auto (f185e521) but needs the live account's usage read through a slot twin, which expired slots deny. 'primary live credential UNREADABLE from this context' every tick is the DESIGNED headless path (TRDD-7PYTX4E9 F1), not a fault.
 
 ## Notes and lessons learned
 
