@@ -134,6 +134,14 @@ DEFAULT_CLEAR_MIN_IDLE_SECONDS = 3600
 DEFAULT_CLEAR_COOLDOWN_SECONDS = 300
 _CLEAR_FIRED_STAMP = "idle-clear-fired.ts"
 
+# TRDD-0TM5NDYN: a HOLD verdict writes no cooldown stamp (only a CLEAR does), so without a
+# second stamp the fleet loop re-picks the same first-in-order root every beat forever and
+# every other candidate starves. EVALUATED and CLEARED are different facts (COQN6KVA lesson)
+# so they get two stamps: this one spaces out RE-EVALUATION regardless of verdict.
+CLEAR_EVAL_SPACING_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_EVAL_SPACING_SECONDS"
+DEFAULT_CLEAR_EVAL_SPACING_SECONDS = 900
+EVAL_STAMP_NAME = "clear-evaluated.ts"
+
 
 def enabled() -> bool:
     return state.is_truthy_env(ENABLED_ENV, True)
@@ -218,6 +226,28 @@ def mark_clear_fired(state_dir: Path, *, now: int) -> None:
         state.atomic_write(state_dir / _CLEAR_FIRED_STAMP, str(now))
     except OSError:
         pass
+
+
+def clear_eval_spacing_seconds() -> int:
+    return state.coerce_int(state.plugin_option(CLEAR_EVAL_SPACING_ENV), DEFAULT_CLEAR_EVAL_SPACING_SECONDS)
+
+
+def mark_evaluated(state_dir: Path, *, now: int) -> None:
+    """Record that this root was JUST HANDED a watcher, independent of its verdict. Best-effort;
+    a stamp failure must never break the beat."""
+    try:
+        state.atomic_write(state_dir / EVAL_STAMP_NAME, str(now))
+    except OSError:
+        pass
+
+
+def evaluated_recently(state_dir: Path, *, now: int) -> bool:
+    """True iff this root was evaluated within the spacing window — a HOLD verdict alone must
+    not make the same root eligible again next beat. Missing/unparseable stamp reads as False
+    (fail toward evaluating, since a root that has never been checked is exactly what this
+    exists to let through)."""
+    last = state.read_int_state(state_dir / EVAL_STAMP_NAME, 0)
+    return last > 0 and 0 <= now - last < clear_eval_spacing_seconds()
 
 
 # --- pure policy ------------------------------------------------------------

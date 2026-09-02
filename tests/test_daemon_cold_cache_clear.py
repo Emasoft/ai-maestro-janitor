@@ -349,6 +349,76 @@ def test_a_heartbeat_armed_session_is_still_evaluated(
     assert len(spawns) == 1, "active=True must not veto evaluation — only human_active does"
 
 
+def test_it_evaluates_a_different_root_on_the_next_beat(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """TRDD-0TM5NDYN: a HOLD writes no cooldown stamp, so without eval-spacing the same
+    first-in-order root is re-picked forever and every other root starves. Two consecutive
+    beats over a two-root fleet must spawn for two DIFFERENT roots, and both must carry the
+    eval stamp afterwards."""
+    d, spawns = wired
+    root_a = _project(tmp_path, "p0")
+    root_b = _project(tmp_path, "p1")
+    monkeypatch.setattr(
+        d.fleet_scan, "gather_fleet", lambda **_k: [_instance(root_a), _instance(root_b)]
+    )
+
+    d.task_cold_cache_clear()
+    d.task_cold_cache_clear()
+
+    assert len(spawns) == 2
+    assert root_a in spawns[0]
+    assert root_b in spawns[1], "the second beat must reach the OTHER root, not re-pick root_a"
+    assert (Path(root_a) / ".janitor" / "state" / "clear-evaluated.ts").is_file()
+    assert (Path(root_b) / ".janitor" / "state" / "clear-evaluated.ts").is_file()
+
+
+def test_a_recently_evaluated_root_is_skipped_and_counted(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """A root evaluated moments ago must not be re-picked before the spacing elapses — the
+    no-candidate summary must name the reason as `recent=1` (TRDD-0TM5NDYN)."""
+    import time as _time
+
+    import cold_cache_compact  # noqa: PLC0415
+
+    d, spawns = wired
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(logs))
+    d.state.log_dir.cache_clear()
+    root = _project(tmp_path)
+    cold_cache_compact.mark_evaluated(Path(root) / ".janitor" / "state", now=int(_time.time()))
+    monkeypatch.setattr(d.fleet_scan, "gather_fleet", lambda **_k: [_instance(root)])
+
+    d.task_cold_cache_clear()
+    d.state.log_dir.cache_clear()
+
+    assert spawns == []
+    written = (logs / "cold-cache-clear.log").read_text(encoding="utf-8")
+    assert "recent=1" in written
+
+
+def test_a_stale_evaluation_stamp_makes_the_root_eligible_again(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """The counterpart of the previous test: once the spacing window has elapsed, the same
+    root is a candidate again — pure arithmetic on the stamp, no sleeping."""
+    import time as _time
+
+    import cold_cache_compact  # noqa: PLC0415
+
+    d, spawns = wired
+    root = _project(tmp_path)
+    stale = int(_time.time()) - cold_cache_compact.clear_eval_spacing_seconds() - 1
+    cold_cache_compact.mark_evaluated(Path(root) / ".janitor" / "state", now=stale)
+    monkeypatch.setattr(d.fleet_scan, "gather_fleet", lambda **_k: [_instance(root)])
+
+    d.task_cold_cache_clear()
+
+    assert len(spawns) == 1, "a stamp older than the spacing must not veto evaluation"
+
+
 def test_no_candidate_logs_a_summary_and_stamps_the_outcome(
     wired, monkeypatch, tmp_path: Path
 ) -> None:

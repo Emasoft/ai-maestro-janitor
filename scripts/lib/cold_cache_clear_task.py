@@ -122,6 +122,7 @@ def run_once() -> int:
     skip_self = 0
     skip_no_state_dir = 0
     skip_cooldown = 0
+    skip_recent = 0
     for inst in fleet:
         # `inst.project_root`, NOT `getattr(inst, "root", "")`. The first draft used the getattr
         # form with a default, and `Instance` has no `root` — so it would have read "" for every
@@ -146,6 +147,13 @@ def run_once() -> int:
             continue
         if cold_cache_compact.clear_in_cooldown(sd, now=now):
             skip_cooldown += 1
+            continue
+        # TRDD-0TM5NDYN: a HOLD writes no cooldown stamp, so without this the same first-in-order
+        # root gets re-picked every beat forever and every other candidate starves. This spaces
+        # RE-EVALUATION regardless of verdict, independent of the cooldown (which only fires on
+        # an actual CLEAR).
+        if cold_cache_compact.evaluated_recently(sd, now=now):
+            skip_recent += 1
             continue
         # KEEP THE WATCHER'S STDOUT (TRDD-UQW5IOAE). It prints exactly the audit line this
         # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus NO_SUMMARY /
@@ -178,6 +186,10 @@ def run_once() -> int:
         argv = [sys.executable, str(watcher), "--project-root", root]
         if shadow:
             argv.append("--dry-run")
+        # Stamp BEFORE the spawn, not after: a spawn failure below must still space out the
+        # retry, or a root whose watcher keeps failing to launch would be re-picked every beat
+        # exactly like the HOLD case this feature exists to fix (TRDD-0TM5NDYN).
+        cold_cache_compact.mark_evaluated(sd, now=now)
         try:
             log_dir = state.log_dir()
             # Explicit, not inherited from log_line's init_state() side effect — an open() that
@@ -208,7 +220,8 @@ def run_once() -> int:
     state.log_line(
         _COMPONENT,
         f"cold-cache-clear: no candidate — active={skip_active} self={skip_self} "
-        f"no-state-dir={skip_no_state_dir} cooldown={skip_cooldown} of {len(fleet)}",
+        f"no-state-dir={skip_no_state_dir} cooldown={skip_cooldown} recent={skip_recent} "
+        f"of {len(fleet)}",
     )
     state.record_outcome(_COMPONENT, "declined:no-candidate")
     return 0

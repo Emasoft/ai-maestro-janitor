@@ -1,9 +1,9 @@
 ---
 trdd-id: 0TM5NDYN
 title: The clear beat re-evaluates the same first fleet candidate every beat, so a HOLD on candidate one starves every other session
-column: dev
+column: testing
 created: 2026-09-02T03:57:41+0200
-updated: 2026-09-02T03:57:41+0200
+updated: 2026-09-02T04:03:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -44,11 +44,13 @@ are different facts (evaluated vs cleared), so two files, per the COQN6KVA lesso
 
 ## Acceptance
 
-- [ ] a root evaluated `< spacing` ago is skipped and counted as `recent`; a root evaluated
+- [x] a root evaluated `< spacing` ago is skipped and counted as `recent`; a root evaluated
       `>= spacing` ago is eligible again; the stamp is written at spawn, before the watcher's
-      verdict is known (test: two beats in a row evaluate two DIFFERENT roots)
-- [ ] a CLEAR still lands the cooldown stamp; `clear_in_cooldown` untouched
-- [ ] `ruff check scripts tests` + `mypy scripts/` + the cold-cache-clear tests green
+      verdict is known — three tests in `tests/test_daemon_cold_cache_clear.py` (two beats
+      evaluate two different roots; `recent=1` in the summary; an old stamp re-qualifies)
+- [x] a CLEAR still lands the cooldown stamp; `clear_in_cooldown` untouched (existing tests)
+- [x] ruff clean, `mypy scripts/` clean (497 files), 47 tests in the three files green —
+      re-run by the approver after the worker's report
 - [ ] after publish + restage: `cold-cache-clear.log` shows `evaluating` lines for at least
       two different roots within four consecutive beats
 
