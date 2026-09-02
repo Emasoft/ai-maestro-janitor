@@ -118,6 +118,10 @@ def run_once() -> int:
         )
         state.record_outcome(_COMPONENT, "declined:watcher-not-staged")
         return 0
+    skip_active = 0
+    skip_self = 0
+    skip_no_state_dir = 0
+    skip_cooldown = 0
     for inst in fleet:
         # `inst.project_root`, NOT `getattr(inst, "root", "")`. The first draft used the getattr
         # form with a default, and `Instance` has no `root` — so it would have read "" for every
@@ -125,15 +129,23 @@ def run_once() -> int:
         # and looks exactly like "no session needed clearing". Attribute access on a known
         # dataclass field is the version that FAILS LOUDLY when the field is renamed.
         root = inst.project_root or ""
-        # `active` means the transcript is ADVANCING — a live turn, i.e. someone (or something)
-        # is working. Clearing that is unrecoverable, and unlike a keystroke it cannot be
-        # deferred-and-retried into safety, so it is a hard skip rather than a wait.
-        if not root or inst.active:
+        # `human_active`, NOT `active` (TRDD-O7UCNNN2): `active` counts a heartbeat cron turn as
+        # activity — correct for session_liveness, but it means an ARMED session's substantive
+        # age never exceeds the ~5-min beat cadence, so `active` is never False and this lane
+        # never evaluates a candidate. `human_active` discounts heartbeat-only turns so an armed
+        # session can still reach idle.
+        if not root or inst.human_active:
+            skip_active += 1
             continue
         if inst.pid in (os.getpid(), gs.daemon_pid()):
+            skip_self += 1
             continue
         sd = Path(root) / ".janitor" / "state"
-        if not sd.is_dir() or cold_cache_compact.clear_in_cooldown(sd, now=now):
+        if not sd.is_dir():
+            skip_no_state_dir += 1
+            continue
+        if cold_cache_compact.clear_in_cooldown(sd, now=now):
+            skip_cooldown += 1
             continue
         # KEEP THE WATCHER'S STDOUT (TRDD-UQW5IOAE). It prints exactly the audit line this
         # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus NO_SUMMARY /
@@ -190,4 +202,13 @@ def run_once() -> int:
             state.log_line(_COMPONENT, f"cold-cache-clear: spawn failed for {root}: {exc}")
             continue
         return 0  # one per beat — see the module docstring
+    # TRDD-O7UCNNN2: a silent `return 0` here is the NDAARSXT shape again — a beat that walked
+    # the whole fleet and found nothing looks identical to a beat that never ran. One summary
+    # line + a stamped outcome makes "declined, and why" observable without a per-instance log.
+    state.log_line(
+        _COMPONENT,
+        f"cold-cache-clear: no candidate — active={skip_active} self={skip_self} "
+        f"no-state-dir={skip_no_state_dir} cooldown={skip_cooldown} of {len(fleet)}",
+    )
+    state.record_outcome(_COMPONENT, "declined:no-candidate")
     return 0

@@ -175,6 +175,11 @@ def _decide(
         pass
 
     idle_s, trailing_enqueues, awaiting_user = fleet_scan.transcript_activity(str(root), now)
+    # TRDD-O7UCNNN2: the gate's idle term must ignore heartbeat-only turns, or an ARMED session
+    # (this watcher's whole audience) can never exceed the ~5-min beat cadence and the 1-hour
+    # floor below is unreachable by construction. `idle_s` (the substantive age) is kept for
+    # logging/comparison only — `human_idle_s` is what feeds the gate.
+    human_idle_s = fleet_scan.human_activity_age(str(root), now)
     # `trailing_enqueues` is deliberately NOT wired into `should_clear_externally` — it is a
     # DIFFERENT signal (the daemon's wedged-session evidence, TRDD-8DR0X08A F2: how many typed
     # commands sat queued and never executed), not a veto for THIS gate. It cannot substitute for
@@ -237,7 +242,7 @@ def _decide(
     # the call is what hid it from mypy. Keep them separate: a composer field can never again
     # reach the gate by being added to the wrong dict.
     gate = {
-        "idle_seconds": idle_s,
+        "idle_seconds": human_idle_s if human_idle_s is not None else idle_s,
         "last_turn_age_s": last_turn_age,
         "ttl_minutes": ec.read_ttl_minutes(sd),
         "seconds_to_next_fire": ec.seconds_until_next_fire(cron, now),
@@ -264,6 +269,11 @@ def _decide(
         **gate,
         "transcript": str(newest) if newest else "",
         "trailing_enqueues": trailing_enqueues,
+        # Both ages kept side by side for diagnosis — TRDD-O7UCNNN2 replaced the substantive
+        # age with the human one as the GATE's input, but seeing them diverge is exactly the
+        # evidence that the fix is doing something on an armed session.
+        "transcript_idle_s": idle_s,
+        "human_idle_s": human_idle_s,
     }
     if on_resume:
         # The RESUME gate, not the abandoned-session one. A session loaded seconds ago can never
@@ -491,7 +501,9 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     two lines instead of indenting the whole flow."""
     verdict, facts = _decide(root, sd, now, force=args.force, on_resume=args.on_resume)
     print(f"VERDICT {'FIRE' if verdict.fire else 'HOLD'} "
-          f"trigger={verdict.trigger or '-'} why={verdict.why}")
+          f"trigger={verdict.trigger or '-'} why={verdict.why} "
+          f"transcript_idle_s={facts.get('transcript_idle_s')} "
+          f"human_idle_s={facts.get('human_idle_s')}")
     if not verdict.fire:
         return 0
 

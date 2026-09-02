@@ -35,12 +35,21 @@ def _daemon():
     return mod
 
 
-def _instance(root: str, *, pid: int = 4242, active: bool = False) -> fleet_scan.Instance:
+def _instance(
+    root: str,
+    *,
+    pid: int = 4242,
+    active: bool = False,
+    human_active: bool | None = None,
+) -> fleet_scan.Instance:
     """A REAL `fleet_scan.Instance`, never a stub.
 
     Load-bearing: a hand-rolled stub with the fields the code happens to read would have
     accepted the `root` typo the module docstring describes. Constructing the real dataclass is
     what makes a renamed field a failure here instead of a silent no-op in production.
+
+    `human_active` defaults to `active` (TRDD-O7UCNNN2) so every pre-existing call site keeps
+    its old meaning unchanged; pass it explicitly to pin the two signals apart.
     """
     return fleet_scan.Instance(
         pid=pid,
@@ -53,6 +62,7 @@ def _instance(root: str, *, pid: int = 4242, active: bool = False) -> fleet_scan
         dispatch_age_s=10,
         active=active,
         transcript_age_s=9000,
+        human_active=active if human_active is None else human_active,
     )
 
 
@@ -317,3 +327,44 @@ def test_the_watchers_verdict_lines_are_kept_not_discarded(monkeypatch, tmp_path
 
     written = (logs / "cold-cache-clear.log").read_text(encoding="utf-8")
     assert "VERDICT HOLD why=transcript-advancing" in written
+
+
+def test_a_heartbeat_armed_session_is_still_evaluated(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """TRDD-O7UCNNN2: `active=True` (a heartbeat cron fire keeps the substantive age fresh)
+    must NOT block evaluation any more — only `human_active` does. This is the fix's whole
+    point: an armed session (`active=True`) that is idle in HUMAN terms (`human_active=False`)
+    is a valid candidate."""
+    d, spawns = wired
+    root = _project(tmp_path)
+    monkeypatch.setattr(
+        d.fleet_scan,
+        "gather_fleet",
+        lambda **_k: [_instance(root, active=True, human_active=False)],
+    )
+
+    d.task_cold_cache_clear()
+
+    assert len(spawns) == 1, "active=True must not veto evaluation — only human_active does"
+
+
+def test_no_candidate_logs_a_summary_and_stamps_the_outcome(
+    wired, monkeypatch, tmp_path: Path
+) -> None:
+    """A beat that walks the whole fleet and finds nothing must say so and why (TRDD-O7UCNNN2)
+    — a silent `return 0` here is the NDAARSXT shape again: indistinguishable from a dead beat."""
+    d, spawns = wired
+    monkeypatch.setattr(
+        d.fleet_scan,
+        "gather_fleet",
+        lambda **_k: [_instance(_project(tmp_path), human_active=True)],
+    )
+
+    d.task_cold_cache_clear()
+
+    assert spawns == []
+    outcome = (d.state.state_dir() / "last-outcome-cold-cache-clear.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "declined:no-candidate" in outcome

@@ -136,6 +136,7 @@ def test_watcher_falls_back_to_the_cache_when_not_staged(
         dispatch_age_s=10,
         active=False,
         transcript_age_s=9000,
+        human_active=False,
     )
     monkeypatch.setattr(fleet_scan, "gather_fleet", lambda now: [inst])
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED", "1")

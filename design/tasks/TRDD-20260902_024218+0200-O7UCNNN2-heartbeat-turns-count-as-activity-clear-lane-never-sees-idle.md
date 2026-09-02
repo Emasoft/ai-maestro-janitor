@@ -1,9 +1,9 @@
 ---
 trdd-id: O7UCNNN2
 title: A heartbeat fire is a substantive transcript turn, so an ARMED session is never idle to the external-clear lane — the daemon can only ever clear sessions the janitor does not run in
-column: dev
+column: testing
 created: 2026-09-02T02:42:18+0200
-updated: 2026-09-02T02:42:18+0200
+updated: 2026-09-02T03:25:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -86,11 +86,16 @@ not prompts.
 
 ## Acceptance
 
-- [ ] `human_activity_age` exists, pure, tested against the record shapes above; liveness
-      diagnosis (`transcript_activity`) byte-for-byte unchanged in behaviour
-- [ ] the clear lane (task pre-filter + watcher gate) uses it; a beat that evaluates nothing
-      logs why and stamps an outcome
-- [ ] `ruff check scripts tests` + `mypy scripts/` + touched tests green
+- [x] `human_activity_age` exists, pure, tested against the record shapes above
+      (`tests/test_fleet_scan_human_activity.py`, human-vs-substantive asserted side by side);
+      `transcript_activity` untouched. LIVE probe before commit: three idle fleet sessions
+      read 764/990/1538 s human-idle while `transcript_activity` showed 100–158 s — the
+      discriminator separates the two on real transcripts, not only on fixtures
+- [x] the clear lane uses it: `run_once` skips on `inst.human_active`, counts skips and logs
+      `no candidate — active=… self=… no-state-dir=… cooldown=… of N` + stamps
+      `declined:no-candidate`; `_decide` feeds the human age to the gate's idle
+- [x] ruff clean, `mypy scripts/` clean (497 files), 126 tests in the touched files green —
+      re-run by the approver
 - [ ] after publish + restage: `cold-cache-clear.log` shows an `evaluating <root>` line for
       an armed session that was idle in HUMAN terms (this closes XCJFCJUX box 4 too)
 

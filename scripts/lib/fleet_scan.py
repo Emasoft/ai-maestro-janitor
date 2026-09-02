@@ -100,6 +100,13 @@ class Instance:
     # question meant for a HUMAN, not dead (TRDD-8IZ8COQ8). Defaulted so pre-existing
     # constructors stay valid.
     awaiting_user: bool = False
+    # TRDD-O7UCNNN2: `active` counts a heartbeat cron fire as activity (by design — it is
+    # substantive liveness evidence session_liveness needs). The external-clear lane needs a
+    # DIFFERENT, stricter measure — was a HUMAN (or agent-typed) turn recent, ignoring
+    # heartbeat-only turns — or an armed session's idle clock can never advance. Defaulted so
+    # pre-existing constructors stay valid; `active` itself is unchanged.
+    human_active: bool = True
+    human_age_s: int | None = None
 
 
 #: Every `claude` verb that starts a ONE-SHOT CLI invocation rather than an interactive REPL
@@ -722,6 +729,78 @@ def substantive_age_from_tail(
     return fallback_age, trailing_enqueues
 
 
+def _is_prompt_record(rec: dict) -> bool:
+    """A ``type: user`` record that is NOT a tool result — i.e. an actual prompt (human-typed
+    or heartbeat-fired), never the tool-result echo that also arrives as ``type: user``."""
+    if rec.get("type") != "user":
+        return False
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, dict) and first.get("type") == "tool_result":
+            return False
+    return True
+
+
+def human_activity_age_from_tail(
+    tail: list[str], *, now: int, fallback_age: int | None
+) -> int | None:
+    """Seconds since the newest HUMAN (or agent-typed) transcript turn — a stricter cousin of
+    ``substantive_age_from_tail`` that ALSO discounts a whole heartbeat cron turn, not just its
+    queue-bookkeeping line (TRDD-O7UCNNN2).
+
+    A heartbeat fire is a ``type: user`` record carrying ``scheduledFireId`` at its top level;
+    Claude Code answers it with a real substantive turn (assistant content, tool calls), so
+    ``substantive_age_from_tail`` — correctly, for ITS purpose — sees an armed session as
+    perpetually active. The external-clear lane needs the opposite bias: an armed session must
+    still be able to reach "idle" between beats.
+
+    Pure. Walks the tail backwards, grouping records into turns delimited by PROMPT records
+    (``_is_prompt_record``); a turn whose prompt is heartbeat-scheduled is skipped WHOLE (its
+    records don't count, tracked but discarded); the first turn whose prompt is NOT scheduled
+    returns the age of that turn's newest record (the first non-queue record seen since the
+    previous prompt boundary). Tail exhausted while every turn seen was scheduled → the age of
+    the OLDEST scheduled prompt (conservative: "at least this idle"). No prompt at all →
+    degrade to ``substantive_age_from_tail``'s age (unknown shape ⇒ count as activity, same
+    fail-safe bias as that function)."""
+    import token_history
+
+    group_newest_ts: int | None = None
+    oldest_scheduled_ts: int | None = None
+    saw_prompt = False
+    for raw in reversed(tail):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            rec = None
+        if not isinstance(rec, dict):
+            continue  # unparseable line: neither a prompt nor a usable timestamp
+        if rec.get("type") == "queue-operation":
+            continue  # bookkeeping only, same exclusion as substantive_age_from_tail
+        ts = token_history.parse_ts(rec.get("timestamp", ""))
+        if group_newest_ts is None and ts is not None:
+            group_newest_ts = ts
+        if _is_prompt_record(rec):
+            saw_prompt = True
+            if "scheduledFireId" in rec:
+                if ts is not None:
+                    oldest_scheduled_ts = ts  # walking backward ⇒ last write wins = oldest
+                group_newest_ts = None  # this turn is discarded; start a fresh group
+                continue
+            if group_newest_ts is not None:
+                return max(0, now - group_newest_ts)
+            if ts is not None:
+                return max(0, now - ts)
+            return fallback_age
+    if not saw_prompt:
+        sub_age, _ = substantive_age_from_tail(tail, now=now, fallback_age=fallback_age)
+        return sub_age
+    if oldest_scheduled_ts is not None:
+        return max(0, now - oldest_scheduled_ts)
+    return fallback_age
+
+
 # Tools whose ONLY possible answer comes from a person, so an unanswered call to one is
 # proof the session is blocked on a human — never on a machine that will finish on its own.
 # Deliberately a NAME allow-list, not "any unanswered tool_use": an unanswered call also
@@ -841,6 +920,39 @@ def transcript_activity(root: str, now: int) -> tuple[int | None, int, bool]:
     if sub_age is not None:
         candidates.append(sub_age)
     return (min(candidates) if candidates else None), trailing, awaiting
+
+
+def human_activity_age(root: str, now: int) -> int | None:
+    """Seconds since this project's newest HUMAN (or agent-typed) transcript turn, ``None``
+    when no transcript exists (TRDD-O7UCNNN2). Mirrors ``transcript_activity``'s file
+    selection exactly (same slug, same newest-file tail read, same min-over-siblings), but
+    scores the newest file with ``human_activity_age_from_tail`` instead of the substantive
+    walk — so a heartbeat-armed session can still be diagnosed idle, without touching
+    ``transcript_activity`` itself (that stays the liveness signal ``session_liveness`` needs
+    unchanged)."""
+    import memory_scopes
+
+    slug = memory_scopes.project_slug(os.path.realpath(root))
+    tdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
+    ages: list[tuple[int, str]] = []
+    try:
+        for name in os.listdir(tdir):
+            if name.endswith(".jsonl"):
+                age = _age(os.path.join(tdir, name), now)
+                if age is not None:
+                    ages.append((age, os.path.join(tdir, name)))
+    except OSError:
+        return None
+    if not ages:
+        return None
+    ages.sort()
+    newest_mtime_age, newest_path = ages[0]
+    tail = _tail_lines(newest_path)
+    human_age = human_activity_age_from_tail(tail, now=now, fallback_age=newest_mtime_age)
+    candidates = [a for a, _ in ages[1:]]
+    if human_age is not None:
+        candidates.append(human_age)
+    return min(candidates) if candidates else None
 
 
 def transcript_age(root: str, now: int) -> int | None:
@@ -1321,6 +1433,8 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
             continue
         tr_age, trailing_enqueues, awaiting_user = transcript_activity(root, now)
         active = tr_age is not None and tr_age < ACTIVE_FRESH_S
+        human_age = human_activity_age(root, now)
+        human_active = human_age is not None and human_age < ACTIVE_FRESH_S
         if sweep_stale_rate_limit_s is not None and sweep_stale_rate_limit(
             root, now=now, max_age_s=sweep_stale_rate_limit_s
         ):
@@ -1363,6 +1477,8 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
                 transcript_age_s=tr_age,
                 trailing_enqueues=trailing_enqueues,
                 awaiting_user=awaiting_user,
+                human_active=human_active,
+                human_age_s=human_age,
             )
         )
     if blocked:
