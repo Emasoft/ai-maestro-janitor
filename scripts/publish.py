@@ -901,6 +901,113 @@ def _called_by_publish_orchestrator(root: Path) -> bool:
     return False
 
 
+# TRDD-QW7K3M2V: this repo is public and 3 personal e-mail addresses already sit in
+# 12 files in history (owner ruling: don't scrub the past, just stop it recurring).
+# So the lint only ever looks at lines ADDED since the remote default branch, and
+# the allow-list below must never contain an actual address.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_EMAIL_ALLOWED_DOMAIN_SUFFIXES = (
+    "users.noreply.github.com", ".local", ".test", ".example", ".invalid", ".localhost",
+)
+_EMAIL_ALLOWED_DOMAINS_EXACT = {"example.com", "example.org", "example.net"}
+_EMAIL_ALLOWED_LOCAL_PARTS = {"noreply", "no-reply"}
+
+
+def _added_lines_since(root: Path, base_ref: str) -> list[tuple[str, int, str]]:
+    """Every line HEAD adds relative to `base_ref`, as (path, new_line_no, text).
+
+    Hand-parses `git diff --unified=0` (three-dot merge-base range) instead of
+    pulling in a diff-parsing dependency — the unified-diff hunk-header format
+    (`@@ -a,b +c,d @@`) is small and stable. Binary files and file deletions are
+    skipped (no `text` to lint).
+    """
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--unified=0", "--no-color", f"{base_ref}...HEAD"],
+            capture_output=True, text=True, cwd=str(root), timeout=60,
+            env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if r.returncode != 0 or not r.stdout:
+        return []
+    out: list[tuple[str, int, str]] = []
+    current_path: str | None = None
+    next_line_no = 0
+    for line in r.stdout.splitlines():
+        if line.startswith("+++ "):
+            fpath = line[len("+++ "):]
+            current_path = None if fpath == "/dev/null" else fpath.removeprefix("b/")
+            continue
+        if line.startswith("Binary files"):
+            current_path = None
+            continue
+        if line.startswith("@@"):
+            m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            if m:
+                next_line_no = int(m.group(1))
+            continue
+        if current_path is None or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            out.append((current_path, next_line_no, line[1:]))
+            next_line_no += 1
+    return out
+
+
+def _base_ref_email_addresses(root: Path, base_ref: str) -> set[str]:
+    """Every e-mail address already present anywhere in `base_ref`'s tree.
+
+    Used to avoid re-flagging an address a modified line merely carries forward
+    unchanged (e.g. reformatting a line around an address that was already there
+    pre-existing in the tree isn't "introducing" it). `git grep` searches the ref's
+    tree content directly — no checkout needed. Exit code 1 means no match, not
+    an error; anything else degrades to an empty (permissive-for-old-addresses) set
+    rather than blocking the gate on a grep hiccup.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "grep", "-I", "-h", "-E", _EMAIL_RE.pattern, base_ref],
+            capture_output=True, text=True, cwd=str(root), timeout=30,
+            env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if r.returncode not in (0, 1):
+        return set()
+    return {m.group(0) for m in _EMAIL_RE.finditer(r.stdout)}
+
+
+def _personal_email_hits(
+    lines: list[tuple[str, int, str]], known_addresses: frozenset[str] = frozenset()
+) -> list[tuple[str, int, str]]:
+    """Flag added e-mail addresses whose domain isn't an allow-listed placeholder.
+
+    `known_addresses` (typically `_base_ref_email_addresses(root, base_ref)`) are
+    addresses already present pre-change — a modified line that keeps one of these
+    isn't a NEW disclosure, so it's skipped even though it sits on an added line.
+
+    Returns MASKED addresses only (`f***@domain`) — the gate's own BLOCKED output
+    must never echo a full address, since it can land in a log.
+    """
+    hits: list[tuple[str, int, str]] = []
+    for path, lineno, text in lines:
+        for m in _EMAIL_RE.finditer(text):
+            addr = m.group(0)
+            if addr in known_addresses:
+                continue
+            local, _, domain = addr.rpartition("@")
+            domain_l = domain.lower()
+            if local.lower() in _EMAIL_ALLOWED_LOCAL_PARTS:
+                continue
+            if domain_l in _EMAIL_ALLOWED_DOMAINS_EXACT:
+                continue
+            if any(domain_l.endswith(suf) for suf in _EMAIL_ALLOWED_DOMAIN_SUFFIXES):
+                continue
+            hits.append((path, lineno, f"{addr[0]}***@{domain}"))
+    return hits
+
+
 def run_gate(root: Path) -> int:
     """Pre-push gate: blocks on any quality issue. Returns 0 if clean."""
     cprint(f"\n{BOLD}Pre-push gate checks{NC}\n")
@@ -930,6 +1037,10 @@ def run_gate(root: Path) -> int:
     # candidates return a remote plugin.json, it's a first push and we allow.
     cprint(f"\n{BLUE}[G1] Checking version bump...{NC}")
     local_ver = get_current_version(root)
+    # Hoisted out of the `if local_ver:` block: [G1b] below reads `matched_ref`
+    # on every path, so it must be bound even when there is no local version.
+    remote_ver: str | None = None
+    matched_ref: str | None = None
     if local_ver:
         # Try origin/HEAD first (most reliable), then explicit main/master
         candidates: list[str] = []
@@ -948,8 +1059,6 @@ def run_gate(root: Path) -> int:
         for fallback in ("origin/main", "origin/master"):
             if fallback not in candidates:
                 candidates.append(fallback)
-        remote_ver: str | None = None
-        matched_ref: str | None = None
         for ref in candidates:
             try:
                 r = subprocess.run(
@@ -976,6 +1085,40 @@ def run_gate(root: Path) -> int:
             return 1
         else:
             cprint(f"  {GREEN}Version bump OK: {remote_ver} → {local_ver} (via {matched_ref}){NC}")
+
+    # Gate 1b: Personal-address lint — TRDD-QW7K3M2V. The repo is public and
+    # already carries 3 personal addresses in history (owner ruled: don't scrub
+    # the past, just block it recurring), so this only checks lines ADDED since
+    # the remote default branch, never the whole tree.
+    cprint(f"\n{BLUE}[G1b] Personal-address lint...{NC}")
+    base_ref: str | None = matched_ref if local_ver and matched_ref else None
+    if base_ref is None:
+        for fallback in ("origin/main", "origin/master"):
+            try:
+                rv = subprocess.run(
+                    ["git", "rev-parse", "--verify", fallback],
+                    capture_output=True, text=True, cwd=str(root), timeout=10,
+                    env=_readonly_git_env(),
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if rv.returncode == 0:
+                base_ref = fallback
+                break
+    if base_ref is None:
+        cprint(f"  {YELLOW}No remote ref found (first push?) — skipping personal-address lint.{NC}")
+    else:
+        known_addrs = frozenset(_base_ref_email_addresses(root, base_ref))
+        email_hits = _personal_email_hits(_added_lines_since(root, base_ref), known_addrs)
+        if email_hits:
+            for hit_path, hit_line, masked in email_hits:
+                cprint(f"  {RED}BLOCKED: personal e-mail address introduced — {hit_path}:{hit_line} {masked}{NC}")
+            cprint(
+                f"  {RED}Redact it the way the repo already does, e.g. `fmu***`; "
+                f"addresses already in history are out of scope for this gate.{NC}"
+            )
+            return 1
+        cprint(f"  {GREEN}No personal address introduced since {base_ref}.{NC}")
 
     # Gate 2: Lint with ruff. MANDATORY — missing scripts/ dir is a BLOCK.
     cprint(f"\n{BLUE}[G2] Linting...{NC}")
