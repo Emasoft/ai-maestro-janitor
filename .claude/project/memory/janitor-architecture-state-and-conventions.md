@@ -2,7 +2,7 @@
 name: janitor-architecture-state-and-conventions
 description: "where should persistent state be written / what is CLAUDE_PLUGIN_ROOT vs CLAUDE_PLUGIN_DATA / where does janitor state live / what is the ONE SANCTIONED EXCEPTION folder ~/.claude/janitor-control / which project rules PRRD pointers shape the architecture / is the legacy janitor-global-state dir safe to delete / which code still touches the legacy janitor-global-state dir / does the daemon still read the legacy global-state folder / arm did not stick on an un-migrated host / a cleared STOP was resurrected by the migration / what is the runtime installed tree layout / show me the on-disk layout of the janitor"
 ocd: 2026-06-13
-lmd: 2026-09-01
+lmd: 2026-09-02
 metadata:
   node_type: memory
   type: project
@@ -120,6 +120,11 @@ $PROJECT/.janitor/state/                                              per-sessio
     desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json · last-resume.ts (TTL-aware cadence, TRDD-0QQX9H0G)
 cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param exists) → fires the stub
 ```
+
+
+^ATOM-0EBD-0XQE [desc: "the launchd-run daemon carries NONE of settings.json's env block — every CLAUDE_PLUGIN_OPTION_* it read from os.environ sat at its default until 3.4.4; daemon-lane code reads options via state.plugin_", keywords: daemon_ignores_CLAUDE_PLUGIN_OPTION lever_true_in_settings.json_but_daemon_still_shadow launchd_daemon_has_no_settings_env plugin_option_not_applied_to_daemon setting_changed_but_daemon_behaviour_unchanged external_clear_still_dry-run_after_enabling ps_-E_daemon_environment_empty state.plugin_option plugin_options_env_child_env where_does_the_daemon_read_its_options, type: project, trdd: TRDD-XCJFCJUX, ocd: 2026-09-02, lmd: 2026-09-02]
+
+Measured 2026-09-02 (TRDD-XCJFCJUX): the OS-keepalive daemon (launchd) had ZERO `CLAUDE_PLUGIN_OPTION_*` variables in its environment (`ps -E` snapshot; the plist has no `EnvironmentVariables`; `launchctl getenv` empty) while `~/.claude/settings.json` had `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED: "true"` — so the external clear ran in `[SHADOW — dry-run]` on every beat and every other daemon knob (intervals, DAEMON_ENABLED, COLD_CACHE_CLEAR_SHADOW, …) silently sat at its default since the keepalive became the production path. Claude Code injects the settings env block into SESSIONS only; a heartbeat-spawned daemon inherits it, a launchd-spawned one does not. Since 3.4.4: daemon.py loads the file's options into a dict mirror at import (gated on `_KEEPALIVE_INSTANCE`, before the interval constants are computed) and refreshes on mtime each tick; ALL daemon-lane option reads go through `state.plugin_option(name)` (real env wins) and every child spawn merges `state.plugin_options_env()`. Rule for new code on the daemon path: never `os.environ.get("CLAUDE_PLUGIN_OPTION_…")` directly — use the accessor, or a launchd host ignores the knob. Diagnose the class with: `ps -E -p <daemon pid> -o command= > snap.txt; grep -c CLAUDE_PLUGIN_OPTION_ snap.txt`.
 
 ## Governed by
 
