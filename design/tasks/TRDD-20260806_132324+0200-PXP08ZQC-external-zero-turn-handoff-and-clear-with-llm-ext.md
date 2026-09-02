@@ -1,11 +1,10 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: blocked
-pre-block-column: todo
-blocked-by: [TRDD-O7UCNNN2]
+column: testing
+blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-02T03:09:00+0200
+updated: 2026-09-02T03:56:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project

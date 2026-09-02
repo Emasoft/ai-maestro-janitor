@@ -1,11 +1,10 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: blocked
-pre-block-column: testing
-blocked-by: [TRDD-O7UCNNN2]
+column: testing
+blocked-by: []
 created: 2026-08-23T16:45:05+0200
-updated: 2026-09-02T03:09:00+0200
+updated: 2026-09-02T03:56:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
