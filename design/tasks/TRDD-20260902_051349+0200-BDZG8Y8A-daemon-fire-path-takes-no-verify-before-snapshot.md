@@ -3,7 +3,7 @@ trdd-id: BDZG8Y8A
 title: the daemon fire path takes no handoff_clear_verify before-snapshot, so an automated clear can never produce the PASS table
 column: testing
 created: 2026-09-02T05:13:49+0200
-updated: 2026-09-02T05:52:05+0200
+updated: 2026-09-02T05:57:19+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -29,6 +29,18 @@ ordering and the fail-open. Boxes 1–2 closed on that; box 3 needs the fix INST
 runs the cached 3.4.7) and then one automated fire — so it is gated on the next `publish.py`
 release + daemon restage. Not publishing for this alone: the next fire still cannot summarize
 until TRDD-QZVAEWQH is ruled on, so batch this into that release.
+
+**Daemon-shaped probe PASSED (2026-09-02 05:56, review-fork settling command)** — the unit test
+alone could not tell CLAUDE_PROJECT_DIR from a conftest override, so the harness was run the way
+the daemon will run it: `env -i` (bare launchd-like env), the framework `python3.12` the plist
+names, cwd inside THIS git repo, `CLAUDE_PROJECT_DIR` pointing at a throwaway dir, the context
+probe option set to `""`. Both the repo harness and the cached 3.4.7 copy wrote the json under
+the throwaway dir with the probe's cron id and `context_source=unknown` (no agentlensPro call),
+and this repo's own `handoff-clear-verify.json` was untouched. Root precedence is
+`state._resolve_project_root`: `CLAUDE_PROJECT_DIR` first, then override, git toplevel, cwd. The
+daemon beat runs `sys.executable <latest cache scripts>/external_handoff_clear.py --project-root`
+(`cold_cache_clear_task.py:111-186`), so `_SCRIPTS` resolves to the cache tree, which ships the
+harness and `lib/state.py` alongside — the fix cannot ship dark for a path reason.
 
 **NEXT ACTION:** after the next publish installs, read the `after` table the resumed session's
 cue produces and check its `before.ts` sits seconds before the matching `fired:` line in
