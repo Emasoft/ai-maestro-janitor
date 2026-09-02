@@ -1,20 +1,21 @@
 ---
 trdd-id: XCJFCJUX
 title: The launchd-run daemon never sees CLAUDE_PLUGIN_OPTION_* — every daemon knob, including the external-clear lever, is stuck at its default
-column: testing
+column: blocked
+pre-block-column: testing
 created: 2026-09-02T00:58:19+0200
-updated: 2026-09-02T02:03:00+0200
+updated: 2026-09-02T03:09:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: []
+blocked-by: [TRDD-O7UCNNN2]
 npt: []
 eht: []
 relevant-rules: []
-external-refs: [TRDD-NDAARSXT, TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
+external-refs: [TRDD-NDAARSXT, TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18, TRDD-O7UCNNN2]
 implementation-commits: [dec760ed, 19a52dc8, d6c82d60]
 ---
 
@@ -44,6 +45,15 @@ from this spec; verified first-hand before commit.
 
 **NEXT ACTION:** verify the worker's diff (`grep -rn 'os.environ\[' scripts/lib/state.py` must
 be empty), run ruff/mypy/tests, commit, re-run `uv run scripts/publish.py --patch`.
+
+### ⛔ 2026-09-02 03:09 — SHIPPED in 3.4.4 (d6c82d60), daemon restaged 02:28:33; box 4 blocked on TRDD-O7UCNNN2
+
+The accessor is live: a probe with the installed 3.4.4 libs run the way the daemon task runs
+gives `enabled() = True` with 6 mirrored options. But box 4 (an `evaluating <root>` line
+WITHOUT `[SHADOW]`) cannot be produced: the same probe shows all 5 fleet instances
+`active=True` at every beat, and TRDD-O7UCNNN2 measured why — a heartbeat fire is a
+substantive turn and `ACTIVE_FRESH_S` equals the heartbeat cadence, so an armed session is
+never idle to the clear lane. Blocked on that card; do NOT re-verify this one's code.
 
 ## Measured 2026-09-02 (not inferred)
 

@@ -4,7 +4,7 @@ title: clear FIRST on any cache-invalidating event, then summarize — the summa
 column: blocked
 pre-block-column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-02T01:06:00+0200
+updated: 2026-09-02T03:09:00+0200
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
@@ -12,7 +12,7 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: user
-blocked-by: [TRDD-XCJFCJUX]
+blocked-by: [TRDD-O7UCNNN2]
 npt: []
 eht: []
 relevant-rules: []

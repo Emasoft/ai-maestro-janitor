@@ -3,9 +3,9 @@ trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
 column: blocked
 pre-block-column: testing
-blocked-by: [TRDD-XCJFCJUX]
+blocked-by: [TRDD-O7UCNNN2]
 created: 2026-08-22T17:43:05+0200
-updated: 2026-09-02T01:21:00+0200
+updated: 2026-09-02T03:09:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high

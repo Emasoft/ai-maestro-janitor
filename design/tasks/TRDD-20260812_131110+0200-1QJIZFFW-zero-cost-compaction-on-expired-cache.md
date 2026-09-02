@@ -3,9 +3,9 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: blocked
 pre-block-column: dev
-blocked-by: [TRDD-XCJFCJUX]
+blocked-by: [TRDD-O7UCNNN2]
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-02T01:04:00+0200
+updated: 2026-09-02T03:09:00+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
