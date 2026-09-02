@@ -786,6 +786,23 @@ def task_oauth_rotator_tick() -> None:
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,
     )
+    # TRDD-NACCL0CB, second incident 2026-09-02 21:41-21:47: the rotator switched at 21:41:03
+    # and the wall landed on the panes between the 21:43 and 21:45 liveness beats; the ESC
+    # fired at 21:45:05 — correct, but the owner had seen the red line for ~2 minutes and had
+    # rotated by hand again. The rotation-ESC pass therefore also runs from THIS 60 s tick
+    # while a rotation is fresh (the per-pane, per-epoch dedupe makes the two callers safe
+    # together), so a wedge that appears after the switch waits at most one tick, not one
+    # liveness beat. Fail-open: a fleet-scan error must never take the rotator tick down.
+    now = int(time.time())
+    if gs.rotation_succeeded_within(_ROTATION_WAKE_WINDOW_S, now=now):
+        try:
+            fleet = fleet_scan.gather_fleet(now=now)
+        except Exception as exc:  # noqa: BLE001 - a scan error must never kill the tick
+            state.log_line("daemon", f"rotation-esc: fleet scan failed on the rotator tick: {exc}")
+            return
+        _rotation_esc_pass(
+            fleet, now, fire=state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED", True)
+        )
 
 
 def task_memory_guard() -> None:

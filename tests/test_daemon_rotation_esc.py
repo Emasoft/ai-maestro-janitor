@@ -200,6 +200,20 @@ def test_dry_run_escs_nothing_and_stamps_nothing(tmp_path, monkeypatch) -> None:
     assert not (sd / daemon.state.DAEMON_ROTATION_ESC_FILE).exists()
 
 
+def test_the_rotator_tick_escs_a_wedged_pane_without_waiting_for_the_liveness_beat(tmp_path, monkeypatch) -> None:
+    """Second 2026-09-02 incident: the wall landed between two liveness beats and the owner
+    rotated by hand in the gap — the 60 s rotator tick must run the ESC pass too."""
+    root = tmp_path / "proj"
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})])
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda: True)
+    monkeypatch.setattr(daemon, "_run_workload", lambda *a, **kw: None)
+    gs.record_rotation_success(int(time.time()))
+    daemon.task_oauth_rotator_tick()
+    assert len(_escs(fired)) == 1, "the tick itself must ESC the wedged pane"
+    daemon.task_session_liveness()
+    assert len(_escs(fired)) == 1, "the liveness beat must not ESC it a second time (per-epoch dedupe)"
+
+
 def _rearm_isolated(monkeypatch) -> None:
     """Isolate the new pre-type guard: the downstream field-busy checks read the real pane."""
     monkeypatch.setattr(daemon.fleet_inject, "command_plan_field_busy", lambda terminal, plan: False)
