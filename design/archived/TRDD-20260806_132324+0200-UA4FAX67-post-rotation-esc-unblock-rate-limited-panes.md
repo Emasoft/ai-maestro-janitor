@@ -1,10 +1,10 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: todo
+column: complete
 blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-03T09:25:00+0200
+updated: 2026-09-03T10:05:20+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -182,7 +182,9 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
       22:18:01 `rotation-esc: FIRED ESC → iterm for ai-maestro-janitor`) and `daemon.log:695-698`
       (2026-09-03T04:10:24-29, matching `rotator.log.1:1172` account switch) — no human keystroke
       visible in either log
-- [ ] harness gap explicitly delegated upstream (#110 cross-referenced)
+- [x] harness gap explicitly delegated upstream (#110 cross-referenced) — ai-maestro#110 is
+      OPEN, filed by this project, and cross-referenced in this card's WHY, task 4, and
+      Pointers sections (`gh issue view 110 --repo Emasoft/ai-maestro` confirmed live 2026-09-03)
 
 ## Pointers
 
@@ -199,3 +201,11 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
   (delegation 2026-09-03 09:58). NACCL0CB's live ESC evidence (`daemon.log.1:9518-9522`,
   `daemon.log:695-698`) IS the live-429-observation this card was waiting on; box 1 closed on
   that proof. Box 2 (#110 upstream) remains open.
+- 2026-09-03T10:05:20+0200 — COMPLETE by janitor-main-session acting for USER (delegation
+  2026-09-03 ~09:10). All 4 acceptance boxes verified: box 1 (live 429→rotate→ESC, NACCL0CB
+  evidence) and box 2 (wake-pass default) were already ticked; box 3 (ESC-only frozen-pane
+  rule) has no unticked box but is preserved by P7WU40G9's test per the STATE block; box 4
+  (harness gap delegated) confirmed live — ai-maestro#110 is OPEN and cross-referenced in
+  this card's own body. No remaining work on this card; box 2 of the original task list
+  (#110 harness primitive) is explicitly NOT ours (janitor#100 split) and stays tracked
+  upstream, not here.
