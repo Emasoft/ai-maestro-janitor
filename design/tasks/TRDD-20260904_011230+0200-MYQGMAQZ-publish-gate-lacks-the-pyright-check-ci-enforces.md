@@ -65,6 +65,15 @@ actually ran (`/tmp/publish6.txt`, the `$` command echoes) against
 | hooks.json validation, dispatch smoke-run, per-hook smoke-run, per-detector strict-run | absent | present |
 | memgrep build + staged-binary run | absent | present |
 
+SCOPE OF THIS MEASUREMENT: the gate column comes from ONE invocation — the
+`--patch` run on `main` of 2026-09-04 — read from that run's own `$` command
+echoes, which is the gate's record of what it executed rather than a reading
+of what it intends to. It is NOT verified invariant across bump types,
+branches, or env overrides; if `publish.py` branches its check set on any of
+those, other paths may differ. The load-bearing claim needs no such
+generalisation: on the run that produced the release CI rejected, the gate
+ran no pyright at all.
+
 So the gate is NOT a superset of CI, and "add pyright" fixes one row of a
 seven-row table. The ruff row matters immediately: the gate lints only
 `scripts/`, and all seven of today's pyright errors were in `tests/` — the
@@ -89,6 +98,19 @@ pushed sha.
 Note this does not conflict with the working rule "after publish.py, do NOT
 sit and watch CI" — that rule governs the operator's attention, not the
 pipeline's ordering. A pipeline that waits costs the human nothing to watch.
+
+## Follow-up noted, not yet acted on
+
+Clearing the 6 `reportOptionalSubscript` errors took five `assert x is not
+None` narrowings in `tests/test_pane_actuate.py`, because `scripts/` was held
+out of scope for that fix. No coverage was lost — those lines already
+subscripted, so a genuine `None` would have raised `TypeError` and the tests
+pass identically before and after, and no test in that file asserts a `None`
+plan. But five copies of one narrowing against `build_step_plan`'s `dict |
+None` is the "enumerating call sites" shape this project keeps getting bitten
+by: if that function cannot return `None` on those paths, the honest fix is
+its ANNOTATION in `scripts/`, and the five asserts are standing in for it.
+Read the five sites and decide before the next publish.
 
 ## Related
 - The 7 errors themselves are being fixed separately; this card is about the GATE, not those errors.
