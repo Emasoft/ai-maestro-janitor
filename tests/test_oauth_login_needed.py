@@ -562,10 +562,13 @@ def test_notify_pushed_high_for_a_48h_bucket_account(tmp_path, monkeypatch, caps
     )
     assert rc == 0
     assert "[oauth-login-needed]" in out
-    assert len(calls) == 1
-    assert calls[0]["sev"] == "HIGH"
-    assert calls[0]["code"] == "OAUTH-LOGIN-NEEDED"
-    assert "soon@x.com" in calls[0]["summary"]
+    # A fresh home also has no topup stamp yet, so the P3c periodic top-up notify
+    # (a distinct OAUTH-LOGIN-TOPUP push, see test_oauth_login_topup.py) fires
+    # alongside this one on a first run — select the acceptance-#1 call by code.
+    login_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-NEEDED"]
+    assert len(login_calls) == 1
+    assert login_calls[0]["sev"] == "HIGH"
+    assert "soon@x.com" in login_calls[0]["summary"]
 
 
 def test_notify_escalates_to_critical_when_expired(tmp_path, monkeypatch, capsys) -> None:
@@ -578,8 +581,9 @@ def test_notify_escalates_to_critical_when_expired(tmp_path, monkeypatch, capsys
         before=lambda home: _write_login_slot(home, "dead@x.com", expires_in_days=-1.0),
     )
     assert rc == 0
-    assert len(calls) == 1
-    assert calls[0]["sev"] == "CRITICAL"
+    login_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-NEEDED"]
+    assert len(login_calls) == 1
+    assert login_calls[0]["sev"] == "CRITICAL"
 
 
 def test_escalation_sig_re_notifies_same_day_when_bucket_worsens(tmp_path, monkeypatch, capsys) -> None:

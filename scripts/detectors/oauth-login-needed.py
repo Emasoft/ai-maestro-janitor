@@ -181,6 +181,30 @@ def _disp(path: Path) -> str:
         return str(path)
 
 
+def _topup_stamp_path(home: Path) -> Path:
+    return home / ".login-topup-last.txt"
+
+
+def _topup_days() -> float:
+    """Cadence (days) of the proactive "top up ALL logins" nudge (TRDD-GZXTSJSR P3c).
+
+    Separate from `_grace_days()` — that one fires REACTIVELY once an account is close
+    to needing a login; this one fires on a flat calendar cadence regardless of whether
+    any single account is currently due, so tokens never approach expiry as a fleet."""
+    return float(state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS"), 7))
+
+
+def _topup_due(home: Path, now: float, every_days: float) -> bool:
+    """True when the periodic top-up nudge is due: no stamp yet, or the stamp is older
+    than `every_days`. A missing/corrupt stamp reads as "due" (fail-open toward nudging,
+    never toward permanent silence)."""
+    try:
+        last = float(_topup_stamp_path(home).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return True
+    return (now - last) >= every_days * 86400
+
+
 def main() -> int:
     state.init_state()
 
@@ -339,6 +363,36 @@ def main() -> int:
             line3 = dedupe.emit_once(seen3, f"stuck-{day}-{kind}", msg3)
             if line3 is not None:
                 print(line3)
+
+    # QUATERNARY nudge (P3c) — proactive "top up ALL your logins" on a flat calendar
+    # cadence, independent of whether any single account is currently flagged above.
+    # Capture-before-crisis: refresh the whole fleet periodically instead of waiting
+    # for individual accounts to become urgent one at a time.
+    #
+    # NOT gated on `supervisor._server_owns_chores()` (P5) — deliberately. That
+    # predicate decides who runs the automatic 60s rotation TICK; a login is a HUMAN
+    # action neither the janitor daemon nor the ai-maestro server can perform for the
+    # user, so the nudge must surface regardless of which side currently owns
+    # rotation. No shared suppression-flag protocol exists on the server side (none
+    # found by grep) — inventing one here would be speculative, so both sides simply
+    # notify; `notify.push`'s own content-hash dedupe + 24h cap already bound how often
+    # the human is actually interrupted if both fire.
+    topup_days = _topup_days()
+    if topup_days > 0 and _topup_due(home, now, topup_days):
+        try:
+            notify.push(
+                sev="HIGH",
+                code="OAUTH-LOGIN-TOPUP",
+                project="oauth-rotator",
+                summary=f"proactive top-up: refresh all {len(facts)} rotator login(s) before any expire",
+                hint="/janitor-capture-all-logins",
+            )
+        except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
+            pass
+        try:
+            state.atomic_write(_topup_stamp_path(home), str(now))
+        except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
+            pass
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

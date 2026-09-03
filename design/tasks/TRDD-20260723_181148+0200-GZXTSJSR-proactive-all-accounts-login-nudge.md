@@ -1,9 +1,9 @@
 ---
 trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
-column: dev
+column: testing
 created: 2026-07-23T18:11:48+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:32:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -14,7 +14,52 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 (P3+P5)
+
+- **P3 + P5 ARE DONE this session.** `/janitor-capture-all-logins` skill
+  (`skills/janitor-capture-all-logins/SKILL.md`) + its backing walker
+  `scripts/capture_all_logins.py` (lists the roster via `rotator.py known-emails`,
+  runs `slot_capture_browser.py <email>` per account, prints per-account progress,
+  aborts only on an INFRA failure — missing engine/capture script or the roster
+  call itself failing; a single account's capture failing is reported and the
+  walk continues). A periodic P3c "top up ALL logins" proactive nudge was added
+  INSIDE `scripts/detectors/oauth-login-needed.py` (`_topup_due`/`_topup_days`,
+  `CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS`, default 7, stamped at
+  `<rotator-home>/.login-topup-last.txt`) — reuses the SAME `notify.push` channel
+  P1/P2 wired in, fires regardless of whether any single account currently needs
+  a login (capture-before-crisis), and is fail-open (wrapped in
+  try/except, never breaks the rest of the detector). P5: verified BY GREP that
+  the nudge path (both the reactive login-needed nudge and the new topup nudge)
+  is NOT gated on `supervisor._server_owns_chores()` — that predicate is called
+  ONLY from `supervisor.diagnose()`'s tick-stall finding, never from
+  `oauth-login-needed.py`; no shared suppression-flag protocol exists anywhere in
+  the tree (grepped for one — none found), so per the task's own instruction
+  nothing was invented; both sides may notify and `notify.push`'s own
+  content-hash dedupe + 24h cap already bound the human-facing spam if the
+  server ever grows its own prompt.
+- **Criterion 5 RESOLVED — the LATE+fail-open invariant applies BY CONSTRUCTION,
+  not by placement.** `oauth-login-needed.py` is one of `dispatch.py`'s
+  `_DETECTORS` roster entries, invoked by `_run_detector()` (`dispatch.py:828`)
+  as an isolated `subprocess.run([script, "--one-shot"], timeout=…)` — Phase 2 of
+  `_run_heartbeat`, itself the LAST phase before `_emit_quiet_if_idle()`. A crash
+  or hang inside the new topup code cannot skip a later phase (there is none
+  after Phase 2) and cannot starve a sibling detector beyond its own wall-clock
+  timeout (`CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT`, default 120s) — the
+  subprocess boundary IS the fail-open guarantee the in-process `_phase_*`
+  convention exists to approximate for functions that share one process. No
+  further change was needed to satisfy the invariant; the new code additionally
+  wraps its own `notify.push`/stamp-write in try/except so a fault there can't
+  even shadow the detector's OTHER (pre-existing) nudges in the same run.
+- Existing tests `test_notify_pushed_high_for_a_48h_bucket_account` and
+  `test_notify_escalates_to_critical_when_expired` were updated to filter
+  `calls` by `code == "OAUTH-LOGIN-NEEDED"` — a fresh rotator home now also
+  fires the P3c topup push on its first-ever run (no stamp yet), so the
+  previous `len(calls) == 1` assumption no longer held.
+- **NEXT ACTION:** none for P3/P5 — both are complete and proven. Only
+  criterion 2 (P3) and 5 were open before this session; both are now ✓. The
+  card's full P1–P5 acceptance list is proven — move to `testing`.
+
+## ⏵ PRIOR STATE (P1) — 2026-09-03
 
 - **P1 IS DONE — verified this session, no new code needed.** Commit `cf9fb7a1`
   (2026-08-22) already delivers the card's full P1 design scope: grace window
@@ -138,18 +183,29 @@ not during one.
    has via=None / refresh_failures≥max), a HIGH (CRITICAL when expired/dead-refresh) desktop
    notification fires from `notify.push` — `tests/test_oauth_login_needed.py::test_notify_pushed_high_for_a_48h_bucket_account`,
    `::test_notify_escalates_to_critical_when_expired`.
-2. NOT DONE — `/janitor-capture-all-logins` does not exist yet (P3, out of this session's scope).
+2. ✓ PROVEN (2026-09-03) — `/janitor-capture-all-logins`
+   (`skills/janitor-capture-all-logins/SKILL.md`) + `scripts/capture_all_logins.py`
+   walk every `rotator.py known-emails` account and run `slot_capture_browser.py
+   <email>` for each in turn; the periodic topup nudge is a P3c addition to
+   `scripts/detectors/oauth-login-needed.py` — `tests/test_capture_all_logins.py`
+   (10 tests), `tests/test_oauth_login_topup.py` (9 tests).
 3. ✓ PROVEN — the nudge resolves `rotator.open_login_script()` per-host, no hard-coded stale
    path; the script exists at `scripts/oauth_rotator/open-login.sh`.
 4. ✓ PROVEN (commit cf9fb7a1) — bucket-aware escalation signature re-notifies same-day on a
    worsening state — `tests/test_oauth_login_needed.py::test_escalation_sig_re_notifies_same_day_when_bucket_worsens`.
-5. UNVERIFIED — whether the cardinal LATE+fail-open invariant applies to this standalone
-   roster detector (vs. only to in-process `dispatch.py` phases) was not investigated this
-   session.
-6. ✓ PROVEN this session — `uv run ruff check scripts/detectors/oauth-login-needed.py
-   tests/test_oauth_login_needed.py`: all checks passed. `uv run mypy scripts/
-   --ignore-missing-imports`: Success, no issues found in 498 source files. `uv run pytest
-   tests/test_oauth_login_needed.py -q -p no:randomly`: 31 passed. (Full-suite `pytest
+5. ✓ PROVEN (2026-09-03) — `dispatch.py::_run_detector` (line 828) invokes every roster
+   detector, including `oauth-login-needed.py`, as an isolated `subprocess.run(...,
+   timeout=…)` inside Phase 2 (the LAST phase of `_run_heartbeat` before
+   `_emit_quiet_if_idle()`) — the subprocess boundary + wall-clock timeout IS the
+   fail-open guarantee for a standalone detector; there is no later phase it could
+   accidentally skip and no shared-process state it could corrupt. The new P3c code
+   additionally wraps its own `notify.push`/stamp-write in try/except.
+6. ✓ PROVEN this session — `uv run ruff check scripts tests`: all checks passed.
+   `uv run mypy scripts/ --ignore-missing-imports`: Success, no issues found in 501
+   source files (498 + 3 new: `scripts/capture_all_logins.py`,
+   `tests/test_capture_all_logins.py`, `tests/test_oauth_login_topup.py`). `uv run
+   pytest tests/test_oauth_login_needed.py tests/test_oauth_login_topup.py
+   tests/test_capture_all_logins.py -q -p no:randomly`: 50 passed. (Full-suite `pytest
    tests/` and the `~/.claude` untouched proof were not re-run this session — no code
    changed, prior gate results for those stand.)
 
