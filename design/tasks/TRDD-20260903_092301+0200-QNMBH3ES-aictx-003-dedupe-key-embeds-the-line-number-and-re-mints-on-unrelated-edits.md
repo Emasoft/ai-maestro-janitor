@@ -3,7 +3,7 @@ trdd-id: QNMBH3ES
 title: AICTX-003 dedupe key embeds the line number so an unrelated edit above the match re-mints a byte-identical proposal
 column: testing
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T10:20:00+0200
+updated: 2026-09-03T11:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -78,16 +78,21 @@ carries the line.
       Proof: `test_dedupe_key_differs_for_two_distinct_matches_in_the_same_file` — distinct keys,
       `len(_proposals(...)) == 2` after both raises.
 - [x] Existing open AICTX-003 proposals keyed by line are retracted or re-keyed on the next
-      detector pass (state the mechanism; no silent duplicates left behind). Mechanism: the new
-      `where` format (`digest:rel:rule_id`) is structurally disjoint from the retired
-      `rel:line` format — a stale proposal's stored key can never again appear in the `live` set
-      `reconcile` builds from the current pass, so it is unconditionally withdrawn on the very
-      next fire (`issue_catalog.reconcile`, `p.key not in live` → `retract`). Proof:
-      `test_an_old_line_keyed_proposal_is_withdrawn_on_the_next_reconcile` — opens a proposal
-      under the old `rel:line` key, calls `reconcile` with the new-format live set, asserts the
-      old proposal is the one withdrawn and `design/proposals/` is empty afterward. No re-key
-      path exists or is needed: the finding simply re-proposes under its stable key on the next
-      `raise_issue`.
+      detector pass (state the mechanism; no silent duplicates left behind). Mechanism:
+      `main()` calls `issue_catalog.migrate_legacy_where(_CODE, new_key_by_rel)` BEFORE
+      `reconcile` on every fire. It re-keys, in place, every pending proposal whose stored
+      `where` still matches the retired `rel:line` shape and whose `rel` has a live finding
+      this fire — rewriting its `ticket-dedupe-key:` frontmatter line to the new
+      `digest:rel:rule_id` key, so `reconcile` then finds it already in `live` and leaves it
+      alone (no re-mint churn). A legacy entry whose `rel` has no live finding this fire is a
+      dead artifact and is deleted directly — never through `ticket_proposal.retract`, which
+      would assert the finding was seen-then-cleared, a claim the old key format cannot back.
+      Proof: `test_migrate_legacy_where_rekeys_live_findings_and_drops_vanished_ones_without_retract`
+      — one still-present old-keyed proposal ends up rewritten with the new key, one vanished
+      old-keyed proposal is removed from `design/proposals/`, and `ticket_proposal.retract` is
+      never called for either, across the migration pass AND the follow-up `reconcile` call.
+      (`test_an_old_line_keyed_proposal_is_withdrawn_on_the_next_reconcile` still covers the
+      standalone `reconcile`-only path with no migration step in front of it.)
 
 ## Approval log
 

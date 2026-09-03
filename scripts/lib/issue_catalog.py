@@ -808,6 +808,65 @@ def reconcile(
     return withdrawn
 
 
+_LEGACY_WHERE_RE = re.compile(r"^[^:]+:\d+$")
+
+
+def migrate_legacy_where(
+    code: str,
+    new_key_by_rel: dict[str, str],
+    *,
+    project_dir: str | None = None,
+) -> tuple[int, int]:
+    """One-shot re-key of proposals still carrying a pre-content-addressed `{rel}:{line}` dedupe
+    key (TRDD-QNMBH3ES). Returns (migrated, dropped).
+
+    `reconcile()` treats "absent from the live set" as "the finding is gone" — correct for the new
+    content-addressed keys, but a legacy-keyed entry for a finding that is STILL THERE would look
+    absent too (its key never appears in a live set built from the new scheme) and get retracted,
+    only to be re-proposed moments later as a "new" finding. So this runs first: an entry whose
+    `rel` the caller says is still live gets rewritten to that finding's new key IN PLACE; one whose
+    `rel` has no live match is a dead artifact of the old scheme and is deleted directly — never
+    through `ticket_proposal.retract`, which would write "WITHDRAWN BY THE JANITOR" and assert the
+    finding was seen and cleared, a claim this code cannot actually back (the old key never told us
+    which rule fired, so a caller-side "still live" miss here is not proof the finding is gone).
+    """
+    prefix = f"{code}:"
+    migrated = 0
+    dropped = 0
+    for _scope, path in ticket_proposal.trdd_common.trdd_files("proposals", project_dir):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        key = ticket_proposal._frontmatter(text).get("ticket-dedupe-key", "")
+        if not key.startswith(prefix):
+            continue
+        where = key[len(prefix) :]
+        if not _LEGACY_WHERE_RE.match(where):
+            continue  # already new-shape, or not this migration's shape at all
+        rel = where.rsplit(":", 1)[0]
+        new_key = new_key_by_rel.get(rel)
+        if new_key:
+            new_text = re.sub(
+                r"(?m)^ticket-dedupe-key: .*$",
+                f"ticket-dedupe-key: {new_key}",
+                text,
+                count=1,
+            )
+            try:
+                path.write_text(new_text, encoding="utf-8")
+            except OSError:
+                continue
+            migrated += 1
+        else:
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            dropped += 1
+    return migrated, dropped
+
+
 def issue_domain(code: str) -> str:
     """The domain a code resolves to, or `""` for an unknown code. For docs + tests."""
     issue = ISSUE_CATALOG.get(code)

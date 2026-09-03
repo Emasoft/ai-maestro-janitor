@@ -300,6 +300,12 @@ def _dedupe_where(rel: str, f: acp.Finding) -> str:
     MUST call this identically: a mismatch would retract every live proposal on the next fire
     (`issue_catalog.reconcile` keys via `_finding_key(..., "")` = `code:where`).
     """
+    if not f.matched_text:
+        # An empty span hashes to the same digest for every such finding in a file+rule, so two
+        # genuinely distinct matches would silently collapse into one dedupe key and one would
+        # vanish from the board. A `Finding` with no matched text is a producer bug, not a real
+        # finding — fail loud instead of minting a colliding key.
+        raise ValueError(f"AICTX-003: empty matched_text for {rel} rule {f.rule_id!r}")
     digest = hashlib.sha1(f.matched_text.encode("utf-8")).hexdigest()[:12]
     return f"{digest}:{rel}:{f.rule_id}"
 
@@ -637,6 +643,18 @@ def main() -> int:
             _NAME,
             f"{provenance_skipped} {_CODE} raise(s) skipped — verified-local-only "
             f"provenance (janitor#214)",
+        )
+
+    # One-shot migration off the pre-TRDD-QNMBH3ES `{rel}:{line}` dedupe-key shape (janitor
+    # QNMBH3ES review finding): without this, every legacy-keyed proposal is absent from the
+    # new-shape live set below and `reconcile` would retract it, only for the loop above to
+    # re-mint the identical proposal moments later — one fire of pure churn per host.
+    new_key_by_rel = {rel: f"{_CODE}:{_dedupe_where(rel, f)}" for rel, f in findings}
+    migrated, dropped = issue_catalog.migrate_legacy_where(_CODE, new_key_by_rel)
+    if migrated or dropped:
+        state.log_line(
+            _NAME,
+            f"{_CODE}: migrated {migrated} legacy line-keyed entries, dropped {dropped}",
         )
 
     for uid in issue_catalog.reconcile(_CODE, [_dedupe_where(rel, f) for rel, f in findings]):
