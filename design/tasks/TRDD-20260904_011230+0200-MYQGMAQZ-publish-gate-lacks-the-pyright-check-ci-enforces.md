@@ -106,11 +106,17 @@ None` narrowings in `tests/test_pane_actuate.py`, because `scripts/` was held
 out of scope for that fix. No coverage was lost — those lines already
 subscripted, so a genuine `None` would have raised `TypeError` and the tests
 pass identically before and after, and no test in that file asserts a `None`
-plan. But five copies of one narrowing against `build_step_plan`'s `dict |
-None` is the "enumerating call sites" shape this project keeps getting bitten
-by: if that function cannot return `None` on those paths, the honest fix is
-its ANNOTATION in `scripts/`, and the five asserts are standing in for it.
-Read the five sites and decide before the next publish.
+plan. Stated precisely, because the repetition is the whole argument: FOUR of the
+five are the same narrowing on `fired[0][1]` in four different tests, and the
+fifth is structurally different (`hard_plan`, i.e. `fired[-1][1]`, in a test
+that first asserts an exact fire count). So it is four copies plus one, not
+five copies — still the "enumerating call sites" shape this project keeps
+getting bitten by. If `build_step_plan` cannot return `None` on those paths,
+the honest fix is its ANNOTATION in `scripts/` and the four are standing in
+for it. Read the sites and decide before the next publish.
+
+(Five asserts clear six pyright errors because the one at line 88 narrows two
+adjacent subscripts of the same expression — the counts differ legitimately.)
 
 ## Related
 - The 7 errors themselves are being fixed separately; this card is about the GATE, not those errors.
