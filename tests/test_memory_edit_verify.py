@@ -1485,6 +1485,26 @@ def test_body_minus_lessons_does_not_raise_on_an_inline_heading_mention():
     assert "mentioned here inline" in out.lower()
 
 
+def test_body_minus_lessons_ignores_fenced_example_heading():
+    """W9BWHGS3: a page whose ```yaml teaching example CONTAINS the heading line as a fenced
+    example must count as ONE real section, not two — the raw-body regex saw the fenced copy
+    as a second full-line heading and refused every consolidate touching memory-system.md."""
+    page = (
+        "# Page one\n\n"
+        "Fact one is a reasonably long body fact about the first page here.\n\n"
+        "```yaml\n"
+        "---\n"
+        "frontmatter: example\n"
+        "---\n"
+        "## Notes and lessons learned\n"
+        "```\n\n"
+        "## Notes and lessons learned\n[^1]: the real lesson.\n"
+    )
+    out = v._body_minus_lessons(page)  # must not raise
+    assert "fact one" in out.lower()
+    assert "the real lesson" not in out.lower()
+
+
 def test_fact_tokens_preserved_noop_passes_when_numeric_unit_line_wraps():
     """The WN7M829Y editorial-pass defect (2026-08-02): a numeric-unit phrase that
     LINE-WRAPS between number and unit ("3\\ndays") used to be extracted with a

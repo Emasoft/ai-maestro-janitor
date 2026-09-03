@@ -319,7 +319,14 @@ def _body_minus_lessons(text: str) -> str:
     # at that mention, leaving later facts unchecked in sources and false-failing
     # results. The multi-heading raise below keys on the SAME full-line anchoring,
     # so an inline mention never trips it (only a genuine second section does).
-    matches = list(re.finditer(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", body))
+    # janitor#W9BWHGS3: match on the FENCE-MASKED body, not the raw one — a page
+    # teaching the heading syntax inside a ```yaml example line was counted as a
+    # real second section, refusing every consolidate that touched it. Masking
+    # preserves offsets (see _mask_code_fences), so the match spans still slice
+    # the ORIGINAL body correctly.
+    matches = list(
+        re.finditer(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", _mask_code_fences(body))
+    )
     if len(matches) > 1:
         raise ValueError(
             f"_body_minus_lessons received text with {len(matches)} "
