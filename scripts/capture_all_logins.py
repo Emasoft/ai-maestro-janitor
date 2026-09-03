@@ -4,8 +4,11 @@ sequence — the "top up all logins" flow the `/janitor-capture-all-logins` skil
 drives (TRDD-GZXTSJSR P3).
 
 Lists the roster via `rotator.py known-emails` (the same source the reauth flow
-uses — state.json's slot index, keychain-agnostic), then runs
-`slot_capture_browser.py <email>` for each account in turn, printing progress.
+uses — state.json's slot index plus any legacy unindexed `slots/*.json`,
+keychain-agnostic; root resolution honours `CLAUDE_ROTATOR_HOME` exactly like
+`supervisor._slot_facts` so the two can never diverge on the SAME env —
+TRDD-GZXTSJSR F4), then runs `slot_capture_browser.py <email>` for each account
+in turn, printing progress.
 
 Assumes each account already has a saved claude.ai session (from
 `/janitor-refresh-cc-logins`'s `open-login.sh` step) — this script MINTS OAuth

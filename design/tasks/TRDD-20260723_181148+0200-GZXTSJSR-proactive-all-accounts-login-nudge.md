@@ -3,7 +3,7 @@ trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
 column: testing
 created: 2026-07-23T18:11:48+0200
-updated: 2026-09-03T09:51:01+0200
+updated: 2026-09-03T11:11:20+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -63,11 +63,29 @@ eht: []
     `detector_name="oauth-login-needed"` and
     `var_name="CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS"` so a bad env value logs
     instead of silently reverting to the default.
-  - **F4 (OPEN, deferred)** — the walker roster
-    (`known-emails` = slots ∪ live_email) vs `_slot_facts` (slots ∪ legacy
-    unindexed) can diverge under `CLAUDE_ROTATOR_HOME`; `rotator.py` ~L2534-2535
-    comments vs the walker's `env -u CLAUDE_PLUGIN_DATA` comments may contradict —
-    NOT investigated this session, still needs a pick-one-and-fix-the-comment pass.
+  - **F4 (FIXED, 2026-09-03)** — confirmed a REAL divergence, not just a comment
+    mismatch: `cmd_known_emails` read the module-level `ROOT` (computed once at
+    import from `_rotator_root()`, which never consults `CLAUDE_ROTATOR_HOME`),
+    while `_slot_facts`'s callers (`oauth-login-needed.py`,
+    `oauth-cookie-reminder.py`) resolve root via `configured_rotator_home()`,
+    which honours `CLAUDE_ROTATOR_HOME`. Under that env var (the tests' / a
+    standalone seed-login setup's isolated root) the walker's roster silently
+    diverged from the reauth-flow's — real slots seeded only under the override
+    were invisible to `known-emails`. Fixed `cmd_known_emails`
+    (`scripts/oauth_rotator/rotator.py`) to resolve root the same way
+    `configured_rotator_home()` does, and to fold in legacy unindexed
+    `slots/*.json` stems (the same fallback `_slot_facts` applies), so the
+    roster is always a superset of what `_slot_facts` would report for the same
+    env. `load_state()` now takes an optional `state_file` override for this.
+    Updated the stale/incomplete comments in `capture_all_logins.py`'s module
+    docstring and `cmd_known_emails`'s own docstring to state the real
+    invariant. Tests:
+    `tests/test_oauth_rotator.py::test_known_emails_follows_claude_rotator_home_override`
+    +
+    `tests/test_oauth_rotator.py::test_known_emails_includes_legacy_unindexed_slot_files`.
+    The `rotator.py` ~L2534-2535 comments cited in the original F4 note turned
+    out to be about `_invoke_slot_capture`'s env-inheritance (`CLAUDE_PLUGIN_DATA`),
+    unrelated to this roster divergence — no contradiction there to fix.
   - **F5 (OPEN, deferred, needs `scripts/daemon.py`)** — move the topup push
     daemon-side per the original P2 design intent (the DAEMON is the human channel;
     `oauth-login-needed.py` currently calls `notify.push` directly from the

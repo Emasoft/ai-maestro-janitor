@@ -1742,6 +1742,58 @@ def test_configured_rotator_home_none_when_absent(
     assert rotator.configured_rotator_home() is None
 
 
+def test_known_emails_follows_claude_rotator_home_override(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """TRDD-GZXTSJSR F4: before this fix, `cmd_known_emails` always read the module-level
+    ROOT (import-time, env-blind), while `configured_rotator_home()` — the resolver
+    `supervisor._slot_facts`'s callers use — honours `CLAUDE_ROTATOR_HOME`. Seeding a
+    real slot ONLY under the override (never under ROOT) reproduces the divergence: the
+    walker's roster must follow `CLAUDE_ROTATOR_HOME` exactly like `_slot_facts` would,
+    or it silently lists an empty/wrong roster while real slots sit untouched."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path / "root-should-be-ignored")
+    override = tmp_path / "override"
+    override.mkdir()
+    (override / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}, "live_email": None}))
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(override))
+    assert rotator.cmd_known_emails() == 0
+    assert capsys.readouterr().out.splitlines() == ["a@x.com"]
+
+
+def test_known_emails_falls_back_to_canonical_when_override_has_no_state_json(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """G6 regression: `CLAUDE_ROTATOR_HOME` must win ONLY when it actually holds a
+    state.json — exactly like `configured_rotator_home()` — or `cmd_known_emails` reads
+    the (empty) override dir while `supervisor._slot_facts` reads canonical, silently
+    listing an empty roster while the real slots sit untouched under canonical."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    data = tmp_path / "data" / rotator._JANITOR_DATA_DIRNAME
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    canonical = data / "oauth-rotator"
+    canonical.mkdir(parents=True)
+    (canonical / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}, "live_email": None}))
+    override = tmp_path / "override"
+    override.mkdir()  # exists, but carries NO state.json
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(override))
+    assert rotator.cmd_known_emails() == 0
+    assert capsys.readouterr().out.splitlines() == ["a@x.com"]
+
+
+def test_known_emails_includes_legacy_unindexed_slot_files(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """`known-emails` folds in `slots/*.json` stems not yet reflected in the state index —
+    the same legacy-plaintext fallback `supervisor._slot_facts` applies — so the walker's
+    roster is always a superset of what `_slot_facts` would report."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
+    (tmp_path / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}, "live_email": None}))
+    slots_dir = tmp_path / "slots"
+    slots_dir.mkdir()
+    (slots_dir / "b@x.com.json").write_text("{}")
+    assert rotator.cmd_known_emails() == 0
+    assert capsys.readouterr().out.splitlines() == ["a@x.com", "b@x.com"]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TRDD-7PYTX4E9 — daemon blind-spot fixes (F1 source-aware identity, F2 beacon,
 # F3 ACL partners, F4 tick-completion stamp, F5 reconcile pin bug)

@@ -1063,14 +1063,19 @@ def expires_in_h(blob: dict) -> float | None:
 _DEFAULT_STATE: dict[str, object] = {"live_email": None, "live_fp": None, "slots": {}}
 
 
-def load_state() -> dict:
+def load_state(state_file: Path | None = None) -> dict:
     """Read the state index with corruption recovery (TRDD-7100178d, Pillar 2). The
     raw bytes come via `integrity.read_or_restore`, which serves the primary when its
     `.sha256` sidecar matches, else restores from the verified `.bak`, else returns
     None. A None (both copies unrecoverable) or a non-dict / JSON-garbage payload
     falls back to the empty default — never crashes the tick. A pre-integrity
-    state.json (no sidecar yet) is trusted as-is, so this is backward-compatible."""
-    raw = integrity.read_or_restore(STATE_FILE)
+    state.json (no sidecar yet) is trusted as-is, so this is backward-compatible.
+
+    `state_file` defaults to the module's own STATE_FILE (ROOT-derived at import).
+    `cmd_known_emails` passes an explicit override so it can honour
+    `CLAUDE_ROTATOR_HOME` the same way `configured_rotator_home()` (and therefore
+    `supervisor._slot_facts`) does — TRDD-GZXTSJSR F4."""
+    raw = integrity.read_or_restore(state_file if state_file is not None else STATE_FILE)
     if raw is None:
         return dict(_DEFAULT_STATE)
     try:
@@ -2849,17 +2854,43 @@ def cmd_live_email() -> int:
 
 
 def cmd_known_emails() -> int:
-    """Print every known account email (live + all slots), one per line.
+    """Print every known account email (live + all slots + legacy unindexed slot
+    files), one per line.
 
     reauth.py uses this list to detect a *positive* wrong-account match on the
     consent page (if the page shows a known email that is NOT the intended one,
-    abort before clicking Authorize).
+    abort before clicking Authorize). `capture_all_logins.py` uses it as the
+    walker's roster.
+
+    Root resolution (TRDD-GZXTSJSR F4): honours `CLAUDE_ROTATOR_HOME` exactly like
+    `configured_rotator_home()` does, so this roster can never diverge from what
+    `supervisor._slot_facts(root, ...)` reports for the SAME env — before this fix
+    `known-emails` always read the module ROOT (import-time, env-blind) while
+    `_slot_facts`'s callers resolve through `configured_rotator_home()`, so a
+    `CLAUDE_ROTATOR_HOME` override (the tests' / a standalone seed-login setup's
+    isolated root) made the walker silently list the WRONG (or empty) roster while
+    the real slots sat under the override, untouched. Also folds in `slots/*.json`
+    stems not yet reflected in the state index — the same legacy-plaintext fallback
+    `_slot_facts` applies — so this roster is always a superset of what
+    `_slot_facts` would report.
     """
-    state = load_state()
+    # G6: match `configured_rotator_home()` exactly — `CLAUDE_ROTATOR_HOME` wins only when it
+    # actually holds a state.json, else fall through to the canonical root. The prior
+    # unconditional `Path(env_home) if env_home else ROOT` diverged from `_slot_facts`'s
+    # resolution whenever the override dir existed but was empty (no state.json): this roster
+    # read the empty override while `_slot_facts` read canonical — the exact divergence F4
+    # claimed to have closed, just on the OTHER resolver.
+    env_home = os.environ.get("CLAUDE_ROTATOR_HOME", "").strip()
+    root = configured_rotator_home() or (Path(env_home) if env_home else ROOT)
+    state = load_state(root / "state.json")
     emails = set(state.get("slots", {}).keys())
     live = state.get("live_email")
     if live:
         emails.add(live)
+    slots_dir = root / "slots"
+    if slots_dir.is_dir():
+        for f in slots_dir.glob("*.json"):
+            emails.add(f.stem)
     for e in sorted(emails):
         print(e)
     return 0
