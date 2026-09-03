@@ -917,10 +917,14 @@ def repair_defect(text: str) -> str:
     # `superseded-atom-no-delimiter-heading` / `superseded-atom-above-delimiter`).
     # Safe to flag for the same TRDD-3SOO1RWE reason: the repair skill now performs
     # the verbatim move-below-the-delimiter fix, landing in the same change as this.
+    # KEY-ONLY view, for the same measured reason as the retro-lesson precheck: an atom
+    # whose `desc:` describes superseded-atom handling quotes `status:superseded` as prose,
+    # and matching that would report a live atom as misplaced-retired — dispatching a repair
+    # chore with nothing to repair. Both callers of this regex must strip quoted values.
     sup_idx = [
         i for i, ln in enumerate(lines)
         if (m := memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln))
-        and _SUPERSEDED_STATUS_RE.search(m.group(2))
+        and _SUPERSEDED_STATUS_RE.search(_props_without_quoted_values(m.group(2)))
     ]
     if sup_idx:
         heading = next(
@@ -1017,6 +1021,27 @@ _SUPERSEDED_STATUS_RE = re.compile(r"status\s*:\s*supers?e+ded")
 # The canonical readability delimiter (SSOT spelling: memgrep's superseded_heading_line).
 _SUPERSEDED_HEADING = "## Superseded"
 
+# A DOUBLE-QUOTED prop VALUE, e.g. the `desc:"…"` summary. Blanked out before any prop
+# KEY is looked for, because a value is prose and may legitimately contain the very text
+# a key-search is hunting.
+_QUOTED_PROP_VALUE_RE = re.compile(r'"[^"]*"')
+
+
+def _props_without_quoted_values(props: str) -> str:
+    """The marker's prop block with every quoted VALUE blanked, so a search finds only KEYS.
+
+    MEASURED FALSE POSITIVE, 2026-09-03. `wikimem-retrieval-engine.md#ATOM-B9G7-XSR8`
+    documents memgrep's superseded-filtering behaviour, so its `desc:` legitimately reads
+    `"memgrep default-excludes status:superseded atoms from search …"`. Searching the raw
+    prop string for `status:superseded` matched that PROSE and reported the atom as retired
+    without a forward pointer — dispatching a retro-lesson chore that then found nothing.
+    A precheck that fires on prose costs a whole agent run per false positive, which is the
+    opposite of what a cheap gate is for.
+
+    Blanking rather than deleting keeps every offset and delimiter intact, so a key search
+    over the result cannot accidentally join two neighbouring props into one token."""
+    return _QUOTED_PROP_VALUE_RE.sub(lambda m: '"' + " " * (len(m.group(0)) - 2) + '"', props)
+
 
 def retro_lesson_has_work(
     root: Path,
@@ -1061,7 +1086,12 @@ def retro_lesson_has_work(
             m = memory_edit_verify._ATOM_MARKER_PROPS_RE.match(ln)
             if not m:
                 continue
-            props = m.group(2)
+            # Both searches run over the KEY-ONLY view: a `desc:` value is prose and may
+            # quote either token verbatim (measured — see _props_without_quoted_values).
+            # The pointer check needs it just as much as the status check: a desc reading
+            # "…set superseded-by: to the lesson id…" would otherwise mark a genuinely
+            # pointer-less atom as already converted, hiding real work instead of inventing it.
+            props = _props_without_quoted_values(m.group(2))
             superseded = bool(_SUPERSEDED_STATUS_RE.search(props))
             has_pointer = bool(re.search(r"supers?e+ded-by\s*:", props))
             if superseded and not has_pointer:

@@ -1059,6 +1059,45 @@ def test_retro_lesson_has_work_accepts_the_superseeded_misspelling(tmp_path):
     assert mcp.retro_lesson_has_work(tmp_path) is True
 
 
+def test_retro_lesson_has_work_ignores_status_text_inside_a_quoted_desc(tmp_path):
+    """An atom whose `desc:` PROSE quotes `status:superseded` is not itself superseded.
+
+    Measured false positive 2026-09-03: `wikimem-retrieval-engine.md#ATOM-B9G7-XSR8`
+    documents memgrep's superseded-filtering, so its desc legitimately contains the
+    phrase. Matching it dispatched a retro-lesson agent that found nothing to do — a
+    precheck exists to make that dispatch cheap, so a false fire costs a whole agent run.
+    """
+    _shaped(
+        tmp_path,
+        "a.md",
+        body='^live [desc: "memgrep excludes status:superseded atoms from search", keywords: k]\nBody.',
+    )
+    assert mcp.retro_lesson_has_work(tmp_path) is False
+
+
+def test_retro_lesson_has_work_ignores_pointer_text_inside_a_quoted_desc(tmp_path):
+    """The mirror case, which fails the OTHER way: desc prose naming `superseded-by:`
+    must not read as a real forward pointer, or a genuinely pointer-less superseded atom
+    is reported converted and its real work is HIDDEN rather than invented."""
+    _shaped(
+        tmp_path,
+        "a.md",
+        body='^old [status:superseded, desc: "set superseded-by: to the lesson id", keywords: k]\nBody.',
+    )
+    assert mcp.retro_lesson_has_work(tmp_path) is True
+
+
+def test_repair_defect_ignores_status_text_inside_a_quoted_desc(tmp_path):
+    """`repair_defect` shares the regex and had the same flaw — a desc quoting the status
+    reported `superseded-misplaced` and dispatched a repair chore with nothing to repair."""
+    page = _shaped(
+        tmp_path,
+        "a.md",
+        body='^live [desc: "memgrep excludes status:superseded atoms from search", keywords: k]\nBody.',
+    )
+    assert mcp.repair_defect(page.read_text(encoding="utf-8")) != "superseded-misplaced"
+
+
 def test_retro_lesson_has_work_false_on_empty_and_missing_dir(tmp_path):
     """An empty or non-existent corpus has no retro work (not an error)."""
     assert mcp.retro_lesson_has_work(tmp_path) is False
