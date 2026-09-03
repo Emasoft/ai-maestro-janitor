@@ -3,7 +3,7 @@ trdd-id: RTRS704K
 title: decide and document unblock-when wait-condition re-evaluation semantics in the IND TRDD base — descriptive blockers like owner-decision-x must become machine-checkable
 column: todo
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T09:23:01+0200
+updated: 2026-09-03T09:31:00+0200
 current-owner: janitor-main-session
 task-type: docs
 priority: normal
@@ -54,5 +54,21 @@ Existing descriptive tokens migrate to `unblock-when: decision:<who>` on next to
       issue on Emasoft/ai-maestro (no direct edits to that repo).
 
 ## Approval log
+
+- 2026-09-03T09:23:01+0200 — filed under USER delegation 2026-09-03 (~09:10, "decide yourself,
+  you can replace me even in human review columns") by janitor-main-session.
+
+## Constraints (advisor review 2026-09-03)
+
+- `issue:<owner/repo#N> closed` must NOT hit the network per card per fire. Evaluate it from
+  the snapshot `_open_issues_bit` already keeps (`dispatch.py:2824-2828`); treat a predicate
+  naming an issue in another repo as `decision:` until a cross-repo snapshot exists.
+- `file:`/`log:` predicates on a PROJECT card are a scope-leak vector — the card is
+  git-tracked and pushed, so an absolute or out-of-repo path leaks local layout to every
+  cloner. Allow only repo-relative paths.
+- "`blocked-by:` keeps only TRDD/issue references" must cite and supersede the F4IBIDB6
+  accommodation at `scripts/lib/trdd_common.py:581-590` (`has_blocked_by_value` deliberately
+  accepts non-TRDD-shaped blockers because most real blockers on this board aren't cards) —
+  the rule text change needs to say explicitly how that accommodation is retired or narrowed.
 
 ## Notes and lessons learned

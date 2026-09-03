@@ -3,7 +3,7 @@ trdd-id: QNMBH3ES
 title: AICTX-003 dedupe key embeds the line number so an unrelated edit above the match re-mints a byte-identical proposal
 column: todo
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T09:23:01+0200
+updated: 2026-09-03T09:31:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -33,11 +33,16 @@ suppressive `refused` disposition shipped for janitor#110 is defeated while the 
 
 ## Fix
 
-Key AICTX-003 on `{rel}:{rule_id}:{sha1(matched_span)[:12]}` — the file, the rule, and a hash of
-the matched text — never the line. Keep the line in `evidence`/the human message so the reader
-can still jump to it. `_finding_key` needs no change if `where` stops carrying the line; verify
-by reading `_finding_key`'s docstring (it warns that a key computed "even slightly differently"
-never retracts) and add the migration note there.
+Change `where` in BOTH `raise_issue` at `scripts/detectors/agent-context-integrity.py:601` AND
+`reconcile` at `scripts/detectors/agent-context-integrity.py:625` in lockstep to
+`{rel}:{rule_id}:{sha1(matched_span)[:12]}` — hash BEFORE a long `rel`, since `_fields` caps
+`where` at 200 chars (`issue_catalog.py:559`/`574`). Keep the line in `evidence`/the human
+message so the reader can still jump to it. Do NOT add a separate `dedupe_key` while `:625`
+stays line-shaped: `issue_catalog.reconcile` keys via `_finding_key(..., "")` = `code:where`
+(`issue_catalog.py:799`), so a mismatched `where` between the two call sites would retract
+every live proposal on the next fire. The lockstep change to both call sites IS the
+acceptance-#3 migration — old line-keyed entries drop out of `live` once `where` no longer
+carries the line.
 
 ## Acceptance
 

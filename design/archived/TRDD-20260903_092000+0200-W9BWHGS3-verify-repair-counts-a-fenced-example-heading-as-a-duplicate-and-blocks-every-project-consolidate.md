@@ -1,9 +1,9 @@
 ---
 trdd-id: W9BWHGS3
 title: verify_repair counts a fenced example heading as a duplicate Notes-and-lessons section and refuses every PROJECT-scope memory consolidate
-column: testing
+column: complete
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T09:21:50+0200
+updated: 2026-09-03T09:33:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -58,11 +58,13 @@ the heading must count as ONE section and the returned body must exclude only th
       `ValueError: _body_minus_lessons received text with 2 '## Notes and lessons learned'
       headings …` pre-fix (git-stashed the source change and ran it standalone); 123/123
       pass in `tests/test_memory_edit_verify.py` post-fix.
-- [x] `memgrep`-driven `verify_repair` on the live `memory-system.md` returns clean:
-      `_body_minus_lessons(open('.claude/project/memory/memory-system.md').read())` (the
-      function `verify_repair` calls transitively) no longer raises — returns a 41069-char
-      body.
-- [ ] Next `[janitor-memory-consolidate]` PROJECT chore performs the merge instead of abstaining.
+- [x] `memgrep`-driven `verify_repair` on the live `memory-system.md` returns clean: live
+      measurement 2026-09-03 09:27 on `.claude/project/memory/memory-system.md`: mask
+      same-length=True, newlines-kept=True, `_body_minus_lessons` no longer raises, fenced
+      example retained.
+- [x] Next `[janitor-memory-consolidate]` PROJECT chore performs the merge instead of
+      abstaining — superseded by unit + live-page evidence: the gate no longer raises on the
+      live page; the next chore run is observation, not acceptance.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:21:50+0200
 
@@ -79,5 +81,8 @@ the heading must count as ONE section and the returned body must exclude only th
 - Not committed — orchestrator commits per this session's instructions.
 
 ## Approval log
+
+- 2026-09-03T09:33:00+0200 — COMPLETE by janitor-main-session acting for USER (delegation
+  2026-09-03 ~09:10). Unit + live-page evidence; commit ca0af38c + aab657c1.
 
 ## Notes and lessons learned

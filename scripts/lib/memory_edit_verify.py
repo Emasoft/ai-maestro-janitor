@@ -319,7 +319,7 @@ def _body_minus_lessons(text: str) -> str:
     # at that mention, leaving later facts unchecked in sources and false-failing
     # results. The multi-heading raise below keys on the SAME full-line anchoring,
     # so an inline mention never trips it (only a genuine second section does).
-    # janitor#W9BWHGS3: match on the FENCE-MASKED body, not the raw one — a page
+    # TRDD-W9BWHGS3: match on the FENCE-MASKED body, not the raw one — a page
     # teaching the heading syntax inside a ```yaml example line was counted as a
     # real second section, refusing every consolidate that touched it. Masking
     # preserves offsets (see _mask_code_fences), so the match spans still slice

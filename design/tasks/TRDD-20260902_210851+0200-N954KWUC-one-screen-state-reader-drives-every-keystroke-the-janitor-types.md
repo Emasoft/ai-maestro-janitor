@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: dev
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T09:29:00+0200
+updated: 2026-09-03T09:32:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -21,6 +21,15 @@ created-by: USER directive 2026-09-02 21:07
 ---
 
 # One screen-state reader drives every keystroke the janitor types
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+
+- **P1 DONE** — commit `afd3af70`: `scripts/lib/pane_state.py`, 18 fixtures, 31 tests.
+- **NEXT ACTION** — Phase 2: build the policy table `(PaneState, event) → plan` plus
+  closed-loop verify, as its own bounded worker task. No call-site edits in this phase.
+- **P3** — migrate the 14 actuators (the proxy call sites) to route through the policy table.
+- **Gating** — EHTs `NACCL0CB` / `3T9HQEQ6` gate `complete`.
+- **SUPERSEDED — do NOT carry forward** — none.
 
 ## Directive (USER, 2026-09-02 21:07, verbatim)
 
@@ -93,7 +102,7 @@ to the wrong state.
 ## Approval log
 
 - 2026-09-03T09:14:00+0200 — APPROVED design → todo by janitor-main-session acting for USER
-  (USER delegation 2026-09-03 09:58: "you can replace me even in human review columns").
+  (USER delegation 2026-09-03 ~09:10: "you can replace me even in human review columns").
   Rationale: the proposal is the USER's own verbatim directive made concrete; the 14 proxy
   call sites are the measured cause of every mis-typed keystroke this month. Phased delivery:
   P1 `pane_state.py` + anonymized real-frame fixture corpus + tests (no call-site changes);
