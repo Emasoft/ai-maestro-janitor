@@ -306,7 +306,15 @@ def _dedupe_where(rel: str, f: acp.Finding) -> str:
         # vanish from the board. A `Finding` with no matched text is a producer bug, not a real
         # finding — fail loud instead of minting a colliding key.
         raise ValueError(f"AICTX-003: empty matched_text for {rel} rule {f.rule_id!r}")
-    digest = hashlib.sha1(f.matched_text.encode("utf-8")).hexdigest()[:12]
+    # `usedforsecurity=False` is REQUIRED, not cosmetic: bandit B324 fails CI on a bare
+    # `hashlib.sha1(...)` (High severity), and CPV's CI-parity preflight blocks the publish on
+    # it. The flag is also TRUE — this digest content-addresses a dedupe key so it survives an
+    # edit landing above the match; it authenticates nothing and defends against no adversary,
+    # so collision resistance is not a property this call needs. Do not "harden" it to sha256:
+    # the key is truncated to 12 hex chars either way, it is stored in a 200-char-capped
+    # `where` field, and changing the algorithm would re-mint every live proposal on the next
+    # fire — the exact churn TRDD-QNMBH3ES exists to stop.
+    digest = hashlib.sha1(f.matched_text.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
     return f"{digest}:{rel}:{f.rule_id}"
 
 
