@@ -3,7 +3,7 @@ trdd-id: BDZG8Y8A
 title: the daemon fire path takes no handoff_clear_verify before-snapshot, so an automated clear can never produce the PASS table
 column: complete
 created: 2026-09-02T05:13:49+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:25:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -100,6 +100,6 @@ clears too.
 
 ## Approval log
 
-- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+- 2026-09-03T09:25:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
   (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
   verdict CLOSE: box 3 proven on 4 live projects, all `ts` matching `external-clear.log fired:` lines.

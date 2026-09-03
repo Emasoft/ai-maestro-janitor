@@ -3,7 +3,7 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: dev
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:25:00+0200
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
@@ -93,7 +93,7 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 
 ## Approval log
 
-- 2026-09-03T10:05:00+0200 — UNBLOCK (blocked → dev) by janitor-main-session acting for USER
+- 2026-09-03T09:25:00+0200 — UNBLOCK (blocked → dev) by janitor-main-session acting for USER
   (delegation 2026-09-03 09:58). `blocked-by: claude-plugins-validation#222` is CLOSED
   (COMPLETED) — verified `gh issue view 222 --repo Emasoft/claude-plugins-validation --json state`
   → `CLOSED`. Restored to `pre-block-column: dev` per

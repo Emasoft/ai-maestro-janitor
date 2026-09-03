@@ -3,7 +3,7 @@ trdd-id: 38PB1B86
 title: janitor-reload fires on every fleet-update epoch and on every clear-born session — gate it on relevance and seed the ack for clear
 column: complete
 created: 2026-09-02T01:36:47+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:25:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -79,6 +79,6 @@ never answered by this project until 2026-09-02. Re-checked against the tree ton
 
 ## Approval log
 
-- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+- 2026-09-03T09:25:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
   (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
   verdict CLOSE: `dispatch.log:3204,3222,3227` proves the relevance gate live across 3 sessions.

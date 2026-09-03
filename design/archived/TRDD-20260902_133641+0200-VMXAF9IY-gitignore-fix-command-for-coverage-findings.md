@@ -3,7 +3,7 @@ trdd-id: VMXAF9IY
 title: a janitor-gitignore-fix command — the remedy path for gitignore-coverage findings (D5 of TRDD-6WM4BFKF)
 column: complete
 created: 2026-09-02T13:36:41+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:25:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -89,7 +89,7 @@ and hand-running `git rm --cached`, and the advisory is LOW so it never interrup
 
 ## Approval log
 
-- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+- 2026-09-03T09:25:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
   (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
   verdict CLOSE: criteria 1-4 proven by `test_gitignore_fix.py` (5 passed), criterion 5 by
   `janitor-core-files-reference.md:28` + clean ruff/mypy. Follow-up: run the command live on one

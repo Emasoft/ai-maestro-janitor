@@ -3,7 +3,7 @@ trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
 column: complete
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:25:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -228,7 +228,7 @@ filed alongside this proposal.
 - 2026-09-02T11:33:17+0200 — IMPLEMENTED by janitor-main-session in `1e0606b9` (delegated
   review: the lean-worker's diff was re-read and its checks re-run first-hand before the commit).
   `dev` → `testing`: the remaining boxes need the next live automated fire on the published lane.
-- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+- 2026-09-03T09:25:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
   (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
   verdict CLOSE (core): boxes 2-3 proven live (`cold-cache-clear.log:1423-1424`,
   `session-summary.log:5-6`). Follow-ups NOT closed here (left open, own owners): box 4
