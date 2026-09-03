@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: todo
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-03T17:58:00+0200
+updated: 2026-09-03T17:32:07+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -18,9 +18,9 @@ eht: []
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 17:58
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 17:32
 
-- Draft 1 (15:25) blamed a dead OAuth credential; draft 2 (17:32) blamed Remote Control.
+- Draft 1 (15:25) blamed a dead OAuth credential; draft 2 (~17:20) blamed Remote Control.
   Two adversarial reviews + settling reads refuted both: **no TERMINAL API error is recorded
   in any transcript** (a retry wait writes nothing), fires kept stalling AFTER `/login`, and
   the cross-session fire timeline shows NO-STUB fires with RC detached (08:05Z–08:34Z,
@@ -44,13 +44,19 @@ in the prompt of a 0 % context session. Nothing was recovered; the owner had to 
 
 ## Root condition — the heartbeat fire stalls with no terminal error recorded (janitor is a bystander)
 
-- Fire timeline across today's four transcripts (stub `fire epoch=` stamps as the "ran"
-  proof): 110 ran, 36 NO-STUB. Stalls cluster: 08:05Z–08:34Z, 09:13Z, 09:51Z onward, and
-  every fire of this session (27) until the stub was run by hand at 17:14:58. Interactive
-  turns in the same session work throughout.
+- Fire timeline across today's four transcripts, "ran" = a `[s:<session>] fire epoch=`
+  stamp in `.janitor/logs/heartbeat-fires.log` matched by EXACT session id within 90 s
+  (the log is per-project and per-session-tagged, so sibling projects cannot pollute it;
+  today's sessions were sequential): 36 NO-STUB. Stalls cluster: 08:05Z, 08:20Z–08:34Z,
+  09:13Z, 09:51Z–09:55Z, 10:22Z, and every fire of this session from 10:26Z to 14:58Z (27).
+  The two "ran" fires of this session (15:21Z, 15:27Z) reached the model and the stub was run
+  by hand in those turns — a fire that reaches the model executes; the stalled ones never do.
+  Interactive turns in the same session work throughout.
 - A heartbeat prompt carries no `UserPromptSubmit` attachments even when healthy, so "zero
-  hook attachments" is NOT a stall signature (draft 2's error). Remote Control does not
-  discriminate either: NO-STUB fires occur with RC detached and ran fires with RC attached.
+  hook attachments" is NOT a stall signature (draft 2's error). Remote Control is refuted on
+  the trustworthy leg alone: NO-STUB fires occurred with RC provably absent (08:05Z–08:34Z
+  before any RC event; 09:51Z–09:55Z after the 09:31Z detach). "ran with RC attached" is not
+  used as evidence — a stamp proves the stub ran, not that RC was attached at that instant.
 - The 11:5x cluster IS explained: the daemon read `retry attempt 1 on screen` on this pane at
   11:47:43 and 11:56:18 (`rotation-esc`), rotated, and stamped `rate-limited.flag`
   (`daemon.py:2126`, only for panes whose screen showed the banner — correct). A CC retry
@@ -107,7 +113,9 @@ Mechanism, verified in code + transcript:
 
 - [ ] **F0 settle the stall shape (no code):** read the pane capture armed at 17:57 (or
       re-arm: an `osascript` read of this iTerm session's `contents` every 45 s while a fire
-      is stalled). A `Retrying in … attempt N/M` row ⇒ the stall is CC's retry wait and the
+      is stalled; the nudge erases the frame every ~21 min, so read the daemon's own
+      `capture_pane_text` result for the stalled window too — a poll that saw no banner is
+      not proof none was shown). A `Retrying in … attempt N/M` row ⇒ the stall is CC's retry wait and the
       janitor defect is why `retry_wedged` lost to `frozen` (`capture_pane_text` None? regex
       miss on 2.1.259's wording? the advance-across-polls guard never confirming because the
       ESC resets it?) — fold that into F1. No banner, spinner only ⇒ a CC-side stall with no
