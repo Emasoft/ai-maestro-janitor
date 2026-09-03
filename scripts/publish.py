@@ -44,12 +44,12 @@ Gate stages (--gate mode, called by pre-push hook):
        may initiate a push (verified via process ancestry, NOT env vars).
    G1. Version bump check (local vs remote, auto-detects origin/HEAD)
    G2. Lint (ruff)
-   G2b. Copy-paste check (jscpd) — GATE-ONLY. Long described here as "parity
-        with ci.yml Mega-Linter COPYPASTE_JSCPD"; verified 2026-09-04 that no
-        workflow runs Mega-Linter or jscpd (it existed once and was removed).
+   G2b. Copy-paste check (jscpd) — GATE-ONLY. Long described as a CI mirror;
+        verified 2026-09-04 that no workflow runs jscpd, nor the linter suite
+        that once hosted it (it existed once and was removed).
         WARNs+skips if jscpd/npx unavailable so a push is never false-blocked.
-   G2c. Workflow lint (actionlint) — GATE-ONLY. Described here as "parity with
-        ci.yml Lint job"; verified 2026-09-04 that no workflow runs actionlint.
+   G2c. Workflow lint (actionlint) — GATE-ONLY. Long described as a CI mirror;
+        verified 2026-09-04 that no workflow runs actionlint.
         WARNs+skips if actionlint unavailable so a push is never false-blocked.
    G2d. Type-check (mypy scripts/ --ignore-missing-imports) — gate-only, NOT
         parity with ci.yml Lint job (CI runs no mypy, only pyright); mypy
@@ -61,8 +61,9 @@ Gate stages (--gate mode, called by pre-push hook):
         if the toolchain is unavailable so a push is never false-blocked. C/C++ is
         detected + noted (built in CI; no false-block-safe local command) (issue #175)
    G2f. Shell lint (shellcheck) — the CI counterpart is ci.yml's plain
-        "Lint shell scripts" step, NOT the Mega-Linter BASH_SHELLCHECK this
-        line named until 2026-09-04 (no workflow runs Mega-Linter).
+        "Lint shell scripts" step, which covers only two named files; the
+        linter-suite job this line used to cite was removed (verified
+        2026-09-04), so most shell is checked HERE or nowhere.
         WARNs+skips if shellcheck unavailable so a push is never false-blocked
         — the same fail-open shape rejected for pyright in G2; deferred on
         cost, not on principle (TRDD-MYQGMAQZ).
@@ -1158,10 +1159,10 @@ def run_gate(root: Path) -> int:
         return 1
     cprint(f"  {GREEN}Lint passed.{NC}")
 
-    # Gate 2b: Copy-paste detection (jscpd) — PARITY with ci.yml Mega-Linter COPYPASTE_JSCPD.
+    # Gate 2b: Copy-paste detection (jscpd) — GATE-ONLY; no workflow runs it.
     # CI's Lint job fails on jscpd duplication over the .jscpd.json threshold; surface it locally
     # BEFORE the bump/tag/push. jscpd needs Node/npx; if it cannot be obtained, DEGRADE to a
-    # non-blocking WARNING (CI still enforces it) — a green gate then does NOT guarantee green CI
+    # non-blocking WARNING — and NOTHING else enforces it (no workflow runs jscpd),
     # for the copy-paste dimension (issue #143). NEVER false-block a push on a tool-install failure.
     cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, gate-only)...{NC}")
     jscpd_bin = shutil.which("jscpd")
@@ -1173,16 +1174,16 @@ def run_gate(root: Path) -> int:
     base_cmd = [jscpd_bin] if jscpd_bin else ([npx_bin, "--yes", "jscpd"] if npx_bin else None)
     if base_cmd is None:
         cprint(f"  {YELLOW}WARNING: jscpd/npx not found — copy-paste check SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it (.jscpd.json threshold). A green gate does")
-        cprint(f"  {YELLOW}NOT guarantee green CI for the copy-paste dimension (issue #143). Install")
-        cprint(f"  {YELLOW}Node/npx for full local parity.{NC}")
+        cprint(f"  {YELLOW}NOTHING ELSE ENFORCES IT: no workflow runs jscpd or Mega-Linter")
+        cprint(f"  {YELLOW}(verified 2026-09-04). Skipping here means the .jscpd.json threshold")
+        cprint(f"  {YELLOW}is unchecked anywhere. Install Node/npx to actually run it.{NC}")
     else:
         # Probe distinguishes 'jscpd unavailable/uninstallable' (WARN) from 'jscpd ran, found dupes' (BLOCK).
         probe = subprocess.run(base_cmd + ["--version"], cwd=str(root),
                                capture_output=True, text=True, timeout=180)
         if probe.returncode != 0:
             cprint(f"  {YELLOW}WARNING: jscpd could not run (npx fetch/install failed) — SKIPPED locally.{NC}")
-            cprint(f"  {YELLOW}CI's Mega-Linter WILL enforce it; green gate != green CI for copy-paste (issue #143).{NC}")
+            cprint(f"  {YELLOW}NOTHING ELSE ENFORCES IT — no workflow runs jscpd (issue #143).{NC}")
         else:
             cp = subprocess.run(base_cmd + ["."], cwd=str(root), timeout=300).returncode
             if cp != 0:
@@ -1194,7 +1195,7 @@ def run_gate(root: Path) -> int:
     # Gate 2c: Workflow-syntax lint (actionlint) — PARITY with ci.yml Lint job.
     # CI runs actionlint on .github/workflows/*; surface a workflow-syntax error
     # locally BEFORE the bump/tag/push. actionlint is a single static binary; if it
-    # is not on PATH, DEGRADE to a non-blocking WARNING (CI still enforces it) — a
+    # is not on PATH, DEGRADE to a non-blocking WARNING — and NOTHING else enforces it
     # green gate then does NOT guarantee green CI for the workflow-syntax dimension.
     # NEVER false-block a push on a missing-tool case (the issue #143 pattern).
     cprint(f"\n{BLUE}[G2c] Workflow lint (actionlint, gate-only)...{NC}")
@@ -1369,7 +1370,8 @@ def run_gate(root: Path) -> int:
     # Gate 2f: Shell lint (shellcheck) -- issue #175.
     # Self-detecting: runs ONLY when the plugin SHIPS shell scripts (*.sh / *.bash).
     # No shell -> skip. Shell present but `shellcheck` absent -> WARN+skip (CI's
-    # Mega-Linter BASH_SHELLCHECK backstops); shellcheck ran + found issues -> BLOCK.
+    # nothing backstops it — ci.yml's own "Lint shell scripts" step runs shellcheck on
+    # only two files); shellcheck ran + found issues -> BLOCK.
     #
     # Gitignored paths are excluded for the same reason as G2e (2026-08-29): this gate exists
     # for PARITY with CI, and CI only ever sees TRACKED files. Scanning `scripts_dev/` made the
@@ -1389,7 +1391,7 @@ def run_gate(root: Path) -> int:
         cprint(f"  {GREEN}No shell scripts -- skipped.{NC}")
     elif shutil.which("shellcheck") is None:
         cprint(f"  {YELLOW}WARNING: shell scripts present but `shellcheck` not found -- shell lint SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Mega-Linter (BASH_SHELLCHECK) WILL enforce it; green gate != green CI for shell.{NC}")
+        cprint(f"  {YELLOW}CI only shellchecks two named files, so most shell goes UNCHECKED.{NC}")
     else:
         sc = subprocess.run(
             ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
@@ -1743,8 +1745,12 @@ def stage_ci_preflight(root: Path) -> None:
     A MISSING TOOL NEVER BLOCKS THE PUBLISH. `ci-preflight` exits non-zero ONLY
     when a gate actually FAILED; every tool-absent case (no npx, no actionlint,
     no checkov, ...) degrades to a non-blocking WARNING and still exits 0. So a
-    lean machine publishes exactly as before — it just gets less LOCAL coverage,
-    which CI still enforces. Do not "harden" this into a hard tool requirement.
+    lean machine publishes exactly as before — it just gets less LOCAL coverage.
+    Do NOT read that as "CI still enforces it": verified 2026-09-04, of the tools
+    this preflight names only ruff and pyright have a workflow counterpart, so a
+    tool-absent WARNING here usually means the check happened NOWHERE
+    (TRDD-MYQGMAQZ). Do not "harden" this into a hard tool requirement either —
+    that trade is the open question on that card, not a silent change.
     """
     cprint(f"\n{BOLD}[4b/11] CI-parity preflight (remote CPV)...{NC}")
     if not shutil.which("uvx"):
