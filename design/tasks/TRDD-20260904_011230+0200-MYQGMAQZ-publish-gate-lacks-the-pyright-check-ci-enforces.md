@@ -124,6 +124,33 @@ Note this does not conflict with the working rule "after publish.py, do NOT
 sit and watch CI" — that rule governs the operator's attention, not the
 pipeline's ordering. A pipeline that waits costs the human nothing to watch.
 
+## OPEN QUESTION FOR THE USER — should an unavailable pyright block the publish?
+
+As shipped (2026-09-04, `82944b56`), a pyright that CANNOT RUN blocks the publish,
+with no override. That is right for a check whose absence caused this card. But
+`publish.py` is the ONLY sanctioned push path, so a degraded uv/PyPI registry now
+means the project cannot ship at all until it recovers — and the pressure to hand-edit
+`publish.py` would be highest exactly when that is most dangerous.
+
+The argument FOR an override (`PUBLISH_PYRIGHT_UNAVAILABLE_OK=1`, default off,
+registered in `stage_bypass_guard`'s documented exemptions so `[0/11]` prints it):
+line 76's "no exceptions and no bypass flags" is about QUALITY — do not ship known-bad
+code — not about operational controls, and the file already carries
+`CPV_SKIP_GH_AUTH_CHECK=1` for exactly this shape, described in Gate 0's own docstring
+as a bypass "on flaky networks". A tool's CDN being unreachable is a different category
+from "my code has type errors, ship anyway", and only the latter is what line 76 forbids.
+
+The argument AGAINST: both existing Gate 0 exemptions are documented as
+"read-only overrides ... and never skip a gate" — `CPV_SKIP_GH_AUTH_CHECK` skips only a
+PRECHECK, and auth must still work for the real push, so nothing is actually
+unverified. A pyright override WOULD skip a real gate, deferring enforcement to CI on
+the pushed commit — which is precisely the failure this card documents. It would also
+be reachable on a night when someone wants it to be reachable.
+
+NOT decided unilaterally: this is a policy call about the release pipeline, not a
+defect with a right answer, and the fail-closed default is the safe state to leave it
+in while it is undecided.
+
 ## Follow-up noted, not yet acted on
 
 Clearing the 6 `reportOptionalSubscript` errors took five `assert x is not
