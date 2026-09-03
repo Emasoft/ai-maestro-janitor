@@ -47,8 +47,15 @@ its settings anyway).
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/github_config_fix.py" --all
    ```
 
-3. **Show the user the plan and get explicit confirmation.** This step mutates REMOTE repos
-   (Tier-2) — do NOT skip it. Summarize which repos change and how.
+3. **Show the user the plan VERBATIM and get explicit confirmation.** This step mutates REMOTE
+   repos (Tier-2) — do NOT skip it.
+
+   **Relay the script's own output; do not summarize it.** `github_config_fix.py` already
+   builds "the ordered list of human-readable actions this fix would take on one repo"
+   (`github_config_fix.py:211`), so a model-written précis costs tokens to add nothing — and
+   worse, a summary of a mutation plan is where a repo quietly goes missing from the list the
+   user is approving. The user is consenting to REMOTE changes: they should read what the tool
+   will actually do, in the tool's words.
 
 4. **APPLY — only after the user confirms.** Re-run with `--apply`; it strips linear-history,
    applies the baseline idempotent-by-name, then RE-AUDITS each repo and reports whether every
