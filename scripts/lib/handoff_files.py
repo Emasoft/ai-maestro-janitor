@@ -100,8 +100,33 @@ def parse(name: str) -> tuple[str, int, int] | None:
 
 
 def write(state_dir: Path, key: str, text: str, *, now: int | None = None) -> Path:
-    """Write ONE handoff to its own path. Never overwrites: the pid+timestamp make it unique."""
-    path = Path(state_dir) / handoff_name(key, now=now)
+    """Write ONE handoff to its own path, unless this SESSION already wrote the same text.
+
+    Never overwrites: the pid+timestamp make each name unique. That uniqueness is what stops
+    two sessions destroying each other's account (TRDD-5RXBI65T) — but on its own it also
+    meant a session that composed twice got TWO files, and `newest_group` returns the whole
+    group, so `on-session-start._inject_post_clear_handoff` injected the same text more than
+    once into the fresh context.
+
+    MEASURED 2026-09-03 (owner report): session `527e1fd0` wrote a 60,932-byte handoff THREE
+    times (10:38, 10:43, 11:55), byte-identical by md5 — ~183 KB injected to say one thing.
+    Session `0137e720` did it twice, four minutes apart. The duplicate does not merely repeat
+    once: an injected handoff rides forward in context on EVERY later turn of that session.
+
+    So an identical re-write is a NO-OP that returns the existing path. Scoped to THIS key
+    (one session) and to EXACT text: a different session's identical handoff is still its own
+    record, and a CHANGED handoff is always written, because the newer account is the point.
+    """
+    sd = Path(state_dir)
+    for _key, _ts, existing in sorted(
+        (e for e in _entries(sd) if e[0] == key), key=lambda e: e[1], reverse=True
+    ):
+        try:
+            if existing.read_text(encoding="utf-8") == text:
+                return existing  # already recorded by this session — writing it again adds nothing
+        except OSError:
+            break  # unreadable: fall through and write, never lose a handoff to a read error
+    path = sd / handoff_name(key, now=now)
     state.atomic_write(path, text)
     return path
 
