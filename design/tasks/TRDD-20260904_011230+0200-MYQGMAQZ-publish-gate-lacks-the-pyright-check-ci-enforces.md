@@ -86,10 +86,28 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       `CI's Lint job runs ['bandit'] but publish.py's stage_lint does not` — ci.yml
       restored, `git status` clean. A probe that only mutates the TEST proves much less,
       because the failure being guarded against is CI gaining a check.
-      KNOWN LIMIT, deliberately not built now: this compares tool NAMES, so it cannot
-      catch SCOPE divergence — the `ruff scripts/` vs `ruff scripts/ tests/` half of this
-      very incident. The second test covers ruff specifically; a general argv comparison
-      is the follow-up if another tool grows path arguments.
+      KNOWN LIMITS, both deliberate and both worth writing down because a guard's blind
+      spots are what make it trustworthy:
+      1. It compares tool NAMES, so it cannot catch SCOPE divergence — the
+         `ruff scripts/` vs `ruff scripts/ tests/` half of this very incident. The second
+         test covers ruff specifically; a general argv comparison is the follow-up if
+         another tool grows path arguments.
+      2. It only extracts tools invoked through a uv/uvx runner (`uvx`, `uv run`,
+         `uv tool run`) — a BARE command in ci.yml is skipped. Today that is exactly one
+         step, `shellcheck scripts/dispatch.sh git-hooks/pre-push`, and it is NOT a
+         divergence: publish.py Gate 2f runs shellcheck already. But a FUTURE bare-command
+         check added to CI would slip past this test silently, which is the same shape as
+         the defect it exists to catch. Widening `_tool_from_tokens` to treat a bare
+         first token as a tool (with an explicit non-tool skip set) is the fix when that
+         happens.
+
+      SEPARATE FINDING while checking limit 2 — another false parity claim, same family
+      as the mypy one this card already corrected: publish.py's Gate 2f describes itself
+      as "parity with ci.yml **Mega-Linter BASH_SHELLCHECK**", but ci.yml's Lint job runs
+      a plain `shellcheck` step, not Mega-Linter. The gate is doing the right thing
+      against the wrong stated counterpart. Gate 2f also WARNs+skips when shellcheck is
+      unavailable — the fail-open pattern rejected for pyright above; whether it should
+      change is the same open question, with lower stakes.
 - [ ] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
 
 ## The divergence is wider than pyright — measured 2026-09-04
