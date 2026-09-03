@@ -87,6 +87,28 @@ The gap is a semantic handoff for the CURRENT session. That is the only new code
   knowledge that is not yet on disk, which no out-of-process composer can see. Deleting it
   would lose facts, not save tokens.
 
+## Scope widened by owner directive, 2026-09-03
+
+> *"all operations of compacting/handoff/etc. are executed by scripts (via llm-ext if
+> necessary) and never by agents. no token should be used or consumed in the operations
+> related to resume/clear/compact/rearm/etc."*
+
+| operation | reachable at zero model cost? | why |
+|---|---|---|
+| compose a handoff | **yes** | script + `llm-ext`, out of process. The engine exists. |
+| clear / compact trigger | **already is** | `clear_trigger.py` / `compact_trigger.py` are pure scripts. |
+| verify across the clear | **already is** | `handoff_clear_verify.py` is a pure script. |
+| inject the handoff on resume | **already is** | the SessionStart hook injects it before the first turn. |
+| decide to shrink | **yes, not yet wired** | `external_handoff_clear.py` decides in-script, but only a model invoking the skill calls it. A hook or the daemon could. |
+| **the resume turn itself** | **no — and it is not overhead** | a resume exists to hand control back to the model; that turn IS the work. |
+| **re-arm** | **NO — platform limit** | `CronCreate` is a MODEL tool. No script can schedule a cron; the janitor's own bootstrap types `/janitor-arm` into the pane for exactly this reason. Make it RARE (7-day expiry + SessionStart re-plumb), not free. |
+| native `/compact` | **no** | Claude Code internal; it re-reads the window. Avoid it, cannot cheapen it. |
+
+**The honest summary: everything except the resume turn and the re-arm is reachable, and
+most of it is already there but unreachable without a model deciding to call it.** The
+remaining work is therefore mostly WIRING, not building — move the trigger from "a skill the
+model invokes" to "a hook or daemon task that fires on its own".
+
 ## Deliberately NOT in this task
 
 The owner also asked that skills and files stop being reloaded each session, with the agent

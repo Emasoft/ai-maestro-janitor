@@ -11013,8 +11013,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "^ATOM-AAAA-BBBB [desc: \"a summary\", keywords: alpha beta, type: reference, trdd: TRDD-M7BZ4X1Q, ocd: 2026-07-21, lmd: 2026-07-21]"
         );
         // Minimal form: no desc, no type, no trdd — still parseable, keywords + dates only. The
-        // absent backlink must not leave an empty `trdd:` behind (TRDD-YMDE95LT: it WARNs, and a
-        // warning that also corrupted the marker would be worse than the gate it replaced).
+        // absent backlink must not leave an empty `trdd:` behind: it is the COMMON and correct
+        // case (a TRDD is one origin among many — see `warn_missing_trdd`), so a marker corrupted
+        // by an empty key would break ordinary atoms, not exceptional ones.
         let min = build_atom_marker("ATOM-CCCC-DDDD", &kw, None, None, None, "2026-07-21");
         assert_eq!(
             min,

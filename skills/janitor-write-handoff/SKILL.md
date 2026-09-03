@@ -1,6 +1,6 @@
 ---
 name: janitor-write-handoff
-description: Write a rich, agent-authored session handoff before a context compaction, so the next turn re-grounds from YOUR semantic account (what you were doing, the plan, the next action, the traps hit) — not just the mechanical PreCompact snapshot. Invoke at a delicate juncture where the always-on zero-cost pre-compact-handoff hook isn't enough. Usually run by /janitor-compact-context --handoff (which passes --then-compact so this chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff, or by asking to write a handoff before compacting.
+description: Write a rich SEMANTIC session handoff before a context compaction, composed OUT OF PROCESS by the llm-ext CLI from this session's own transcript — so the next turn re-grounds from an account of what was actually happening, not just the mechanical PreCompact snapshot, and the model spends NO tokens authoring it. Usually run by /janitor-compact-context --handoff (which passes --then-compact so this chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff, or by asking to write a handoff before compacting.
 ---
 
 # Janitor write-handoff
@@ -11,15 +11,18 @@ Every compaction already gets a **mechanical, zero-cost** handoff: the
 `pre-compact-handoff.py` PreCompact hook writes `.janitor/state/precompact-handoff.md`
 from on-disk truth (git HEAD + recent commits, working tree, in-flight TRDD `## STATE`
 blocks, VERBATIM recent transcript turns). That is un-hallucinatable but **mechanical** —
-it captures *what the filesystem says*, not *what you were thinking*.
+it captures *what the filesystem says*, not *what was being worked out*.
 
-This skill writes the **semantic** layer on top: a rich, agent-authored handoff to
-`.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` capturing the reasoning a snapshot can't — the plan,
-the next concrete action, the OPEN issues and why each is still unsolved, the
-load-bearing facts, the trap you already wasted time on, the alternative you rejected
-and why. It is **opt-in** because authoring it costs tokens
-(that is exactly why `/janitor-compact-context --handoff` is a separate, deliberate mode
-— see [When to use](#when-to-use)). Reserve it for **delicate junctures**.
+This skill adds the **semantic** layer on top, and it is **also zero model cost**:
+`scripts/compose_agent_handoff.py` summarizes this session's own transcript through the
+`llm-ext` CLI, out of process, and writes
+`.janitor/state/agent-handoff-<session>-<ts>-<pid>.md`.
+
+**It used to make the MODEL author that prose, and that was the whole cost** — tokens
+spent inside the very window about to be shrunk, which is the worst possible place to
+spend them. Owner directive 2026-09-03 retired that: handoff, compaction and clear work
+is done by scripts, via `llm-ext` where intelligence is genuinely needed, never by an
+agent writing prose. The old body of this skill is what that directive was aimed at.
 
 ## When to use
 
@@ -29,65 +32,45 @@ and why. It is **opt-in** because authoring it costs tokens
   mental model, a non-obvious next step — and a plain compaction summary would lose it.
 - The user asks for a handoff before compacting.
 
-Do NOT use it for routine compactions — the free mechanical handoff is enough. Do NOT
-write a bloated handoff: it costs tokens to author now AND to read on resume. Be dense.
+**The old "reserve it for delicate junctures, it costs tokens" caveat is RETIRED** — it
+described the model-authored path. One `llm-ext` call is not a reason to ration this.
+The remaining reason to prefer the free mechanical handoff alone is that a routine
+compaction rarely needs the semantic layer, not that asking for it is expensive.
 
 ## Instructions
 
-1. **Ensure the state dir exists, and compute YOUR handoff's filename** — one command,
-   which prints the exact path to Write to:
+1. **Compose it — ONE command, and you author nothing.**
 
    ```bash
-   mkdir -p "${CLAUDE_PROJECT_DIR}/.janitor/state" && \
-   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/lib/handoff_files.py" --path
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compose_agent_handoff.py" \
+     --project-root "${CLAUDE_PROJECT_DIR:-$(pwd)}"
    ```
 
-   **Never Write to `agent-handoff.md` itself.** That fixed path had several independent
-   writers and no coordination, so one silently destroyed another — measured twice in two
-   days (TRDD-5RXBI65T). Every handoff now lands on its own
-   `agent-handoff-<session>-<timestamp>-<pid>.md`, which is what the printed path gives you.
-   The timestamp and pid are what stop two sessions of THIS project — which share one state
-   dir — from overwriting each other's account. Readers load the whole group in write order,
-   so nothing is lost by there being more than one.
+   The script summarizes THIS session's own transcript through the `llm-ext` CLI —
+   out of process, at zero model cost — then writes the handoff to its own
+   `agent-handoff-<session>-<ts>-<pid>.md` and records the resume directive. Owner
+   directive 2026-09-03: handoff and compaction work is done by scripts, never by an
+   agent authoring prose inside the very window it is about to shrink.
 
-2. **Author a dense, semantic handoff** and Write it to **the path step 1 printed**. Cover, in this order,
-   only what a fresh post-compaction turn genuinely needs:
-   - **Task + TRDD** — what you are doing and the governing `TRDD-<id8>` (so the next
-     turn reads its `## STATE` block, the authoritative record).
-   - **NEXT ACTION** — the ONE concrete next step, runnable as written (a command, an
-     edit, a file to open). Point at durable state, never a volatile in-memory step.
-   - **Plan** — the remaining steps in order, terse.
-   - **Open issues — what is NOT yet solved, and WHY** — the intelligent summary a
-     lossy compaction destroys first. For EACH unresolved issue, bug, or pending
-     decision: one line naming it, one line on WHY it is still open (root cause
-     unknown? blocked on whom/what? deliberately deferred? awaiting the user's
-     call?), and a POINTER to where the full context durably lives — the governing
-     `TRDD-<id8>`, a wikimem page name (recallable later via
-     `memgrep recall "<symptom>" <memdir>`), a Claude Code native memory note, or a
-     GitHub issue `#N`. A pointer costs one line; the content is read on demand —
-     NEVER paste what a reference can carry.
-   - **Load-bearing facts / gotchas** — exact constants, the one command that works,
-     the trap already hit, the rejected alternative + WHY. This is the part the
-     mechanical handoff cannot produce — spend your words here.
-   - **Verify** — how to confirm the work is correct (the test/lint command, the pass
-     criteria).
-   Keep it to what matters. Do NOT restate what `precompact-handoff.md` already has
-   (git log, working tree, verbatim turns) — this handoff COMPLEMENTS that file. The
-   same economy applies to memories: when a wikimem page or memory note already holds
-   the detail, reference it by name instead of restating it.
+   **Never Write a handoff by hand, and never to `agent-handoff.md` itself.** That fixed
+   path had several independent writers and no coordination, so one silently destroyed
+   another — measured twice in two days (TRDD-5RXBI65T). The script goes through
+   `handoff_files.write`, which is the only writer; readers load the whole group in write
+   order, so nothing is lost by there being more than one.
 
-3. **Record the resume pointer** so the post-compaction turn is steered to your handoff.
-   Write ONE line to `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt`:
+2. **Branch on the FIRST WORD of stdout:**
 
-   ```text
-   read the newest .janitor/state/agent-handoff-*.md FIRST (rich agent handoff), then <your one-line resume tail>
-   ```
+   | token | meaning | what to do |
+   |---|---|---|
+   | `HANDOFF_READY <bytes>` | written, directive recorded | proceed to step 3 |
+   | `SUMMARY_FAILED <reason>` | `llm-ext` absent or failing | NOT an error — the free mechanical `precompact-handoff.md` still covers the resume. Say so in one line and proceed. |
+   | `NO_TRANSCRIPT` | no transcript resolved for this project | report it; nothing was written |
 
-   The PostCompact `post-compact-resume.py` hook reads this first line, prepends its own
-   pointer to `precompact-handoff.md`, and the next heartbeat emits `[janitor-resume] …`
-   — so the resumed turn reads BOTH the mechanical and the rich handoff before acting.
+   **Do NOT fall back to authoring the handoff yourself on `SUMMARY_FAILED`.** That is the
+   cost this skill exists to remove, and the mechanical handoff already carries git state,
+   the working tree, the in-flight TRDD `## STATE` blocks, and verbatim recent turns.
 
-4. **Chain to `/compact` — ONLY if invoked with `--then-compact`.** Inspect your
+3. **Chain to `/compact` — ONLY if invoked with `--then-compact`.** Inspect your
    invocation arguments:
    - **Arguments contain `--then-compact`** (the `/janitor-compact-context --handoff
      --hard` path): enqueue `/compact` so it runs when THIS turn ends, then stop. Run:
@@ -97,7 +80,7 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
      ```
 
      The trigger's default is soft/enqueue (no ESC, TRDD-0GPQROC1); no `--directive`
-     here (step 3 already set the authoritative directive). Then **END YOUR TURN
+     here (step 1's script already wrote the authoritative directive). Then **END YOUR TURN
      IMMEDIATELY** — emit one short line (e.g. *"Handoff written; compacting now,
      I'll auto-resume."*) and stop.
    - **No `--then-compact`** (a bare `/janitor-write-handoff`, or the combined
