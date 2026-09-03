@@ -96,7 +96,7 @@ def test_evaluate_malformed_resets_at_skipped() -> None:
 
 def test_account_prefix_is_local_part_only() -> None:
     """The label is the email local part only (privacy) — never the full address in a line."""
-    assert tbn.account_prefix("seed@gmail.com") == "seed"
+    assert tbn.account_prefix("seed@example.invalid") == "seed"
     assert tbn.account_prefix(None) == "live"
     assert tbn.account_prefix("") == "live"
     usage = _usage(seven=(46.0, _reset_for(_7D, 2 / 7)))
