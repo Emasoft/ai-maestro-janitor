@@ -90,6 +90,8 @@ import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstal
 import marketplace_refresh_plan as mrp  # noqa: E402  # installed-backing refresh set (TRDD-5EHBPH6G)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import notify  # noqa: E402  # human-notification channel — daemon-only (TRDD-4649ZLE0)
+import pane_actuate  # noqa: E402  # THE actuator: read the pane → policy table → type → verify (TRDD-N954KWUC)
+import pane_state  # noqa: E402  # one screen-state reader for a Claude Code pane (TRDD-N954KWUC)
 import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
 import rules_installer as ri  # noqa: E402  # post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
@@ -158,6 +160,22 @@ _DECLINE_REMEDY = {
     "declined_unwired": (
         "its diagnosis has no recovery rung wired, so nothing will be attempted "
         "automatically"
+    ),
+    # TRDD-N954KWUC P3 — the policy table looked at that session's SCREEN and refused. Both
+    # outcomes are decisions that typed NOTHING, so they must never spend a recovery attempt
+    # (they would walk the budget toward the hard, killing rungs for a session that is fine).
+    "policy_refused": (
+        "that session's screen shows a state no keystroke is safe in (a pending prompt, a "
+        "live turn, or a pane that could not be read) — open the pane and look at it"
+    ),
+    "deferred_presence": (
+        "the keystroke was held because someone is at this machine's keyboard — it lands on "
+        "its own once the machine goes idle; nothing to do"
+    ),
+    "channel_rejected": (
+        "the keystroke was sent and the pane's injection channel accepted nothing — the tmux "
+        "pane or iTerm session named in that project's state is probably gone; re-open it, or "
+        "clear the stale terminal identity so the pane is rediscovered"
     ),
 }
 
@@ -1287,7 +1305,13 @@ def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit, de
         self_pid=os.getpid(),
         daemon_pid=gs.daemon_pid(),
     )
-    outcome = fleet_restart.fire_restart(plan, enabled=enabled, killable=killable)
+    # TRDD-N954KWUC P3: hand the pane identity down so the relaunch keystroke goes through
+    # the policy table (it refuses to type a relaunch line into a pane that still shows a
+    # LIVE claude) instead of firing blind.
+    outcome = fleet_restart.fire_restart(
+        plan, enabled=enabled, killable=killable,
+        terminal=inst.terminal, project_dir=inst.project_root,
+    )
     _write_recovery_state(sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity})
     rung = str(plan.get("rung", "?"))
     channel = _hard_restart_channel(plan)
@@ -1760,7 +1784,18 @@ def task_session_liveness(fleet: list | None = None) -> None:
                             f"for {tag}",
                         )
                     else:
-                        esc_ok = fleet_inject.fire(esc_plan)
+                        # TRDD-N954KWUC P3 — through the policy table, never a bare fire.
+                        # `unattended=True` is the payload that authorizes the ONE keystroke
+                        # allowed over a pending human decision: the HID-idle threshold this
+                        # branch just measured. The table still refuses if the screen shows a
+                        # live turn or a retry wedge, which this site could never see before.
+                        esc_ok = pane_actuate.act(
+                            inst.terminal,
+                            pane_actuate.Event.STALE_PROMPT,
+                            unattended=True,
+                            project_dir=inst.project_root,
+                            log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
+                        ).status is pane_actuate.OutcomeStatus.DONE
                         state.log_line(
                             "daemon",
                             f"session-liveness: "
@@ -1776,17 +1811,26 @@ def task_session_liveness(fleet: list | None = None) -> None:
                         # RECORD IT — a dismissal must never be silent: the human can
                         # only learn what was dismissed via the ledger (a stall would
                         # be worse, but a SILENT dismissal is worse still).
-                        findings_ledger.record(
-                            sev="HIGH",
-                            code="FLEET-AWAITING-DISMISS",  # <=24 chars: findings_ledger._clean cap
-                            src="daemon",
-                            msg=(
-                                f"pending prompt ESC-dismissed after "
-                                f"{hid_awaiting:.0f}s unattended — nothing was "
-                                "answered; review what was asked"
-                            ),
-                            project_dir=inst.project_root,
-                        )
+                        #
+                        # Gated on `esc_ok` since TRDD-N954KWUC P3: the record ASSERTS the
+                        # prompt was dismissed, and the policy table now refuses far more
+                        # often than the old blind fire did (a live turn on screen, an
+                        # unreadable readable-channel, an ESC that did not clear the dialog).
+                        # An unconditional record there would tell the human their prompt was
+                        # dismissed while it is still sitting on their screen — a false
+                        # ledger entry is worse than none, because it is acted on.
+                        if esc_ok:
+                            findings_ledger.record(
+                                sev="HIGH",
+                                code="FLEET-AWAITING-DISMISS",  # <=24 chars: findings_ledger._clean cap
+                                src="daemon",
+                                msg=(
+                                    f"pending prompt ESC-dismissed after "
+                                    f"{hid_awaiting:.0f}s unattended — nothing was "
+                                    "answered; review what was asked"
+                                ),
+                                project_dir=inst.project_root,
+                            )
             continue
         if sl.is_hard_rung(action):
             # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
@@ -1842,17 +1886,26 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # cannot see a long-backoff wedge (its attempt number never advances), so read the
         # frame itself here, once, right before typing. An unreadable pane stays permissive
         # (same contract as `command_plan_field_busy`).
-        if not fr.injection_is_hard(inst.diagnosis):
-            frame = fleet_scan.capture_pane_text(inst.terminal)
-            wedge_attempt = sl.retry_wedge_attempt_at_tail(frame) if frame is not None else None
-            if wedge_attempt is not None:
-                state.log_line(
-                    "daemon",
-                    f"session-liveness: {tag} shows the retry wedge (attempt {wedge_attempt}) — "
-                    f"would {action}; not typing into a blocked pane",
-                )
-                _decline("retry_wedge_on_screen", action, None)
-                continue
+        #
+        # TRDD-N954KWUC P3: this read is now the ONE capture this beat takes of this pane —
+        # it feeds both the decline below AND `pane_actuate.act` at the bottom (passed as
+        # `state=`), so routing every keystroke through the policy table costs no extra
+        # osascript (Proposal §5). `pane_state.parse` is a superset of the raw
+        # `retry_wedge_attempt_at_tail` probe it replaces: same anchors, same attempt number,
+        # plus the queued-command count the flush law needs.
+        pane = pane_state.read(inst.terminal)
+        if (
+            pane is not None
+            and pane.status.kind == pane_state.StatusKind.RETRY_WEDGE
+            and not fr.injection_is_hard(inst.diagnosis)
+        ):
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} shows the retry wedge (attempt {pane.status.attempt}) — "
+                f"would {action}; not typing into a blocked pane",
+            )
+            _decline("retry_wedge_on_screen", action, None)
+            continue
         # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
         # session gets a soft enqueue so its in-flight turn survives (TRDD-0GPQROC1).
         plan = fleet_inject.build_injection(
@@ -1887,8 +1940,17 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 # Finish our own send instead of blocking on it. Enter ALONE — the command is
                 # already in the field and is already ours, so this types no new text and
                 # cannot concatenate onto a line someone is editing.
-                submit = fleet_inject.build_submit_plan(inst.terminal, plan)
-                sent = fleet_inject.fire(submit) if submit else False
+                # TRDD-N954KWUC P3 — through the table (reusing THIS beat's pane read), so
+                # the Enter is refused if the field drained between the read-back above and
+                # now, and never lands on a pane holding a human decision.
+                sent = pane_actuate.act(
+                    inst.terminal,
+                    pane_actuate.Event.OWN_COMMAND_UNSUBMITTED,
+                    state=pane,
+                    submit_ref=plan,
+                    project_dir=inst.project_root,
+                    log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
+                ).status is pane_actuate.OutcomeStatus.DONE
                 state.log_line(
                     "daemon",
                     f"session-liveness: {tag} field holds OUR unsubmitted {ours!r} on "
@@ -1931,7 +1993,55 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # and the session then just sits idle, strictly worse than the wedge (which at
             # least made the stall visible).
             fleet_scan.write_rate_limited_flag(inst.project_root, now)
-        ok = fleet_inject.fire(plan)
+        # TRDD-N954KWUC P3 — the rung's keystrokes now go through the policy table. The
+        # caller-supplied payload is what this pure table cannot see: the command the rung
+        # resolved and the hard/soft law its DIAGNOSIS dictates (a 15-minute-stale transcript
+        # is invisible on screen). `command_plan=plan` fires the very plan built above, so the
+        # channel walk and `esc_first` atomicity are byte-identical to before the migration.
+        outcome = pane_actuate.act(
+            inst.terminal,
+            pane_actuate.Event.RECOVERY_RUNG,
+            state=pane,
+            command=fleet_inject.action_to_command(action),
+            esc_first=fr.injection_is_hard(inst.diagnosis),
+            command_plan=plan,
+            project_dir=inst.project_root,
+            log=lambda m, _t=tag: state.log_line("daemon", f"{_t} {m}"),
+        )
+        # A decision that typed NOTHING must not spend a recovery attempt — that is the
+        # `_decline` contract (F9), and spending budget for an action never tried is what
+        # walks the ladder to the hard, killing rungs. NOOP = the table refused on what the
+        # screen showed; DEFERRED = a human is at the keyboard; NOT TOUCHED = we typed and the
+        # channel refused every plan. Only a rung that actually REACHED the pane consumes an
+        # attempt, exactly as a bare `fire()` did.
+        if outcome.status is pane_actuate.OutcomeStatus.NOOP:
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} REFUSED by the pane policy — would {action}; "
+                f"the screen does not allow it right now",
+            )
+            _decline("policy_refused", action, str(plan["channel"]))
+            continue
+        if outcome.status is pane_actuate.OutcomeStatus.DEFERRED:
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} DEFERRED (user at the keyboard) — would {action}",
+            )
+            _decline("deferred_presence", action, str(plan["channel"]))
+            continue
+        if not outcome.touched:
+            # The table said type, the loop typed, and `fleet_inject.fire` accepted nothing —
+            # a dead channel, not a failed action. `status` reports FAILED here, exactly as it
+            # does for a rung that landed and did not take, so keying the attempt counter on
+            # the status word would charge this pane for a keystroke it never received and
+            # march the ladder toward `relaunch`/kill on a transient channel fault.
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} NOT DELIVERED — would {action}; the channel accepted nothing",
+            )
+            _decline("channel_rejected", action, str(plan["channel"]))
+            continue
+        ok = outcome.status is pane_actuate.OutcomeStatus.DONE
         _write_recovery_state(
             sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity}
         )
@@ -2014,13 +2124,13 @@ def _rotation_esc_pass(fleet: list, now: int, *, fire: bool) -> None:
         dedupe = sd / state.DAEMON_ROTATION_ESC_FILE
         if state.read_int_state(dedupe, 0) == epoch:
             continue  # this pane already got its ESC for THIS rotation
-        text = fleet_scan.capture_pane_text(inst.terminal)
-        if text is None:
+        pane = pane_state.read(inst.terminal)
+        if pane is None:
             state.log_line("daemon", f"rotation-esc: cannot read the pane for {label} — skipped")
             continue
-        attempt = sl.retry_wedge_attempt_at_tail(text)
-        if attempt is None:
+        if pane.status.kind != pane_state.StatusKind.RETRY_WEDGE:
             continue  # no retry wedge on screen — the rotation has nothing to unblock here
+        attempt = pane.status.attempt
         plan = fleet_inject.build_esc_plan(inst.terminal)
         if plan is None:
             state.log_line("daemon", f"rotation-esc: {label} is wedged but has no ESC channel — skipped")
@@ -2031,14 +2141,51 @@ def _rotation_esc_pass(fleet: list, now: int, *, fire: bool) -> None:
                 f"rotation-esc:DRY would ESC → {plan['channel']} for {label} (attempt {attempt} on screen)",
             )
             continue
+        # Written BEFORE the ESC and NOT retracted when nothing lands. The ordering is
+        # deliberate: the ESC ends the turn immediately, so writing the flag afterwards races
+        # dispatch reading it. Leaving it when the channel accepted nothing is safe rather than
+        # sloppy — a pane that got no ESC is still wedged, and a wedged pane's REPL is mid-turn,
+        # so no cron fire can consume the flag until it unwedges. At that point the flag is
+        # TRUE (the pane really was rate-limited) and the resume is the right response. The
+        # flag is also single-consumer by contract — only dispatch clears it — so the daemon
+        # deleting one it wrote would race the very reader the ordering above protects.
         fleet_scan.write_rate_limited_flag(root, now)
-        ok = fleet_inject.fire(plan)
-        if ok:
+        # TRDD-N954KWUC P3 — the table turns this single blind ESC into the WEDGE's own ESC
+        # law: 1 + one per queued command (TRDD-3T9HQEQ6's queue flush), each verified by
+        # re-reading until the wedge is actually gone. The pane read above is reused, so the
+        # capture budget is unchanged.
+        outcome = pane_actuate.act(
+            inst.terminal,
+            pane_actuate.Event.ROTATION_LANDED,
+            state=pane,
+            command_plan=plan,
+            project_dir=root,
+            log=lambda m, _l=label: state.log_line("daemon", f"rotation-esc: {_l} {m}"),
+        )
+        # "One ESC per pane per rotation" counts ATTEMPTS, not successes. Stamp whenever the
+        # actuator actually typed — DONE (the wedge cleared) and FAILED (it did not) both sent
+        # keystrokes. Stamping only on DONE would re-ESC a pane the ESC cannot clear on every
+        # liveness beat AND every 60 s rotator tick for the whole rotation window: a weekly
+        # wall reads `Retrying in 5h` unchanged for hours, so the "failure" is permanent and the
+        # retry is unbounded. That is the blind repeated keystroke this TRDD exists to kill, and
+        # each extra press risks landing on an already-empty prompt, which opens the rewind menu.
+        # Key on `touched` — "a keystroke was accepted by the channel" — never on `status`.
+        # `status` cannot carry this: FAILED means the pane never reached WEDGE_GONE, which
+        # happens BOTH when we pressed a live pane that stayed wedged (stamp: we already spent
+        # this rotation's attempt) AND when every press went into a channel that could not be
+        # built (do NOT stamp: nothing was sent, and stamping would cost this pane its unwedge
+        # for the rest of the rotation window). NOOP and DEFERRED land nothing by construction.
+        # `steps_done` is no substitute either — on failure it is the step INDEX, so a
+        # single-step flush reports 0 even after pressing.
+        if outcome.touched:
             sd.mkdir(parents=True, exist_ok=True)
             state.atomic_write(dedupe, str(epoch))
+        # The status word, not a FIRED/FIRE-FAILED binary: a REFUSED (noop) and a FAILED are
+        # different facts for the human reading this log, and collapsing them is how a policy
+        # decision gets misread as a broken channel.
         state.log_line(
             "daemon",
-            f"rotation-esc: {'FIRED' if ok else 'FIRE-FAILED'} ESC → {plan['channel']} for {label} "
+            f"rotation-esc: {outcome.status.value.upper()} ESC → {plan['channel']} for {label} "
             f"(retry attempt {attempt} on screen, rotation {now - epoch}s ago)",
         )
 
@@ -2136,7 +2283,19 @@ def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
                         f"resume-wake:DRY would /janitor-resume → {plan['channel']} for {label}",
                     )
                     continue
-                if fleet_inject.fire(plan):
+                # TRDD-N954KWUC P3 — through the table. A pane showing a retry wedge or a
+                # pending human decision now REFUSES this soft `/janitor-resume` instead of
+                # queueing it behind the wall; no dedupe/coverage stamp is written then, so
+                # dispatch keeps this session on the FAST cron (MF4 fail-open) and the cron
+                # stays the trigger — the same shape the pre-existing guards above take.
+                if pane_actuate.act(
+                    inst.terminal,
+                    pane_actuate.Event.RESUME_WAKE,
+                    command=fleet_inject.action_to_command("resume"),
+                    command_plan=plan,
+                    project_dir=root,
+                    log=lambda m, _l=label: state.log_line("daemon", f"resume-wake: {_l} {m}"),
+                ).status is pane_actuate.OutcomeStatus.DONE:
                     state.atomic_write(dedupe, str(since))  # dedupe: injected for THIS window
                     state.atomic_write(covered, str(now))   # coverage PROVEN → dispatch may demote
                     state.log_line(
@@ -2181,7 +2340,21 @@ def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
             f"would {plan['command']}; skipped (no injection channel)",
         )
         return
-    ok = fleet_inject.fire(cmd_plan)
+    # TRDD-N954KWUC P3 — through the policy table. `esc_first` (the frozen-target unwedge)
+    # and the command are the caller's payload; the table adds what only the SCREEN knows:
+    # a wedged pane gets the full 1+queued ESC flush before the stop command instead of one
+    # ESC, and a pane holding a human decision is left alone. A soft stop into a WORKING pane
+    # is still allowed — it lands at the turn boundary and destroys no in-flight work (owner
+    # directive 2026-07-10), which is exactly why this path was designed soft.
+    ok = pane_actuate.act(
+        plan["terminal"],
+        pane_actuate.Event.STOP_FLAG,
+        command=str(plan["command"]),
+        esc_first=esc_first,
+        command_plan=cmd_plan,
+        project_dir=inst.project_root if inst is not None else None,
+        log=lambda m: state.log_line("daemon", f"fleet-stop: pid {plan['pid']} {m}"),
+    ).status is pane_actuate.OutcomeStatus.DONE
     if ok:
         # Stamp ONLY on a successful fire, so a transient fire failure retries next beat.
         gs.record_fleet_injection(plan["pid"], flag_state, now)

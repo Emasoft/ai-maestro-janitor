@@ -81,6 +81,13 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, frame: str | None = WEDG
     # hid_idle 0.0 = the owner is typing RIGHT NOW — the condition that deferred every beat on
     # 2026-09-02. The ESC pass must not care.
     monkeypatch.setattr(daemon.user_intent, "hid_idle_seconds", lambda **kw: hid_idle)
+    # TRDD-N954KWUC P3 made the actuator a CLOSED loop: it re-reads the pane between presses,
+    # and `pane_actuate._read` sleeps `_SETTLE_S` (3.0 s) first so a real terminal can repaint.
+    # These tests reach the actuator through the daemon, so they cannot pass `settle_s=0.0` the
+    # way `test_pane_actuate.py` does — without this they would sleep ~9 s per flush against a
+    # capture seam that returns a FROZEN frame and can never repaint. Real seconds in a suite
+    # that already flakes under load (TRDD-7NSRD8OV) buy nothing: the frame is a constant.
+    monkeypatch.setattr(daemon.pane_actuate.time, "sleep", lambda *_a, **_kw: None)
     return recorded
 
 
@@ -95,26 +102,71 @@ def test_a_fresh_rotation_escs_the_wedged_pane_even_while_the_owner_types(tmp_pa
     gs.record_rotation_success(int(time.time()))
     daemon.task_session_liveness()
 
-    assert len(_escs(fired)) == 1, "one ESC must reach the wedged pane"
+    # The ratified flush law (TRDD-N954KWUC Proposal: "`retry_wedge` + rotation → ESC × (1 +
+    # queued)"): the policy emits ONE ESC Step carrying a press BUDGET of `1 + queued_count`,
+    # and `execute` spends it one press at a time with a re-read between them.
+    #
+    # Read the number from the PLAN, never from the observed fire count — the two agree here
+    # only by construction, and back-solving the budget from a failure count cannot tell a
+    # spent budget apart from a retry loop. WEDGED_FRAME parses as
+    # `InputFieldKind.QUEUED, queued_count=1` (one `❯ /janitor-arm` above the input box), so
+    # `repeat_max = min(1 + 1, _QUEUE_FLUSH_MAX_ESC) = 2`. `retries` (3) is the patience for ONE
+    # press, not a second source of presses: the loop types only while `presses < repeat_max`.
+    #
+    # `_escs` counts fired PLANS, not raw keystrokes — each plan is a whole `build_esc_plan`,
+    # which sends the established ESC burst at the tmux layer. The budget counts policy presses.
+    #
+    # The capture seam returns the SAME wedged frame forever, so WEDGE_GONE is never satisfied
+    # and the whole budget is spent; a real pane that unwedges on the first press stops at one.
+    assert len(_escs(fired)) == 2, "flush budget = 1 + one per queued command"
     assert fired[0]["channel"] == "tmux"
     sd = root / ".janitor" / "state"
     assert (sd / "rate-limited.flag").is_file(), "the flag is what makes dispatch resume after the Stop"
     assert (sd / daemon.state.DAEMON_ROTATION_ESC_FILE).read_text().strip() == str(gs.rotation_success_epoch())
 
 
+def test_a_rejected_channel_does_not_burn_the_rotations_one_attempt(tmp_path, monkeypatch) -> None:
+    """`fire` refuses every plan (a dead channel) → the pane got NOTHING, so the once-per-rotation
+    dedupe must NOT be stamped and the next beat must try again.
+
+    This is the trap in keying the stamp on `status`: the pane never reaches WEDGE_GONE either
+    way, so a rejected channel and a genuinely stubborn wedge both report FAILED. Stamping on
+    FAILED would convert one transient channel hiccup into a missed unwedge for the whole
+    rotation window — silent, and strictly worse than the over-pressing it replaced.
+    """
+    root = tmp_path / "proj"
+    fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})])
+    monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(fired.append(plan)) or False)
+    gs.record_rotation_success(int(time.time()))
+    daemon.task_session_liveness()
+
+    assert len(_escs(fired)) == 2, "the flush still spends its budget against the dead channel"
+    assert not (root / ".janitor" / "state" / daemon.state.DAEMON_ROTATION_ESC_FILE).exists(), (
+        "nothing landed → this rotation's attempt was not spent"
+    )
+    daemon.task_session_liveness()
+    assert len(_escs(fired)) == 4, "the next beat must retry a pane that was never actually typed into"
+
+
 def test_one_esc_per_pane_per_rotation_and_a_new_rotation_escs_again(tmp_path, monkeypatch) -> None:
-    """A second beat inside the same rotation window must not ESC twice; a NEW rotation must."""
+    """A second beat inside the same rotation window must not ESC twice; a NEW rotation must.
+
+    The dedupe counts ATTEMPTS, not successes: this pane NEVER unwedges (the capture seam is
+    static), so the flush ends FAILED — and the stamp must still be written. Keying it on
+    success instead would re-flush this pane on every liveness beat and every 60 s rotator tick
+    for the whole rotation window, which is what a 5-hour `Retrying in 5h` wall looks like.
+    """
     root = tmp_path / "proj"
     fired = _setup(monkeypatch, tmp_path, [_inst("healthy", root, {"tmux_pane": "%5"})])
     first = int(time.time()) - 30
     gs.record_rotation_success(first)
     daemon.task_session_liveness()
     daemon.task_session_liveness()
-    assert len(_escs(fired)) == 1, "same rotation → exactly one ESC"
+    assert len(_escs(fired)) == 2, "same rotation → exactly one flush (2 presses), not two flushes"
 
     gs.record_rotation_success(first + 20)
     daemon.task_session_liveness()
-    assert len(_escs(fired)) == 2, "a new rotation epoch re-arms the ESC"
+    assert len(_escs(fired)) == 4, "a new rotation epoch re-arms the flush"
 
 
 def test_the_control_no_rotation_types_nothing(tmp_path, monkeypatch) -> None:
@@ -209,9 +261,9 @@ def test_the_rotator_tick_escs_a_wedged_pane_without_waiting_for_the_liveness_be
     monkeypatch.setattr(daemon, "_run_workload", lambda *a, **kw: None)
     gs.record_rotation_success(int(time.time()))
     daemon.task_oauth_rotator_tick()
-    assert len(_escs(fired)) == 1, "the tick itself must ESC the wedged pane"
+    assert len(_escs(fired)) == 2, "the tick itself must flush the wedged pane (1 + 1 queued)"
     daemon.task_session_liveness()
-    assert len(_escs(fired)) == 1, "the liveness beat must not ESC it a second time (per-epoch dedupe)"
+    assert len(_escs(fired)) == 2, "the liveness beat must not ESC it a second time (per-epoch dedupe)"
 
 
 def _rearm_isolated(monkeypatch) -> None:
