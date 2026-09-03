@@ -34,10 +34,14 @@ therefore names the FIRST bump commit, not the head it just pushed.
 - publish.py still reported `Verified on remote: v3.4.14` and `Published
   3.4.14 successfully!` — the remote verification only checks the tag
   EXISTS, not what it points at.
-- Impact that day was NIL: the four commits were two version bumps plus two
-  test/comment-only changes, and the shipped code was byte-identical.
-  Confirmed by reading `git show v3.4.14:scripts/lib/pane_policy.py` — the
-  release's functional payload was present in the tag.
+- Impact that day was NIL, measured rather than inferred from the commit
+  subjects: `git diff --stat v3.4.14..origin/main` touches exactly three
+  files — `CHANGELOG.md`, `tests/test_oauth_rotator.py`,
+  `tests/test_window_burn_rate.py` (17 insertions, 2 deletions). Nothing
+  under `scripts/` appears, and `plugin.json` does not appear either
+  because both bump commits set the same version. `git show
+  v3.4.14:scripts/lib/pane_policy.py` additionally confirms the release's
+  functional payload is present in the tag.
 
 ## Why it matters
 

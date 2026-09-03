@@ -3,7 +3,7 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: testing
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-03T11:20:06+0200
+updated: 2026-09-04T01:07:00+0200
 review-after: 2026-09-05
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
@@ -114,8 +114,10 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
       bound from a live payload found on disk; `external_clear.cache_expired_from_harness_payload`
       (new) is wired into `on-session-start-cold-cache-clear.py` and outranks + skips the
       agentlensPro probe when the harness already answered (2026-09-03, 4 new unit tests)
-- [ ] pytest + ruff + mypy green — ruff + mypy clean repo-wide; pytest 16139 passed / 1
-      pre-existing unrelated failure (rules-floor-cap byte budget, untouched by this card)
+- [x] pytest + ruff + mypy green — the 3.4.14 publish gate ran all three on this tree
+      (2026-09-04): ruff clean, mypy clean over 504 source files, pytest 16351 passed /
+      1 skipped / 0 failed. The rules-floor-cap byte-budget failure noted here on
+      2026-09-03 is gone, so the box is now green without the carve-out.
 
 ## Notes and lessons learned
 

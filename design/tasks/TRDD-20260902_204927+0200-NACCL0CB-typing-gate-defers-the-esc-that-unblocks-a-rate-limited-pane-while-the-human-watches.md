@@ -1,9 +1,9 @@
 ---
 trdd-id: NACCL0CB
 title: the typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
-column: testing
+column: complete
 created: 2026-09-02T20:49:27+0200
-updated: 2026-09-03T23:39:49+0200
+updated: 2026-09-04T01:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
