@@ -407,6 +407,36 @@ def test_the_closed_loop_spends_exactly_one_capture_when_it_converges(monkeypatc
     assert len(reads) == 1
 
 
+def test_fail_open_fires_into_a_readable_pane_that_did_not_answer(monkeypatch) -> None:
+    """Law 1 refuses a READABLE pane that did not answer this beat; `fail_open` is the one
+    sanctioned exception, and it exists because that law has a DIRECTION.
+
+    Getting nothing is the safe answer for a keystroke that STARTS work and the dangerous one for
+    a keystroke that STOPS it: `/janitor-disarm` and the kill switch have to arrive even on a beat
+    the pane cannot be read, or they stop propagating fleet-wide the moment pane capture breaks —
+    silently, because a NOOP is indistinguishable from a clean beat.
+
+    Both halves are asserted here, because the default is the load-bearing one for every OTHER
+    caller: without `fail_open` this must type NOTHING.
+
+    This is `fail_open`'s only coverage. It used to be exercised through
+    `test_daemon_fleet_stop.py`, whose `_wire` left the capture seam unstubbed — but that seam was
+    reading the developer's live tmux server, so it was stubbed with an idle frame, and `act` now
+    parses a real state there and never reaches this branch.
+    """
+    monkeypatch.setattr(fleet_scan, "capture_pane_text", lambda _t: None)
+    fired = _seam(monkeypatch)
+    refused = _act(pa.Event.STOP_FLAG, command="/janitor-disarm", esc_first=False)
+    assert refused.status is pa.OutcomeStatus.NOOP, "Law 1's default must refuse an unread pane"
+    assert refused.observed == ("unreadable",)
+    assert _keys(fired) == [], "and it must type nothing"
+
+    opened = _act(pa.Event.STOP_FLAG, command="/janitor-disarm", esc_first=False, fail_open=True)
+    assert opened.status is pa.OutcomeStatus.DONE
+    assert opened.touched is True
+    assert _keys(fired) == ["/janitor-disarm"], "the stop lands despite the unreadable pane"
+
+
 def test_touched_is_false_when_the_channel_accepted_nothing(monkeypatch) -> None:
     """`touched` means "a keystroke REACHED the pane", and it is the ONLY signal that says so —
     `status` cannot, because a channel that accepts nothing reports FAILED exactly like a live

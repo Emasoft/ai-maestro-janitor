@@ -100,8 +100,12 @@ def _has_esc(calls: list[dict]) -> list[bool]:
     exactly never; keying on it would report every iTerm stop as soft and reintroduce the vacuous
     assertion one layer down.
 
-    These tests are the only coverage of `pane_actuate.act`'s `fail_open` (verified repo-wide:
-    the only other mention is the `daemon.py` fleet-stop call site that passes it). `_wire` stubs
+    These tests do NOT cover `pane_actuate.act`'s `fail_open`, and it is worth saying so where
+    someone would look for it: they did while the capture seam was unstubbed and `act` read None,
+    but stubbing that seam (rightly — it was reading the developer's live tmux server) means
+    `act` now parses a real state, so Law 1 never trips and the fail-open branch is never taken.
+    Its coverage lives in `test_pane_actuate.py::test_fail_open_fires_into_a_readable_pane_that_
+    did_not_answer`. `_wire` stubs
     the capture seam with an IDLE frame (see the note there — leaving it unstubbed made these
     tests depend on the developer's live tmux server), so `_rung`'s wedge branch correctly does
     not fire on an idle pane and `esc_first` reaches the command step directly, which is what
