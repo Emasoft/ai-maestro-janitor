@@ -2,6 +2,99 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.14] — 2026-09-03
+
+### Bug Fixes
+
+- **terminal-trigger:** Flush the pane queue with repeated ESC before /model opus (TRDD-3T9HQEQ6) (e0c328c)
+- **terminal-trigger:** Refuse to type when the pane cannot be read back after ESC (TRDD-3T9HQEQ6) (1533ccc)
+- **detectors:** One owner for the tracked-but-ignored finding (TRDD-IEAZQ9MK) (bd3af65)
+- **gitignore-fix:** Fail fast on git errors and append bytes verbatim (TRDD-VMXAF9IY) (2e0aea0)
+- **gitignore-fix:** Render the confirmation diff with real line endings (TRDD-VMXAF9IY) (ede9bdb)
+- **memory:** Count lessons headings on the fence-masked body (TRDD-W9BWHGS3) (ca0af38)
+- **heartbeat:** Resolve blockers across every design folder; unknown id is decision-needed, never unblockable (TRDD-1PDCPIZC) (edf0bcd)
+- **heartbeat:** A refused/cancelled/failed blocker is decision-needed, not unblockable; superseded follows superseded-by (TRDD-1PDCPIZC) (edd19f0)
+- **daemon:** Marketplace-refresh refreshes only installed-backing marketplaces, per item, under a shared deadline (TRDD-5EHBPH6G) (69feb82)
+- **oauth:** Top-up nudge survives notify's content-hash dedupe; walker kills the whole capture tree and honors the bootstrap pid lock (TRDD-GZXTSJSR follow-up) (b0d4f04)
+- **agent-context-integrity:** AICTX-003 dedupe key hashes the matched span, not the line (TRDD-QNMBH3ES, janitor#291) (bce5b3b)
+- **daemon:** Marketplace-refresh stops at a run budget; process-group kill witnessed by a launcher+grandchild test (TRDD-5EHBPH6G follow-up) (9a9408d)
+- **agent-context-integrity:** Re-key legacy line-keyed AICTX-003 entries instead of withdrawing them; fail fast on an empty span (TRDD-QNMBH3ES follow-up) (b0dca22)
+- **agent-context-integrity:** A legacy entry migrates only on a unique rel match — never guess, never merge (TRDD-QNMBH3ES) (436cca6)
+- **memory:** A TRDD is one origin among many, not the default provenance (b924471)
+- **precheck:** A quoted desc: value is prose, not the atom's own props (7d9c2f9)
+- **handoff:** An identical re-write is a no-op, not a second injected copy (e272cb6)
+- **daemon:** A keystroke that never reached the pane must not spend its budget (TRDD-N954KWUC) (8cb71c3)
+- **daemon:** A stop must arrive even when the pane cannot be read (TRDD-N954KWUC) (2a62538)
+- **tests:** Stop reading the developer's real tmux server in the fleet-stop suite (TRDD-N954KWUC) (e93a920)
+- **rotator:** The login roster must see legacy unindexed slots and honour CLAUDE_ROTATOR_HOME (TRDD-GZXTSJSR) (81dee6a)
+- **agent-context-integrity:** Content-address the AICTX-003 dedupe key (TRDD-QNMBH3ES, janitor#291) (4d70ca7)
+- **version-update:** One retry on the transient-contention shape only (TRDD-ZM5LZ24Y, TRDD-7NSRD8OV) (86b6d01)
+- **fleet-restart:** Route the relaunch through the policy table, and test both deferral log lines (TRDD-N954KWUC, TRDD-NACCL0CB) (e581c4d)
+- **pane-policy:** Never ESC a pane that is visibly working (TRDD-KE88RIKX) (fc76c0c)
+- **trdd:** Keep a docs commit out of implementation-commits, and bound the escalation claim (d869b75)
+- **trdd:** Retract the "promoted past quiet mode" claim — the regex never reads the ledger (b4e2211)
+- **privacy:** Redact the owner's home path from TRDD-7KRF99WI, and close the card (2154895)
+- **privacy:** Remove the owner's username from every tracked file, not just the ones CPV named (09d202f)
+- **liveness:** Stop the janitor typing ESC into sessions that are working (TRDD-L32WC0H7 F0-F6) (9cc2204)
+- **tests:** Stop the marketplace per-item-timeout test racing a real subprocess under load (TRDD-7NSRD8OV) (5648e14)
+- **aictx:** Declare the dedupe hash non-security so bandit stops failing CI (TRDD-QNMBH3ES) (a4ad460)
+
+### Documentation
+
+- **TRDD-Q0Y4M1TF:** 3.4.13 shipped + daemon restaged; record the weekly-window model-in-use finding for N954KWUC (e351dd5)
+- **TRDD-3T9HQEQ6:** Correct the updated stamp to the real clock (22:40, not 22:52) (6c2c59f)
+- **gitignore-fix:** Docstring states the real exit codes — 1 when git itself failed (TRDD-VMXAF9IY) (5a2126d)
+- **board:** Approve TRDD-N954KWUC design→todo, pull TRDD-GZXTSJSR planned→dev (fb02d17)
+- Add TRDD-1PDCPIZC, TRDD-5EHBPH6G, TRDD-W9BWHGS3 — three defects the night's heartbeats surfaced (b8e25fe)
+- **TRDD-GZXTSJSR:** STATE refreshed — P1 proven shipped in cf9fb7a1, P3/P5 open (817b50b)
+- **board:** Close 38PB1B86 BDZG8Y8A VMXAF9IY QZVAEWQH → complete, unblock GK35MOXU UA4FAX67 (158d2be)
+- **board:** Apply the close-card content edits missed by the git-mv-only commit (5ab811b)
+- **board:** Advisor corrections — QNMBH3ES lockstep where-key, RTRS704K constraints, N954KWUC STATE + delegation time; close TRDD-W9BWHGS3 (ada04da)
+- **dispatch:** The login-needed comment names the capture flow, not the retired open-login.sh path (TRDD-GZXTSJSR) (920f6e9)
+- **board:** Close TRDD-UA4FAX67 → complete — post-rotation ESC is shipped and observed live (NACCL0CB) (3e095d5)
+- **board:** Reopen TRDD-UA4FAX67 complete → testing — the ESC was observed, the pane's recovery was not (cd08f27)
+- Add TRDD-L32WC0H7 — session-liveness ESC nudge loops on a dead credential; cold-cache gate types /clear into an empty session (b1f61af)
+- **TRDD-L32WC0H7:** Cause corrected after adversarial review — fires stall inside Claude Code, not on a credential (7bd4c72)
+- **TRDD-L32WC0H7:** Second review — Remote Control refuted by the cross-session fire timeline; stall = CC retry wait where the daemon read the banner, unsettled elsewhere (e72183f)
+- **TRDD-L32WC0H7:** Third review — 'ran' re-derived by exact session-id stamp match; RC refutation anchored on the NO-STUB leg only; updated: stamps set to real clock (d5d4ed0)
+- **TRDD-L32WC0H7:** Advisor verdict + fourth review folded in — counter reset confirmed in code, F1 keyed on the flag, one ESC per press, F3 window guard, F4 exit set, new F6 for the /clear cancel predicate (a82f0e5)
+- **TRDD-L32WC0H7:** Defect 2 header matches the corrected mechanism (unknown, not pre-clear) (9fcf395)
+- **memory:** Atomize agentlens-diagnostics-integration (+4 atoms) — janitor memory chore (fb2a11c)
+- **TRDD-L32WC0H7:** Fifth review — F1 key confirmed live (stub run cleared the flag), F6 needs an interrupt-record exclusion, is_session_frozen tests go with it (5d551bb)
+- **memory:** Split memory-system.md into overview + 4 sub-pages — janitor memory chore (25c8129)
+- TRDD-N954KWUC P3 done → testing; file TRDD-8BXMNQ4T for the beat-blocking follow-up (818363c)
+- Record the three missing implementation commits on TRDD-N954KWUC (6aea43d)
+- **memory:** Record that publishing is what makes the live acceptance boxes observable (76dbd2e)
+- **trdd:** Carry the in-flight card updates that the code commits reference (9c859e8)
+- **memory:** Record the working-pane ESC law and the mutation-probe lesson (TRDD-KE88RIKX) (8504289)
+- **trdd:** Verify KE88RIKX's two load-bearing claims instead of asserting them (62f55e8)
+- **trdd:** Finish verifying the escalation paragraph, and correct two claims it got wrong (1581af1)
+- **board:** Close GZXTSJSR, QNMBH3ES and RTRS704K; state NACCL0CB's hold on the card (1cc8d61)
+- **board:** TRDD-L32WC0H7 → testing, not complete — F5 is unobserved (TRDD-L32WC0H7) (3c6d12d)
+
+### Features
+
+- **gitignore-fix:** /janitor-gitignore-fix — the remedy path for gitignore-coverage findings (TRDD-VMXAF9IY) (1c576fd)
+- **heartbeat:** Attention summary on the keep-going cue — blocked/failed/design/planned cards surface every N fires (TRDD-1PDCPIZC) (81c927a)
+- **pane-state:** One parser for the Claude Code pane frame — Phase 1 of TRDD-N954KWUC (afd3af7)
+- **oauth:** /janitor-capture-all-logins + periodic all-accounts top-up nudge (TRDD-GZXTSJSR P3/P5) (0fc3ad5)
+- **trdd:** Unblock-when wait-condition predicates in the IND base, evaluated by trdd-drift (TRDD-RTRS704K, janitor#288) (f512540)
+- **handoff:** Compose the semantic handoff out of process, not by the model (f9bf82e)
+- **pane:** Route every janitor keystroke through read → decide → verify (TRDD-N954KWUC) (3050805)
+- **trdd:** Unblock-when hardenings — SHIPPED-not-terminal holds, all-folder blocker index (TRDD-RTRS704K, janitor#288) (3fe3b0e)
+- **external-clear:** Wire the PostModelSwitch hook and read the harness cache verdict (TRDD-GK35MOXU) (d043195)
+
+### Refactor
+
+- **terminal-trigger:** Report the ESC cap from its constant, not a literal (TRDD-3T9HQEQ6) (fb25366)
+- **compact:** Derive the resume directive from the board, not from the model (d23a110)
+- **github-config:** Relay the plan verbatim instead of summarizing it (1565ee6)
+
+### Testing
+
+- **memory:** Fence-mask test asserts the sliced content, not just the count (TRDD-W9BWHGS3); docs(board): real-clock stamps on 6 cards (aab657c)
+- **pane:** Cover fail_open, which the fleet-stop fix silently un-covered (TRDD-N954KWUC) (6197d7c)
+- **pane:** Make the fail_open test say what it depends on (TRDD-N954KWUC) (1a06ea4)
 ## [3.4.13] — 2026-09-02
 
 ### Bug Fixes
@@ -20,6 +113,10 @@ All notable changes to this project will be documented in this file.
 - **tls_context:** The certifi comment had it backwards — a fresh python.org build has NO certifi; Install Certificates.command is what adds it (TRDD-X6I04SAO) (5d3c82d)
 - **TRDD-3T9HQEQ6:** Todo → dev (9277f03)
 - **TRDD-3T9HQEQ6:** Dev → todo — worker died mid-edit, partial work parked in stash@{0} (12a4c98)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.13 (ca398cf)
 ## [3.4.12] — 2026-09-02
 
 ### Bug Fixes
