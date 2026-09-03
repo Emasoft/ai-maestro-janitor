@@ -78,16 +78,25 @@ the plan / the trap to avoid" layer on top, for the rare junctures that warrant 
 
 ## Instructions
 
-1. **Formulate a precise one-line resume directive** — what the NEXT turn should
-   do after the compact. Make it self-correcting (point at durable state, not a
-   volatile in-memory step). Good forms:
+1. **OMIT `--directive` by default — do not compose one.** The PostCompact hook
+   already derives the resume pointer from the newest in-flight TRDD on the board
+   (`post-compact-resume.py::_inflight_trdd_directive`, which its own docstring calls
+   "a zero-discipline fallback"). That derivation is a script reading the board, so it
+   costs nothing, and the board is more current than a sentence composed from memory.
+
+   Owner directive 2026-09-03: resume/clear/compact work is done by scripts, never by
+   an agent composing prose. A hand-written directive is the one place this skill still
+   could, so the default is now not to.
+
+   **Pass `--directive` ONLY when the next step is genuinely not derivable from the
+   board** — the work spans no card, or the next action is a specific command the card
+   does not name. Then keep it to one line pointing at durable state, never a volatile
+   in-memory step:
    - `continue TRDD-<uid8> at <next step> — read its STATE block first`
    - `execute the handoff at <path>`
-   - `resume <task>: next is <concrete action>`
-   If you genuinely have no specific pointer, omit `--directive` — the PostCompact
-   hook will fall back to the newest in-flight TRDD on the board. (In `--handoff`
-   mode the resume directive is set by `/janitor-write-handoff` instead, pointing at
-   the rich handoff it writes — so `--directive` here is optional.)
+
+   In `--handoff` mode, pass nothing: `compose_agent_handoff.py` writes the authoritative
+   directive as part of composing the handoff.
 
 2. **Run the backing script** (records the directive, then fires the detached
    send at this pane after a short delay). Add `--hard` and/or `--handoff` per the

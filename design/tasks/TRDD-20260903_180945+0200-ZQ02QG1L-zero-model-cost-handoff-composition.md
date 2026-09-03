@@ -109,6 +109,35 @@ most of it is already there but unreachable without a model deciding to call it.
 remaining work is therefore mostly WIRING, not building — move the trigger from "a skill the
 model invokes" to "a hook or daemon task that fires on its own".
 
+## MEASURED 2026-09-03 — the raw summary is 31,897 bytes, and that decides the design
+
+A real `compose_agent_handoff.py --dry-run` on this session produced **31,897 bytes**
+against `HANDOFF_MAX_BYTES = 4096`. Nearly 8× over, and 4× worse than the "7 KB in
+practice" figure in `compose_handoff`'s own comment — which is why this was measured
+instead of assumed.
+
+**Consequence 1 — the clear path must NOT reuse `compose_agent_handoff.py`.**
+`clear_trigger.check_handoff_concise` would return `too-large` on every run, immediately
+before an UNRECOVERABLE `/clear`. `janitor-handoff-and-clear` therefore needs
+`external_clear.compose_handoff`, which allocates the scriptable facts first, then a
+guaranteed tail slice, then hands the summary whatever budget remains, and emits an
+unconditional `memgrep recall` line so the result always carries a reference. That is
+precisely this problem, already solved and already tested.
+
+**So the four "unwired" functions are not dead weight — three of them are the answer.**
+`compose_handoff` + `compose_template_handoff` + `HandoffInputs` should be LANDED for the
+clear path, not deleted. Only `run_llm_ext_summary` remains a genuine duplicate of the
+live `summarize_with_retry`.
+
+**Consequence 2 — a size gate is owed on the path already shipped.**
+`janitor-write-handoff` now writes the raw summary with no bound, and
+`on-session-start.py::_inject_post_clear_handoff` injects the whole handoff group into the
+fresh context. A 32 KB handoff therefore rides forward on every later turn — trading the
+authoring cost for a per-turn read cost, which is the trade `token-economy-agents-and-scenarios.md`
+warns against. Not wrong for `/compact` (the window survives either way), but it should be
+bounded. Simplest fix: give `compose_agent_handoff.py` a `--max-bytes` defaulting to
+`HANDOFF_MAX_BYTES` and route it through `compose_handoff` too.
+
 ## Deliberately NOT in this task
 
 The owner also asked that skills and files stop being reloaded each session, with the agent
