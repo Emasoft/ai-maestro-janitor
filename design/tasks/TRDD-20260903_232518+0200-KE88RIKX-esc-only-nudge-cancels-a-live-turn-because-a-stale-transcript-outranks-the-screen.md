@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-03T23:25:18+0200
+updated: 2026-09-03T23:31:02+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -13,9 +13,9 @@ severity: high
 relevant-rules: []
 npt: []
 eht: []
-parent-trdd: N954KWUC
+related-trdds: [N954KWUC, L32WC0H7, 8DR0X08A]
 min-approval-requirement: none
-implementation-commits: []
+implementation-commits: [fc76c0ca, 85042899]
 external-refs: []
 ---
 
@@ -126,8 +126,47 @@ keystrokes.
 - [ ] LIVE: after the release, no `FIRED esc_nudge` line in `daemon.log` names a working pane
       (blocked on publishing — the daemon runs the installed plugin)
 
+## Considered and DECLINED — do not re-litigate without new evidence
+
+**Applying the same `command is None` guard inside `_blind`.** `_blind` serves channels with NO
+read-back BY CONSTRUCTION (the ai-maestro CLI, wtype, xdotool — `fleet_inject._readback_identity`
+returns None for all three), and `pane_actuate.act` is the only caller allowed to assert
+`blind_ok`. There, refusing the ESC-only rung would not trade a bad keystroke for a good one; it
+would disable the `frozen` recovery outright on those channels, because no better signal exists
+and none can be obtained. The observed defect was on a READABLE iTerm channel, where a correct
+signal was available and ignored. Left as is, deliberately.
+
+`_at_idle` and `_at_wedge` were checked and need no change: at an idle pane there is no live turn
+for ESC to cancel, and at a wedge the ESC is the entire point.
+
+**Residual risk, accepted — and it escalates rather than going silent.** "Refusing strands
+nothing" is too strong as stated. What it strands is nothing we can still CLASSIFY as stuck: a
+pane whose retry banner was already erased by an earlier ESC repaints as a spinner row and parses
+`WORKING` via `_classify_status`'s `status_row is not None` fallback, so this law now withholds
+the ESC that used to (blindly) fire again. That is the intended trade — it is the very loop
+TRDD-L32WC0H7 documents — and it is the better failure of the two, because the old behaviour
+destroyed real work silently while this one reports itself:
+
+- per beat: `session-liveness: … REFUSED by the pane policy` in `daemon.log`;
+- after `_STALL_ESCALATE_S` of an UNCHANGED decline signature, `daemon._decline` records a HIGH
+  `FLEET-DECLINE-STALL` finding carrying the `policy_refused` remedy text ("open the pane and
+  look at it") and logs `session-liveness: ESCALATING … a human must clear it`.
+
+So a genuinely hung pane surfaces to a human on its own; the janitor does not watch it forever in
+silence. VERIFIED by reading `daemon.py::_decline` (the escalation block and the
+`_write_recovery_state` call below it), not inferred from its docstring.
+
+**`_decline` does not spend a recovery attempt — VERIFIED, not assumed.** Its
+`_write_recovery_state` payload is `{**_st, "last_ts", "identity", "last_audit", "sig_since",
+"escalated"}`: it stamps the cooldown and carries the prior state forward, and `attempts` is
+never among the keys. This is the load-bearing safety property of the whole fix — had it
+incremented, the change would have converted "ESC the pane" into "march to
+`relaunch`/`force_restart`", which is strictly worse than the defect it repairs.
+
 ## Notes
 
-Parent is TRDD-N954KWUC: this is the law that migration should have tightened and did not. It is
+Related to TRDD-N954KWUC: this is the law that migration should have tightened and did not. It is
 filed separately rather than reopened on N954KWUC because that card is terminal-adjacent at
-`testing` and this is a distinct defect with its own proof.
+`testing` and this is a distinct defect with its own proof. It is `related-trdds:`, NOT
+`parent-trdd:` — a defect in code another card shipped is neither that card's prerequisite (NPT)
+nor its effect-handler (EHT), which is all `parent-trdd:` encodes.
