@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import re
 import signal
@@ -86,6 +87,7 @@ import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TR
 import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
+import marketplace_refresh_plan as mrp  # noqa: E402  # installed-backing refresh set (TRDD-5EHBPH6G)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import notify  # noqa: E402  # human-notification channel — daemon-only (TRDD-4649ZLE0)
 import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
@@ -415,6 +417,18 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             text=True,
             close_fds=True,
             preexec_fn=preexec_fn,
+            # TRDD-5EHBPH6G: own process group. `cmd[0]` is sometimes a launcher
+            # prefix (`taskpolicy -b`, `nice`, `ionice`) that FORKS the real
+            # workload as ITS OWN child rather than exec-replacing itself — SIGKILL
+            # on just `proc.pid` (the launcher) then leaves that real child
+            # orphaned and running, still holding the inherited stdout/stderr PIPE
+            # fds open, so `communicate()` never sees EOF either. `os.killpg` below
+            # kills the whole group in one shot — the same fix `poll_background`'s
+            # OUTER watchdog already applies for identically this reason, which is
+            # exactly why only the outer 1920s cap was ever the thing actually
+            # ending a wedged marketplace-refresh: this inner 1800s deadline was
+            # detecting the timeout correctly but not able to stop the subprocess.
+            start_new_session=True,
             # launchd's own env has no settings.json knobs (TRDD-XCJFCJUX) — merge the
             # in-memory mirror in so a child that reads CLAUDE_PLUGIN_OPTION_* sees them
             # via its own os.environ; a real env var still wins.
@@ -442,7 +456,11 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                 or gs.kill_switch_present()
             ):
                 state.log_line("daemon", f"  killing `{short}` (timeout or shutdown)")
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:  # noqa: BLE001 - pgroup may already be gone
+                    with contextlib.suppress(Exception):
+                        proc.kill()
                 # communicate() (not wait()) is the documented reap after a
                 # communicate() timeout on a PIPE child: it drains the stdout/
                 # stderr pipes AND closes their fds deterministically. wait()
@@ -470,14 +488,38 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
     caller is idempotent (re-running a marketplace refresh / plugin update / usage
     probe has no side effect beyond the intended one), so a single retry is safe.
 
+    `timeout` is the TOTAL budget shared across every attempt, not a per-attempt
+    grant (TRDD-5EHBPH6G): a retry after a slow non-zero-exit first attempt gets
+    only what's LEFT of `timeout`, never a fresh full `timeout` again. Without
+    this, a caller with `max_attempts=2` and a first attempt that runs most of
+    `timeout` before exiting non-zero could burn close to `2 * timeout` in the
+    worst case — which is exactly what the pre-fix `marketplace-refresh` did:
+    daemon.log showed a retry starting ~21 min into a 30 min budget and getting a
+    FRESH 1800 s allowance, so the outer `_WORKLOAD_TIMEOUT_SEC + grace` watchdog
+    SIGKILLed it at ~32 min instead of the inner deadline ending it at ~30 min.
+
     `preexec_fn` (optional, TRDD-TY2EZ8ZH) is threaded into every attempt's
     `_run_workload_once`. Default None ⇒ unchanged behavior for every existing
     caller.
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     result: Optional[subprocess.CompletedProcess[str]] = None
+    deadline = time.time() + timeout
     for attempt in range(1, max(1, max_attempts) + 1):
-        result = _run_workload_once(cmd, timeout=timeout, heartbeat_tick=heartbeat_tick, preexec_fn=preexec_fn)
+        # Attempt 1 always gets the FULL requested `timeout`, computed fresh — not
+        # `deadline - now`, which on a small `timeout` can truncate a few
+        # milliseconds of setup/scheduling overhead down to 0 via `int()` and skip
+        # the attempt entirely before it ever runs. `math.ceil` (not `int`, which
+        # truncates toward zero) means a retry with any real time left — even a
+        # fraction of a second — still gets that whole second, never 0.
+        remaining = timeout if attempt == 1 else math.ceil(deadline - time.time())
+        if remaining <= 0:
+            # The first attempt already spent the whole shared budget — a retry
+            # with 0s left would just spawn-and-instantly-kill, wasting a process
+            # launch for nothing. Stop here; `result` already holds attempt 1's
+            # (non-zero) outcome.
+            break
+        result = _run_workload_once(cmd, timeout=remaining, heartbeat_tick=heartbeat_tick, preexec_fn=preexec_fn)
         if result is None or result.returncode == 0:
             return result
         if attempt < max_attempts:
@@ -492,24 +534,54 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 # ---------- Tasks --------------------------------------------------------
 
 def task_marketplace_refresh() -> None:
-    """Run `claude plugin marketplace update` (bulk → all marketplaces).
+    """Refresh only the marketplaces that back an INSTALLED plugin, one call each.
 
-    This is the operation that, when fired from N concurrent sessions, was
-    the worst contributor to the pile-up reported in issue #7. The daemon
-    runs it exactly once per cadence — never overlapping with itself, and
-    (via the shared marketplace lock) never overlapping with a per-session
-    single-market update either.
+    TRDD-5EHBPH6G: `claude plugin marketplace update` (bare, no name) loops EVERY
+    registered marketplace inside the CLI itself — 262 on the host this was
+    diagnosed on, nearly all backing zero installed plugins. That serial O(all
+    registered) sweep, throttled to background QoS, reliably missed the daemon's
+    workload cap and was SIGKILLed on every run, holding the marketplace lock for
+    the whole ~32 min attempt and starving every other marketplace op behind it.
+
+    The fix: derive the refresh set from `installed_plugins.json`
+    (`marketplace_refresh_plan.refresh_plan`, `<plugin>@<marketplace>` install-record
+    keys) plus `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA`, and call the CLI's
+    per-name form (`claude plugin marketplace update <name>` — the same argv shape
+    `_consume_plugin_update_requests` already uses) once per name, each bounded by
+    its OWN `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S` timeout (default
+    60s) so one hung remote can't consume the whole budget. A timed-out or failed
+    item is logged and skipped, never retried in the same run — the run as a whole
+    only counts as FAILED (raises, so the quarantine/backoff bookkeeping and
+    consecutive-failure streak in `Task.run`/`poll_background` see it) when every
+    item failed. `last-run.ts`'s existing unconditional-stamp-even-on-failure
+    semantics are UNCHANGED here — see `Task.poll_background`'s docstring; making
+    a failed run stop refreshing that stamp is a separate, deliberately deferred
+    change (TRDD-FFXGPZEI, backburner) with wider blast radius than this task.
     """
     with gs.marketplace_lock() as got:
         if not got:
             state.log_line("daemon", "  marketplace-refresh deferred (another marketplace op holds the lock)")
             return
+        installed: dict = {}
+        try:
+            ip_path = _plugins_cache_root().parent / "installed_plugins.json"
+            installed = json.loads(ip_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            state.log_line("daemon", f"  marketplace-refresh: could not read installed_plugins.json ({exc})")
+        plan = mrp.refresh_plan(
+            installed, state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA")
+        )
+        if not plan:
+            state.log_line("daemon", "  marketplace-refresh: refreshed 0/0 marketplaces (none installed)")
+            return
+        per_item_timeout = state.coerce_int(
+            state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S"), 60
+        )
         # TRDD-TY2EZ8ZH (#244): run this CPU+IO-heavy refresh at LOW priority so it
         # yields to the user's foreground work (it was timing out their Bash/agents/CI).
         # FAIL-OPEN — ANY error building the throttle prefix or the renice preexec
         # falls through to the CURRENT un-throttled invocation. A throttle defect must
         # NEVER break marketplace-refresh or wedge the machine-wide singleton daemon.
-        base_cmd = ["claude", "plugin", "marketplace", "update"]
         try:
             prefix = dt._low_priority_prefix()
             preexec = dt.nice_preexec()
@@ -522,13 +594,40 @@ def task_marketplace_refresh() -> None:
                 f"  marketplace-refresh: running at low priority (prefix={prefix or '[]'}, "
                 f"nice={'yes' if preexec else 'no'})",
             )
-        proc = _run_workload(prefix + base_cmd, preexec_fn=preexec)
-        if proc is None:
-            return
-        if proc.returncode != 0:
-            state.log_line("daemon", f"  marketplace-refresh exited rc={proc.returncode}")
-            for ln in (proc.stderr or "").splitlines()[:5]:
-                state.log_line("daemon", f"    stderr: {ln.strip()}")
+        t0 = time.time()
+        refreshed = 0
+        for name in plan:
+            proc = _run_workload_once(
+                prefix + ["claude", "plugin", "marketplace", "update", name],
+                timeout=per_item_timeout,
+                # Cap the poll tick to the item's own budget — the default 10s tick
+                # (fine for the old 1800s workload cap) would otherwise let a small
+                # per-item timeout (e.g. the 60s default itself, on a flaky remote
+                # that's still "hung" at 15s) go undetected for up to 10s past its
+                # deadline, or on a sub-10s custom timeout, never fire at all before
+                # `communicate()` returns some other way.
+                heartbeat_tick=min(per_item_timeout, _WORKLOAD_HEARTBEAT_TICK_SEC),
+                preexec_fn=preexec,
+            )
+            if proc is None:
+                state.log_line(
+                    "daemon", f"  marketplace-refresh: {name} timed out after {per_item_timeout}s — skipped"
+                )
+                continue
+            if proc.returncode != 0:
+                state.log_line("daemon", f"  marketplace-refresh: {name} exited rc={proc.returncode}")
+                continue
+            refreshed += 1
+        dt_s = int(time.time() - t0)
+        state.log_line(
+            "daemon", f"  marketplace-refresh: refreshed {refreshed}/{len(plan)} marketplaces in {dt_s}s"
+        )
+        if refreshed == 0:
+            # Every item failed/timed out — a genuine run failure, not a partial
+            # success. Raising is what `_run_task_child` turns into rc=1, which
+            # `Task.poll_background`/`run()` read to increment the consecutive-
+            # failure streak and quarantine backoff exactly like any other task.
+            raise RuntimeError(f"marketplace-refresh: all {len(plan)} marketplace(s) failed")
 
 
 # `task_user_plugins_update` was RETIRED here 2026-08-20 (TRDD-E39YT9G6, after

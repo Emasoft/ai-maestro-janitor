@@ -1,9 +1,9 @@
 ---
 trdd-id: 5EHBPH6G
 title: marketplace-refresh sweeps 262 registered marketplaces serially under background QoS and is cap-killed on every run — five consecutive rc=-9 and plugin updates deferred behind its lock
-column: todo
+column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T09:20:00+0200
+updated: 2026-09-03T09:46:54+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -61,12 +61,74 @@ heartbeat's task-quarantine drift line.
    detector sees the truth.
 4. Surface the count: the task logs `refreshed N/M marketplaces in T s`.
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+
+Implemented (`scripts/daemon.py`, `scripts/lib/marketplace_refresh_plan.py`, tests). Gates
+clean (`ruff`, `mypy`, targeted `pytest` — 84 tests: 73 daemon/marketplace unit +
+11 `test_daemon_integration.py`). Not yet published/observed live (box 4).
+
+- **Fix 1 (plan)** — new `scripts/lib/marketplace_refresh_plan.refresh_plan()`: installed-
+  backing marketplaces (from `installed_plugins.json`, `<plugin>@<mkt>` keys) ∪
+  `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA`. `task_marketplace_refresh` loops this
+  plan calling `claude plugin marketplace update <name>` per item (same argv shape
+  `_consume_plugin_update_requests` already used) — the bulk no-name call is GONE.
+- **Fix 2 (per-item timeout)** — `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S`
+  (default 60s) via `_run_workload_once` per item; a timeout/failure is logged and skipped,
+  never retried in the same run. The run only counts as FAILED (raises → normal
+  quarantine/backoff bookkeeping) when EVERY item failed.
+- **Fix 3, reworked per orchestrator review (2 real bugs found, not the diagnosed one)**:
+  - The 1800s single-call deadline is now moot FOR THIS TASK (no more single bulk call to
+    apply it to) — not "made to fire", just no longer reachable here. Left untouched for
+    its other caller (`task_version_update`, line ~785).
+  - **Real bug A (found via advisor + daemon.log)**: `_run_workload`'s retry gave attempt 2
+    a FRESH `_WORKLOAD_TIMEOUT_SEC`, not what was left of the shared budget — daemon.log.1
+    showed a retry ~21 min into a 30 min budget getting another full 1800s, so the outer
+    ~32 min watchdog did 100% of the killing. Fixed: `_run_workload` now shares ONE deadline
+    across attempts (`math.ceil` remaining, never a truncated-to-0 first grant). New test:
+    `tests/test_daemon.py::test_run_workload_retry_does_not_get_a_fresh_full_timeout`.
+    `task_marketplace_refresh` itself never hits this path anyway (uses
+    `_run_workload_once` directly, max_attempts=1-equivalent by construction).
+  - **Real bug B (found empirically — my own test failed against real `taskpolicy`)**:
+    `_run_workload_once`'s kill path SIGKILLed only `proc.pid` (the `taskpolicy -b` launcher
+    itself), not the real workload it forks — an orphaned, still-running, pipe-holding
+    child. This is why the OLD inner deadline never visibly stopped anything: it was
+    detecting the timeout correctly, just unable to kill through a launcher prefix. Fixed:
+    `start_new_session=True` + `os.killpg` (mirrors what `poll_background`'s OUTER watchdog
+    already did for the identical reason), with a `proc.kill()` fallback.
+  - **DROPPED per orchestrator correction**: "write last-run.ts only on success" is NOT
+    implemented — `Task.run`/`poll_background` write it unconditionally for every task
+    (daemon_watchdog.py's FAILING-BUT-RUNNING logic + `time_until_due`'s backoff depend on
+    that invariant machine-wide). That semantics change is a separate, wider-blast-radius
+    TRDD-FFXGPZEI (backburner) — not this one.
+- **Fix 4 (log line)** — `marketplace-refresh: refreshed N/M marketplaces in Ts`, implemented.
+- Test isolation fix: `tests/test_daemon_integration.py`'s harness now pins
+  `CLAUDE_CONFIG_DIR` to a tmp dir with one `installed_plugins.json` record — without it the
+  two marketplace-refresh integration tests silently depended on the REAL host's install
+  state (empty on a clean CI runner ⇒ empty plan ⇒ the CLI never gets invoked at all).
+
+**NEXT ACTION**: publish, then after the next `marketplace-refresh` cadence fires, check
+`daemon.log` for one run finishing rc=0 in <300s (32 marketplaces measured on this dev host,
+well under budget) and confirm no more `plugin-update deferred (marketplace lock held)`
+lines — tick acceptance box 4 from that observation.
+
+**Fable advisor**: not consulted directly — this session (lean-worker) has no Agent tool.
+The orchestrator relayed advisor review at two points mid-task (both addressed above); no
+independent verdict was obtained by this session itself.
+
 ## Acceptance
 
-- [ ] Unit test: with 3 installed plugins from 2 marketplaces and 200 registered ones, the
-      refresh plan contains exactly those 2 (+ extras from the option).
-- [ ] Unit test: a per-item timeout skips the entry and the run still succeeds.
-- [ ] Unit test: the stamp is untouched after a failed run; `last-failure.ts` is written.
+- [x] Unit test: with 3 installed plugins from 2 marketplaces and 200 registered ones, the
+      refresh plan contains exactly those 2 (+ extras from the option). —
+      `tests/test_marketplace_refresh_plan.py::test_refresh_plan_is_installed_backing_plus_extras`
+      (+ 4 more planner unit tests, all passing).
+- [x] Unit test: a per-item timeout skips the entry and the run still succeeds. —
+      `tests/test_daemon_marketplace_refresh_task.py::test_per_item_timeout_skips_and_run_still_succeeds`
+      (real fake-`claude`-on-PATH subprocess, real timeout, `@pytest.mark.no_timeout_scale`).
+- [x] ~~Unit test: the stamp is untouched after a failed run; `last-failure.ts` is written.~~
+      **DROPPED — deferred to TRDD-FFXGPZEI** (see STATE above). Replaced with two tests
+      that DO match what shipped: `test_all_items_failing_is_a_failed_run` and
+      `test_a_partial_success_is_not_a_failed_run` (both in
+      `tests/test_daemon_marketplace_refresh_task.py`).
 - [ ] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
       and `plugin-update` no longer logging `deferred (marketplace lock held)`.
 

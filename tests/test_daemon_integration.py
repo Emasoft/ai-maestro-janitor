@@ -135,7 +135,20 @@ def harness(tmp_path: Path):
     (bin_dir / "taskpolicy").chmod(0o755)
     stub_log = tmp_path / "claude.log"
 
+    # TRDD-5EHBPH6G: task_marketplace_refresh now derives its refresh set from
+    # `installed_plugins.json` instead of running one CLI-side bulk sweep — pin
+    # CLAUDE_CONFIG_DIR to an isolated dir with ONE install record so the tests
+    # below that assert a `plugin marketplace update` call happened are
+    # deterministic, not dependent on whatever is actually installed on the host
+    # running the suite (which could be zero plugins, silently emptying the plan).
+    claude_config_dir = tmp_path / "claude-config"
+    (claude_config_dir / "plugins").mkdir(parents=True)
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        json.dumps({"plugins": {"test-plugin-a@mp": [{"scope": "user"}]}}), encoding="utf-8"
+    )
+
     base_env = os.environ.copy()
+    base_env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir)
     base_env["JANITOR_GLOBAL_STATE_DIR"] = str(state_dir)
     # The six mode flags (incl. reload-needed.flag) now live at the FIXED control_dir()
     # (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME

@@ -168,9 +168,28 @@ def _load_daemon():
     return mod
 
 
+def _fake_lock_ctx():
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_lock():
+        yield True
+
+    return _fake_lock
+
+
+def _stub_plan_of_one(daemon, monkeypatch, name="only-mkt"):
+    """Give task_marketplace_refresh a one-marketplace plan without touching the
+    real installed_plugins.json (the planner itself is exercised separately, in
+    test_marketplace_refresh_plan.py — this test is about throttle wiring)."""
+    monkeypatch.setattr(daemon, "_plugins_cache_root", lambda: __import__("pathlib").Path("/nonexistent/cache"))
+    monkeypatch.setattr(daemon.mrp, "refresh_plan", lambda installed, extra: [name])
+
+
 def test_marketplace_refresh_applies_prefix_when_available(monkeypatch):
     """task_marketplace_refresh prepends the throttle prefix and passes a preexec
-    when launchers are present — proving the throttle is wired to the subprocess."""
+    when launchers are present — proving the throttle is wired to the per-item
+    subprocess call."""
     daemon = _load_daemon()
     captured: dict = {}
 
@@ -178,68 +197,55 @@ def test_marketplace_refresh_applies_prefix_when_available(monkeypatch):
     monkeypatch.setattr(daemon.dt, "_low_priority_prefix", lambda: ["nice", "-n", "19", "ionice", "-c", "3"])
     sentinel = lambda: None  # noqa: E731 — a stand-in preexec callable
     monkeypatch.setattr(daemon.dt, "nice_preexec", lambda: sentinel)
+    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock_ctx())
+    _stub_plan_of_one(daemon, monkeypatch)
 
-    # The marketplace lock is a context manager yielding "got"; force it acquired.
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_lock():
-        yield True
-
-    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock)
-
-    # Capture what argv + preexec the workload runner receives; do not spawn.
-    def _fake_run_workload(cmd, **kwargs):
+    # Capture what argv + preexec the per-item workload call receives; do not spawn.
+    def _fake_run_workload_once(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["preexec"] = kwargs.get("preexec_fn")
-        return None  # short-circuits the rest of the task
+        return daemon.subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(daemon, "_run_workload", _fake_run_workload)
+    monkeypatch.setattr(daemon, "_run_workload_once", _fake_run_workload_once)
     monkeypatch.setattr(daemon.state, "log_line", lambda *a, **k: None)
 
     daemon.task_marketplace_refresh()
 
     assert captured["cmd"] == [
         "nice", "-n", "19", "ionice", "-c", "3",
-        "claude", "plugin", "marketplace", "update",
+        "claude", "plugin", "marketplace", "update", "only-mkt",
     ]
     assert captured["preexec"] is sentinel
 
 
 def test_marketplace_refresh_falls_back_when_no_throttle(monkeypatch):
-    """With no launchers AND no preexec, the bare command is run un-throttled —
-    the FAIL-OPEN behavior that keeps the daemon working everywhere."""
+    """With no launchers AND no preexec, the bare per-item command is run
+    un-throttled — the FAIL-OPEN behavior that keeps the daemon working everywhere."""
     daemon = _load_daemon()
     captured: dict = {}
 
     monkeypatch.setattr(daemon.dt, "_low_priority_prefix", lambda: [])
     monkeypatch.setattr(daemon.dt, "nice_preexec", lambda: None)
+    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock_ctx())
+    _stub_plan_of_one(daemon, monkeypatch)
 
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_lock():
-        yield True
-
-    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock)
-
-    def _fake_run_workload(cmd, **kwargs):
+    def _fake_run_workload_once(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["preexec"] = kwargs.get("preexec_fn")
-        return None
+        return daemon.subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(daemon, "_run_workload", _fake_run_workload)
+    monkeypatch.setattr(daemon, "_run_workload_once", _fake_run_workload_once)
     monkeypatch.setattr(daemon.state, "log_line", lambda *a, **k: None)
 
     daemon.task_marketplace_refresh()
 
-    assert captured["cmd"] == ["claude", "plugin", "marketplace", "update"]
+    assert captured["cmd"] == ["claude", "plugin", "marketplace", "update", "only-mkt"]
     assert captured["preexec"] is None
 
 
 def test_marketplace_refresh_throttle_build_error_falls_back(monkeypatch):
-    """If building the throttle prefix raises, the task still runs the bare command
-    (a throttle bug never breaks marketplace-refresh)."""
+    """If building the throttle prefix raises, the task still runs the bare
+    per-item command (a throttle bug never breaks marketplace-refresh)."""
     daemon = _load_daemon()
     captured: dict = {}
 
@@ -248,24 +254,18 @@ def test_marketplace_refresh_throttle_build_error_falls_back(monkeypatch):
 
     monkeypatch.setattr(daemon.dt, "_low_priority_prefix", _boom)
     monkeypatch.setattr(daemon.dt, "nice_preexec", lambda: None)
+    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock_ctx())
+    _stub_plan_of_one(daemon, monkeypatch)
 
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_lock():
-        yield True
-
-    monkeypatch.setattr(daemon.gs, "marketplace_lock", _fake_lock)
-
-    def _fake_run_workload(cmd, **kwargs):
+    def _fake_run_workload_once(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["preexec"] = kwargs.get("preexec_fn")
-        return None
+        return daemon.subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(daemon, "_run_workload", _fake_run_workload)
+    monkeypatch.setattr(daemon, "_run_workload_once", _fake_run_workload_once)
     monkeypatch.setattr(daemon.state, "log_line", lambda *a, **k: None)
 
     daemon.task_marketplace_refresh()
 
-    assert captured["cmd"] == ["claude", "plugin", "marketplace", "update"]
+    assert captured["cmd"] == ["claude", "plugin", "marketplace", "update", "only-mkt"]
     assert captured["preexec"] is None

@@ -485,3 +485,39 @@ def test_run_workload_no_retry_on_clean_exit(
     result = daemon._run_workload(workload, timeout=10)
     assert result is not None and result.returncode == 0
     assert len(captured) == 1, "a clean exit must not be retried"
+
+
+def test_run_workload_retry_does_not_get_a_fresh_full_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-5EHBPH6G: `timeout` is a TOTAL budget shared across attempts, not a
+    per-attempt grant. A first attempt that consumes (at least) the whole
+    `timeout` before exiting non-zero must NOT get a fresh full `timeout` on
+    retry — the pre-fix bug that let a 30 min budget become ~32 min of real
+    wall-clock across two attempts (daemon.log: retries at ~21 min in,
+    cap-killed at ~32 min — the retry got a FRESH 1800s, not what was left).
+
+    `_run_workload_once` is faked here (real-subprocess timing would make a
+    sub-second margin flaky) to deterministically consume exactly the whole
+    `timeout` on attempt 1, so this isolates `_run_workload`'s OWN
+    budget-accounting arithmetic — the thing this fix changes — from the
+    real-subprocess kill-path behavior `_run_workload_once` already has its
+    own dedicated tests for above.
+    """
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    calls: list[int] = []
+
+    def _fake_once(cmd, *, timeout, **_kwargs):
+        calls.append(timeout)
+        time.sleep(timeout)  # attempt 1 always eats its ENTIRE granted budget
+        return daemon.subprocess.CompletedProcess(cmd, 3, "", "")
+
+    monkeypatch.setattr(daemon, "_run_workload_once", _fake_once)
+    result = daemon._run_workload(["irrelevant"], timeout=1, heartbeat_tick=1)
+
+    assert calls == [1], (
+        "attempt 1 must be granted the full budget, and — since it consumed all "
+        "of it — attempt 2 must NEVER be spawned (a fresh grant would append a "
+        "second entry here)"
+    )
+    assert result is not None and result.returncode == 3
