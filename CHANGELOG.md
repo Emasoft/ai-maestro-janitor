@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- **tests:** Finish the address-lint fixes — a redaction that kept the real domain, and a filename that reads as one (235f281)
+## [3.4.14] — 2026-09-03
+
+### Bug Fixes
+
 - **terminal-trigger:** Flush the pane queue with repeated ESC before /model opus (TRDD-3T9HQEQ6) (e0c328c)
 - **terminal-trigger:** Refuse to type when the pane cannot be read back after ESC (TRDD-3T9HQEQ6) (1533ccc)
 - **detectors:** One owner for the tracked-but-ignored finding (TRDD-IEAZQ9MK) (bd3af65)
@@ -88,6 +93,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Bump version to 3.4.14 (103a2e5)
+- Bump version to 3.4.14 (cc6bc25)
 
 ### Refactor
 
