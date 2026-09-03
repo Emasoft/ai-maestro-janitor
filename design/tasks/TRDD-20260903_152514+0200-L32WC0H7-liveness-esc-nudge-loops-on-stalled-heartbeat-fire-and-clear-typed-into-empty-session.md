@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-04T00:13:30+0200
+updated: 2026-09-04T01:12:00+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -238,17 +238,43 @@ Mechanism, verified in code + transcript:
 
 - [ ] A session whose fires stall shows at most ONE `Interrupted` row per liveness episode,
       then a human-facing finding; never a 21-min ESC cadence.
-- [ ] No cron fire is killed by the nudge's own second ESC (transcript never shows
-      interrupt → fire → interrupt within 3 s).
-- [ ] The cold-cache gate logs `context 0 < <min> — nothing worth reclaiming` on a
+      — NO TEST, by nature: this counts rows across a real multi-beat episode, so it is a
+      field observation like F5, not a unit-testable property. Audited 2026-09-04; the
+      underlying counter-reset fix is covered by
+      `test_daemon_session_liveness.py::test_healthy_with_rate_limited_flag_still_present_keeps_the_episode_open`,
+      but nothing asserts the row count or the cadence bound. Observe with F5.
+- [x] No cron fire is killed by the nudge's own second ESC (transcript never shows
+      interrupt → fire → interrupt within 3 s). — 2026-09-04:
+      `test_fleet_inject.py::test_esc_only_osascript_sends_exactly_one_esc` and
+      `::test_esc_only_plan_tmux_and_gui_channels_also_send_one_esc` assert exactly ONE
+      ESC press across the iTerm, tmux and wtype/xdotool channels — the second ESC that
+      killed the fresh fire no longer exists to send.
+- [x] The cold-cache gate logs `context 0 < <min> — nothing worth reclaiming` on a
       post-`/clear` session with no assistant message, and still fires on a large
-      transcript whose tail window did not reach the file start.
-- [ ] A cancelled `/clear` injection leaves the prompt field empty; a user's own typed text
-      is never cleared.
-- [ ] A pending `/clear` chain is not cancelled by a heartbeat fire, only by a human turn.
+      transcript whose tail window did not reach the file start. — 2026-09-04, two
+      halves: `test_context_size_guard.py::test_latest_context_size_no_assistant_usage_in_a_small_file_is_zero`
+      pins the KNOWN-empty 0 (and `..._in_a_huge_file_stays_none` the None branch), and
+      `test_external_clear.py:155` / `:495` assert the literal
+      `"nothing worth reclaiming"` reaches `v.why` when context is under the floor.
+- [x] A cancelled `/clear` injection leaves the prompt field empty; a user's own typed text
+      is never cleared. — 2026-09-04:
+      `test_terminal_trigger_readback.py::test_still_wanted_cancel_clears_a_leftover_exact_match_command`
+      and `::test_still_wanted_cancel_never_clears_the_users_own_text` cover both halves.
+- [x] A pending `/clear` chain is not cancelled by a heartbeat fire, only by a human turn.
+      — 2026-09-04: `test_fleet_scan_human_activity.py::test_interrupt_record_never_counts_as_a_human_turn`
+      (our own nudge's interrupt is not human activity) plus
+      `test_external_handoff_clear.py::test_a_real_turn_after_the_verdict_retires_the_clear`
+      and `::test_a_turn_in_the_verdicts_own_second_is_not_a_comeback` (only a real turn
+      strictly after the verdict cancels).
 - [ ] No `GIVING UP` line ever appears for a session whose transcript is fresh (the F1
       early-warning signal); no `[frozen] attempt=1` follows `attempt=0` without an
       `Interrupted` pair (the F2 signal).
+      — NO TEST, by nature: a composite absence-over-a-live-log property. Audited
+      2026-09-04; F1 and F2 are each covered individually
+      (`test_daemon_session_liveness.py::test_healthy_with_rate_limited_flag_still_present_keeps_the_episode_open`,
+      `test_daemon_hard_restart.py::test_frozen_exhausted_stays_esc_nudge_then_crash_loop`)
+      but their joint early-warning signature is only observable in production. Observe
+      with F5.
 - [x] `uv run pytest` + `ruff` + `mypy` green. — 2026-09-04 on the tree committed as `9cc22049`:
       `16351 passed, 1 skipped, 8 subtests passed` (`PYTEST=0`), `ruff check scripts tests` all
       checks passed, `mypy scripts/ --ignore-missing-imports` clean over 504 source files.
