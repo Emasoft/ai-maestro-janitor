@@ -81,6 +81,198 @@ def review_after_epoch(head: str) -> int | None:
         return None  # e.g. 2026-02-31 — a nonsense date is not a valid snooze
 
 
+# ── unblock-when (RTRS704K) — predicate kinds a card's `unblock-when:` may name ────────────
+_PRED_TRDD_RE = re.compile(r"^trdd:([0-9A-Za-z]{8})\s+terminal$")
+_PRED_ISSUE_RE = re.compile(r"^issue:([\w.-]+/[\w.-]+)#(\d+)\s+closed$")
+_PRED_FILE_RE = re.compile(r"^file:(\S+)\s+exists$")
+_PRED_LOG_RE = re.compile(r"^log:(\S+)\s+matches\s+(.+)$")
+_PRED_DATE_RE = re.compile(r"^date:>=(\d{4})-(\d{2})-(\d{2})$")
+_PRED_DECISION_RE = re.compile(r"^decision:\S+$")
+
+
+def _repo_relative(rel: str) -> bool:
+    """True iff `rel` cannot escape the project root — a PROJECT card is pushed, so an
+    absolute or `..`-climbing path in `file:`/`log:` would leak local layout to every
+    cloner (advisor constraint, RTRS704K)."""
+    return not rel.startswith("/") and ".." not in Path(rel).parts
+
+
+def _evaluate_predicate(
+    pred: str,
+    *,
+    column_by_uid: dict[str, str],
+    project_repo_slug: str | None,
+    open_issue_numbers: set[int],
+    project_root: Path,
+    now: int,
+) -> bool | None:
+    """One `unblock-when:` predicate → True (satisfied) / False (not yet, or never
+    auto-clearable) / None (malformed — unknown shape or an out-of-bounds path). PURE except
+    for the two filesystem-read kinds, which fail to False (not a parse error) on I/O trouble.
+    """
+    m = _PRED_TRDD_RE.match(pred)
+    if m:
+        return trdd_common.is_terminal_column(column_by_uid.get(m.group(1), ""))
+    m = _PRED_ISSUE_RE.match(pred)
+    if m:
+        owner_repo, num = m.group(1), int(m.group(2))
+        # Cross-repo issues have no local snapshot to check against (advisor constraint) —
+        # treat as `decision:`-shaped: never auto-clears, but it is a real predicate, not a
+        # typo, so it is NOT malformed.
+        if project_repo_slug is None or owner_repo.lower() != project_repo_slug.lower():
+            return False
+        return num not in open_issue_numbers
+    m = _PRED_FILE_RE.match(pred)
+    if m:
+        rel = m.group(1)
+        if not _repo_relative(rel):
+            return None
+        return (project_root / rel).exists()
+    m = _PRED_LOG_RE.match(pred)
+    if m:
+        rel, pattern = m.group(1), m.group(2)
+        if not _repo_relative(rel):
+            return None
+        try:
+            text = (project_root / rel).read_text(encoding="utf-8")
+        except OSError:
+            return False
+        try:
+            return re.search(pattern, text, re.MULTILINE) is not None
+        except re.error:
+            return None
+    m = _PRED_DATE_RE.match(pred)
+    if m:
+        try:
+            target = (
+                datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                .astimezone()
+                .timestamp()
+            )
+        except ValueError:
+            return None
+        return now >= target
+    if _PRED_DECISION_RE.match(pred):
+        return False  # the ONLY human-only kind — the attention cue surfaces it, never this
+    return None  # unrecognized shape
+
+
+def evaluate_unblock_when(
+    predicates: list[str],
+    *,
+    column_by_uid: dict[str, str],
+    project_repo_slug: str | None,
+    open_issue_numbers: set[int],
+    project_root: Path,
+    now: int,
+) -> tuple[bool, list[str]]:
+    """(all_satisfied, malformed_tokens) for a card's `unblock-when:` list.
+
+    Fails OPEN toward "stay blocked" on a malformed predicate — the inverse stance of
+    `review_after_epoch` (which fails open toward "check it"), because here the failure mode
+    to avoid is unblocking a card on a typo, not silencing one.
+    """
+    malformed: list[str] = []
+    all_true = True
+    for pred in predicates:
+        result = _evaluate_predicate(
+            pred,
+            column_by_uid=column_by_uid,
+            project_repo_slug=project_repo_slug,
+            open_issue_numbers=open_issue_numbers,
+            project_root=project_root,
+            now=now,
+        )
+        if result is None:
+            malformed.append(pred)
+            all_true = False
+        elif result is not True:
+            all_true = False
+    return (all_true and not malformed), malformed
+
+
+_FM_COLUMN_BLOCKED_RE = re.compile(r"^column:[ \t]*blocked[ \t]*$", re.MULTILINE)
+_FM_UPDATED_LINE_RE = re.compile(r"^updated:[ \t]*.*$", re.MULTILINE)
+
+
+def _restore_column_text(text: str, target_column: str, now_iso: str) -> str | None:
+    """Rewrite `column: blocked` → `column: <target_column>` and bump `updated:`, both
+    scoped to the frontmatter block only. None if the shape doesn't match — the caller then
+    writes nothing rather than risk a malformed rewrite."""
+    m = trdd_common.FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    block = m.group(1)
+    block, n = _FM_COLUMN_BLOCKED_RE.subn(f"column: {target_column}", block, count=1)
+    if n != 1:
+        return None
+    block, n = _FM_UPDATED_LINE_RE.subn(f"updated: {now_iso}", block, count=1)
+    if n != 1:
+        return None
+    return text[: m.start(1)] + block + text[m.end(1) :]
+
+
+def _try_unblock(
+    f: Path,
+    head: str,
+    *,
+    column_by_uid: dict[str, str],
+    project_repo_slug: str | None,
+    open_issue_numbers: set[int],
+    project_root: Path,
+    now: int,
+    seen: Path,
+) -> None:
+    """Restore a `column: blocked` card whose `unblock-when:` predicates now ALL hold.
+
+    No `unblock-when:` field → nothing to do (silent — `blocked-by:` alone stays a human
+    read, per rule §6). Never touches a card with no field, never partially restores one.
+    """
+    predicates = trdd_common.unblock_when_predicates(head)
+    if not predicates:
+        return
+    satisfied, malformed = evaluate_unblock_when(
+        predicates,
+        column_by_uid=column_by_uid,
+        project_repo_slug=project_repo_slug,
+        open_issue_numbers=open_issue_numbers,
+        project_root=project_root,
+        now=now,
+    )
+    uid = trdd_common.extract_uid(f.name)
+    if uid is None:
+        return
+    if malformed:
+        state.log_line(
+            "trdd-drift",
+            f"TRDD-{uid[:8]} unblock-when has a malformed predicate "
+            f"{malformed!r} — staying blocked, never auto-unblocking on a parse error.",
+        )
+    if not satisfied:
+        return
+    target = trdd_common.pre_block_column(head) or "todo"
+    try:
+        text = f.read_text(encoding="utf-8")
+    except OSError:
+        return
+    now_iso = datetime.fromtimestamp(now).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+    new_text = _restore_column_text(text, target, now_iso)
+    if new_text is None:
+        return
+    try:
+        state.atomic_write(f, new_text)
+    except OSError:
+        return
+    line = dedupe.emit_once(
+        seen,
+        f"unblocked@{uid}@{now // 86400}",
+        f"[trdd-drift] TRDD-{uid[:8]} unblock-when predicates all satisfied — "
+        f"restored column: blocked -> {target}.",
+    )
+    if line is not None:
+        print(line)
+
+
 def _last_touched_epoch(path: Path, project_root: Path) -> int:
     """Prefer git last-commit timestamp, fall back to mtime for uncommitted files.
 
@@ -158,6 +350,42 @@ def main() -> int:
         return 0
 
     now = int(time.time())
+
+    # Pass 1 — a uid->column board for the `trdd:<id> terminal` predicate kind (mirrors
+    # trdd-state-reconciliation's Check-4 board): built once so resolving one card's blocker
+    # never re-reads the whole tree per predicate.
+    column_by_uid: dict[str, str] = {}
+    for _scope, _f in trdds:
+        _uid = trdd_common.extract_uid(_f.name)
+        if _uid is not None:
+            _, _col = _parse_trdd_state(_f)
+            column_by_uid[_uid] = _col
+
+    # This project's own `owner/repo` + its currently-open issue numbers, from the
+    # network-free snapshot `github-issues-watch` already maintains (dispatch.py's
+    # `_open_issues_bit` reads the same file the same way) — the `issue:<owner/repo#N>
+    # closed` predicate must never hit the network per card per fire (advisor constraint).
+    project_repo_slug: str | None = None
+    remote_proc = state.run_subprocess(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        timeout=5,
+        detector_name="trdd-drift",
+    )
+    if remote_proc is not None and remote_proc.returncode == 0:
+        import issues_watch  # noqa: PLC0415 - lazy, this detector's only use of it (lib already on sys.path)
+
+        project_repo_slug = issues_watch.parse_remote_slug(remote_proc.stdout or "")
+    open_issue_numbers: set[int] = set()
+    try:
+        import json  # noqa: PLC0415 - lazy, this detector's only use of it
+
+        seen_issues_raw = json.loads(
+            (state.state_dir() / "issues-watch-seen.json").read_text(encoding="utf-8")
+        )
+        if isinstance(seen_issues_raw, dict):
+            open_issue_numbers = {int(k) for k in seen_issues_raw if str(k).isdigit()}
+    except (OSError, ValueError):
+        pass  # no snapshot yet — every `issue:` predicate on THIS repo stays unsatisfied
 
     for scope, f in trdds:
         status, column = _parse_trdd_state(f)
@@ -254,6 +482,21 @@ def main() -> int:
         # than the v1 statuses on purpose — a `backburner`/`todo` TRDD that hasn't moved in
         # weeks is exactly the staleness worth surfacing.
         if column:
+            if column == "blocked":
+                # `blocked` is not drift-eligible (it IS the licence to sit still) — but it
+                # may carry a machine-checkable `unblock-when:` this fire can clear on its
+                # own (RTRS704K). No such field → `_try_unblock` is a no-op.
+                _try_unblock(
+                    f,
+                    fm_head,
+                    column_by_uid=column_by_uid,
+                    project_repo_slug=project_repo_slug,
+                    open_issue_numbers=open_issue_numbers,
+                    project_root=root,
+                    now=now,
+                    seen=seen,
+                )
+                continue
             if column not in _ACTIVE_COLUMNS:
                 continue
         elif status not in _DRIFT_ACTIVE_STATUSES:

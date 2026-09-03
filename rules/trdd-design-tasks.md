@@ -127,6 +127,18 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
 OPEN on a malformed date. Full grammar + rationale: the reference.
 Implementation: `scripts/detectors/trdd-drift.py::review_after_epoch`.
 
+## `unblock-when:` — machine-checkable wait conditions on a `blocked` card
+
+`unblock-when: [<pred>, ...]` (kinds: `trdd:<id> terminal`, `issue:<owner/repo#N> closed`,
+`file:<repo-relative path> exists`, `log:<repo-relative path> matches <regex>`,
+`date:>=YYYY-MM-DD`, `decision:<who>` — the only human-only kind) lets `trdd-drift` restore
+`column: blocked` to `pre-block-column:` on its own once ALL predicates hold; a malformed
+predicate MUST fail OPEN toward staying blocked, never toward unblocking. `blocked-by:` keeps
+only TRDD/issue references going forward — a descriptive token migrates to
+`unblock-when: [decision:<who>]` on next touch, superseding (for new cards) the F4IBIDB6
+`has_blocked_by_value` accommodation. Full grammar: the reference.
+Implementation: `scripts/detectors/trdd-drift.py::evaluate_unblock_when`.
+
 ## Cross-project scope discriminators
 
 Additive, lint-enforced incrementally: `project-id:` — PROJECT discriminator (`scope:

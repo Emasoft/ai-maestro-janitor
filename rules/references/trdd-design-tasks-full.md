@@ -162,6 +162,8 @@ parent-trdd: null                        # the TRDD that spawned this one
 npt: [TRDD-K3QX9P2W, TRDD-M7BZ4X1Q]      # Necessary Prerequisite Tasks
 eht: [TRDD-71a2239a]                     # Effects Handling Tasks
 blocked-by: [TRDD-K3QX9P2W]              # runtime blockers (subset of npt while in-flight)
+unblock-when: []                         # machine-checkable predicates trdd-drift auto-clears
+                                          # `blocked` on (see "unblock-when:" below)
 supersedes: []                           # TRDDs this one replaces
 superseded-by: []                        # populated when column=superseded
 pre-block-column: null                   # column to restore to when blockers clear
@@ -240,6 +242,29 @@ The match is **line-anchored at column 0** (`^review-after:\s*YYYY-MM-DD\s*$`), 
 paragraph that merely *discusses* the field (e.g. quoting it in prose) is not mistaken for a
 real park. Implementation + tests: `scripts/detectors/trdd-drift.py::review_after_epoch`,
 `tests/test_trdd_drift_review_after.py`.
+
+### `unblock-when:` — machine-checkable wait conditions (RTRS704K, janitor#288)
+
+`blocked-by:` alone let a card name a DESCRIPTIVE token nothing could evaluate
+(`owner-decision-x`, `awaiting-live-429-observation`) — legal, and invisible to every drain
+mechanism. `unblock-when: [<pred>, ...]` fixes that: `trdd-drift` re-evaluates it on every
+fire and, once ALL predicates hold, restores `column: blocked` to `pre-block-column:` (or
+`todo` when unset). `blocked-by:` narrows to **TRDD/issue references only** going forward — a
+descriptive token migrates to `unblock-when: [decision:<who>]` on next touch, superseding the
+F4IBIDB6 accommodation (`scripts/lib/trdd_common.py::has_blocked_by_value`) for NEW cards; that
+function itself is untouched (existing non-TRDD-shaped blockers stay legible until migrated).
+
+Predicate kinds: `trdd:<id> terminal` (another TRDD reached `TERMINAL_COLUMNS`) ·
+`issue:<owner/repo#N> closed` (evaluated from `github-issues-watch`'s open-issue snapshot,
+**never** a live call; a repo other than this project's own is `decision:`-shaped until a
+cross-repo snapshot exists) · `file:<repo-relative path> exists` · `log:<repo-relative path>
+matches <regex>` · `date:>=YYYY-MM-DD` · `decision:<who>` — the **only** human-only kind,
+surfaced by the attention cue, and it never auto-clears. `file:`/`log:` paths MUST be
+repo-relative (a PROJECT card is pushed — an absolute or `..`-climbing path leaks local
+layout). A malformed predicate fails OPEN toward **staying blocked** — the inverse of
+`review-after:`'s stance, because here a typo must never accidentally unblock. Implementation +
+tests: `scripts/detectors/trdd-drift.py::evaluate_unblock_when`,
+`tests/test_trdd_drift_unblock_when.py`.
 
 ### Minimal TRDD (most fields use defaults)
 

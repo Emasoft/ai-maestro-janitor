@@ -238,6 +238,11 @@ FM_SUPERSEDED_BY_RE = re.compile(r"^superseded-by:[ \t]*(.+)$", re.MULTILINE)
 # legitimately stalled in `backburner`/`todo` on its own dependency chain, not forgotten
 # (trdd-drift narrowing, janitor#189: a card with a stated precondition is not "drift").
 FM_NPT_RE = re.compile(r"^npt:[ \t]*(.+)$", re.MULTILINE)
+# `unblock-when:` (RTRS704K) — a machine-checkable predicate list that lets `trdd-drift`
+# clear `column: blocked` on its own, instead of `blocked-by:` carrying descriptive tokens
+# no tool can evaluate (janitor#288). `pre-block-column:` is the column to restore to.
+FM_UNBLOCK_WHEN_RE = re.compile(r"^unblock-when:[ \t]*(.+)$", re.MULTILINE)
+FM_PRE_BLOCK_COLUMN_RE = re.compile(r"^pre-block-column:[ \t]*(.+)$", re.MULTILINE)
 # Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
 LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
 
@@ -649,6 +654,33 @@ def has_stated_precondition(head: str) -> bool:
     if nm and parse_flow_list(nm.group(1)):
         return True
     return False
+
+
+def unblock_when_predicates(head: str) -> list[str]:
+    """Extract the raw predicate tokens from an `unblock-when:` flow-list value in `head`.
+
+    Pure text extraction only — evaluating a predicate needs project state (other TRDDs'
+    columns, a GitHub issue snapshot, the filesystem) this module has no access to;
+    `trdd-drift` owns evaluation. An empty/absent field yields [] — no field, nothing to
+    auto-unblock.
+    """
+    fm = FRONTMATTER_RE.match(head)
+    if not fm:
+        return []
+    m = FM_UNBLOCK_WHEN_RE.search(fm.group(1))
+    if not m:
+        return []
+    return parse_flow_list(m.group(1))
+
+
+def pre_block_column(head: str) -> str:
+    """The `pre-block-column:` value in `head`, or "" when absent — the column to restore to
+    when every `unblock-when:` predicate turns true."""
+    fm = FRONTMATTER_RE.match(head)
+    if not fm:
+        return ""
+    m = FM_PRE_BLOCK_COLUMN_RE.search(fm.group(1))
+    return m.group(1).strip() if m else ""
 
 
 def impl_commit_shas(raw: str) -> list[str]:
