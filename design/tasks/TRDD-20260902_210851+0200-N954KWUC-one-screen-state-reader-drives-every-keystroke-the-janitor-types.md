@@ -1,9 +1,9 @@
 ---
 trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
-column: dev
+column: testing
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T09:32:00+0200
+updated: 2026-09-03T22:31:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: [NACCL0CB, 3T9HQEQ6]
-implementation-commits: []
+implementation-commits: [afd3af70, 30508054, 8cb71c3b, e93a9203]
 created-by: USER directive 2026-09-02 21:07
 ---
 
@@ -25,11 +25,41 @@ created-by: USER directive 2026-09-02 21:07
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
 
 - **P1 DONE** — commit `afd3af70`: `scripts/lib/pane_state.py`, 18 fixtures, 31 tests.
-- **NEXT ACTION** — Phase 2: build the policy table `(PaneState, event) → plan` plus
-  closed-loop verify, as its own bounded worker task. No call-site edits in this phase.
-- **P3** — migrate the 14 actuators (the proxy call sites) to route through the policy table.
+- **P2 DONE** — `scripts/lib/pane_policy.py` (new) + `tests/test_pane_policy.py` (new, 23 test
+  functions / 33 collected cases, all pass). `Event`, `Expect` (+ `ANY` for unverifiable
+  intermediate ESC-flush steps), `Step`, `plan()`, `satisfied()`, `execute()` (closed-loop,
+  bounded retries, STOP on wrong post-state). Rows: `retry_wedge`+ROTATION_LANDED/NO_HEADROOM,
+  `awaiting_user`/`working` never type (any event), `idle`+CRON_DEAD → `/janitor-arm`,
+  `None`/`unknown` → `()`. `PLUGIN_STAGED`/`STOP_FLAG` intentionally left `()` — need external
+  context (which flag/plugin) neither `PaneState` nor `Event` carries; documented in the
+  module docstring, not guessed. No call-site edits (Phase 3 scope). Gates: ruff + mypy clean
+  (502 files), pytest 64/64 (pane_policy + pane_state). Report:
+  `reports/board-drain/20260903_105448+0200-N954KWUC-p2-pane-policy.md`.
+- **P3 DONE** — commits `30508054` (actuator), `8cb71c3b` (daemon sites), `e93a9203` (test
+  isolation). `fleet_inject.fire` is called from ONE place (`pane_actuate.py:188`). Full suite
+  **16341 passed, 0 failed**; ruff + mypy clean (504 files). Acceptance boxes 1-3 ticked.
+- **`Outcome.touched` is the load-bearing addition, and it is not cosmetic.** `status` cannot
+  answer "did a keystroke reach the pane": FAILED covers BOTH a live pane that stayed wedged
+  (attempt spent) and a channel that accepted nothing (attempt NOT spent). Two consumers keyed
+  attempt bookkeeping on `status` and both were wrong — the rotation dedupe (burns the
+  rotation's one ESC on an untouched pane) and the recovery ladder (charges an attempt and
+  marches toward the killing rungs on a transient channel fault). **Any new caller that stamps
+  "we already actuated this pane" MUST key on `touched`.**
+- **NEXT ACTION** — acceptance box 4, the only one left: observe ONE live rotation and one
+  no-headroom fallback end with the pane back at `idle`/`working` with no human keystroke.
+  Read `.janitor/logs/pane-policy.log` for the step-by-step. Cannot be forced; it needs a real
+  wall.
+- **Follow-up filed, deliberately NOT fixed here** — the actuator's verify loop re-reads with a
+  3.0 s settle before each read, on the SINGLE-THREADED daemon beat, so a wedged pane now costs
+  real wall-clock where the pre-P3 detached `fire` cost none. Severity is unmeasured and the
+  measurement is a read of data already on disk (beat-to-beat deltas in `daemon.log` during a
+  rotation window) — do that BEFORE choosing a mechanism. See TRDD-8BXMNQ4T.
 - **Gating** — EHTs `NACCL0CB` / `3T9HQEQ6` gate `complete`.
-- **SUPERSEDED — do NOT carry forward** — none.
+- **SUPERSEDED — do NOT carry forward** — the two STATE blocks below are P1/P2 history. Their
+  "NEXT ACTION" lines are both done. Also dead: the earlier claim that `pane_actuate` preserves
+  each site's channel selection "byte-for-byte" — it does not on the wedge+command path, where
+  the post-flush `esc_first=False` makes `build_command_plan` pick the `aimaestro` channel; the
+  module docstring now documents the split.
 
 ## Directive (USER, 2026-09-02 21:07, verbatim)
 
@@ -92,10 +122,14 @@ to the wrong state.
       `scripts/lib/pane_state.py` (new) + 18-file fixture corpus (6 real + 12 synthetic) under
       `tests/fixtures/pane_frames/` + `tests/test_pane_state.py` (31 tests, all pass). Report:
       `reports/board-drain/20260903_092933+0200-N954KWUC-p1-pane-state.md`.
-- [ ] Every `fleet_inject.fire` call site in `daemon.py` / `fleet_restart.py` goes through the
-      policy table; grep shows no direct actuator that does not first read `PaneState`.
-- [ ] Each policy row has a test that feeds a frame + event and asserts the exact keystroke
-      sequence, and a test that a wrong post-state stops the sequence.
+- [x] Every `fleet_inject.fire` call site in `daemon.py` / `fleet_restart.py` goes through the
+      policy table; grep shows no direct actuator that does not first read `PaneState`. Proof:
+      `grep -rn "fleet_inject.fire(" scripts/` returns exactly one call — `pane_actuate.py:188`
+      — plus prose mentions in comments. Commits `30508054`, `8cb71c3b`, `e93a9203`.
+- [x] Each policy row has a test that feeds a frame + event and asserts the exact keystroke
+      sequence, and a test that a wrong post-state stops the sequence. Proof:
+      `scripts/lib/pane_policy.py` (new) + `tests/test_pane_policy.py` (new, 33 cases, all
+      pass). Report: `reports/board-drain/20260903_105448+0200-N954KWUC-p2-pane-policy.md`.
 - [ ] Live: a rotation and a no-headroom fallback each end with the pane back at `idle` or
       `working` with no human keystroke, logged step by step.
 
