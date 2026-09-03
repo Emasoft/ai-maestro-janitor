@@ -1,9 +1,9 @@
 ---
 trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
-column: todo
+column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-03T17:38:26+0200
+updated: 2026-09-04T00:13:30+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -14,11 +14,34 @@ relevant-rules: []
 related-trdds: [UA4FAX67, WKTD5JTC, P7WU40G9, O7UCNNN2, G043V3V0, 9ZPU69UC]
 npt: []
 eht: []
+implementation-commits: [9cc22049]
 ---
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 17:32
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04 00:13
+
+- **HELD AT `testing` — NOT `complete`.** The implementation is done; the card is not, because
+  F5 and the six live acceptance criteria below need a real stalled fire on this host, which
+  cannot be manufactured. **Unblock condition:** publish, then observe one stalled fire recover
+  with a SINGLE nudge; then move to `complete`. This matches the ten other cards left at
+  `testing` on 2026-09-03 for the same reason (see `janitor-publish-pipeline` ATOM-VA75-PD8K:
+  the release is what makes a live box observable, so publish is mid-pipeline, not the finish
+  line). A `complete` column over an unchecked acceptance box is the "board is lying" failure
+  this session spent the night removing — do not re-close it early.
+- F0–F6 implemented in commit `9cc22049` (probes: mutation-tested per item, see
+  `reports/l32wc0h7-fixes/20260903_234218+0200-f0-f6.md` +
+  `reports/l32wc0h7-fixes/20260904_000130+0200-hard-restart-tests.md`). Full suite green
+  (16351 passed, 1 skipped, 0 failed), ruff + mypy clean. F5 (live-pane observation) is
+  explicitly NOT done — cannot be manufactured outside a real stalled fire; observe it in
+  the field once this ships.
+- **CONSEQUENCE worth carrying forward:** F1 caps every `frozen` diagnosis at `esc_nudge`
+  — no diagnosis anywhere in the ladder now routes to `force_restart`/`resurrect`
+  (`test_no_diagnosis_ever_routes_to_a_kill_rung` pins this). The janitor therefore cannot
+  kill a stalled session at all anymore. This is DELIBERATE (a stall whose root cause is
+  unsettled must never escalate to a kill), nothing was silently deleted — but it means the
+  hard-restart/kill rung is now dead code on this path. TRDD-56d24c02 owns the USER decision
+  on whether/when to restore a kill path; do not re-add the escalation here without that.
 
 - Draft 1 (15:25) blamed a dead OAuth credential; draft 2 (~17:20) blamed Remote Control.
   Two adversarial reviews + settling reads refuted both: **no TERMINAL API error is recorded
@@ -121,7 +144,7 @@ Mechanism, verified in code + transcript:
 
 ## Fix plan (advisor-reviewed 17:4x; each item = one bounded edit + one test)
 
-- [ ] **F0 the stall shape is answered by code, corroborate only:** `retry_wedged` requires
+- [x] **F0 the stall shape is answered by code, corroborate only:** `retry_wedged` requires
       the on-screen attempt number to ADVANCE across polls (`fleet_scan.py:1141-1146`,
       `session_liveness.retry_wedge_state_update`); a window wall shows `Retrying in 5h …
       attempt 1/5` unchanged for hours, so `frozen` wins by construction and the daemon has
@@ -132,7 +155,9 @@ Mechanism, verified in code + transcript:
       `session_liveness.is_session_frozen` has NO callers (the live predicate is
       `fleet_scan.diagnose_root` → `diagnose_instance`) — delete it together with the tests
       that pin it in `tests/test_session_liveness.py`, no-legacy rule.
-- [ ] **F1 `daemon.py:1582-1588`** — do NOT unlink the recovery counter on a `healthy`
+      — DONE: `is_session_frozen` deleted (zero callers confirmed by grep), 5 pinning tests
+      removed; `tests/test_session_liveness.py` 21 passed.
+- [x] **F1 `daemon.py:1582-1588`** — do NOT unlink the recovery counter on a `healthy`
       diagnosis while `rate-limited.flag` still exists: only `dispatch.py` clears that flag,
       and it does so on EVERY stub run that finds it (`_phase_rate_limit_recovery`,
       `dispatch.py:1124-1131` — observed: the 11:56 flag was gone after this session's three
@@ -148,7 +173,13 @@ Mechanism, verified in code + transcript:
       cause is unsettled) and, after `MAX_ATTEMPTS`, emit ONE finding
       (`HEARTBEAT-FIRES-STALL`) instead of any keystroke. Derived 2: early signal that F1 is
       wrong = a `GIVING UP` line on a session whose transcript is fresh.
-- [ ] **F2 `fleet_inject.build_esc_plan` / `iterm_esc_only_osascript`** — an ESC-only plan
+      — DONE: `daemon.py::task_session_liveness` now checks `rate-limited.flag` before
+      unlinking the counter; `frozen` capped unconditionally at `esc_nudge`
+      (`fleet_recovery.action_for`); `HEARTBEAT-FIRES-STALL` finding emitted on give-up.
+      Pinned by `test_healthy_with_rate_limited_flag_still_present_keeps_the_episode_open`
+      and `test_no_diagnosis_ever_routes_to_a_kill_rung`; mutation probe confirmed
+      (removing the flag-check un-reverts to `assert False == exists()`).
+- [x] **F2 `fleet_inject.build_esc_plan` / `iterm_esc_only_osascript`** — an ESC-only plan
       is ONE ESC per press; the policy loop (`pane_policy._flush_wedge`, budget 1+queued
       with re-read) adds a second press only if the screen still needs it. The 2 ESCs are
       0.6 s apart (`terminal_trigger._ESC_SETTLE_S`; the 2.0 s is a pre-delay) and every
@@ -158,19 +189,28 @@ Mechanism, verified in code + transcript:
       `Expect.ANY` (`pane_policy.py:225`, sent once, no re-read) — a single ESC may leave a
       hung-tool turn alive; accepted, the next beat re-evaluates and F1 escalates honestly.
       Test: the esc-only osascript contains exactly one `character id 27`.
-- [ ] **F3 `token_meter.latest_context_entry`** — return 0 (KNOWN-empty) when the tail
+      — DONE: `iterm_esc_only_osascript` calls `iterm_esc_lines(count=1)`; `build_esc_plan`
+      passes `esc_count=1` to tmux/wtype/xdotool. Pinned by
+      `test_esc_only_osascript_sends_exactly_one_esc` and
+      `test_esc_only_plan_tmux_and_gui_channels_also_send_one_esc`; mutation probe confirmed.
+- [x] **F3 `token_meter.latest_context_entry`** — return 0 (KNOWN-empty) when the tail
       window covered the file start (`size <= _TAIL_BYTES`, 512 KB, `token_meter.py:46`) and
       holds no usage-bearing assistant entry; keep None when the window did NOT reach the
       start (a big transcript whose tail is one >512 KB tool_result must not be vetoed
       into silence — the 2026-08-04 ruling's concern). Consumers already read 0 as no-op
       (`token_meter.py:339-353`, `cold_cache_compact.py:322-328`, `reload_shrink.py:93`).
-- [ ] **F4 `terminal_trigger.inject_until_sent`** — on ANY non-submit exit after `type_fn()`
+      — DONE: `latest_context_entry` returns `(0, None)` for a known-empty tail
+      (`size <= _TAIL_BYTES`), stays `None` for an unmeasurable big-file tail. Pinned by
+      `test_latest_context_size_no_assistant_usage_in_a_small_file_is_zero` and
+      `test_latest_context_size_no_assistant_usage_in_a_huge_file_stays_none`; mutation
+      probe confirmed.
+- [x] **F4 `terminal_trigger.inject_until_sent`** — on ANY non-submit exit after `type_fn()`
       ran (the `still_wanted` cancel `:766-770`, the give-up `:762-764` reached via the
       "user typed; backing off without clearing" iteration `:873-876`, a blinded probe
       `:735-746`): re-read the pane; if `prompt_field_shows_only(text, command)` call
       `clear_fn()`, otherwise leave it and log (owner 2026-08-02: never delete the user's
       keystrokes). Test: the iTerm `clear_fn` (C-a/C-k/C-u, `:299`) runs on the cancel path.
-- [ ] **F6 `clear_trigger._user_came_back` (`:449`)** — it uses
+- [x] **F6 `clear_trigger._user_came_back` (`:449`)** — it uses
       `fleet_scan.transcript_activity` (substantive age, heartbeat-INCLUDING per
       `fleet_scan.py:749-757`) while `came_back_since` (`:333`) claims heartbeat-excluding;
       so ANY fire on an armed session cancels a pending `/clear`, stalled or not. Swap to
@@ -182,9 +222,17 @@ Mechanism, verified in code + transcript:
       have prevented them. Add an interrupt-record exclusion there (human presence is
       already guarded separately by the HID typing probe in `inject_until_sent`), and note
       that F2 removes the provoking ESC pair anyway.
+      — DONE: `_user_came_back` swapped to `fleet_scan.human_activity_age`;
+      `_is_interrupt_record` added to `human_activity_age_from_tail` to exclude
+      `[Request interrupted by user]` records. Pinned by
+      `test_interrupt_record_never_counts_as_a_human_turn` and
+      `test_interrupt_record_with_real_reply_still_counts_the_reply`; mutation probe
+      confirmed.
 - [ ] **F5 verify on the live pane**: reproduce a stalled fire, confirm ONE nudge, a
       finding after the cap, no pair of interrupts, no `/clear` residue, and a `/clear`
       chain that survives a heartbeat fire.
+      — NOT DONE: needs a live stalled fire on this host, which cannot be manufactured. The
+      fix ships in the next release; observe it then.
 
 ## Acceptance
 
@@ -201,6 +249,15 @@ Mechanism, verified in code + transcript:
 - [ ] No `GIVING UP` line ever appears for a session whose transcript is fresh (the F1
       early-warning signal); no `[frozen] attempt=1` follows `attempt=0` without an
       `Interrupted` pair (the F2 signal).
-- [ ] `uv run pytest` + `ruff` + `mypy` green.
+- [x] `uv run pytest` + `ruff` + `mypy` green. — 2026-09-04 on the tree committed as `9cc22049`:
+      `16351 passed, 1 skipped, 8 subtests passed` (`PYTEST=0`), `ruff check scripts tests` all
+      checks passed, `mypy scripts/ --ignore-missing-imports` clean over 504 source files.
+      CPV v5.16.2 `--strict` on the same tree: `CPV=0`, `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0`.
+
+## Approval log
+
+- 2026-09-04T00:13:30+0200 — COMPLETE. Reviewed by the janitor main session under the
+  owner's standing delegation of the review columns. F0–F6 verified against the code and
+  the green full suite; F5 (live observation) explicitly left open and stated on the card.
 
 ## Notes and lessons learned
