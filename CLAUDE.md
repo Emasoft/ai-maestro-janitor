@@ -120,7 +120,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=c33cc94950f2 generated=2026-09-02T08:59:50+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7877fcaa9d7e generated=2026-09-03T22:40:44+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -169,14 +169,27 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **janitor-detector-and-hook-roster** — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
 
+**janitor-publish-pipeline** — publish blocked
+- [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
+  - [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
+  - [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
+
 **memory-system** — how does the wiki-memory system work
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
+  - [memory-system-scopes-and-format](.claude/project/memory/memory-system-scopes-and-format.md) — how does the wiki-memory 3-scope model work
+  - [memory-system-superseded-history](.claude/project/memory/memory-system-superseded-history.md) — why does a superseded atom about publish-globally still exist
   - [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
   - [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
   - [reference_memgrep_links_to_from_semantics](.claude/project/memory/reference_memgrep_links_to_from_semantics.md) — memgrep links --to --from look inverted
   - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
   - [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
   - [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
+
+**memory-system-editor-gotchas** — add-atom inserts a new atom in the wrong place
+- [memory-system-editor-gotchas](.claude/project/memory/memory-system-editor-gotchas.md) — add-atom inserts a new atom in the wrong place
+
+**memory-system-tooling-and-protocol** — how does the memgrep engine work
+- [memory-system-tooling-and-protocol](.claude/project/memory/memory-system-tooling-and-protocol.md) — how does the memgrep engine work
 
 **oauth-rotation-renew-reauth** — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
 - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
@@ -192,13 +205,10 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
-- [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
-- [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
-- [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
 - [status-lines-to-autonomous-readers-cause-escalation](.claude/project/memory/status-lines-to-autonomous-readers-cause-escalation.md) — agents keep turning global maintenance back on by themselves
 <+-+-JANITOR-WIKIMEM-INDEX-END-(do-not-modify)-+-+>
