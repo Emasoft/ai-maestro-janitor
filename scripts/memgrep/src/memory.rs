@@ -5039,21 +5039,28 @@ pub(crate) fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
     Ok(())
 }
 
-/// WARN — never error — when an atom is written with no `--trdd` provenance backlink
-/// (TRDD-YMDE95LT).
+/// NOTE — never a warning, never an error — when an atom is written with no `--trdd` backlink.
 ///
-/// Deliberately not a gate. The corpus already holds ~276 atoms with no backlink, so a hard failure
-/// would refuse every write on every page until a mass migration ran — the field would then be
-/// "adopted" by whoever had the least work to do, which is nobody. A warning lets it ACCRETE: each
-/// new atom carries one, each `update-mem-atom --trdd` back-fills one, and the coverage the chores
-/// need arrives without a flag day.
+/// A TRDD IS ONE ORIGIN AMONG MANY, NOT THE DEFAULT (owner directive, 2026-09-03). A fact can just
+/// as legitimately come from a direct user instruction, a test result, an incident, a measurement,
+/// reading the code, an upstream changelog, or a peer agent's report. The earlier text here called
+/// a missing backlink a gap that left "nothing recording WHICH decision produced it", which is
+/// false for every one of those origins and pushed writers toward inventing a card to satisfy a
+/// field. The owner's words when this was corrected: *"i can think of hundreds of origins for an
+/// atom memory."*
+///
+/// So this is INFORMATIONAL and only fires where a card plausibly exists to link. It is not a
+/// prompt to create one. Provenance that is not a TRDD belongs in the atom's own body, in a line
+/// naming the origin and its date — that is a complete record, and a later chore demoting the fact
+/// sources its rationale from there exactly as it would from a card.
 fn warn_missing_trdd(trdd: Option<&str>) {
     if trdd.is_none() {
         eprintln!(
-            "warning: this atom carries no `--trdd` backlink, so nothing records WHICH decision \
-             produced it. Written anyway. A later chore demoting this fact must then either invent \
-             a rationale or leave a known-stale fact standing — pass `--trdd TRDD-XXXXXXXX` when a \
-             card exists, or back-fill it later with `memgrep update-mem-atom --trdd`."
+            "note: no `--trdd` backlink on this atom. That is fine — a TRDD is one origin among \
+             many (a user directive, a test result, an incident, a measurement, reading the code, \
+             an upstream doc). If a card DID produce this fact, link it with `memgrep \
+             update-mem-atom --trdd`; otherwise state the origin and its date in the atom body and \
+             the provenance is complete. Do NOT create a card just to fill this field."
         );
     }
 }

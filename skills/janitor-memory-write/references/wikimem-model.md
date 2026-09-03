@@ -444,28 +444,46 @@ REPAIR pass clears both by moving the atom's block below the section VERBATIM
 (reorder only, never reword — the lessons stay pooled in Notes, every `[^N]` ref
 keeps resolving).
 
-## Provenance — `commits:` / `trdd:` and the WHY-resolution chain
+## Provenance — where a fact CAME FROM, and the WHY-resolution chain
 
-A memory that records a **code change** SHOULD carry its provenance: the
-`commits:` (the SHA[s] the fact came from) and, when one exists, the `trdd:`
-(the TRDD that designed the change). These are optional and forward-going —
-existing notes without them stay valid — but they are what makes the
-**superseded-memory WHY sourceable rather than inferred**.
+**A TRDD is ONE origin among many, never the default** (owner directive,
+2026-09-03). A fact can just as legitimately come from a direct user
+instruction, a test result, an incident, a measurement, reading the code, an
+upstream changelog, or a peer agent's report — the owner's words: *"i can think
+of hundreds of origins for an atom memory."* So an atom with no `trdd:` is
+**not** missing provenance, and **nobody should ever mint a card to fill that
+field**. Provenance that is not a TRDD belongs in the atom's own BODY, in a
+line naming the origin and its date. That is a complete record.
+
+A memory that records a **code change** additionally SHOULD carry `commits:`
+(the SHA[s] the fact came from) and, when one exists, `trdd:` (the card that
+designed the change). Both are optional and forward-going — existing notes
+without them stay valid.
 
 When the autonomous conflict / fact-verification pass finds an **obsolete**
-memory, it resolves the WHY for the `[^N]` demotion in this fixed order, and
-**never invents one**:
+memory, it resolves the WHY for the `[^N]` demotion **from a source, never by
+invention**. For a code-change fact the chain is:
 
 `memory.commits:` → `memory.trdd:` → that TRDD's `implementation-commits:` →
 `git show <sha>` (commit message **+** diff **+** code comments at the site).
 
+**For every other origin, the atom's stated origin line IS the source.** Read
+the body before concluding the WHY is unrecoverable — a fact that opens
+"OWNER DIRECTIVE, 2026-09-03" is fully sourced with no card and no commit.
+
 That chain is only as good as the discipline that fed it — see
 `~/.claude/rules/commit-discipline.md` (commit often; WHY in the commit message
-AND the code comments; `TRDD-<8hex>` in the subject). It is also the test the
-pass uses to tell a **false** memory (no trace anywhere in git → safe to delete)
-from a **superseded** one (traceable → demote, never delete): a memory with **no
-provenance and no git trace is NOT deleted** — provenance is the precondition for
-the destructive path.
+AND the code comments; `TRDD-<8hex>` in the subject).
+
+**THE DELETE GATE STILL MEANS `commits:`/`trdd:` SPECIFICALLY, and broadening
+the definition of provenance above must NOT widen it.** The pass tells a
+**false** memory (no trace anywhere in git → deletable) from a **superseded**
+one (traceable → demote, never delete) by actually running a git search. Only a
+commit or a card gives it something to search; a stated origin like "the owner
+said so" is perfectly good provenance for sourcing a WHY and is **not**
+verifiable against git, so it can never satisfy the destructive path. An atom
+whose only provenance is a stated origin is therefore **demote-or-skip, never
+delete** — the same answer it got before this section was broadened.
 
 ## File → functionality (the RECALL entry point)
 

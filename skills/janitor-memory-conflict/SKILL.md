@@ -46,9 +46,15 @@ and the agent prompts live in the references (Resources).
 4. **Unreachable / ambiguous repo ⇒ DEMOTE.** "No git trace" counts only when the correct
    repo was found and the search ran; missing/ambiguous (same filename in two repos) can't
    prove tracelessness.
-5. **WHY is SOURCED, never inferred** — only via `memory.commits:` → `memory.trdd:` → the
-   TRDD's `implementation-commits:` → `git show <sha>`. Chain empty → say "superseded;
-   rationale not recoverable", never invent one.
+5. **WHY is SOURCED, never inferred.** The code-change chain is one route:
+   `memory.commits:` → `memory.trdd:` → the TRDD's `implementation-commits:` →
+   `git show <sha>`. **It is not the only one, because a TRDD is one origin among many**
+   (owner directive, 2026-09-03). A fact can equally come from a direct user instruction, a
+   test result, an incident, a measurement, reading the code, or an upstream doc — and when
+   the atom's own body NAMES that origin and its date, the WHY is sourced, from the body,
+   with no card in sight. Read the body before declaring the chain empty. Only when neither
+   the chain nor a stated origin yields a rationale: say "superseded; rationale not
+   recoverable", never invent one.
 6. **Read-ONLY against project repos** — `show`/`log`/`blame` only, NEVER
    `add`/`commit`/`push`/`checkout`/`stash`; a **dirty** project tree ⇒ SKIP that conflict.
 7. **All mutation through `memory_txn_cli.py`** — only staged COPIES; the txn applies them
