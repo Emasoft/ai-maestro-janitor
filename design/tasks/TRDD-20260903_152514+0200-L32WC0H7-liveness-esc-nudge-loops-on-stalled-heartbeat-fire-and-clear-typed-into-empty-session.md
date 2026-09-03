@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: todo
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-03T17:32:00+0200
+updated: 2026-09-03T17:58:00+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -18,15 +18,23 @@ eht: []
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 17:32
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 17:58
 
-- First draft (15:25) blamed a dead OAuth credential. An adversarial review + two settling
-  reads overturned it: **no `isApiErrorMessage` entry exists in either transcript**, and the
-  fires kept stalling AFTER the owner's `/login` (ESC hits 15:50, 16:12, 16:33, 16:53).
-- **SUPERSEDED — do NOT carry forward:** "dead credential" as the cause; "the gate read the
-  pre-`/clear` context size" (the post-clear transcript is a fresh file: 0 assistant entries).
-- NEXT ACTION: F0's settling test (detach Remote Control, wait one fire, check whether
-  `dispatch.log` gains a line). Everything in F1–F4 is independent of F0's outcome.
+- Draft 1 (15:25) blamed a dead OAuth credential; draft 2 (17:32) blamed Remote Control.
+  Two adversarial reviews + settling reads refuted both: **no TERMINAL API error is recorded
+  in any transcript** (a retry wait writes nothing), fires kept stalling AFTER `/login`, and
+  the cross-session fire timeline shows NO-STUB fires with RC detached (08:05Z–08:34Z,
+  09:51Z) and ran fires with RC attached — RC does not discriminate.
+- What the daemon's own pane reads DID see on this pane: `retry attempt 1 on screen` at
+  11:47:43 and 11:56:18 (`rotation-esc`), i.e. the 11:5x stalls were CC 429 retry waits.
+  Whether the post-`/login` stalls (15:2x–16:5x) are the same shape is UNSETTLED.
+- **SUPERSEDED — do NOT carry forward:** "dead credential"; "Remote Control breaks cron
+  fires"; "the daemon stamps rate-limited.flag on every pane" (it stamps only panes whose
+  screen showed the retry banner — `daemon.py:2126` after the pane read; this pane did).
+- NEXT ACTION: read the pane capture the session armed at 17:57 for the next stalled fire
+  (`<scratchpad>/pane-capture.txt`, 45 s cadence, ~22 min): a `Retrying in … attempt N/M`
+  row ⇒ F0's janitor branch (why `retry_wedged` lost to `frozen`); no row ⇒ CC-side stall
+  with no banner, file upstream with the transcript shape. F1–F4 do not depend on it.
 
 ## Symptom (owner report, 2026-09-03)
 
@@ -34,21 +42,22 @@ An armed session showed sixteen consecutive `Running scheduled task … ⎿ Inte
 should Claude do instead?` rows between 12:26 and 15:10, then `❯ /clear [name]` sitting typed
 in the prompt of a 0 % context session. Nothing was recovered; the owner had to run `/login`.
 
-## Root condition — the heartbeat fire itself stalls inside Claude Code (janitor is a bystander)
+## Root condition — the heartbeat fire stalls with no terminal error recorded (janitor is a bystander)
 
-- Every `*/5` fire since 11:46 stalled BEFORE any hook ran: 27 fires in this session, 0
-  assistant entries, 0 `UserPromptSubmit` hook attachments (an interactive prompt gets 4). The
-  stub never ran (`dispatch.log` last fire-driven write 11:36:56; `heartbeat-fires.log`
-  11:46:28) until run by hand at 17:14:58. Interactive turns in the same session work.
-- The only attachment on the first stalled fire (10:26:55Z) is `remote_session_change` with
-  this session's Remote Control URL; the status line shows `/rc` attached. **Hypothesis, not
-  proven:** CC 2.1.259 cannot run a scheduled-task turn while Remote Control is attached.
-  Settling test in F0. No credential involvement: `/login` at 15:15 changed nothing for fires.
-- What DID happen at 11:56: a 5h-window rate limit (`rotation-esc: … retry attempt 1 on
-  screen, rotation 1s ago`), the rotator rotated, and the DAEMON stamped
-  `rate-limited.flag` on every pane (`daemon.py:1990/2126 → fleet_scan.write_rate_limited_flag`).
-  That flag is what turns every later stall into `frozen`. `OAUTH-PRIMARY-UNREADABLE` has
-  been logged since 03:04 through hours of healthy turns — it discriminates nothing.
+- Fire timeline across today's four transcripts (stub `fire epoch=` stamps as the "ran"
+  proof): 110 ran, 36 NO-STUB. Stalls cluster: 08:05Z–08:34Z, 09:13Z, 09:51Z onward, and
+  every fire of this session (27) until the stub was run by hand at 17:14:58. Interactive
+  turns in the same session work throughout.
+- A heartbeat prompt carries no `UserPromptSubmit` attachments even when healthy, so "zero
+  hook attachments" is NOT a stall signature (draft 2's error). Remote Control does not
+  discriminate either: NO-STUB fires occur with RC detached and ran fires with RC attached.
+- The 11:5x cluster IS explained: the daemon read `retry attempt 1 on screen` on this pane at
+  11:47:43 and 11:56:18 (`rotation-esc`), rotated, and stamped `rate-limited.flag`
+  (`daemon.py:2126`, only for panes whose screen showed the banner — correct). A CC retry
+  wait writes no transcript entry and no `isApiErrorMessage`, which is exactly the observed
+  shape. The 08:05Z cluster and the post-`/login` stalls (15:2x–16:5x) have no pane read
+  and stay UNSETTLED — F0 captures the next one. `OAUTH-PRIMARY-UNREADABLE` has been logged
+  since 03:04 through hours of healthy turns — it discriminates nothing.
 
 ## Defect 1 — the `frozen` esc_nudge is self-resetting and fires forever
 
@@ -74,6 +83,9 @@ Mechanism, verified in code + transcript:
 4. Each ESC-provoked fire also counted as "the session took a real turn Ns ago — the user is
    back" and cancelled the pending `/clear` chain six times (`clear-trigger.log` 13:24:47 →
    15:10:54), so the two chores fought each other for three hours.
+5. Not every `Interrupted` row is the nudge: the 13:28:11Z fire was interrupted at 13:35:17Z
+   with no daemon ESC logged (liveness deferred on HID activity at 15:31/15:42/15:44) — the
+   owner's own ESC. Nine of the pairs match a FIRED line to the second; attribute only those.
 
 ## Defect 2 — the cold-cache gate reads a pre-`/clear` context size and leaves `/clear` typed
 
@@ -93,19 +105,21 @@ Mechanism, verified in code + transcript:
 
 ## Fix plan (F0 settles the outside cause; F1–F4 are janitor edits in `scripts/lib/` + `daemon.py`)
 
-- [ ] **F0 settle the CC-side stall (no code):** with the session idle, detach Remote
-      Control, wait for one `*/5` fire, then `tail -1 .janitor/logs/heartbeat-fires.log` —
-      a new `fire epoch=` line means RC attachment is the cause (file it upstream as a CC
-      issue with the `remote_session_change`-then-silence transcript shape); no new line
-      means the cause is elsewhere and the next probe is a fire with ALL prompt hooks
-      disabled. Either way the janitor must survive a fire that never runs (F1).
+- [ ] **F0 settle the stall shape (no code):** read the pane capture armed at 17:57 (or
+      re-arm: an `osascript` read of this iTerm session's `contents` every 45 s while a fire
+      is stalled). A `Retrying in … attempt N/M` row ⇒ the stall is CC's retry wait and the
+      janitor defect is why `retry_wedged` lost to `frozen` (`capture_pane_text` None? regex
+      miss on 2.1.259's wording? the advance-across-polls guard never confirming because the
+      ESC resets it?) — fold that into F1. No banner, spinner only ⇒ a CC-side stall with no
+      visible cause: file upstream with the fire-then-silence transcript shape. Either way
+      the janitor must survive a fire that never runs (F1).
 - [ ] **F1 `daemon.py` / `fleet_recovery`** — an esc_nudge episode must persist across the
       transcript refresh it causes: key the attempt counter on the `rate-limited-since.ts`
       epoch (the stall episode), not on "transcript went fresh"; cap `frozen` nudges per
       episode (reuse `GIVING UP` at 4); after the cap emit ONE finding
-      (`HEARTBEAT-FIRES-STALL`) instead of a keystroke. Derived: the post-rotation stamp
-      (`daemon.py:1990/2126`) must not mark a pane `rate-limited` that never showed the
-      retry banner — stamp only panes `rotation-esc` actually matched.
+      (`HEARTBEAT-FIRES-STALL`) instead of a keystroke. Derived: the `rate-limited.flag`
+      stamp itself is correct (only banner-matched panes) and stays; what must change is
+      that a flag older than one episode cannot re-arm the ladder from `attempt=0`.
 - [ ] **F2 `terminal_trigger.iterm_esc_lines` callers** — the esc-only recovery plan sends
       ONE ESC when a cron is armed for the pane (the second ESC is what kills the provoked
       fire). Keep `HARD_INTERRUPT_ESC_COUNT=2` for the command-typing path (the rewind rule
