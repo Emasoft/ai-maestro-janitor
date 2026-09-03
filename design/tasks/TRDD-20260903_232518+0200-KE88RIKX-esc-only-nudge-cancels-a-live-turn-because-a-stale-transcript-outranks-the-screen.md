@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-03T23:31:02+0200
+updated: 2026-09-03T23:34:43+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -153,13 +153,39 @@ destroyed real work silently while this one reports itself:
   `FLEET-DECLINE-STALL` finding carrying the `policy_refused` remedy text ("open the pane and
   look at it") and logs `session-liveness: ESCALATING … a human must clear it`.
 
-So a genuinely hung pane is REPORTED after about an hour rather than watched forever in silence.
-Two honest limits on that claim: the escalation fires **exactly once** per unchanged signature
-(TRDD-FB84YUGT — by design, it is a report, not a repeating alarm), and it reaches the human only
-as far as the findings ledger does, which is `/janitor-findings` and the heartbeat's drift lines
-— it is not a push notification. VERIFIED by reading `daemon.py::_decline` (the escalation block,
-the constant at `daemon.py:131-133`, and the `_write_recovery_state` call below it), not inferred
-from its docstring.
+So a pane refused with an UNCHANGED decline signature for an hour is REPORTED rather than watched
+forever in silence — note "unchanged signature", not "hung pane": a pane alternating between
+`policy_refused` and `deferred_presence` (a human intermittently at the keyboard) resets the
+clock each time and may never reach the threshold. The steadily-refused case, which is the one
+this fix creates, is covered.
+
+The report is not merely filed: `dispatch._URGENT_LINE_RE` matches `HIGH` case-insensitively
+and is documented as "the override that stops the [quiet-mode advisory list] from muzzling a real
+alarm", so a `FLEET-DECLINE-STALL` line is PROMOTED PAST QUIET MODE into the heartbeat's own
+stdout. The two exemptions from that override — `_REMOTE_TEXT_DETECTORS`, and the "another
+actor's work" set — cover neither `daemon` nor this code. It is therefore stronger than a row
+waiting in `/janitor-findings`.
+
+One honest limit: it fires **exactly once** per unchanged decline signature — `escalated = False
+if changed else bool(_st.get("escalated"))`, where `changed` is `last_audit != sig`. So the flag
+RESETS when the signature changes, which is the behaviour you want in both directions: a pane
+that recovers and later stalls differently escalates again, and a pane stuck in one unchanged
+state is reported once rather than every beat (TRDD-FB84YUGT).
+
+`sig_since` resets the same way and for the same reason (`sig_since = now if changed else …` —
+its comment names the trap: re-stamping it on an UNCHANGED decline would leave a permanent stall
+permanently one beat old, defeating the escalation entirely).
+
+Setting the knob to `0` does NOT disable the escalation — the natural assumption, and wrong here.
+`coerce_int` returns a non-negative int and the guard is `now - sig_since >= _STALL_ESCALATE_S`,
+so `0` makes it fire on the FIRST refused beat. (Contrast `rate_limit_flag_is_stale`, where
+`max_age_s <= 0` genuinely disables the sweep — the two knobs read the same and behave
+oppositely.)
+
+All of the above VERIFIED by reading the code — `daemon.py::_decline` (the escalation block, the
+`escalated` and `sig_since` assignments, the `_write_recovery_state` call), the constant at
+`daemon.py:131-133` via `_env_interval` → `state.coerce_int(plugin_option(var), default)`, and
+`dispatch.py`'s `_URGENT_LINE_RE` — not inferred from any docstring.
 
 **`_decline` does not spend a recovery attempt — VERIFIED, not assumed.** Its
 `_write_recovery_state` payload is `{**_st, "last_ts", "identity", "last_audit", "sig_since",
