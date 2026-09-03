@@ -3,7 +3,7 @@ trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
 column: testing
 created: 2026-07-23T18:11:48+0200
-updated: 2026-09-03T09:32:00+0200
+updated: 2026-09-03T09:51:01+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -14,7 +14,78 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 (P3+P5)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03 (advisor follow-up F1-F3)
+
+- **F1, F2, F3, F7, F8 FIXED this session — proven by tests, gates clean.** An advisor
+  review of commit `0fc3ad5d` (P3/P5's own commit) found 5 real defects in the P3/P3c
+  code; the orchestrator verified F1 and F2 in code before dispatch. F4/F5/F6 are
+  OPEN — see below.
+  - **F1 (SEVERE, fixed)** — `oauth-login-needed.py`'s topup summary was
+    byte-identical every 7-day cycle, so `notify.push`'s content-hash dedupe
+    (checked against the FULL sent-history, not age-filtered) silently DEDUPED every
+    fire after the very first one, forever, on a given host; the stamp also wrote
+    unconditionally (DISABLED/BELOW_SEVERITY/CAPPED/DEDUPED all burned the cadence).
+    Fixed: the summary now bakes in the ISO period (`%Y-%m-%d`), the stamp writes
+    ONLY when `notify.push` returns `PUSHED`/`PUSHED_DIGEST`, and an in-context
+    heartbeat line was added via `dedupe.emit_once(seen, f"topup-{day}", …)` (key
+    `.oauth-login-topup-seen.txt`). Proven with the REAL `notify.push` (only actual
+    OS-level delivery mocked via `notify._deliver`) in an isolated
+    `JANITOR_GLOBAL_STATE_DIR` — `tests/test_oauth_login_topup.py::test_main_topup_pushes_again_next_due_cycle_with_real_notify`
+    (a fire 8 days later PUSHES, not DEDUPES) + 4 more tests for the stamp-gating and
+    the heartbeat line.
+  - **F2 (HIGH, fixed)** — `capture_all_logins.py`'s old `subprocess.run(timeout=120)`
+    had no `start_new_session`, so a timeout SIGKILLed only the `uv` process,
+    orphaning `slot_capture_browser.py` + headful Chrome (the capture legitimately
+    polls consent up to 300s). Fixed: `capture_one` now runs via `Popen(...,
+    start_new_session=True)`, kills the WHOLE process group on timeout
+    (`_kill_process_group`: SIGTERM then SIGKILL after a 5s grace), and the default
+    timeout is 400s, env-tunable via `CLAUDE_PLUGIN_OPTION_CAPTURE_TIMEOUT_S`. Proven
+    with a REAL process tree (a fake capture script that forks a `sleep 600`
+    grandchild) — `tests/test_capture_all_logins.py::test_kill_process_group_terminates_a_grandchild_too`
+    and `::test_capture_one_kills_the_whole_tree_and_reports_timeout` (asserts the
+    grandchild pid is dead via `os.kill(pid, 0)` after the timeout, and that
+    `TimeoutExpired` still propagates so the walker's per-account catch keeps going).
+  - **F3 (HIGH, fixed)** — the walker did not honor the daemon's bootstrap PID lock
+    (`rotator._bootstrap_pid_path`/`_bootstrap_pid_alive`), so a manual capture could
+    race the daemon's own detached auto-bootstrap on the same email's Chrome
+    `--user-data-dir`. Fixed: `capture_already_running(email)` checks the lock
+    BEFORE launching and `main()` skips with a `SKIPPED (a capture is already
+    running, pid=…)` line (reported as a per-cycle failure, not a hard abort);
+    `capture_one` also writes/clears its OWN pidfile at the same path
+    (write-after-spawn, remove in `finally`, even on a timeout). Proven —
+    `tests/test_capture_all_logins.py::test_capture_already_running_*` (3 tests) +
+    `::test_main_skips_account_with_a_capture_already_running`.
+  - **F7 (LOW, no code change needed)** — verified by re-reading
+    `skills/janitor-capture-all-logins/SKILL.md:24` and `README.md:128`: both already
+    say "heartbeat line" / describe the nudge generically — the wording is now true
+    because F1 actually added that heartbeat line.
+  - **F8 (MINOR, fixed)** — `_topup_days()`'s `state.coerce_int(...)` call now passes
+    `detector_name="oauth-login-needed"` and
+    `var_name="CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS"` so a bad env value logs
+    instead of silently reverting to the default.
+  - **F4 (OPEN, deferred)** — the walker roster
+    (`known-emails` = slots ∪ live_email) vs `_slot_facts` (slots ∪ legacy
+    unindexed) can diverge under `CLAUDE_ROTATOR_HOME`; `rotator.py` ~L2534-2535
+    comments vs the walker's `env -u CLAUDE_PLUGIN_DATA` comments may contradict —
+    NOT investigated this session, still needs a pick-one-and-fix-the-comment pass.
+  - **F5 (OPEN, deferred, needs `scripts/daemon.py`)** — move the topup push
+    daemon-side per the original P2 design intent (the DAEMON is the human channel;
+    `oauth-login-needed.py` currently calls `notify.push` directly from the
+    per-project detector subprocess, which works today but is not where P2 says the
+    channel should live). Deliberately NOT touched this session — `daemon.py` is
+    owned by another concurrent worker per explicit instruction.
+  - **F6 (OPEN, deferred)** — not independently investigated this session; tracked
+    alongside F5 as part of the daemon-side move.
+  - **Gates:** `uv run ruff check scripts tests` clean on every touched file;
+    `uv run mypy scripts/ --ignore-missing-imports`: Success, no issues found in 501
+    source files; `uv run pytest tests/test_oauth_login_needed.py
+    tests/test_oauth_login_topup.py tests/test_capture_all_logins.py -q
+    -p no:randomly`: 64 passed (17 + 22 new/changed in topup+capture-all, 25
+    unchanged in oauth-login-needed).
+  - **NEXT ACTION:** F5 (move the topup push daemon-side) + F4 (roster-divergence
+    comment fix) as their own bounded follow-up, once `daemon.py` is free.
+
+## ⏵ PRIOR STATE (P3+P5) — 2026-09-03
 
 - **P3 + P5 ARE DONE this session.** `/janitor-capture-all-logins` skill
   (`skills/janitor-capture-all-logins/SKILL.md`) + its backing walker

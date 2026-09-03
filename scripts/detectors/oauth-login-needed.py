@@ -191,7 +191,14 @@ def _topup_days() -> float:
     Separate from `_grace_days()` — that one fires REACTIVELY once an account is close
     to needing a login; this one fires on a flat calendar cadence regardless of whether
     any single account is currently due, so tokens never approach expiry as a fleet."""
-    return float(state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS"), 7))
+    return float(
+        state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS"),
+            7,
+            detector_name="oauth-login-needed",
+            var_name="CLAUDE_PLUGIN_OPTION_LOGIN_TOPUP_EVERY_DAYS",
+        )
+    )
 
 
 def _topup_due(home: Path, now: float, every_days: float) -> bool:
@@ -379,20 +386,48 @@ def main() -> int:
     # the human is actually interrupted if both fire.
     topup_days = _topup_days()
     if topup_days > 0 and _topup_due(home, now, topup_days):
+        # The period (F1) makes the message content-hash DIFFERENT each due cycle —
+        # without it the summary was byte-identical every time, so notify.push's own
+        # content-hash dedupe (scripts/lib/notify.py ~L205-211, checked against the
+        # FULL sent-history) silently deduped every fire after the very first one,
+        # forever, on a given host.
+        period = time.strftime("%Y-%m-%d", time.localtime(now))
+        outcome = None
         try:
-            notify.push(
+            outcome = notify.push(
                 sev="HIGH",
                 code="OAUTH-LOGIN-TOPUP",
                 project="oauth-rotator",
-                summary=f"proactive top-up: refresh all {len(facts)} rotator login(s) before any expire",
+                summary=(
+                    f"proactive top-up ({period}): refresh all {len(facts)} rotator "
+                    f"login(s) before any expire"
+                ),
                 hint="/janitor-capture-all-logins",
             )
         except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
             pass
-        try:
-            state.atomic_write(_topup_stamp_path(home), str(now))
-        except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
-            pass
+
+        # In-context heartbeat line for ATTENDED sessions (P2's "belt and suspenders"),
+        # via the same dedupe.emit_once mechanism the other nudges in this file use —
+        # once per day regardless of how many project heartbeats fire.
+        seen4 = home / ".oauth-login-topup-seen.txt"
+        line4 = dedupe.emit_once(
+            seen4,
+            f"topup-{day}",
+            f"[oauth-login-topup] proactive top-up due — run `/janitor-capture-all-logins` "
+            f"to refresh all {len(facts)} rotator login(s) before any expire.",
+        )
+        if line4 is not None:
+            print(line4)
+
+        # Stamp ONLY on an actual push (F1) — DISABLED/BELOW_SEVERITY/CAPPED/DEDUPED
+        # must NOT burn the 7-day cadence, or a config gate (or the dedupe bug above)
+        # silently disables the proactive topup forever after its very first tick.
+        if outcome in (notify.PUSHED, notify.PUSHED_DIGEST):
+            try:
+                state.atomic_write(_topup_stamp_path(home), str(now))
+            except Exception:  # noqa: BLE001 -- a stamp-write fault must never break the heartbeat
+                pass
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

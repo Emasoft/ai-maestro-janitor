@@ -13,6 +13,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 _DETECTOR = _HERE.parent / "scripts" / "detectors" / "oauth-login-needed.py"
 
@@ -147,3 +149,99 @@ def test_main_skips_topup_when_cadence_set_to_zero(tmp_path: Path, monkeypatch, 
 
     topup_calls = [c for c in calls if c["code"] == "OAUTH-LOGIN-TOPUP"]
     assert topup_calls == []
+
+
+# ---------------------------------------------------------------------------
+# F1 (TRDD-GZXTSJSR follow-up) — the topup summary must vary by period (so
+# notify.push's content-hash dedupe doesn't silently swallow every fire after
+# the first forever), the stamp must gate on an ACTUAL push, and the
+# in-context heartbeat line must exist alongside the notify.push channel.
+# ---------------------------------------------------------------------------
+
+
+def _isolated_env(tmp_path: Path, monkeypatch, home: Path) -> None:
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    for var in (
+        "CLAUDE_PLUGIN_OPTION_NOTIFY_ENABLED",
+        "CLAUDE_PLUGIN_OPTION_NOTIFY_WEBHOOK_URL",
+        "CLAUDE_PLUGIN_OPTION_NOTIFY_MIN_SEVERITY",
+        "CLAUDE_PLUGIN_OPTION_NOTIFY_MAX_PER_DAY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    (tmp_path / "proj").mkdir(exist_ok=True)
+    (tmp_path / "userhome").mkdir(exist_ok=True)
+
+
+def test_main_topup_pushes_again_next_due_cycle_with_real_notify(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A second due fire 7 days later must return PUSHED, not DEDUPED — the summary
+    now bakes in the period, so the message content-hash differs cycle to cycle.
+    Real `notify.push` (only actual OS-level delivery is mocked out)."""
+    monkeypatch.setattr(det.notify, "_deliver", lambda *a, **kw: None)  # no real popup
+    home = tmp_path / "rotator"
+    _write_healthy_slot(home, "healthy@x.com")
+    _isolated_env(tmp_path, monkeypatch, home)
+
+    base = 1_800_000_000.0
+    monkeypatch.setattr(det.time, "time", lambda: base)
+    assert det.main() == 0
+    stamp1 = det._topup_stamp_path(home).read_text(encoding="utf-8")
+    assert float(stamp1) == base  # F1: stamped because notify.push actually PUSHED
+
+    later = base + 8 * 86400  # past the default 7-day cadence
+    monkeypatch.setattr(det.time, "time", lambda: later)
+    assert det.main() == 0
+    stamp2 = det._topup_stamp_path(home).read_text(encoding="utf-8")
+    assert float(stamp2) == later  # re-stamped: the second cycle PUSHED, not DEDUPED
+
+
+@pytest.mark.parametrize(
+    "outcome", ["capped", "deduped", "below-severity", "disabled"]
+)
+def test_main_does_not_stamp_topup_when_push_did_not_actually_push(
+    tmp_path: Path, monkeypatch, outcome: str
+) -> None:
+    """F1: DISABLED/BELOW_SEVERITY/CAPPED/DEDUPED must NOT burn the 7-day cadence —
+    only a real PUSHED/PUSHED_DIGEST may write the stamp."""
+    monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
+    home = tmp_path / "rotator"
+    _write_healthy_slot(home, "healthy@x.com")
+    _isolated_env(tmp_path, monkeypatch, home)
+
+    assert det.main() == 0
+    assert not det._topup_stamp_path(home).is_file()
+
+
+@pytest.mark.parametrize("outcome", ["pushed", "pushed-digest"])
+def test_main_stamps_topup_only_on_an_actual_push(
+    tmp_path: Path, monkeypatch, outcome: str
+) -> None:
+    monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
+    home = tmp_path / "rotator"
+    _write_healthy_slot(home, "healthy@x.com")
+    _isolated_env(tmp_path, monkeypatch, home)
+
+    assert det.main() == 0
+    assert det._topup_stamp_path(home).is_file()
+
+
+def test_main_prints_topup_heartbeat_line_for_attended_sessions(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """P2's "belt and suspenders" — the in-context heartbeat line must exist
+    alongside the notify.push desktop channel, not just replace it."""
+    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
+    home = tmp_path / "rotator"
+    _write_healthy_slot(home, "healthy@x.com")
+    _isolated_env(tmp_path, monkeypatch, home)
+
+    rc = det.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[oauth-login-topup]" in out
