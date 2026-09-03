@@ -1,9 +1,9 @@
 ---
 trdd-id: 38PB1B86
 title: janitor-reload fires on every fleet-update epoch and on every clear-born session — gate it on relevance and seed the ack for clear
-column: testing
+column: complete
 created: 2026-09-02T01:36:47+0200
-updated: 2026-09-02T02:35:00+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -66,11 +66,19 @@ never answered by this project until 2026-09-02. Re-checked against the tree ton
 - [x] `ruff check scripts tests` + `mypy scripts/` (497 files) + 193 tests green — re-run by
       the approver after the worker's report, not taken from it
 - [x] #290 answered with this card id (issuecomment-5502292641)
-- [ ] #290 closed once items 1–2 SHIP (next publish + install), with the live `[reload-guard]`
-      log line as evidence
+- [x] #290 closed once items 1–2 SHIP (next publish + install), with the live `[reload-guard]`
+      log line as evidence — `.janitor/logs/dispatch.log:3204,3222,3227` shows the no-op ack
+      firing across 3 independent sessions (2026-09-02T11:10:50, 23:20:20, 2026-09-03T05:34:52);
+      #290 closed citing this proof
 
 ## Notes and lessons learned
 
 - A peer's measured issue sat unanswered for five days while the board said the pipeline was
   draining. The nudge now carries the open-issue count; the count is only useful if someone
   reads the threads.
+
+## Approval log
+
+- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+  (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
+  verdict CLOSE: `dispatch.log:3204,3222,3227` proves the relevance gate live across 3 sessions.

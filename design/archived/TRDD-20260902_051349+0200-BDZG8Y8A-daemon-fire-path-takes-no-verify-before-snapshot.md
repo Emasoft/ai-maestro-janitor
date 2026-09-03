@@ -1,9 +1,9 @@
 ---
 trdd-id: BDZG8Y8A
 title: the daemon fire path takes no handoff_clear_verify before-snapshot, so an automated clear can never produce the PASS table
-column: testing
+column: complete
 created: 2026-09-02T05:13:49+0200
-updated: 2026-09-02T06:01:53+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -88,9 +88,18 @@ clears too.
       the fire and its `cron_id` matches the pre-clear stamp — `8ee015de`,
       `test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain` +
       `test_fire_still_spawns_when_the_verify_snapshot_fails`
-- [ ] the next automated clear's `--phase after` run (from the resume cue) reports a table whose
+- [x] the next automated clear's `--phase after` run (from the resume cue) reports a table whose
       `before.ts` is seconds before the `fired:` line in `external-clear.log` AND whose
       `before.context_tokens` is non-null (a null there is the transcript branch gone dark under
-      the daemon, not a small session — see STATE)
+      the daemon, not a small session — see STATE) — proven on 4 independent live projects:
+      llm-externalizer (`ts=1788405929` matches `external-clear.log:618 fired:` at the same
+      second), AgentlensPro (`context_tokens=635706`), ai-maestro-janitor (`context_tokens=369314`),
+      CLAUDE-PLUGIN-VALIDATION (`context_tokens=308764`)
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+  (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
+  verdict CLOSE: box 3 proven on 4 live projects, all `ts` matching `external-clear.log fired:` lines.

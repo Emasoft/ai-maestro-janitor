@@ -1,9 +1,9 @@
 ---
 trdd-id: QZVAEWQH
 title: the daemon-spawned llm-ext cannot see the OpenRouter key under launchd — every automated clear degrades to the mechanical handoff
-column: testing
+column: complete
 created: 2026-09-02T05:12:04+0200
-updated: 2026-09-02T11:33:17+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -177,14 +177,18 @@ filed alongside this proposal.
       summarize <file>` fails with the daemon's exact line (`env var $OPENROUTER_API_KEY is not
       set`), while the same command in a session works. The key exists wherever a SESSION runs, so
       the summary must be produced from session context, never from the launchd daemon.
-- [ ] (re-read against D) the cleared session's own SessionStart summarizer writes the keyed
+- [x] (re-read against D) the cleared session's own SessionStart summarizer writes the keyed
       handoff — proven by the next automated fire: `external-clear.log` shows
       `SUMMARY_DELEGATED key=<key>` with NO llm-ext attempt from the daemon, and that project's
       `session-summary.log` shows READY plus a keyed `agent-handoff-<key>-…md` in its state dir
-      (the old form — the daemon's child env carrying the key — is superseded, see STATE)
-- [ ] the cleared session resumes from the llm-ext summary (a keyed
+      (the old form — the daemon's child env carrying the key — is superseded, see STATE) —
+      proven live: `cold-cache-clear.log:1423-1424` shows `SUMMARY_DELEGATED key=9ba2dd9f`, 20
+      total `SUMMARY_DELEGATED` lines, zero daemon-side `api_key` failures since
+- [x] the cleared session resumes from the llm-ext summary (a keyed
       `agent-handoff-<key>-<ts>-<pid>.md` written by `handoff_files.write`), not from
-      `precompact-handoff.md`
+      `precompact-handoff.md` — proven: `.janitor/state/agent-handoff-9ba2dd9f-20260903_052534+0200-35993.md`
+      (121 lines, substantive) exists, and `session-summary.log:5-6` shows the hold released for
+      the next session
 - [ ] the five drill cards blocked on this (2F3I2P18, 1QJIZFFW, PXP08ZQC, 79LXF6PJ, 5RXBI65T's
       successor observation) re-measure against that fire
 - [ ] the two summaries the key's absence cost are back-filled from the surviving transcripts
@@ -193,7 +197,9 @@ filed alongside this proposal.
       two caveats: the transcripts survive only until `cleanupPeriodDays: 90` prunes them
       (`~/.claude/settings.json` line 2), and SessionStart injects the NEWEST handoff file, so by
       the time the key lands newer handoffs will exist there and a back-fill reaches a future
-      session only by link (cite its path from the current handoff), not by injection
+      session only by link (cite its path from the current handoff), not by injection — half
+      done: llm-externalizer already has `agent-handoff-28ec9a0e-20260902_052025+0200-38150.md`;
+      AgentlensPro still has NO `*f7594ac9*` file — follow-up needed
 
 ## Approval log
 
@@ -222,3 +228,9 @@ filed alongside this proposal.
 - 2026-09-02T11:33:17+0200 — IMPLEMENTED by janitor-main-session in `1e0606b9` (delegated
   review: the lean-worker's diff was re-read and its checks re-run first-hand before the commit).
   `dev` → `testing`: the remaining boxes need the next live automated fire on the published lane.
+- 2026-09-03T10:05:00+0200 — CLOSE (testing → complete) by janitor-main-session acting for USER
+  (delegation 2026-09-03 09:58). Audit `reports/board-drain/20260903_092000+0200-testing-cards-evidence-audit.md`
+  verdict CLOSE (core): boxes 2-3 proven live (`cold-cache-clear.log:1423-1424`,
+  `session-summary.log:5-6`). Follow-ups NOT closed here (left open, own owners): box 4
+  (re-measure the 5 blocked drill cards) and box 5 (AgentlensPro `f7594ac9` back-fill still
+  missing).
