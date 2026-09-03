@@ -21,6 +21,8 @@ fleet_scan = importlib.import_module("fleet_scan")
 daemon = importlib.import_module("daemon")
 gs = importlib.import_module("global_state")
 
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "pane_frames"
+
 
 def _inst(
     pid: int,
@@ -34,6 +36,98 @@ def _inst(
         terminal={"tmux_pane": f"%{pid}"}, diagnosis=diagnosis, recovery=None,
         dispatch_age_s=None, active=active, transcript_age_s=10,
     )
+
+
+def _has_esc(calls: list[dict]) -> list[bool]:
+    """Does each fired plan CONTAIN an ESC — the soft/hard switch, observed in the KEYSTROKES.
+
+    PRESENCE, not position. The predicate is `any(...)` over the step list, so
+    an ESC emitted AFTER the command would read the same as one emitted before it. Today the two
+    coincide — `build_tmux_steps` appends its `HARD_INTERRUPT_ESC_COUNT` `Escape` steps under
+    `if esc_first:` BEFORE the loop that types the commands, and its own docstring calls the
+    sequence "an OPTIONAL leading ESC, then each command" — so the assertions pass for the
+    right reason — but nothing here would catch a builder that moved the ESC after the command,
+    which is the "an ESC into a clear field interrupts the fresh turn" hazard `pane_policy._rung`
+    warns about. Pinning the order needs an index comparison, not an `any`; it is worth doing the
+    day a builder makes that mistake plausible, and saying so is worth more than a name that
+    quietly claims it already happened.
+
+    These tests used to read `plan["esc_first"]`, a key the `_wire` stub put on its OWN synthetic
+    dict. TRDD-N954KWUC P3 routes fleet-stop through the policy table, which REBUILDS the plan
+    with the real `fleet_inject.build_command_plan` (the caller's plan is only a fallback for a
+    terminal that cannot be rebuilt) — so the stub's marker key never reaches `fire` and the
+    assertion was pinning which dict object travelled, not what got typed.
+
+    The policy is unchanged and still observable: a hard stop emits an `Escape` step ahead of the
+    command, a soft one does not. Reading the steps tests the behaviour instead of the plumbing,
+    and it keeps working the next time the plan's shape changes.
+
+    Reads BOTH plan shapes and RAISES on a third, rather than answering False. `steps` is the
+    tmux/wtype/xdotool shape; the iTerm branch carries an `osascript` string with the ESC baked
+    into it and no `steps` at all. A bare `.get("steps", [])` would report "no ESC" there — which
+    fails `test_frozen_target_is_hard` loudly (fine) but makes `test_healthy_target_is_soft` pass
+    for the wrong reason: not because no ESC was sent, but because the helper cannot see ESCs on
+    that channel. A soft-stop assertion that CANNOT fail is worse than no assertion, because the
+    thing it guards is "we do not interrupt a live turn". Every `_inst` here builds
+    `terminal={"tmux_pane": ...}`, so tmux is all this file exercises today; the iTerm arm is
+    untaken but NOT dead — it is what makes the branch already correct on the day a fixture
+    carrying a real `iterm_session_id` appears.
+
+    `build_command_plan` returns four channels, and the `steps` arm covers three of them, not
+    just tmux: tmux emits `send-keys … Escape`, wtype `-k Escape`, xdotool `key Escape` — the
+    same literal token in all three (verified in `terminal_trigger`: `wtype -k Escape` at :942,
+    `xdotool key Escape` at :971). The fourth is `aimaestro`, which returns `{channel, command,
+    argv}` with NEITHER key and so hits the raise. That is deliberate but should not read as a
+    mystery — and the reason is NOT "aimaestro is only chosen for soft sends". `build_command_plan`
+    returns an aimaestro plan from TWO places: the soft branch (`session and cli and not
+    esc_first`), and a HARD-INTENT FALL-THROUGH taken when there is no tmux pane and no iTerm id,
+    on the grounds that an enqueue ignoring the requested ESC still beats UNREACHABLE. So an
+    aimaestro plan can answer a hard request; what is invariant is that it carries NO ESC either
+    way. That is read from the payload, not inferred from the branch: `aimaestro_command_argv`
+    returns `[cli, "session", "command", <session>, "--newline", "--", <command>]` — no ESC, no
+    interrupt flag, and no `esc_first` parameter to take one, because the RPC has no raw-ESC
+    primitive and typing into a mid-turn agent enqueues regardless of intent.
+
+    Whoever first adds an `aimaestro_session`/`aimaestro_cli` fixture should therefore append
+    `False` for it — correct, since the question this helper asks is "did the plan LEAD WITH AN
+    ESC", not "was a hard stop intended" — and should know that a `False` there may be a hard
+    stop that silently could not deliver its ESC, which is a fact about the channel worth its own
+    test rather than a line in this one. The raise exists for a genuinely NEW shape.
+
+    The iTerm predicate is `character id 27`, not `Escape` — measured, not assumed. AppleScript
+    sends a raw ESC as `write text (character id 27) without newline`
+    (`terminal_trigger.iterm_esc_lines`), so the word "Escape" appears in a HARD iTerm plan
+    exactly never; keying on it would report every iTerm stop as soft and reintroduce the vacuous
+    assertion one layer down.
+
+    These tests are the only coverage of `pane_actuate.act`'s `fail_open` (verified repo-wide:
+    the only other mention is the `daemon.py` fleet-stop call site that passes it). `_wire` stubs
+    the capture seam with an IDLE frame (see the note there — leaving it unstubbed made these
+    tests depend on the developer's live tmux server), so `_rung`'s wedge branch correctly does
+    not fire on an idle pane and `esc_first` reaches the command step directly, which is what
+    `test_frozen_target_is_hard` pins.
+    """
+    out: list[bool] = []
+    for c in calls:
+        if "steps" in c:
+            # A step is a list of argv tokens (`['RUN','tmux','send-keys','-t','%41','Escape']`),
+            # so this is a membership test on that list, not a substring test on a string.
+            out.append(any("Escape" in step for step in c["steps"]))
+        elif "osascript" in c:
+            # NOT `"Escape" in ...`: AppleScript sends a raw ESC as
+            # `write text (character id 27) without newline` (`terminal_trigger.iterm_esc_lines`),
+            # so the word "Escape" appears in a hard iTerm plan exactly never — measured. Keying
+            # on it would have reported every iTerm stop as SOFT, which is the vacuous-assertion
+            # bug this helper exists to prevent, reintroduced one layer down.
+            #
+            # And this predicate DISCRIMINATES, which is the half that is easy to skip: measured
+            # against a real `iterm_session_id`, a hard plan contains `character id 27` twice
+            # (`HARD_INTERRUPT_ESC_COUNT == 2`) and a soft plan contains it zero times. Presence
+            # is enough; the count is not asserted, so raising that constant does not touch this.
+            out.append("character id 27" in c["osascript"])
+        else:
+            raise AssertionError(f"unknown plan shape, cannot read the soft/hard policy: {sorted(c)}")
+    return out
 
 
 class _Fire:
@@ -62,6 +156,25 @@ def _wire(monkeypatch, tmp_path, *, fleet, enabled=True, fire_ok=True, plan: str
         return {"channel": "tmux", "command": command, "esc_first": esc_first}
 
     monkeypatch.setattr(daemon.fleet_restart, "command_injection_plan", _plan)
+    # Stub the capture SEAM. It used to be left unstubbed, on the belief that a tmux pane like
+    # `%41` cannot exist so the read returns None and `act` proceeds blind. That belief is
+    # wrong twice over. `act`'s Law 1 is `blind_ok = not (read_pane and
+    # channel_has_readback(terminal))`, and every `_inst` here carries a `tmux_pane` — so the
+    # channel HAS read-back, a None read is "readable pane that did not answer", and `act`
+    # returns NOOP typing nothing. And the read is a REAL `tmux` shell-out against the
+    # developer's own server, so what these tests asserted depended on that machine's live pane
+    # list and on whether the call beat its timeout under load.
+    #
+    # Measured 2026-09-03: all 10 passed in isolation and 6 failed inside the full suite with
+    # `fire.calls == []` — the signature of the NOOP above. A frozen idle frame makes the route
+    # deterministic and closer to production than the blind path ever was: `act` parses a real
+    # state, `_rung`'s wedge branch correctly does not fire on an idle pane, and `esc_first`
+    # reaches the command step exactly as the soft/hard assertions below require.
+    monkeypatch.setattr(
+        daemon.fleet_scan,
+        "capture_pane_text",
+        lambda _terminal: (_FIXTURES / "synthetic-idle-empty-field.txt").read_text(encoding="utf-8"),
+    )
     fire = _Fire(fire_ok)
     monkeypatch.setattr(daemon.fleet_inject, "fire", fire)
     return fire
@@ -146,7 +259,7 @@ def test_healthy_target_is_soft(monkeypatch, tmp_path) -> None:
     fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41)])
     gs.set_kill_switch("d")
     daemon.task_fleet_stop()
-    assert [c["esc_first"] for c in fire.calls] == [False]
+    assert _has_esc(fire.calls) == [False]
 
 
 def test_frozen_target_is_hard(monkeypatch, tmp_path) -> None:
@@ -156,7 +269,7 @@ def test_frozen_target_is_hard(monkeypatch, tmp_path) -> None:
     fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41, diagnosis="frozen")])
     gs.set_kill_switch("d")
     daemon.task_fleet_stop()
-    assert [c["esc_first"] for c in fire.calls] == [True]
+    assert _has_esc(fire.calls) == [True]
 
 
 def test_cron_dead_target_is_soft(monkeypatch, tmp_path) -> None:
@@ -164,4 +277,4 @@ def test_cron_dead_target_is_soft(monkeypatch, tmp_path) -> None:
     fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41, diagnosis="cron_dead")])
     gs.set_kill_switch("d")
     daemon.task_fleet_stop()
-    assert [c["esc_first"] for c in fire.calls] == [False]
+    assert _has_esc(fire.calls) == [False]

@@ -50,5 +50,12 @@ def test_wikimem_model_documents_provenance_fields_and_chain():
     assert "commits:" in text and "trdd:" in text
     assert "WHY-resolution chain" in text
     assert "implementation-commits:" in text
-    # provenance is the precondition for the destructive (delete) path
-    assert "provenance is the precondition" in text.lower()
+    # The DELETE gate is still gated on provenance — but only on the GIT-VERIFIABLE kind.
+    # The old sentinel phrase "provenance is the precondition" was retired when the model was
+    # corrected (USER, 2026-09-02): an atom does NOT require a TRDD, and provenance may be a
+    # test result, a code reading, or a stated origin. Broadening what counts as provenance
+    # must NOT widen the destructive path, so the assertion moved onto the clause that says so.
+    # Asserting the retired phrase would re-pin the superseded model.
+    lower = text.lower()
+    assert "the delete gate still means" in lower and "commits:" in text and "trdd:" in text
+    assert "demote-or-skip, never" in lower, "a stated-origin atom must never be deletable"

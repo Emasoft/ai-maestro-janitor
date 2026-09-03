@@ -1066,12 +1066,41 @@ def write_rate_limited_flag(root: str, now: int) -> None:
 
     Best-effort: a write failure here must never break the recovery beat — the ESC itself
     is the load-bearing action; this flag is the follow-up that makes it actually resume.
+
+    IDEMPOTENT on `since`: the field means "when this limit STARTED", so a re-observation of a
+    limit already flagged must NOT move it forward. `on-stop-failure` writes it once per limit,
+    and this function claims to mirror that write exactly — refreshing it on every call is the
+    deviation, not the fix. It matters because `daemon._rate_limit_window_key` reads `since` as
+    its primary source: a caller that re-runs each beat (the rotation ESC pass does, whenever
+    its actuation does not land and so stamps no dedupe) would churn the value and stop
+    `_resume_wake_pass`'s per-window dedupe from ever matching. The flag itself is `touch`ed
+    unconditionally — it is a boolean, and re-touching it is what keeps an existing limit alive.
     """
     sdir = os.path.join(root, ".janitor", "state")
     try:
         os.makedirs(sdir, exist_ok=True)
+        since = os.path.join(sdir, state.RATE_LIMITED_SINCE_FILE)
+        # ORDER IS LOAD-BEARING: read the flag's existence BEFORE touching it. Hoisting the
+        # `touch()` above this line — the obvious tidy-up, since both lines address the same
+        # file — makes `already_flagged` unconditionally True.
+        #
+        # The FIRST-call case survives that reorder (the conjunction's `isfile(since)` clause is
+        # False on a fresh dir, so `since` is still written). The case that does NOT survive is
+        # the swept flag: the sweeper deletes the flag and can leave `since` orphaned, and a
+        # hoisted `touch()` re-creates it before we look, so we conclude "already flagged", skip
+        # the write, and date the NEW limit to the OLD one's `since` — and it stays wrong until
+        # the flag is swept again, because every call in between sees both files and skips.
+        # `test_a_flag_swept_out_from_under_us_re_arms_since` is the one that fails on a
+        # reorder; verified by mutation, not by reading.
+        already_flagged = os.path.isfile(os.path.join(sdir, state.RATE_LIMITED_FLAG))
+        # The flag is touched unconditionally: it is a boolean, and its MTIME is what
+        # `sweep_stale_rate_limit` ages out — refreshing it is how an ongoing limit stays alive.
         Path(os.path.join(sdir, state.RATE_LIMITED_FLAG)).touch()
-        state.atomic_write(os.path.join(sdir, state.RATE_LIMITED_SINCE_FILE), str(now))
+        # The conjunction, not a bare `if not already_flagged`: the sweeper deletes the flag and
+        # can leave `since` orphaned, and a flag that exists with no `since` beside it must
+        # re-arm rather than stay sourceless.
+        if not (already_flagged and os.path.isfile(since)):
+            state.atomic_write(since, str(now))
     except OSError:
         pass
 

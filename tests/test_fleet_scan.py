@@ -1047,6 +1047,55 @@ def test_write_rate_limited_flag_matches_on_stop_failure_shape(tmp_path: Path) -
     assert (sdir / "rate-limited-since.ts").read_text(encoding="utf-8").strip() == str(now)
 
 
+def test_the_first_call_writes_since_and_a_later_one_leaves_it(tmp_path: Path) -> None:
+    """`since` means WHEN THE LIMIT STARTED, so a re-observation must not move it forward.
+
+    This pins the OUTCOME only. It does NOT pin the read-before-touch ordering inside the
+    function — measured by mutation: hoisting the `touch()` leaves this test green, because the
+    conjunction's `isfile(since)` clause is False on a fresh dir and `since` is written anyway.
+    `test_a_flag_swept_out_from_under_us_re_arms_since` is the one that catches a reorder.
+
+    Why it matters live: the rotation ESC pass re-runs every liveness beat whenever its
+    actuation does not land (nothing landed → no dedupe stamp), so a churning `since` would
+    stop `_resume_wake_pass`'s per-window dedupe from ever matching.
+    """
+    root = tmp_path / "p"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    since = root / ".janitor" / "state" / "rate-limited-since.ts"
+    fs.write_rate_limited_flag(str(root), 1_000_000)
+    assert since.read_text(encoding="utf-8").strip() == "1000000", "the FIRST call must write it"
+    fs.write_rate_limited_flag(str(root), 1_009_999)
+    assert since.read_text(encoding="utf-8").strip() == "1000000", "a re-observation must not move it"
+
+
+def test_a_flag_swept_out_from_under_us_re_arms_since(tmp_path: Path) -> None:
+    """`sweep_stale_rate_limit` deletes the FLAG and can leave `since` orphaned. The next limit
+    must re-arm it — which is why the guard is a conjunction and not a bare `not already_flagged`:
+    a fresh flag beside a stale `since` would otherwise date the new limit to the old one.
+
+    This is ALSO the test that pins the read-before-touch ordering in `write_rate_limited_flag`
+    (verified by mutation): hoist the `touch()` above the `already_flagged` read and this fails,
+    because the re-created flag makes us conclude "already flagged" and skip the re-arm — while
+    every other test here stays green.
+
+    The flag is unlinked directly rather than by calling `sweep_stale_rate_limit`, because what
+    is under test is how this function reacts to that FILE STATE, not the sweeper's decision to
+    produce it; driving the real sweeper would need a stale mtime and a max-age window, adding
+    two failure modes that have nothing to do with the branch being pinned. The equivalence is
+    narrow and that is all it needs to be: the sweeper guards heavily (a `disarmed.flag` skip,
+    an mtime stat, a staleness policy, a lost-unlink race) but its only MUTATION is
+    `os.unlink(flag)` and it never touches `since` — so when it does act, the post-state is the
+    one constructed by hand here."""
+    root = tmp_path / "p"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    flag = root / ".janitor" / "state" / "rate-limited.flag"
+    since = root / ".janitor" / "state" / "rate-limited-since.ts"
+    fs.write_rate_limited_flag(str(root), 1_000_000)
+    flag.unlink()  # the sweeper aged it out; `since` is left behind
+    fs.write_rate_limited_flag(str(root), 2_000_000)
+    assert since.read_text(encoding="utf-8").strip() == "2000000"
+
+
 def test_iterm_probe_retries_a_transient_empty_and_reports_the_attempt_count() -> None:
     """A host under heavy load must not be declared unreachable on ONE quiet probe.
 

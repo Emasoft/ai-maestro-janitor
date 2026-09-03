@@ -16,8 +16,18 @@ giving the commands", 2026-09-02).
 WHAT THIS MODULE DELIBERATELY DOES NOT DO: it never changes HOW `fleet_inject` types. A
 step's `keys` is mapped back to the exact builder the call site used before —
 `build_esc_plan` for `"ESC"`, `build_submit_plan` for `"Enter"`, and for a command the
-caller's OWN already-built plan when it has one (`command_plan`), so each site's channel
-selection and its `esc_first` law survive byte-for-byte. Only the DECISION moved.
+caller's OWN already-built plan when it has one (`command_plan`). Only the DECISION moved.
+
+ONE EXCEPTION, and it is not byte-for-byte: on the wedge path `_rung` deliberately sets
+`esc_first=False` on the command that follows a queue flush (the flush already proved the
+field empty, so an ESC there would interrupt the fresh turn). `build_command_plan` BRANCHES on
+that flag — `if session and cli and not esc_first` picks the `aimaestro` channel — so a
+terminal carrying BOTH an aimaestro identity and a tmux pane now sends the ESC on tmux and the
+command on aimaestro, where before P3 one plan carried both on tmux. Whether that split is
+desirable is a real question (the server channel is synchronous and has a meaningful exit
+code, which the keystroke channels do not); what is NOT acceptable is claiming fidelity this
+path does not have. Reachability is narrow — the instance must be non-`server_owned` and still
+have `aimaestro_session`/`aimaestro_cli` populated.
 
 "Fired" means the screen changed the way we expected AND the sender accepted the plan
 (Proposal §3). A step whose `Expect` is verifiable is re-read until it converges; a step that
@@ -132,6 +142,7 @@ def act(
     *,
     state: PaneState | None = None,
     read_pane: bool = True,
+    fail_open: bool = False,
     command: str | None = None,
     esc_first: bool = False,
     unattended: bool = False,
@@ -173,7 +184,18 @@ def act(
     # Law 1: a blind one-shot is authorized ONLY by a channel with no read-back BY
     # CONSTRUCTION. A readable pane that did not answer this beat gets nothing — typing into
     # a pane we normally see and currently cannot is the 2026-09-02 incident on another path.
+    #
+    # `fail_open` is the ONE sanctioned exception, and it exists because Law 1 has a direction:
+    # it makes an unreadable pane get NOTHING, which is the safe answer for a keystroke that
+    # STARTS work and the dangerous one for a keystroke that STOPS it. The kill switch and
+    # `/janitor-disarm` must reach every session even on the beat their panes cannot be read —
+    # a stop that silently does not arrive is exactly the failure the switch exists to prevent,
+    # and it fails machine-wide the moment pane capture does. Callers on a stop path opt in;
+    # nothing else may, because for them Law 1's default is the correct one.
     blind_ok = not (read_pane and channel_has_readback(terminal))
+    if state is None and not blind_ok and fail_open:
+        _log("readable channel could not be read — firing blind anyway (stop path, fail-open)")
+        blind_ok = True
     if state is None and not blind_ok:
         _log("skipped — readable channel could not be read")
         return Outcome(status=OutcomeStatus.NOOP, steps_done=0, observed=("unreadable",))

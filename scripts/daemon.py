@@ -2153,7 +2153,12 @@ def _rotation_esc_pass(fleet: list, now: int, *, fire: bool) -> None:
         # TRDD-N954KWUC P3 — the table turns this single blind ESC into the WEDGE's own ESC
         # law: 1 + one per queued command (TRDD-3T9HQEQ6's queue flush), each verified by
         # re-reading until the wedge is actually gone. The pane read above is reused, so the
-        # capture budget is unchanged.
+        # FIRST capture is free — but verification is not: `execute` re-reads after every press
+        # and once more while it waits for the last one to take, each read preceded by
+        # `pane_actuate._SETTLE_S`. Proposal §5's one-capture-per-pane-per-beat therefore no
+        # longer holds for any verifiable step, and the daemon beat is single-threaded, so this
+        # pass now costs real wall-clock per wedged pane. That is the price of not typing blind;
+        # bounding it is TRDD-N954KWUC's own follow-up, not something to paper over here.
         outcome = pane_actuate.act(
             inst.terminal,
             pane_actuate.Event.ROTATION_LANDED,
@@ -2353,6 +2358,11 @@ def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
         esc_first=esc_first,
         command_plan=cmd_plan,
         project_dir=inst.project_root if inst is not None else None,
+        # FAIL-OPEN, and only here: a stop must arrive even on a beat its pane cannot be read.
+        # The table's default refuses to type into a readable-but-unanswering pane, which is
+        # right for a keystroke that starts work and wrong for one that ends it — the kill
+        # switch would stop propagating fleet-wide the moment pane capture broke, silently.
+        fail_open=True,
         log=lambda m: state.log_line("daemon", f"fleet-stop: pid {plan['pid']} {m}"),
     ).status is pane_actuate.OutcomeStatus.DONE
     if ok:

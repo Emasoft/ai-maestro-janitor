@@ -407,6 +407,58 @@ def test_the_closed_loop_spends_exactly_one_capture_when_it_converges(monkeypatc
     assert len(reads) == 1
 
 
+def test_touched_is_false_when_the_channel_accepted_nothing(monkeypatch) -> None:
+    """`touched` means "a keystroke REACHED the pane", and it is the ONLY signal that says so —
+    `status` cannot, because a channel that accepts nothing reports FAILED exactly like a live
+    pane that stayed wedged. Callers keeping attempt bookkeeping (the rotation dedupe, the
+    recovery-attempt counter) key on this, so a False here is what stops an untouched pane from
+    being charged for keystrokes it never received."""
+    wedged = (_FIXTURES / "real-wedged-fable-limit.txt").read_text(encoding="utf-8")
+    monkeypatch.setattr(fleet_scan, "capture_pane_text", lambda _t: wedged)
+    fired = _seam(monkeypatch, accepted=False)
+    outcome = _act(pa.Event.ROTATION_LANDED, state=ps.parse(wedged))
+    assert fired, "the loop must still have TRIED — otherwise this proves nothing about acceptance"
+    assert outcome.status is pa.OutcomeStatus.FAILED
+    assert outcome.touched is False
+
+
+def test_touched_is_true_when_any_step_landed_not_only_when_all_did(monkeypatch) -> None:
+    """The `any` vs `all` decision, pinned. A multi-step plan whose first step lands and whose
+    second does not has TOUCHED the pane: re-running the whole sequence later would re-press an
+    already-flushed queue, which is the over-pressing hazard this card exists to kill — not a
+    missed actuation. `all` would report False here and license exactly that re-press.
+
+    `status` is still FAILED (the sequence did not fully apply), which is the point: the two
+    fields answer different questions and a caller must not read one for the other.
+
+    Pinned on RECOVERY_RUNG — the multi-step row with a LIVE caller (`daemon.py`'s recovery
+    ladder, which keys its attempt budget on `touched`) — rather than on NO_HEADROOM, whose row
+    nothing currently fires. A semantics test on an unfired row proves the field's behaviour but
+    no caller's dependence on it, and it would be deleted along with the row."""
+    wedged = (_FIXTURES / "real-wedged-fable-limit.txt").read_text(encoding="utf-8")
+    cleared = (_FIXTURES / "synthetic-idle-empty-field.txt").read_text(encoding="utf-8")
+    monkeypatch.setattr(fleet_scan, "capture_pane_text", lambda _t: cleared)
+    calls: list[int] = []
+
+    def _fire(plan):
+        calls.append(1)
+        return len(calls) == 1  # the first keystroke lands, every later one is refused
+
+    fired = _seam(monkeypatch)
+    monkeypatch.setattr(fleet_inject, "fire", _fire)
+    # A wedge + a command is the flush-then-type shape: ESC budget first, then the rung's own
+    # command with `esc_first=False` because the flush just proved the field empty.
+    outcome = _act(
+        pa.Event.RECOVERY_RUNG, state=ps.parse(wedged), command="/janitor-arm", esc_first=True
+    )
+    # Pin the STEPS, not the press count: `_flush_wedge` alone carries `repeat_max=2`, so a
+    # `len(calls) > 1` check could be satisfied by one step spending its budget against a
+    # non-converging pane — press count standing in for step count. This pins identity too.
+    assert _keys(fired) == ["ESC", "/janitor-arm"], "the rung must be flush-then-command"
+    assert outcome.status is pa.OutcomeStatus.FAILED
+    assert outcome.touched is True
+
+
 # ---------------------------------------------------------------------------------------
 # The per-project ledger (TRDD-UA4FAX67 keys its `unblock-when` predicate on this file)
 # ---------------------------------------------------------------------------------------
