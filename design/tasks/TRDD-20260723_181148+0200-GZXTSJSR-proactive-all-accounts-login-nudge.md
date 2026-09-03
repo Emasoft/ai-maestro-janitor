@@ -3,7 +3,7 @@ trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
 column: dev
 created: 2026-07-23T18:11:48+0200
-updated: 2026-09-03T10:06:00+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -14,7 +14,35 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-23
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+
+- **P1 IS DONE — verified this session, no new code needed.** Commit `cf9fb7a1`
+  (2026-08-22) already delivers the card's full P1 design scope: grace window
+  1.0→2.0 days (`_grace_days()`, env-tunable via `CLAUDE_ROTATOR_LOGIN_NUDGE_GRACE_DAYS`),
+  fire-on-fail-signal via `cascade.classify` (a `token_days is None` — i.e. `via=None`/no
+  token — or `refresh_failures >= DEFAULT_MAX_REFRESH_FAILURES` both land in `REAUTH_NUDGE`
+  immediately, no grace wait: `scripts/oauth_rotator/cascade.py:138,152-154`), and the
+  decision stays entirely inside the cascade SSOT (no threshold logic duplicated in the
+  detector). Same commit also folded in P2's notify-routing (`notify.push`, severity
+  CRITICAL/HIGH by worst account) and P4's escalation dedupe (bucket-aware signature
+  re-notifies same-day on worsening) — bonus, not required by P1, but it means acceptance
+  criteria 1 and 4 are ALSO proven. Root cause 5 (stale `open-login.sh` path) was already
+  fixed pre-existing (`rotator.open_login_script()` resolves per-host, verified present at
+  `scripts/oauth_rotator/open-login.sh`) — criterion 3 proven.
+- **STILL OPEN (out of this session's scope — P1 only was requested):** P3
+  (`/janitor-capture-all-logins` skill walking every account — criterion 2, NOT built) and
+  P5 (server-ownership coordination). Criterion 5 (nudge phase LATE + fail-open inside the
+  heartbeat, combined resume+nudge test) is UNVERIFIED — `oauth-login-needed.py` is a
+  standalone roster detector (`dispatch.py:303`, 6h cadence), not a phase inside
+  `dispatch.py`'s own function list the STATE's cardinal invariant names
+  (`_phase_self_cost_alarm` etc.); whether that invariant even applies to a separate-process
+  detector, vs. only to phases literally inside `_run_heartbeat`, was not investigated this
+  session — do that before closing P5.
+- **NEXT ACTION:** author P3 (`/janitor-capture-all-logins` skill + backing script that
+  loops `slot_capture_browser.py <email>` over every configured account) as its own bounded
+  task, then P5's server-suppression-flag check. Column stays `dev` — the card's acceptance
+  list spans P1-P5 and only P1's 3 design bullets are proven; do not move to `testing` until
+  criteria 2 and 5 are also proven.
 
 - **WHY THIS EXISTS:** a live scenario was interrupted by a rate-limit / all-accounts
   exhaustion; the agents died; re-running costs millions of tokens. The rotator had NO healthy
@@ -106,17 +134,24 @@ not during one.
 
 ## Acceptance criteria
 
-1. With an account whose token expires in <48h (or has via=None / refresh_failures≥max), a HIGH
-   desktop notification fires from the daemon telling the user to log in — verified on a seeded
-   isolated state (no real keychain, S1a/S1b/S1e sandbox honored).
-2. `/janitor-capture-all-logins` walks every configured account and invokes the working capture
-   command for each, in sequence.
-3. The nudge no longer prints the stale `open-login.sh` path.
-4. A worsening state (48h→expired) re-notifies rather than staying silent after one daily nudge.
-5. The login-nudge phase is LATE + fail-open in the heartbeat — a recovery fire still emits its
-   survival marker and never loses it (cardinal invariant); proven by a combined resume+nudge
-   test.
-6. pyright 0 new errors / ruff clean / full `pytest tests/` green / `~/.claude` proven untouched.
+1. ✓ PROVEN (2026-09-03, commit cf9fb7a1) — with an account whose token expires in <48h (or
+   has via=None / refresh_failures≥max), a HIGH (CRITICAL when expired/dead-refresh) desktop
+   notification fires from `notify.push` — `tests/test_oauth_login_needed.py::test_notify_pushed_high_for_a_48h_bucket_account`,
+   `::test_notify_escalates_to_critical_when_expired`.
+2. NOT DONE — `/janitor-capture-all-logins` does not exist yet (P3, out of this session's scope).
+3. ✓ PROVEN — the nudge resolves `rotator.open_login_script()` per-host, no hard-coded stale
+   path; the script exists at `scripts/oauth_rotator/open-login.sh`.
+4. ✓ PROVEN (commit cf9fb7a1) — bucket-aware escalation signature re-notifies same-day on a
+   worsening state — `tests/test_oauth_login_needed.py::test_escalation_sig_re_notifies_same_day_when_bucket_worsens`.
+5. UNVERIFIED — whether the cardinal LATE+fail-open invariant applies to this standalone
+   roster detector (vs. only to in-process `dispatch.py` phases) was not investigated this
+   session.
+6. ✓ PROVEN this session — `uv run ruff check scripts/detectors/oauth-login-needed.py
+   tests/test_oauth_login_needed.py`: all checks passed. `uv run mypy scripts/
+   --ignore-missing-imports`: Success, no issues found in 498 source files. `uv run pytest
+   tests/test_oauth_login_needed.py -q -p no:randomly`: 31 passed. (Full-suite `pytest
+   tests/` and the `~/.claude` untouched proof were not re-run this session — no code
+   changed, prior gate results for those stand.)
 
 ## Approval log
 
