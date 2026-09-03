@@ -40,8 +40,19 @@ implementation-commits: []
 
 ## Acceptance criteria
 
-- [ ] Determine whether CPV reads `.mega-linter.yml` (perturb the config and
+- [x] Determine whether CPV reads `.mega-linter.yml` (perturb the config and
       re-run the preflight, or read CPV's source).
+      — ANSWERED 2026-09-04 by perturbation: removed `- COPYPASTE_JSCPD` from
+      `ENABLE_LINTERS` and re-ran `cpv-remote-validate ci-preflight .`. jscpd
+      STILL RAN (`✓ jscpd: Copy-paste check passed`). So **CPV does NOT read this
+      config** — it carries its own list and merely labels its checks with
+      Mega-Linter sub-linter names. The config was restored byte-identically
+      (sha match, clean `git status`).
+      CONSEQUENCE for the decision below: deleting `.mega-linter.yml` would NOT
+      weaken the stage-4b preflight. The file's only remaining function is as
+      configuration for a Mega-Linter run that nothing performs — including its
+      `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`, which therefore does NOT set
+      the threshold the preflight's jscpd actually uses.
 - [ ] Decide: delete / restore a workflow / adopt wanted linters
       individually.
 - [ ] Execute that decision.
