@@ -1,12 +1,12 @@
 ---
 trdd-id: 7KRF99WI
 title: the branch-protection guard proposes a matrix job name that can never report
-column: testing
+column: complete
 blocked-by: []
 unblock-when: []
 review-after: 2026-09-05
 created: 2026-08-30T00:39:59+0200
-updated: 2026-09-03T11:47:00+0200
+updated: 2026-09-03T23:38:32+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -16,6 +16,7 @@ min-approval-requirement: none
 npt: []
 eht: []
 relevant-rules: []
+implementation-commits: [df8ff661]
 external-refs: [janitor#294, TRDD-H8WRCW0I]
 ---
 
@@ -23,7 +24,7 @@ external-refs: [janitor#294, TRDD-H8WRCW0I]
 
 ## ⏵ 2026-09-03 11:47 — VERIFIED against a real PR-triggered matrix repo; `testing` box ticked
 
-Re-measured live, read-only, against `/Users/emanuelesabetta/ai-maestro`
+Re-measured live, read-only, against the local `ai-maestro` checkout
 (`.github/workflows/ci.yml` has `strategy.matrix` on job `test`, `on: pull_request`):
 
 ```
@@ -178,7 +179,7 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
       Two tests added to `tests/test_branch_protection_guard.py`
 - [x] the fix is verified against a repo that HAS a PR-triggered matrix job, not only against this
       one, since this one does not reproduce it — VERIFIED 2026-09-03 against
-      `/Users/emanuelesabetta/ai-maestro` (real PR-triggered `strategy.matrix` job), see STATE
+      the local `ai-maestro` checkout (real PR-triggered `strategy.matrix` job), see STATE
       block above: the matrix job is omitted and every emitted context matches a real GitHub
       check-run name
 - [x] `uv run pytest -q` (guard file: 56 passed) + ruff clean + mypy clean. **Full-suite run still
@@ -196,3 +197,7 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
 - **This was found by a peer measuring MY code on THEIR repo**, and it is the second finding
   tonight that this repo could not have produced on its own — the local run is clean. A function
   that behaves correctly on every repo you own is not evidence about the function.
+
+## Approval log
+
+- 2026-09-03T23:38:32+0200 — COMPLETE. Reviewed by the janitor main session under the owner's standing delegation of the review columns (2026-09-03). Every acceptance box verified against the code, not taken from the card's own word.
