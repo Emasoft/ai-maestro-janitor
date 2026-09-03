@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - **liveness:** Stop the janitor typing ESC into sessions that are working (TRDD-L32WC0H7 F0-F6) (9cc2204)
 - **tests:** Stop the marketplace per-item-timeout test racing a real subprocess under load (TRDD-7NSRD8OV) (5648e14)
 - **aictx:** Declare the dedupe hash non-security so bandit stops failing CI (TRDD-QNMBH3ES) (a4ad460)
+- **privacy:** Redact real account addresses from tracked cards, and move fixtures off a real domain (f54a895)
 
 ### Documentation
 
@@ -83,6 +84,10 @@ All notable changes to this project will be documented in this file.
 - **pane:** Route every janitor keystroke through read → decide → verify (TRDD-N954KWUC) (3050805)
 - **trdd:** Unblock-when hardenings — SHIPPED-not-terminal holds, all-folder blocker index (TRDD-RTRS704K, janitor#288) (3fe3b0e)
 - **external-clear:** Wire the PostModelSwitch hook and read the harness cache verdict (TRDD-GK35MOXU) (d043195)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.14 (103a2e5)
 
 ### Refactor
 
