@@ -1,9 +1,10 @@
 ---
 trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
-column: dev
+column: testing
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-03T09:25:00+0200
+updated: 2026-09-03T11:20:06+0200
+review-after: 2026-09-05
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
@@ -19,6 +20,51 @@ external-refs: [TRDD-2F3I2P18]
 ---
 
 # The harness now EMITS the model-change event — stop polling for it
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:20+0200
+
+- **2026-09-03 11:20 — `dev → testing` (soak).** `.cpv-version` bumped v5.4.0 → v5.16.2 with the
+  two workflow literals (`tests/test_cpv_pin_ssot.py` 11/11; `cpv-remote-validate plugin .
+  --strict` at v5.16.2 → `CRITICAL=0 MAJOR=0 MINOR=0 NIT=0`, exit 0 — v5.4.0 had rejected
+  `PostModelSwitch` as `[CRITICAL] Unknown hook event`). The advisor's pre-existing hole in
+  `on-session-start-cold-cache-clear.py::_payload` (a non-object JSON body raised outside the
+  guard) is closed (`return data if isinstance(data, dict) else {}`; probed with `[]` and
+  `"x"` → exit 0). All code work is done; the two open boxes (live `/model`, `/effort`) can only
+  be observed in a session running the NEXT published version — this session's 3.4.13
+  `hooks.json` carries no `PostModelSwitch` entry. **NEXT ACTION:** after the publish installs,
+  run `/model opus` then `/model fable` in one session and grep
+  `.janitor/state/` for the stamp the hook advances; then `/effort` and record whether it fires.
+- **Box 1 (hooks.json registration)**: `PostModelSwitch` entry ADDED to `hooks/hooks.json`
+  (upstream `claude-plugins-validation#222` closed 2026-09-02). CPV's own repo now accepts
+  the event (`scripts/cpv_validation_common.py:334-335` in `claude-plugins-validation` main,
+  released as v5.15.0+). **NOT done: bumping this repo's `.cpv-version` pin** (currently
+  `v5.4.0`, 70+ releases behind) — that is a repo-wide publish-pipeline change spanning every
+  CPV delta since 5.4.0, not something to rush inside this card's scope. Orchestrator: bump
+  `.cpv-version` (own TRDD or chore) before the next publish, or the gate still won't see this
+  hook. **Still NOT done: a real `/model` switch verification on this machine** — a subagent
+  worker cannot safely switch its own session's model mid-task; needs a human/interactive run.
+- **Box 3 (/effort measurement)**: NOT measured live this pass (same reason — needs an
+  interactive session running `/effort`). CPV's spec-sync report for 2.1.251
+  (`claude-plugins-validation/reports/spec-sync-2.1.257/20260901_222622+0200-w2-issue-222-model-switch-hooks.md`)
+  documents the event registration but says nothing about whether an effort-only change fires
+  it. Fallback poll (`prefix_invalidated`) stays in place until this is measured.
+- **Box 4 (SessionStart staleness) — DONE this pass.** A live 2.1.251+ resume payload was
+  found on disk (`.janitor/state/session-staleness.json`, 3 projects) and named the real
+  fields: `prompt_cache_likely_expired` (bool) + `estimated_cache_write_usd` (float).
+  Bound `prompt_cache_likely_expired` in `external_clear.cache_expired_from_harness_payload`
+  (new, pure) and wired it into `on-session-start-cold-cache-clear.py`: the harness signal, read
+  straight from the hook's own stdin payload (NOT the sibling file — that hook fires in
+  parallel and reading its file here would race the writer), outranks and skips the
+  agentlensPro probe subprocess when present. `estimated_cache_write_usd` is bound/observed
+  but not consumed — no consumer needs it yet; leaving it in the persisted file is enough.
+- **Box 5 (gates)**: ruff + mypy clean repo-wide. pytest: 16139 passed, 1 pre-existing
+  UNRELATED failure (`test_rules_installer.py::test_shipped_rules_stay_under_the_context_floor_cap`
+  — shipped `rules/*.md` corpus 829 B over its byte cap; touches none of this card's files,
+  confirmed pre-existing via `git log` on that test/rules — not fixed here, out of scope).
+- (superseded 11:20 — the `.cpv-version` bump landed; see the top entry for the live-check
+  NEXT ACTION.)
+
+
 
 ## Why (USER directive, 2026-09-01: "you said there is no model change event? wrong")
 
@@ -54,22 +100,22 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 ## Acceptance
 
 - [ ] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
-      real `/model` switch on this machine, not just a unit test) — the SCRIPT shipped in
-      `df26fa12` (subprocess test bumps 1→2) but the hooks.json REGISTRATION is DEFERRED:
-      CPV's hook-event allowlist (v5.4.0 pin AND upstream main, checked 2026-09-01) predates
-      CC 2.1.251 and rejects the event as CRITICAL, blocking the publish. Filed upstream:
-      claude-plugins-validation issue 222. Re-add the hooks.json entry once a CPV release
-      knows the event; the script is inert until registered, so nothing half-works meanwhile
+      real `/model` switch on this machine, not just a unit test) — hooks.json entry ADDED
+      2026-09-03 (CPV upstream issue 222 closed, CPV main now knows the event); `.cpv-version`
+      pin bump is STILL PENDING (orchestrator — see STATE block), and the live `/model`-switch
+      verification is still outstanding (needs an interactive session, not a background worker)
 - [x] the external-clear gate fires on the stamp with the consume-on-fire semantics
       (`df26fa12`: third stamp name in `_read_reload_state`; probe/consume tests)
 - [ ] measured whether `/effort` fires the hook; fallback poll retained or retired accordingly,
-      with the finding written into the card
-- [ ] SessionStart staleness + re-cache cost persisted and preferred by the resume gate —
-      HALF DONE: the resume hook now defensively persists every stale/cache/cost payload
-      scalar to `session-staleness.json` (field names are the harness's, undocumented; one
-      live 2.1.251+ resume payload on disk will name them). The gate-side consumer binds to
-      the real names then
-- [ ] pytest + ruff + mypy green
+      with the finding written into the card — STILL OUTSTANDING, needs an interactive
+      session; fallback poll (`prefix_invalidated`) stays in place
+- [x] SessionStart staleness + re-cache cost persisted and preferred by the resume gate —
+      the real field names (`prompt_cache_likely_expired`, `estimated_cache_write_usd`) were
+      bound from a live payload found on disk; `external_clear.cache_expired_from_harness_payload`
+      (new) is wired into `on-session-start-cold-cache-clear.py` and outranks + skips the
+      agentlensPro probe when the harness already answered (2026-09-03, 4 new unit tests)
+- [ ] pytest + ruff + mypy green — ruff + mypy clean repo-wide; pytest 16139 passed / 1
+      pre-existing unrelated failure (rules-floor-cap byte budget, untouched by this card)
 
 ## Notes and lessons learned
 

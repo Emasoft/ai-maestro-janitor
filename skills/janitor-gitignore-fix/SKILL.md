@@ -1,6 +1,6 @@
 ---
 name: janitor-gitignore-fix
-description: Remedy for a gitignore-coverage / ADVISORY-GITIGNORE-COVER finding — a private class (`.env`, `*.key`, `reports/`, …) missing from `.gitignore`, or a private file already tracked. Plan-first: shows the proposed `.gitignore` diff and the exact `git rm --cached` lines, mutates nothing until you confirm. Trigger with /janitor-gitignore-fix or when asked to "fix the gitignore", "cover the missing patterns", or after a gitignore-coverage heartbeat line.
+description: Remedy for a gitignore-coverage / ADVISORY-GITIGNORE-COVER finding — a private class (`.env`, `*.key`, `reports/`, …) missing from `.gitignore`, or a private file already tracked. Plan-first — shows the proposed `.gitignore` diff and the exact `git rm --cached` lines, mutates nothing until you confirm. Trigger with /janitor-gitignore-fix or when asked to "fix the gitignore", "cover the missing patterns", or after a gitignore-coverage heartbeat line.
 ---
 
 # Janitor gitignore-fix

@@ -255,6 +255,30 @@ def test_the_post_model_switch_hook_advances_the_stamp(tmp_path: Path) -> None:
         assert stamp.read_text(encoding="utf-8") == expected
 
 
+def test_harness_payload_expired_true_is_read_verbatim() -> None:
+    """The resume-hook payload's own `prompt_cache_likely_expired: true` is trusted as-is —
+    this is the harness's first-party verdict, not a heuristic re-derivation of it."""
+    assert ec.cache_expired_from_harness_payload({"prompt_cache_likely_expired": True}) is True
+
+
+def test_harness_payload_expired_false_is_read_verbatim() -> None:
+    """A warm-cache verdict from the harness is trusted too — it must not be coerced to
+    `None` (which would fall through to a probe that could contradict it)."""
+    assert ec.cache_expired_from_harness_payload({"prompt_cache_likely_expired": False}) is False
+
+
+def test_harness_payload_missing_field_is_no_signal() -> None:
+    """Pre-2.1.251 harnesses (and non-resume sources) never send this field — absence must
+    read as `None` (no signal), not `False` (which would wrongly veto a real cold resume)."""
+    assert ec.cache_expired_from_harness_payload({}) is None
+
+
+def test_harness_payload_non_bool_field_is_no_signal() -> None:
+    """A malformed or renamed field (a string, a stray null) must not be coerced to a bool —
+    only a genuine JSON boolean is a signal; anything else is treated as absent."""
+    assert ec.cache_expired_from_harness_payload({"prompt_cache_likely_expired": "true"}) is None
+
+
 def test_a_stale_event_pending_beside_a_fresh_one_is_not_consumed_early(tmp_path: Path) -> None:
     """One name stale, the other fresh: the probe must fire AND leave the cursor alone — a
     partial consume would need one write covering both names and would eat the fresh event."""

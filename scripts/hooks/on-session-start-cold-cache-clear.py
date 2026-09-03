@@ -78,7 +78,11 @@ def _payload() -> dict:
         if sys.stdin.isatty():
             return {}
         raw = sys.stdin.read()
-        return json.loads(raw) if raw.strip() else {}
+        data = json.loads(raw) if raw.strip() else {}
+        # A non-object JSON body (`[]`, `"x"`, `1`) parses fine and then `data.get` in main()
+        # raises AttributeError OUTSIDE this guard — the hook would exit 1 with a traceback
+        # on every session start until the payload changed. Only a mapping is a payload.
+        return data if isinstance(data, dict) else {}
     except Exception:  # noqa: BLE001 -- a malformed payload must not break session start
         return {}
 
@@ -142,18 +146,31 @@ def main() -> int:
 
         newest = cold_cache_compact.newest_transcript(root)
         now = int(time.time())
+        # TRDD-GK35MOXU: the SAME SessionStart `data` payload this hook already parsed may
+        # carry the harness's own `prompt_cache_likely_expired` verdict (CC >= 2.1.251). Read
+        # from `data` directly, never `session-staleness.json` — that file is written by the
+        # SIBLING `on-session-start.py` hook, which fires in PARALLEL with this one per the
+        # docs, so reading it here would race its writer. The stdin payload has no such race:
+        # both hooks receive the identical JSON for this one SessionStart.
+        harness_signal = None if already else ec.cache_expired_from_harness_payload(data)
         # The probe answers when it can and WINS when it does; elapsed time is the fallback that
         # makes this lever reachable at all on a host without agentlensPro (TRDD-CEWVQ8DG). Before
         # this, an abstaining probe logged `why=cache state unknown — not clearing` and a whole
         # fleet of cold resumes each paid a full cache-creation write on its first turn.
+        # The harness signal, when present, OUTRANKS the probe and SKIPS its subprocess
+        # entirely (TRDD-GK35MOXU) — cheaper and it is the harness's own answer, not a
+        # heuristic re-derivation of it from the outside.
         cache_expired = (
             None
             if already
             else ec.resolve_cache_expired(
-                # The ONE subprocess, and only once the local facts have failed to refuse. It costs
-                # a bounded ~20 s worst case, which is why it must not run on the `compact` path
-                # above.
-                ec.cache_certainly_expired(root),
+                harness_signal
+                if harness_signal is not None
+                # The ONE subprocess, and only once the local facts have failed to refuse. It
+                # costs a bounded ~20 s worst case, which is why it must not run on the
+                # `compact` path above, and now also skipped whenever the harness already
+                # answered.
+                else ec.cache_certainly_expired(root),
                 last_turn_age_s=cold_cache_compact.transcript_age_s(newest, now=now),
                 ttl_minutes=ec.read_ttl_minutes(sd),
             )

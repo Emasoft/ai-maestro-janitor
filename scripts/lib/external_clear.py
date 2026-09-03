@@ -1408,6 +1408,24 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
     return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
 
 
+def cache_expired_from_harness_payload(payload: Mapping[str, object]) -> bool | None:
+    """PURE. The FIRST-PARTY answer to `cache_certainly_expired`'s question (TRDD-GK35MOXU).
+
+    CC >= 2.1.251's SessionStart resume payload carries `prompt_cache_likely_expired` — the
+    harness's OWN verdict, computed with information (its internal cache bookkeeping) that no
+    external probe can see. When present it OUTRANKS `cache_certainly_expired`'s agentlensPro
+    subprocess: no probe latency, no third-party dependency, and it is the harness answering
+    about itself rather than a heuristic re-derivation of the same fact from the outside.
+
+    Field name is UNDOCUMENTED in the CC changelog — bound from a live 2.1.251+ resume payload
+    observed on disk (`.janitor/state/session-staleness.json`, written defensively by
+    `on-session-start.py` since it shipped). Missing or non-bool => `None` (no signal; the
+    caller falls back to the agentlensPro probe, exactly as it did before this existed).
+    """
+    v = payload.get("prompt_cache_likely_expired")
+    return v if isinstance(v, bool) else None
+
+
 def cache_expired_by_age(last_turn_age_s: int | None, *, ttl_minutes: int) -> bool | None:
     """PURE. `True` when elapsed time ALONE makes cache expiry certain; `None` when it does not.
 

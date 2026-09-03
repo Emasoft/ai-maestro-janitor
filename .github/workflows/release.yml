@@ -65,8 +65,9 @@ jobs:
         # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
         # v2.153.2 regression.) Never bump without running the candidate ref
         # against the tree locally first.
-        # PINNED AT v5.4.0 as of the 2026-08-08 canon-alignment pass (bumped
-        # from v5.1.4). publish.py now DERIVES its spec from `.cpv-version`
+        # PINNED AT v5.16.2 as of 2026-09-03 (bumped from v5.4.0: the older pin
+        # predates CC 2.1.251's PostModelSwitch hook event and rejected it as a
+        # CRITICAL — TRDD-GK35MOXU). publish.py DERIVES its spec from `.cpv-version`
         # (_read_cpv_pin), so the moving sites are `.cpv-version` + the two
         # workflow literals, and tests/test_cpv_pin_ssot.py holds them equal.
         # Verified locally against this tree BEFORE the bump: the candidate
@@ -110,11 +111,11 @@ jobs:
           # alone. `|| true` and a discarded stdout: this step must never be able to fail
           # the release — even if the probe subcommand errors, uvx has already BUILT and
           # cached the package, which is the only thing being bought here.
-          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.4.0" \
+          uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
             --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
 
           run_cpv() {
-            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.4.0" \
+            timeout 420 uvx --from "git+https://github.com/Emasoft/claude-plugins-validation@v5.16.2" \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
