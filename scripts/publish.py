@@ -44,10 +44,13 @@ Gate stages (--gate mode, called by pre-push hook):
        may initiate a push (verified via process ancestry, NOT env vars).
    G1. Version bump check (local vs remote, auto-detects origin/HEAD)
    G2. Lint (ruff)
-   G2b. Copy-paste check (jscpd, parity with ci.yml Mega-Linter COPYPASTE_JSCPD;
-        WARNs+skips if jscpd/npx unavailable so a push is never false-blocked)
-   G2c. Workflow lint (actionlint, parity with ci.yml Lint job; WARNs+skips if
-        actionlint unavailable so a push is never false-blocked)
+   G2b. Copy-paste check (jscpd) — GATE-ONLY. Long described here as "parity
+        with ci.yml Mega-Linter COPYPASTE_JSCPD"; verified 2026-09-04 that no
+        workflow runs Mega-Linter or jscpd (it existed once and was removed).
+        WARNs+skips if jscpd/npx unavailable so a push is never false-blocked.
+   G2c. Workflow lint (actionlint) — GATE-ONLY. Described here as "parity with
+        ci.yml Lint job"; verified 2026-09-04 that no workflow runs actionlint.
+        WARNs+skips if actionlint unavailable so a push is never false-blocked.
    G2d. Type-check (mypy scripts/ --ignore-missing-imports) — gate-only, NOT
         parity with ci.yml Lint job (CI runs no mypy, only pyright); mypy
         catches a class of scripts/lib sibling-call errors pyright misses
@@ -57,8 +60,12 @@ Gate stages (--gate mode, called by pre-push hook):
         dotnet build / swift build / zig build), each self-detecting; WARNs+skips
         if the toolchain is unavailable so a push is never false-blocked. C/C++ is
         detected + noted (built in CI; no false-block-safe local command) (issue #175)
-   G2f. Shell lint (shellcheck, parity with ci.yml Mega-Linter BASH_SHELLCHECK;
-        WARNs+skips if shellcheck unavailable so a push is never false-blocked)
+   G2f. Shell lint (shellcheck) — the CI counterpart is ci.yml's plain
+        "Lint shell scripts" step, NOT the Mega-Linter BASH_SHELLCHECK this
+        line named until 2026-09-04 (no workflow runs Mega-Linter).
+        WARNs+skips if shellcheck unavailable so a push is never false-blocked
+        — the same fail-open shape rejected for pyright in G2; deferred on
+        cost, not on principle (TRDD-MYQGMAQZ).
    G3. Validate (uvx cpv-remote-validate plugin . --strict)
    G4. Tests (pytest)
 
@@ -1156,7 +1163,7 @@ def run_gate(root: Path) -> int:
     # BEFORE the bump/tag/push. jscpd needs Node/npx; if it cannot be obtained, DEGRADE to a
     # non-blocking WARNING (CI still enforces it) — a green gate then does NOT guarantee green CI
     # for the copy-paste dimension (issue #143). NEVER false-block a push on a tool-install failure.
-    cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, parity with CI)...{NC}")
+    cprint(f"\n{BLUE}[G2b] Copy-paste check (jscpd, gate-only)...{NC}")
     jscpd_bin = shutil.which("jscpd")
     # Resolve npx ONCE into a variable so mypy narrows it (a second
     # shutil.which("npx") call INSIDE the list keeps the element typed
@@ -1180,7 +1187,7 @@ def run_gate(root: Path) -> int:
             cp = subprocess.run(base_cmd + ["."], cwd=str(root), timeout=300).returncode
             if cp != 0:
                 cprint(f"  {RED}BLOCKED: jscpd found copy-paste duplication over the .jscpd.json threshold{NC}")
-                cprint(f"  {RED}(parity with CI Mega-Linter). Reduce duplication or raise the threshold in .jscpd.json.{NC}")
+                cprint(f"  {RED}(gate-only; CI runs no jscpd). Reduce duplication or raise the threshold in .jscpd.json.{NC}")
                 return 1
             cprint(f"  {GREEN}Copy-paste check passed.{NC}")
 
@@ -1190,7 +1197,7 @@ def run_gate(root: Path) -> int:
     # is not on PATH, DEGRADE to a non-blocking WARNING (CI still enforces it) — a
     # green gate then does NOT guarantee green CI for the workflow-syntax dimension.
     # NEVER false-block a push on a missing-tool case (the issue #143 pattern).
-    cprint(f"\n{BLUE}[G2c] Workflow lint (actionlint, parity with CI)...{NC}")
+    cprint(f"\n{BLUE}[G2c] Workflow lint (actionlint, gate-only)...{NC}")
     wf_dir = root / ".github" / "workflows"
     has_workflows = wf_dir.is_dir() and (any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml")))
     actionlint_bin = shutil.which("actionlint")
@@ -1203,7 +1210,7 @@ def run_gate(root: Path) -> int:
     else:
         al = subprocess.run([actionlint_bin], cwd=str(root), timeout=120).returncode
         if al != 0:
-            cprint(f"  {RED}BLOCKED: actionlint found workflow-syntax errors (parity with CI Lint job).{NC}")
+            cprint(f"  {RED}BLOCKED: actionlint found workflow-syntax errors (gate-only; CI runs no actionlint).{NC}")
             return 1
         cprint(f"  {GREEN}Workflow lint passed.{NC}")
 
@@ -1212,7 +1219,7 @@ def run_gate(root: Path) -> int:
     # locally BEFORE the bump/tag/push. A `--version` probe distinguishes
     # 'mypy unavailable' (WARN + skip, never false-block) from 'mypy ran, found
     # errors' (BLOCK) — the issue #143 degrade-gracefully pattern.
-    cprint(f"\n{BLUE}[G2d] Type-check (mypy, parity with CI)...{NC}")
+    cprint(f"\n{BLUE}[G2d] Type-check (mypy, gate-only)...{NC}")
     mypy_bin = shutil.which("mypy")
     mypy_cmd = [mypy_bin] if mypy_bin else (["uv", "run", "mypy"] if shutil.which("uv") else None)
     if mypy_cmd is None:
@@ -1228,7 +1235,7 @@ def run_gate(root: Path) -> int:
             mt = subprocess.run(mypy_cmd + ["scripts/", "--ignore-missing-imports"],
                                 cwd=str(root), timeout=300).returncode
             if mt != 0:
-                cprint(f"  {RED}BLOCKED: mypy found type errors in scripts/ (parity with CI Lint job).{NC}")
+                cprint(f"  {RED}BLOCKED: mypy found type errors in scripts/ (gate-only; CI runs pyright instead).{NC}")
                 return 1
             cprint(f"  {GREEN}Type-check passed.{NC}")
 
@@ -1388,7 +1395,7 @@ def run_gate(root: Path) -> int:
             ["shellcheck", *[str(s) for s in sorted(_shell_scripts)]],
             cwd=str(root), timeout=180).returncode
         if sc != 0:
-            cprint(f"  {RED}BLOCKED: shellcheck found issues (parity with CI Mega-Linter BASH_SHELLCHECK).{NC}")
+            cprint(f"  {RED}BLOCKED: shellcheck found issues (CI runs a plain shellcheck step).{NC}")
             return 1
         cprint(f"  {GREEN}Shell lint passed ({len(_shell_scripts)} script(s)).{NC}")
 
