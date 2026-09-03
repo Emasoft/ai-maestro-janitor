@@ -1,13 +1,13 @@
 ---
 trdd-id: GZXTSJSR
 title: Proactive all-accounts OAuth login nudge — prompt EARLY and via a real notification, capture every account before any expires
-column: testing
+column: complete
 created: 2026-07-23T18:11:48+0200
-updated: 2026-09-03T11:11:20+0200
+updated: 2026-09-03T23:38:32+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
-implementation-commits: [cf9fb7a1]
+implementation-commits: [cf9fb7a1, b0d4f046, 81dee6a0]
 relevant-rules: []
 parent-trdd:
 npt: []
@@ -304,3 +304,4 @@ not during one.
   this feature in direct response to a costly incident (a live scenario killed by a preventable
   rate-limit). Standalone project → the user is the approver. Implementation plan presented for
   the HOW before the multi-file build begins.
+- 2026-09-03T23:38:32+0200 — COMPLETE. Reviewed by the janitor main session under the owner's standing delegation of the review columns (2026-09-03). Every acceptance box verified against the code, not taken from the card's own word.

@@ -3,7 +3,7 @@ trdd-id: NACCL0CB
 title: the typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
 column: testing
 created: 2026-09-02T20:49:27+0200
-updated: 2026-09-03T23:12:50+0200
+updated: 2026-09-03T23:39:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
@@ -24,9 +24,24 @@ supersedes-directive: 2026-07-18 typing gate (TRDD-6Q0OYYYH) for the retry-wedge
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
 
+**HELD AT `testing` — the hold, stated so the board is not lying (2026-09-03 23:40):** every
+acceptance box is now ticked, so this card is done on its own terms. It is NOT moved to
+`complete` for two named reasons, both of which clear on their own:
+
+1. No green FULL suite since the `_at_working` change (TRDD-KE88RIKX, commit fc76c0ca). Only
+   128 policy-adjacent tests have run.
+2. A worker is implementing TRDD-L32WC0H7's F0–F6 and its F1 edits the recovery-counter unlink
+   at `daemon.py:1582-1588` — four lines from the `daemon.py:1578` log line this card's test
+   pins — and may add tests to the same `tests/test_daemon_rotation_esc.py`.
+
+Unblock condition: the worker returns AND `uv run pytest -q` is green. Then move to `complete`.
+The other four cards reviewed in the same pass (GZXTSJSR, 7KRF99WI, QNMBH3ES, RTRS704K) have
+zero file overlap with that worker and are held only by (1).
+
 **Board reconciliation (2026-09-03 11:09):** boxes 1, 3, 4 ticked (live evidence + tests
-re-verified this pass). Box 2 stays open — no test covers the `WEDGED … deferred` pending-list
-log line at `daemon.py:1548-1554`; write one before closing this card.
+re-verified this pass). Box 2 was open — no test covered the `WEDGED … deferred` pending-list
+log line, cited there as `daemon.py:1548-1554`. Now closed; note the citation had DRIFTED and the
+live line is `daemon.py:1578-1579` (see the box's own text for what that cost).
 
 ## ⏵ PRIOR STATE — 2026-09-02 21:12
 

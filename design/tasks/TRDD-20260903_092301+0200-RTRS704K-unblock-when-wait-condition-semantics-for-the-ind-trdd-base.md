@@ -1,9 +1,9 @@
 ---
 trdd-id: RTRS704K
 title: decide and document unblock-when wait-condition re-evaluation semantics in the IND TRDD base — descriptive blockers like owner-decision-x must become machine-checkable
-column: testing
+column: complete
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T23:10:01+0200
+updated: 2026-09-03T23:38:32+0200
 current-owner: janitor-main-session
 task-type: docs
 priority: normal
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [f512540f, 3fe3b0e2]
 external-refs: [janitor#288, ai-maestro#158, ai-maestro TRDD-2UPK4XZG]
 created-by: issue triage 2026-09-03
 ---
@@ -144,6 +144,7 @@ Existing descriptive tokens migrate to `unblock-when: decision:<who>` on next to
 
 - 2026-09-03T09:23:01+0200 — filed under USER delegation 2026-09-03 (~09:10, "decide yourself,
   you can replace me even in human review columns") by janitor-main-session.
+- 2026-09-03T23:38:32+0200 — COMPLETE. Reviewed by the janitor main session under the owner's standing delegation of the review columns (2026-09-03). Every acceptance box verified against the code, not taken from the card's own word.
 
 ## Constraints (advisor review 2026-09-03)
 

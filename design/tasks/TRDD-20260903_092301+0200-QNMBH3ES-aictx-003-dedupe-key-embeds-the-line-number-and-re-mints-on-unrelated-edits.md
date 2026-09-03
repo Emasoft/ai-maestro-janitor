@@ -1,9 +1,9 @@
 ---
 trdd-id: QNMBH3ES
 title: AICTX-003 dedupe key embeds the line number so an unrelated edit above the match re-mints a byte-identical proposal
-column: testing
+column: complete
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T11:05:58+0200
+updated: 2026-09-03T23:38:32+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [b0dca228, 436cca65]
+implementation-commits: [b0dca228, 436cca65, 4d70ca78]
 external-refs: [janitor#291]
 created-by: issue triage 2026-09-03
 ---
@@ -144,5 +144,7 @@ carries the line.
       standalone `reconcile`-only path with no migration step in front of it.)
 
 ## Approval log
+
+- 2026-09-03T23:38:32+0200 — COMPLETE. Reviewed by the janitor main session under the owner's standing delegation of the review columns (2026-09-03). Every acceptance box verified against the code, not taken from the card's own word.
 
 ## Notes and lessons learned
