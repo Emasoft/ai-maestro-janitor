@@ -293,6 +293,48 @@ def test_the_control_a_calm_cron_dead_pane_still_gets_its_rearm(tmp_path, monkey
     assert any("janitor-arm" in (p.get("command") or "") for p in fired), "the rearm must still fire"
 
 
+def test_a_wedged_target_with_queued_commands_is_deferred_not_typed_into(tmp_path, monkeypatch) -> None:
+    """TRDD-8DR0X08A F2 (box closed for TRDD-NACCL0CB): a soft rung (`rearm`) against a target
+    with >=1 trailing enqueue must be DEFERRED (nothing typed) and must log the WEDGED line +
+    push a FLEET-WEDGED finding, instead of piling one more queued command behind the stuck ones."""
+    root = tmp_path / "proj"
+    inst = fleet_scan.Instance(
+        pid=1, command="claude", tty="ttys1", project_root=str(root),
+        terminal={"tmux_pane": "%5"}, diagnosis="cron_dead", recovery=None,
+        dispatch_age_s=None, active=False, transcript_age_s=None,
+        trailing_enqueues=1, awaiting_user=False,
+    )
+    fired = _setup(monkeypatch, tmp_path, [inst], hid_idle=600.0)
+    pushed: list = []
+    monkeypatch.setattr(daemon.notify, "push", lambda **kw: pushed.append(kw))
+    daemon.task_session_liveness()
+
+    assert fired == [], "a wedged target must not be typed into, not even the deferred command"
+    assert pushed and pushed[0]["code"] == "FLEET-WEDGED"
+    log_path = daemon.state.log_dir() / "daemon.log"
+    log_text = log_path.read_text()
+    assert "WEDGED (1 queued unexecuted command(s)) — would rearm" in log_text
+
+
+def test_the_typing_gate_defers_the_whole_beat_and_logs_who_it_deferred(tmp_path, monkeypatch) -> None:
+    """TRDD-NACCL0CB: HID idle inside the presence window must defer every injection AND log the
+    `user typing (HID idle` line with a `; deferred: ` tail naming the pending action."""
+    root = tmp_path / "proj"
+    inst = fleet_scan.Instance(
+        pid=1, command="claude", tty="ttys1", project_root=str(root),
+        terminal={"tmux_pane": "%5"}, diagnosis="cron_dead", recovery=None,
+        dispatch_age_s=None, active=False, transcript_age_s=None,
+        trailing_enqueues=0, awaiting_user=False,
+    )
+    fired = _setup(monkeypatch, tmp_path, [inst], hid_idle=0.0)
+    daemon.task_session_liveness()
+
+    assert fired == [], "the typing gate must defer every injection this beat"
+    log_text = (daemon.state.log_dir() / "daemon.log").read_text()
+    assert "user typing (HID idle" in log_text
+    assert "; deferred: proj:cron_dead" in log_text
+
+
 def test_tail_parser_anchors_on_the_input_box_and_column_zero() -> None:
     """The positional guard, against frames shaped like this host's real captures."""
     assert sl.retry_wedge_attempt_at_tail(WEDGED_FRAME) == 1

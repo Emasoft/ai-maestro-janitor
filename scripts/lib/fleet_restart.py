@@ -365,6 +365,37 @@ def live_cmdline(pid: int) -> str:
     return (proc.stdout or "").strip()
 
 
+def _fire_relaunch(
+    plan: dict, terminal: dict | None, project_dir: str | None, *, read_pane: bool
+) -> bool:
+    """Type the relaunch line through the policy table (TRDD-N954KWUC P3), never a bare
+    `fleet_inject.fire`. Returns True iff it landed.
+
+    ``read_pane`` is TRUE only for rung 5 (``relaunch``), whose target is a pid that died on
+    its own: its frame carries no Claude chrome and classifies ``UNKNOWN``, which is exactly
+    what the ``RELAUNCH`` row expects. That read buys the check this rung never had — if the
+    pane in fact shows a LIVE claude (the human restarted it, or the scan raced), the table
+    refuses instead of typing ``claude --continue`` into that session's input field.
+
+    It is FALSE for rung 6 (``force_restart``), and that is deliberate, not an omission: we
+    have just SIGTERMed the pid microseconds ago, so the pane is still painting the dying
+    session's chrome and would classify as a live claude. Reading it there would refuse our
+    own relaunch and burn a recovery attempt on a session we ourselves just killed. The kill
+    IS the evidence; the screen has not caught up with it yet.
+    """
+    import pane_actuate  # noqa: PLC0415 -- local: fleet_inject/pane_state cycle at module load
+
+    outcome = pane_actuate.act(
+        terminal or {},
+        pane_actuate.Event.RELAUNCH,
+        read_pane=read_pane and terminal is not None,
+        command=str(plan.get("command") or ""),
+        command_plan=plan,
+        project_dir=project_dir,
+    )
+    return outcome.status is pane_actuate.OutcomeStatus.DONE
+
+
 def fire_restart(
     plan: dict | None,
     *,
@@ -373,6 +404,8 @@ def fire_restart(
     killer=os.kill,
     spawner=None,
     cmdline_reader=live_cmdline,
+    terminal: dict | None = None,
+    project_dir: str | None = None,
 ) -> str:
     """Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
     rung that kills, ``killable`` (the ``is_killable`` verdict the caller computed) AND the
@@ -404,7 +437,11 @@ def fire_restart(
     if not enabled:
         return f"DRY_RUN:{rung}"
     if rung == "relaunch":
-        return "FIRED:relaunch" if fleet_inject.fire(plan) else "FIRE_FAILED:relaunch"
+        return (
+            "FIRED:relaunch"
+            if _fire_relaunch(plan, terminal, project_dir, read_pane=True)
+            else "FIRE_FAILED:relaunch"
+        )
     if rung in ("force_restart", "resurrect"):
         if not killable:
             return f"REFUSED:not-killable:{rung}"
@@ -418,8 +455,11 @@ def fire_restart(
         except (OSError, ProcessLookupError):
             pass  # already gone is success for our purposes
         if rung == "force_restart":
-            return "FIRED:force_restart" if fleet_inject.fire(plan["relaunch"]) else \
-                "FIRE_FAILED:force_restart"
+            # read_pane=False: we SIGTERMed this pid microseconds ago, so the pane still
+            # paints the dying session's chrome — see `_fire_relaunch`.
+            return "FIRED:force_restart" if _fire_relaunch(
+                plan["relaunch"], terminal, project_dir, read_pane=False
+            ) else "FIRE_FAILED:force_restart"
         # resurrect: spawn the detached background claude
         run = spawner if spawner is not None else _default_spawn
         return "FIRED:resurrect" if run(plan["spawn"]) else "FIRE_FAILED:resurrect"

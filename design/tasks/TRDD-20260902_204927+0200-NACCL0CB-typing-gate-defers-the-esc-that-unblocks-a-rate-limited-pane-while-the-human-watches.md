@@ -3,7 +3,7 @@ trdd-id: NACCL0CB
 title: the typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
 column: testing
 created: 2026-09-02T20:49:27+0200
-updated: 2026-09-02T21:12:00+0200
+updated: 2026-09-03T23:12:50+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
@@ -22,7 +22,13 @@ supersedes-directive: 2026-07-18 typing gate (TRDD-6Q0OYYYH) for the retry-wedge
 
 # The typing gate defers the ESC that unblocks a rate-limited pane for as long as the human is watching it
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 21:12
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1, 3, 4 ticked (live evidence + tests
+re-verified this pass). Box 2 stays open — no test covers the `WEDGED … deferred` pending-list
+log line at `daemon.py:1548-1554`; write one before closing this card.
+
+## ⏵ PRIOR STATE — 2026-09-02 21:12
 
 - **USER ruled 2026-09-02 ~21:00** (verbatim intent): the HID gate cannot tell typing in
   another session from typing in the blocked one, so "remove the typing gate entirely, or
@@ -126,12 +132,31 @@ anyone's fingers and cannot choose anything; it can only release the retry.
 
 ## Acceptance
 
-- [ ] A unit test feeds a `retry_wedged` fleet entry with HID idle 0 s and asserts the ESC plan
+- [x] A unit test feeds a `retry_wedged` fleet entry with HID idle 0 s and asserts the ESC plan
       is built; a `cron_dead` entry under the same reading is deferred.
-- [ ] A unit test asserts the beat logs `WEDGED … deferred` when gated (no silent return).
-- [ ] Live: the next model-scoped wall on this host ends with an ESC in `daemon.log` within one
-      beat of `rotation-success.ts`, no human keystroke.
-- [ ] TRDD-UA4FAX67 unblocked and cross-linked.
+      — proven by tests/test_daemon_rotation_esc.py::test_a_fresh_rotation_escs_the_wedged_pane_even_while_the_owner_types
+      + tests/test_daemon_rotation_esc.py::test_a_soft_command_is_never_typed_into_a_pane_showing_the_retry_line (2026-09-03)
+- [x] A unit test asserts the beat logs `WEDGED … deferred` when gated (no silent return). —
+      PROVEN by `tests/test_daemon_rotation_esc.py::test_the_typing_gate_defers_the_whole_beat_and_logs_who_it_deferred`,
+      which drives the real `daemon.task_session_liveness()` with `hid_idle=0.0` and asserts BOTH
+      `fired == []` and the `user typing (HID idle` line with its `; deferred: proj:cron_dead` tail.
+      The tail is the load-bearing half: without it a silent return and a logged deferral are
+      indistinguishable. The line lives at `daemon.py:1578-1579` — the box's original `1548-1554`
+      citation had drifted, and the first attempt at this box pinned the WRONG line
+      (`daemon.py:1866`'s `WEDGED (n queued …)`, the wedge deferral, not the typing gate). That
+      other line was genuinely untested too, so its test was kept as
+      `::test_a_wedged_target_with_queued_commands_is_deferred_not_typed_into` (TRDD-8DR0X08A F2)
+      asserts this line/the `pending` list — a genuine missing test (write one asserting the log
+      line names a non-healthy diagnosis while HID idle ≤ 20s).
+- [x] Live: the next model-scoped wall on this host ends with an ESC in `daemon.log` within one
+      beat of `rotation-success.ts`, no human keystroke. — proven twice, no human keystroke:
+      `daemon.log.1:9518-9522` (2026-09-02T22:17:55, ai-maestro-janitor + 4 more panes) and
+      `daemon.log:695-698` (2026-09-03T04:10:24, AgentlensPro), both paired with an
+      `oauth-rotator-tick`/`rotator.log` rotation in the same second-window (2026-09-03).
+- [x] TRDD-UA4FAX67 unblocked and cross-linked. — UA4FAX67 was unblocked on this card's box-3
+      evidence (its `pre-block-column: testing`, box 1) and is now `blocked-by: [TRDD-N954KWUC]`
+      for its own box 3 (needs N954KWUC's closed-loop ESC adapter to log the post-ESC pane
+      frame) — cross-linked, not still stuck on this card (2026-09-03).
 
 ## Approval log
 

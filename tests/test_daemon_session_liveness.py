@@ -28,6 +28,11 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 import daemon  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
 
+# A real captured/anonymized IDLE frame — an empty input field, no wedge, no dialog.
+_IDLE_PANE = (
+    _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
+).read_text(encoding="utf-8")
+
 
 def _inst(
     diagnosis: str, root: str, terminal: dict, *, trailing: int = 0, awaiting: bool = False
@@ -52,6 +57,14 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> list
         fn.cache_clear()
     recorded: list = []
     monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True)
+    # TRDD-N954KWUC P3 — every keystroke now goes through the pane policy table, which READS
+    # the target pane first and (correctly) refuses to type into a readable channel it cannot
+    # see. These synthetic instances point at tmux panes that do not exist on this machine, so
+    # the real capture returns None. Hand them the plain IDLE frame these fixtures always
+    # implied, so the tests keep exercising the RECOVERY policy rather than the
+    # unreadable-pane guard, which has its own tests in test_pane_actuate.py. Tests that need
+    # a different screen re-patch this AFTER `_setup` (monkeypatch: last write wins).
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _IDLE_PANE)
     # `sweep_stale_rate_limit_s` is the daemon's opt-in stale-flag sweep (janitor#77 item C);
     # the seam accepts and ignores it — these tests inject a fleet, so there are no real roots.
     monkeypatch.setattr(
