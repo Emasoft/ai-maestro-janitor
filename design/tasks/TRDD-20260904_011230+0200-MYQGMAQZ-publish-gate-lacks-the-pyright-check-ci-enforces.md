@@ -189,10 +189,33 @@ file "orphaned" on the strength of one directory check — the same shape as the
 section is about. What is VERIFIED: no file under `.github/workflows/` invokes it, there
 is no `.pre-commit-config.yaml`, and `git grep -il 'mega.\?linter'` finds it referenced
 only by `.cspell.json`, this card, publish.py's stale comments and one test.
-What is NOT checked: whether **CPV's `ci-preflight`** reads it — publish.py's own stage-4b
-docstring says that preflight covers "the enabled Mega-Linter sub-linters", and stage 4b
-runs on EVERY publish. If CPV consumes this config, the file is live and deleting it would
-silently weaken the preflight. Settle that before acting on the follow-up below.
+CHECKED, 2026-09-04, by RUNNING it rather than leaving it on the card: stage 4b's
+`cpv-remote-validate ci-preflight .` reports 11 checks and is clearly Mega-Linter-aware —
+`jscpd`, `bandit`, `shellcheck`, `shfmt`, `actionlint`, `mypy` all run and several are
+labelled "(Mega-Linter <SUB_LINTER> parity)". So the answer flips the follow-up: those
+checks are NOT unenforced — **the preflight is the enforcer, on every publish**, and CI
+was never the backstop for them. Still unproven is whether CPV PARSES `.mega-linter.yml`
+or carries its own list; that is what the delete-vs-keep decision turns on.
+
+### The same falsehood is upstream, in CPV, and fires on every publish
+
+`ci-preflight`'s own SKIPPED messages say:
+
+    ! cspell:  ... Mega-Linter SPELL_CSPELL check SKIPPED locally.
+               CI's Mega-Linter WILL enforce it; install cspell ... for full local parity.
+    ! checkov: ... CI's Mega-Linter WILL enforce it ...
+    ! trivy:   ... CI's Mega-Linter WILL enforce it ...
+
+That is the identical false-backstop claim this card had removed from publish.py hours
+earlier — asserting CI enforcement for three checks no workflow in this repo runs, printed
+to the operator at the moment each is skipped. It is in `claude-plugins-validation`, a
+DIFFERENT project, so per the cross-project rule it is NOT to be edited from here: it needs
+an issue on that repo, or a fork+PR, and the USER decides which. Noted, not acted on.
+
+Note the generality: CPV is generic tooling used by many plugins, and its message is only
+true for a repo that actually runs Mega-Linter. This repo does not, and CPV cannot know
+that — which is an argument for the message naming what it verified rather than predicting
+what CI will do.
 
 `.mega-linter.yml` is present and git-tracked at the repo root, and NO workflow runs
 Mega-Linter (verified 2026-09-04 — `grep -rn mega-linter .github/workflows/` is empty).
