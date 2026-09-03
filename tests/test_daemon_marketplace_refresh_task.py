@@ -19,6 +19,7 @@ import importlib
 import json
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -99,10 +100,27 @@ def test_per_item_timeout_skips_and_run_still_succeeds(
 
     Marked `no_timeout_scale`: the suite-wide `Popen.communicate` timeout scaling
     (tests/conftest.py, x10) would otherwise turn this test's real 1s per-item
-    budget into 10s — the exact thing this test asserts DIDN'T fire."""
+    budget into 10s — the exact thing this test asserts DIDN'T fire.
+
+    `ok-mkt` is stubbed to return instantly in-process instead of spawning the
+    fake `claude` subprocess: under pytest-xdist full-suite load a REAL
+    subprocess for "ok-mkt" can itself take >1s of wall clock to spawn+exit,
+    racing the very budget this test is timing (measured flake, TRDD-7NSRD8OV).
+    `slow-mkt` still goes through the real `_run_workload_once` subprocess path
+    so the timeout-detection code itself stays genuinely exercised.
+    """
     cache_parent, lines = isolated
     _write_installed(cache_parent, ["ok-mkt", _SLOW_MARKET])
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S", "1")
+
+    real_run_once = daemon._run_workload_once
+
+    def _run_once_unless_slow(cmd, **kwargs):
+        if cmd[-1] == _SLOW_MARKET:
+            return real_run_once(cmd, **kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "_run_workload_once", _run_once_unless_slow)
 
     daemon.task_marketplace_refresh()  # must not raise
 
