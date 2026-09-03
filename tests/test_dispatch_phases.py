@@ -3346,6 +3346,121 @@ def test_attention_gate_fires_immediately_when_the_id_set_changes(
     assert dispatch._attention_gate(sd, "sig-b") is True  # fire 3, but the id set changed
 
 
+def test_attention_summary_unresolvable_blocked_by_id_is_decision_needed(
+    env_isolation: dict,
+) -> None:
+    """A `blocked-by:` id that resolves to NO file anywhere on the board (typo, LOCAL-scope
+    id, or a cross-project reference this board can't see) must never read as 'unblockable'
+    just because it is missing — that would silently drop the only pointer to a possibly-
+    real, still-open task. It must be flagged for a human instead (TRDD-1PDCPIZC follow-up,
+    review finding #1)."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card_blocked_by(tasks, "GHOST001", "blocked", "[TRDD-NOSUCH01]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 decision-needed: TRDD-GHOST001" in clause
+    assert "unblockable" not in clause
+
+
+def test_attention_summary_blocker_in_archived_folder_is_unblockable(
+    env_isolation: dict,
+) -> None:
+    """A `blocked-by:` id that has already reached a terminal column in `design/archived/`
+    (not `design/tasks/`) must still resolve and classify as 'unblockable' — the id lookup
+    now spans every design folder, not just the open `tasks/` zone (TRDD-1PDCPIZC follow-up,
+    review finding #1)."""
+    dispatch = _import_dispatch()
+    project = env_isolation["project"]
+    _card(project / "design" / "archived", "ARCH0001", "complete")
+    _card_blocked_by(project / "design" / "tasks", "CITES001", "blocked", "[TRDD-ARCH0001]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 unblockable: TRDD-CITES001" in clause
+
+
+def test_attention_gate_survives_an_unwritable_state_dir(
+    env_isolation: dict,
+) -> None:
+    """An unwritable state dir must fail OPEN (emit the attention line, never raise) — the
+    same best-effort contract every other board reader in this file already has (TRDD-
+    1PDCPIZC follow-up, review finding #2)."""
+    dispatch = _import_dispatch()
+    import state as _st
+
+    sd = _st.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    sd.chmod(0o500)
+    try:
+        result = dispatch._attention_gate(sd, "some-signature")  # must not raise
+    finally:
+        sd.chmod(0o700)
+    assert result is True
+
+
+def test_keep_going_nudge_prints_the_attention_clause(env_isolation: dict) -> None:
+    """Wiring test: a blocked card must reach the actual printed keep-going cue, not just
+    `_attention_summary`'s return value — this is what an unattended session actually reads
+    (TRDD-1PDCPIZC follow-up, review finding #3)."""
+    dispatch = _import_dispatch()
+    import state as _st
+
+    _st.init_state()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card_blocked_by(tasks, "STUCK001", "blocked", "[owner-decision-approve-the-migration]")
+
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+
+    assert "attention:" in out
+    assert "1 decision-needed: TRDD-STUCK001" in out
+
+
+def test_attention_summary_owner_repo_issue_ref_is_not_decision_needed(
+    env_isolation: dict,
+) -> None:
+    """`blocked-by: [ai-maestro#151]` is the board's REAL issue-blocker shape (owner/repo#N,
+    per trdd_common's own `ai-maestro#102` example) — it must read as a plain external
+    blocker, neither `unblockable` nor `decision-needed` (advisor finding (a), TRDD-1PDCPIZC
+    follow-up). The old `^#\\d+$` regex only matched a bare `#N` and misclassified this as
+    decision-needed."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card_blocked_by(tasks, "WAITING1", "blocked", "[ai-maestro#151]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 blocked (TRDD-WAITING1)" in clause
+    assert "decision-needed" not in clause
+    assert "unblockable" not in clause
+
+
+def test_work_and_attention_columns_are_disjoint_and_cover_the_board(env_isolation: dict) -> None:
+    """`_WORK_COLUMNS` and `_ATTENTION_COLUMNS` must never double-count a column (a card
+    can only be "actively worked" or "awaiting a human", not both), and every non-terminal,
+    non-`backburner` column of the ratified 22-column board vocabulary
+    (~/.claude/rules/universal-kanban.md) must appear in exactly one of the two tuples
+    (advisor finding (b), TRDD-1PDCPIZC follow-up)."""
+    dispatch = _import_dispatch()
+    work = set(dispatch._WORK_COLUMNS)
+    attention = set(dispatch._ATTENTION_COLUMNS)
+
+    assert work.isdisjoint(attention), f"double-counted: {work & attention}"
+
+    # The 22-column board vocabulary minus `backburner` (a resting state, not on-board work)
+    # and minus the columns this board treats as terminal (`complete`, `published`, `live`,
+    # `superseded` — `failed` stays OPEN per universal-kanban.md and trdd-approval-tiers.md,
+    # so it is deliberately NOT excluded here).
+    board_columns = {
+        "approval", "design", "design_ai_review", "design_human_review",
+        "todo", "verify_assumptions", "plan", "dispatch", "dev", "testing",
+        "ai_review", "human_review", "publish", "deploy", "live_auditing", "blocked", "failed",
+    }
+    covered = work | attention
+    assert board_columns <= covered, f"uncovered board columns: {board_columns - covered}"
+
+
 # ---------- per-detector last-outcome stamp (TRDD-COQN6KVA) -------------
 
 

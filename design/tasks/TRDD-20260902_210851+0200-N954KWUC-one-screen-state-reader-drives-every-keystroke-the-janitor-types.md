@@ -108,6 +108,10 @@ to the wrong state.
   P1 `pane_state.py` + anonymized real-frame fixture corpus + tests (no call-site changes);
   P2 policy table + closed-loop verify; P3 migrate the 14 call sites. EHTs NACCL0CB /
   3T9HQEQ6 gate `complete`, not `dev`.
+- 2026-09-03T09:36:00+0200 — CORRECTION (append-only): the line above originally read
+  "USER delegation 2026-09-03 09:58" and was rewritten in place to "~09:10" in commit
+  ada04daf; the delegation preceded the 09:14 approval, 09:58 was a clock error. Recorded
+  here because an audit-trail entry must be corrected by appending, not by editing.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
 

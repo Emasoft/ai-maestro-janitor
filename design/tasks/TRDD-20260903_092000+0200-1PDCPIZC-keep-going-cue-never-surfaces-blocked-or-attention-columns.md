@@ -3,7 +3,7 @@ trdd-id: 1PDCPIZC
 title: the keep-going cue never surfaces blocked, failed, design or planned cards — 21 blocked cards sat invisible through a whole night of heartbeats
 column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T09:27:08+0200
+updated: 2026-09-03T09:37:27+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,7 +22,7 @@ created-by: USER report 2026-09-03 09:18
 
 # The keep-going cue never surfaces blocked or attention columns
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:27:08+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:37:27+0200
 
 Boxes 1-2 of Fix/Acceptance implemented and tested:
 `scripts/dispatch.py` — `_attention_summary()` (~L2709), `_blocked_reason()` (~L2676),
@@ -32,6 +32,15 @@ bits. Env knob `CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES` (default 6). State f
 `.janitor/state/attention-fire-counter.txt`, `.janitor/state/attention-last-ids.txt`.
 Tests: `tests/test_dispatch_phases.py` (6 new tests, all pass; full file 148 passed).
 Gates: ruff + mypy clean on `scripts/` + `tests/`.
+
+**Follow-up (review, this session):** `_blocked_reason`/`_attention_summary` now resolve a
+`blocked-by:` id against ALL design folders (via new shared `_all_folders_columns()`, also
+used by `_directive_task_is_terminal`), not just `tasks/` — an unresolved id is
+`decision-needed` instead of a false `unblockable`. `_attention_gate` was already best-effort
+guarded (fails open on any I/O fault). `_ISSUE_REF_RE` widened to match the board's real
+`owner/repo#N` issue-blocker shape, not just a bare `#N`. `_WORK_COLUMNS`/`_ATTENTION_COLUMNS`
+de-duplicated (`human_review` was in both) and widened to cover the full 22-column board
+vocabulary. 8 new tests added; 154 pass; ruff+mypy clean.
 
 **NEXT ACTION:** box 3 ("Live: the next heartbeat after this ships lists the current blocked
 count") — observe the next live heartbeat's `[janitor-resume]`/keep-going cue after this

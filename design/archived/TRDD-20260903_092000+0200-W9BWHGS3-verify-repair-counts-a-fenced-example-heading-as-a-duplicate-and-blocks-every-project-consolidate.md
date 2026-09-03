@@ -84,5 +84,13 @@ the heading must count as ONE section and the returned body must exclude only th
 
 - 2026-09-03T09:33:00+0200 — COMPLETE by janitor-main-session acting for USER (delegation
   2026-09-03 ~09:10). Unit + live-page evidence; commit ca0af38c + aab657c1.
+- 2026-09-03T09:37:00+0200 — CLARIFICATION (append-only, review-fork finding): closed on the
+  unit + gate evidence — `atom_desc_violations` on the live `memory-system.md` returns `[]`
+  under the fixed code (measured 09:36). The LIVE merge lands only after the next publish +
+  install, because the curator runs the INSTALLED plugin (3.4.13, unfixed); the 09:28
+  consolidate abstain on this host is expected until then. The refusal the 02:39 run recorded
+  for the pair self-expires (7-day TTL, or when either page changes — `memory_refusals`), so
+  no manual clear is needed. The STATE block's "not agent-verifiable in this session" line
+  predates this measurement.
 
 ## Notes and lessons learned

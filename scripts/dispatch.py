@@ -42,6 +42,7 @@ import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
@@ -2565,6 +2566,27 @@ def _directive_is_stale_by_age(age_s: int) -> bool:
     return cap > 0 and age_s > cap
 
 
+def _all_folders_columns(project_root: str, trdd_common: Any) -> dict[str, str]:
+    """`{uid: column}` for every TRDD across ALL design folders (tasks/archived/proposals/
+    refused, in `trdd_common.DESIGN_FOLDERS` order — first hit wins on a duplicate id).
+
+    Shared by `_directive_task_is_terminal` and `_attention_summary` (TRDD-1PDCPIZC
+    follow-up, review finding #b): a `blocked-by:`/directive-named id resolves against the
+    WHOLE board, not just the open `tasks/` zone — a card can legitimately cite an id that
+    has already been archived, or was never in `tasks/` at all. `trdd_common` is `Any` here
+    because callers `import trdd_common` lazily (mirrors this file's other lib imports) and
+    pass the module object straight through.
+    """
+    columns: dict[str, str] = {}
+    for folder in trdd_common.DESIGN_FOLDERS:
+        for _, path in trdd_common.trdd_files(folder, project_root):
+            uid = trdd_common.extract_uid(path.name)
+            if uid and uid not in columns:
+                _, column = trdd_common.parse_trdd_state(path)
+                columns[uid] = column
+    return columns
+
+
 def _directive_task_is_terminal(directive_text: str) -> bool:
     """True iff EVERY `TRDD-<id8>` the directive names has already reached a terminal
     column (published/complete/live/failed/superseded/cancelled/refused) — i.e. the task
@@ -2596,14 +2618,7 @@ def _directive_task_is_terminal(directive_text: str) -> bool:
         ids = trdd_common.extract_trdd_refs(directive_text)
         if not ids:
             return False
-        columns: dict[str, str] = {}
-        project_root = str(state.project_root())
-        for folder in trdd_common.DESIGN_FOLDERS:
-            for _, path in trdd_common.trdd_files(folder, project_root):
-                uid = trdd_common.extract_uid(path.name)
-                if uid and uid not in columns:
-                    _, column = trdd_common.parse_trdd_state(path)
-                    columns[uid] = column
+        columns = _all_folders_columns(str(state.project_root()), trdd_common)
         for uid in ids:
             column = columns.get(uid)
             if not column or not trdd_common.is_terminal_column(column):
@@ -2613,7 +2628,16 @@ def _directive_task_is_terminal(directive_text: str) -> bool:
         return False
 
 
-_WORK_COLUMNS = ("dev", "todo", "testing", "human_review")
+# Every non-terminal, non-`backburner` column from the 22-column board vocabulary
+# (~/.claude/rules/universal-kanban.md) belongs in exactly ONE of `_WORK_COLUMNS`
+# (a worker is actively moving it) or `_ATTENTION_COLUMNS` below (it waits on a
+# human). `human_review` moved OUT of here to `_ATTENTION_COLUMNS` only — it was
+# double-counted in both tuples (review finding #b, TRDD-1PDCPIZC follow-up), and
+# it is by definition awaiting a human ruling, not worker-active.
+_WORK_COLUMNS = (
+    "todo", "verify_assumptions", "plan", "dispatch", "dev", "testing",
+    "ai_review", "publish", "deploy", "live_auditing",
+)
 
 
 def _board_summary_bit() -> str:
@@ -2657,16 +2681,19 @@ def _board_summary_bit() -> str:
 _ATTENTION_COLUMNS = (
     "blocked",
     "failed",
+    "approval",
     "design",
     "design_ai_review",
     "design_human_review",
     "human_review",
     "planned",
 )
-# A `#123` element is a legitimate non-TRDD blocker (a GitHub issue reference) — only a bare
-# descriptive token (`owner-decision-…`, `awaiting-live-…`) means nobody but a human can ever
-# resolve it.
-_ISSUE_REF_RE = re.compile(r"^#\d+$")
+# A GitHub issue reference is a legitimate non-TRDD blocker — only a bare descriptive token
+# (`owner-decision-…`, `awaiting-live-…`) means nobody but a human can ever resolve it. The
+# board's real issue blockers are `owner/repo#N` shaped (`ai-maestro#151`, `AgentlensPro#19` —
+# trdd_common's own `ai-maestro#102` example), not the bare `#N` this used to require; a bare
+# `#N` is still accepted (optional owner/repo prefix) since nothing forbids it.
+_ISSUE_REF_RE = re.compile(r"^(?:[\w.-]+/)?[\w.-]*#\d+$")
 _ATTENTION_EVERY_ENV = "CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES"
 _ATTENTION_EVERY_DEFAULT = 6
 _ATTENTION_COUNTER_FILE = "attention-fire-counter.txt"
@@ -2697,10 +2724,17 @@ def _blocked_reason(head: str, columns: dict[str, str]) -> str:
         issue_refs = sum(1 for el in raw if _ISSUE_REF_RE.match(el))
         if len(raw) - len(ids) > issue_refs:
             return "decision-needed"
-        if ids and all(
-            columns.get(i) is None or trdd_common.is_terminal_column(columns[i]) for i in ids
-        ):
-            return "unblockable"
+        if ids:
+            # `columns` is now built from EVERY design folder (tasks/archived/proposals/
+            # refused), so a missing entry means the id genuinely resolves nowhere — a
+            # typo or a cross-project reference this board can't see — not "terminal by
+            # proxy". Flag it for a human rather than silently declaring the card
+            # unblockable; only a fully-resolved, fully-terminal set is unblockable.
+            resolved_columns = [columns[i] for i in ids if i in columns]
+            if len(resolved_columns) < len(ids):
+                return "decision-needed"
+            if all(trdd_common.is_terminal_column(c) for c in resolved_columns):
+                return "unblockable"
         return ""
     except Exception:  # noqa: BLE001 -- a classification bug must never break the nudge
         return ""
@@ -2739,8 +2773,21 @@ def _attention_summary() -> tuple[str, str]:
             _, column = trdd_common.parse_state_text(head)
             columns[uid] = column
             heads[uid] = head
+        # `_blocked_reason` resolves each `blocked-by:` id against `columns` — a
+        # `blocked` card can legitimately cite an id that has already been archived
+        # (or a proposal/refused one), so index every design folder too, via the same
+        # helper `_directive_task_is_terminal` uses. Only `tasks/` ids (in `heads`
+        # below) can populate `by_column` (attention columns only ever live there);
+        # this merge exists purely so a resolvable-but-non-open id doesn't get
+        # mistaken for "resolves nowhere" (`decision-needed`) by `_blocked_reason`.
+        for uid, column in _all_folders_columns(project_root, trdd_common).items():
+            columns.setdefault(uid, column)
         by_column: dict[str, list[str]] = {}
-        for uid, column in columns.items():
+        for uid in heads:
+            # Iterate `heads` (tasks/ only), never `columns` — `columns` now also
+            # carries archived/proposals/refused ids for blocked-by resolution, and
+            # those must never surface as an OPEN attention card.
+            column = columns[uid]
             if column in _ATTENTION_COLUMNS:
                 by_column.setdefault(column, []).append(uid)
         if not by_column:
