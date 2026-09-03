@@ -297,8 +297,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # opt-in-by-presence gate (a rotator home with a state.json). It surfaces the
     # accounts that need a ONE-TIME human login because they can neither self-renew
     # (no refreshToken) nor auto-bootstrap (no live claude.ai Chrome session), so
-    # only a fresh sign-in via open-login.sh can revive them (the detector resolves that
-    # script's real path per host — it is NOT at a fixed location; see janitor#258).
+    # only a fresh human sign-in can revive them — the nudge now points at the browser
+    # capture (`/janitor-capture-all-logins`, TRDD-GZXTSJSR P3), no longer at an
+    # open-login.sh path (that path was host-specific and stale; see janitor#258).
     # Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
     # machine-scoped daily dedupe keeps it gentle.
     ("oauth-login-needed", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_LOGIN_NEEDED_INTERVAL"),
