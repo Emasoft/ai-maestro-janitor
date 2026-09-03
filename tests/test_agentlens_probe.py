@@ -22,7 +22,7 @@ BURN_STATUS = {
     "activeSessions": 1,
     "accountWindows": [
         {"accountUuid": "80ddbe47", "fiveMinTokensPerMin": 302492, "events": 7789,
-         "accountLabel": "emanuele.sabetta@gmail.com"},
+         "accountLabel": "<account-emanuele>"},
     ],
     "topSessions": [
         {"sessionId": "c8a95d7e-048f-4c47-ae33-1dfacbcab3b1",

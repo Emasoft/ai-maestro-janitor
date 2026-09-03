@@ -42,7 +42,7 @@ published-at: 2026-06-24T22:26:00+0200
   even triggered — `_bootstrap_seeded_slots` gates on `_bootstrap_eligible`, which
   delegates to classify → never returns RENEW_COOKIE for a has_refresh slot.
 - **PROVEN the leg WORKS** (2026-06-24, first live validation on this machine):
-  `slot_capture_browser.py fmuaddib@gmail.com` drove the seeded Chrome, the live
+  `slot_capture_browser.py <account-fmuaddib>` drove the seeded Chrome, the live
   cookie authenticated the consent page, clicked Authorize, minted a fresh
   refresh-bearing slot — hands-free. (Logs: reports_dev/oauth/capture-fmuaddib-*.log;
   agent-browser driver also independently validated, reports_dev/oauth/agent-browser-modelA2-*.log.)

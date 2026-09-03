@@ -126,7 +126,7 @@ Wire the EXISTING detector to the EXISTING injector.
    Verified first-hand across three copies (working tree, cached 2.3.0, cached 2.4.1):
    the janitor's `rotator.is_safe_alternate(bfh, bsd)` takes ONLY the 5h and 7d windows —
    there is no scoped term anywhere in the janitor's selection path, and the string
-   `live fmuaddib@gmail.com 5h=35% 7d=59% Fable=97% -> rotate` sitting in `state.json`
+   `live <account-fmuaddib> 5h=35% 7d=59% Fable=97% -> rotate` sitting in `state.json`
    CANNOT have been produced by any janitor version (all three build `live_desc` as
    `"5h=%s 7d=%s%s"`, no scoped clause). The `oauth-rotator-tick` chore was yielded to the
    ai-maestro server that morning (daemon log, `chore-coordination`), and the server's

@@ -28,7 +28,7 @@ external-refs: []
 Added `rotator.configured_rotator_home()` (SSOT); both `oauth-login-needed._rotator_home` and
 `oauth-cookie-reminder._rotator_home` now delegate to it (one-liners). **PROOF on the live
 machine**: the fixed detector now resolves the CANONICAL home and emits
-`[oauth-login-needed] 1 account(s) need a one-time login: fmuaddib@gmail.com — run
+`[oauth-login-needed] 1 account(s) need a one-time login: <account-fmuaddib> — run
 ~/.claude/account-rotator/open-login.sh <email> …` — where it was SILENT before (read stale legacy,
 fmuaddib looked healthy). **89 affected tests pass** (4 new resolver unit tests + the full
 oauth-login-needed/oauth-cookie-reminder/rotator suites), **ruff clean**. The 4 new tests cover:
@@ -36,7 +36,7 @@ both-present→canonical (the regression), only-legacy→legacy, env-override-wi
 publish; the running daemon auto-rolls to it (lesson: source≠production until published).
 
 ### The bug (root-caused live 2026-06-24 while verifying the triad)
-The daemon logs `cascade: reauth-nudge=fmuaddib@gmail.com` every 60s, yet the USER-FACING
+The daemon logs `cascade: reauth-nudge=<account-fmuaddib>` every 60s, yet the USER-FACING
 `oauth-login-needed` detector emits NOTHING and never creates its seen-file — so the user is
 never told to re-login. Root cause: the detector and the daemon resolve DIFFERENT rotator homes.
 

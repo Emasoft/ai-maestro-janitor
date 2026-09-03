@@ -61,7 +61,7 @@ NOT fix it (sensitive, high-blast-radius — a wrong change breaks the rotation/
 mechanism itself). Surfaced for the user to decide.**
 
 **Discovered live, 2026-06-24 ~01:1x**, during the autonomous overnight session: the
-alternate account `fmuaddib@gmail.com` has been **stuck-expired** (`oauth-health
+alternate account `<account-fmuaddib>` has been **stuck-expired** (`oauth-health
 days=-0.1`) for 30+ minutes while the global daemon is **alive and ticking** (heartbeat
 30s fresh; `oauth-rotator-tick.last-run.ts` at 01:17). So the alternate is a **dead
 rotation target**, and nothing surfaced it.
@@ -124,7 +124,7 @@ escalates to REAUTH:
 
 ## Immediate remediation (USER, independent of the code fix)
 
-Re-login `fmuaddib@gmail.com` (its refresh token appears dead) — via
+Re-login `<account-fmuaddib>` (its refresh token appears dead) — via
 `/refresh-claude-logins` / the rotator's reauth path — to restore a working rotation
 alternate. Until then there is no rotation safety net.
 

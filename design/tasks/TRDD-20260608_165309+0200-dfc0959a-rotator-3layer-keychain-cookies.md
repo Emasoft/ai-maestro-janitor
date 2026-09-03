@@ -189,7 +189,7 @@ user-scope shell scripts INTO the repo + an installer so these fixes ship to eve
   136 oauth+cascade tests green, ruff clean.
 
 **LIVE DIAGNOSIS (2026-06-08, why the USER had to manually rotate):** the daemon rotator.log
-showed `auto: live emanuele.sabetta@gmail.com exhausted (5h=28% 7d=100%) but no alternate is
+showed `auto: live <account-emanuele> exhausted (5h=28% 7d=100%) but no alternate is
 healthy + below safe threshold — all paid accounts maxed`. ROTATE worked correctly — it had
 NOWHERE to switch to because BOTH paid accounts were at/near their weekly wall simultaneously.
 No software fix for "all accounts maxed"; only a window reset, a fresh login, or a 3rd account

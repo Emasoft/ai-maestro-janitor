@@ -1345,7 +1345,7 @@ def account_email(blob: dict) -> str | None:
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None
     name = data.get("organization_name") or ""
-    # "fmuaddib@gmail.com's Organization" -> "fmuaddib@gmail.com"
+    # "user@example.com's Organization" -> "user@example.com"
     marker = "'s Organization"
     if name.endswith(marker):
         return name[: -len(marker)].strip()

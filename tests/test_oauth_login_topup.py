@@ -88,7 +88,7 @@ def test_main_fires_topup_notify_on_first_run_with_no_stamp(
     calls = []
     monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
@@ -114,7 +114,7 @@ def test_main_does_not_refire_topup_within_the_cadence_window(
     calls = []
     monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
@@ -135,7 +135,7 @@ def test_main_skips_topup_when_cadence_set_to_zero(tmp_path: Path, monkeypatch, 
     calls = []
     monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(tmp_path / "profiles"))
@@ -185,7 +185,7 @@ def test_main_topup_pushes_again_next_due_cycle_with_real_notify(
     Real `notify.push` (only actual OS-level delivery is mocked out)."""
     monkeypatch.setattr(det.notify, "_deliver", lambda *a, **kw: None)  # no real popup
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
 
     base = 1_800_000_000.0
@@ -211,7 +211,7 @@ def test_main_does_not_stamp_topup_when_push_did_not_actually_push(
     only a real PUSHED/PUSHED_DIGEST may write the stamp."""
     monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
 
     assert det.main() == 0
@@ -224,7 +224,7 @@ def test_main_stamps_topup_only_on_an_actual_push(
 ) -> None:
     monkeypatch.setattr(det.notify, "push", lambda **kw: outcome)
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
 
     assert det.main() == 0
@@ -238,7 +238,7 @@ def test_main_prints_topup_heartbeat_line_for_attended_sessions(
     alongside the notify.push desktop channel, not just replace it."""
     monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
     home = tmp_path / "rotator"
-    _write_healthy_slot(home, "healthy@x.com")
+    _write_healthy_slot(home, "healthy@invalid")
     _isolated_env(tmp_path, monkeypatch, home)
 
     rc = det.main()

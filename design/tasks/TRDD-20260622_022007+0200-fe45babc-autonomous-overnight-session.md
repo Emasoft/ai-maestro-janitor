@@ -54,7 +54,7 @@ tamper-evident recovery audit log — all fail-open, never-kill-the-user.
 **NEXT — everything remaining is USER-gated; await the USER:**
 1. **E2/E3** — the process-KILLING hard-restart rungs (the nuclear option) are built+tested+default-OFF but UNWIRED;
    say **"wire E2/E3"** to greenlight (held only because killing processes warrants one human word — Tier-3/destructive).
-2. **Re-login `fmuaddib@gmail.com`** via `/janitor-refresh-claude-logins` — the IRREDUCIBLE human OAuth consent
+2. **Re-login `<account-fmuaddib>`** via `/janitor-refresh-claude-logins` — the IRREDUCIBLE human OAuth consent
    (dead refresh token, 374 failed renewals; the rotator auto-captures after).
 3. #209 (scope-migration Phase 2 — needs the target corpus) and #230 (3-tier memory architecture — needs structural
    sign-off) remain USER-gated.
@@ -94,7 +94,7 @@ roadmap; every ship TDD + adversarial spark-review + CI-green:
 
 **NEXT:** (a) build F3 (safe, in flight); (b) surface E2/E3 to the USER as the one immortality piece awaiting their
 explicit opt-in (it kills processes). **THE ONE IRREDUCIBLE USER ACTION still stands:** re-login
-`fmuaddib@gmail.com` via `/janitor-refresh-claude-logins` (dead refresh token, 374 failed renewals; only a human
+`<account-fmuaddib>` via `/janitor-refresh-claude-logins` (dead refresh token, 374 failed renewals; only a human
 OAuth consent restores it, then the rotator auto-captures).
 
 #### Superseded — do NOT carry forward
@@ -135,7 +135,7 @@ violation). (3) The remaining immortality GROUPS — E (per-scenario handlers), 
 are a genuine USER pick-the-next-effort fork, and the safety-critical pieces need the plan's ultracode-review
 Workflow (USER opt-in, which `/go-on-yourself` does not grant). So await the USER's "do C3 / continue immortality
 / pick effort X" or a fresh thin session. **THE ONE IRREDUCIBLE USER ACTION remains: re-login
-`fmuaddib@gmail.com`** — now via `/janitor-refresh-claude-logins` (post-fold; the legacy
+`<account-fmuaddib>`** — now via `/janitor-refresh-claude-logins` (post-fold; the legacy
 `~/.claude/account-rotator/open-login.sh` path is superseded by the in-plugin helper). Its refresh token is dead
 (374 failed renewals); only a human OAuth consent restores it, after which the rotator auto-captures hands-free.
 
@@ -143,7 +143,7 @@ Workflow (USER opt-in, which `/go-on-yourself` does not grant). So await the USE
 - ✗ "C2 committed LOCAL, **NOT published** / HOLD C2 for publish" (the ~18:20 entry) — C2 SOURCE is now PUBLISHED
   (rode v0.19.1→v0.20.1 via commit 9773ff3 already on main). What remains is C2 **ACTIVATION** (the re-arm) +
   USER review, NOT the publish. C2 is published-but-DORMANT (non-auto-rolling stub) → safe.
-- ✗ "re-login via `~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`" — the wrapper folded into the
+- ✗ "re-login via `~/.claude/account-rotator/open-login.sh <account-fmuaddib>`" — the wrapper folded into the
   plugin (v0.20.0); use `/janitor-refresh-claude-logins` (or `$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator/open-login.sh`).
 
 ### ✅ 2026-06-24 ~18:20 — immortality GROUP C **C2 IMPLEMENTED** (committed LOCAL, NOT published) → deliberate phased checkpoint before C3
@@ -204,8 +204,8 @@ both callers resolve the SAME inputs; [^7] tests must isolate the log too, not j
 Triad VERIFIED LIVE: ROTATE no-ops correctly (live `emanuele.sabetta` 5h≈18%/7d≈88%, within limits), RENEW
 keeps it fresh, REAUTH now surfaces the dead account. Tree clean; v0.18.3 live on GitHub.
 
-**🙋 THE ONE IRREDUCIBLE USER ACTION:** re-login `fmuaddib@gmail.com`
-(`~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`) — its refresh token is genuinely dead (374
+**🙋 THE ONE IRREDUCIBLE USER ACTION:** re-login `<account-fmuaddib>`
+(`~/.claude/account-rotator/open-login.sh <account-fmuaddib>`) — its refresh token is genuinely dead (374
 failed renewals); only a human OAuth consent restores it. The janitor now correctly TELLS the user (v0.18.3);
 the login itself is irreducibly theirs. After it, the rotator auto-captures the new refresh hands-free.
 
@@ -259,7 +259,7 @@ The 5h window aged out the heavy bursts (budget swung 100%→single-digit; a tra
 
 **⚠ WHY HOLDING further heavy work:** LIVE (emanuele.sabetta) is at **5h=86% / 7d=60%** and the alternate **fmuaddib is DEAD** (5h/7d=err — dead refresh token; v0.17.3 SURFACES it but the USER must re-login to restore it). With NO rotation safety net and the 5h window near the 88% threshold, a big GROUP-C/TIER-2 build (more publish runs + test suites) risks burning LIVE's budget → stuck rate-limited (the very failure the immortality work prevents). Per the mandate's own "ship few rock-solid, not many half-baked" + the HJGR4I5W keep-usage-LOW prudence → HOLD until the 5h window eases or the USER returns.
 
-**🙋 USER ACTION NEEDED:** re-login **`fmuaddib@gmail.com`** (e.g. `~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`, or the rotator reauth path) to restore the OAuth rotation alternate — until then this and every unattended session has no safety net.
+**🙋 USER ACTION NEEDED:** re-login **`<account-fmuaddib>`** (e.g. `~/.claude/account-rotator/open-login.sh <account-fmuaddib>`, or the rotator reauth path) to restore the OAuth rotation alternate — until then this and every unattended session has no safety net.
 
 **NEXT (when budget allows / user returns):** TIER 2 (field-agent governance — #230/aebedbff, GATED on the USER confirming the granular `janitor-memory-*` skill list + naming) and the remaining immortality groups (GROUP C self-integrity #228/53a00e44, D config-self-heal, E per-scenario handlers, F observability + ai-maestro). design/proposals/ is EMPTY.
 
@@ -622,7 +622,7 @@ going to finish. so you must switch oauth token soon."* Then `/go-on-yourself`.
 
 ### OAUTH SURVIVAL (check FIRST on every wake — this is the lifeline)
 - Rotator opted-in; daemon alive (manages 60s ticks). Two accounts:
-  `emanuele.sabetta@gmail.com` + `fmuaddib@gmail.com`. BOTH near 7d limits (~90-93%).
+  `<account-emanuele>` + `<account-fmuaddib>`. BOTH near 7d limits (~90-93%).
 - **At 02:20 force-rotated LIVE → `fmuaddib` (5h=0% fresh); `emanuele` 5h≈95% recovering.**
 - Rule each wake: `ROT=…/0.15.0/scripts/oauth_rotator/rotator.py`;
   `uv run --script --quiet "$ROT" usage`. If the LIVE account is **>88% on 5h OR 7d**,

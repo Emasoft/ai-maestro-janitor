@@ -32,7 +32,7 @@ implementation-commits: [b35121c]
   was 6.7 days ago, legitimately (live `f***` hit 429×3 → rotate); the live account is
   "within limits" every tick now. What the user actually saw was the daemon's **post-login
   AUTO-BOOTSTRAP** opening a **HEADFUL Chrome** today 10:56 to mint a refresh token for the
-  seeded alternate slot `fmuaddib@gmail.com` (a known DEAD-refresh account). The live
+  seeded alternate slot `<account-fmuaddib>` (a known DEAD-refresh account). The live
   credential was never touched. The daemon disarm + global-pause flags were set minutes
   AFTER 10:56 — the user reacting to the surprise window (this is THIS session's origin).
 - **Path:** `daemon.task_oauth_rotator_tick` → `rotator.cmd_tick` → (DEAD LAST)

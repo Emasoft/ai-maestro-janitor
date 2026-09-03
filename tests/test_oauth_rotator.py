@@ -1786,12 +1786,12 @@ def test_known_emails_includes_legacy_unindexed_slot_files(
     roster is always a superset of what `_slot_facts` would report."""
     monkeypatch.setattr(rotator, "ROOT", tmp_path)
     monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
-    (tmp_path / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}, "live_email": None}))
+    (tmp_path / "state.json").write_text(json.dumps({"slots": {"a@invalid": {}}, "live_email": None}))
     slots_dir = tmp_path / "slots"
     slots_dir.mkdir()
-    (slots_dir / "b@x.com.json").write_text("{}")
+    (slots_dir / "b@invalid.json").write_text("{}")
     assert rotator.cmd_known_emails() == 0
-    assert capsys.readouterr().out.splitlines() == ["a@x.com", "b@x.com"]
+    assert capsys.readouterr().out.splitlines() == ["a@invalid", "b@invalid"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

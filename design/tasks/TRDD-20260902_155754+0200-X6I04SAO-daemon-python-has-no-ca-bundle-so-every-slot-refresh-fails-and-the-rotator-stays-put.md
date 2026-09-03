@@ -19,7 +19,7 @@ eht: []
 
 **Board reconciliation (2026-09-03 11:09):** boxes 1-3 remain proven (unchanged, self-consistent
 with STATE). Box 4 stays open: `rotator.log:806` shows a fresh SCOPED wall today
-(`2026-09-03T10:15:46+0200 auto: switched emanuele.sabetta@gmail.com -> ipazia.emasoft@gmail.com
+(`2026-09-03T10:15:46+0200 auto: switched <account-emanuele> -> <account-ipazia>
 … +SCOPED[7d/Fable=90%] -> rotate`), and it rotated cleanly — but `daemon.log` in the same
 `oauth-rotator-tick` window (10:15:43-10:15:53) shows only `rotation-esc: cannot read the pane
 for IOSVoice_bak — skipped`, no `rotation-esc: FIRED ESC` for any pane. This was a proactive
