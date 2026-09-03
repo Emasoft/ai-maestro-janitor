@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: todo
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-03T17:34:26+0200
+updated: 2026-09-03T17:38:26+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -130,11 +130,15 @@ Mechanism, verified in code + transcript:
       Corroboration: the pane capture armed 17:24 (`<scratchpad>/pane-capture.txt`); a poll
       that saw no banner proves nothing (the nudge erases the frame). Derived cleanup:
       `session_liveness.is_session_frozen` has NO callers (the live predicate is
-      `fleet_scan.diagnose_root` → `diagnose_instance`) — delete it, no-legacy rule.
+      `fleet_scan.diagnose_root` → `diagnose_instance`) — delete it together with the tests
+      that pin it in `tests/test_session_liveness.py`, no-legacy rule.
 - [ ] **F1 `daemon.py:1582-1588`** — do NOT unlink the recovery counter on a `healthy`
-      diagnosis while `rate-limited.flag` still exists: only `dispatch.py` clears that flag
-      (`fleet_scan.py:966-969`), so flag-present + healthy = the heartbeat has NOT actually
-      run and the episode is still open. Do NOT key the episode on `rate-limited-since.ts`
+      diagnosis while `rate-limited.flag` still exists: only `dispatch.py` clears that flag,
+      and it does so on EVERY stub run that finds it (`_phase_rate_limit_recovery`,
+      `dispatch.py:1124-1131` — observed: the 11:56 flag was gone after this session's three
+      stub runs at 17:14–17:27, nothing else could have removed it inside the 24 h sweep),
+      so flag-present + healthy = the heartbeat has NOT actually run and the episode is
+      still open. Do NOT key the episode on `rate-limited-since.ts`
       (re-stamped by `:1990` and `:2126` on every attempt — self-defeating). Precedent:
       TRDD-8DR0X08A (`fleet_scan.py:690-696`) fixed the identical self-reset for queue lines;
       cite it in the code comment. Derived 1: with `include_hard=True` (`daemon.py:1698`) a
@@ -171,7 +175,13 @@ Mechanism, verified in code + transcript:
       `fleet_scan.py:749-757`) while `came_back_since` (`:333`) claims heartbeat-excluding;
       so ANY fire on an armed session cancels a pending `/clear`, stalled or not. Swap to
       `fleet_scan.human_activity_age` (what `external_handoff_clear.py:282` already feeds the
-      gate) and fix the docstring.
+      gate) and fix the docstring. Derived: `human_activity_age_from_tail` filters only
+      `queue-operation` and `scheduledFireId` records, so the ESC's own
+      `[Request interrupted by user]` user record still reads as a human turn — each of this
+      incident's six cancels landed 2–7 s after that record, so the swap alone would NOT
+      have prevented them. Add an interrupt-record exclusion there (human presence is
+      already guarded separately by the HID typing probe in `inject_until_sent`), and note
+      that F2 removes the provoking ESC pair anyway.
 - [ ] **F5 verify on the live pane**: reproduce a stalled fire, confirm ONE nudge, a
       finding after the cap, no pair of interrupts, no `/clear` residue, and a `/clear`
       chain that survives a heartbeat fire.
