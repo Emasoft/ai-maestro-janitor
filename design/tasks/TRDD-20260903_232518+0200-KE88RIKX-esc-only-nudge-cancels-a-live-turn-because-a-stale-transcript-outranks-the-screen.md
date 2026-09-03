@@ -15,7 +15,7 @@ npt: []
 eht: []
 related-trdds: [N954KWUC, L32WC0H7, 8DR0X08A]
 min-approval-requirement: none
-implementation-commits: [fc76c0ca, 85042899]
+implementation-commits: [fc76c0ca]
 external-refs: []
 ---
 
@@ -148,13 +148,18 @@ TRDD-L32WC0H7 documents — and it is the better failure of the two, because the
 destroyed real work silently while this one reports itself:
 
 - per beat: `session-liveness: … REFUSED by the pane policy` in `daemon.log`;
-- after `_STALL_ESCALATE_S` of an UNCHANGED decline signature, `daemon._decline` records a HIGH
+- after `_STALL_ESCALATE_S` (`CLAUDE_PLUGIN_OPTION_DAEMON_DECLINE_STALL_ESCALATE`, default
+  **3600 s**) of an UNCHANGED decline signature, `daemon._decline` records a HIGH
   `FLEET-DECLINE-STALL` finding carrying the `policy_refused` remedy text ("open the pane and
   look at it") and logs `session-liveness: ESCALATING … a human must clear it`.
 
-So a genuinely hung pane surfaces to a human on its own; the janitor does not watch it forever in
-silence. VERIFIED by reading `daemon.py::_decline` (the escalation block and the
-`_write_recovery_state` call below it), not inferred from its docstring.
+So a genuinely hung pane is REPORTED after about an hour rather than watched forever in silence.
+Two honest limits on that claim: the escalation fires **exactly once** per unchanged signature
+(TRDD-FB84YUGT — by design, it is a report, not a repeating alarm), and it reaches the human only
+as far as the findings ledger does, which is `/janitor-findings` and the heartbeat's drift lines
+— it is not a push notification. VERIFIED by reading `daemon.py::_decline` (the escalation block,
+the constant at `daemon.py:131-133`, and the `_write_recovery_state` call below it), not inferred
+from its docstring.
 
 **`_decline` does not spend a recovery attempt — VERIFIED, not assumed.** Its
 `_write_recovery_state` payload is `{**_st, "last_ts", "identity", "last_audit", "sig_since",
