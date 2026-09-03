@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-03T23:34:43+0200
+updated: 2026-09-03T23:36:12+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -159,12 +159,26 @@ forever in silence — note "unchanged signature", not "hung pane": a pane alter
 clock each time and may never reach the threshold. The steadily-refused case, which is the one
 this fix creates, is covered.
 
-The report is not merely filed: `dispatch._URGENT_LINE_RE` matches `HIGH` case-insensitively
-and is documented as "the override that stops the [quiet-mode advisory list] from muzzling a real
-alarm", so a `FLEET-DECLINE-STALL` line is PROMOTED PAST QUIET MODE into the heartbeat's own
-stdout. The two exemptions from that override — `_REMOTE_TEXT_DETECTORS`, and the "another
-actor's work" set — cover neither `daemon` nor this code. It is therefore stronger than a row
-waiting in `/janitor-findings`.
+**Where the report actually appears — corrected once, and the first answer was wrong.** The
+`FLEET-DECLINE-STALL` row is written by the DAEMON process into the findings ledger. It surfaces
+to a human in two places, and neither is the per-fire heartbeat stdout:
+
+- **SessionStart**, via `findings_ledger.surface_block(...)` — called from
+  `scripts/hooks/on-session-start.py`, the ONLY caller besides the CLI;
+- **`/janitor-findings`** on demand (`scripts/findings_cli.py`).
+
+The earlier draft of this section claimed the line was "promoted past quiet mode into the
+heartbeat's own stdout" by `dispatch._URGENT_LINE_RE`. That was wrong, and wrong in an
+instructive way: the regex is real and does match `HIGH`, but its INPUT is the lines
+`dispatch.py` itself produces while running detectors during a fire — it never reads the ledger.
+`grep -rn "surface_block\|unread_entries" scripts/` returns `findings_cli.py` and
+`on-session-start.py` and nothing in `dispatch.py`. Verifying that a mechanism EXISTS is not
+verifying that YOUR data reaches it.
+
+Practical consequence, which is the honest form of the trade: a refused pane is reported to the
+next session that starts, not to the session sitting in front of it. On this machine that is a
+real delay — the SessionStart block at the top of this very session showed
+`…14 older unread — /janitor-findings to browse`.
 
 One honest limit: it fires **exactly once** per unchanged decline signature — `escalated = False
 if changed else bool(_st.get("escalated"))`, where `changed` is `last_audit != sig`. So the flag
