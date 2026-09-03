@@ -175,6 +175,11 @@ def _wire(monkeypatch, tmp_path, *, fleet, enabled=True, fire_ok=True, plan: str
         "capture_pane_text",
         lambda _terminal: (_FIXTURES / "synthetic-idle-empty-field.txt").read_text(encoding="utf-8"),
     )
+    # And no real settle sleeps: `act` now re-reads to verify, and `pane_actuate._read` waits
+    # `_SETTLE_S` (3.0 s) first so a live terminal can repaint. The stub above returns a FROZEN
+    # frame, so there is nothing to wait for — 56 s of the suite spent proving a constant is
+    # constant (TRDD-7NSRD8OV: this suite already flakes under load).
+    monkeypatch.setattr(daemon.pane_actuate.time, "sleep", lambda *_a, **_kw: None)
     fire = _Fire(fire_ok)
     monkeypatch.setattr(daemon.fleet_inject, "fire", fire)
     return fire
