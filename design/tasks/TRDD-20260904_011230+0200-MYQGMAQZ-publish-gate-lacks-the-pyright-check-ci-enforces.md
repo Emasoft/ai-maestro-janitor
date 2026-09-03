@@ -182,6 +182,30 @@ Two cheap cold-path proxies were tried and both failed — don't repeat them:
 asymmetry argument was sufficient from the start, and every empirical justification
 written after the number was chosen turned out false. See [[debugging-methodology-verify-before-concluding-mechanism-and-rule-claims]].
 
+## Why the false CI-parity claims survived — an ORPHANED `.mega-linter.yml`
+
+`.mega-linter.yml` is present and git-tracked at the repo root, and NO workflow runs
+Mega-Linter (verified 2026-09-04 — `grep -rn mega-linter .github/workflows/` is empty).
+So the gate's long-standing "parity with ci.yml Mega-Linter COPYPASTE_JSCPD" /
+"BASH_SHELLCHECK" claims were never fabricated: they pointed at a real config file that is
+still sitting there looking live, while the job that executed it was removed at some point
+(`git log -S "Mega-Linter" -- .github/workflows/` finds the commits that touched it).
+
+That is the mechanism behind the whole class: a config outliving its runner reads as
+evidence the runner exists. Anyone auditing by looking for the config — rather than for a
+workflow step that invokes it — concludes CI enforces it.
+
+FOLLOW-UP, not done here: decide whether `.mega-linter.yml` should be deleted (nothing
+runs it) or a workflow restored to run it. Leaving an orphaned linter config is drift that
+will re-seed this exact confusion. NOT deleted tonight because it is a deliberate
+repo-config decision, and because a `.gitignore`d-or-not config may still be consumed by
+something outside this repo's workflows.
+
+Coverage note measured while checking this: 8 shell files are tracked; ci.yml's
+"Lint shell scripts" step names only `scripts/dispatch.sh` and `git-hooks/pre-push`, while
+the gate's G2f rglobs every `*.sh`/`*.bash`. So 7 of 8 shell files are checked by the gate
+or nowhere — the corrected warning text says exactly that.
+
 ## OPEN QUESTION FOR THE USER — should an unavailable pyright block the publish?
 
 As shipped (2026-09-04, `82944b56`), a pyright that CANNOT RUN blocks the publish,
