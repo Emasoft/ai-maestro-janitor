@@ -141,6 +141,7 @@ def test_resolve_latest_published_reports_a_TIMEOUT_apart_from_other_failures(
     vu = _vu()
     vdir = _make_plugin_root(env / "cache", "0.5.0", repo_url="https://github.com/o/r")
     monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(vu.time, "sleep", lambda _s: None)  # skip the real retry pause
 
     def _timeout(*_a, **_k):
         raise vu.subprocess.TimeoutExpired(cmd=["gh"], timeout=5)
@@ -154,6 +155,83 @@ def test_resolve_latest_published_reports_a_TIMEOUT_apart_from_other_failures(
         "the message must name the CEILING that was hit — a reader who sees '5s' after it was "
         "raised to 30s chases a version of the code that no longer exists"
     )
+
+
+def test_resolve_latest_published_retries_once_after_a_timeout_then_succeeds(
+    env: Path, monkeypatch
+) -> None:
+    """TRDD-ZM5LZ24Y hardening: a single stalled attempt must not decline the whole fire.
+
+    2026-08-21 measured a daemon fire decline while a shell call moments later succeeded —
+    exactly the transient shape a retry recovers from.
+    """
+    vu = _vu()
+    vdir = _make_plugin_root(env / "cache", "0.5.0", repo_url="https://github.com/o/r")
+    monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(vu.time, "sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def _flaky(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise vu.subprocess.TimeoutExpired(cmd=["gh"], timeout=5)
+        return vu.subprocess.CompletedProcess(
+            args=["gh"], returncode=0, stdout="v9.9.9\n", stderr="",
+        )
+
+    monkeypatch.setattr(vu.subprocess, "run", _flaky)
+    said: list[str] = []
+    assert vu.resolve_latest_published(vdir, on_failure=said.append) == "9.9.9"
+    assert calls["n"] == 2, "must have retried exactly once"
+    assert said == [], "a recovered retry must not report a failure"
+
+
+def test_resolve_latest_published_declines_after_two_timeouts_naming_timeout(
+    env: Path, monkeypatch
+) -> None:
+    """Two straight timeouts (never fixable by more retries here) decline, and the
+    decline names `timed out` — not a conflated generic failure."""
+    vu = _vu()
+    vdir = _make_plugin_root(env / "cache", "0.5.0", repo_url="https://github.com/o/r")
+    monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(vu.time, "sleep", lambda _s: None)
+
+    def _always_timeout(*_a, **_k):
+        raise vu.subprocess.TimeoutExpired(cmd=["gh"], timeout=5)
+
+    monkeypatch.setattr(vu.subprocess, "run", _always_timeout)
+    said: list[str] = []
+    assert vu.resolve_latest_published(vdir, on_failure=said.append) is None
+    assert "timed out" in said[-1], said
+    assert "2 attempts" in said[-1], said
+
+
+def test_resolve_latest_published_declines_after_two_bad_exits_naming_exit_code(
+    env: Path, monkeypatch
+) -> None:
+    """A `gh` that keeps exiting non-zero (e.g. a transient API 5xx) retries once, then
+    declines naming the exit code — not a timeout."""
+    vu = _vu()
+    vdir = _make_plugin_root(env / "cache", "0.5.0", repo_url="https://github.com/o/r")
+    monkeypatch.setattr(vu.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(vu.time, "sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def _bad_exit(*_a, **_k):
+        calls["n"] += 1
+        return vu.subprocess.CompletedProcess(
+            args=["gh"], returncode=1, stdout="", stderr="HTTP 502",
+        )
+
+    monkeypatch.setattr(vu.subprocess, "run", _bad_exit)
+    said: list[str] = []
+    assert vu.resolve_latest_published(vdir, on_failure=said.append) is None
+    assert calls["n"] == 2, "must have retried exactly once"
+    assert "exited 1" in said[-1], said
+    assert "502" in said[-1], said
+    assert "timed out" not in said[-1], "a bad exit must not read as a timeout"
 
 
 def test_gh_provenance_ceiling_is_generous_because_the_asymmetry_is_stark(monkeypatch) -> None:

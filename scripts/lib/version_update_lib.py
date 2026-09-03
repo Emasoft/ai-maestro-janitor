@@ -43,6 +43,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -88,6 +89,13 @@ _GH_REPO_RE = re.compile(r"^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$")
 # NOT `state.timeout_scale()` — that knob is 1.0 in production and the daemon IS production,
 # so scaling would change nothing where the failure happens (TRDD-7NSRD8OV, category B).
 GH_PROVENANCE_TIMEOUT_S = float(os.environ.get("JANITOR_GH_PROVENANCE_TIMEOUT_S", "30"))
+
+# One retry, after a short pause, on a TIMEOUT or a non-zero exit — both are the
+# transient-contention shape (a stalled network stack, a momentarily-rate-limited API),
+# not a structural failure like a missing binary or a repo with no releases, which retrying
+# cannot fix and which fail on the first attempt (see resolve_latest_published). 2 s is long
+# enough to clear a momentary stall without doubling a 30 s ceiling into a minute-long fire.
+GH_PROVENANCE_RETRY_PAUSE_S = float(os.environ.get("JANITOR_GH_PROVENANCE_RETRY_PAUSE_S", "2"))
 
 
 def _semver_tuple(s: str) -> tuple[int, ...]:
@@ -272,8 +280,9 @@ def resolve_latest_published(
     — three different causes collapsed into one string, with three different fixes.
     Measured 2026-08-21: the daemon declined at 00:37 while the same call from a
     shell returned `3.3.26` happily, and nothing recorded which branch refused. The
-    TIMEOUT is reported separately from a general OSError precisely because a 5 s
-    ceiling on a contended box and a missing binary need opposite responses.
+    TIMEOUT is reported separately from a general OSError precisely because a
+    `GH_PROVENANCE_TIMEOUT_S`-second (30 s default) ceiling on a contended box and
+    a missing binary need opposite responses.
 
     Still silent by DEFAULT — the caller decides whether to log.
     """
@@ -317,25 +326,49 @@ def resolve_latest_published(
         # whenever the pin is stale — and it needs a PATH fix, not a longer timeout.
         _fail("gh is not on PATH for this process")
         return None
-    try:
-        proc = subprocess.run(
-            ["gh", "api", f"repos/{slug}/releases/latest", "--jq", ".tag_name"],
-            capture_output=True, text=True, timeout=GH_PROVENANCE_TIMEOUT_S, check=False,
-        )
-    except subprocess.TimeoutExpired:
+    cmd = ["gh", "api", f"repos/{slug}/releases/latest", "--jq", ".tag_name"]
+    # ONE retry after a short pause, on a TIMEOUT or a non-zero `gh` exit only — both are
+    # the transient-contention shape a retry can actually fix (2026-08-21 measured a daemon
+    # decline while a shell call moments later succeeded). A missing binary or an unparseable
+    # manifest is structural and returns above, on the first attempt, without wasting a retry.
+    timed_out = False
+    last_returncode: int | None = None
+    last_tail: str = ""
+    proc: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(2):
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=GH_PROVENANCE_TIMEOUT_S, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc = None
+        except (OSError, subprocess.SubprocessError) as exc:
+            _fail(f"gh api did not run ({exc})")
+            return None
+        else:
+            timed_out = False
+            if proc.returncode == 0:
+                break
+            last_returncode = proc.returncode
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            last_tail = tail[-1][:120] if tail else ""
+        if attempt == 0:
+            time.sleep(GH_PROVENANCE_RETRY_PAUSE_S)
+    if timed_out:
         # Reported apart from the OSError below ON PURPOSE: this ceiling is hardcoded
         # here, outside `state.run_subprocess`, so the suite's timeout knob cannot
         # reach it AND `timeout_scale()` is 1.0 in production anyway — the daemon IS
         # production. If this is what refuses, the answer is a bigger ceiling or a
         # retry, never a scale (TRDD-ZM5LZ24Y, category B of TRDD-7NSRD8OV).
-        _fail(f"gh api timed out after {GH_PROVENANCE_TIMEOUT_S:g}s")
+        _fail(f"gh api timed out after {GH_PROVENANCE_TIMEOUT_S:g}s (2 attempts)")
         return None
-    except (OSError, subprocess.SubprocessError) as exc:
-        _fail(f"gh api did not run ({exc})")
-        return None
+    assert proc is not None  # every non-timeout path above set it
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        _fail(f"gh api exited {proc.returncode}" + (f": {tail[-1][:120]}" if tail else ""))
+        _fail(
+            f"gh api exited {last_returncode} (2 attempts)"
+            + (f": {last_tail}" if last_tail else "")
+        )
         return None
     tag = (proc.stdout or "").strip()
     if not tag:

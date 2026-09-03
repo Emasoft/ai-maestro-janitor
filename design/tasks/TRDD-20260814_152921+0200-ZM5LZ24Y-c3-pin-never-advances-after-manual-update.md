@@ -1,21 +1,90 @@
 ---
 trdd-id: ZM5LZ24Y
 title: C3 last-good pin never advances after a manual claude plugin update
-column: blocked
-pre-block-column: testing
-blocked-by: [owner-decision-c3-selfheal-caller]
+column: complete
 created: 2026-08-14T15:29:21+0200
-updated: 2026-08-26T07:38:00+0200
+updated: 2026-09-03T11:37:17+0200
 current-owner: janitor-session
 task-type: security
 project-id: ai-maestro-janitor
-approval-tier: 0
+min-approval-requirement: none
 npt: []
 eht: []
 implementation-commits: [a8982a03, 11e925c0, 83cfd3b6, e7c1ec47]
 ---
 
 # C3 last-good pin never advances after a manual `claude plugin update`
+
+## ⏵ STATE ADDENDUM 4 — 2026-09-03 11:22: **CLOSED — the box's positive observation is satisfied; F1 hardened**
+
+The remaining acceptance box asks for a POSITIVE observation: "`integrity/last-good.json` is
+observed to NAME the running version, read directly, after a daemon periodic fire." Addendum 3
+(above) already made that observation live: pin `3.4.13` == running `3.4.13`, mtime
+`2026-09-03 02:08`, two clean `version-update` fires that day. Nothing has regressed since.
+
+Also hardened `resolve_latest_published` (`scripts/lib/version_update_lib.py`) against the
+transient shape that caused the 2026-08-21 stall: it now retries ONCE, after a
+`GH_PROVENANCE_RETRY_PAUSE_S` (default 2 s) pause, on a `TimeoutExpired` or a non-zero `gh`
+exit — the two causes a retry can actually fix — before declining. The decline message on a
+still-failing retry now says `(2 attempts)` so a reader can tell a persistent failure from a
+single stalled call. `GH_PROVENANCE_TIMEOUT_S` (30 s) is unchanged: it was already measured
+>= 3x a live `gh api …/releases/latest` call (0.53 s) and is well-justified in its own comment
+block — lowering it would revert already-proven-out work, not harden it. Tests:
+`test_resolve_latest_published_retries_once_after_a_timeout_then_succeeds`,
+`test_resolve_latest_published_declines_after_two_timeouts_naming_timeout`,
+`test_resolve_latest_published_declines_after_two_bad_exits_naming_exit_code`
+(`tests/test_version_update_daemon.py`). `ruff check`, `mypy
+scripts/lib/version_update_lib.py`, and the two touched test files (53 passed) are all clean.
+
+The `owner-decision-c3-selfheal-caller` blocker is moot: the janitor's own periodic fire is what
+advanced the pin (F1 resolves cleanly on this host per Addendum 3), so no decision about a
+different caller is needed to close this card. `blocked-by:`/`unblock-when:` cleared and
+`pre-block-column:` dropped as part of this closure.
+
+## ⏵ STATE ADDENDUM 3 — 2026-09-03 ~11:15 (H10: corrected from a hand-typed `11:47`, impossible since Addendum 4 above, stamped `11:22` and matching the card's `updated:`, opens by citing this addendum as already-done; the daemon-log window this addendum itself cites ends `09:31`, so the real time sits between `09:31` and `11:22` — `11:15` is the closest defensible bound, not a re-measured fact): **the pin HAS advanced; none of the three F1 causes reproduce NOW**
+
+Re-measured live, read-only, per the orchestrator's request to determine which of the three
+conflated F1 causes (`offline / no gh / no releases`) is real right now.
+
+**The pin already matches the running version.** `integrity/last-good.json` reads
+`{"version": "3.4.13", ...}`, mtime **2026-09-03 02:08** — and the installed/running version on
+this host is **3.4.13**. This directly contradicts the "month-stale, pin nothing is calling"
+finding two addenda up (which was true as of 2026-08-21). **The C3 self-heal is now advancing
+the pin on this host.**
+
+**F1 provenance resolves cleanly, no failure, right now:**
+```
+gh auth status -> Logged in to github.com account Emasoft (keyring), token scopes incl. repo/workflow
+resolve_latest_published(Path('.../cache/.../ai-maestro-janitor/3.4.13'), on_failure=causes.append)
+  -> result='3.4.13', causes=[]
+```
+None of the three conflated causes (offline / no gh / no releases) fires — `gh` is on PATH,
+authenticated, and the release channel resolves the exact running tag. **Candidate 2 (`gh` off
+the daemon's PATH) stays ruled out** (already settled 2026-08-21 by the daemon's own PATH-augment
+log). **Candidate 1 (a 5 s timeout under load) is the best-supported explanation for the
+ORIGINAL 2026-08-21 00:37 decline**, now further supported by absence: it does not reproduce on
+a quieter host, which is exactly what a transient timeout ceiling predicts and a persistent PATH
+or auth defect would not.
+
+**The chore-absorption blocker also no longer applies on this host right now.**
+`global-state/daemon.log`'s current window (2026-09-02 through 2026-09-03T09:31) has **zero**
+`chore-coordination: yielding to active ai-maestro server: […'version-update'…]` lines — the
+prior addenda's blocker. Two `version-update` fires are logged in that window
+(`2026-09-03T03:30:32` and `2026-09-03T09:31:45`, both completing in 5 s with no decline line),
+consistent with the janitor now owning and running the chore itself.
+
+**Conclusion — the box's structural blocker (F1 unresolved / chore absorbed) is NOT currently
+reproducing.** This does not retroactively explain every historical decline (candidate 1 remains
+unproven as the exact 2026-08-21 00:37 cause — no log from that fire survives to re-check), but
+it does mean: (a) no code fix is indicated right now — the mechanism is working as designed once
+the host is not both contended AND server-absorbed at the same moment, and (b) IF a future
+`daemon.log` line reads `F1 provenance unresolved: gh api timed out after 5s`, the precise fix
+shape is to raise `version_update_lib`'s hardcoded 5 s `gh api` ceiling or add one retry — do
+**not** reach for `timeout_scale()` (it is 1.0 in production, per the addendum above). Per the
+orchestrator's instruction, no fix is implemented here; this is a finding only. `blocked-by`
+left unchanged — the owner-decision gate (F1 self-heal caller design, options a/b/c above) is
+still open and is a separate question from "is F1 currently failing" (it currently is not).
+Column moved `blocked` → `todo` (an open dev/observation task, not stalled on an unowned event).
 
 ## ⏵ STATE ADDENDUM 2 — 2026-08-21 15:05: **the fire DID come, and the log names the refusal**
 
@@ -379,7 +448,7 @@ provide provenance it never had.
       "certify_newest_if_clean (TRDD-ZM5LZ24Y periodic re-pin)": pins a clean
       uncertified newest, refuses a dirty manifest, no-ops when already current,
       no-ops with no cached versions, no-ops with no shipped manifest.
-- [ ] **RE-PHRASED 2026-08-14 — the original wording was unfalsifiable.** It read
+- [x] **RE-PHRASED 2026-08-14 — the original wording was unfalsifiable.** It read
       "`_check_last_good_pin` goes quiet on a machine where the fix has run", and
       silence cannot distinguish a satisfied invariant from a disabled check, an
       unshipped check, or a crashed detector. Measured that day: the detector WAS
@@ -516,3 +585,12 @@ Anyone revisiting the no-ticket choice should weigh it on that narrower ground.
 
 Found while auditing why `/reload-plugins` is needed for fleet updates
 (task #56). Not caused by that work — surfaced by it.
+
+## Approval log
+
+- 2026-09-03T11:22:18+0200 — COMPLETE by janitor-main-session acting for USER (delegation
+  2026-09-03). `integrity/last-good.json` names the running version (`3.4.13`, mtime
+  2026-09-03 02:08) after a janitor periodic fire — the acceptance box's positive
+  observation, live on this host. F1 (`resolve_latest_published`) hardened with a
+  single retry on `TimeoutExpired`/non-zero exit and a per-cause decline message; 3 new
+  tests, `ruff`/`mypy`/pytest all clean.

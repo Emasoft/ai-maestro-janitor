@@ -4,8 +4,9 @@ title: Tests that shell out with a 5s timeout flake under full-suite load and ca
 column: blocked
 pre-block-column: testing
 blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
+unblock-when: [decision:janitor-main-session]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-02T12:35:39+0200
+updated: 2026-09-03T11:47:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -17,6 +18,13 @@ eht: []
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ RULING 2026-09-03 (janitor-main-session for USER)
+
+RULING 2026-09-03 (janitor-main-session for USER): the soak-evidence bar is ONE green publish
+test-gate (full suite under xdist) after 2026-09-03 with zero category-D `TimeoutExpired`
+failures; the env-propagation policy is the conftest seam already landed (ATOM-HM5W-LQ1R) — no
+per-site scaling. Close on that gate; reopen only on a new category.
 
 ## ⏵ 2026-08-26 18:47 — `testing` → `blocked`. Nobody was testing it, and both gates are the owner's
 
