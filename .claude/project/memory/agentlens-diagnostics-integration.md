@@ -2,7 +2,7 @@
 name: agentlens-diagnostics-integration
 description: "should I switch a janitor detector to agentlensPro's window budget / does agentlensPro report account window utilization% / why is agentlensPro's window budget null / capacitySource none / how do I add an agentlensPro probe to a detector / where is the agentlens_probe integration / prefer agentlensPro over the home-grown token estimates / what does agentlensPro actually measure OTEL vs oauth usage / why is window-burn-rate detector split between enrich and cross-check / what does investigate_burn's cause or verdict field mean / FORK_STORM FAT_SESSION_REWRITES culprit attribution / does agentlensPro suppress the local token-usage-anomaly alarm / is the agentlensPro probe fail-open if the CLI binary is missing / heartbeat_burn_status_command heartbeat_investigate_burn_command config gate / two accounts show contradicting burn numbers 94% vs 5.9% / who is authoritative for window utilization percent / TTL-regime cadence probe shares the same integration shape"
 ocd: 2026-07-12
-lmd: 2026-07-12
+lmd: 2026-09-03
 metadata:
   node_type: memory
   type: project
@@ -16,6 +16,7 @@ publish-globally: false
 
 # agentlensPro diagnostics integration
 
+^UKOL3WE6 [desc:"the janitor's agentlensPro CLI integration lives in one shared substrate module used by two detectors plus the TTL probe", keywords:agentlens_probe_integration_shape shared_substrate_module config_gated_5s_bounded_fail_open which_detectors_use_agentlensPro where_is_agentlens_probe_py probe_json_parse_format_cause_clause, ocd:2026-07-12, lmd:2026-07-12]
 The janitor consumes the optional machine-local **agentlensPro** CLI as a diagnostics
 source through one shared substrate: **`scripts/lib/agentlens_probe.py`** (config-gated,
 5 s-bounded, fail-open; `probe_json` → typed `parse_*` → `format_cause_clause`). Two
@@ -23,6 +24,7 @@ detectors use it, plus the TTL-regime cadence probe.
 
 ## The load-bearing verified fact (2026-07-12, live CLI)
 
+^VICVILYL [desc:"agentlensPro measures spend via OTEL not oauth usage; window budget/percent/projection are null; authoritative only for burn rate and culprit attribution, never window utilization percent", keywords:does_agentlensPro_report_window_utilization_percent why_is_capacitySource_none agentlensPro_otel_vs_oauth_usage who_is_authoritative_for_window_percent get_burn_status_costPerHour_topSessions investigate_burn_findings_cause_shareOfWindow_confidence_verdict killed_the_switch_window_budget_to_agentlensPro_plan TRDD-90B47EM9_false_premise, ocd:2026-07-12, lmd:2026-07-12]
 **agentlensPro observes spend via OTEL, NOT Anthropic's `/api/oauth/usage`.** With no
 configured capacity it reports `capacitySource: "none"`, so its window **budget / % /
 projection are null**. It is therefore authoritative ONLY for:
@@ -37,6 +39,7 @@ naive "switch the window budget to agentlensPro" plan (TRDD-90B47EM9's original 
 
 ## The per-detector split (TRDD-WUUR2DFX; USER "Anomaly switch + burn enrich")
 
+^M2D4155G [desc:"window-burn-rate uses agentlensPro only to enrich the culprit clause, keeping window-percent math authoritative; token-usage-anomaly keeps its local baseline primary, never suppressed", keywords:why_is_window_burn_rate_detector_split_between_enrich_and_cross_check does_agentlensPro_suppress_the_local_token_usage_anomaly_alarm window_burn_rate_enrich_vs_token_usage_anomaly_cross_check agentlens_cause_clause_vs_agentlens_enrich TRDD-WUUR2DFX_anomaly_switch_plus_burn_enrich local_alarm_never_downgraded_by_agentlensPro, ocd:2026-07-12, lmd:2026-07-12]
 - **`window-burn-rate` → ENRICH.** Keeps the rotator's authoritative window% math
   (`token_burn`, unchanged); only the CULPRIT clause switches to `investigate_burn`
   (`_agentlens_cause_clause()`), native `token_history` fleet-scan as fallback.
@@ -48,6 +51,7 @@ naive "switch the window budget to agentlensPro" plan (TRDD-90B47EM9's original 
 
 ## The invariant every probe holds
 
+^M5T1DZYI [desc:"every agentlensPro probe is config-gated, bounded, fail-open to native fallback, and prefer-when-present, so a machine without the CLI behaves identically — same shape as the TTL-regime probe", keywords:is_the_agentlensPro_probe_fail_open_if_the_cli_binary_is_missing heartbeat_burn_status_command_heartbeat_investigate_burn_command_config_gate TTL_regime_cadence_probe_shares_the_same_integration_shape do_not_invent_a_second_integration_shape machine_without_cli_is_byte_identical prefer_agentlensPro_over_home_grown_token_estimates_when_present, ocd:2026-07-12, lmd:2026-07-12]
 Config-gated (`heartbeat_burn_status_command` / `heartbeat_investigate_burn_command` /
 `heartbeat_account_status_command` — empty string disables), bounded (short timeout,
 never a hot path — the expensive `investigate_burn` runs ONLY post-alarm/post-trip),
