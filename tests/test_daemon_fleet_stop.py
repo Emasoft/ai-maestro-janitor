@@ -104,8 +104,9 @@ def _has_esc(calls: list[dict]) -> list[bool]:
     someone would look for it: they did while the capture seam was unstubbed and `act` read None,
     but stubbing that seam (rightly — it was reading the developer's live tmux server) means
     `act` now parses a real state, so Law 1 never trips and the fail-open branch is never taken.
-    Its coverage lives in `test_pane_actuate.py::test_fail_open_fires_into_a_readable_pane_that_
-    did_not_answer`. `_wire` stubs
+    Its coverage lives in `test_pane_actuate.py::test_fail_open_*` — referenced by prefix on ONE
+    line deliberately: an identifier wrapped across a line break is invisible to grep, which is
+    the same failure as searching for a name that prose has hyphenated. `_wire` stubs
     the capture seam with an IDLE frame (see the note there — leaving it unstubbed made these
     tests depend on the developer's live tmux server), so `_rung`'s wedge branch correctly does
     not fire on an idle pane and `esc_first` reaches the command step directly, which is what

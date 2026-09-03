@@ -424,6 +424,11 @@ def test_fail_open_fires_into_a_readable_pane_that_did_not_answer(monkeypatch) -
     reading the developer's live tmux server, so it was stubbed with an idle frame, and `act` now
     parses a real state there and never reaches this branch.
     """
+    # The precondition the NAME asserts, made loud instead of assumed: Law 1 only applies to a
+    # channel that HAS read-back, and that fact lives in `_act`'s default terminal two helpers
+    # away. Swap that default for a channel without read-back and both halves below would still
+    # pass — via the blind-by-construction path, with `fail_open` irrelevant.
+    assert pa.channel_has_readback(_TMUX), "this test is about Law 1, which needs a readable channel"
     monkeypatch.setattr(fleet_scan, "capture_pane_text", lambda _t: None)
     fired = _seam(monkeypatch)
     refused = _act(pa.Event.STOP_FLAG, command="/janitor-disarm", esc_first=False)
@@ -435,6 +440,24 @@ def test_fail_open_fires_into_a_readable_pane_that_did_not_answer(monkeypatch) -
     assert opened.status is pa.OutcomeStatus.DONE
     assert opened.touched is True
     assert _keys(fired) == ["/janitor-disarm"], "the stop lands despite the unreadable pane"
+
+    # The HARD half. fleet-stop passes `esc_first=fr.injection_is_hard(...)`, True for a frozen
+    # target whose wedged turn would never dequeue a soft command — so the ESC has to survive the
+    # blind route too. Same code path (`_blind` → `_rung(None, ...)`, whose wedge branch cannot
+    # fire on a None state), different built plan: the ESC is inside the command plan rather than
+    # a step of its own, so it is asserted on the plan and not via `_keys`.
+    hard = _act(pa.Event.STOP_FLAG, command="/janitor-disarm", esc_first=True, fail_open=True)
+    assert hard.status is pa.OutcomeStatus.DONE
+    # EXACTLY two fires across this test — one soft, one hard, and none from the refused call.
+    # Assert it BEFORE indexing `fired[-1]`, because that index is what makes a failure honest:
+    # if the hard call fired nothing, `fired[-1]` is silently the SOFT plan (no Escape in it), and
+    # the assertion below would report a DROPPED ESC when the truth is that nothing was typed —
+    # sending the next reader to `build_command_plan` instead of to `act`. An exact count also
+    # catches a spurious extra fire, and retroactively pins that the refusal typed nothing, which
+    # the soft half's `_keys(fired) == [...]` was quietly relying on.
+    assert len(fired) == 2, "the hard call must have fired, and nothing else may have"
+    hard_plan = fired[-1][1]
+    assert any("Escape" in step for step in hard_plan["steps"]), "a frozen target keeps its ESC"
 
 
 def test_touched_is_false_when_the_channel_accepted_nothing(monkeypatch) -> None:
