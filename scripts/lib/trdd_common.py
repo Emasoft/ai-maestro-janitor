@@ -229,6 +229,11 @@ FM_CREATED_RE = re.compile(r"^created:[ \t]*(.+)$", re.MULTILINE)
 FM_UPDATED_RE = re.compile(r"^updated:[ \t]*(.+)$", re.MULTILINE)
 FM_BLOCKED_BY_RE = re.compile(r"^blocked-by:[ \t]*(.+)$", re.MULTILINE)
 FM_IMPL_COMMITS_RE = re.compile(r"^implementation-commits:[ \t]*(.+)$", re.MULTILINE)
+# `superseded-by:` — the replacement TRDD(s) a `column: superseded` card names
+# (trdd-approval-tiers.md). Read by `_blocked_reason`'s depth-1 chase: a blocker that was
+# itself superseded is not "gone", it moved — the dependent's real answer is the replacement's
+# column, not a blind "unblockable".
+FM_SUPERSEDED_BY_RE = re.compile(r"^superseded-by:[ \t]*(.+)$", re.MULTILINE)
 # `npt:` (Necessary Prerequisite Tasks) — a card that must finish these BEFORE `dev` is
 # legitimately stalled in `backburner`/`todo` on its own dependency chain, not forgotten
 # (trdd-drift narrowing, janitor#189: a card with a stated precondition is not "drift").
@@ -573,6 +578,26 @@ def blocked_by_ids(raw: str) -> list[str]:
         m = _TRDD_REF_TOKEN_RE.search(el)
         if m:
             ids.append(m.group(1))
+        elif re.fullmatch(r"[0-9A-Za-z]{8}", el):
+            ids.append(el)
+    return ids
+
+
+def superseded_by_ids(head: str) -> list[str]:
+    """Extract the replacement TRDD ids from a `superseded-by:` flow-list value in `head`.
+
+    Mirrors `blocked_by_ids`, but reads the field directly off the frontmatter head text
+    (searched the same way `_blocked_reason` searches for `blocked-by:` in the caller) rather
+    than from a pre-extracted match group — the shape the depth-1 supersession chase needs.
+    """
+    m = FM_SUPERSEDED_BY_RE.search(head)
+    if not m:
+        return []
+    ids: list[str] = []
+    for el in parse_flow_list(m.group(1)):
+        rm = _TRDD_REF_TOKEN_RE.search(el)
+        if rm:
+            ids.append(rm.group(1))
         elif re.fullmatch(r"[0-9A-Za-z]{8}", el):
             ids.append(el)
     return ids

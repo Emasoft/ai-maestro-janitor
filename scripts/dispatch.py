@@ -2567,9 +2567,9 @@ def _directive_is_stale_by_age(age_s: int) -> bool:
     return cap > 0 and age_s > cap
 
 
-def _all_folders_columns(project_root: str, trdd_common: Any) -> dict[str, str]:
-    """`{uid: column}` for every TRDD across ALL design folders (tasks/archived/proposals/
-    refused, in `trdd_common.DESIGN_FOLDERS` order — first hit wins on a duplicate id).
+def _all_folders_columns(project_root: str, trdd_common: Any) -> tuple[dict[str, str], dict[str, str]]:
+    """`({uid: column}, {uid: head})` for every TRDD across ALL design folders (tasks/archived/
+    proposals/refused, in `trdd_common.DESIGN_FOLDERS` order — first hit wins on a duplicate id).
 
     Shared by `_directive_task_is_terminal` and `_attention_summary` (TRDD-1PDCPIZC
     follow-up, review finding #b): a `blocked-by:`/directive-named id resolves against the
@@ -2577,15 +2577,25 @@ def _all_folders_columns(project_root: str, trdd_common: Any) -> dict[str, str]:
     has already been archived, or was never in `tasks/` at all. `trdd_common` is `Any` here
     because callers `import trdd_common` lazily (mirrors this file's other lib imports) and
     pass the module object straight through.
+
+    The `heads` half (added TRDD-1PDCPIZC follow-up #2) is what lets `_blocked_reason` chase
+    a `column: superseded` blocker one hop to its `superseded-by:` replacement without a
+    second file-read pass — the head text was already in hand from the column read.
     """
     columns: dict[str, str] = {}
+    heads: dict[str, str] = {}
     for folder in trdd_common.DESIGN_FOLDERS:
         for _, path in trdd_common.trdd_files(folder, project_root):
             uid = trdd_common.extract_uid(path.name)
             if uid and uid not in columns:
-                _, column = trdd_common.parse_trdd_state(path)
+                try:
+                    head = path.read_text(encoding="utf-8", errors="replace")[: trdd_common.HEAD_BYTES]
+                except OSError:
+                    continue
+                _, column = trdd_common.parse_state_text(head)
                 columns[uid] = column
-    return columns
+                heads[uid] = head
+    return columns, heads
 
 
 def _directive_task_is_terminal(directive_text: str) -> bool:
@@ -2619,7 +2629,7 @@ def _directive_task_is_terminal(directive_text: str) -> bool:
         ids = trdd_common.extract_trdd_refs(directive_text)
         if not ids:
             return False
-        columns = _all_folders_columns(str(state.project_root()), trdd_common)
+        columns, _heads = _all_folders_columns(str(state.project_root()), trdd_common)
         for uid in ids:
             column = columns.get(uid)
             if not column or not trdd_common.is_terminal_column(column):
@@ -2701,14 +2711,62 @@ _ATTENTION_COUNTER_FILE = "attention-fire-counter.txt"
 _ATTENTION_LAST_IDS_FILE = "attention-last-ids.txt"
 
 
-def _blocked_reason(head: str, columns: dict[str, str]) -> str:
+# Terminal columns split into two very different fates for a card that CITES them as a
+# blocker (TRDD-1PDCPIZC follow-up #1). `trdd_common.is_terminal_column` keeps its documented
+# "any terminal blocker is stale" meaning for its other callers (e.g. `_directive_task_is_
+# terminal` — a finished task is a finished task, full stop); this finer split exists only
+# because `_blocked_reason` must tell a human WHAT to do about the stale block, and "unblockable"
+# is not a safe verdict for all of them: a `blocked` card citing a `refused`/`cancelled`/`failed`
+# blocker would get restored to its `pre-block-column:` on the next drain pass as if the
+# dependency had shipped — it never will, and the dependent needs a human RULING (re-scope,
+# re-target, or itself cancel), not a silent unblock.
+_DONE_BLOCKER_COLUMNS = frozenset({"complete", "completed", "published", "live"})
+_DECISION_BLOCKER_COLUMNS = frozenset({"refused", "cancelled", "failed"})
+
+
+def _classify_blocker_column(column: str, uid: str, columns: dict[str, str], heads: dict[str, str], trdd_common: Any) -> str:
+    """Classify ONE resolved `blocked-by:` id's column: "unblockable" / "decision-needed" / "".
+
+    "" means the blocker is still open (or, for a superseded blocker, its replacement is) —
+    a plain, currently-valid block. `superseded` is resolved one hop via `superseded-by:`
+    (depth 1 only, per TRDD-1PDCPIZC follow-up #1's spec — no further chase even if the
+    replacement was itself superseded again): an unreadable head or an empty/unresolvable
+    `superseded-by:` degrades to "decision-needed" rather than guessing.
+    """
+    if column in _DONE_BLOCKER_COLUMNS:
+        return "unblockable"
+    if column in _DECISION_BLOCKER_COLUMNS:
+        return "decision-needed"
+    if column == "superseded":
+        head = heads.get(uid)
+        if head is None:
+            return "decision-needed"
+        targets = trdd_common.superseded_by_ids(head)
+        if not targets:
+            return "decision-needed"
+        target_column = columns.get(targets[0])
+        if target_column is None:
+            return "decision-needed"
+        if target_column in _DONE_BLOCKER_COLUMNS:
+            return "unblockable"
+        if target_column in _DECISION_BLOCKER_COLUMNS:
+            return "decision-needed"
+        return ""
+    return ""
+
+
+def _blocked_reason(head: str, columns: dict[str, str], heads: dict[str, str] | None = None) -> str:
     """Classify a `blocked` card's `blocked-by:` claim: "unblockable", "decision-needed", or "".
 
-    "unblockable": every named TRDD id has already reached a terminal column (or the id
-    resolves to no file at all) — the card is stuck citing a blocker that can never drain it.
+    "unblockable": every named TRDD id has already reached a DONE column (complete/completed/
+    published/live), or resolves via a `superseded` hop to one — the card is stuck citing a
+    blocker that can never drain it.
     "decision-needed": at least one `blocked-by:` element is neither a TRDD id nor a `#N`
-    issue reference — a bare descriptive token (`owner-decision-…`) nobody was ever asked to
-    resolve. "" is a plain, currently-valid block — nothing extra worth saying.
+    issue reference (a bare descriptive token like `owner-decision-…` nobody was ever asked to
+    resolve), OR at least one resolved id is `refused`/`cancelled`/`failed` (or chases via
+    `superseded-by:` to one of those, or to nothing resolvable) — the dependency will never
+    land, so the dependent needs a human RULING, not a silent unblock.
+    "" is a plain, currently-valid block — nothing extra worth saying.
     Best-effort: any parse fault (including a missing lib) degrades to "" — never breaks the
     survival pulse.
     """
@@ -2730,11 +2788,17 @@ def _blocked_reason(head: str, columns: dict[str, str]) -> str:
             # refused), so a missing entry means the id genuinely resolves nowhere — a
             # typo or a cross-project reference this board can't see — not "terminal by
             # proxy". Flag it for a human rather than silently declaring the card
-            # unblockable; only a fully-resolved, fully-terminal set is unblockable.
+            # unblockable; only a fully-resolved set can be unblockable.
             resolved_columns = [columns[i] for i in ids if i in columns]
             if len(resolved_columns) < len(ids):
                 return "decision-needed"
-            if all(trdd_common.is_terminal_column(c) for c in resolved_columns):
+            classified = [
+                _classify_blocker_column(c, i, columns, heads or {}, trdd_common)
+                for c, i in zip(resolved_columns, ids)
+            ]
+            if any(c == "decision-needed" for c in classified):
+                return "decision-needed"
+            if all(c == "unblockable" for c in classified):
                 return "unblockable"
         return ""
     except Exception:  # noqa: BLE001 -- a classification bug must never break the nudge
@@ -2780,9 +2844,15 @@ def _attention_summary() -> tuple[str, str]:
         # helper `_directive_task_is_terminal` uses. Only `tasks/` ids (in `heads`
         # below) can populate `by_column` (attention columns only ever live there);
         # this merge exists purely so a resolvable-but-non-open id doesn't get
-        # mistaken for "resolves nowhere" (`decision-needed`) by `_blocked_reason`.
-        for uid, column in _all_folders_columns(project_root, trdd_common).items():
+        # mistaken for "resolves nowhere" (`decision-needed`) by `_blocked_reason`. The
+        # `heads` merge (not just `columns`) is what lets a `superseded` blocker chase its
+        # `superseded-by:` — that field lives in the blocker's OWN head, which may sit in
+        # any design folder, not just `tasks/`.
+        all_columns, all_heads = _all_folders_columns(project_root, trdd_common)
+        for uid, column in all_columns.items():
             columns.setdefault(uid, column)
+        for uid, other_head in all_heads.items():
+            heads.setdefault(uid, other_head)
         by_column: dict[str, list[str]] = {}
         for uid in heads:
             # Iterate `heads` (tasks/ only), never `columns` — `columns` now also
@@ -2802,7 +2872,7 @@ def _attention_summary() -> tuple[str, str]:
             if not ids:
                 continue
             if col == "blocked":
-                reasons = {u: _blocked_reason(heads[u], columns) for u in ids}
+                reasons = {u: _blocked_reason(heads[u], columns, heads) for u in ids}
                 unblockable = [u for u in ids if reasons[u] == "unblockable"]
                 decision = [u for u in ids if reasons[u] == "decision-needed"]
                 clause = f"{len(ids)} blocked"

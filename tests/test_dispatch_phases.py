@@ -3417,6 +3417,47 @@ def test_keep_going_nudge_prints_the_attention_clause(env_isolation: dict) -> No
     assert "1 decision-needed: TRDD-STUCK001" in out
 
 
+def test_attention_summary_refused_blocker_is_decision_needed_not_unblockable(
+    env_isolation: dict,
+) -> None:
+    """A blocker that reached `refused` will NEVER land — restoring the dependent as
+    'unblockable' (pre-block-column) would be wrong; it needs a human RULING instead
+    (TRDD-1PDCPIZC follow-up #1)."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card(tasks, "REFUSED1", "refused")
+    _card_blocked_by(tasks, "NEEDRUL1", "blocked", "[TRDD-REFUSED1]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 decision-needed: TRDD-NEEDRUL1" in clause
+    assert "unblockable" not in clause
+
+
+def test_attention_summary_superseded_blocker_follows_superseded_by_to_open_card(
+    env_isolation: dict,
+) -> None:
+    """A `superseded` blocker is not gone, it MOVED — `_blocked_reason` follows
+    `superseded-by:` one hop; when the replacement is still open, the dependent stays a
+    plain, currently-valid block (neither `unblockable` nor `decision-needed`) rather than
+    the old "any terminal blocker unblocks" verdict (TRDD-1PDCPIZC follow-up #1)."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card(tasks, "REPLACE1", "dev")  # the open replacement — still doing the work
+    (tasks / "TRDD-20260901_000000+0200-OLDCARD1-t.md").write_text(
+        "---\ntrdd-id: OLDCARD1\ntitle: t\ncolumn: superseded\n"
+        "superseded-by: [TRDD-REPLACE1]\n---\nbody\n",
+        encoding="utf-8",
+    )
+    _card_blocked_by(tasks, "CITESOLD", "blocked", "[TRDD-OLDCARD1]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 blocked (TRDD-CITESOLD)" in clause
+    assert "decision-needed" not in clause
+    assert "unblockable" not in clause
+
+
 def test_attention_summary_owner_repo_issue_ref_is_not_decision_needed(
     env_isolation: dict,
 ) -> None:
@@ -3436,29 +3477,61 @@ def test_attention_summary_owner_repo_issue_ref_is_not_decision_needed(
     assert "unblockable" not in clause
 
 
+def test_attention_summary_descriptive_token_ending_in_hash_number_is_latent_issue_ref(
+    env_isolation: dict,
+) -> None:
+    """LATENT AMBIGUITY (documented, not fixed): `_ISSUE_REF_RE` matches ANY token ending in
+    `#N`, including a descriptive token that merely happens to end that way (e.g.
+    `owner-decision-x#1`) — it reads as a legitimate issue-ref blocker (neither `unblockable`
+    nor `decision-needed`), not as the "nobody was ever asked to resolve this" case it should
+    be. No board token in this codebase currently carries a trailing `#N` outside real
+    `owner/repo#N` issue refs, so this is dormant today. If one ever does, tighten
+    `_ISSUE_REF_RE` to require a real `owner/repo` prefix (or a bare `#N` with nothing else)
+    rather than an arbitrary descriptive prefix."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card_blocked_by(tasks, "AMBIG001", "blocked", "[owner-decision-x#1]")
+
+    clause, _signature = dispatch._attention_summary()
+
+    assert "1 blocked (TRDD-AMBIG001)" in clause
+    assert "decision-needed" not in clause
+    assert "unblockable" not in clause
+
+
 def test_work_and_attention_columns_are_disjoint_and_cover_the_board(env_isolation: dict) -> None:
     """`_WORK_COLUMNS` and `_ATTENTION_COLUMNS` must never double-count a column (a card
     can only be "actively worked" or "awaiting a human", not both), and every non-terminal,
     non-`backburner` column of the ratified 22-column board vocabulary
     (~/.claude/rules/universal-kanban.md) must appear in exactly one of the two tuples
     (advisor finding (b), TRDD-1PDCPIZC follow-up)."""
+    import trdd_common
+
     dispatch = _import_dispatch()
     work = set(dispatch._WORK_COLUMNS)
     attention = set(dispatch._ATTENTION_COLUMNS)
 
     assert work.isdisjoint(attention), f"double-counted: {work & attention}"
 
-    # The 22-column board vocabulary minus `backburner` (a resting state, not on-board work)
-    # and minus the columns this board treats as terminal (`complete`, `published`, `live`,
-    # `superseded` — `failed` stays OPEN per universal-kanban.md and trdd-approval-tiers.md,
-    # so it is deliberately NOT excluded here).
-    board_columns = {
-        "approval", "design", "design_ai_review", "design_human_review",
-        "todo", "verify_assumptions", "plan", "dispatch", "dev", "testing",
-        "ai_review", "human_review", "publish", "deploy", "live_auditing", "blocked", "failed",
-    }
+    # Derived from the single source of truth (`trdd_common.ALL_COLUMNS`/`TERMINAL_COLUMNS`)
+    # instead of a hand-typed literal, so this test can't silently drift from the vocabulary
+    # it's meant to police. `backburner` (a resting state, not on-board work) and the
+    # `proposal`/`completed` bracket values (3P-KAN-20 — folder markers, not open-board
+    # columns; `refused`/`cancelled` are already excluded via TERMINAL_COLUMNS) are excluded;
+    # `failed` stays OPEN per universal-kanban.md and trdd-approval-tiers.md even though
+    # TERMINAL_COLUMNS lists it (blocker-staleness meaning, not on-board-ness), so it is
+    # added back in.
+    board_columns = (
+        trdd_common.ALL_COLUMNS
+        - trdd_common.TERMINAL_COLUMNS
+        - {"backburner", "proposal", "completed"}
+        | {"failed"}
+    )
     covered = work | attention
     assert board_columns <= covered, f"uncovered board columns: {board_columns - covered}"
+    assert work | attention <= trdd_common.ALL_COLUMNS, (
+        f"invented columns: {(work | attention) - trdd_common.ALL_COLUMNS}"
+    )
 
 
 # ---------- per-detector last-outcome stamp (TRDD-COQN6KVA) -------------
