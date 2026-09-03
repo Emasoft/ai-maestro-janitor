@@ -1,9 +1,9 @@
 ---
 trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
-column: todo
+column: dev
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T09:14:00+0200
+updated: 2026-09-03T09:29:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -78,8 +78,11 @@ to the wrong state.
 
 ## Acceptance
 
-- [ ] `pane_state.read` classifies every frame in the fixture corpus (incl. the 5 captured
-      2026-09-02 21:03) into the intended status, with the queued-command count.
+- [x] `pane_state.read` classifies every frame in the fixture corpus (incl. the 5 captured
+      2026-09-02 21:03) into the intended status, with the queued-command count. Proof:
+      `scripts/lib/pane_state.py` (new) + 18-file fixture corpus (6 real + 12 synthetic) under
+      `tests/fixtures/pane_frames/` + `tests/test_pane_state.py` (31 tests, all pass). Report:
+      `reports/board-drain/20260903_092933+0200-N954KWUC-p1-pane-state.md`.
 - [ ] Every `fleet_inject.fire` call site in `daemon.py` / `fleet_restart.py` goes through the
       policy table; grep shows no direct actuator that does not first read `PaneState`.
 - [ ] Each policy row has a test that feeds a frame + event and asserts the exact keystroke
@@ -96,5 +99,31 @@ to the wrong state.
   P1 `pane_state.py` + anonymized real-frame fixture corpus + tests (no call-site changes);
   P2 policy table + closed-loop verify; P3 migrate the 14 call sites. EHTs NACCL0CB /
   3T9HQEQ6 gate `complete`, not `dev`.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
+
+**P1 DONE.** `scripts/lib/pane_state.py` (new): `read(terminal) -> PaneState | None`,
+`parse(frame: str) -> PaneState`; enums `StatusKind`/`InputFieldKind`; dataclasses
+`PaneState`/`Status`/`InputField`. Reuses `session_liveness.status_row_text_at_tail`
+(factored out of `retry_wedge_attempt_at_tail`, same file lines ~95-155 — a small refactor,
+behavior-preserving, all 40 pre-existing rotation-ESC/session-liveness tests still pass).
+Fixture corpus: `tests/fixtures/pane_frames/` (18 files, 6 real anonymized + 12 synthetic).
+Tests: `tests/test_pane_state.py` (31, all pass). Gates: ruff + mypy clean on `scripts/` (501
+files). No call site touched (`daemon.py`/`fleet_restart.py`/`fleet_scan.py` — Phase 3 scope).
+Full detail: `reports/board-drain/20260903_092933+0200-N954KWUC-p1-pane-state.md`.
+
+**NEXT ACTION (Phase 2):** author the `(PaneState, event) -> plan` policy table per Proposal
+§2 — events: rotation landed, no-headroom verdict, cron dead, plugin staged, stop flag, stale
+prompt. Rows the incident dictates are already listed in the Proposal. Build it as a pure
+function `scripts/lib/pane_policy.py` (or similar), tested the same way (frame/event in,
+exact keystroke sequence out), still with NO call-site migration (that's Phase 3). Then
+Phase 3 migrates the 14 `fleet_inject.fire` call sites in `daemon.py`/`fleet_restart.py` to
+go through the policy table, per acceptance box 2.
+
+**Known Phase-1 limitations, carried forward, not blocking:** `context_pct` and
+`agents_running` parsing are validated only against synthetic frames (no real capture on this
+host shows either yet); `awaiting_user` kind detection is keyword-based, not anchored on a
+real capture. Phase 2 should treat these as best-effort until validated live — see the
+report's "Open items" section.
 
 ## Notes and lessons learned

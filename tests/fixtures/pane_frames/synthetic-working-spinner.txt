@@ -1,0 +1,8 @@
+⏺ Reading file
+✽ Tomfoolering… (12s · ↑ 2.1k tokens)
+     (ctrl+b to run in background)
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Sonnet 5 v2.1.300 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

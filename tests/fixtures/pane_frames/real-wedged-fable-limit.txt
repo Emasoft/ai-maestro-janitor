@@ -1,0 +1,14 @@
+⏺ janitor heartbeat
+  Ran 1 shell command
+✻ Running scheduled task (Sep 2 8:38pm)
+⏺ Remote Control disconnected — run /remote-control
+  /remote-control
+  Janitor re-arm step 1: prepare
+  ⎿  $ uv run --script --quiet arm_prepare.py
+✻ Fable limit reached · Retrying in 5h (Sep 8 at 5pm) · attempt 1/5
+  ❯ /janitor-arm
+──────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Fable 5.1 v2.1.258 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

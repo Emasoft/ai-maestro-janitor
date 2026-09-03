@@ -1,0 +1,9 @@
+⏺ Root cause: every pane showed
+  ✻ Fable limit reached · Retrying in 5h (Sep 8 at 5pm) · attempt 1/5
+  until you pressed ESC by hand.
+✻ Cogitated for 9s · done 8:46 PM
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Fable 5.1 v2.1.258 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

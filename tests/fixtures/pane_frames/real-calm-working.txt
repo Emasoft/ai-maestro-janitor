@@ -1,0 +1,9 @@
+⏺ some earlier output
+  detail
+✽ Boogieing… (1m 13s · ↓ 779 tokens)
+     (ctrl+b to run in background)
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Fable 5.1 v2.1.258 | 📁 proj
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

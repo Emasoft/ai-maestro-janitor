@@ -1,0 +1,9 @@
+⏺ Bash(delete the build output directory)
+  Do you want to proceed?
+  ❯ 1. Yes
+    2. Yes, and don't ask again
+    3. No, and tell Claude what to do differently
+──────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────
+  🤖 Sonnet 5 v2.1.300 | 📁 proj

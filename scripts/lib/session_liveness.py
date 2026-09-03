@@ -92,26 +92,42 @@ _STATUS_ROW_GLYPHS = "✻✽✶✢✳·"
 _ROW_MARKER_GLYPHS = "✻✽✶✢✳⏺❯›※◯"
 
 
-def retry_wedge_attempt_at_tail(text: str) -> int | None:
-    """The retry-wedge attempt number from a pane frame's STATUS block, or None. PURE.
+def status_row_text_at_tail(text: str) -> str | None:
+    """The joined text of Claude Code's OWN status row anchored at the tail, or None. PURE.
 
-    The rotation-ESC pass (TRDD-NACCL0CB) cannot use the advance-across-polls guard: a
-    weekly-window wall shows `Retrying in 5h … attempt 1/5` and that attempt number does not
-    move for five hours, so "advanced" can never come true there. Its guard is POSITIONAL,
-    anchored on Claude Code's own chrome rather than a row count (a plain "last N rows"
-    window was reviewed and rejected: on this host assistant prose reaches within a dozen rows
-    of the bottom, and this repo's own replies quote the wedge line verbatim):
+    Factored out of `retry_wedge_attempt_at_tail` (TRDD-N954KWUC Phase 1) so `pane_state.py`
+    can classify the FULL status row (idle / working / retry-wedge / …), not just pull the
+    wedge's attempt number back out of it — one anchor, two readers.
+
+    The positional guard, anchored on Claude Code's own chrome rather than a row count (a
+    plain "last N rows" window was reviewed and rejected: on this host assistant prose reaches
+    within a dozen rows of the bottom, and this repo's own replies quote the wedge line
+    verbatim):
 
     - the input box is the pair of dash borders at the bottom; the status block (spinner or
       retry line, queued `❯ cmd` rows) is the few rows directly above the UPPER border, and
       conversation content is above that;
-    - a real retry line is Claude Code's status row: column 0, starting with a glyph from
+    - a real status line is Claude Code's own row: column 0, starting with a glyph from
       `_STATUS_ROW_GLYPHS` (`✻ Fable limit reached · …`). Assistant prose is indented under
       its `⏺` marker; a PAST USER PROMPT echoes at column 0 as `❯ text` — the owner typed the
       red line into a prompt on 2026-09-02, so column 0 alone is not enough.
 
-    So: the first status-glyph row matching the wedge signature within `_STATUS_BLOCK_ROWS`
-    rows above the upper border counts; anything indented, prompt-echoed or higher up does not.
+    A status row re-wraps at the terminal width (the session-limit line is ~70 chars, so a
+    pane under ~72 columns splits `Retrying in …` from `attempt N/M`). Join the glyph-led row
+    with the rows below it up to the next row marker — probed 2026-09-02: per-row matching
+    returned None at 60 and 48 columns. An indented QUOTE of the wedge line is not stitched
+    in: it starts with a status glyph after stripping, i.e. it is a marker.
+
+    The window can hold an OLDER status-glyph row above the current one (a stale
+    `✻ Running scheduled task …` line left over from earlier in the transcript, observed on
+    this host 2026-09-02 sitting above a fresh wedge line) — so once a candidate row is
+    matched, joined, and consumed, the scan resumes AFTER its continuation rows and keeps the
+    LAST block found, i.e. the one closest to the input box. Scanning naively backwards is
+    NOT equivalent: `·` legitimately opens a real status row (`plain_429` below) but ALSO
+    appears as the mid-text separator in an unindented WRAPPED continuation (`Retrying in
+    5h …\n· attempt 1/5` at narrow widths) — a backward scan would land on that fragment and
+    misread it as a fresh, incomplete status row. Consuming a matched block's continuation
+    rows before looking for the next candidate is what tells the two apart.
     """
     rows = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
     borders = [i for i, r in enumerate(rows) if _INPUT_BOX_BORDER_RE.match(r)]
@@ -120,23 +136,36 @@ def retry_wedge_attempt_at_tail(text: str) -> int | None:
         window = rows[max(0, top - _STATUS_BLOCK_ROWS):top]
     else:
         window = rows[-_TAIL_FALLBACK_ROWS:]
-    # A status row re-wraps at the terminal width (the session-limit line is ~70 chars, so a
-    # pane under ~72 columns splits `Retrying in …` from `attempt N/M`). Join each glyph-led
-    # row with the rows below it up to the next row marker, then match — probed 2026-09-02:
-    # per-row matching returned None at 60 and 48 columns. An indented QUOTE of the wedge line
-    # is not stitched in: it starts with a status glyph after stripping, i.e. it is a marker.
-    for i, row in enumerate(window):
+    last_block: str | None = None
+    i = 0
+    while i < len(window):
+        row = window[i]
         if row[:1] not in _STATUS_ROW_GLYPHS:
+            i += 1
             continue  # prose, a prompt echo, a tool row — never Claude Code's own status row
         joined = [row]
-        for cont in window[i + 1:]:
-            if cont.strip()[:1] in _ROW_MARKER_GLYPHS or _INPUT_BOX_BORDER_RE.match(cont):
-                break
-            joined.append(cont.strip())
-        m = _RETRY_WEDGE_RE.search(" ".join(joined))
-        if m:
-            return int(m.group(1))
-    return None
+        j = i + 1
+        while j < len(window) and window[j].strip()[:1] not in _ROW_MARKER_GLYPHS and not _INPUT_BOX_BORDER_RE.match(window[j]):
+            joined.append(window[j].strip())
+            j += 1
+        last_block = " ".join(joined)
+        i = j  # resume past the consumed continuation rows, never re-scan them as a new start
+    return last_block
+
+
+def retry_wedge_attempt_at_tail(text: str) -> int | None:
+    """The retry-wedge attempt number from a pane frame's STATUS block, or None. PURE.
+
+    The rotation-ESC pass (TRDD-NACCL0CB) cannot use the advance-across-polls guard: a
+    weekly-window wall shows `Retrying in 5h … attempt 1/5` and that attempt number does not
+    move for five hours, so "advanced" can never come true there. See `status_row_text_at_tail`
+    for the positional anchor this reuses.
+    """
+    status = status_row_text_at_tail(text)
+    if status is None:
+        return None
+    m = _RETRY_WEDGE_RE.search(status)
+    return int(m.group(1)) if m else None
 
 
 def retry_wedge_state_update(
