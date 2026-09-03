@@ -71,7 +71,25 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       the fail-closed change. The probe file was restored byte-identically (sha match,
       clean `git status`). The happy path alone would have proved nothing — the value of
       this change is entirely in (b) and (c).
-- [ ] A test pins that the gate's checker set is not a strict subset of CI's Lint job, so a future CI check added without a gate counterpart is caught.
+- [x] A test pins that the gate's checker set is not a strict subset of CI's Lint job, so a
+      future CI check added without a gate counterpart is caught.
+      — `tests/test_publish_gate_ci_parity.py`, 2026-09-04. It `yaml.safe_load`s
+      `.github/workflows/ci.yml`, extracts the tools the Lint job's `run:` steps actually
+      invoke, `ast.parse`s `publish.py` and walks ONLY the `stage_lint` FunctionDef for
+      `run(...)`/`subprocess.run(...)` argv literals, and asserts `ci_tools - gate_tools`
+      is empty. Scoped to the function by AST rather than grepping the file, so an
+      unrelated mention of a tool's name elsewhere cannot satisfy it. The gate running
+      MORE than CI stays legal (mypy is deliberately gate-only). A second test asserts the
+      gate's ruff paths are a superset of CI's.
+      PROVED IN THE DIRECTION THAT MATTERS: injecting a new CI-only step
+      (`uvx bandit -r scripts/`) into ci.yml fails it with
+      `CI's Lint job runs ['bandit'] but publish.py's stage_lint does not` — ci.yml
+      restored, `git status` clean. A probe that only mutates the TEST proves much less,
+      because the failure being guarded against is CI gaining a check.
+      KNOWN LIMIT, deliberately not built now: this compares tool NAMES, so it cannot
+      catch SCOPE divergence — the `ruff scripts/` vs `ruff scripts/ tests/` half of this
+      very incident. The second test covers ruff specifically; a general argv comparison
+      is the follow-up if another tool grows path arguments.
 - [ ] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
 
 ## The divergence is wider than pyright — measured 2026-09-04
@@ -124,34 +142,27 @@ Note this does not conflict with the working rule "after publish.py, do NOT
 sit and watch CI" — that rule governs the operator's attention, not the
 pipeline's ordering. A pipeline that waits costs the human nothing to watch.
 
-## The pyright timeout, and a worked example of measuring the wrong thing
+## The pyright timeout — 900s, and two dead ends not to retry
 
-`stage_lint`'s pyright call carries a 900s ceiling chosen on ASYMMETRY, not measurement:
-the check fails closed on the only sanctioned push path, so a tight ceiling can kill a
-WORKING pyright and block the release, while a generous one costs nothing because it
-binds only when something is already wrong. Do not tune it toward the warm figure.
+The ceiling rests on ASYMMETRY, not measurement: the check fails closed on the only
+sanctioned push path, so a tight value can kill a WORKING pyright and block the release,
+while a generous one binds only when something is already wrong. A warm full analysis of
+504 source files plus `tests/` takes 13-14s here; there is NO cold-cache measurement, so
+do not tune the ceiling toward the warm figure.
 
-The measurement story is worth keeping because two claims died in it, both stated as
-fact before being checked:
+Two cheap cold-path proxies were tried and both failed — don't repeat them:
+- **`uvx --with pyright --refresh pyright`** measures nothing. It timed 13s against 14s
+  for the same command without the flag, so it added no download at all. Why remains
+  UNEXPLAINED — an open question, not a closed one.
+- **Reading one cached archive** to conclude the analyzer is fetched at runtime was
+  wrong: six pyright archives are cached and the "newer" version is among them. The wheel
+  in fact bundles the analyzer (`pyright-internal.js`, 3M) plus 27M of `typeshed-fallback`
+  stubs, all inside uv's cache; only the Node runtime is separate, provisioned by
+  `node.py` via nodeenv into `get_cache_dir()/pyright-python/<version>`.
 
-1. **`--refresh` as a cold-path proxy — FALSE.** `uvx --with pyright --refresh pyright`
-   timed 13s; the same command WITHOUT the flag timed 14s. Identical within noise, so
-   the flag added no download and never exercised the fetch path it was standing in for.
-   The 13s went into a code comment as a "cold-ish measurement" — in the same commit that
-   removed a different false claim from that comment.
-2. **"The analyzer is fetched at runtime, so the payload is not uv's to refresh" —
-   NOT SUPPORTED, and its evidence was wrong.** The evidence offered was that the wrapper
-   reported pyright 1.1.411 while a cached dist-info said 1.1.410. Enumerating the cache
-   killed it: SIX pyright archives are cached and **1.1.411 is among them** — one archive
-   had been grepped and read as the whole picture. Measuring further: the wheel's `dist/`
-   is **34M of bundled analyzer inside uv's cache**, not a thin wrapper; what IS separate
-   is a Node runtime that `node.py` provisions via nodeenv into
-   `get_cache_dir()/pyright-python/<version>`. So most of the payload IS uv's, and why
-   `--refresh` added no time remains UNEXPLAINED.
-
-What survives: a warm full analysis of 504 source files plus `tests/` takes 13-14s here,
-and there is no cold-cache measurement. The 900s stands on the asymmetry argument alone,
-which never needed a number.
+**The wider lesson this cost is on the USER-scope debugging-methodology page**: the
+asymmetry argument was sufficient from the start, and every empirical justification
+written after the number was chosen turned out false. See [[debugging-methodology-verify-before-concluding-mechanism-and-rule-claims]].
 
 ## OPEN QUESTION FOR THE USER — should an unavailable pyright block the publish?
 
