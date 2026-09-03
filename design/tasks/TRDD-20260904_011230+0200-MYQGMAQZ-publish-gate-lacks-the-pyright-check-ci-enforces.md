@@ -3,7 +3,7 @@ trdd-id: MYQGMAQZ
 title: the publish gate lacks the pyright check CI enforces so a release can be tagged before CI rejects it
 column: todo
 created: 2026-09-04T01:12:30+0200
-updated: 2026-09-04T01:12:30+0200
+updated: 2026-09-04T01:52:00+0200
 current-owner: main-session
 task-type: infra
 min-approval-requirement: none
@@ -37,15 +37,28 @@ implementation-commits: []
 Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it (no path argument — `pyrightconfig.json`'s `include` covers `scripts/` and `tests/`), with the same `uv sync --extra dev` precondition CI performs so imports resolve. Treat a non-zero exit as BLOCKED, like the rest of 4b.
 
 ## Acceptance criteria
-- [ ] Stage 4b runs pyright with the same invocation and preconditions as ci.yml's Lint job.
-- [ ] The gate's ruff scope matches CI's (`scripts/ tests/`, not `scripts/` alone).
+- [x] The gate runs pyright with the same invocation as ci.yml's Lint job — 2026-09-04,
+      landed in `stage_lint` (step 2) rather than 4b, because that is where the other
+      linters already live and the cheap fails belong before the test suite. Invoked
+      `uvx --with pyright pyright` with no path and no extra flags, exactly as CI does;
+      a `--version` probe separates "cannot launch" (WARN + skip, never a false block on
+      an offline machine) from "ran and found errors" (BLOCK), copying the jscpd/actionlint
+      pattern already in this file.
+- [x] The gate's ruff scope matches CI's — now `ruff check scripts/ tests/`.
 - [ ] The remaining rows of the divergence table are each either adopted into the
       gate or explicitly declared out of scope ON THIS CARD with a reason — an
       undocumented gap is what produced this defect.
 - [ ] The GitHub release is not created until CI is green for the pushed sha
       (the ordering defect above), or that ordering is explicitly rejected here
       with a reason.
-- [ ] A tree with a deliberate pyright error is BLOCKED by publish.py before any tag or push.
+- [x] A tree with a deliberate pyright error is BLOCKED by publish.py before any tag or push.
+      — 2026-09-04, verified by invoking `stage_lint(root)` DIRECTLY (not by running a
+      publish), three paths: (a) clean tree → returns, pyright reported `0 errors`;
+      (b) a deliberate `x: int = "not an int"` appended to a tracked test file →
+      `BLOCKED: pyright found type errors`, `SystemExit code=1`; (c) `shutil.which("uvx")`
+      forced to None → WARN and continue, no false block. The probe file was restored
+      byte-identically (sha match, clean `git status`). The happy path alone would have
+      proved nothing — the value of this change is entirely in (b).
 - [ ] A test pins that the gate's checker set is not a strict subset of CI's Lint job, so a future CI check added without a gate counterpart is caught.
 - [ ] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
 

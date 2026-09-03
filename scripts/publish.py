@@ -16,7 +16,9 @@ Modes:
 Pipeline stages (all fail-fast — any non-zero exit aborts):
    0. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
    1. Check working tree is clean
-   2. Lint files (ruff)
+   2. Lint files (ruff scripts/ tests/ + mypy scripts/ + pyright — ruff and
+      pyright are parity with ci.yml Lint job; mypy is gate-only, catching a
+      class of scripts/lib sibling-call errors pyright misses, TRDD-BMDZK4RA)
    3. Validate plugin (uvx cpv-remote-validate plugin . --strict — fetches
       the canonical CPV validator from GitHub so this plugin never vendors
       a local copy and never drifts from upstream rules)
@@ -46,8 +48,11 @@ Gate stages (--gate mode, called by pre-push hook):
         WARNs+skips if jscpd/npx unavailable so a push is never false-blocked)
    G2c. Workflow lint (actionlint, parity with ci.yml Lint job; WARNs+skips if
         actionlint unavailable so a push is never false-blocked)
-   G2d. Type-check (mypy scripts/ --ignore-missing-imports, parity with ci.yml
-        Lint job; WARNs+skips if mypy unavailable so a push is never false-blocked)
+   G2d. Type-check (mypy scripts/ --ignore-missing-imports) — gate-only, NOT
+        parity with ci.yml Lint job (CI runs no mypy, only pyright); mypy
+        catches a class of scripts/lib sibling-call errors pyright misses
+        (TRDD-BMDZK4RA). WARNs+skips if mypy unavailable so a push is never
+        false-blocked
    G2e. Compiled-component build gates (cargo clippy+test / go vet+build+test /
         dotnet build / swift build / zig build), each self-detecting; WARNs+skips
         if the toolchain is unavailable so a push is never false-blocked. C/C++ is
@@ -1488,22 +1493,63 @@ def stage_check_clean(root: Path) -> None:
     cprint(f"  {GREEN}Clean.{NC}")
 
 def stage_lint(root: Path) -> None:
-    """Step 2: Lint + typecheck (ruff + mypy). MANDATORY — no skip.
+    """Step 2: Lint + typecheck (ruff + mypy + pyright). MANDATORY — no skip
+    for ruff/mypy; pyright degrades to a WARNING when it cannot be launched.
 
     Runs ruff for style/syntax and mypy for static types in the same stage.
     Both must succeed — the cornerstone rule forbids any push with lint or
     type errors. Type-checking runs BEFORE the test suite so the cheap fails
     come before the expensive ones.
+
+    Pyright (TRDD-MYQGMAQZ). CI's Lint job runs `ruff check scripts/ tests/`
+    then `uvx --with pyright pyright` (no path — pyrightconfig.json's
+    `include` covers both scripts/ and tests/) and BLOCKS a merge on either.
+    This stage previously ran neither `tests/` in ruff nor pyright at all,
+    so release 3.4.14 was tagged, published, and installed with 7 pyright
+    errors CI's Lint job rejected the same commit for — the gate was green
+    and CI was red. mypy stays gate-only, not redundant with pyright: per
+    pyproject.toml (TRDD-BMDZK4RA) mypy cannot see cross-file calls into
+    scripts/lib the way pyright's `extraPaths` does, so the two check
+    complementary error classes.
     """
     cprint(f"\n{BOLD}[2/11] Linting + type-checking...{NC}")
     scripts_dir = root / "scripts"
     if not scripts_dir.is_dir():
         cprint(f"  {RED}BLOCKED: scripts/ directory missing — cannot lint.{NC}")
         sys.exit(1)
-    cprint(f"  {BLUE}ruff check scripts/{NC}")
-    run(["uv", "run", "ruff", "check", "scripts/"], cwd=root)
+    cprint(f"  {BLUE}ruff check scripts/ tests/{NC}")
+    run(["uv", "run", "ruff", "check", "scripts/", "tests/"], cwd=root)
     cprint(f"  {BLUE}mypy scripts/ --ignore-missing-imports{NC}")
     run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root)
+
+    # Pyright, invoked EXACTLY as CI does (no path, no extra flags) — parity
+    # with ci.yml Lint job. `uvx` fetching pyright over the network can fail
+    # on an offline machine; the jscpd/actionlint pattern above in run_gate()
+    # applies here too: a `--version` probe tells 'pyright unavailable' (WARN
+    # + skip, never false-block) apart from 'pyright ran, found errors'
+    # (BLOCK) — issue #143's degrade-gracefully pattern.
+    cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
+    uvx_bin = shutil.which("uvx")
+    if uvx_bin is None:
+        cprint(f"  {YELLOW}WARNING: uvx not found — pyright check SKIPPED locally.{NC}")
+        cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI.{NC}")
+    else:
+        try:
+            probe = subprocess.run([uvx_bin, "--with", "pyright", "pyright", "--version"],
+                                   cwd=str(root), capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.SubprocessError):
+            probe = None
+        if probe is None or probe.returncode != 0:
+            cprint(f"  {YELLOW}WARNING: pyright could not run (uvx fetch/install failed) — SKIPPED locally.{NC}")
+            cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI.{NC}")
+        else:
+            pr = subprocess.run([uvx_bin, "--with", "pyright", "pyright"],
+                                cwd=str(root), timeout=300).returncode
+            if pr != 0:
+                cprint(f"  {RED}BLOCKED: pyright found type errors (parity with CI Lint job).{NC}")
+                sys.exit(1)
+            cprint(f"  {GREEN}Pyright check passed.{NC}")
+
     cprint(f"  {GREEN}Lint + typecheck passed.{NC}")
 
 # Issue #31 (v2.98.0): browser-orphan cleanup signatures.
